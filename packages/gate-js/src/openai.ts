@@ -478,10 +478,11 @@ function wrapHostedMcpTool(tool: HostedToolSlice, opts: OpenAiWrapOptions): Host
       // The caller's original config demanded a human for this tool but gave
       // the runner no resolver. The hosted-MCP approval loop consumes
       // decisions with a truthy check (see OpenAiApprovalDecision's doc), so
-      // there is no "leave it pending" here: per this product's own posture
-      // (gate.ts, SOP_RULE_APPROVAL), an approval that cannot be granted is a
-      // block. Keep your own onApproval on the hostedMcpTool — this wrapper
-      // composes with it — to retain a human flow.
+      // there is no "leave it pending" here, and the demand is the caller's
+      // own config rather than an Intutic hold rule, so there is no hold to
+      // record either: an approval nobody can grant is a block. Keep your own
+      // onApproval on the hostedMcpTool — this wrapper composes with it — to
+      // retain a human flow.
       return {
         approve: false,
         reason:

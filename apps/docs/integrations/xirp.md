@@ -38,7 +38,7 @@ Run `intutic connect` as normal, against the **main checkout** of the repository
 
 ### 3. What gets written
 
-- **For Xirp itself:** nothing. `tools/cli/src/harness/xirp.ts`'s `writeConfig` is a no-op by design.
+- **For Xirp itself:** nothing. `tools/cli/src/harness/xirp.ts`'s `writeConfig` is a no-op by design. Xirp has no instructions file; the harnesses it runs read their own ([Where rule sets go](/guide/how-it-works#where-rule-sets-go)).
 - **For each wrapped harness:** what that harness's own adapter writes. Its user-level hook registration governs sessions in every worktree; its project-level files exist only in the main checkout.
 
 ## Config details

@@ -25,32 +25,16 @@
  */
 
 import { join } from 'node:path'
-import { access, readFile } from 'node:fs/promises'
+import { access } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { hashString } from '../lib/hash.js'
 import { loadCredentials } from '../config/store.js'
-import { buildSopSections } from './base.js'
-import { rulesSectionOf, writeRulesSection, writeAntigravityCliHooks, writeAntigravityHooks } from '@intutic/sync-daemon'
+import { writeAntigravityCliHooks, writeAntigravityHooks } from '@intutic/sync-daemon'
+import { rulesSectionHash, writeRulesSectionFile } from './rulesFiles.js'
 
 const CONFIG_FILE = 'GEMINI.md'
-
-/**
- * The section's text. No sync time in it: the same rule sets give the same
- * bytes, so a sync with nothing new leaves the user's file alone.
- */
-function buildRulesBody(sops: SyncSopEntry[], proxyUrl: string): string {
-  return [
-    '# Intutic Governance Rules (auto-generated)',
-    '# DO NOT EDIT this section — managed by intutic sync daemon; edit outside the INTUTIC:RULES markers',
-    '',
-    `> **Proxy URL:** \`${proxyUrl}\``,
-    '',
-    buildSopSections(sops),
-  ].join('\n')
-}
 
 export const antigravityAdapter: IHarnessAdapter = {
   type: HarnessType.ANTIGRAVITY,
@@ -82,22 +66,12 @@ export const antigravityAdapter: IHarnessAdapter = {
     await writeAntigravityHooks(workspaceRoot, proxyUrl, workspaceId)
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    if (sops.length === 0) return null
-    const filePath = join(workspaceRoot, CONFIG_FILE)
-    await writeRulesSection(filePath, workspaceRoot, buildRulesBody(sops, proxyUrl))
-    return filePath
+  writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    return writeRulesSectionFile(workspaceRoot, CONFIG_FILE, sops, proxyUrl)
   },
 
   /** The section only: the user's own edits elsewhere in `GEMINI.md` are not drift. */
-  async readCurrentHash(workspaceRoot: string): Promise<string | null> {
-    let content: string
-    try {
-      content = await readFile(join(workspaceRoot, CONFIG_FILE), 'utf-8')
-    } catch {
-      return null
-    }
-    const section = rulesSectionOf(content)
-    return section === null ? null : hashString(section)
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return rulesSectionHash(workspaceRoot, CONFIG_FILE)
   },
 }

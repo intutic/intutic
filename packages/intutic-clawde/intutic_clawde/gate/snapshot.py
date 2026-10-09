@@ -44,6 +44,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from . import sso_groups as sso
+from . import actions
+from .phrases import has_phrase, phrase_text
 
 SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -51,13 +53,16 @@ SNAPSHOT_STALE_AFTER_DAYS = 7
 SEV_SHADOW = "shadow"
 SEV_WARN = "warn"
 SEV_BLOCK = "block"
+# A hold rule (a REQUIRE_APPROVAL: SOP, or a local review_before: token):
+# refuses like a block, but asks a person rather than denying — see hold.py.
+SEV_HOLD = "hold"
 
 
 @dataclass
 class Rule:
     id: str
     severity: str
-    subject: str          # tool | command | target | any
+    subject: str          # tool | command | target | phrase | action | any
     reason: str
     pattern: re.Pattern
 
@@ -90,6 +95,8 @@ class Snapshot:
 @dataclass
 class Decision:
     severity: str | None    # None == allow
+    # The rule's reason and [id]; for a hold, the reason alone, which the gate
+    # words as a hold.
     reason: str = ""
     rule_id: str = ""
 
@@ -197,9 +204,27 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
         rules = [r for r in rules if not r.id.startswith("destructive.")]
 
     n_tool, n_command, n_target = _normalise(tool_name), _normalise(command), _normalise(target)
+    words = None
+    # The command's action tokens, space-padded as the hook gates write them,
+    # so a review_before hold on action:deploy matches whole tokens. Classified
+    # with the same needles and phrase matcher as the hook gates and actions.rs.
+    action_tokens = None
 
     for rule in rules:
-        if rule.subject == "tool":
+        if rule.subject == "phrase":
+            # The source is `|`-separated phrases matched as words against the
+            # raw command (phrases.py), not a regex: a backtracking regex for
+            # "whatever separates the words" is super-linear on crafted input.
+            if words is None:
+                words = phrase_text(command)
+            subjects = [n_command] if any(
+                has_phrase(words, p, True) for p in rule.pattern.pattern.split("|")
+            ) else []
+        elif rule.subject == "action":
+            if action_tokens is None:
+                action_tokens = " " + " ".join(actions.classify(tool_name, {"command": command})) + " "
+            subjects = [action_tokens]
+        elif rule.subject == "tool":
             subjects = [n_tool]
         elif rule.subject == "command":
             subjects = [n_command]
@@ -209,14 +234,18 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
             subjects = [n_command, n_target]
 
         for subject in subjects:
-            if not rule.pattern.search(subject):
+            if rule.subject != "phrase" and not rule.pattern.search(subject):
                 continue
             if rule.severity == SEV_SHADOW:
                 return Decision(SEV_SHADOW, f"{rule.reason} [{rule.id}]", rule.id)
             if rule.severity == SEV_WARN:
                 verb = n_command.strip().split(" ")[0] if n_command else ""
                 return Decision(SEV_WARN, f"{rule.reason} [{rule.id}] verb={verb}", rule.id)
-            # The rule's own reason, not a generic one — resolveSeverity reads it.
+            if rule.severity == SEV_HOLD:
+                return Decision(SEV_HOLD, rule.reason, rule.id)
+            # Any other severity blocks, as an unknown one does in the shipped
+            # gates: a severity this reader does not know must not allow. The
+            # rule's own reason, not a generic one — resolveSeverity reads it.
             return Decision(SEV_BLOCK, f"{rule.reason} [{rule.id}]", rule.id)
 
     return Decision(None)

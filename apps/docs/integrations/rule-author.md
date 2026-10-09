@@ -22,7 +22,7 @@ Local rules merge with any centrally synced rules most-restrictive-wins: a KILL 
 
 ### Automatic (sync daemon)
 
-Workspaces running `intutic connect` receive the skill automatically: the sync daemon writes `.agents/skills/intutic-rule-author/SKILL.md` into the workspace if it is not already present. It never overwrites your local edits.
+Workspaces running `intutic connect` receive the skill automatically: connect writes `.agents/skills/intutic-rule-author/SKILL.md` into the workspace if it is not already present. It never overwrites your local edits, and `intutic disconnect` deletes the copy connect wrote unless you have edited it.
 
 ### Manual
 

@@ -10,7 +10,7 @@ exports[`generated hook scripts > antigravity > matches the recorded output byte
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v9 ─────────────────────────────
+# ── Intutic fail-closed prelude v12 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -41,8 +41,376 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 2
 fi
 
+# The phrase matcher and the hold classifier (GATE_PY_LIB in gateBody.ts),
+# for the extractor below and for phrase-subject rules. A quoted heredoc, so
+# the shell expands nothing in it; read stops at end of input and returns 1.
+IFS= read -r -d '' INTUTIC_PY_LIB <<'INTUTIC_PY_LIB_END' || true
+"""Phrase matching for shell commands and SQL in linear time.
+
+A transliteration of packages/shared-types/src/phrases.ts; read that module's
+docstring for what counts as a separator and why no regex searches the input.
+The rules are the same; the walk is organised for CPython, which is slow per
+step: runs of ordinary characters, spaces and backslashes are consumed by
+anchored character-class matches (one pass each, nothing to backtrack into),
+and a phrase is checked only at the words that can start it.
+
+Every classifier runs the shared vectors in
+packages/proxy/src/plugins/anomaly/action_vectors.json, and the hook gates
+emit this file verbatim (services/sync-daemon/src/lib/phrasesPy.ts holds a
+byte-identical copy, which a test compares). It must stay self-contained: the
+standard library only, no module state beyond the constants below, and no
+backtick or dollar-brace, which the TypeScript copy cannot hold.
+"""
+
+import re
+from bisect import bisect_left
+
+_SPACE_CHARS = (
+    " \\t\\n\\r\\v\\f\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007"
+    "\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff"
+)
+_SPACES = frozenset(_SPACE_CHARS)
+_WORD = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+# One anchored match per piece of the text. Every alternative starts with a
+# character no other alternative can start with, so exactly one can match at
+# a position and it matches one run of its class: nothing to backtrack into.
+_PIECE = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[/;&|])"
+)
+# A run of words that need no decision, each followed by one plain space:
+# ordinary characters, after at most a leading run of dashes. Consumed in one
+# match and split in C — most of a long command is this.
+_BULK = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]*) )+")
+_BULK_NO_COMMENT = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\;&|-]*) )+")
+# A run of line continuations or escaped spaces between words: one break.
+_CONTINUATIONS = re.compile("(?:\\\\\\\\[" + _SPACE_CHARS + "])+")
+# The same once no "*/" is left in the text: no "/*" can open a comment, so a
+# slash is an ordinary character.
+_PIECE_NO_COMMENT = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[;&|])"
+)
+
+
+class PhraseText:
+    """A text cut into words, ready for any number of has_phrase calls."""
+
+    __slots__ = ("raw", "joined", "toks", "sep", "nl", "eol", "dash", "bar", "tail", "memo")
+
+    def __init__(self):
+        self.raw = ""
+        self.joined = ""
+        self.toks = []
+        self.sep = []
+        self.nl = []
+        self.eol = []
+        self.dash = []
+        self.bar = []
+        self.tail = False
+        self.memo = {}
+
+
+def phrase_text(value):
+    """Cut value into words in one pass (see phraseText in phrases.ts)."""
+    s = ("" if value is None else str(value)).lower()
+    n = len(s)
+    t = PhraseText()
+    t.raw = s
+    toks, sep, nl, eol, dash, bar = t.toks, t.sep, t.nl, t.eol, t.dash, t.bar
+    start = -1
+    tok_bar = False
+    pend_sep = pend_nl = pend_eol = False
+    close = -2 if "*/" in s else -1  # the next "*/" at or after the last search; -1 once none is left
+    piece = _PIECE if close != -1 else _PIECE_NO_COMMENT
+    bulk = _BULK if close != -1 else _BULK_NO_COMMENT
+    i = 0
+    while i < n:
+        if start < 0:
+            m = bulk.match(s, i)
+            if m is not None:
+                words = m.group().split(" ")
+                words.pop()
+                rest = len(words) - 1
+                toks.extend(words)
+                sep.append(pend_sep)
+                sep.extend([True] * rest)
+                nl.append(pend_nl)
+                nl.extend([False] * rest)
+                eol.append(pend_eol)
+                eol.extend([False] * rest)
+                dash.extend([w.startswith("--") for w in words])
+                bar.extend([False] * (rest + 1))
+                pend_sep = True
+                pend_nl = pend_eol = False
+                i = m.end()
+                continue
+            m = _CONTINUATIONS.match(s, i)
+            if m is not None:
+                pend_sep = True
+                i = m.end()
+                continue
+        m = piece.match(s, i)
+        kind = m.lastgroup
+        j = m.end()
+        if kind == "plain":
+            if start < 0:
+                start = i
+            i = j
+            continue
+        word_break = False
+        newline = eol_here = False
+        nxt = j
+        if kind == "space":
+            newline = eol_here = "\\n" in m.group()
+            word_break = True
+        elif kind == "dash":
+            # A "--" inside a word starts a new one, glued to it: it can open a
+            # comment or an option run but cannot stand for a plain gap.
+            if j - i > 1 and start >= 0:
+                toks.append(s[start:i])
+                sep.append(pend_sep)
+                nl.append(pend_nl)
+                eol.append(pend_eol)
+                dash.append(s.startswith("--", start))
+                bar.append(tok_bar)
+                start = -1
+                tok_bar = False
+                pend_sep = pend_nl = pend_eol = False
+            if start < 0:
+                start = i
+            i = j
+            continue
+        elif kind == "backslash":
+            # Every backslash but the last is followed by a backslash: a
+            # literal character. The last one decides.
+            last = j - 1
+            d = s[j] if j < n else ""
+            if d in ("n", "t", "r") or (d != "" and d in _SPACES):
+                if last > i and start < 0:
+                    start = i
+                word_break = True
+                eol_here = d == "n"
+                nxt = j + 1
+                if last > i:
+                    # the literal backslashes end the word before the escape
+                    toks.append(s[start:last])
+                    sep.append(pend_sep)
+                    nl.append(pend_nl)
+                    eol.append(pend_eol)
+                    dash.append(s.startswith("--", start))
+                    bar.append(tok_bar)
+                    start = -1
+                    tok_bar = False
+                    pend_sep = pend_nl = pend_eol = False
+            else:
+                if start < 0:
+                    start = i
+                i = j
+                continue
+        else:
+            c = s[i]
+            if c == "/" and j < n and s[j] == "*" and close != -1:
+                if close < i + 2:
+                    close = s.find("*/", i + 2)
+                    if close == -1:
+                        piece = _PIECE_NO_COMMENT
+                        bulk = _BULK_NO_COMMENT
+                if close != -1:
+                    word_break = True
+                    nxt = close + 2
+            if not word_break:
+                if start < 0:
+                    start = i
+                if c != "/":
+                    tok_bar = True
+                i = j
+                continue
+        if start >= 0:
+            toks.append(s[start:i])
+            sep.append(pend_sep)
+            nl.append(pend_nl)
+            eol.append(pend_eol)
+            dash.append(s.startswith("--", start))
+            bar.append(tok_bar)
+            start = -1
+            tok_bar = False
+            pend_sep = pend_nl = pend_eol = False
+        pend_sep = True
+        if newline:
+            pend_nl = True
+        if eol_here:
+            pend_eol = True
+        i = nxt
+    if start >= 0:
+        toks.append(s[start:n])
+        sep.append(pend_sep)
+        nl.append(pend_nl)
+        eol.append(pend_eol)
+        dash.append(s.startswith("--", start))
+        bar.append(tok_bar)
+        pend_sep = False
+    t.tail = pend_sep
+    t.joined = " ".join(toks)
+    return t
+
+
+def _next_index(t):
+    """Per word x: the first word at or after x containing ;&|, with a real
+    newline before it, and with any newline before it. Built once per text."""
+    ix = t.memo.get("#next")
+    if ix is None:
+        T = len(t.toks)
+        nb = [T] * (T + 1)
+        nn = [T] * (T + 1)
+        ne = [T] * (T + 1)
+        b = n_ = e = T
+        bar, nl, eol = t.bar, t.nl, t.eol
+        for x in range(T - 1, -1, -1):
+            if bar[x]:
+                b = x
+            if nl[x]:
+                n_ = x
+            if eol[x]:
+                e = x
+            nb[x] = b
+            nn[x] = n_
+            ne[x] = e
+        ix = (nb, nn, ne)
+        t.memo["#next"] = ix
+    return ix
+
+
+def has_phrase(t, needle, bounded=False):
+    """Whether t contains needle (see hasPhrase in phrases.ts)."""
+    words = needle.lower().split(" ")
+    if len(words) == 1:
+        return words[0] in t.raw
+    trailing_gap = words[-1] == ""
+    if trailing_gap:
+        words.pop()
+    for w in words:
+        if w == "" or w not in t.joined:
+            return False
+    toks, sep, dash, tail = t.toks, t.sep, t.dash, t.tail
+    T = len(toks)
+    k = len(words)
+
+    def positions(i):
+        """The words that word i of the phrase can be, by its position."""
+        w = words[i]
+        first = i == 0
+        last = i == k - 1 and not trailing_gap
+        key = ("f" if first else "") + ("l" if last else "") + ("b" if bounded else "") + ":" + w
+        hit = t.memo.get(key)
+        if hit is not None:
+            return hit
+        lw = len(w)
+        if first:
+            out = [q for q, tok in enumerate(toks) if tok.endswith(w)]
+        elif last:
+            out = [q for q, tok in enumerate(toks) if tok.startswith(w)]
+        else:
+            out = [q for q, tok in enumerate(toks) if tok == w]
+        if bounded:
+            kept = []
+            for q in out:
+                tok = toks[q]
+                if first and len(tok) > lw and tok[len(tok) - lw - 1] in _WORD:
+                    continue
+                if last and len(tok) > lw and (tok[lw] in _WORD or tok[lw] == "."):
+                    continue
+                kept.append(q)
+            out = kept
+        t.memo[key] = out
+        return out
+
+    # The words at which the rest of the phrase matches, ascending.
+    ok = positions(k - 1)
+    if trailing_gap:
+        kept = []
+        for q in ok:
+            r = q + 1
+            if r < T:
+                if sep[r] or (dash[r] and not t.bar[r] and (r + 1 < T or tail)):
+                    kept.append(q)
+            elif tail:
+                kept.append(q)
+        ok = kept
+    if k == 1:
+        return bool(ok)
+    nb, nn, ne = _next_index(t)
+    for i in range(k - 2, -1, -1):
+        ok_sep = [q for q in ok if sep[q]]
+        ok_set = set(ok_sep)
+        memo = {}
+
+        def option(r):
+            # An option run reaches any word before a ;&| word or a real newline.
+            j = bisect_left(ok_sep, r + 1)
+            return j < len(ok_sep) and ok_sep[j] <= min(nb[r], nn[r + 1], T - 1)
+
+        def reach(r):
+            # The gap that starts at word r leads into the rest of the phrase:
+            # directly, after an option run, or after -- comments, each of
+            # which runs to the next newline.
+            path = []
+            cur = r
+            while True:
+                if cur >= T:
+                    val = False
+                    break
+                if cur in memo:
+                    val = memo[cur]
+                    break
+                if cur in ok_set or (dash[cur] and option(cur)):
+                    val = memo[cur] = True
+                    break
+                if not dash[cur]:
+                    val = memo[cur] = False
+                    break
+                path.append(cur)
+                cur = ne[cur + 1]
+            for x in path:
+                memo[x] = val
+            return val
+
+        ok = [p for p in positions(i) if reach(p + 1)]
+        if not ok:
+            return False
+    return bool(ok)
+
+
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
+_INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
+
+
+def intutic_actions(tool, command):
+    if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
+        return " "
+    words = phrase_text(command)
+    out = " "
+    for action, needles in _INTUTIC_ACTION_NEEDLES:
+        if any(has_phrase(words, n) for n in needles):
+            out += action + " "
+    return out
+
+
+def intutic_phrase_rule(source, command):
+    words = phrase_text(command)
+    return any(has_phrase(words, p, True) for p in source.split("|"))
+
+INTUTIC_PY_LIB_END
+export INTUTIC_PY_LIB
+
 INTUTIC_FIELDS="$(printf '%s' "$INPUT" | python3 -c '
-import sys, json
+import os, sys, json
 def clean(v):
     return " ".join(str(v).split()) if isinstance(v, str) else ""
 state = "ok"
@@ -72,6 +440,21 @@ def first(*keys):
         if isinstance(v, str) and v:
             return clean(v)
     return ""
+def raw_first(*keys):
+    for k in keys:
+        v = i.get(k)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+raw_command = raw_first("command", "cmd", "script", "shell_command")
+# The hold classifier reads the raw command: a line continuation or a comment
+# is still in it. The library is the shared phrase matcher, not a regex.
+lib = {}
+try:
+    exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+except Exception:
+    actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
@@ -80,6 +463,9 @@ print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
 print(first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
+print(actions)
+# The raw command as one JSON line, for phrase-subject rules.
+print(json.dumps(raw_command, ensure_ascii=False))
 # The FULL tool_input, serialized to the exact shape argPattern rules are
 # matched against everywhere: JSON.stringify(tool_input) — compact separators,
 # insertion order, non-ASCII intact. The selected fields above are whitespace-
@@ -87,7 +473,7 @@ print(clean(d.get("session_id", d.get("sessionId", ""))))
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
 print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n')"
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -95,10 +481,13 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
+# Space-padded action tokens the extractor's classifier found, or " ".
+INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
 # value other than "ok" — see the envelope refusal in emitShellGate.
@@ -150,7 +539,11 @@ log_event() {
   ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[$'\\x01'-$'\\x1f']/ }"
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local incident_id; incident_id="$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo "$(date +%s)")"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"antigravity\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\"}"
+  # The event's id: random, made once here, and resent with the line it is
+  # written into, so the control plane processes the event once.
+  local event_id; event_id="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
+  [ -n "$event_id" ] || event_id="$(date +%s)$$\${RANDOM}\${RANDOM}\${RANDOM}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"antigravity\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\"}"
   printf '%s\\n' "$entry" >> "$HOOK_EVENTS_LOG" 2>/dev/null || true
   if [ -n "$INTUTIC_API_KEY" ]; then
     curl -s -o /dev/null --max-time 3 -X POST \\
@@ -162,7 +555,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v9 — harness: antigravity ────────────
+# ── Intutic gate body v12 — harness: antigravity ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -378,17 +771,6 @@ if [ -z "$INTUTIC_REVIEW_REQUEST_FILE" ]; then
   INTUTIC_REVIEW_REQUEST_FILE="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/events/review-requests.jsonl"
 fi
 INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/approved-bypasses.jsonl}"
-intutic_actions() {
-  local _t _c out=" "
-  _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
-  _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-  case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
-  case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac
-  case "$_c" in *"gh release create"*|*"git tag"*|*"npm version"*|*"cargo release"*|*"goreleaser release"*|*"semantic-release"*) out="\${out}action:release " ;; esac
-  case "$_c" in *"insert into"*|*"update "*|*"delete from"*|*"drop table"*|*"drop database"*|*"drop schema"*|*"truncate "*|*"alter table"*) out="\${out}action:db_write " ;; esac
-  printf '%s' "$out"
-}
 intutic_sha256() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
   elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
@@ -463,8 +845,6 @@ intutic_hold() {
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
-# Computed after the classifier is defined; read by the \`action\` subject.
-INTUTIC_ACTIONS="$(intutic_actions "\${TOOL:-}" "\${COMMAND:-}")"
 
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
@@ -496,9 +876,26 @@ intutic_apply() {
     # machinery matches. The secrets.* floor rules ride this. Guaranteed
     # non-empty by the extractor (it defaults to "{}").
     content) _subs=("$TOOL_INPUT_JSON") ;;
-    # The space-padded action tokens intutic_actions derived from the command
-    # (" action:deploy "), so a hold on \`action:deploy\` matches whole tokens.
+    # The space-padded action tokens the extractor's classifier derived from
+    # the raw command (" action:deploy "), so a hold on \`action:deploy\`
+    # matches whole tokens.
     action)  _subs=("$INTUTIC_ACTIONS") ;;
+    # The source is |-separated phrases matched as words against the raw
+    # command by the phrase matcher in Python, not a regex: grep is linear,
+    # but the gap between the words was not expressible without one that
+    # backtracks in the other gates. One python3 run, only for these rules.
+    # The command goes in on stdin: as an argument, a long one would exceed
+    # the kernel's per-argument limit and the rule would silently not run.
+    phrase)
+      if python3 -c 'import os, sys, json
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else 1)' "$rsrc" <<< "$INTUTIC_RAW_COMMAND_JSON" 2>/dev/null; then
+        _subs=("$INTUTIC_NCOMMAND")
+      else
+        return 0
+      fi
+      ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -506,7 +903,9 @@ intutic_apply() {
     *)       _subs=("$INTUTIC_NCOMMAND" "$INTUTIC_NTARGET") ;;
   esac
   hit=0
+  [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
+    [ "$rsubj" = "phrase" ] && break
     if [ "$rflags" = "i" ]; then
       printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
     else
@@ -641,7 +1040,7 @@ exports[`generated hook scripts > goose > matches the recorded output byte for b
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v9 ─────────────────────────────
+# ── Intutic fail-closed prelude v12 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -673,8 +1072,376 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 2
 fi
 
+# The phrase matcher and the hold classifier (GATE_PY_LIB in gateBody.ts),
+# for the extractor below and for phrase-subject rules. A quoted heredoc, so
+# the shell expands nothing in it; read stops at end of input and returns 1.
+IFS= read -r -d '' INTUTIC_PY_LIB <<'INTUTIC_PY_LIB_END' || true
+"""Phrase matching for shell commands and SQL in linear time.
+
+A transliteration of packages/shared-types/src/phrases.ts; read that module's
+docstring for what counts as a separator and why no regex searches the input.
+The rules are the same; the walk is organised for CPython, which is slow per
+step: runs of ordinary characters, spaces and backslashes are consumed by
+anchored character-class matches (one pass each, nothing to backtrack into),
+and a phrase is checked only at the words that can start it.
+
+Every classifier runs the shared vectors in
+packages/proxy/src/plugins/anomaly/action_vectors.json, and the hook gates
+emit this file verbatim (services/sync-daemon/src/lib/phrasesPy.ts holds a
+byte-identical copy, which a test compares). It must stay self-contained: the
+standard library only, no module state beyond the constants below, and no
+backtick or dollar-brace, which the TypeScript copy cannot hold.
+"""
+
+import re
+from bisect import bisect_left
+
+_SPACE_CHARS = (
+    " \\t\\n\\r\\v\\f\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007"
+    "\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff"
+)
+_SPACES = frozenset(_SPACE_CHARS)
+_WORD = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+# One anchored match per piece of the text. Every alternative starts with a
+# character no other alternative can start with, so exactly one can match at
+# a position and it matches one run of its class: nothing to backtrack into.
+_PIECE = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[/;&|])"
+)
+# A run of words that need no decision, each followed by one plain space:
+# ordinary characters, after at most a leading run of dashes. Consumed in one
+# match and split in C — most of a long command is this.
+_BULK = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]*) )+")
+_BULK_NO_COMMENT = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\;&|-]*) )+")
+# A run of line continuations or escaped spaces between words: one break.
+_CONTINUATIONS = re.compile("(?:\\\\\\\\[" + _SPACE_CHARS + "])+")
+# The same once no "*/" is left in the text: no "/*" can open a comment, so a
+# slash is an ordinary character.
+_PIECE_NO_COMMENT = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[;&|])"
+)
+
+
+class PhraseText:
+    """A text cut into words, ready for any number of has_phrase calls."""
+
+    __slots__ = ("raw", "joined", "toks", "sep", "nl", "eol", "dash", "bar", "tail", "memo")
+
+    def __init__(self):
+        self.raw = ""
+        self.joined = ""
+        self.toks = []
+        self.sep = []
+        self.nl = []
+        self.eol = []
+        self.dash = []
+        self.bar = []
+        self.tail = False
+        self.memo = {}
+
+
+def phrase_text(value):
+    """Cut value into words in one pass (see phraseText in phrases.ts)."""
+    s = ("" if value is None else str(value)).lower()
+    n = len(s)
+    t = PhraseText()
+    t.raw = s
+    toks, sep, nl, eol, dash, bar = t.toks, t.sep, t.nl, t.eol, t.dash, t.bar
+    start = -1
+    tok_bar = False
+    pend_sep = pend_nl = pend_eol = False
+    close = -2 if "*/" in s else -1  # the next "*/" at or after the last search; -1 once none is left
+    piece = _PIECE if close != -1 else _PIECE_NO_COMMENT
+    bulk = _BULK if close != -1 else _BULK_NO_COMMENT
+    i = 0
+    while i < n:
+        if start < 0:
+            m = bulk.match(s, i)
+            if m is not None:
+                words = m.group().split(" ")
+                words.pop()
+                rest = len(words) - 1
+                toks.extend(words)
+                sep.append(pend_sep)
+                sep.extend([True] * rest)
+                nl.append(pend_nl)
+                nl.extend([False] * rest)
+                eol.append(pend_eol)
+                eol.extend([False] * rest)
+                dash.extend([w.startswith("--") for w in words])
+                bar.extend([False] * (rest + 1))
+                pend_sep = True
+                pend_nl = pend_eol = False
+                i = m.end()
+                continue
+            m = _CONTINUATIONS.match(s, i)
+            if m is not None:
+                pend_sep = True
+                i = m.end()
+                continue
+        m = piece.match(s, i)
+        kind = m.lastgroup
+        j = m.end()
+        if kind == "plain":
+            if start < 0:
+                start = i
+            i = j
+            continue
+        word_break = False
+        newline = eol_here = False
+        nxt = j
+        if kind == "space":
+            newline = eol_here = "\\n" in m.group()
+            word_break = True
+        elif kind == "dash":
+            # A "--" inside a word starts a new one, glued to it: it can open a
+            # comment or an option run but cannot stand for a plain gap.
+            if j - i > 1 and start >= 0:
+                toks.append(s[start:i])
+                sep.append(pend_sep)
+                nl.append(pend_nl)
+                eol.append(pend_eol)
+                dash.append(s.startswith("--", start))
+                bar.append(tok_bar)
+                start = -1
+                tok_bar = False
+                pend_sep = pend_nl = pend_eol = False
+            if start < 0:
+                start = i
+            i = j
+            continue
+        elif kind == "backslash":
+            # Every backslash but the last is followed by a backslash: a
+            # literal character. The last one decides.
+            last = j - 1
+            d = s[j] if j < n else ""
+            if d in ("n", "t", "r") or (d != "" and d in _SPACES):
+                if last > i and start < 0:
+                    start = i
+                word_break = True
+                eol_here = d == "n"
+                nxt = j + 1
+                if last > i:
+                    # the literal backslashes end the word before the escape
+                    toks.append(s[start:last])
+                    sep.append(pend_sep)
+                    nl.append(pend_nl)
+                    eol.append(pend_eol)
+                    dash.append(s.startswith("--", start))
+                    bar.append(tok_bar)
+                    start = -1
+                    tok_bar = False
+                    pend_sep = pend_nl = pend_eol = False
+            else:
+                if start < 0:
+                    start = i
+                i = j
+                continue
+        else:
+            c = s[i]
+            if c == "/" and j < n and s[j] == "*" and close != -1:
+                if close < i + 2:
+                    close = s.find("*/", i + 2)
+                    if close == -1:
+                        piece = _PIECE_NO_COMMENT
+                        bulk = _BULK_NO_COMMENT
+                if close != -1:
+                    word_break = True
+                    nxt = close + 2
+            if not word_break:
+                if start < 0:
+                    start = i
+                if c != "/":
+                    tok_bar = True
+                i = j
+                continue
+        if start >= 0:
+            toks.append(s[start:i])
+            sep.append(pend_sep)
+            nl.append(pend_nl)
+            eol.append(pend_eol)
+            dash.append(s.startswith("--", start))
+            bar.append(tok_bar)
+            start = -1
+            tok_bar = False
+            pend_sep = pend_nl = pend_eol = False
+        pend_sep = True
+        if newline:
+            pend_nl = True
+        if eol_here:
+            pend_eol = True
+        i = nxt
+    if start >= 0:
+        toks.append(s[start:n])
+        sep.append(pend_sep)
+        nl.append(pend_nl)
+        eol.append(pend_eol)
+        dash.append(s.startswith("--", start))
+        bar.append(tok_bar)
+        pend_sep = False
+    t.tail = pend_sep
+    t.joined = " ".join(toks)
+    return t
+
+
+def _next_index(t):
+    """Per word x: the first word at or after x containing ;&|, with a real
+    newline before it, and with any newline before it. Built once per text."""
+    ix = t.memo.get("#next")
+    if ix is None:
+        T = len(t.toks)
+        nb = [T] * (T + 1)
+        nn = [T] * (T + 1)
+        ne = [T] * (T + 1)
+        b = n_ = e = T
+        bar, nl, eol = t.bar, t.nl, t.eol
+        for x in range(T - 1, -1, -1):
+            if bar[x]:
+                b = x
+            if nl[x]:
+                n_ = x
+            if eol[x]:
+                e = x
+            nb[x] = b
+            nn[x] = n_
+            ne[x] = e
+        ix = (nb, nn, ne)
+        t.memo["#next"] = ix
+    return ix
+
+
+def has_phrase(t, needle, bounded=False):
+    """Whether t contains needle (see hasPhrase in phrases.ts)."""
+    words = needle.lower().split(" ")
+    if len(words) == 1:
+        return words[0] in t.raw
+    trailing_gap = words[-1] == ""
+    if trailing_gap:
+        words.pop()
+    for w in words:
+        if w == "" or w not in t.joined:
+            return False
+    toks, sep, dash, tail = t.toks, t.sep, t.dash, t.tail
+    T = len(toks)
+    k = len(words)
+
+    def positions(i):
+        """The words that word i of the phrase can be, by its position."""
+        w = words[i]
+        first = i == 0
+        last = i == k - 1 and not trailing_gap
+        key = ("f" if first else "") + ("l" if last else "") + ("b" if bounded else "") + ":" + w
+        hit = t.memo.get(key)
+        if hit is not None:
+            return hit
+        lw = len(w)
+        if first:
+            out = [q for q, tok in enumerate(toks) if tok.endswith(w)]
+        elif last:
+            out = [q for q, tok in enumerate(toks) if tok.startswith(w)]
+        else:
+            out = [q for q, tok in enumerate(toks) if tok == w]
+        if bounded:
+            kept = []
+            for q in out:
+                tok = toks[q]
+                if first and len(tok) > lw and tok[len(tok) - lw - 1] in _WORD:
+                    continue
+                if last and len(tok) > lw and (tok[lw] in _WORD or tok[lw] == "."):
+                    continue
+                kept.append(q)
+            out = kept
+        t.memo[key] = out
+        return out
+
+    # The words at which the rest of the phrase matches, ascending.
+    ok = positions(k - 1)
+    if trailing_gap:
+        kept = []
+        for q in ok:
+            r = q + 1
+            if r < T:
+                if sep[r] or (dash[r] and not t.bar[r] and (r + 1 < T or tail)):
+                    kept.append(q)
+            elif tail:
+                kept.append(q)
+        ok = kept
+    if k == 1:
+        return bool(ok)
+    nb, nn, ne = _next_index(t)
+    for i in range(k - 2, -1, -1):
+        ok_sep = [q for q in ok if sep[q]]
+        ok_set = set(ok_sep)
+        memo = {}
+
+        def option(r):
+            # An option run reaches any word before a ;&| word or a real newline.
+            j = bisect_left(ok_sep, r + 1)
+            return j < len(ok_sep) and ok_sep[j] <= min(nb[r], nn[r + 1], T - 1)
+
+        def reach(r):
+            # The gap that starts at word r leads into the rest of the phrase:
+            # directly, after an option run, or after -- comments, each of
+            # which runs to the next newline.
+            path = []
+            cur = r
+            while True:
+                if cur >= T:
+                    val = False
+                    break
+                if cur in memo:
+                    val = memo[cur]
+                    break
+                if cur in ok_set or (dash[cur] and option(cur)):
+                    val = memo[cur] = True
+                    break
+                if not dash[cur]:
+                    val = memo[cur] = False
+                    break
+                path.append(cur)
+                cur = ne[cur + 1]
+            for x in path:
+                memo[x] = val
+            return val
+
+        ok = [p for p in positions(i) if reach(p + 1)]
+        if not ok:
+            return False
+    return bool(ok)
+
+
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
+_INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
+
+
+def intutic_actions(tool, command):
+    if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
+        return " "
+    words = phrase_text(command)
+    out = " "
+    for action, needles in _INTUTIC_ACTION_NEEDLES:
+        if any(has_phrase(words, n) for n in needles):
+            out += action + " "
+    return out
+
+
+def intutic_phrase_rule(source, command):
+    words = phrase_text(command)
+    return any(has_phrase(words, p, True) for p in source.split("|"))
+
+INTUTIC_PY_LIB_END
+export INTUTIC_PY_LIB
+
 INTUTIC_FIELDS="$(printf '%s' "$INPUT" | python3 -c '
-import sys, json
+import os, sys, json
 def clean(v):
     return " ".join(str(v).split()) if isinstance(v, str) else ""
 state = "ok"
@@ -704,6 +1471,21 @@ def first(*keys):
         if isinstance(v, str) and v:
             return clean(v)
     return ""
+def raw_first(*keys):
+    for k in keys:
+        v = i.get(k)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+raw_command = raw_first("command", "cmd", "script", "shell_command")
+# The hold classifier reads the raw command: a line continuation or a comment
+# is still in it. The library is the shared phrase matcher, not a regex.
+lib = {}
+try:
+    exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+except Exception:
+    actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
@@ -712,6 +1494,9 @@ print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
 print(first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
+print(actions)
+# The raw command as one JSON line, for phrase-subject rules.
+print(json.dumps(raw_command, ensure_ascii=False))
 # The FULL tool_input, serialized to the exact shape argPattern rules are
 # matched against everywhere: JSON.stringify(tool_input) — compact separators,
 # insertion order, non-ASCII intact. The selected fields above are whitespace-
@@ -719,7 +1504,7 @@ print(clean(d.get("session_id", d.get("sessionId", ""))))
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
 print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n')"
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -727,10 +1512,13 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
+# Space-padded action tokens the extractor's classifier found, or " ".
+INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
 # value other than "ok" — see the envelope refusal in emitShellGate.
@@ -782,7 +1570,11 @@ log_event() {
   ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[$'\\x01'-$'\\x1f']/ }"
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local incident_id; incident_id="$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo "$(date +%s)")"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"goose\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\"}"
+  # The event's id: random, made once here, and resent with the line it is
+  # written into, so the control plane processes the event once.
+  local event_id; event_id="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
+  [ -n "$event_id" ] || event_id="$(date +%s)$$\${RANDOM}\${RANDOM}\${RANDOM}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"goose\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\"}"
   # Path B: reliable file append
   printf '%s\\n' "$entry" >> "$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP (non-blocking, near-real-time)
@@ -796,7 +1588,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v9 — harness: goose ────────────
+# ── Intutic gate body v12 — harness: goose ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -1012,17 +1804,6 @@ if [ -z "$INTUTIC_REVIEW_REQUEST_FILE" ]; then
   INTUTIC_REVIEW_REQUEST_FILE='<ROOT>/.intutic/events/review-requests.jsonl'
 fi
 INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/approved-bypasses.jsonl}"
-intutic_actions() {
-  local _t _c out=" "
-  _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
-  _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-  case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
-  case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac
-  case "$_c" in *"gh release create"*|*"git tag"*|*"npm version"*|*"cargo release"*|*"goreleaser release"*|*"semantic-release"*) out="\${out}action:release " ;; esac
-  case "$_c" in *"insert into"*|*"update "*|*"delete from"*|*"drop table"*|*"drop database"*|*"drop schema"*|*"truncate "*|*"alter table"*) out="\${out}action:db_write " ;; esac
-  printf '%s' "$out"
-}
 intutic_sha256() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
   elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
@@ -1097,8 +1878,6 @@ intutic_hold() {
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
-# Computed after the classifier is defined; read by the \`action\` subject.
-INTUTIC_ACTIONS="$(intutic_actions "\${TOOL:-}" "\${COMMAND:-}")"
 
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
@@ -1130,9 +1909,26 @@ intutic_apply() {
     # machinery matches. The secrets.* floor rules ride this. Guaranteed
     # non-empty by the extractor (it defaults to "{}").
     content) _subs=("$TOOL_INPUT_JSON") ;;
-    # The space-padded action tokens intutic_actions derived from the command
-    # (" action:deploy "), so a hold on \`action:deploy\` matches whole tokens.
+    # The space-padded action tokens the extractor's classifier derived from
+    # the raw command (" action:deploy "), so a hold on \`action:deploy\`
+    # matches whole tokens.
     action)  _subs=("$INTUTIC_ACTIONS") ;;
+    # The source is |-separated phrases matched as words against the raw
+    # command by the phrase matcher in Python, not a regex: grep is linear,
+    # but the gap between the words was not expressible without one that
+    # backtracks in the other gates. One python3 run, only for these rules.
+    # The command goes in on stdin: as an argument, a long one would exceed
+    # the kernel's per-argument limit and the rule would silently not run.
+    phrase)
+      if python3 -c 'import os, sys, json
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else 1)' "$rsrc" <<< "$INTUTIC_RAW_COMMAND_JSON" 2>/dev/null; then
+        _subs=("$INTUTIC_NCOMMAND")
+      else
+        return 0
+      fi
+      ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -1140,7 +1936,9 @@ intutic_apply() {
     *)       _subs=("$INTUTIC_NCOMMAND" "$INTUTIC_NTARGET") ;;
   esac
   hit=0
+  [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
+    [ "$rsubj" = "phrase" ] && break
     if [ "$rflags" = "i" ]; then
       printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
     else
@@ -1277,7 +2075,7 @@ exports[`generated hook scripts > hermes > matches the recorded output byte for 
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v9 ─────────────────────────────
+# ── Intutic fail-closed prelude v12 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -1318,8 +2116,376 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 2
 fi
 
+# The phrase matcher and the hold classifier (GATE_PY_LIB in gateBody.ts),
+# for the extractor below and for phrase-subject rules. A quoted heredoc, so
+# the shell expands nothing in it; read stops at end of input and returns 1.
+IFS= read -r -d '' INTUTIC_PY_LIB <<'INTUTIC_PY_LIB_END' || true
+"""Phrase matching for shell commands and SQL in linear time.
+
+A transliteration of packages/shared-types/src/phrases.ts; read that module's
+docstring for what counts as a separator and why no regex searches the input.
+The rules are the same; the walk is organised for CPython, which is slow per
+step: runs of ordinary characters, spaces and backslashes are consumed by
+anchored character-class matches (one pass each, nothing to backtrack into),
+and a phrase is checked only at the words that can start it.
+
+Every classifier runs the shared vectors in
+packages/proxy/src/plugins/anomaly/action_vectors.json, and the hook gates
+emit this file verbatim (services/sync-daemon/src/lib/phrasesPy.ts holds a
+byte-identical copy, which a test compares). It must stay self-contained: the
+standard library only, no module state beyond the constants below, and no
+backtick or dollar-brace, which the TypeScript copy cannot hold.
+"""
+
+import re
+from bisect import bisect_left
+
+_SPACE_CHARS = (
+    " \\t\\n\\r\\v\\f\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007"
+    "\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff"
+)
+_SPACES = frozenset(_SPACE_CHARS)
+_WORD = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+# One anchored match per piece of the text. Every alternative starts with a
+# character no other alternative can start with, so exactly one can match at
+# a position and it matches one run of its class: nothing to backtrack into.
+_PIECE = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[/;&|])"
+)
+# A run of words that need no decision, each followed by one plain space:
+# ordinary characters, after at most a leading run of dashes. Consumed in one
+# match and split in C — most of a long command is this.
+_BULK = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]*) )+")
+_BULK_NO_COMMENT = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\;&|-]*) )+")
+# A run of line continuations or escaped spaces between words: one break.
+_CONTINUATIONS = re.compile("(?:\\\\\\\\[" + _SPACE_CHARS + "])+")
+# The same once no "*/" is left in the text: no "/*" can open a comment, so a
+# slash is an ordinary character.
+_PIECE_NO_COMMENT = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[;&|])"
+)
+
+
+class PhraseText:
+    """A text cut into words, ready for any number of has_phrase calls."""
+
+    __slots__ = ("raw", "joined", "toks", "sep", "nl", "eol", "dash", "bar", "tail", "memo")
+
+    def __init__(self):
+        self.raw = ""
+        self.joined = ""
+        self.toks = []
+        self.sep = []
+        self.nl = []
+        self.eol = []
+        self.dash = []
+        self.bar = []
+        self.tail = False
+        self.memo = {}
+
+
+def phrase_text(value):
+    """Cut value into words in one pass (see phraseText in phrases.ts)."""
+    s = ("" if value is None else str(value)).lower()
+    n = len(s)
+    t = PhraseText()
+    t.raw = s
+    toks, sep, nl, eol, dash, bar = t.toks, t.sep, t.nl, t.eol, t.dash, t.bar
+    start = -1
+    tok_bar = False
+    pend_sep = pend_nl = pend_eol = False
+    close = -2 if "*/" in s else -1  # the next "*/" at or after the last search; -1 once none is left
+    piece = _PIECE if close != -1 else _PIECE_NO_COMMENT
+    bulk = _BULK if close != -1 else _BULK_NO_COMMENT
+    i = 0
+    while i < n:
+        if start < 0:
+            m = bulk.match(s, i)
+            if m is not None:
+                words = m.group().split(" ")
+                words.pop()
+                rest = len(words) - 1
+                toks.extend(words)
+                sep.append(pend_sep)
+                sep.extend([True] * rest)
+                nl.append(pend_nl)
+                nl.extend([False] * rest)
+                eol.append(pend_eol)
+                eol.extend([False] * rest)
+                dash.extend([w.startswith("--") for w in words])
+                bar.extend([False] * (rest + 1))
+                pend_sep = True
+                pend_nl = pend_eol = False
+                i = m.end()
+                continue
+            m = _CONTINUATIONS.match(s, i)
+            if m is not None:
+                pend_sep = True
+                i = m.end()
+                continue
+        m = piece.match(s, i)
+        kind = m.lastgroup
+        j = m.end()
+        if kind == "plain":
+            if start < 0:
+                start = i
+            i = j
+            continue
+        word_break = False
+        newline = eol_here = False
+        nxt = j
+        if kind == "space":
+            newline = eol_here = "\\n" in m.group()
+            word_break = True
+        elif kind == "dash":
+            # A "--" inside a word starts a new one, glued to it: it can open a
+            # comment or an option run but cannot stand for a plain gap.
+            if j - i > 1 and start >= 0:
+                toks.append(s[start:i])
+                sep.append(pend_sep)
+                nl.append(pend_nl)
+                eol.append(pend_eol)
+                dash.append(s.startswith("--", start))
+                bar.append(tok_bar)
+                start = -1
+                tok_bar = False
+                pend_sep = pend_nl = pend_eol = False
+            if start < 0:
+                start = i
+            i = j
+            continue
+        elif kind == "backslash":
+            # Every backslash but the last is followed by a backslash: a
+            # literal character. The last one decides.
+            last = j - 1
+            d = s[j] if j < n else ""
+            if d in ("n", "t", "r") or (d != "" and d in _SPACES):
+                if last > i and start < 0:
+                    start = i
+                word_break = True
+                eol_here = d == "n"
+                nxt = j + 1
+                if last > i:
+                    # the literal backslashes end the word before the escape
+                    toks.append(s[start:last])
+                    sep.append(pend_sep)
+                    nl.append(pend_nl)
+                    eol.append(pend_eol)
+                    dash.append(s.startswith("--", start))
+                    bar.append(tok_bar)
+                    start = -1
+                    tok_bar = False
+                    pend_sep = pend_nl = pend_eol = False
+            else:
+                if start < 0:
+                    start = i
+                i = j
+                continue
+        else:
+            c = s[i]
+            if c == "/" and j < n and s[j] == "*" and close != -1:
+                if close < i + 2:
+                    close = s.find("*/", i + 2)
+                    if close == -1:
+                        piece = _PIECE_NO_COMMENT
+                        bulk = _BULK_NO_COMMENT
+                if close != -1:
+                    word_break = True
+                    nxt = close + 2
+            if not word_break:
+                if start < 0:
+                    start = i
+                if c != "/":
+                    tok_bar = True
+                i = j
+                continue
+        if start >= 0:
+            toks.append(s[start:i])
+            sep.append(pend_sep)
+            nl.append(pend_nl)
+            eol.append(pend_eol)
+            dash.append(s.startswith("--", start))
+            bar.append(tok_bar)
+            start = -1
+            tok_bar = False
+            pend_sep = pend_nl = pend_eol = False
+        pend_sep = True
+        if newline:
+            pend_nl = True
+        if eol_here:
+            pend_eol = True
+        i = nxt
+    if start >= 0:
+        toks.append(s[start:n])
+        sep.append(pend_sep)
+        nl.append(pend_nl)
+        eol.append(pend_eol)
+        dash.append(s.startswith("--", start))
+        bar.append(tok_bar)
+        pend_sep = False
+    t.tail = pend_sep
+    t.joined = " ".join(toks)
+    return t
+
+
+def _next_index(t):
+    """Per word x: the first word at or after x containing ;&|, with a real
+    newline before it, and with any newline before it. Built once per text."""
+    ix = t.memo.get("#next")
+    if ix is None:
+        T = len(t.toks)
+        nb = [T] * (T + 1)
+        nn = [T] * (T + 1)
+        ne = [T] * (T + 1)
+        b = n_ = e = T
+        bar, nl, eol = t.bar, t.nl, t.eol
+        for x in range(T - 1, -1, -1):
+            if bar[x]:
+                b = x
+            if nl[x]:
+                n_ = x
+            if eol[x]:
+                e = x
+            nb[x] = b
+            nn[x] = n_
+            ne[x] = e
+        ix = (nb, nn, ne)
+        t.memo["#next"] = ix
+    return ix
+
+
+def has_phrase(t, needle, bounded=False):
+    """Whether t contains needle (see hasPhrase in phrases.ts)."""
+    words = needle.lower().split(" ")
+    if len(words) == 1:
+        return words[0] in t.raw
+    trailing_gap = words[-1] == ""
+    if trailing_gap:
+        words.pop()
+    for w in words:
+        if w == "" or w not in t.joined:
+            return False
+    toks, sep, dash, tail = t.toks, t.sep, t.dash, t.tail
+    T = len(toks)
+    k = len(words)
+
+    def positions(i):
+        """The words that word i of the phrase can be, by its position."""
+        w = words[i]
+        first = i == 0
+        last = i == k - 1 and not trailing_gap
+        key = ("f" if first else "") + ("l" if last else "") + ("b" if bounded else "") + ":" + w
+        hit = t.memo.get(key)
+        if hit is not None:
+            return hit
+        lw = len(w)
+        if first:
+            out = [q for q, tok in enumerate(toks) if tok.endswith(w)]
+        elif last:
+            out = [q for q, tok in enumerate(toks) if tok.startswith(w)]
+        else:
+            out = [q for q, tok in enumerate(toks) if tok == w]
+        if bounded:
+            kept = []
+            for q in out:
+                tok = toks[q]
+                if first and len(tok) > lw and tok[len(tok) - lw - 1] in _WORD:
+                    continue
+                if last and len(tok) > lw and (tok[lw] in _WORD or tok[lw] == "."):
+                    continue
+                kept.append(q)
+            out = kept
+        t.memo[key] = out
+        return out
+
+    # The words at which the rest of the phrase matches, ascending.
+    ok = positions(k - 1)
+    if trailing_gap:
+        kept = []
+        for q in ok:
+            r = q + 1
+            if r < T:
+                if sep[r] or (dash[r] and not t.bar[r] and (r + 1 < T or tail)):
+                    kept.append(q)
+            elif tail:
+                kept.append(q)
+        ok = kept
+    if k == 1:
+        return bool(ok)
+    nb, nn, ne = _next_index(t)
+    for i in range(k - 2, -1, -1):
+        ok_sep = [q for q in ok if sep[q]]
+        ok_set = set(ok_sep)
+        memo = {}
+
+        def option(r):
+            # An option run reaches any word before a ;&| word or a real newline.
+            j = bisect_left(ok_sep, r + 1)
+            return j < len(ok_sep) and ok_sep[j] <= min(nb[r], nn[r + 1], T - 1)
+
+        def reach(r):
+            # The gap that starts at word r leads into the rest of the phrase:
+            # directly, after an option run, or after -- comments, each of
+            # which runs to the next newline.
+            path = []
+            cur = r
+            while True:
+                if cur >= T:
+                    val = False
+                    break
+                if cur in memo:
+                    val = memo[cur]
+                    break
+                if cur in ok_set or (dash[cur] and option(cur)):
+                    val = memo[cur] = True
+                    break
+                if not dash[cur]:
+                    val = memo[cur] = False
+                    break
+                path.append(cur)
+                cur = ne[cur + 1]
+            for x in path:
+                memo[x] = val
+            return val
+
+        ok = [p for p in positions(i) if reach(p + 1)]
+        if not ok:
+            return False
+    return bool(ok)
+
+
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
+_INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
+
+
+def intutic_actions(tool, command):
+    if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
+        return " "
+    words = phrase_text(command)
+    out = " "
+    for action, needles in _INTUTIC_ACTION_NEEDLES:
+        if any(has_phrase(words, n) for n in needles):
+            out += action + " "
+    return out
+
+
+def intutic_phrase_rule(source, command):
+    words = phrase_text(command)
+    return any(has_phrase(words, p, True) for p in source.split("|"))
+
+INTUTIC_PY_LIB_END
+export INTUTIC_PY_LIB
+
 INTUTIC_FIELDS="$(printf '%s' "$INPUT" | python3 -c '
-import sys, json
+import os, sys, json
 def clean(v):
     return " ".join(str(v).split()) if isinstance(v, str) else ""
 state = "ok"
@@ -1349,6 +2515,21 @@ def first(*keys):
         if isinstance(v, str) and v:
             return clean(v)
     return ""
+def raw_first(*keys):
+    for k in keys:
+        v = i.get(k)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+raw_command = raw_first("command", "cmd", "script", "shell_command")
+# The hold classifier reads the raw command: a line continuation or a comment
+# is still in it. The library is the shared phrase matcher, not a regex.
+lib = {}
+try:
+    exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+except Exception:
+    actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
@@ -1357,6 +2538,9 @@ print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
 print(first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
+print(actions)
+# The raw command as one JSON line, for phrase-subject rules.
+print(json.dumps(raw_command, ensure_ascii=False))
 # The FULL tool_input, serialized to the exact shape argPattern rules are
 # matched against everywhere: JSON.stringify(tool_input) — compact separators,
 # insertion order, non-ASCII intact. The selected fields above are whitespace-
@@ -1364,7 +2548,7 @@ print(clean(d.get("session_id", d.get("sessionId", ""))))
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
 print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n')"
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -1372,10 +2556,13 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
+# Space-padded action tokens the extractor's classifier found, or " ".
+INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
 # value other than "ok" — see the envelope refusal in emitShellGate.
@@ -1417,7 +2604,11 @@ log_event() {
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   # incidentId = sha1(timestamp + toolName + workspaceId).slice(0,16)
   local incident_id; incident_id="$(echo -n "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum | cut -c1-16)"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${INTUTIC_WORKSPACE_ID}\\",\\"harnessType\\":\\"hermes\\",\\"incidentId\\":\\"\${incident_id}\\",\\"timestamp\\":\\"\${ts}\\"}"
+  # The event's id: random, made once here, and resent with the line it is
+  # written into, so the control plane processes the event once.
+  local event_id; event_id="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
+  [ -n "$event_id" ] || event_id="$(date +%s)$$\${RANDOM}\${RANDOM}\${RANDOM}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${INTUTIC_WORKSPACE_ID}\\",\\"harnessType\\":\\"hermes\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\",\\"timestamp\\":\\"\${ts}\\"}"
   # Path B: reliable file append (sync-daemon drains on FSEvents change)
   printf '%s\\n' "$entry" >> "$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP POST (near-real-time dashboard, non-blocking)
@@ -1431,7 +2622,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v9 — harness: hermes ────────────
+# ── Intutic gate body v12 — harness: hermes ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -1647,17 +2838,6 @@ if [ -z "$INTUTIC_REVIEW_REQUEST_FILE" ]; then
   INTUTIC_REVIEW_REQUEST_FILE="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/events/review-requests.jsonl"
 fi
 INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/approved-bypasses.jsonl}"
-intutic_actions() {
-  local _t _c out=" "
-  _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
-  _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-  case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
-  case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac
-  case "$_c" in *"gh release create"*|*"git tag"*|*"npm version"*|*"cargo release"*|*"goreleaser release"*|*"semantic-release"*) out="\${out}action:release " ;; esac
-  case "$_c" in *"insert into"*|*"update "*|*"delete from"*|*"drop table"*|*"drop database"*|*"drop schema"*|*"truncate "*|*"alter table"*) out="\${out}action:db_write " ;; esac
-  printf '%s' "$out"
-}
 intutic_sha256() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
   elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
@@ -1732,8 +2912,6 @@ intutic_hold() {
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
-# Computed after the classifier is defined; read by the \`action\` subject.
-INTUTIC_ACTIONS="$(intutic_actions "\${TOOL:-}" "\${COMMAND:-}")"
 
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
@@ -1765,9 +2943,26 @@ intutic_apply() {
     # machinery matches. The secrets.* floor rules ride this. Guaranteed
     # non-empty by the extractor (it defaults to "{}").
     content) _subs=("$TOOL_INPUT_JSON") ;;
-    # The space-padded action tokens intutic_actions derived from the command
-    # (" action:deploy "), so a hold on \`action:deploy\` matches whole tokens.
+    # The space-padded action tokens the extractor's classifier derived from
+    # the raw command (" action:deploy "), so a hold on \`action:deploy\`
+    # matches whole tokens.
     action)  _subs=("$INTUTIC_ACTIONS") ;;
+    # The source is |-separated phrases matched as words against the raw
+    # command by the phrase matcher in Python, not a regex: grep is linear,
+    # but the gap between the words was not expressible without one that
+    # backtracks in the other gates. One python3 run, only for these rules.
+    # The command goes in on stdin: as an argument, a long one would exceed
+    # the kernel's per-argument limit and the rule would silently not run.
+    phrase)
+      if python3 -c 'import os, sys, json
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else 1)' "$rsrc" <<< "$INTUTIC_RAW_COMMAND_JSON" 2>/dev/null; then
+        _subs=("$INTUTIC_NCOMMAND")
+      else
+        return 0
+      fi
+      ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -1775,7 +2970,9 @@ intutic_apply() {
     *)       _subs=("$INTUTIC_NCOMMAND" "$INTUTIC_NTARGET") ;;
   esac
   hit=0
+  [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
+    [ "$rsubj" = "phrase" ] && break
     if [ "$rflags" = "i" ]; then
       printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
     else
@@ -1910,7 +3107,7 @@ exports[`generated hook scripts > openhands > matches the recorded output byte f
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v9 ─────────────────────────────
+# ── Intutic fail-closed prelude v12 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -1941,8 +3138,376 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 2
 fi
 
+# The phrase matcher and the hold classifier (GATE_PY_LIB in gateBody.ts),
+# for the extractor below and for phrase-subject rules. A quoted heredoc, so
+# the shell expands nothing in it; read stops at end of input and returns 1.
+IFS= read -r -d '' INTUTIC_PY_LIB <<'INTUTIC_PY_LIB_END' || true
+"""Phrase matching for shell commands and SQL in linear time.
+
+A transliteration of packages/shared-types/src/phrases.ts; read that module's
+docstring for what counts as a separator and why no regex searches the input.
+The rules are the same; the walk is organised for CPython, which is slow per
+step: runs of ordinary characters, spaces and backslashes are consumed by
+anchored character-class matches (one pass each, nothing to backtrack into),
+and a phrase is checked only at the words that can start it.
+
+Every classifier runs the shared vectors in
+packages/proxy/src/plugins/anomaly/action_vectors.json, and the hook gates
+emit this file verbatim (services/sync-daemon/src/lib/phrasesPy.ts holds a
+byte-identical copy, which a test compares). It must stay self-contained: the
+standard library only, no module state beyond the constants below, and no
+backtick or dollar-brace, which the TypeScript copy cannot hold.
+"""
+
+import re
+from bisect import bisect_left
+
+_SPACE_CHARS = (
+    " \\t\\n\\r\\v\\f\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007"
+    "\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff"
+)
+_SPACES = frozenset(_SPACE_CHARS)
+_WORD = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+# One anchored match per piece of the text. Every alternative starts with a
+# character no other alternative can start with, so exactly one can match at
+# a position and it matches one run of its class: nothing to backtrack into.
+_PIECE = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[/;&|])"
+)
+# A run of words that need no decision, each followed by one plain space:
+# ordinary characters, after at most a leading run of dashes. Consumed in one
+# match and split in C — most of a long command is this.
+_BULK = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]*) )+")
+_BULK_NO_COMMENT = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\;&|-]*) )+")
+# A run of line continuations or escaped spaces between words: one break.
+_CONTINUATIONS = re.compile("(?:\\\\\\\\[" + _SPACE_CHARS + "])+")
+# The same once no "*/" is left in the text: no "/*" can open a comment, so a
+# slash is an ordinary character.
+_PIECE_NO_COMMENT = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[;&|])"
+)
+
+
+class PhraseText:
+    """A text cut into words, ready for any number of has_phrase calls."""
+
+    __slots__ = ("raw", "joined", "toks", "sep", "nl", "eol", "dash", "bar", "tail", "memo")
+
+    def __init__(self):
+        self.raw = ""
+        self.joined = ""
+        self.toks = []
+        self.sep = []
+        self.nl = []
+        self.eol = []
+        self.dash = []
+        self.bar = []
+        self.tail = False
+        self.memo = {}
+
+
+def phrase_text(value):
+    """Cut value into words in one pass (see phraseText in phrases.ts)."""
+    s = ("" if value is None else str(value)).lower()
+    n = len(s)
+    t = PhraseText()
+    t.raw = s
+    toks, sep, nl, eol, dash, bar = t.toks, t.sep, t.nl, t.eol, t.dash, t.bar
+    start = -1
+    tok_bar = False
+    pend_sep = pend_nl = pend_eol = False
+    close = -2 if "*/" in s else -1  # the next "*/" at or after the last search; -1 once none is left
+    piece = _PIECE if close != -1 else _PIECE_NO_COMMENT
+    bulk = _BULK if close != -1 else _BULK_NO_COMMENT
+    i = 0
+    while i < n:
+        if start < 0:
+            m = bulk.match(s, i)
+            if m is not None:
+                words = m.group().split(" ")
+                words.pop()
+                rest = len(words) - 1
+                toks.extend(words)
+                sep.append(pend_sep)
+                sep.extend([True] * rest)
+                nl.append(pend_nl)
+                nl.extend([False] * rest)
+                eol.append(pend_eol)
+                eol.extend([False] * rest)
+                dash.extend([w.startswith("--") for w in words])
+                bar.extend([False] * (rest + 1))
+                pend_sep = True
+                pend_nl = pend_eol = False
+                i = m.end()
+                continue
+            m = _CONTINUATIONS.match(s, i)
+            if m is not None:
+                pend_sep = True
+                i = m.end()
+                continue
+        m = piece.match(s, i)
+        kind = m.lastgroup
+        j = m.end()
+        if kind == "plain":
+            if start < 0:
+                start = i
+            i = j
+            continue
+        word_break = False
+        newline = eol_here = False
+        nxt = j
+        if kind == "space":
+            newline = eol_here = "\\n" in m.group()
+            word_break = True
+        elif kind == "dash":
+            # A "--" inside a word starts a new one, glued to it: it can open a
+            # comment or an option run but cannot stand for a plain gap.
+            if j - i > 1 and start >= 0:
+                toks.append(s[start:i])
+                sep.append(pend_sep)
+                nl.append(pend_nl)
+                eol.append(pend_eol)
+                dash.append(s.startswith("--", start))
+                bar.append(tok_bar)
+                start = -1
+                tok_bar = False
+                pend_sep = pend_nl = pend_eol = False
+            if start < 0:
+                start = i
+            i = j
+            continue
+        elif kind == "backslash":
+            # Every backslash but the last is followed by a backslash: a
+            # literal character. The last one decides.
+            last = j - 1
+            d = s[j] if j < n else ""
+            if d in ("n", "t", "r") or (d != "" and d in _SPACES):
+                if last > i and start < 0:
+                    start = i
+                word_break = True
+                eol_here = d == "n"
+                nxt = j + 1
+                if last > i:
+                    # the literal backslashes end the word before the escape
+                    toks.append(s[start:last])
+                    sep.append(pend_sep)
+                    nl.append(pend_nl)
+                    eol.append(pend_eol)
+                    dash.append(s.startswith("--", start))
+                    bar.append(tok_bar)
+                    start = -1
+                    tok_bar = False
+                    pend_sep = pend_nl = pend_eol = False
+            else:
+                if start < 0:
+                    start = i
+                i = j
+                continue
+        else:
+            c = s[i]
+            if c == "/" and j < n and s[j] == "*" and close != -1:
+                if close < i + 2:
+                    close = s.find("*/", i + 2)
+                    if close == -1:
+                        piece = _PIECE_NO_COMMENT
+                        bulk = _BULK_NO_COMMENT
+                if close != -1:
+                    word_break = True
+                    nxt = close + 2
+            if not word_break:
+                if start < 0:
+                    start = i
+                if c != "/":
+                    tok_bar = True
+                i = j
+                continue
+        if start >= 0:
+            toks.append(s[start:i])
+            sep.append(pend_sep)
+            nl.append(pend_nl)
+            eol.append(pend_eol)
+            dash.append(s.startswith("--", start))
+            bar.append(tok_bar)
+            start = -1
+            tok_bar = False
+            pend_sep = pend_nl = pend_eol = False
+        pend_sep = True
+        if newline:
+            pend_nl = True
+        if eol_here:
+            pend_eol = True
+        i = nxt
+    if start >= 0:
+        toks.append(s[start:n])
+        sep.append(pend_sep)
+        nl.append(pend_nl)
+        eol.append(pend_eol)
+        dash.append(s.startswith("--", start))
+        bar.append(tok_bar)
+        pend_sep = False
+    t.tail = pend_sep
+    t.joined = " ".join(toks)
+    return t
+
+
+def _next_index(t):
+    """Per word x: the first word at or after x containing ;&|, with a real
+    newline before it, and with any newline before it. Built once per text."""
+    ix = t.memo.get("#next")
+    if ix is None:
+        T = len(t.toks)
+        nb = [T] * (T + 1)
+        nn = [T] * (T + 1)
+        ne = [T] * (T + 1)
+        b = n_ = e = T
+        bar, nl, eol = t.bar, t.nl, t.eol
+        for x in range(T - 1, -1, -1):
+            if bar[x]:
+                b = x
+            if nl[x]:
+                n_ = x
+            if eol[x]:
+                e = x
+            nb[x] = b
+            nn[x] = n_
+            ne[x] = e
+        ix = (nb, nn, ne)
+        t.memo["#next"] = ix
+    return ix
+
+
+def has_phrase(t, needle, bounded=False):
+    """Whether t contains needle (see hasPhrase in phrases.ts)."""
+    words = needle.lower().split(" ")
+    if len(words) == 1:
+        return words[0] in t.raw
+    trailing_gap = words[-1] == ""
+    if trailing_gap:
+        words.pop()
+    for w in words:
+        if w == "" or w not in t.joined:
+            return False
+    toks, sep, dash, tail = t.toks, t.sep, t.dash, t.tail
+    T = len(toks)
+    k = len(words)
+
+    def positions(i):
+        """The words that word i of the phrase can be, by its position."""
+        w = words[i]
+        first = i == 0
+        last = i == k - 1 and not trailing_gap
+        key = ("f" if first else "") + ("l" if last else "") + ("b" if bounded else "") + ":" + w
+        hit = t.memo.get(key)
+        if hit is not None:
+            return hit
+        lw = len(w)
+        if first:
+            out = [q for q, tok in enumerate(toks) if tok.endswith(w)]
+        elif last:
+            out = [q for q, tok in enumerate(toks) if tok.startswith(w)]
+        else:
+            out = [q for q, tok in enumerate(toks) if tok == w]
+        if bounded:
+            kept = []
+            for q in out:
+                tok = toks[q]
+                if first and len(tok) > lw and tok[len(tok) - lw - 1] in _WORD:
+                    continue
+                if last and len(tok) > lw and (tok[lw] in _WORD or tok[lw] == "."):
+                    continue
+                kept.append(q)
+            out = kept
+        t.memo[key] = out
+        return out
+
+    # The words at which the rest of the phrase matches, ascending.
+    ok = positions(k - 1)
+    if trailing_gap:
+        kept = []
+        for q in ok:
+            r = q + 1
+            if r < T:
+                if sep[r] or (dash[r] and not t.bar[r] and (r + 1 < T or tail)):
+                    kept.append(q)
+            elif tail:
+                kept.append(q)
+        ok = kept
+    if k == 1:
+        return bool(ok)
+    nb, nn, ne = _next_index(t)
+    for i in range(k - 2, -1, -1):
+        ok_sep = [q for q in ok if sep[q]]
+        ok_set = set(ok_sep)
+        memo = {}
+
+        def option(r):
+            # An option run reaches any word before a ;&| word or a real newline.
+            j = bisect_left(ok_sep, r + 1)
+            return j < len(ok_sep) and ok_sep[j] <= min(nb[r], nn[r + 1], T - 1)
+
+        def reach(r):
+            # The gap that starts at word r leads into the rest of the phrase:
+            # directly, after an option run, or after -- comments, each of
+            # which runs to the next newline.
+            path = []
+            cur = r
+            while True:
+                if cur >= T:
+                    val = False
+                    break
+                if cur in memo:
+                    val = memo[cur]
+                    break
+                if cur in ok_set or (dash[cur] and option(cur)):
+                    val = memo[cur] = True
+                    break
+                if not dash[cur]:
+                    val = memo[cur] = False
+                    break
+                path.append(cur)
+                cur = ne[cur + 1]
+            for x in path:
+                memo[x] = val
+            return val
+
+        ok = [p for p in positions(i) if reach(p + 1)]
+        if not ok:
+            return False
+    return bool(ok)
+
+
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
+_INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
+
+
+def intutic_actions(tool, command):
+    if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
+        return " "
+    words = phrase_text(command)
+    out = " "
+    for action, needles in _INTUTIC_ACTION_NEEDLES:
+        if any(has_phrase(words, n) for n in needles):
+            out += action + " "
+    return out
+
+
+def intutic_phrase_rule(source, command):
+    words = phrase_text(command)
+    return any(has_phrase(words, p, True) for p in source.split("|"))
+
+INTUTIC_PY_LIB_END
+export INTUTIC_PY_LIB
+
 INTUTIC_FIELDS="$(printf '%s' "$INPUT" | python3 -c '
-import sys, json
+import os, sys, json
 def clean(v):
     return " ".join(str(v).split()) if isinstance(v, str) else ""
 state = "ok"
@@ -1972,6 +3537,21 @@ def first(*keys):
         if isinstance(v, str) and v:
             return clean(v)
     return ""
+def raw_first(*keys):
+    for k in keys:
+        v = i.get(k)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+raw_command = raw_first("command", "cmd", "script", "shell_command")
+# The hold classifier reads the raw command: a line continuation or a comment
+# is still in it. The library is the shared phrase matcher, not a regex.
+lib = {}
+try:
+    exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+except Exception:
+    actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
@@ -1980,6 +3560,9 @@ print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
 print(first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
+print(actions)
+# The raw command as one JSON line, for phrase-subject rules.
+print(json.dumps(raw_command, ensure_ascii=False))
 # The FULL tool_input, serialized to the exact shape argPattern rules are
 # matched against everywhere: JSON.stringify(tool_input) — compact separators,
 # insertion order, non-ASCII intact. The selected fields above are whitespace-
@@ -1987,7 +3570,7 @@ print(clean(d.get("session_id", d.get("sessionId", ""))))
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
 print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n')"
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -1995,10 +3578,13 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
+# Space-padded action tokens the extractor's classifier found, or " ".
+INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
 # value other than "ok" — see the envelope refusal in emitShellGate.
@@ -2050,7 +3636,11 @@ log_event() {
   ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[$'\\x01'-$'\\x1f']/ }"
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local incident_id; incident_id="$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo "$(date +%s)")"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"openhands\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\"}"
+  # The event's id: random, made once here, and resent with the line it is
+  # written into, so the control plane processes the event once.
+  local event_id; event_id="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
+  [ -n "$event_id" ] || event_id="$(date +%s)$$\${RANDOM}\${RANDOM}\${RANDOM}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"openhands\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\"}"
   # Path B: reliable file append
   printf '%s\\n' "$entry" >> "$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP (non-blocking, near-real-time)
@@ -2064,7 +3654,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v9 — harness: openhands ────────────
+# ── Intutic gate body v12 — harness: openhands ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -2280,17 +3870,6 @@ if [ -z "$INTUTIC_REVIEW_REQUEST_FILE" ]; then
   INTUTIC_REVIEW_REQUEST_FILE="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/events/review-requests.jsonl"
 fi
 INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/approved-bypasses.jsonl}"
-intutic_actions() {
-  local _t _c out=" "
-  _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
-  _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-  case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
-  case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac
-  case "$_c" in *"gh release create"*|*"git tag"*|*"npm version"*|*"cargo release"*|*"goreleaser release"*|*"semantic-release"*) out="\${out}action:release " ;; esac
-  case "$_c" in *"insert into"*|*"update "*|*"delete from"*|*"drop table"*|*"drop database"*|*"drop schema"*|*"truncate "*|*"alter table"*) out="\${out}action:db_write " ;; esac
-  printf '%s' "$out"
-}
 intutic_sha256() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
   elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
@@ -2365,8 +3944,6 @@ intutic_hold() {
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
-# Computed after the classifier is defined; read by the \`action\` subject.
-INTUTIC_ACTIONS="$(intutic_actions "\${TOOL:-}" "\${COMMAND:-}")"
 
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
@@ -2398,9 +3975,26 @@ intutic_apply() {
     # machinery matches. The secrets.* floor rules ride this. Guaranteed
     # non-empty by the extractor (it defaults to "{}").
     content) _subs=("$TOOL_INPUT_JSON") ;;
-    # The space-padded action tokens intutic_actions derived from the command
-    # (" action:deploy "), so a hold on \`action:deploy\` matches whole tokens.
+    # The space-padded action tokens the extractor's classifier derived from
+    # the raw command (" action:deploy "), so a hold on \`action:deploy\`
+    # matches whole tokens.
     action)  _subs=("$INTUTIC_ACTIONS") ;;
+    # The source is |-separated phrases matched as words against the raw
+    # command by the phrase matcher in Python, not a regex: grep is linear,
+    # but the gap between the words was not expressible without one that
+    # backtracks in the other gates. One python3 run, only for these rules.
+    # The command goes in on stdin: as an argument, a long one would exceed
+    # the kernel's per-argument limit and the rule would silently not run.
+    phrase)
+      if python3 -c 'import os, sys, json
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else 1)' "$rsrc" <<< "$INTUTIC_RAW_COMMAND_JSON" 2>/dev/null; then
+        _subs=("$INTUTIC_NCOMMAND")
+      else
+        return 0
+      fi
+      ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -2408,7 +4002,9 @@ intutic_apply() {
     *)       _subs=("$INTUTIC_NCOMMAND" "$INTUTIC_NTARGET") ;;
   esac
   hit=0
+  [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
+    [ "$rsubj" = "phrase" ] && break
     if [ "$rflags" = "i" ]; then
       printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
     else
@@ -2544,7 +4140,7 @@ exports[`generated hook scripts > pi > matches the recorded output byte for byte
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v9 ─────────────────────────────
+# ── Intutic fail-closed prelude v12 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -2585,8 +4181,376 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 2
 fi
 
+# The phrase matcher and the hold classifier (GATE_PY_LIB in gateBody.ts),
+# for the extractor below and for phrase-subject rules. A quoted heredoc, so
+# the shell expands nothing in it; read stops at end of input and returns 1.
+IFS= read -r -d '' INTUTIC_PY_LIB <<'INTUTIC_PY_LIB_END' || true
+"""Phrase matching for shell commands and SQL in linear time.
+
+A transliteration of packages/shared-types/src/phrases.ts; read that module's
+docstring for what counts as a separator and why no regex searches the input.
+The rules are the same; the walk is organised for CPython, which is slow per
+step: runs of ordinary characters, spaces and backslashes are consumed by
+anchored character-class matches (one pass each, nothing to backtrack into),
+and a phrase is checked only at the words that can start it.
+
+Every classifier runs the shared vectors in
+packages/proxy/src/plugins/anomaly/action_vectors.json, and the hook gates
+emit this file verbatim (services/sync-daemon/src/lib/phrasesPy.ts holds a
+byte-identical copy, which a test compares). It must stay self-contained: the
+standard library only, no module state beyond the constants below, and no
+backtick or dollar-brace, which the TypeScript copy cannot hold.
+"""
+
+import re
+from bisect import bisect_left
+
+_SPACE_CHARS = (
+    " \\t\\n\\r\\v\\f\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007"
+    "\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff"
+)
+_SPACES = frozenset(_SPACE_CHARS)
+_WORD = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+# One anchored match per piece of the text. Every alternative starts with a
+# character no other alternative can start with, so exactly one can match at
+# a position and it matches one run of its class: nothing to backtrack into.
+_PIECE = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[/;&|])"
+)
+# A run of words that need no decision, each followed by one plain space:
+# ordinary characters, after at most a leading run of dashes. Consumed in one
+# match and split in C — most of a long command is this.
+_BULK = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\/;&|-]*) )+")
+_BULK_NO_COMMENT = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+|-+[^" + _SPACE_CHARS + "\\\\\\\\;&|-]*) )+")
+# A run of line continuations or escaped spaces between words: one break.
+_CONTINUATIONS = re.compile("(?:\\\\\\\\[" + _SPACE_CHARS + "])+")
+# The same once no "*/" is left in the text: no "/*" can open a comment, so a
+# slash is an ordinary character.
+_PIECE_NO_COMMENT = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\\\\\;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\\\\\+)"
+    "|(?P<other>[;&|])"
+)
+
+
+class PhraseText:
+    """A text cut into words, ready for any number of has_phrase calls."""
+
+    __slots__ = ("raw", "joined", "toks", "sep", "nl", "eol", "dash", "bar", "tail", "memo")
+
+    def __init__(self):
+        self.raw = ""
+        self.joined = ""
+        self.toks = []
+        self.sep = []
+        self.nl = []
+        self.eol = []
+        self.dash = []
+        self.bar = []
+        self.tail = False
+        self.memo = {}
+
+
+def phrase_text(value):
+    """Cut value into words in one pass (see phraseText in phrases.ts)."""
+    s = ("" if value is None else str(value)).lower()
+    n = len(s)
+    t = PhraseText()
+    t.raw = s
+    toks, sep, nl, eol, dash, bar = t.toks, t.sep, t.nl, t.eol, t.dash, t.bar
+    start = -1
+    tok_bar = False
+    pend_sep = pend_nl = pend_eol = False
+    close = -2 if "*/" in s else -1  # the next "*/" at or after the last search; -1 once none is left
+    piece = _PIECE if close != -1 else _PIECE_NO_COMMENT
+    bulk = _BULK if close != -1 else _BULK_NO_COMMENT
+    i = 0
+    while i < n:
+        if start < 0:
+            m = bulk.match(s, i)
+            if m is not None:
+                words = m.group().split(" ")
+                words.pop()
+                rest = len(words) - 1
+                toks.extend(words)
+                sep.append(pend_sep)
+                sep.extend([True] * rest)
+                nl.append(pend_nl)
+                nl.extend([False] * rest)
+                eol.append(pend_eol)
+                eol.extend([False] * rest)
+                dash.extend([w.startswith("--") for w in words])
+                bar.extend([False] * (rest + 1))
+                pend_sep = True
+                pend_nl = pend_eol = False
+                i = m.end()
+                continue
+            m = _CONTINUATIONS.match(s, i)
+            if m is not None:
+                pend_sep = True
+                i = m.end()
+                continue
+        m = piece.match(s, i)
+        kind = m.lastgroup
+        j = m.end()
+        if kind == "plain":
+            if start < 0:
+                start = i
+            i = j
+            continue
+        word_break = False
+        newline = eol_here = False
+        nxt = j
+        if kind == "space":
+            newline = eol_here = "\\n" in m.group()
+            word_break = True
+        elif kind == "dash":
+            # A "--" inside a word starts a new one, glued to it: it can open a
+            # comment or an option run but cannot stand for a plain gap.
+            if j - i > 1 and start >= 0:
+                toks.append(s[start:i])
+                sep.append(pend_sep)
+                nl.append(pend_nl)
+                eol.append(pend_eol)
+                dash.append(s.startswith("--", start))
+                bar.append(tok_bar)
+                start = -1
+                tok_bar = False
+                pend_sep = pend_nl = pend_eol = False
+            if start < 0:
+                start = i
+            i = j
+            continue
+        elif kind == "backslash":
+            # Every backslash but the last is followed by a backslash: a
+            # literal character. The last one decides.
+            last = j - 1
+            d = s[j] if j < n else ""
+            if d in ("n", "t", "r") or (d != "" and d in _SPACES):
+                if last > i and start < 0:
+                    start = i
+                word_break = True
+                eol_here = d == "n"
+                nxt = j + 1
+                if last > i:
+                    # the literal backslashes end the word before the escape
+                    toks.append(s[start:last])
+                    sep.append(pend_sep)
+                    nl.append(pend_nl)
+                    eol.append(pend_eol)
+                    dash.append(s.startswith("--", start))
+                    bar.append(tok_bar)
+                    start = -1
+                    tok_bar = False
+                    pend_sep = pend_nl = pend_eol = False
+            else:
+                if start < 0:
+                    start = i
+                i = j
+                continue
+        else:
+            c = s[i]
+            if c == "/" and j < n and s[j] == "*" and close != -1:
+                if close < i + 2:
+                    close = s.find("*/", i + 2)
+                    if close == -1:
+                        piece = _PIECE_NO_COMMENT
+                        bulk = _BULK_NO_COMMENT
+                if close != -1:
+                    word_break = True
+                    nxt = close + 2
+            if not word_break:
+                if start < 0:
+                    start = i
+                if c != "/":
+                    tok_bar = True
+                i = j
+                continue
+        if start >= 0:
+            toks.append(s[start:i])
+            sep.append(pend_sep)
+            nl.append(pend_nl)
+            eol.append(pend_eol)
+            dash.append(s.startswith("--", start))
+            bar.append(tok_bar)
+            start = -1
+            tok_bar = False
+            pend_sep = pend_nl = pend_eol = False
+        pend_sep = True
+        if newline:
+            pend_nl = True
+        if eol_here:
+            pend_eol = True
+        i = nxt
+    if start >= 0:
+        toks.append(s[start:n])
+        sep.append(pend_sep)
+        nl.append(pend_nl)
+        eol.append(pend_eol)
+        dash.append(s.startswith("--", start))
+        bar.append(tok_bar)
+        pend_sep = False
+    t.tail = pend_sep
+    t.joined = " ".join(toks)
+    return t
+
+
+def _next_index(t):
+    """Per word x: the first word at or after x containing ;&|, with a real
+    newline before it, and with any newline before it. Built once per text."""
+    ix = t.memo.get("#next")
+    if ix is None:
+        T = len(t.toks)
+        nb = [T] * (T + 1)
+        nn = [T] * (T + 1)
+        ne = [T] * (T + 1)
+        b = n_ = e = T
+        bar, nl, eol = t.bar, t.nl, t.eol
+        for x in range(T - 1, -1, -1):
+            if bar[x]:
+                b = x
+            if nl[x]:
+                n_ = x
+            if eol[x]:
+                e = x
+            nb[x] = b
+            nn[x] = n_
+            ne[x] = e
+        ix = (nb, nn, ne)
+        t.memo["#next"] = ix
+    return ix
+
+
+def has_phrase(t, needle, bounded=False):
+    """Whether t contains needle (see hasPhrase in phrases.ts)."""
+    words = needle.lower().split(" ")
+    if len(words) == 1:
+        return words[0] in t.raw
+    trailing_gap = words[-1] == ""
+    if trailing_gap:
+        words.pop()
+    for w in words:
+        if w == "" or w not in t.joined:
+            return False
+    toks, sep, dash, tail = t.toks, t.sep, t.dash, t.tail
+    T = len(toks)
+    k = len(words)
+
+    def positions(i):
+        """The words that word i of the phrase can be, by its position."""
+        w = words[i]
+        first = i == 0
+        last = i == k - 1 and not trailing_gap
+        key = ("f" if first else "") + ("l" if last else "") + ("b" if bounded else "") + ":" + w
+        hit = t.memo.get(key)
+        if hit is not None:
+            return hit
+        lw = len(w)
+        if first:
+            out = [q for q, tok in enumerate(toks) if tok.endswith(w)]
+        elif last:
+            out = [q for q, tok in enumerate(toks) if tok.startswith(w)]
+        else:
+            out = [q for q, tok in enumerate(toks) if tok == w]
+        if bounded:
+            kept = []
+            for q in out:
+                tok = toks[q]
+                if first and len(tok) > lw and tok[len(tok) - lw - 1] in _WORD:
+                    continue
+                if last and len(tok) > lw and (tok[lw] in _WORD or tok[lw] == "."):
+                    continue
+                kept.append(q)
+            out = kept
+        t.memo[key] = out
+        return out
+
+    # The words at which the rest of the phrase matches, ascending.
+    ok = positions(k - 1)
+    if trailing_gap:
+        kept = []
+        for q in ok:
+            r = q + 1
+            if r < T:
+                if sep[r] or (dash[r] and not t.bar[r] and (r + 1 < T or tail)):
+                    kept.append(q)
+            elif tail:
+                kept.append(q)
+        ok = kept
+    if k == 1:
+        return bool(ok)
+    nb, nn, ne = _next_index(t)
+    for i in range(k - 2, -1, -1):
+        ok_sep = [q for q in ok if sep[q]]
+        ok_set = set(ok_sep)
+        memo = {}
+
+        def option(r):
+            # An option run reaches any word before a ;&| word or a real newline.
+            j = bisect_left(ok_sep, r + 1)
+            return j < len(ok_sep) and ok_sep[j] <= min(nb[r], nn[r + 1], T - 1)
+
+        def reach(r):
+            # The gap that starts at word r leads into the rest of the phrase:
+            # directly, after an option run, or after -- comments, each of
+            # which runs to the next newline.
+            path = []
+            cur = r
+            while True:
+                if cur >= T:
+                    val = False
+                    break
+                if cur in memo:
+                    val = memo[cur]
+                    break
+                if cur in ok_set or (dash[cur] and option(cur)):
+                    val = memo[cur] = True
+                    break
+                if not dash[cur]:
+                    val = memo[cur] = False
+                    break
+                path.append(cur)
+                cur = ne[cur + 1]
+            for x in path:
+                memo[x] = val
+            return val
+
+        ok = [p for p in positions(i) if reach(p + 1)]
+        if not ok:
+            return False
+    return bool(ok)
+
+
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
+_INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
+
+
+def intutic_actions(tool, command):
+    if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
+        return " "
+    words = phrase_text(command)
+    out = " "
+    for action, needles in _INTUTIC_ACTION_NEEDLES:
+        if any(has_phrase(words, n) for n in needles):
+            out += action + " "
+    return out
+
+
+def intutic_phrase_rule(source, command):
+    words = phrase_text(command)
+    return any(has_phrase(words, p, True) for p in source.split("|"))
+
+INTUTIC_PY_LIB_END
+export INTUTIC_PY_LIB
+
 INTUTIC_FIELDS="$(printf '%s' "$INPUT" | python3 -c '
-import sys, json
+import os, sys, json
 def clean(v):
     return " ".join(str(v).split()) if isinstance(v, str) else ""
 state = "ok"
@@ -2616,6 +4580,21 @@ def first(*keys):
         if isinstance(v, str) and v:
             return clean(v)
     return ""
+def raw_first(*keys):
+    for k in keys:
+        v = i.get(k)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+raw_command = raw_first("command", "cmd", "script", "shell_command")
+# The hold classifier reads the raw command: a line continuation or a comment
+# is still in it. The library is the shared phrase matcher, not a regex.
+lib = {}
+try:
+    exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+except Exception:
+    actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
@@ -2624,6 +4603,9 @@ print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
 print(first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
+print(actions)
+# The raw command as one JSON line, for phrase-subject rules.
+print(json.dumps(raw_command, ensure_ascii=False))
 # The FULL tool_input, serialized to the exact shape argPattern rules are
 # matched against everywhere: JSON.stringify(tool_input) — compact separators,
 # insertion order, non-ASCII intact. The selected fields above are whitespace-
@@ -2631,7 +4613,7 @@ print(clean(d.get("session_id", d.get("sessionId", ""))))
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
 print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n')"
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -2639,10 +4621,13 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
+# Space-padded action tokens the extractor's classifier found, or " ".
+INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-""}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
 # value other than "ok" — see the envelope refusal in emitShellGate.
@@ -2688,7 +4673,11 @@ log_event() {
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   # incidentId = sha1(timestamp + toolName + workspaceId).slice(0,16)
   local incident_id; incident_id="$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo "$(date +%s)")"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"pi\\",\\"incidentId\\":\\"\${incident_id}\\",\\"timestamp\\":\\"\${ts}\\"\${sid:+,\\"sessionId\\":\\"\${sid}\\"}}"
+  # The event's id: random, made once here, and resent with the line it is
+  # written into, so the control plane processes the event once.
+  local event_id; event_id="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
+  [ -n "$event_id" ] || event_id="$(date +%s)$$\${RANDOM}\${RANDOM}\${RANDOM}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"pi\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\",\\"timestamp\\":\\"\${ts}\\"\${sid:+,\\"sessionId\\":\\"\${sid}\\"}}"
   # Path B: reliable file append (sync-daemon drains on FSEvents change)
   printf '%s\\n' "$entry" >> "$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP POST (near-real-time dashboard, non-blocking)
@@ -2702,7 +4691,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v9 — harness: pi ────────────
+# ── Intutic gate body v12 — harness: pi ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -2918,17 +4907,6 @@ if [ -z "$INTUTIC_REVIEW_REQUEST_FILE" ]; then
   INTUTIC_REVIEW_REQUEST_FILE="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/events/review-requests.jsonl"
 fi
 INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/approved-bypasses.jsonl}"
-intutic_actions() {
-  local _t _c out=" "
-  _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ;; *) printf ' '; return 0 ;; esac
-  _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-  case "$_c" in *"git push"*|*"kubectl apply"*|*"kubectl rollout"*|*"helm upgrade"*|*"helm install"*|*"terraform apply"*|*"docker push"*|*"serverless deploy"*|*"fly deploy"*|*"vercel deploy"*|*"gcloud run deploy"*|*"aws deploy"*|*"aws s3 sync"*|*"eb deploy"*) out="\${out}action:deploy " ;; esac
-  case "$_c" in *"npm publish"*|*"pnpm publish"*|*"yarn publish"*|*"cargo publish"*|*"twine upload"*|*"poetry publish"*|*"gem push"*|*"docker manifest push"*) out="\${out}action:publish " ;; esac
-  case "$_c" in *"gh release create"*|*"git tag"*|*"npm version"*|*"cargo release"*|*"goreleaser release"*|*"semantic-release"*) out="\${out}action:release " ;; esac
-  case "$_c" in *"insert into"*|*"update "*|*"delete from"*|*"drop table"*|*"drop database"*|*"drop schema"*|*"truncate "*|*"alter table"*) out="\${out}action:db_write " ;; esac
-  printf '%s' "$out"
-}
 intutic_sha256() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
   elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
@@ -3003,8 +4981,6 @@ intutic_hold() {
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
-# Computed after the classifier is defined; read by the \`action\` subject.
-INTUTIC_ACTIONS="$(intutic_actions "\${TOOL:-}" "\${COMMAND:-}")"
 
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
@@ -3036,9 +5012,26 @@ intutic_apply() {
     # machinery matches. The secrets.* floor rules ride this. Guaranteed
     # non-empty by the extractor (it defaults to "{}").
     content) _subs=("$TOOL_INPUT_JSON") ;;
-    # The space-padded action tokens intutic_actions derived from the command
-    # (" action:deploy "), so a hold on \`action:deploy\` matches whole tokens.
+    # The space-padded action tokens the extractor's classifier derived from
+    # the raw command (" action:deploy "), so a hold on \`action:deploy\`
+    # matches whole tokens.
     action)  _subs=("$INTUTIC_ACTIONS") ;;
+    # The source is |-separated phrases matched as words against the raw
+    # command by the phrase matcher in Python, not a regex: grep is linear,
+    # but the gap between the words was not expressible without one that
+    # backtracks in the other gates. One python3 run, only for these rules.
+    # The command goes in on stdin: as an argument, a long one would exceed
+    # the kernel's per-argument limit and the rule would silently not run.
+    phrase)
+      if python3 -c 'import os, sys, json
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else 1)' "$rsrc" <<< "$INTUTIC_RAW_COMMAND_JSON" 2>/dev/null; then
+        _subs=("$INTUTIC_NCOMMAND")
+      else
+        return 0
+      fi
+      ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -3046,7 +5039,9 @@ intutic_apply() {
     *)       _subs=("$INTUTIC_NCOMMAND" "$INTUTIC_NTARGET") ;;
   esac
   hit=0
+  [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
+    [ "$rsubj" = "phrase" ] && break
     if [ "$rflags" = "i" ]; then
       printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
     else

@@ -100,6 +100,9 @@ function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
       event: verdict,
       toolName, reason: reason || '',
@@ -107,6 +110,7 @@ function logEvent(verdict, toolName, reason) {
       harnessType: 'muse-code',
       timestamp: ts,
       incidentId,
+      eventId,
       ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
     fs.appendFileSync(${JSON.stringify(hookEventsLog)}, entry, { flag: 'a' });

@@ -5,7 +5,7 @@
  *
  * - The action classifier: whether a command is `action:db_write`.
  * - The snapshot reader running the hook gates' `destructive.sql_drop` rule,
- *   whose ERE the vector file carries as shipped: whether it fires. The server
+ *   which the vector file carries as the snapshot ships it: whether it fires. The server
  *   tier (`POST /api/v1/hook-gate`) is the control plane's DLP, which runs the
  *   same vectors in its own suite.
  */
@@ -18,14 +18,14 @@ import { evaluate, loadSnapshot, SEV_WARN } from '../snapshot.js'
 
 const VECTORS = join(__dirname, '../../../shared-types/fixtures/destructive-sql-vectors.json')
 const doc = JSON.parse(readFileSync(VECTORS, 'utf-8')) as {
-  ere: string
+  rule: { id: string; subject: string; source: string }
   cases: Array<{ text: string; statement: string | null; dbWrite: boolean }>
 }
 const cases = doc.cases.map((c) => [JSON.stringify(c.text), c] as const)
 
 function sqlDropSnapshot() {
   const file = join(mkdtempSync(join(tmpdir(), 'intutic-gate-sql-')), 'policy-snapshot.rules')
-  writeFileSync(file, ['destructive.sql_drop', 'warn', 'i', 'command', 'Destructive SQL statement', doc.ere].join('\t') + '\n')
+  writeFileSync(file, [doc.rule.id, 'warn', 'i', doc.rule.subject, 'Destructive SQL statement', doc.rule.source].join('\t') + '\n')
   return loadSnapshot('', file)
 }
 

@@ -2,9 +2,9 @@ import os
 import time
 import warnings
 import requests
-from typing import List, Dict, Any, Callable, Optional
+from typing import List, Dict, Any, Callable, NoReturn, Optional
 from .errors import ClawdeBlockedError, ClawdeConnectionError
-from .refusals import REFUSAL_HEADER, header_refusal, parse_refusal
+from .refusals import REFUSAL_HEADER, REFUSAL_RULE_HEADER, ProxyRefusal, header_refusal, parse_refusal, stream_refusal
 from .context_resolver import resolve_context
 from .budget_checker import BudgetChecker
 from .circuit_breaker import CircuitBreaker
@@ -94,9 +94,10 @@ class ClawdeClient:
 
         Returns the completion with `verdict` set to "allow" when the proxy let
         the request through. A governance refusal, including one the proxy
-        answers with a 200 and names in `x-intutic-refusal`, fires the matching
-        event and raises ClawdeBlockedError, unretried. Transport failures, timeouts and
-        5xx answers are retried; anything else raises ClawdeConnectionError.
+        answers with a 200 and names in `x-intutic-refusal` (or, on a stream,
+        in its `: intutic-refusal` line), fires the matching event and raises
+        ClawdeBlockedError, unretried. Transport failures, timeouts and 5xx
+        answers are retried; anything else raises ClawdeConnectionError.
         """
         request_payload = {
             "model": model,
@@ -128,25 +129,30 @@ class ClawdeClient:
                 try:
                     result = res.json()
                 except ValueError:
+                    # A `stream=True` request comes back as an event stream,
+                    # which chat() does not parse; it still must not pass off
+                    # a refusal the stream names as a transport failure.
+                    streamed = stream_refusal(res.text)
+                    if streamed is not None:
+                        self._refuse(streamed, res.status_code)
                     raise ClawdeConnectionError(
                         f"Proxy answered {res.status_code} with a body that is not JSON: {res.text}"
                     )
-                # A refusal answered as an assistant turn (the cost-prediction gate).
-                answered = header_refusal(res.headers.get(REFUSAL_HEADER), _first_message_text(result))
+                # A refusal answered as an assistant turn: a withheld tool
+                # call, a withheld body, or the cost-prediction gate.
+                answered = header_refusal(
+                    res.headers.get(REFUSAL_HEADER),
+                    res.headers.get(REFUSAL_RULE_HEADER),
+                    _first_message_text(result),
+                )
                 if answered is not None:
-                    self.emit(answered["verdict"], {**answered, "status": res.status_code})
-                    raise ClawdeBlockedError(
-                        answered["verdict"], answered["code"], res.status_code, answered["message"]
-                    )
+                    self._refuse(answered, res.status_code)
                 result["verdict"] = "allow"
                 return result
 
             refusal = parse_refusal(res.status_code, res.text)
             if refusal is not None:
-                self.emit(refusal["verdict"], {**refusal, "status": res.status_code})
-                raise ClawdeBlockedError(
-                    refusal["verdict"], refusal["code"], res.status_code, refusal["message"]
-                )
+                self._refuse(refusal, res.status_code)
 
             last_error = f"HTTP error {res.status_code}: {res.text}"
             # A 4xx that is not a refusal (bad key, malformed body) fails the
@@ -155,6 +161,13 @@ class ClawdeClient:
                 raise ClawdeConnectionError(last_error)
 
         raise ClawdeConnectionError(f"Request failed after {max_attempts} attempts. Last error: {last_error}")
+
+    def _refuse(self, refusal: ProxyRefusal, status: int) -> NoReturn:
+        """Fires the refusal's event, then raises it."""
+        self.emit(refusal["verdict"], {**refusal, "status": status})
+        raise ClawdeBlockedError(
+            refusal["verdict"], refusal["code"], status, refusal["message"], refusal.get("rule_id")
+        )
 
 
 def _first_message_text(completion: Any) -> str:

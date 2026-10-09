@@ -28,23 +28,23 @@ const fake = vi.hoisted(() => {
 import * as fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import * as os from 'node:os'
-import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { join, dirname, relative, extname } from 'node:path'
-import type { SyncSopEntry } from '@intutic/shared-types'
+import type { HarnessType, SyncSopEntry } from '@intutic/shared-types'
 import {
-  DisconnectPlan,
   injectMcpServer,
   keepOriginal,
   noteProxyUrl,
+  writeOwnedFile,
   planDisconnect,
   updatePreToolUseHooks,
+  writeBundledSkills,
+  writeDecisionsTargets,
 } from '@intutic/sync-daemon'
 import { getAdapter } from '../harness/detector.js'
-import { planN8nDisconnect } from '../harness/n8n.js'
 import { runDisconnect } from './disconnect.js'
 
 const PROXY = 'http://localhost:4000'
+const LEGACY_DECISIONS = '<!-- INTUTIC:DECISIONS_LOG:START -->\n## Recent Governed Decisions\n\n- old entry\n<!-- INTUTIC:DECISIONS_LOG:END -->'
 const SOPS: SyncSopEntry[] = [
   { sopId: 'sop_1', title: 'No secrets', content: 'Never print a secret.', contentHash: '', harnessTargets: [] },
 ]
@@ -447,6 +447,108 @@ const CASES: Case[] = [
     },
     edit: () => editJson(join(home, '.dsh', 'profiles', 'main', 'package.json'), (d) => { d.dependencies.y = '2.0.0' }),
   },
+  {
+    // Codex and OpenCode share AGENTS.md: one section, the team's text kept around it.
+    harness: 'codex',
+    name: 'codex and opencode, with an AGENTS.md of the team\'s own',
+    seed: () => put(join(ws, 'AGENTS.md'), '# Team\n\nRun the tests.\n'),
+    connect: async () => {
+      await connectHarness('codex')
+      await connectHarness('opencode')
+    },
+    edit: () => editText(join(ws, 'AGENTS.md'), 'Run the tests.', 'Run every test.'),
+    connected: async () => {
+      const text = await fs.readFile(join(ws, 'AGENTS.md'), 'utf-8')
+      expect(text).toMatch(/^# Team\n\nRun the tests\.\n\n<!-- INTUTIC:RULES:START -->\n[\s\S]*Never print a secret\.[\s\S]*<!-- INTUTIC:RULES:END -->\n$/)
+      expect(text.match(/INTUTIC:RULES:START/g)).toHaveLength(1)
+    },
+  },
+  ...(['muse-code', 'claude-code', 'cursor', 'windsurf', 'roo-code'] as const).map((harness): Case => {
+    // Earlier versions wrote these files whole. Connect gives the user's copy
+    // back (or turns AGENTS.md into the section), and disconnect still
+    // restores everything byte for byte.
+    const legacy = { 'muse-code': 'AGENTS.md', 'claude-code': 'CLAUDE.md', cursor: '.cursorrules', windsurf: '.windsurfrules', 'roo-code': '.roorules' }[harness]
+    return {
+      harness,
+      name: `${harness}, ${legacy} an earlier version wrote whole`,
+      seed: () => put(join(ws, legacy), 'The team\'s own rules.\n'),
+      connect: async () => {
+        const file = join(ws, legacy)
+        await keepOriginal(file, ws)
+        await writeOwnedFile(file, ws, '# Intutic Governance Rules (auto-generated)\n# DO NOT EDIT — managed by intutic sync daemon\n\n## Old rule\n')
+        await getAdapter(harness)!.writeConfig(ws, SOPS, PROXY)
+      },
+      edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+      connected: async () => {
+        const text = await fs.readFile(join(ws, legacy), 'utf-8')
+        expect(text).not.toContain('Old rule')
+        expect(text.startsWith('The team\'s own rules.\n')).toBe(true)
+      },
+    }
+  }),
+  ...(['claude-code', 'codex', 'cursor', 'aider', 'goose', 'continue'] as const).map((harness): Case => {
+    // The decisions log next to the rules: its own file, or its own section.
+    const seeds: Record<typeof harness, () => Promise<void>> = {
+      'claude-code': () => put(join(ws, 'CLAUDE.md'), '# Project rules\n\nUse tabs.\n'),
+      codex: () => put(join(ws, 'AGENTS.md'), '# Team\n\nRun the tests.\n'),
+      cursor: () => put(join(ws, '.cursor', 'rules', 'style.mdc'), '---\nalwaysApply: true\n---\nTabs.\n'),
+      aider: () => put(join(ws, '.aider.conf.yml'), 'model: gpt-4o\nread:\n  - CONVENTIONS.md\n'),
+      goose: () => put(join(ws, '.goosehints'), 'Prefer small diffs.\n'),
+      continue: () => put(join(ws, 'README.md'), '# project\n'),
+    }
+    return {
+      harness,
+      name: `${harness}, with the decisions log`,
+      seed: seeds[harness],
+      connect: async () => {
+        await connectHarness(harness)
+        await writeDecisionsTargets(ws, [harness as HarnessType], '## Recent Governed Decisions\n\n- 2026-10-09 — Decision: rollout approved')
+      },
+      edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+      connected: async () => {
+        // No harness's decisions log goes to CLAUDE.md.
+        if (harness === 'claude-code') expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toBe('# Project rules\n\nUse tabs.\n')
+        else expect(existsSync(join(ws, 'CLAUDE.md'))).toBe(false)
+      },
+    }
+  }),
+  {
+    // Earlier versions appended the decisions log to the team's CLAUDE.md.
+    harness: 'claude-code',
+    name: 'claude-code, the decisions section an earlier version appended to CLAUDE.md',
+    seed: () => put(join(ws, 'CLAUDE.md'), '# Project rules\n\nUse tabs.\n'),
+    connect: () => editText(join(ws, 'CLAUDE.md'), 'Use tabs.\n', `Use tabs.\n\n${LEGACY_DECISIONS}\n`),
+    edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+  },
+  {
+    // ... and to the CLAUDE.md they had created whole for the rules.
+    harness: 'claude-code',
+    name: 'claude-code, a CLAUDE.md an earlier version created, with the decisions section',
+    seed: () => put(join(ws, 'README.md'), '# project\n'),
+    connect: async () => {
+      await writeOwnedFile(join(ws, 'CLAUDE.md'), ws, '# Intutic Governance Rules (auto-generated)\n# DO NOT EDIT — managed by intutic sync daemon\n\n## Old rule\n')
+      await fs.appendFile(join(ws, 'CLAUDE.md'), `\n${LEGACY_DECISIONS}\n`)
+    },
+    edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+  },
+  {
+    harness: 'openclaw',
+    name: 'openclaw, with an AGENTS.md of the user\'s own in a configured agent workspace',
+    seed: async () => {
+      await put(join(home, '.openclaw', 'openclaw.json'), { agents: { defaults: { workspace: '~/assistant' } } })
+      await put(join(home, 'assistant', 'AGENTS.md'), '# How I work\n\nAsk first.\n')
+    },
+    // The rules only: the gate writer runs `openclaw hooks check`, which an
+    // installed OpenClaw answers slowly for a configured workspace.
+    connect: async () => {
+      await getAdapter('openclaw')!.writeConfig(ws, SOPS, PROXY)
+    },
+    edit: () => editText(join(home, 'assistant', 'AGENTS.md'), 'Ask first.', 'Ask twice.'),
+    connected: async () => {
+      expect(await fs.readFile(join(home, 'assistant', 'AGENTS.md'), 'utf-8')).toContain('Never print a secret.')
+      expect(existsSync(join(home, '.openclaw', 'workspace'))).toBe(false)
+    },
+  },
 ]
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -573,6 +675,32 @@ describe('intutic disconnect, the command', () => {
     expect(existsSync(credentials)).toBe(true)
   })
 
+  // connect writes the Kitkat and rule-author skills into the workspace when
+  // they are missing; disconnect takes back exactly those, and nothing the
+  // user wrote or changed.
+  it('removes the agent skills connect wrote, and keeps a skill the user had or edited', async () => {
+    const kitkat = join(ws, '.agents', 'skills', 'intutic-governance-kitkat', 'SKILL.md')
+    const ruleAuthor = join(ws, '.agents', 'skills', 'intutic-rule-author', 'SKILL.md')
+    await seedUser()
+    await put(kitkat, '# the copy I downloaded\n')
+    const before = await snapshot()
+    await connectAs(['cursor'])
+    expect(await writeBundledSkills(ws)).toEqual([ruleAuthor])
+    await runDisconnect({ keepLogin: true })
+    const after = await snapshot()
+    for (const path of [config, credentials, join(home, '.intutic')]) after.delete(relative(home, path))
+    expect(Object.fromEntries(after)).toEqual(Object.fromEntries(before))
+
+    await clear()
+    await seedUser()
+    await connectAs(['cursor'])
+    expect(await writeBundledSkills(ws)).toEqual([ruleAuthor, kitkat])
+    await fs.appendFile(kitkat, '\nOur team also asks you to name the ticket.\n')
+    await runDisconnect({ keepLogin: true })
+    expect(existsSync(ruleAuthor)).toBe(false)
+    expect(await fs.readFile(kitkat, 'utf-8')).toContain('Our team also asks you to name the ticket.')
+  })
+
   it('--harness takes one harness out and leaves the others connected', async () => {
     await seedUser()
     await connectAs(['claude-code', 'cursor'])
@@ -581,7 +709,8 @@ describe('intutic disconnect, the command', () => {
       version: 1,
       hooks: { beforeShellExecution: [{ command: './audit.sh' }] },
     })
-    expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toContain('Intutic Governance Rules')
+    expect(await fs.readFile(join(ws, '.claude', 'rules', 'intutic-governance.md'), 'utf-8')).toContain('Intutic Governance Rules')
+    expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toBe('team rules\n')
     expect(existsSync(join(ws, '.cursor', 'mcp.json'))).toBe(false)
     const saved = JSON.parse(await fs.readFile(config, 'utf-8'))
     expect(saved.harnesses).toEqual(['claude-code'])
@@ -603,44 +732,5 @@ describe('intutic disconnect, the command', () => {
   it('rejects a harness it does not know', async () => {
     await runDisconnect({ harness: 'no-such-harness' })
     expect(process.exitCode).toBe(1)
-  })
-})
-
-describe('n8n workflow variables', () => {
-  it('removes the two variables connect set and keeps the workflow\'s own', async () => {
-    const puts: unknown[] = []
-    const workflow = {
-      id: 'w1',
-      name: 'Flow',
-      nodes: [],
-      connections: {},
-      settings: { executionOrder: 'v1', variables: { intutic_proxy_url: PROXY, intutic_governance_rules: 'x', mine: 'keep' } },
-    }
-    const server = createServer((req, res) => {
-      let body = ''
-      req.on('data', (c) => { body += c })
-      req.on('end', () => {
-        res.setHeader('content-type', 'application/json')
-        if (req.method === 'PUT') {
-          puts.push(JSON.parse(body))
-          res.end('{}')
-        } else if (req.url === '/api/v1/workflows') res.end(JSON.stringify({ data: [{ id: 'w1', name: 'Flow' }] }))
-        else res.end(JSON.stringify(workflow))
-      })
-    })
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-    const prev = process.env.N8N_URL
-    process.env.N8N_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-    try {
-      const plan = new DisconnectPlan()
-      await planN8nDisconnect(plan)
-      expect(plan.visible()).toHaveLength(1)
-      expect(puts).toHaveLength(0)
-      await plan.apply()
-      expect(puts).toEqual([{ name: 'Flow', nodes: [], connections: {}, settings: { executionOrder: 'v1', variables: { mine: 'keep' } } }])
-    } finally {
-      process.env.N8N_URL = prev
-      server.close()
-    }
   })
 })

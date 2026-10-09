@@ -10,6 +10,10 @@ Claude Code, Cursor, Google Antigravity, OpenAI Codex, and other compatible agen
 
 Instead of merging rules globally into host machine config files, you can place a pre-configured `SKILL.md` directly into your workspace. When the AI agent connects, it automatically reads the Kitkat skill rules to structure its prompts, FinOps attributes, and safety overrides locally.
 
+The skill also tells the agent what to do when Intutic refuses or holds a call: what every refusal code means, which ones it may retry and which it must not, that a held call needs an owner, admin or engineering manager to approve it (and that the retry passes only while the workspace's review-hold bypass is on), and how to tell the user.
+
+`intutic connect` writes it to `.agents/skills/intutic-governance-kitkat/SKILL.md` in the workspace when it is missing, next to the [Rule Author skill](/integrations/rule-author), and never overwrites a copy that is already there. `intutic disconnect` deletes the copy connect wrote, unless you have edited it. The steps below are for a workspace that does not run `intutic connect`.
+
 ---
 
 ## Setup

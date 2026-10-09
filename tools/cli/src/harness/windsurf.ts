@@ -1,7 +1,12 @@
 /**
  * windsurf.ts — Windsurf adapter (full implementation with hooks + TLS MITM proxy config).
  *
- * Writes .windsurfrules governance text and injects Cascade hook scripts
+ * Writes the rule sets to `.windsurf/rules/intutic-governance.md` with
+ * `trigger: always_on`, which Cascade includes in every message
+ * (https://docs.devin.ai/desktop/cascade/memories, where Windsurf's rules
+ * docs now live; `.windsurfrules`, which earlier versions overwrote, is the
+ * legacy single file, and the user's own copy of it comes back), and injects
+ * Cascade hook scripts
  * at user-level (~/.codeium/windsurf/hooks.json) and workspace-level
  * (.windsurf/hooks.json), merged with any hooks already there. Also merges
  * HTTP proxy settings into Windsurf's user settings.json, and switches
@@ -15,16 +20,15 @@
 import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { HarnessType } from '@intutic/shared-types'
+import { HarnessType, rulesFrontMatterOf } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { hashFile } from '../lib/hash.js'
-import { buildMarkdownContent } from './base.js'
 import { loadCredentials } from '../config/store.js'
 import { writeWindsurfHooks } from '@intutic/sync-daemon/harness/windsurfHooks'
-import { writeOwnedFile } from '@intutic/sync-daemon'
+import { ownRulesFileHash, retireLegacyRulesFile, writeOwnRulesFile } from './rulesFiles.js'
 
-const CONFIG_FILE = '.windsurfrules'
+const CONFIG_FILE = '.windsurf/rules/intutic-governance.md'
+const LEGACY_FILE = '.windsurfrules'
 const WINDSURF_USER_DIR = join(homedir(), '.codeium', 'windsurf')
 
 export const windsurfAdapter: IHarnessAdapter = {
@@ -32,7 +36,7 @@ export const windsurfAdapter: IHarnessAdapter = {
   configFileName: CONFIG_FILE,
 
   async detect(workspaceRoot: string): Promise<boolean> {
-    for (const marker of [CONFIG_FILE, '.windsurf']) {
+    for (const marker of [LEGACY_FILE, '.windsurf']) {
       try { await access(join(workspaceRoot, marker)); return true } catch { /* fall through */ }
     }
     try { await access(WINDSURF_USER_DIR); return true } catch { return false }
@@ -47,15 +51,12 @@ export const windsurfAdapter: IHarnessAdapter = {
     await writeWindsurfHooks(workspaceRoot, proxyUrl, proxyPort, creds?.workspaceId || 'local')
   },
 
-  /** .windsurfrules markdown governance text. */
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    const filePath = join(workspaceRoot, CONFIG_FILE)
-    const content = buildMarkdownContent(sops, proxyUrl)
-    await writeOwnedFile(filePath, workspaceRoot, content)
-    return filePath
+    await retireLegacyRulesFile(workspaceRoot, LEGACY_FILE)
+    return writeOwnRulesFile(workspaceRoot, CONFIG_FILE, sops, proxyUrl, rulesFrontMatterOf(HarnessType.WINDSURF, 'Intutic governance rules'))
   },
 
-  async readCurrentHash(workspaceRoot: string): Promise<string | null> {
-    try { return await hashFile(join(workspaceRoot, CONFIG_FILE)) } catch { return null }
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return ownRulesFileHash(workspaceRoot, CONFIG_FILE)
   },
 }

@@ -45,9 +45,17 @@ The `@intutic/mcp-governance-proxy` package supports three execution modes:
 
 | Mode | Command Syntax | Purpose & Exposed Capabilities |
 | :--- | :--- | :--- |
-| **Standalone Governance Server** | `npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy` | Exposes governance status tools directly to the agent (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`). |
+| **Standalone Governance Server** | `npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy` | Exposes governance tools directly to the agent: `intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`, and the three below. |
 | **Governed Proxy Wrapper (stdio)** | `npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy --workspace-id <wk_id> -- <real-mcp-command>` | Intercepts, evaluates, and logs tool calls for a downstream MCP server spawned as a stdio child process, before forwarding. |
 | **Governed Proxy Wrapper (remote bridge)** | `npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy --workspace-id <wk_id> --remote-url <url> [--remote-transport sse\|http]` | Same governance pipeline as the stdio wrapper, applied to a remote MCP server reached over HTTP or Server-Sent Events instead of a spawned child process — see [Remote (HTTP/SSE) MCP servers](/guide/mcp-governance#remote-http-sse-mcp-servers-the-stdio-http-bridge) for the full mechanism. |
+
+The standalone server's tools that answer a refusal:
+
+| Tool | Answers |
+| :--- | :--- |
+| `intutic_hold_status` (`holdId`) | Whether a hold has been approved or rejected, and whether retrying the identical call now passes: `wait`, `passes` (with the time the approval's bypass expires), `held_again` (approved, but the workspace's `reviewHoldBypassEnabled` is off or the bypass has expired) or `do_not_retry` |
+| `intutic_mcp_registry_status` (`server`, optional) | For each server in the registry: its status, whether calls to it are allowed or refused and with which [code](#refusal-codes), and its switched-off tools |
+| `intutic_mcp_budget_remaining` | Each MCP call budget that counts the caller's calls: limit, calls used and left this period, and when it resets. Counts are read from the Valkey the proxies count in (`INTUTIC_VALKEY_URL`); without one, `used` is `null` |
 
 ---
 
@@ -99,8 +107,8 @@ variants:
 | Decision | Direction | Meaning |
 | :--- | :--- | :--- |
 | `allow` | request | Forward the JSON-RPC frame to the real server. |
-| `block` | request | Refuse the call pre-flight; return a JSON-RPC `-32603` error to the agent. Nothing runs. |
-| `hold` | request | A `require_approval` rule matched: refuse the call for now, record a hold for review, and return a `-32603` error whose message names the hold id (also in `error.data.holdId`). See [Approval holds](/guide/mcp-governance#approval-holds). |
+| `block` | request | Refuse the call pre-flight; return a JSON-RPC `-32603` error to the agent, with a [refusal code](#refusal-codes) in `error.data.code`. Nothing runs. |
+| `hold` | request | A `require_approval` rule matched: refuse the call for now, record a hold for review, and return a `-32603` error whose message names the hold id (also in `error.data.holdId`, with `error.data.code` `HELD`). See [Approval holds](/guide/mcp-governance#approval-holds). |
 | `redact` | response | Declared by the `Decision` type but produced structurally, not as a `decide()` return value — see below. |
 
 `decide()` runs this pipeline, in order, over every `tools/call` request:
@@ -109,7 +117,7 @@ variants:
 2. **Server allowlist** (`mcpAllowedServers`) — refuses the whole server if it's not on an explicit, non-empty allowlist.
 3. **Tool allowlist** (`mcpAllowedTools`) — refuses the individual tool the same way.
 4. **SSO group policy** — the workspace's `sso_group_policy`, applied to the member the proxy's API key belongs to. See [Who made the call](/guide/mcp-governance#caller-identity).
-5. **DLP scan** — blocks a request whose arguments contain a credential-shaped value or a destructive command pattern (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`). Command patterns are matched against each argument string as the tool receives it, object keys included, and the SQL keywords may be separated by any whitespace, a block or `--` comment, or an escaped `\n` / `\t`: `DROP/**/TABLE` and `DROP` and `TABLE` on separate lines are blocked. The scan reads text, not SQL, so a quoted mention such as `SELECT 'drop table'` is blocked too — a quoted string is also how a shell command carries the real statement.
+5. **DLP scan** — blocks a request whose arguments contain a credential-shaped value or a destructive command pattern (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`). Command patterns are matched against each argument string as the tool receives it, object keys included, and the SQL keywords may be separated by any whitespace, a line continuation, a block or `--` comment, or an escaped `\n` / `\t`: `DROP/**/TABLE` and `DROP` and `TABLE` on separate lines are blocked. The scan reads text, not SQL, so a quoted mention such as `SELECT 'drop table'` is blocked too — a quoted string is also how a shell command carries the real statement.
 6. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` holds the call for a person's approval (`hold` above).
 7. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
 8. **Anomaly detectors** and **WASM rules** — see the session-scope note below.
@@ -120,6 +128,43 @@ card numbers, IBANs and SSNs by default. Arguments are never rewritten, so a
 match blocks the call even when its detector is set to `redact`. The LLM proxy
 and the hook gates treat the same value differently; see
 [What each surface does with a match](/guide/policies#what-each-surface-does-with-a-match).
+
+### Refusal codes
+
+Every refusal is a JSON-RPC `-32603` error whose message is written for the agent, and whose `error.data` names it for a client that reads it programmatically: `code`, one of the codes below; `ruleId`, the rule, setting or detector that decided; and, for some codes, more fields. A hold adds `status: "pending_approval"` and `holdId`, which is empty when the hold could not be recorded, so there is nothing to approve yet. `BUDGET_EXCEEDED` adds the budget's `budgetId`, `scope`, `period`, `limit`, `used` and `resetAt`, and `BUDGET_UNAVAILABLE` the `budgetIds` it could not check.
+
+```json
+{"code": -32603, "message": "[Intutic Governance] Tool call blocked: Tool \"query\" is disabled on MCP server \"db\" …",
+ "data": {"code": "TOOL_DISABLED", "ruleId": "mcp_registry.db.query"}}
+```
+
+| Code | `ruleId` | Meaning |
+|---|---|---|
+| `REGISTRY_UNAVAILABLE` | `mcpProxyFailBehavior` | The MCP server registry has not loaded since the proxy started, and the proxy fails closed |
+| `SERVER_BLOCKED` | `mcp_registry.<server>` | The server is blocked in the MCP server registry |
+| `SERVER_HELD` | `mcp_registry.<server>` | The server changed its tools in a way scored high risk and waits for an owner or admin to approve it again |
+| `SERVER_NOT_APPROVED` | `mcpDefaultPolicy` | The workspace refuses servers it has not approved (`mcpDefaultPolicy: deny`), and this one is not approved |
+| `TOOL_DISABLED` | `mcp_registry.<server>.<tool>` | The tool is switched off on this server in the registry |
+| `SERVER_NOT_ALLOWED` | `mcpAllowedServers` | The server is not on the workspace's `mcpAllowedServers` list |
+| `TOOL_NOT_ALLOWED` | `mcpAllowedTools` | The tool is not on the workspace's `mcpAllowedTools` list |
+| `SSO_GROUP` | `sso_group.high_risk.<tool>` or `sso_group.require_obo.<tool>` | The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown |
+| `DLP` | `dlp.<pattern>` | The arguments contain a credential, a destructive command or a PII value the DLP scan blocks |
+| `SOP_RULE` | The SOP rule id | A `block` SOP rule matched |
+| `HELD` | The SOP rule id | A `require_approval` SOP rule matched: the call is held for a person's approval, and `holdId` names the hold |
+| `INJECTION` | `injection.tool_input` | The arguments matched a prompt-injection pattern, and the workspace blocks injection |
+| `ANOMALY` | The detector id | An anomaly detector stopped the call |
+| `WASM_RULE` | `wasm:<rule id>` | A custom WASM rule blocked the call |
+| `REASK` | The detector id, or `wasm:<rule id>` | An anomaly detector or WASM rule refused this attempt; revise the approach |
+| `REASK_EXHAUSTED` | The detector id, or `wasm:<rule id>` | The same detector or rule refused three attempts, so it now blocks outright |
+| `BUDGET_EXCEEDED` | The budget id | An MCP call budget covering this call is used up until `resetAt` |
+| `BUDGET_UNAVAILABLE` | `mcpProxyFailBehavior` | A call budget covers this call but could not be checked, and the proxy fails closed |
+| `GOVERNANCE_UNAVAILABLE` | `mcpProxyFailBehavior` | A governance check could not complete, and the proxy fails closed |
+| `TOFU_UNAVAILABLE` | `mcpProxyFailBehavior` | The server's pinned tool definitions could not be read or written, and the proxy fails closed |
+| `TOOL_DEFINITIONS_CHANGED` | `tofu.<server>` | The server's tool definitions changed since they were first pinned, and the proxy fails closed |
+| `RESULT_WITHHELD_DLP` | `dlp.<pattern>` | The tool ran, but its result held sensitive data that could not be redacted safely, so it was not delivered |
+| `RESULT_WITHHELD_INJECTION` | `injection.tool_result` | The tool ran, but its result matched a prompt-injection pattern, so it was not delivered |
+
+The two `RESULT_WITHHELD_*` codes answer a call that already ran; every other code means the call did not run.
 
 ### Anomaly-detection session scope
 

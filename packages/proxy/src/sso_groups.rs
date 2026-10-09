@@ -122,17 +122,7 @@ impl SsoGroupDecision {
 
 /// A rule id that survives `ruleIdFromReason` (`[A-Za-z0-9_.:-]`).
 pub fn rule_id(kind: &str, tool_name: &str) -> String {
-    let safe: String = tool_name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '-') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    format!("sso_group.{kind}.{safe}")
+    crate::refusal::tool_rule_id(&format!("sso_group.{kind}"), tool_name)
 }
 
 /// Decides one tool call. `tool_names` is every name the call goes by; a

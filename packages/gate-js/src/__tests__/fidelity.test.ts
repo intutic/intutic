@@ -56,12 +56,13 @@ function severityConst(s: 'block' | 'warn' | 'shadow'): string {
 }
 
 /** Runs `evaluate()` with the fixture string as whichever subject the
- *  pattern targets — `command`/`target`/`tool`, or both for `'any'`. */
+ *  pattern targets — `command`/`target`/`tool` (a `phrase` rule reads the
+ *  command), or both for `'any'`. */
 function evaluateAgainst(p: FixturePattern, snap: ReturnType<typeof loadSnapshot>, fixture: string) {
   const subject = p.subject ?? 'any'
   const toolName = subject === 'tool' ? fixture : 'shell'
   const target = subject === 'target' ? fixture : ''
-  const command = subject === 'command' || subject === 'any' ? fixture : ''
+  const command = subject === 'command' || subject === 'phrase' || subject === 'any' ? fixture : ''
   return evaluate(toolName, target, command, snap)
 }
 

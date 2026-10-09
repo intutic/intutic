@@ -120,9 +120,6 @@ const HTTP_POST_PATTERNS: &[&str] = &[
 ];
 
 /// Commands that write to a database.
-///
-/// Matched with [`SQL_GAP`] standing for each space, not as plain substrings —
-/// see [`matches_sql_any`].
 const DB_WRITE_PATTERNS: &[&str] = &[
     "insert into",
     "update ",
@@ -134,45 +131,66 @@ const DB_WRITE_PATTERNS: &[&str] = &[
     "alter table",
 ];
 
-/// What may separate two SQL keywords: whitespace (tabs and newlines
-/// included), a newline, tab or carriage return written as a two-character
-/// escape (`\n` — SQL that was escaped once more, as `printf` and `echo -e`
-/// expand it), a `/* … */` comment, or a `-- …` comment that runs to a newline.
+/// What may separate two words of a command or SQL statement: whitespace
+/// (tabs and newlines included), a newline, tab or carriage return written as a
+/// two-character escape (`\n` — SQL that was escaped once more, as `printf` and
+/// `echo -e` expand it), a backslash before whitespace (a shell line
+/// continuation, or an escaped space), a `/* … */` comment, a `-- …` comment
+/// that runs to a newline, or a run of `--` long options (`git --no-pager
+/// push`, `kubectl --context prod apply`) that stops at the end of the shell
+/// command.
 ///
-/// A plain `"drop table"` substring missed `DROP` and `TABLE` separated by a
-/// tab, a newline or `/**/`, all of which the database runs. The gap is matched rather
-/// than stripped out of the text first, because stripping deletes text: `--` is
-/// also how every long shell flag begins, and removing "comments" from
-/// `psql --command "drop table x"` would remove the statement with them.
-/// Matching only between two keywords adds matches and never hides one.
+/// Every phrase in the pattern lists below is matched with this standing for
+/// each space (see [`phrases`]). A plain `"drop table"` or `"git push"`
+/// substring missed the words separated by a tab, a newline, a line
+/// continuation or `/**/`, all of which the database or the shell reads as one
+/// break — so a `review_before: action:deploy` hold was dodged by `git\tpush`.
+/// The gap is matched rather than stripped out of the text first, because
+/// stripping deletes text: `--` is also how every long shell flag begins, and
+/// removing "comments" from `psql --command "drop table x"` would remove the
+/// statement with them. Matching only between two words adds matches and never
+/// hides one.
 ///
-/// Each alternative is unambiguous — a comment ends at its first terminator —
-/// so a backtracking engine cannot blow up on it. `gate/actions.py` in
-/// intutic-clawde and `actions.ts` in `@intutic/gate` carry this exact string,
-/// and their tests compare it with this one.
-const SQL_GAP: &str =
-    r"(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+";
+/// The comment alternatives are unambiguous — a comment ends at its first
+/// terminator — and the long-option run sits outside the repetition. Rust's
+/// regex engine is linear-time whatever the pattern; the JavaScript and Python
+/// classifiers (`@intutic/gate`, intutic-clawde, the MCP proxy, the hook
+/// gates) do not use a regex for this, because theirs backtrack: they run the
+/// phrase matcher in `@intutic/shared-types` phrases.ts and its Python
+/// transliteration. `action_vectors.json` beside this file is the behaviour all
+/// of them must share, including inputs that must stay fast.
+const SQL_GAP: &str = r"(?:(?:\s|\\[ntr\s]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+(?:--[^;&|\n]*\s)?|--[^;&|\n]*\s)";
 
-/// A pattern list's phrases as regexes, each space standing for [`SQL_GAP`].
-fn sql_phrases(patterns: &[&str]) -> Vec<regex::Regex> {
+/// A pattern list's phrases as regexes, each space standing for [`SQL_GAP`]. A
+/// one-word pattern stays a plain substring.
+fn phrases(patterns: &[&str]) -> Vec<regex::Regex> {
     patterns
         .iter()
         .map(|p| {
             let words: Vec<String> = p.split(' ').map(regex::escape).collect();
-            regex::Regex::new(&words.join(SQL_GAP)).expect("static SQL phrase")
+            regex::Regex::new(&words.join(SQL_GAP)).expect("static phrase")
         })
         .collect()
 }
 
-/// [`matches_any`] for SQL keyword phrases, tolerant of what may separate the
-/// keywords (see [`SQL_GAP`]).
-fn matches_sql_any(haystack: &str) -> bool {
-    static DB_WRITE: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
-    DB_WRITE
-        .get_or_init(|| sql_phrases(DB_WRITE_PATTERNS))
+/// Does `haystack` contain any of `patterns`, whatever separates each
+/// phrase's words (see [`SQL_GAP`])? `cell` caches the compiled list.
+fn matches_phrase(
+    haystack: &str,
+    cell: &'static std::sync::OnceLock<Vec<regex::Regex>>,
+    patterns: &[&str],
+) -> bool {
+    cell.get_or_init(|| phrases(patterns))
         .iter()
         .any(|r| r.is_match(haystack))
 }
+
+static TEST_PHRASES: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
+static DEPLOY_PHRASES: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
+static PUBLISH_PHRASES: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
+static RELEASE_PHRASES: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
+static HTTP_POST_PHRASES: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
+static DB_WRITE_PHRASES: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
 
 /// Path fragments that indicate credential material.
 pub(crate) const SECRET_PATH_FRAGMENTS: &[&str] = &[
@@ -338,16 +356,16 @@ pub fn classify(tool_name: &str, input: &serde_json::Value) -> Vec<String> {
     if tool_is(tool_name, SHELL_TOOLS) {
         // Tests first: `npm test && git push` is both, and the ordering rule
         // needs the test to be seen as having happened before the deploy.
-        if matches_any(&args, TEST_PATTERNS) {
+        if matches_phrase(&args, &TEST_PHRASES, TEST_PATTERNS) {
             actions.push("run_tests");
         }
-        if matches_any(&args, DEPLOY_PATTERNS) {
+        if matches_phrase(&args, &DEPLOY_PHRASES, DEPLOY_PATTERNS) {
             actions.push("deploy");
         }
-        if matches_any(&args, PUBLISH_PATTERNS) {
+        if matches_phrase(&args, &PUBLISH_PHRASES, PUBLISH_PATTERNS) {
             actions.push("publish");
         }
-        if matches_any(&args, RELEASE_PATTERNS) {
+        if matches_phrase(&args, &RELEASE_PHRASES, RELEASE_PATTERNS) {
             actions.push("release");
         }
         // SOURCE BEFORE SINK — same principle as tests-before-deploy above, and
@@ -368,10 +386,10 @@ pub fn classify(tool_name: &str, input: &serde_json::Value) -> Vec<String> {
         if matches_any(&args, PII_PATH_FRAGMENTS) {
             actions.push("pii_export");
         }
-        if matches_any(&args, HTTP_POST_PATTERNS) {
+        if matches_phrase(&args, &HTTP_POST_PHRASES, HTTP_POST_PATTERNS) {
             actions.push("http_post");
         }
-        if matches_sql_any(&args) {
+        if matches_phrase(&args, &DB_WRITE_PHRASES, DB_WRITE_PATTERNS) {
             actions.push("db_write");
         }
     } else if tool_is(tool_name, EDITOR_TOOLS) {
@@ -463,6 +481,40 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
+
+    /// The behaviour every classifier shares: this one, `@intutic/gate`'s,
+    /// intutic-clawde's and the hook gates' hold classifier all run
+    /// `action_vectors.json`. `git\tpush`, a line continuation or a long option
+    /// between the words dodged a `review_before` hold here while the hook gate
+    /// held it.
+    #[test]
+    fn every_shared_vector_classifies_as_listed() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("action_vectors.json")).expect("action_vectors.json");
+        let held = vectors["held"].as_array().expect("held");
+        assert!(held.len() > 20, "the vector table did not load");
+        for v in held {
+            let cmd = v[0].as_str().expect("command");
+            let want: Vec<&str> = v[1]
+                .as_array()
+                .expect("tokens")
+                .iter()
+                .map(|t| t.as_str().expect("token"))
+                .collect();
+            assert_eq!(
+                classify("Bash", &json!({ "command": cmd })),
+                want,
+                "{cmd:?}"
+            );
+        }
+        for v in vectors["notHeld"].as_array().expect("notHeld") {
+            let cmd = v.as_str().expect("command");
+            assert!(
+                classify("Bash", &json!({ "command": cmd })).is_empty(),
+                "{cmd:?}"
+            );
+        }
     }
 
     #[test]

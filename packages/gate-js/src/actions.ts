@@ -18,6 +18,8 @@
  * they are load-bearing and must survive editing.
  */
 
+import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
+
 export const ACTION_PREFIX = 'action:'
 
 /** Commands that put code or artefacts somewhere real. */
@@ -94,10 +96,7 @@ export const HTTP_POST_PATTERNS: readonly string[] = [
   'http post',
 ]
 
-/**
- * Commands that write to a database. Matched with {@link SQL_GAP} standing for
- * each space, not as plain substrings — see {@link matchesSqlAny}.
- */
+/** Commands that write to a database. */
 export const DB_WRITE_PATTERNS: readonly string[] = [
   'insert into',
   'update ',
@@ -108,24 +107,6 @@ export const DB_WRITE_PATTERNS: readonly string[] = [
   'truncate ',
   'alter table',
 ]
-
-/**
- * What may separate two SQL keywords: whitespace, a two-character escaped
- * newline, tab or carriage return, a block comment, or a `--` comment that
- * runs to a newline. Byte-identical to `SQL_GAP` in actions.rs (the test
- * compares them); see the comment there for why the gap is matched rather
- * than stripped from the text.
- */
-export const SQL_GAP = String.raw`(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+`
-
-const DB_WRITE_PHRASES: readonly RegExp[] = DB_WRITE_PATTERNS.map(
-  (p) => new RegExp(p.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(SQL_GAP)),
-)
-
-/** `matchesAny` for DB_WRITE_PATTERNS, tolerant of what separates the keywords. */
-export function matchesSqlAny(haystack: string): boolean {
-  return DB_WRITE_PHRASES.some((r) => r.test(haystack))
-}
 
 /**
  * Path fragments that indicate credential material.
@@ -219,6 +200,14 @@ export function flattenInput(value: unknown): string {
   return ''
 }
 
+/**
+ * Does `words` contain any of `patterns`, whatever separates each phrase's
+ * words? A one-word pattern is a plain substring (see phrases.ts).
+ */
+function matchesPhrase(words: PhraseText, patterns: readonly string[]): boolean {
+  return patterns.some((p) => hasPhrase(words, p))
+}
+
 export function matchesAny(haystack: string, patterns: readonly string[]): boolean {
   return patterns.some((p) => haystack.includes(p))
 }
@@ -243,20 +232,22 @@ export function toolIs(name: string, group: readonly string[]): boolean {
 export function classify(toolName: string, toolInput: unknown): string[] {
   const args = flattenInput(toolInput)
   const actions: string[] = []
+  // Cut into words once, for every phrase list below (see phrases.ts).
+  const words = phraseText(args)
 
   if (toolIs(toolName, SHELL_TOOLS)) {
     // Tests first: `make test && git push` is both, and the ordering rule
     // needs the test to be seen as having happened before the deploy.
-    if (matchesAny(args, TEST_PATTERNS)) actions.push('run_tests')
-    if (matchesAny(args, DEPLOY_PATTERNS)) actions.push('deploy')
-    if (matchesAny(args, PUBLISH_PATTERNS)) actions.push('publish')
-    if (matchesAny(args, RELEASE_PATTERNS)) actions.push('release')
+    if (matchesPhrase(words, TEST_PATTERNS)) actions.push('run_tests')
+    if (matchesPhrase(words, DEPLOY_PATTERNS)) actions.push('deploy')
+    if (matchesPhrase(words, PUBLISH_PATTERNS)) actions.push('publish')
+    if (matchesPhrase(words, RELEASE_PATTERNS)) actions.push('release')
     // Source before sink, so that (secret_read -> http_post) can still fire
     // on a single command that does both.
     if (matchesAny(args, SECRET_PATH_FRAGMENTS)) actions.push('secret_read')
     if (matchesAny(args, PII_PATH_FRAGMENTS)) actions.push('pii_export')
-    if (matchesAny(args, HTTP_POST_PATTERNS)) actions.push('http_post')
-    if (matchesSqlAny(args)) actions.push('db_write')
+    if (matchesPhrase(words, HTTP_POST_PATTERNS)) actions.push('http_post')
+    if (matchesPhrase(words, DB_WRITE_PATTERNS)) actions.push('db_write')
   }
 
   return actions.map((a) => ACTION_PREFIX + a)

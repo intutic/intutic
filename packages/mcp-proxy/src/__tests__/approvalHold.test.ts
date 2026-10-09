@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import * as http from 'node:http'
 import type { AddressInfo } from 'node:net'
+import * as node_fs from 'node:fs'
 import * as node_os from 'node:os'
 import * as node_path from 'node:path'
 import { ApprovalHolds, canonicalJson, holdKey } from '../approvalHold.js'
@@ -191,6 +192,19 @@ describe('approval holds', () => {
     expect(canonicalJson({ b: 1, a: { d: [2, { z: 1, y: 2 }], c: undefined } })).toBe('{"a":{"d":[2,{"y":2,"z":1}]},"b":1}')
   })
 
+  // The SDK gates (`@intutic/gate`, `intutic_clawde.gate`) key their bypasses
+  // the same way and run the same vectors; this side is the reference.
+  it('hashes every shared hold-key vector to its expected target hash', () => {
+    const { vectors } = JSON.parse(
+      node_fs.readFileSync(node_path.join(__dirname, '../../../shared-types/fixtures/hold-key-vectors.json'), 'utf-8'),
+    ) as { vectors: Array<{ toolInput: unknown; canonical: string; targetHash: string }> }
+    expect(vectors.length).toBeGreaterThan(5)
+    for (const v of vectors) {
+      expect(canonicalJson(v.toolInput)).toBe(v.canonical)
+      expect(holdKey('deployer', 'deploy', v.toolInput).targetHash).toBe(v.targetHash)
+    }
+  })
+
   it('the proxy answers a held call with a held error frame carrying the hold id', async () => {
     const writes: string[] = []
     const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
@@ -213,6 +227,6 @@ describe('approval holds', () => {
     const frame = JSON.parse(writes[0]!) as { id: number; error: { message: string; data: { status: string; holdId: string } } }
     expect(frame.id).toBe(7)
     expect(frame.error.message).toMatch(/^\[Intutic Governance\] Tool call HELD for approval/)
-    expect(frame.error.data).toEqual({ status: 'pending_approval', holdId: holds[0]!['holdId'] })
+    expect(frame.error.data).toEqual({ code: 'HELD', ruleId: 'sop_deploy', status: 'pending_approval', holdId: holds[0]!['holdId'] })
   })
 })

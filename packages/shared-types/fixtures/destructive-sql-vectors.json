@@ -1,7 +1,11 @@
 {
-  "$comment": "Destructive SQL: one set of answers that every implementation is tested against. `text` is a tool argument or shell command as the tool receives it. `statement` is what a blocking text rule reports for it: DROP TABLE, DROP DATABASE, DROP SCHEMA or TRUNCATE TABLE, or null. Checked against the control plane DLP (findDlpMatch, behind POST /api/v1/hook-gate and the AgentCore check; the QM screen and OpenAI Agents trace redaction), the MCP proxy DLP, and the hook gates' destructive.sql_drop rule, whose ERE is `ere` below (pinned to protectedPaths.ts) as the sync daemon (JavaScript and grep -E), @intutic/gate and intutic_clawde.gate snapshot readers run it. `dbWrite` is whether the action classifiers read it as action:db_write: actions.rs in the proxy, actions.ts in @intutic/gate, gate/actions.py in intutic_clawde. The proxy's sql_guard parses the SQL a client will run and ignores quoted text, so it answers a different question and is not run against these.",
+  "$comment": "Destructive SQL: one set of answers that every implementation is tested against. `text` is a tool argument or shell command as the tool receives it. `statement` is what a blocking text rule reports for it: DROP TABLE, DROP DATABASE, DROP SCHEMA or TRUNCATE TABLE, or null. Checked against findDestructiveSql in shared-types, the control plane DLP (findDlpMatch, behind POST /api/v1/hook-gate, the AgentCore check and the QM screen), the MCP proxy DLP, and the hook gates' destructive.sql_drop rule, which `rule` below carries as the snapshot ships it (pinned to protectedPaths.ts) and the sync daemon, @intutic/gate and intutic_clawde.gate snapshot readers run. `dbWrite` is whether the action classifiers read it as action:db_write: actions.rs in the proxy, actions.ts in @intutic/gate, gate/actions.py in intutic_clawde. The proxy's sql_guard parses the SQL a client will run and ignores quoted text, so it answers a different question and is not run against these.",
   "version": 1,
-  "ere": "([^a-zA-Z0-9_]|\\\\[ntr])(drop(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]*( |\\\\[n]))?|--[^;&|]*( |\\\\[n]))(table|database|schema)|truncate(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]*( |\\\\[n]))?|--[^;&|]*( |\\\\[n]))table)[^a-zA-Z0-9_.]",
+  "rule": {
+    "id": "destructive.sql_drop",
+    "subject": "phrase",
+    "source": "drop table|drop database|drop schema|truncate table"
+  },
   "cases": [
     {
       "text": "psql -c 'DROP TABLE users'",
@@ -37,6 +41,12 @@
       "statement": "DROP TABLE",
       "dbWrite": true,
       "note": "a tab"
+    },
+    {
+      "text": "psql -c 'DROP \\\nTABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a shell line continuation"
     },
     {
       "text": "psql -c 'DROP  TABLE users'",
@@ -211,7 +221,7 @@
       "text": "truncate --size 0 table.log",
       "statement": null,
       "dbWrite": true,
-      "note": "a long flag is not a comment that ends at TABLE"
+      "note": "the classifiers read a long option as a gap; the text rules need the statement word to end"
     },
     {
       "text": "git stash drop",
@@ -223,6 +233,12 @@
       "statement": null,
       "dbWrite": false,
       "note": "the gap joins only the two keywords"
+    },
+    {
+      "text": "git stash drop --quiet && cat table.md",
+      "statement": null,
+      "dbWrite": false,
+      "note": "a long option is a gap only up to the end of the shell command"
     },
     {
       "text": "psql --table-only",

@@ -56,6 +56,8 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { decodeSsoGroupRecord, SSO_GROUP_RECORD_TAG, type SsoGroupRecord } from './ssoGroups.js'
+import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
+import { classify } from './actions.js'
 
 export const SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -63,9 +65,20 @@ export const SNAPSHOT_STALE_AFTER_DAYS = 7
 export const SEV_SHADOW = 'shadow' as const
 export const SEV_WARN = 'warn' as const
 export const SEV_BLOCK = 'block' as const
+/**
+ * A hold rule (a `REQUIRE_APPROVAL:` SOP, or a local `review_before:` token):
+ * refuses like a block, but asks a person rather than denying — see hold.ts.
+ */
+export const SEV_HOLD = 'hold' as const
 
-export type Severity = typeof SEV_SHADOW | typeof SEV_WARN | typeof SEV_BLOCK
-export type RuleSubject = 'tool' | 'command' | 'target' | 'any'
+export type Severity = typeof SEV_SHADOW | typeof SEV_WARN | typeof SEV_BLOCK | typeof SEV_HOLD
+/**
+ * `phrase`: the source is `|`-separated phrases matched as words (phrases.ts),
+ * not a regex. `action`: the source is matched against the action tokens the
+ * command classifies to (`" action:deploy "`, actions.ts) — what a local
+ * `review_before: action:<name>` compiles to.
+ */
+export type RuleSubject = 'tool' | 'command' | 'target' | 'phrase' | 'action' | 'any'
 export type SnapshotState = 'ok' | 'absent' | 'invalid' | 'empty' | 'stale'
 
 export interface Rule {
@@ -112,6 +125,7 @@ export class Snapshot {
 export interface Decision {
   /** `null` means allow. */
   severity: Severity | null
+  /** The rule's reason and `[id]`; for a hold, the reason alone, which the gate words as a hold. */
   reason: string
   ruleId: string
 }
@@ -246,19 +260,37 @@ export function evaluate(
   const nTool = normalise(toolName)
   const nCommand = normalise(command)
   const nTarget = normalise(target)
+  let words: PhraseText | null = null
+  // The command's action tokens, space-padded as the hook gates write them, so
+  // a hold on `action:deploy` matches whole tokens. Classified with the same
+  // needles and phrase matcher as the hook gates and the proxy's actions.rs.
+  let actions: string | null = null
 
   for (const rule of rules) {
+    if (rule.subject === 'phrase') {
+      // The source is `|`-separated phrases matched as words against the raw
+      // command (phrases.ts), not a regex: a backtracking regex for "whatever
+      // separates the words" is super-linear on crafted input.
+      words ??= phraseText(command)
+      const w = words
+      if (!rule.pattern.source.split('|').some((p) => hasPhrase(w, p, true))) continue
+    }
+    if (rule.subject === 'action') actions ??= ' ' + classify(toolName, { command }).join(' ') + ' '
     const subjects =
-      rule.subject === 'tool'
-        ? [nTool]
-        : rule.subject === 'command'
-          ? [nCommand]
-          : rule.subject === 'target'
-            ? [nTarget]
-            : [nCommand, nTarget]
+      rule.subject === 'phrase'
+        ? [nCommand]
+        : rule.subject === 'action'
+          ? [actions!]
+          : rule.subject === 'tool'
+            ? [nTool]
+            : rule.subject === 'command'
+              ? [nCommand]
+              : rule.subject === 'target'
+                ? [nTarget]
+                : [nCommand, nTarget]
 
     for (const subject of subjects) {
-      if (!rule.pattern.test(subject)) continue
+      if (rule.subject !== 'phrase' && !rule.pattern.test(subject)) continue
       if (rule.severity === SEV_SHADOW) {
         return { severity: SEV_SHADOW, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id }
       }
@@ -270,7 +302,12 @@ export function evaluate(
           ruleId: rule.id,
         }
       }
-      // The rule's own reason, not a generic one — resolveSeverity reads it.
+      if (rule.severity === SEV_HOLD) {
+        return { severity: SEV_HOLD, reason: rule.reason, ruleId: rule.id }
+      }
+      // Any other severity blocks, as an unknown one does in the shipped
+      // gates: a severity this reader does not know must not allow. The
+      // rule's own reason, not a generic one — resolveSeverity reads it.
       return { severity: SEV_BLOCK, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id }
     }
   }

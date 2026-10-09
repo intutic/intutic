@@ -145,3 +145,44 @@ class TestEvaluation:
         """INTUTIC_GUARD_DISABLE=1 must not disable a workspace's own rules."""
         assert snap.evaluate("shell", "", "rm -rf /", s, guard_disabled=True).severity is None
         assert snap.evaluate("write_file", ".intutic/x", "", s, guard_disabled=True).severity == snap.SEV_BLOCK
+
+
+class TestPhraseRules:
+    """A `phrase` rule's source is phrases joined by |, matched as words by the
+    phrase matcher, never as a regex: the gap regex it replaced backtracked for
+    seconds on a few hundred kilobytes of crafted command."""
+
+    @pytest.fixture()
+    def s(self, tmp_path):
+        return snap.load_snapshot(WS, _rules_file(tmp_path, [
+            line("destructive.sql_drop", "warn", "i", "phrase", "Destructive SQL statement",
+                 "drop table|drop database|drop schema|truncate table"),
+        ]))
+
+    @pytest.mark.parametrize("command", [
+        "psql -c 'DROP/**/TABLE users'",
+        "psql -c 'DROP -- why\nTABLE users'",
+        "psql -c 'DROP \\\nTABLE users'",
+        "printf 'DROP\\nTABLE users' | psql",
+    ])
+    def test_matches_the_words_whatever_separates_them(self, s, command):
+        d = snap.evaluate("shell", "", command, s)
+        assert d.severity == snap.SEV_WARN and d.rule_id == "destructive.sql_drop"
+
+    @pytest.mark.parametrize("command", ["git stash drop && cat table.md", "truncate --size 0 table.log", "./drop_table.sh"])
+    def test_needs_the_whole_words(self, s, command):
+        assert snap.evaluate("shell", "", command, s).severity is None
+
+    @pytest.mark.parametrize("unit,times", [("drop -- ", 25000), ("drop /* ", 25000), ("\\ ", 100000)])
+    def test_stays_linear_on_crafted_input(self, s, unit, times):
+        import time
+
+        command = unit * times
+        best = None
+        for _ in range(3):
+            t0 = time.perf_counter()
+            snap.evaluate("shell", "", command, s)
+            took = time.perf_counter() - t0
+            best = took if best is None else min(best, took)
+        # The best of three runs: the bound is on the matcher, not on a busy machine.
+        assert best < 0.2

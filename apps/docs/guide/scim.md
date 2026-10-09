@@ -40,6 +40,13 @@ directory credentials. Revoke from the same panel or
 `DELETE /api/v1/scim/tokens/:tokenId`; revocation takes effect on the next request.
 
 The token is workspace-scoped and separate from regular API keys.
+
+Issuing a token needs the Enterprise or Self-host plan, the same check every
+`/scim/v2` request makes. On another plan, Biz Org included, the panel says
+which plans include SCIM and `POST /api/v1/scim/tokens` answers `403`
+(`Upgrade required — SCIM user provisioning requires an Enterprise plan`).
+Tokens issued before a downgrade stay listed so you can revoke them; `/scim/v2`
+refuses them until the workspace is back on a plan with SCIM.
 :::
 
 ---

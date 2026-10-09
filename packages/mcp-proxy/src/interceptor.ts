@@ -27,20 +27,45 @@ import type { PolicyClient, SopRule } from './policy.js'
 import { detectionFinding, type GovernanceEmitter } from './emitter.js'
 import type { ApprovalHolds } from './approvalHold.js'
 import { budgetEventDetail, exceededReason, unavailableReason, warningReason, type McpBudgetEnforcer } from './budget.js'
+import type { McpRefusalCode } from './refusals.js'
 
 const log = createLogger('mcp-proxy-interceptor')
 
+/**
+ * A refusal: what the agent reads (`reason`), and what a client reads — the
+ * stable `code`, the `ruleId` that decided, and any `detail` the code carries
+ * (refusals.ts). All three reach the JSON-RPC frame's `error.data`.
+ */
+export interface Block {
+  action: 'block'
+  reason: string
+  code: Exclude<McpRefusalCode, 'HELD'>
+  ruleId: string
+  detail?: Record<string, unknown>
+}
+
 export type Decision =
   | { action: 'allow' }
-  | { action: 'block'; reason: string }
+  | Block
   | { action: 'redact'; reason: string; redactedInput: unknown }
   /**
    * Refused for now, pending a person's approval (`require_approval`). Not a
    * block: the agent is told the hold id and to retry once it is approved,
    * which passes only while the workspace's review-hold bypass is on — see
-   * approvalHold.ts.
+   * approvalHold.ts. `holdId` is empty when the hold could not be recorded.
    */
-  | { action: 'hold'; reason: string; holdId: string }
+  | { action: 'hold'; reason: string; holdId: string; ruleId: string }
+
+/** The decision for a refusal. */
+function block(code: Block['code'], ruleId: string, reason: string, detail?: Record<string, unknown>): Block {
+  return detail ? { action: 'block', reason, code, ruleId, detail } : { action: 'block', reason, code, ruleId }
+}
+
+/** Every governance check that cannot complete refuses with this, when the proxy fails closed. */
+const FAIL_CLOSED_REASON =
+  'Governance check failed — Intutic control plane unreachable. ' +
+  'Tool call blocked by workspace policy (fail-closed mode). ' +
+  'Contact your administrator or update mcpProxyFailBehavior to open.'
 
 export class ToolCallInterceptor {
   constructor(
@@ -148,7 +173,7 @@ export class ToolCallInterceptor {
    * CURRENT attempt, so existing consumers keyed on `tool_blocked` must see
    * it, exactly like every other new block reason in this package.
    */
-  private async applyReaskLadder(key: string, baseReason: string, toolName: string, toolInput: unknown): Promise<Decision> {
+  private async applyReaskLadder(key: string, baseReason: string, toolName: string, toolInput: unknown): Promise<Block> {
     // Shared across the session's sibling proxy processes when a session
     // store is configured (Wave 5.3); the per-process counter otherwise.
     const attempts = await this.session.incrReaskAttemptShared(key)
@@ -158,13 +183,13 @@ export class ToolCallInterceptor {
         `attempts with no correction.`
       log.warn({ action: 'reask_hardened', toolName, key, attempts }, 'Reask attempts exhausted — hardening to a hard block')
       this.emitter.emit('tool_blocked', toolName, toolInput, hardenedReason)
-      return { action: 'block', reason: hardenedReason }
+      return block('REASK_EXHAUSTED', key, hardenedReason)
     }
     const reaskReason =
       `${baseReason} (attempt ${attempts}/${REASK_MAX_ATTEMPTS} — will become an unconditional ` +
       `block if this keeps tripping)`
     this.emitter.emit('tool_blocked', toolName, toolInput, reaskReason)
-    return { action: 'block', reason: reaskReason }
+    return block('REASK', key, reaskReason)
   }
 
   /**
@@ -194,7 +219,7 @@ export class ToolCallInterceptor {
         `control plane is reachable to request approval.`
     log.warn({ action: 'tool_held', toolName, ruleId: rule.id, holdId: outcome.holdId, recorded: outcome.recorded }, reason)
     this.emitter.emit('tool_held', toolName, toolInput, `${rule.reason} [${rule.id}]`)
-    return { action: 'hold', reason, holdId: outcome.holdId }
+    return { action: 'hold', reason, holdId: outcome.recorded ? outcome.holdId : '', ruleId: rule.id }
   }
 
   /**
@@ -225,33 +250,34 @@ export class ToolCallInterceptor {
         `Tool call blocked (fail-closed mode: mcpProxyFailBehavior or INTUTIC_MCP_FAIL_OPEN=false).`
       log.warn({ action: 'registry_unknown_block', serverName: this.serverName, toolName }, reason)
       this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-      return { action: 'block', reason }
+      return block('REGISTRY_UNAVAILABLE', 'mcpProxyFailBehavior', reason)
     }
 
-    let reason: string | null = null
+    let refusal: Block | null = null
+    const server = `mcp_registry.${this.serverName}`
     if (registry.blockedServers.includes(this.serverName)) {
-      reason =
+      refusal = block('SERVER_BLOCKED', server,
         `MCP server "${this.serverName}" is blocked in this workspace's MCP server registry. ` +
-        `An owner or admin can change that on the MCP Servers page.`
+        `An owner or admin can change that on the MCP Servers page.`)
     } else if (registry.heldServers.includes(this.serverName)) {
-      reason =
+      refusal = block('SERVER_HELD', server,
         `MCP server "${this.serverName}" changed its tools in a way scored high risk, and this workspace ` +
         `holds such a server until it is approved again. It is waiting in the approval queue on the MCP ` +
-        `Servers page for an owner or admin.`
+        `Servers page for an owner or admin.`)
     } else if (registry.defaultPolicy === 'deny' && !registry.approvedServers.includes(this.serverName)) {
-      reason =
+      refusal = block('SERVER_NOT_APPROVED', 'mcpDefaultPolicy',
         `MCP server "${this.serverName}" is not approved in this workspace's MCP server registry, ` +
         `and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in ` +
-        `the approval queue on the MCP Servers page for an owner or admin.`
+        `the approval queue on the MCP Servers page for an owner or admin.`)
     } else if ((registry.disabledTools[this.serverName] ?? []).includes(toolName)) {
-      reason =
+      refusal = block('TOOL_DISABLED', `${server}.${toolName}`,
         `Tool "${toolName}" is disabled on MCP server "${this.serverName}" in this workspace's ` +
-        `MCP server registry. An owner or admin can re-enable it on the MCP Servers page.`
+        `MCP server registry. An owner or admin can re-enable it on the MCP Servers page.`)
     }
-    if (!reason) return null
-    log.warn({ action: 'registry_block', serverName: this.serverName, toolName }, reason)
-    this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-    return { action: 'block', reason }
+    if (!refusal) return null
+    log.warn({ action: 'registry_block', serverName: this.serverName, toolName }, refusal.reason)
+    this.emitter.emit('tool_blocked', toolName, toolInput, refusal.reason)
+    return refusal
   }
 
   /**
@@ -282,7 +308,7 @@ export class ToolCallInterceptor {
     const reason = `${decision.reason} [${decision.ruleId}]`
     log.warn({ action: 'sso_group_block', toolName, memberId: principal?.memberId ?? null, ruleId: decision.ruleId }, reason)
     this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-    return { action: 'block', reason }
+    return block('SSO_GROUP', decision.ruleId ?? 'sso_group', reason)
   }
 
   /**
@@ -329,7 +355,7 @@ export class ToolCallInterceptor {
         `allowlist in workspace settings (mcpAllowedServers).`
       log.warn({ action: 'server_allowlist_block', serverName: this.serverName, toolName }, reason)
       this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-      return { action: 'block', reason }
+      return block('SERVER_NOT_ALLOWED', 'mcpAllowedServers', reason)
     }
 
     // 0. Additive tool scoping. When the workspace declares an allowlist,
@@ -346,7 +372,7 @@ export class ToolCallInterceptor {
         `allowlist in workspace settings (mcpAllowedTools).`
       log.warn({ action: 'allowlist_block', toolName }, reason)
       this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-      return { action: 'block', reason }
+      return block('TOOL_NOT_ALLOWED', 'mcpAllowedTools', reason)
     }
 
     // 0.5. SSO group clearance, after the scoping checks and before DLP.
@@ -371,19 +397,11 @@ export class ToolCallInterceptor {
         const reason = formatDlpBlockReason(dlp.findings)
         log.warn({ action: 'dlp_block', toolName, findings: dlp.findings }, 'DLP block')
         this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-        return { action: 'block', reason }
+        return block('DLP', `dlp.${dlp.findings[0]?.pattern ?? 'input'}`, reason)
       }
     } catch (err) {
       log.error({ action: 'dlp_error', err: (err as Error).message }, 'DLP scan error — skipping')
-      if (!this.failOpen) {
-        return {
-          action: 'block',
-          reason:
-            'Governance check failed — Intutic control plane unreachable. ' +
-            'Tool call blocked by workspace policy (fail-closed mode). ' +
-            'Contact your administrator or update mcpProxyFailBehavior to open.',
-        }
-      }
+      if (!this.failOpen) return block('GOVERNANCE_UNAVAILABLE', 'mcpProxyFailBehavior', FAIL_CLOSED_REASON)
     }
 
     // 2. SOP policy rule match
@@ -394,7 +412,7 @@ export class ToolCallInterceptor {
         if (rule.action === 'block') {
           log.warn({ action: 'policy_block', toolName, ruleId: rule.id, reason: rule.reason }, 'Policy block')
           this.emitter.emit('tool_blocked', toolName, toolInput, rule.reason)
-          return { action: 'block', reason: rule.reason }
+          return block('SOP_RULE', rule.id, rule.reason)
         }
         if (rule.action === 'warn') {
           log.warn({ action: 'policy_warn', toolName, ruleId: rule.id, reason: rule.reason }, 'Policy warning (allowing)')
@@ -411,15 +429,7 @@ export class ToolCallInterceptor {
       }
     } catch (err) {
       log.error({ action: 'policy_error', err: (err as Error).message }, 'Policy evaluation error')
-      if (!this.failOpen) {
-        return {
-          action: 'block',
-          reason:
-            'Governance check failed — Intutic control plane unreachable. ' +
-            'Tool call blocked by workspace policy (fail-closed mode). ' +
-            'Contact your administrator or update mcpProxyFailBehavior to open.',
-        }
-      }
+      if (!this.failOpen) return block('GOVERNANCE_UNAVAILABLE', 'mcpProxyFailBehavior', FAIL_CLOSED_REASON)
     }
 
     // 3. Prompt-injection scan (request direction) — the `toolInput` a
@@ -452,7 +462,7 @@ export class ToolCallInterceptor {
         })
         if (injectionAction === 'block') {
           this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-          return { action: 'block', reason }
+          return block('INJECTION', 'injection.tool_input', reason)
         }
         // 'warn' (default): report only, fall through to allow.
       }
@@ -507,7 +517,7 @@ export class ToolCallInterceptor {
 
           if (effective === 'kill') {
             this.emitter.emit('tool_blocked', toolName, toolInput, finding.reason)
-            return { action: 'block', reason: finding.reason }
+            return block('ANOMALY', finding.detectorId, finding.reason)
           }
 
           if (effective === 'reask') {
@@ -557,7 +567,7 @@ export class ToolCallInterceptor {
         if (verdict.code === 'block') {
           log.warn({ action: 'wasm_block', toolName, ruleId: verdict.ruleId }, 'Tool call blocked by WASM governance rule')
           this.emitter.emit('tool_blocked', toolName, toolInput, verdict.reason)
-          return { action: 'block', reason: verdict.reason }
+          return block('WASM_RULE', `wasm:${verdict.ruleId}`, verdict.reason)
         }
         if (verdict.code === 'reask') {
           // Keyed per-rule-id, independent of every anomaly detector's own
@@ -629,8 +639,9 @@ export class ToolCallInterceptor {
           budgetEventDetail(verdict.standing),
         )
       }
-      this.emitter.emit('tool_blocked', toolName, toolInput, reason, undefined, budgetEventDetail(verdict.standing))
-      return { action: 'block', reason }
+      const detail = budgetEventDetail(verdict.standing)
+      this.emitter.emit('tool_blocked', toolName, toolInput, reason, undefined, detail)
+      return block('BUDGET_EXCEEDED', detail.budgetId, reason, { ...detail })
     }
 
     // Unavailable: no Valkey configured, or it did not answer.
@@ -648,6 +659,6 @@ export class ToolCallInterceptor {
     const reason = unavailableReason(verdict.budgets)
     log.warn({ action: 'mcp_budget_unchecked_block', toolName }, reason)
     this.emitter.emit('tool_blocked', toolName, toolInput, reason)
-    return { action: 'block', reason }
+    return block('BUDGET_UNAVAILABLE', 'mcpProxyFailBehavior', reason, { budgetIds: verdict.budgets.map((b) => b.id) })
   }
 }

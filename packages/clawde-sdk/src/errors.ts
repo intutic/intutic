@@ -35,18 +35,23 @@ export class ClawdeVerdictError extends ClawdeError {
 
 /**
  * The proxy refused the request: a policy block, a reask, a loop run held for
- * review, a spend cap or a DLP block. Never retried — the same request would be
- * refused again. `code` is the proxy's error code and `message` its reason.
+ * review, a spend cap, a DLP block, or a tool call the model made that the
+ * proxy withheld. Never retried — the same request would be refused again.
+ * `code` is the proxy's refusal code, `message` its reason, and `ruleId` the
+ * rule that decided, when the proxy names one (every refusal it answers with
+ * a 200 does).
  */
 export class ClawdeBlockedError extends ClawdeVerdictError {
   declare public verdict: RefusalVerdict
   public readonly code: string
   public readonly status: number
+  public readonly ruleId: string | undefined
 
-  constructor(verdict: RefusalVerdict, code: string, status: number, message: string) {
+  constructor(verdict: RefusalVerdict, code: string, status: number, message: string, ruleId?: string) {
     super(verdict, message)
     this.name = 'ClawdeBlockedError'
     this.code = code
     this.status = status
+    this.ruleId = ruleId
   }
 }

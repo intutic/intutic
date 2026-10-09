@@ -102,7 +102,7 @@ describe('scanToolInput', () => {
   // One set of answers for every destructive-SQL text rule: the vectors in
   // shared-types, run here through the scanner exactly as a tool call reaches
   // it (each decoded argument string), and by the control plane's DLP, the
-  // hook gates' ERE and both gate SDKs' readers elsewhere.
+  // hook gates' phrase rule and both gate SDKs' readers elsewhere.
   describe('destructive SQL, against the shared vectors', () => {
     const VECTORS = join(__dirname, '../../../shared-types/fixtures/destructive-sql-vectors.json')
     const cases = (JSON.parse(readFileSync(VECTORS, 'utf-8')) as { cases: Array<{ text: string; statement: string | null }> }).cases
@@ -124,6 +124,24 @@ describe('scanToolInput', () => {
     it('finds a statement in a nested argument or an object key', () => {
       expect(statements({ batch: [{ sql: 'select 1' }, { sql: 'DROP\nTABLE users' }] })).toEqual(['SQL DROP TABLE statement'])
       expect(statements({ 'DROP TABLE users': true })).toEqual(['SQL DROP TABLE statement'])
+    })
+
+    // The scan used a regex with the gap between the keywords, which a
+    // backtracking engine took seconds on; the phrase matcher stays linear.
+    it.each(
+      (JSON.parse(readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8')) as {
+        adversarial: Array<[string, number]>
+      }).adversarial,
+    )('scans %j repeated %i times in under 200 ms', (unit, times) => {
+      const command = unit.repeat(times)
+      let best = Infinity
+      for (let run = 0; run < 3; run++) {
+        const t0 = performance.now()
+        scanToolInput({ command })
+        best = Math.min(best, performance.now() - t0)
+      }
+      // The best of three runs: the bound is on the matcher, not on a busy machine.
+      expect(best).toBeLessThan(200)
     })
   })
 

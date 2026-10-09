@@ -38,8 +38,7 @@ The microagent is Intutic's file, rewritten whole on each sync:
 
 ```markdown
 # Intutic Governance Rules (auto-generated)
-# DO NOT EDIT — managed by intutic sync daemon
-# Last sync: 2026-10-08T22:24:00Z
+# DO NOT EDIT — managed by intutic sync daemon; put rules of your own in another file
 
 > **Proxy URL:** `http://localhost:4000`
 

@@ -7,6 +7,8 @@
  *
  *   POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?}
  *   POST /api/v1/hook-events     batched telemetry       -> creates governance_incidents rows
+ *   POST /api/v1/decisions       record a hold           -> joins the review queue (hold.ts)
+ *   GET  /api/v1/decisions/approved-bypasses             -> approvals that let a held call through
  *
  * Two behaviours that must not be "improved":
  *
@@ -22,6 +24,7 @@
  *     telemetry.
  */
 
+import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -43,6 +46,8 @@ const VALID_EVENTS = new Set([
   'snapshot_stale',
   'snapshot_invalid',
   'snapshot_empty',
+  'tool_held',
+  'hold_approved_bypass_used',
 ])
 
 export interface GateResponse {
@@ -98,17 +103,26 @@ export class GateClient {
   }
 
   private async post(path: string, body: unknown, timeoutMs: number): Promise<Record<string, unknown>> {
+    return this.request('POST', path, body, timeoutMs)
+  }
+
+  private async request(
+    method: 'GET' | 'POST',
+    path: string,
+    body: unknown,
+    timeoutMs: number,
+  ): Promise<Record<string, unknown>> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const res = await fetch(this.baseUrl + path, {
-        method: 'POST',
+        method,
         headers: {
-          'Content-Type': 'application/json',
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
           Authorization: `Bearer ${this.apiKey}`,
           'X-Workspace-Id': this.workspaceId,
         },
-        body: JSON.stringify(body),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: controller.signal,
       })
       if (!res.ok) throw new Error(`HTTP ${res.status} from ${path}`)
@@ -190,6 +204,9 @@ export class GateClient {
       sessionId: this.sessionId,
       harnessType: this.harness,
       timestamp: new Date().toISOString(),
+      // The event's id, made once: if this post is ever repeated, the control
+      // plane processes the event once.
+      eventId: randomBytes(16).toString('hex'),
     }
     if (toolInput !== undefined) ev.toolInput = toolInput
     if (incidentId) ev.incidentId = incidentId
@@ -199,6 +216,35 @@ export class GateClient {
       return true
     } catch {
       return false
+    }
+  }
+
+  /**
+   * Records one hold in the review queue (`POST /api/v1/decisions`), the way
+   * the hook gates' records reach it. Never throws; `false` when the control
+   * plane did not accept it, so the refusal can say there is nothing to
+   * approve yet.
+   */
+  async recordHold(hold: Record<string, unknown>): Promise<boolean> {
+    try {
+      const d = await this.post('/api/v1/decisions', { holds: [hold] }, this.timeoutMs)
+      return d.accepted === 1
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * The workspace's approved bypasses (`GET /api/v1/decisions/approved-bypasses`),
+   * or `null` when they cannot be read. Never throws: a hold that cannot be
+   * checked for an approval stays held.
+   */
+  async approvedBypasses(): Promise<unknown[] | null> {
+    try {
+      const d = await this.request('GET', '/api/v1/decisions/approved-bypasses', undefined, this.timeoutMs)
+      return Array.isArray(d.bypasses) ? d.bypasses : null
+    } catch {
+      return null
     }
   }
 

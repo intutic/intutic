@@ -55,6 +55,8 @@ import {
   staticFloorPatterns,
   type GuardPattern,
 } from './protectedPaths.js'
+import { PHRASES_JS_SOURCE } from '@intutic/shared-types'
+import { PHRASES_PY_SOURCE } from '../lib/phrasesPy.js'
 
 /**
  * Bumped when the emitted evaluator changes shape.
@@ -129,13 +131,39 @@ import {
  * change: an invalid snapshot keeps its `sso_group.*` block rules instead of
  * dropping them with the rest of the dynamic tier. A v8 gate reading a v9
  * snapshot enforces the same rules and drops them on an invalid one.
+ *
+ * v10: the hold classifier matches each action needle's words with a gap
+ * regex (`SQL_GAP_ERE`, replaced in v12) between them, over the normalised command, instead of
+ * as a plain substring of the raw one. `DROP/**\/TABLE`, `DROP -- why` +
+ * newline + `TABLE`, an escaped `\n`, a line continuation and (in the JS
+ * gates, which read the raw command) a tab or a doubled space all dodged a
+ * `review_before: action:db_write` or `action:deploy` hold. Only the emitted
+ * classifier changed; the `.rules` format did not, so v9 and v10 gates read
+ * each other's snapshots — a v9 gate just holds fewer spellings.
+ *
+ * v11: the classifier reads every harness's shell tool ({@link
+ * ACTION_TOOL_NAMES}, now the proxy's `SHELL_TOOLS`, Gemini CLI's
+ * `run_shell_command` included) with the v10 matching. A v10 gate does not
+ * classify a command run through those extra tool names. The `.rules` format
+ * is unchanged.
+ *
+ * v12: no regex runs on a command to find words that may be split apart. The
+ * hold classifier and `phrase`-subject rules (`destructive.sql_drop`) use the
+ * linear phrase matcher (`@intutic/shared-types` phrases.ts, emitted as
+ * JavaScript; `phrases.py`, emitted as Python and run by the bash gates'
+ * extractor), over the raw command. The v10 regex took seconds on a few
+ * hundred kilobytes of `git -- git -- …` in the JS gates, and bash's pattern
+ * substitution a minute on a long run of backslashes. A v11 gate reading a v12
+ * snapshot reads a `phrase` rule's source — the phrases joined by `|` — as a
+ * regex over the command, which still matches their plain spellings.
  */
-export const GATE_VERSION = 9
+export const GATE_VERSION = 12
 
 /**
  * The coarse command → action-token classification the hold tier keys on:
- * `review_before: action:deploy` holds a shell command that contains any of
- * the deploy needles. Deliberately minimal — a gate that tries to be clever
+ * `review_before: action:deploy` holds a shell command that contains one of
+ * the deploy needles, whatever separates its words (the phrase matcher,
+ * `@intutic/shared-types` phrases.ts). Deliberately minimal — a gate that tries to be clever
  * about shell commands is a gate that blocks real work — and it mirrors the
  * proxy's `actions.rs` in both directions: `hookActionParity.test.ts` reads
  * THIS file as text and fails if either side knows a needle the other does
@@ -177,21 +205,41 @@ export const REVIEW_REQUESTS_LOG = `.intutic/events/${REVIEW_REQUESTS_BASENAME}`
  *  other version at ingest. */
 export const REVIEW_REQUEST_VERSION = 1
 
-/** The bash classifier: echoes a space-padded token string for `$TOOL`/`$COMMAND`. */
-function shellActionClassifier(): string {
-  const cases = ACTION_NEEDLES.map(
-    ([action, needles]) =>
-      `  case "$_c" in ${needles.map((n) => `*"${n}"*`).join('|')}) out="\${out}${action} " ;; esac`,
-  ).join('\n')
-  return `intutic_actions() {
-  local _t _c out=" "
-  _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in ${[...ACTION_TOOL_NAMES].join('|')}) ;; *) printf ' '; return 0 ;; esac
-  _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-${cases}
-  printf '%s' "$out"
-}`
-}
+/**
+ * The Python the bash gates run, defined once per gate script: the phrase
+ * matcher ({@link PHRASES_PY_SOURCE}) and two entry points over it.
+ *
+ * - `intutic_actions(tool, command)` — the hold classifier, called by
+ *   {@link SHELL_EXTRACT}'s Python, which already reads the raw tool input:
+ *   space-padded action tokens (" action:deploy ") or " ".
+ * - `intutic_phrase_rule(source, command)` — a `phrase`-subject rule: its
+ *   source is `|`-separated phrases, each matched as words with boundaries.
+ *
+ * The classifier used to be `grep -E` with a gap regex over the normalised
+ * command, and bash's own pattern substitution on it took a minute on a long
+ * run of backslashes. Python is already required by every bash gate.
+ */
+export const GATE_PY_LIB = `${PHRASES_PY_SOURCE}
+
+_INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)}
+_INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)}
+
+
+def intutic_actions(tool, command):
+    if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
+        return " "
+    words = phrase_text(command)
+    out = " "
+    for action, needles in _INTUTIC_ACTION_NEEDLES:
+        if any(has_phrase(words, n) for n in needles):
+            out += action + " "
+    return out
+
+
+def intutic_phrase_rule(source, command):
+    words = phrase_text(command)
+    return any(has_phrase(words, p, True) for p in source.split("|"))
+`
 
 /**
  * How old a snapshot may be before a gate reports it as stale.
@@ -397,6 +445,38 @@ function shellQuote(s: string): string {
 }
 
 /**
+ * The JS classifier, `intuticActions(toolName, command)`. Needs
+ * `intuticNormalise` in scope. Exported for the classifier's tests.
+ */
+export function emitJsActionClassifier(): string {
+  return `// The phrase matcher, emitted from @intutic/shared-types phrases.ts. No
+// regex runs on a command to find words that may be split apart.
+${PHRASES_JS_SOURCE}
+const INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)};
+const INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)};
+
+/** Space-padded action tokens for a shell command (" action:deploy "), or " ". */
+function intuticActions(toolName, command) {
+  if (INTUTIC_ACTION_TOOLS.indexOf(String(toolName || '').toLowerCase()) === -1) return ' ';
+  var words = phraseText(command), out = ' ';
+  for (var i = 0; i < INTUTIC_ACTION_NEEDLES.length; i++) {
+    var needles = INTUTIC_ACTION_NEEDLES[i][1];
+    for (var j = 0; j < needles.length; j++) {
+      if (hasPhrase(words, needles[j])) { out += INTUTIC_ACTION_NEEDLES[i][0] + ' '; break; }
+    }
+  }
+  return out;
+}
+
+/** A \`phrase\`-subject rule: its source is |-separated phrases matched as words. */
+function intuticPhraseRule(source, words) {
+  var phrases = String(source).split('|');
+  for (var i = 0; i < phrases.length; i++) if (hasPhrase(words, phrases[i], true)) return true;
+  return false;
+}`
+}
+
+/**
  * The hold tier's JS helpers, emitted once into every JS-family gate.
  *
  * `intuticHold` is the one place a hold happens: bypass lookup, hold record,
@@ -405,22 +485,8 @@ function shellQuote(s: string): string {
  * the caller must refuse. Everything is local — no network on the tool path.
  */
 function jsHoldHelpers(reviewRequestFile: string | undefined): string {
-  return `const INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)};
-const INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)};
+  return `${emitJsActionClassifier()}
 const INTUTIC_REVIEW_REQUEST_FILE = ${JSON.stringify(reviewRequestFile ?? null)};
-
-/** Space-padded action tokens for a shell command (" action:deploy "), or " ". */
-function intuticActions(toolName, command) {
-  if (INTUTIC_ACTION_TOOLS.indexOf(String(toolName || '').toLowerCase()) === -1) return ' ';
-  var c = String(command || '').toLowerCase(), out = ' ';
-  for (var i = 0; i < INTUTIC_ACTION_NEEDLES.length; i++) {
-    var needles = INTUTIC_ACTION_NEEDLES[i][1];
-    for (var j = 0; j < needles.length; j++) {
-      if (c.indexOf(needles[j]) !== -1) { out += INTUTIC_ACTION_NEEDLES[i][0] + ' '; break; }
-    }
-  }
-  return out;
-}
 
 // Who may approve a hold, and when the retry passes: the sentence every gate
 // and the MCP proxy print (holdMessages.ts in shared-types).
@@ -703,7 +769,6 @@ if [ -z "$INTUTIC_REVIEW_REQUEST_FILE" ]; then
   INTUTIC_REVIEW_REQUEST_FILE=${opts.reviewRequestFile ? shellQuote(opts.reviewRequestFile) : '"$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/events/review-requests.jsonl"'}
 fi
 INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/approved-bypasses.jsonl}"
-${shellActionClassifier()}
 intutic_sha256() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
   elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
@@ -778,8 +843,6 @@ intutic_hold() {
   ${log} "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
-# Computed after the classifier is defined; read by the \`action\` subject.
-INTUTIC_ACTIONS="$(intutic_actions "\${TOOL:-}" "\${COMMAND:-}")"
 
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
@@ -811,9 +874,26 @@ intutic_apply() {
     # machinery matches. The secrets.* floor rules ride this. Guaranteed
     # non-empty by the extractor (it defaults to "{}").
     content) _subs=("$TOOL_INPUT_JSON") ;;
-    # The space-padded action tokens intutic_actions derived from the command
-    # (" action:deploy "), so a hold on \`action:deploy\` matches whole tokens.
+    # The space-padded action tokens the extractor's classifier derived from
+    # the raw command (" action:deploy "), so a hold on \`action:deploy\`
+    # matches whole tokens.
     action)  _subs=("$INTUTIC_ACTIONS") ;;
+    # The source is |-separated phrases matched as words against the raw
+    # command by the phrase matcher in Python, not a regex: grep is linear,
+    # but the gap between the words was not expressible without one that
+    # backtracks in the other gates. One python3 run, only for these rules.
+    # The command goes in on stdin: as an argument, a long one would exceed
+    # the kernel's per-argument limit and the rule would silently not run.
+    phrase)
+      if python3 -c 'import os, sys, json
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else 1)' "$rsrc" <<< "$INTUTIC_RAW_COMMAND_JSON" 2>/dev/null; then
+        _subs=("$INTUTIC_NCOMMAND")
+      else
+        return 0
+      fi
+      ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
@@ -821,7 +901,9 @@ intutic_apply() {
     *)       _subs=("$INTUTIC_NCOMMAND" "$INTUTIC_NTARGET") ;;
   esac
   hit=0
+  [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
+    [ "$rsubj" = "phrase" ] && break
     if [ "$rflags" = "i" ]; then
       printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
     else
@@ -1203,12 +1285,20 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
   // The space-padded action tokens the command classifies to, for \`action\`
   // subject rules (" action:deploy ").
   const nActions = intuticActions(toolName, command);
+  var words = null;
   const rules = INTUTIC_FLOOR.concat(snap.rules);
   for (const rule of rules) {
+    // A phrase rule's source is |-separated phrases matched as words against
+    // the raw command — never as a regex, which backtracks on crafted input.
+    if (rule.subject === 'phrase') {
+      if (words === null) words = phraseText(command);
+      if (!intuticPhraseRule(rule.re.source, words)) continue;
+    }
     // Each field is tested separately rather than concatenated — joining them
     // lets a pattern match across the seam between two innocuous values.
     const subjects =
-      rule.subject === 'tool' ? [nTool]
+      rule.subject === 'phrase' ? [nCommand]
+      : rule.subject === 'tool' ? [nTool]
       : rule.subject === 'command' ? [nCommand]
       : rule.subject === 'target' ? [nTarget]
       // The serialized tool input, un-normalised: a content rule (the
@@ -1219,7 +1309,7 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
       : rule.subject === 'action' ? [nActions]
       : [nCommand, nTarget];
     for (const subject of subjects) {
-      if (!rule.re.test(subject)) continue;
+      if (rule.subject !== 'phrase' && !rule.re.test(subject)) continue;
       // The argument condition of a WHERE rule: the tool-name half has
       // matched, and the rule fires only if the argPattern also matches the
       // serialized tool input. A pattern that failed to compile at load time
@@ -1553,8 +1643,16 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 2
 fi
 
+# The phrase matcher and the hold classifier (GATE_PY_LIB in gateBody.ts),
+# for the extractor below and for phrase-subject rules. A quoted heredoc, so
+# the shell expands nothing in it; read stops at end of input and returns 1.
+IFS= read -r -d '' INTUTIC_PY_LIB <<'INTUTIC_PY_LIB_END' || true
+${GATE_PY_LIB}
+INTUTIC_PY_LIB_END
+export INTUTIC_PY_LIB
+
 INTUTIC_FIELDS="$(printf '%s' "$INPUT" | python3 -c '
-import sys, json
+import os, sys, json
 def clean(v):
     return " ".join(str(v).split()) if isinstance(v, str) else ""
 state = "ok"
@@ -1584,6 +1682,21 @@ def first(*keys):
         if isinstance(v, str) and v:
             return clean(v)
     return ""
+def raw_first(*keys):
+    for k in keys:
+        v = i.get(k)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+raw_command = raw_first("command", "cmd", "script", "shell_command")
+# The hold classifier reads the raw command: a line continuation or a comment
+# is still in it. The library is the shared phrase matcher, not a regex.
+lib = {}
+try:
+    exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+except Exception:
+    actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
@@ -1592,6 +1705,9 @@ print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
 print(first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
+print(actions)
+# The raw command as one JSON line, for phrase-subject rules.
+print(json.dumps(raw_command, ensure_ascii=False))
 # The FULL tool_input, serialized to the exact shape argPattern rules are
 # matched against everywhere: JSON.stringify(tool_input) — compact separators,
 # insertion order, non-ASCII intact. The selected fields above are whitespace-
@@ -1599,7 +1715,7 @@ print(clean(d.get("session_id", d.get("sessionId", ""))))
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
 print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n')"
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -1607,10 +1723,13 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
+# Space-padded action tokens the extractor's classifier found, or " ".
+INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-\"\"}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
 # value other than "ok" — see the envelope refusal in emitShellGate.
@@ -1663,6 +1782,10 @@ ${rows.join('\n')}
 
 
 ${NORMALISE_CONTRACT.pySource}
+
+
+# The phrase matcher (intutic_clawde/gate/phrases.py), for phrase rules.
+${PHRASES_PY_SOURCE}
 
 
 _state = {"digest": "", "workspace": ""}
@@ -1718,7 +1841,7 @@ def _intutic_snapshot_rules():
                     # A rule that will not compile is dropped, not fatal.
                     if _skip_destructive and f[0].startswith("destructive."):
                         continue
-                    out.append((f[0], f[5], re.IGNORECASE if f[2] == "i" else 0, f[4], f[1]))
+                    out.append((f[0], f[5], re.IGNORECASE if f[2] == "i" else 0, f[4], f[1], f[3]))
                 except Exception:
                     continue
     except Exception:
@@ -1749,9 +1872,17 @@ def _intutic_evaluate(text):
                 flags.append((rid, reason))
         except Exception:
             continue
-    for rid, src, flags_re, reason, severity in _intutic_snapshot_rules():
+    words = None
+    for rid, src, flags_re, reason, severity, rsubj in _intutic_snapshot_rules():
         try:
-            if not re.search(src, subject, flags_re):
+            if rsubj == "phrase":
+                # |-separated phrases matched as words (phrases.py), never as
+                # a regex, which backtracks on crafted text.
+                if words is None:
+                    words = phrase_text(text)
+                if not any(has_phrase(words, p, True) for p in src.split("|")):
+                    continue
+            elif not re.search(src, subject, flags_re):
                 continue
         except Exception:
             continue
@@ -1822,6 +1953,9 @@ ${jsGuardTable('INTUTIC_FLOOR', floor)}
 // Emitted from NORMALISE_CONTRACT, not retyped. The previous hand-written copy
 // had already drifted from the in-process one on null handling.
 ${NORMALISE_CONTRACT.jsSource}
+
+// The phrase matcher (@intutic/shared-types phrases.ts), for phrase rules.
+${PHRASES_JS_SOURCE}
 
 ${JS_SNAPSHOT_LOADER}
 
@@ -1917,13 +2051,21 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
       if (v && typeof v === 'object') { for (const k in v) _walk(v[k]); }
     })(node.parameters == null ? {} : node.parameters);
     const nLeaves = _leaves.map(intuticNormalise);
+    var leafWords = null;
     for (const rule of rules) {
+      // A phrase rule's source is |-separated phrases matched as words in each
+      // parameter string — never as a regex, which backtracks on crafted input.
+      if (rule.subject === 'phrase') {
+        if (leafWords === null) leafWords = _leaves.map(phraseText);
+        var _phrases = rule.re.source.split('|');
+        if (!leafWords.some(function (w) { return _phrases.some(function (p) { return hasPhrase(w, p, true); }); })) continue;
+      }
       // A node has no separate command/target — its parameters are both. A
       // 'tool' rule matches the node TYPE and nothing else, for the same
       // reason the per-tool gates never test a path pattern against "Write".
-      const subjects = rule.subject === 'tool' ? [nType, nTypeBase] : [nParams].concat(nLeaves);
+      const subjects = rule.subject === 'phrase' ? [nParams] : rule.subject === 'tool' ? [nType, nTypeBase] : [nParams].concat(nLeaves);
       for (const subject of subjects) {
-        if (!rule.re.test(subject)) continue;
+        if (rule.subject !== 'phrase' && !rule.re.test(subject)) continue;
         if (rule.argDowngraded) {
           try {
             record('rule_downgraded', 'n8n:' + nodeName,

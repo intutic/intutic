@@ -86,6 +86,9 @@ function logEvent(verdict, toolName, reason) {
     const ts = new Date().toISOString();
     // incidentId = sha1(timestamp + toolName + workspaceId).slice(0,16)
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
       // Passed through, not collapsed to two values: the advisory tier emits
       // 'tool_flagged', and a ternary here silently recorded it as an allow.
@@ -96,6 +99,7 @@ function logEvent(verdict, toolName, reason) {
       harnessType: 'openclaw',
       timestamp: ts,
       incidentId,
+      eventId,
       ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
     // Path B: reliable file append (sync-daemon drains on FSEvents change)
@@ -317,4 +321,27 @@ export async function writeOpenclawHooks(
     // Not installed or check failed — non-fatal
     log.debug({ action: 'openclaw_hooks_check_skipped', err }, 'openclaw hooks check skipped (binary not in PATH or check failed)')
   }
+}
+
+/**
+ * OpenClaw's agent workspace, where it loads `AGENTS.md` and its other
+ * bootstrap files every session — never from a project:
+ * `agents.defaults.workspace` in `~/.openclaw/openclaw.json`, else
+ * `OPENCLAW_WORKSPACE_DIR`, else `~/.openclaw/workspace`
+ * (https://github.com/openclaw/openclaw/blob/98457908cf3e4fbbd0354b530e0aa0d15b560158/docs/gateway/config-agents/workspace-and-bootstrap.md).
+ */
+export async function openclawAgentWorkspace(): Promise<string> {
+  const home = os.homedir()
+  const expand = (p: string) => (p === '~' || p.startsWith('~/') ? path.join(home, p.slice(1)) : path.resolve(p))
+  try {
+    const doc = parseJson5Like(await fs.readFile(path.join(home, '.openclaw', 'openclaw.json'), 'utf-8'))
+    const agents = doc.agents as { defaults?: { workspace?: unknown } } | undefined
+    const configured = agents?.defaults?.workspace
+    if (typeof configured === 'string' && configured.trim() !== '') return expand(configured.trim())
+  } catch {
+    // No config, or one that does not parse: the defaults apply.
+  }
+  const fromEnv = process.env.OPENCLAW_WORKSPACE_DIR
+  if (fromEnv) return expand(fromEnv)
+  return path.join(home, '.openclaw', 'workspace')
 }

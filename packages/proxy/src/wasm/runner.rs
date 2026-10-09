@@ -116,12 +116,24 @@ fn read_guest_reason(
         return None;
     }
 
-    let text = std::str::from_utf8(&data[ptr..end]).ok()?.trim();
+    sanitize_reason(std::str::from_utf8(&data[ptr..end]).ok()?)
+}
+
+/// A guest-supplied reason made safe to show: trimmed, at most
+/// [`MAX_GUEST_REASON`] characters, control characters removed. `None` when
+/// nothing is left. Also used for an OPA policy's `deny` message (`opa.rs`).
+pub(super) fn sanitize_reason(text: &str) -> Option<String> {
+    let text = text.trim();
     if text.is_empty() {
         return None;
     }
     // Control characters would corrupt a log line or an HTTP header.
-    Some(text.chars().filter(|c| !c.is_control()).collect())
+    Some(
+        text.chars()
+            .take(MAX_GUEST_REASON)
+            .filter(|c| !c.is_control())
+            .collect(),
+    )
 }
 
 /// Evaluate one rule.

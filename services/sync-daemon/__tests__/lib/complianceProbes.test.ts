@@ -112,6 +112,7 @@ describe('Network Compliance Probes', () => {
     expect(result.incident?.toolName).toBe('127.0.0.1')
     expect(result.incident?.workspaceId).toBe('ws_test')
     expect(result.incident?.reason).toContain('bypassed proxy containment rules')
+    expect(result.incident?.eventId, 'the id the control plane processes each event once by').toMatch(/^[0-9a-f]{32}$/)
   })
 
   it('should handle connection failure (e.g. refused connection) as contained', async () => {

@@ -35,8 +35,9 @@ const guardedTools = wrapTools(myTools) // array or {name: tool} record
 ```
 
 On a refused call, the wrapped tool throws `IntuticGateRefusal` (message
-prefixed `[Intutic Governance] BLOCKED:`) BEFORE the real implementation
-runs — this package's throw-based refusal contract, the same one
+prefixed `[Intutic Governance] BLOCKED:`, or `IntuticGateHold`, prefixed
+`[Intutic Governance] HELD:`, for a call held for approval) BEFORE the real
+implementation runs — this package's throw-based refusal contract, the same one
 `services/sync-daemon/src/harness/gateBody.ts`'s emitted gates and
 `packages/mcp-proxy/src/policy.ts` use elsewhere in this repo's gate
 vocabulary.
@@ -45,9 +46,10 @@ vocabulary.
 
 | Export | From | What it is |
 |---|---|---|
-| `Gate`, `GateConfig` | `gate.ts` | The four-tier evaluator. `new Gate(cfg, client?)`, `await gate.guard(toolName, toolInput)`. |
+| `Gate`, `GateConfig` | `gate.ts` | The five-tier evaluator. `new Gate(cfg, client?)`, `await gate.guard(toolName, toolInput)`. |
 | `install(gate)`, `active()` | `gate.ts` | Process-wide default gate, so wrapped tools don't need the instance threaded through every call site. |
-| `IntuticGateRefusal`, `GateError`, `GateConnectionError` | `errors.ts` | Thrown on refusal. `.reason`, `.code`, `.incidentId` carry the structured verdict; `.message` carries the `[Intutic Governance] BLOCKED: ...` text. |
+| `IntuticGateRefusal`, `GateError`, `GateConnectionError` | `errors.ts` | Thrown on refusal. `.reason`, `.code` (a `GateRefusalCode`, listed in `GATE_REFUSAL_CODES`), `.incidentId` carry the structured verdict; `.message` carries the `[Intutic Governance] BLOCKED: ...` text. |
+| `IntuticGateHold` | `errors.ts` | The `IntuticGateRefusal` a hold rule throws (`code` `HELD`) after recording the hold for approval; `.holdId` names it. See `hold.ts`. |
 | `GateClient` | `client.ts` | Control-plane client (`hookGate`, `emit`, `GateClient.fromEnv(...)`). |
 | `wrapTool(fn \| tool, opts?)`, `wrapTools(list \| record, gate?)` | `wrapTools.ts` | Generic wrapping for a plain async function or an `{ execute, ... }`-shaped tool object. **This is the integration point for any JS framework without a dedicated adapter — LangChain.js included.** |
 | `intuticHeaders(opts?)` | `headers.ts` | Headers for a proxy-pointed HTTP/OpenAI-compatible client (`x-session-id`, `x-workspace-id`, `x-intutic-harness`). |
@@ -159,9 +161,10 @@ to match. Confirmed against `@ai-sdk/harness@1.0.75` and re-verified on
   `PreToolUse` hook + `.claude/settings.json` directly into the sandbox
   filesystem via `HarnessAgentSettings.sandboxConfig.onBootstrap` — the only
   way to put anything resembling the native Intutic gate inside the
-  microVM. Claude Code only; a strict subset of a laptop gate (no SOP tier,
-  review-hold, or event draining — those need a live control-plane
-  connection a bootstrap function can't have). Spread its output into
+  microVM. Claude Code only; a strict subset of a laptop gate (no SOP tier
+  or event draining, and a hold rule refuses the call outright because no
+  approval can be requested — those need a live control-plane connection a
+  bootstrap function can't have). Spread its output into
   `sandboxConfig` alongside `recommendedHarnessSettings()`. See TD-417 and
   `apps/docs/integrations/ai-sdk-harness.md` for what has and hasn't been
   live-verified.

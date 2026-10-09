@@ -6,7 +6,7 @@ Integrate Intutic governance with [Claude Code](https://docs.anthropic.com/en/do
 
 Intutic governs Claude Code in three layers:
 
-- **Rules** — governance SOPs written into your project's `CLAUDE.md`, which Claude Code reads as its instructions.
+- **Rules** — governance SOPs written to `.claude/rules/intutic-governance.md`, which Claude Code loads at launch alongside your `CLAUDE.md`. Your `CLAUDE.md` is not touched.
 - **A blocking gate** — a PreToolUse hook registered in `.claude/settings.json` and `~/.claude/settings.json` that runs `.intutic/hooks/claude-code-check.js` before every `Bash`, `Edit`, `Write`, `MultiEdit` and MCP (`mcp__*`) tool call and refuses the call with exit code 2 when it breaks a rule, plus `permissions.deny` entries derived from your SOPs.
 - **Proxy routing** — LLM traffic through the Intutic proxy, and your MCP servers wrapped by the MCP governance proxy.
 
@@ -14,7 +14,7 @@ Intutic governs Claude Code in three layers:
 
 ### 1. Ensure CLAUDE.md exists
 
-Claude Code looks for `CLAUDE.md` in your project root. If you don't have one yet:
+Intutic detects Claude Code from a `CLAUDE.md` in your project root. If you don't have one yet:
 
 ```bash
 touch CLAUDE.md
@@ -29,7 +29,7 @@ intutic init
 The CLI detects `CLAUDE.md` and registers Claude Code as a harness:
 
 ```
-  ✔ claude-code → CLAUDE.md
+  ✔ claude-code → .claude/rules/intutic-governance.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
@@ -44,14 +44,13 @@ intutic start
 
 ## What gets written
 
-Intutic writes governance SOPs as markdown into `CLAUDE.md`:
+Intutic writes governance SOPs as markdown to `.claude/rules/intutic-governance.md`, when at least one SOP targets Claude Code:
 
 ```markdown
 # Intutic Governance Rules (auto-generated)
-# DO NOT EDIT — managed by intutic sync daemon
-# Last sync: 2026-06-11T22:24:00Z
+# DO NOT EDIT — managed by intutic sync daemon; put rules of your own in another file
 
-> **Proxy URL:** `http://localhost:4000/v1`
+> **Proxy URL:** `http://localhost:4000`
 
 ## Code Review Requirements
 
@@ -88,9 +87,14 @@ There is one PreToolUse entry each for `Bash`, `Edit`, `Write`, `MultiEdit` and 
 
 The gate fails closed: if it cannot read the tool call or crashes, the call is refused. Every decision is appended to `.intutic/events/hook-events.jsonl` and forwarded to the control plane.
 
-::: warning
-Intutic overwrites the entire `CLAUDE.md` file. If you have custom instructions, consider moving them to a separate file or adding them as SOP files in `.intutic/sops/` (see [SOP Front Matter](/reference/sop-front-matter)).
-:::
+The rules file is Intutic's own and is replaced on each sync; keep your own instructions in `CLAUDE.md` or in other files in `.claude/rules/`. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
+
+### Rules and the decisions log
+
+- **Rule sets** go to `.claude/rules/intutic-governance.md`, and, when the workspace turned on the [Governed Decisions Log](/guide/decisions-log), its newest entries to `.claude/rules/intutic-decisions.md`. Neither has `paths:` front matter, so Claude Code loads both at launch with the priority of `.claude/CLAUDE.md`, whether or not your project has a `CLAUDE.md`.
+- **`CLAUDE.md` is never created or written.** Under Claude Code's default setting, a project `CLAUDE.md` stops it reading `AGENTS.md`, so creating one would hide your team's `AGENTS.md` from it. Earlier versions overwrote `CLAUDE.md` whole and appended the decisions log to it; the next sync gives you your own copy back, takes the decisions section out of a `CLAUDE.md` you kept, and removes a `CLAUDE.md` an earlier version created that holds nothing else.
+- **Nothing is read twice.** Claude Code reads the workspace's `AGENTS.md` too when no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` is in its working directory or a directory above it (your own `~/.claude/CLAUDE.md` does not count). Then a rule set aimed at both Claude Code and another `AGENTS.md` reader, such as Codex, reaches Claude Code through `AGENTS.md` and is left out of `.claude/rules/intutic-governance.md`, and the decisions log, which `AGENTS.md` carries for those harnesses, is left out of `.claude/rules/intutic-decisions.md`. A rule set aimed at Claude Code alone always stays in its own file. When a `CLAUDE.md` appears or goes, the next sync moves the content to match.
+- **Your choice of instruction files is followed.** Claude Code's **Project instructions** setting decides when it reads `AGENTS.md`: the default `claude-md-or-agents-md`, `claude-md-and-agents-md` to read your `CLAUDE.md` and `AGENTS.md` together, `claude-md`, or `managed-only`. You can opt in to `claude-md-and-agents-md` from `/config` in Claude Code, or under `pluginConfigs` → `cc-plugin-agents-md@builtin` in `~/.claude/settings.json`; Intutic reads the value there and places the content to match. Claude Code ignores the setting in a project's settings files, so it is yours to choose, not the repository's. See [Claude Code's AGENTS.md documentation](https://code.claude.com/docs/en/memory#agentsmd).
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness claude-code`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
@@ -99,7 +103,7 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness cl
 | Property | Value |
 |----------|-------|
 | Harness type | `claude-code` |
-| Config file | `CLAUDE.md` |
+| Rules file | `.claude/rules/intutic-governance.md` |
 | Detection | Checks for `CLAUDE.md` in workspace root |
 | Format | Markdown (header + SOP sections) |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
@@ -114,7 +118,7 @@ export ANTHROPIC_BASE_URL=http://localhost:4000
 
 `intutic exec -- claude` sets this for you.
 
-The proxy URL is included in the `CLAUDE.md` header for reference.
+The proxy URL is included in the rules file's header for reference.
 
 ## Session Cost Attribution & Auto-Judging
 
@@ -140,7 +144,7 @@ Since Claude Code's CLI natively intercepts prompts starting with `/` at the she
 To configure the same entries by hand, add them to `~/.claude.json`:
 
 ### 1. Standalone Governance Server Mode
-Exposes Intutic governance status and SOP tools (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`) to Claude Code CLI:
+Exposes Intutic governance tools (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`, `intutic_hold_status`, `intutic_mcp_registry_status`, `intutic_mcp_budget_remaining`) to Claude Code CLI:
 
 ```json
 {

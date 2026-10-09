@@ -13,7 +13,7 @@
  * @module
  */
 
-import { DESTRUCTIVE_SQL_PATTERNS } from '@intutic/shared-types'
+import { DESTRUCTIVE_SQL_STATEMENTS, hasPhrase, phraseText, type PhraseText } from '@intutic/shared-types'
 import { PII_DETECTORS, findPii, resolvePiiActions } from './dlpPii.js'
 import type { PiiDetector } from './dlpPii.js'
 import { createStderrLogger } from './stderrLog.js'
@@ -29,6 +29,17 @@ export interface DlpScanResult {
 }
 
 /**
+ * A value pattern is a regex over the serialized arguments; a SQL command is a
+ * phrase, matched as words in each argument string by the shared phrase
+ * matcher (`@intutic/shared-types` phrases.ts): any whitespace, a line
+ * continuation, an escaped `\n` / `\t`, a block or `--` comment, or `--`
+ * options may separate the keywords. It was a regex with that gap between
+ * the keywords, and a backtracking engine took seconds on a few hundred
+ * kilobytes of `drop -- drop -- …` in an argument.
+ */
+type DlpPattern = { description: string; redactable: boolean } & ({ regex: RegExp } | { phrase: string })
+
+/**
  * Compiled DLP patterns.
  *
  * `redactable` separates VALUE patterns (a credential-shaped string that can
@@ -40,7 +51,7 @@ export interface DlpScanResult {
  * a result protects the agent's context without changing what the result
  * means. Command patterns therefore never apply to results.
  */
-const DLP_PATTERNS: Array<{ regex: RegExp; description: string; redactable: boolean }> = [
+const DLP_PATTERNS: DlpPattern[] = [
   // API keys / tokens
   { regex: /sk-[A-Za-z0-9]{20,}/, description: 'OpenAI API key pattern', redactable: true },
   { regex: /sk-ant-[A-Za-z0-9\-_]{20,}/, description: 'Anthropic API key pattern', redactable: true },
@@ -62,7 +73,9 @@ const DLP_PATTERNS: Array<{ regex: RegExp; description: string; redactable: bool
   // (`SELECT 'drop table'`) is blocked as well, because quoting is also how a
   // shell command carries the real thing (`psql -c 'DROP TABLE x'`).
   { regex: /rm\s+-rf?\s+\//, description: 'Destructive rm -rf / command', redactable: false },
-  ...DESTRUCTIVE_SQL_PATTERNS.map(({ regex, description }) => ({ regex, description, redactable: false })),
+  // The destructive SQL statements are shared with the control plane's DLP
+  // (destructiveSql.ts in shared-types), matched bounded at both ends.
+  ...DESTRUCTIVE_SQL_STATEMENTS.map(({ phrase, description }) => ({ phrase, description, redactable: false })),
   // Private key material
   { regex: /-----BEGIN\s+(RSA\s+)?PRIVATE KEY-----/, description: 'PEM private key material', redactable: true },
   { regex: /-----BEGIN\s+EC\s+PRIVATE KEY-----/, description: 'EC private key material', redactable: true },
@@ -75,7 +88,7 @@ const DLP_PATTERNS: Array<{ regex: RegExp; description: string; redactable: bool
  * The hardcoded floor above stays regardless: an unreachable control plane
  * must degrade to the floor, never to no scanning.
  */
-let dynamicPatterns: Array<{ regex: RegExp; description: string; redactable: boolean }> = []
+let dynamicPatterns: DlpPattern[] = []
 
 /**
  * Replace the dynamic pattern set from control-plane regex sources.
@@ -101,7 +114,7 @@ export function setDynamicPatterns(sources: readonly string[]): number {
   return dropped
 }
 
-function allPatterns(): Array<{ regex: RegExp; description: string; redactable: boolean }> {
+function allPatterns(): DlpPattern[] {
   return dynamicPatterns.length ? [...DLP_PATTERNS, ...dynamicPatterns] : DLP_PATTERNS
 }
 
@@ -132,8 +145,9 @@ configurePii(process.env['INTUTIC_MCP_DLP_DETECTORS'])
 export function redactText(text: string): { redacted: string; findings: DlpFinding[] } {
   const findings: DlpFinding[] = []
   let redacted = text
-  for (const { regex, description, redactable } of allPatterns()) {
-    if (!redactable) continue
+  for (const p of allPatterns()) {
+    if (!p.redactable || !('regex' in p)) continue
+    const { regex, description } = p
     const global = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : regex.flags + 'g')
     if (global.test(redacted)) {
       findings.push({ pattern: regex.source, description })
@@ -192,10 +206,17 @@ export function scanToolInput(toolInput: unknown): DlpScanResult {
   // The full set — floor plus workspace patterns — on the input direction too:
   // a workspace pattern that blocked results but not the input that exfiltrates
   // them would be scanning the wrong side.
-  for (const { regex, description, redactable } of allPatterns()) {
-    const hit = redactable ? regex.test(serialized) : strings.some((s) => regex.test(s))
+  let words: PhraseText[] | null = null
+  for (const p of allPatterns()) {
+    let hit: boolean
+    if ('phrase' in p) {
+      words ??= strings.map((s) => phraseText(s))
+      hit = words.some((w) => hasPhrase(w, p.phrase, true))
+    } else {
+      hit = p.redactable ? p.regex.test(serialized) : strings.some((s) => p.regex.test(s))
+    }
     if (hit) {
-      findings.push({ pattern: regex.source, description })
+      findings.push({ pattern: 'phrase' in p ? p.phrase : p.regex.source, description: p.description })
     }
   }
   for (const det of enabledPii) {

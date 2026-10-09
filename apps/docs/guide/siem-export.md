@@ -1,4 +1,4 @@
-# SIEM Export <Badge type="tip" text="Cloud" />
+# SIEM Export <Badge type="warning" text="Biz Org+" />
 
 Stream governance events — execution traces, incidents, detector findings, plan decisions, sign-ins, settings and policy changes, gate and integrity alerts, and optionally every gate decision — to your own SIEM or warehouse.
 
@@ -26,6 +26,20 @@ From **Settings › Integrations › SIEM Export**, click **Add Destination**, c
 Credentials are encrypted at rest and are never returned unmasked after creation — only OWNER/ADMIN roles can create, edit, or deactivate a destination. Any workspace member can view the destination list and its health status.
 
 Use **Test** to run a synchronous health check against a destination without waiting for a real event.
+
+## Plans {#plans}
+
+SIEM export comes with the Biz Org, Enterprise and Self-host plans and the trials. On another plan, creating, editing, testing and re-keying a destination answer `403` with `Upgrade required — SIEM export requires a Biz Org plan or higher`, and **Settings › Integrations › SIEM Export** says which plans include it.
+
+A workspace that moves to a plan without SIEM export keeps its destinations, and they send nothing from that moment:
+
+- Each active destination is listed as **Paused**. `GET /api/v1/siem/destinations` and `GET /api/v1/siem/destinations/:id` carry the reason in `pausedReason` (`null` while a destination streams).
+- Events from that point are not delivered, and none are queued for later.
+- The dead-letter queue is kept and not retried. It is delivered once the workspace is on a plan with SIEM export again.
+- The control plane logs `SIEM export paused: the workspace plan does not include it`, at most once an hour per workspace.
+- Owners and admins can still view, deactivate (`PUT` with only `{"isActive": false}`) and delete a destination.
+
+Moving back to a plan with SIEM export resumes streaming to every destination still active.
 
 ## What gets streamed
 

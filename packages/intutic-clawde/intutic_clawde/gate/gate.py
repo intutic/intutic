@@ -33,6 +33,11 @@ shell call". It runs BEFORE A2 so that a block, when both would fire, is
 attributed to the authored policy rather than to the hardcoded one. It fails
 open because A2 covers the identical case and fails closed: A3 moves where the
 policy is *written*, and is not what makes the run safe. See soprules.py.
+
+A hold rule in A1 or A3 (a REQUIRE_APPROVAL: SOP, or a local review_before:
+token) raises IntuticGateHold after recording the hold for review, unless an
+approved bypass lets this exact call through — the hook gates' and the MCP
+proxy's mechanism, through the same decisions API. See hold.py.
 """
 
 from __future__ import annotations
@@ -46,11 +51,31 @@ from ..errors import ClawdeError
 from . import imagecheck, snapshot, soprules, sso_groups
 from .actions import is_deploy, touches_infra
 from .client import GateClient
+from .hold import hold_message, request_hold
 
 
 # Tools that cannot change anything. They still get the local snapshot check
 # (Tier A), but skip the remote gate call (Tier B) — see Gate.guard().
 READ_ONLY_TOOLS = frozenset({"read_file", "list_files", "read", "cat", "view"})
+
+
+#: Every `code` an IntuticGateRefusal can carry: the tier that refused, or for
+#: the image-integrity tier the specific failure. Held to
+#: packages/shared-types/fixtures/refusal-codes.json (`gate`) by a test, as the
+#: TypeScript gate's list and the gate SDK reference are.
+GATE_REFUSAL_CODES = (
+    "SSO_GROUP",
+    "SNAPSHOT",
+    "HELD",
+    "SOP_RULE",
+    "HOOK_GATE",
+    imagecheck.E_UNPINNED_LATEST,
+    imagecheck.E_UNPINNED_TAG,
+    imagecheck.E_UNKNOWN_REGISTRY,
+    imagecheck.E_UNKNOWN_IMAGE,
+    imagecheck.E_DIGEST_MISMATCH,
+    imagecheck.E_MANIFEST_UNPARSEABLE,
+)
 
 
 class IntuticGateRefusal(ClawdeError):
@@ -59,8 +84,9 @@ class IntuticGateRefusal(ClawdeError):
     The python-raise contract: the exception's message begins
     `[Intutic Governance] BLOCKED:` — the same family the Open WebUI filter
     raises — so harnesses and log scrapers that already recognise that prefix
-    recognise this refusal too. The structured fields (`reason`, `code`,
-    `incident_id`) carry the machine-readable version.
+    recognise this refusal too. The structured fields (`reason`, `code`, one
+    of GATE_REFUSAL_CODES, and `incident_id`) carry the machine-readable
+    version.
     """
 
     def __init__(self, reason: str, code: str, incident_id: Optional[str] = None):
@@ -68,6 +94,24 @@ class IntuticGateRefusal(ClawdeError):
         self.reason = reason
         self.code = code
         self.incident_id = incident_id
+
+
+class IntuticGateHold(IntuticGateRefusal):
+    """Raised when a hold rule stopped the call to ask a person first (`code`
+    HELD). A subclass, so a caller that stops on every refusal stops on this
+    too; one that tells the user about holds catches it first.
+
+    `hold_id` names the hold in the review queue, and is None when the hold
+    could not be recorded (no control plane to record it in), in which case
+    there is nothing to approve yet. The message starts
+    `[Intutic Governance] HELD:`, as the hook gates print a hold, and says who
+    can approve it and when a retry passes. See hold.py.
+    """
+
+    def __init__(self, reason: str, hold_id: Optional[str]):
+        super().__init__(reason, "HELD")
+        self.args = (f"[Intutic Governance] HELD: {reason}",)
+        self.hold_id = hold_id
 
 
 @dataclass
@@ -204,8 +248,14 @@ class Gate:
                        "INTUTIC_GUARD_DISABLE=1 — policy-snapshot rules skipped; "
                        "built-in protections still active")
 
+        # Hold rules an approved bypass let through on this call, so the
+        # register's copy of the same rule in Tier A3 does not hold it again.
+        approved: set[str] = set()
         d = snapshot.evaluate(tool_name, target, command, self.snapshot(), disabled)
-        if d.severity == snapshot.SEV_BLOCK:
+        if d.severity == snapshot.SEV_HOLD:
+            self._hold(d.rule_id, d.reason, tool_name, tool_input)
+            approved.add(d.rule_id)
+        elif d.severity == snapshot.SEV_BLOCK:
             self._emit("tool_blocked", tool_name, d.reason, tool_input)
             raise IntuticGateRefusal(d.reason, "SNAPSHOT")
         if d.severity == snapshot.SEV_WARN:
@@ -226,15 +276,14 @@ class Gate:
                     self._emit("tool_blocked", tool_name, reason, tool_input)
                     raise IntuticGateRefusal(reason, "SOP_RULE")
                 if rule.action == soprules.ACTION_APPROVAL:
-                    # No human is at the keyboard during an agent run, so an
-                    # approval that cannot be granted is a block. Treating it
-                    # as a warning would let the call through precisely when
-                    # someone asked to be consulted.
-                    self._emit("tool_blocked", tool_name,
-                               f"{reason} (approval required; no reviewer in an "
-                               f"unattended run)", tool_input)
-                    raise IntuticGateRefusal(reason, "SOP_RULE_APPROVAL")
-                self._emit("tool_flagged", tool_name, reason, tool_input)
+                    # Held for a person, under the id the snapshot gives the
+                    # same rule (sop.<id>), so one approval covers the call in
+                    # either tier.
+                    hold_rule_id = f"sop.{rule.id}"
+                    if hold_rule_id not in approved:
+                        self._hold(hold_rule_id, rule.reason, tool_name, tool_input)
+                else:
+                    self._emit("tool_flagged", tool_name, reason, tool_input)
 
         # ---- Tier A2: image integrity -------------------------------------
         # Nothing else in Intutic does this. See imagecheck.py.
@@ -279,6 +328,22 @@ class Gate:
 
         if tool_name not in READ_ONLY_TOOLS:
             self._emit("tool_allowed", tool_name, "", tool_input)
+
+    def _hold(self, rule_id: str, rule_reason: str, tool_name: str, tool_input: dict) -> None:
+        """A hold rule matched: returns when an approved bypass lets this exact
+        call through (the remaining tiers still apply), and otherwise raises
+        IntuticGateHold after recording the hold."""
+        outcome = request_hold(self.client, rule_id, rule_reason, tool_name, tool_input)
+        if outcome.kind == "bypassed":
+            # Let through, loudly: a bypass nobody can see used is no better
+            # than no review at all.
+            self._emit("hold_approved_bypass_used", tool_name,
+                       f"Approved bypass for {rule_id} — approved by "
+                       f"{outcome.decided_by or 'an approver'} on hold {outcome.hold_id}", tool_input)
+            return
+        self._emit("tool_held", tool_name, f"{rule_reason} [{rule_id}]", tool_input)
+        raise IntuticGateHold(hold_message(rule_reason, rule_id, outcome),
+                              outcome.hold_id if outcome.recorded else None)
 
 
 # Module-level active gate, so decorated tools do not need the instance

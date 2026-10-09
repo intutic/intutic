@@ -31,6 +31,14 @@ export const E_UNKNOWN_IMAGE = 'E_UNKNOWN_IMAGE'
 export const E_DIGEST_MISMATCH = 'E_DIGEST_MISMATCH'
 export const E_MANIFEST_UNPARSEABLE = 'E_MANIFEST_UNPARSEABLE'
 
+export type ImageRefusalCode =
+  | typeof E_UNPINNED_LATEST
+  | typeof E_UNPINNED_TAG
+  | typeof E_UNKNOWN_REGISTRY
+  | typeof E_UNKNOWN_IMAGE
+  | typeof E_DIGEST_MISMATCH
+  | typeof E_MANIFEST_UNPARSEABLE
+
 /** A parsed container image reference. */
 export interface ImageRef {
   raw: string
@@ -53,12 +61,10 @@ export interface ImagePolicy {
   images?: Record<string, { approved_digests?: string[] }>
 }
 
-export interface Verdict {
-  ok: boolean
-  code: string
-  detail: string
-  images: ImageRef[]
-}
+/** `code` is `''` on a pass and names the failure otherwise. */
+export type Verdict =
+  | { ok: true; code: ''; detail: string; images: ImageRef[] }
+  | { ok: false; code: ImageRefusalCode; detail: string; images: ImageRef[] }
 
 /** The single line an operator sees on the dashboard. */
 export function verdictReason(v: Verdict): string {
@@ -70,7 +76,7 @@ function ok(images: ImageRef[] = []): Verdict {
   return { ok: true, code: '', detail: '', images }
 }
 
-function fail(code: string, detail: string, images: ImageRef[] = []): Verdict {
+function fail(code: ImageRefusalCode, detail: string, images: ImageRef[] = []): Verdict {
   return { ok: false, code, detail, images }
 }
 

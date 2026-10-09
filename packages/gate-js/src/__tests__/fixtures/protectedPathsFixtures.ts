@@ -39,7 +39,7 @@
  * `services/sync-daemon/__tests__/harness/protectedPathCopies.test.ts`.
  */
 
-export type Subject = 'tool' | 'command' | 'target' | 'any'
+export type Subject = 'tool' | 'command' | 'target' | 'phrase' | 'any'
 export type Severity = 'block' | 'warn' | 'shadow'
 
 export interface FixturePattern {
@@ -222,9 +222,9 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'destructive.sql_drop',
-    source: '([^a-zA-Z0-9_]|\\\\[ntr])(drop(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]*( |\\\\[n]))?|--[^;&|]*( |\\\\[n]))(table|database|schema)|truncate(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]*( |\\\\[n]))?|--[^;&|]*( |\\\\[n]))table)[^a-zA-Z0-9_.]',
+    source: 'drop table|drop database|drop schema|truncate table',
     ignoreCase: true,
-    subject: 'command',
+    subject: 'phrase',
     severity: 'warn',
     reason: 'Destructive SQL statement',
     matches: [

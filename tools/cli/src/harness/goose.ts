@@ -1,9 +1,13 @@
 /**
  * goose.ts — Goose adapter (full implementation).
  *
- * Detects the Goose CLI agent, writes SOP rules, injects the Intutic
- * governance plugin (PreToolUse hooks + immutable flags), and merges
- * the proxy URL into ~/.config/goose/config.yaml.
+ * Detects the Goose CLI agent, writes the rule sets as a marked section of
+ * the workspace's `.goosehints` (which Goose loads, with `AGENTS.md`, from
+ * every directory between the git root and where it runs, at the start of
+ * every session;
+ * https://github.com/block/goose/blob/0f4768025f517f5812f6d962a90aa52d509863cf/crates/goose/src/hints/load_hints.rs),
+ * injects the Intutic governance plugin (PreToolUse hooks + immutable flags),
+ * and merges the proxy URL into ~/.config/goose/config.yaml.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -13,16 +17,17 @@ import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
+import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { hashFile } from '../lib/hash.js'
 import { writeGooseHooks } from '@intutic/sync-daemon/harness/gooseHooks'
+import { rulesSectionHash, writeRulesSectionFile } from './rulesFiles.js'
 
-const CONFIG_FILE = '.config/goose/config.yaml'
-const GOOSE_CONFIG = join(homedir(), CONFIG_FILE)
+const RULES_FILE = '.goosehints'
+const GOOSE_CONFIG = join(homedir(), '.config', 'goose', 'config.yaml')
 
 export const gooseAdapter: IHarnessAdapter = {
   type: HarnessType.GOOSE,
-  configFileName: CONFIG_FILE,
+  configFileName: RULES_FILE,
 
   async detect(_workspaceRoot: string): Promise<boolean> {
     try {
@@ -38,19 +43,11 @@ export const gooseAdapter: IHarnessAdapter = {
     await writeGooseHooks(proxyUrl)
   },
 
-  // Unlike every markdown adapter, Goose has no text-rules file to write rule
-  // sets to — `HARNESS_CONFIG_FILES.goose` is empty, and its governance is
-  // the PreToolUse plugin, whose gate is compiled from the shared
-  // protected-path list rather than from the rule sets.
-  async writeConfig(): Promise<string | null> {
-    return null
+  writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    return writeRulesSectionFile(workspaceRoot, RULES_FILE, sops, proxyUrl)
   },
 
-  async readCurrentHash(_workspaceRoot: string): Promise<string | null> {
-    try {
-      return await hashFile(GOOSE_CONFIG)
-    } catch {
-      return null
-    }
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return rulesSectionHash(workspaceRoot, RULES_FILE)
   },
 }

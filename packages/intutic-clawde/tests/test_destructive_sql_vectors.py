@@ -7,10 +7,8 @@ TypeScript SDK, the MCP proxy, the control plane's DLP and the hook gates'
 readers of the same question:
 
 * the action classifier (``action:db_write``);
-* the snapshot reader, running the hook gates' rule as shipped (the vector file
-  carries its ERE), with Python's ``re`` and this reader's normalisation. The
-  reader did not pad its subject, so a command that began ``DROP TABLE`` matched
-  nothing.
+* the snapshot reader, running the hook gates' rule as the snapshot ships it
+  (the vector file carries it).
 
 The server tier is the control plane's DLP, which runs the same vectors in its
 own suite. A missing file is a failure, not a skip: a skip would read as "every
@@ -52,7 +50,8 @@ def test_classifier_reads_each_vector(case: dict) -> None:
 @pytest.fixture(scope="module")
 def sql_drop_snapshot(tmp_path_factory) -> snapshot.Snapshot:
     path = tmp_path_factory.mktemp("rules") / "policy-snapshot.rules"
-    line = "\t".join(["destructive.sql_drop", "warn", "i", "command", "Destructive SQL statement", DOC["ere"]])
+    rule = DOC["rule"]
+    line = "\t".join([rule["id"], "warn", "i", rule["subject"], "Destructive SQL statement", rule["source"]])
     path.write_text(line + "\n", encoding="utf-8")
     snap = snapshot.load_snapshot("", str(path))
     assert snap.state == "ok" and len(snap.rules) == 1, "the reader dropped the rule"

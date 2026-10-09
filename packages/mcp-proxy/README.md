@@ -49,7 +49,7 @@ Every governance check proxy mode applies to a stdio server — allowlists, `too
 - API keys and tokens: OpenAI, Anthropic, Google, GitHub, Slack, AWS access key IDs
 - PEM and EC private keys, long hex strings that look like secrets
 - US Social Security numbers
-- Destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `TRUNCATE TABLE`) — arguments only, matched against each decoded argument string; whitespace, comments or an escaped `\n` between the SQL keywords do not hide them, and a quoted mention counts
+- Destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `TRUNCATE TABLE`) — arguments only, matched against each decoded argument string; whitespace, a line continuation, comments or an escaped `\n` between the SQL keywords do not hide them, and a quoted mention counts
 
 ### Policy Enforcement
 

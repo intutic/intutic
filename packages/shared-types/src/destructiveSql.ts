@@ -1,52 +1,42 @@
 /**
  * Destructive SQL as a text rule: the statements every blocking text scanner
- * refuses in tool arguments, and what may separate their keywords.
+ * refuses in tool arguments.
  *
  * The control plane's DLP (`POST /api/v1/hook-gate`, which both gate SDKs'
- * server tier, the AgentCore interceptor, OpenAI Agents trace ingest and the
- * QM security screen run) and the MCP governance proxy's DLP read both from
- * here. The harness hook gates carry the same statements as the
- * `destructive.sql_drop` rule, in POSIX ERE (`protectedPaths.ts`); the action
- * classifiers in the Rust proxy and both gate SDKs read keyword phrases with
- * the same gap. `fixtures/destructive-sql-vectors.json` holds every one of
- * them to the same answers.
+ * server tier, the AgentCore interceptor and the QM security screen run) and
+ * the MCP governance proxy's DLP read both from here. The harness hook gates
+ * carry the same phrases as the `destructive.sql_drop` rule
+ * (`protectedPaths.ts`). Each statement is matched as words by the phrase
+ * matcher (phrases.ts), bounded at both ends: any separator the shell or the
+ * database reads as a word break may split the keywords (a comment, an escaped
+ * newline, a line continuation, `--` options), but `DROP TABLES` and
+ * `truncate --size 0 table.log` are not the statement. No regex runs on the
+ * text, so crafted input cannot make the scan backtrack.
+ * `fixtures/destructive-sql-vectors.json` holds every implementation to the
+ * same answers.
  *
  * A text rule, not a SQL parser: a quoted mention (`SELECT 'drop table'`) is
  * refused too, because quoting is how a shell command carries the real
  * statement (`psql -c 'DROP TABLE x'`). The proxy's `sql_guard`, which parses
  * the SQL a client will run, is the one that tells them apart.
  */
+import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
 
-/**
- * What may separate two SQL keywords: whitespace, a newline, tab or carriage
- * return written as a two-character escape (`\n`, as `printf` expands it and
- * as JSON encodes a newline), a block comment, or a `--` comment that runs to
- * a newline. Byte-identical to `SQL_GAP` in the proxy's
- * `plugins/anomaly/actions.rs` (a test compares them), where the comment
- * explains why the gap is matched rather than stripped from the text.
- */
-export const SQL_GAP = String.raw`(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+`
-
-/** The statements a text scanner refuses, as the keywords that open each. */
+/** The statements a text scanner refuses, and the phrase that finds each. */
 export const DESTRUCTIVE_SQL_STATEMENTS = [
-  { statement: 'DROP TABLE', description: 'SQL DROP TABLE statement' },
-  { statement: 'DROP DATABASE', description: 'SQL DROP DATABASE statement' },
-  { statement: 'DROP SCHEMA', description: 'SQL DROP SCHEMA statement' },
-  { statement: 'TRUNCATE TABLE', description: 'SQL TRUNCATE TABLE statement' },
+  { statement: 'DROP TABLE', phrase: 'drop table', description: 'SQL DROP TABLE statement' },
+  { statement: 'DROP DATABASE', phrase: 'drop database', description: 'SQL DROP DATABASE statement' },
+  { statement: 'DROP SCHEMA', phrase: 'drop schema', description: 'SQL DROP SCHEMA statement' },
+  { statement: 'TRUNCATE TABLE', phrase: 'truncate table', description: 'SQL TRUNCATE TABLE statement' },
 ] as const
 
 export type DestructiveSqlStatement = (typeof DESTRUCTIVE_SQL_STATEMENTS)[number]['statement']
 
 /**
- * One case-insensitive pattern per statement, its keywords joined by
- * {@link SQL_GAP}. No `g` flag, so a shared instance carries no `lastIndex`.
+ * The destructive statements `text` contains, in {@link DESTRUCTIVE_SQL_STATEMENTS}
+ * order. Pass a {@link PhraseText} already cut from the text to reuse it.
  */
-export const DESTRUCTIVE_SQL_PATTERNS: ReadonlyArray<{
-  statement: DestructiveSqlStatement
-  description: string
-  regex: RegExp
-}> = DESTRUCTIVE_SQL_STATEMENTS.map(({ statement, description }) => ({
-  statement,
-  description,
-  regex: new RegExp(statement.split(' ').join(SQL_GAP), 'i'),
-}))
+export function findDestructiveSql(text: string | PhraseText): Array<(typeof DESTRUCTIVE_SQL_STATEMENTS)[number]> {
+  const words = typeof text === 'string' ? phraseText(text) : text
+  return DESTRUCTIVE_SQL_STATEMENTS.filter((s) => hasPhrase(words, s.phrase, true))
+}

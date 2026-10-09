@@ -140,6 +140,7 @@ describe('Continue config.yaml — apiBase', () => {
 })
 
 describe('Aider .aider.conf.yml', () => {
+  const WS = path.join(path.sep, 'work', 'project')
   const userConfig = [
     '# team settings',
     'model: sonnet',
@@ -156,23 +157,32 @@ describe('Aider .aider.conf.yml', () => {
   ].join('\n')
 
   it('keeps lists and comments, strips auto-exec and invalid legacy keys, and writes only real Aider options', () => {
-    const { content, stripped } = mergeAiderYaml(userConfig, 'http://127.0.0.1:4000', true)
+    const { content, stripped } = mergeAiderYaml(userConfig, 'http://127.0.0.1:4000', WS, true)
     expect(stripped.sort()).toEqual(['lint-cmd', 'test-cmd'])
     expect(content).toContain('# team settings')
     const parsed = parseYaml(content!) as Record<string, unknown>
     expect(parsed).toEqual({
       model: 'sonnet',
-      read: ['CONVENTIONS.md', AIDER_SOPS_FILE],
+      read: ['CONVENTIONS.md', path.join(WS, AIDER_SOPS_FILE)],
       'set-env': ['FOO=bar', 'ANTHROPIC_BASE_URL=http://127.0.0.1:4000'],
       'openai-api-base': URL_V1,
     })
   })
 
   it('is idempotent and drops the SOP read entry when there are no SOPs', () => {
-    const once = mergeAiderYaml(userConfig, 'http://127.0.0.1:4000', true).content!
-    expect(mergeAiderYaml(once, 'http://127.0.0.1:4000', true).content).toBe(once)
-    const parsed = parseYaml(mergeAiderYaml(once, 'http://127.0.0.1:4000', false).content!) as Record<string, unknown>
+    const once = mergeAiderYaml(userConfig, 'http://127.0.0.1:4000', WS, true).content!
+    expect(mergeAiderYaml(once, 'http://127.0.0.1:4000', WS, true).content).toBe(once)
+    const parsed = parseYaml(mergeAiderYaml(once, 'http://127.0.0.1:4000', WS, false).content!) as Record<string, unknown>
     expect(parsed.read).toEqual(['CONVENTIONS.md'])
+  })
+
+  it('lists the SOP file by absolute path, since Aider resolves read entries against the directory it runs in', () => {
+    // Earlier versions wrote the workspace-relative path, which Aider missed
+    // when started from a subdirectory; it is replaced, not kept alongside.
+    const legacy = 'model: sonnet\nread:\n  - CONVENTIONS.md\n  - .intutic/aider-sops.md\n'
+    const parsed = parseYaml(mergeAiderYaml(legacy, 'http://127.0.0.1:4000', WS, true).content!) as Record<string, unknown>
+    expect(parsed.read).toEqual(['CONVENTIONS.md', path.join(WS, AIDER_SOPS_FILE)])
+    expect(path.isAbsolute((parsed.read as string[])[1]!)).toBe(true)
   })
 
   it('writes the SOP file next to the config and leaves an unparseable config untouched', async () => {

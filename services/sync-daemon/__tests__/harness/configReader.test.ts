@@ -44,63 +44,63 @@ describe('Config Reader', () => {
   })
 
   describe('readHarnessConfigs', () => {
-    it('reads .cursorrules file and returns correct hash', async () => {
+    it('reads .goosehints file and returns correct hash', async () => {
       const content = '# Governance Rules\n\n## No Destructive Commands\nDo not run rm -rf'
-      await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), content)
+      await node_fs.writeFile(node_path.join(tmpDir, '.goosehints'), content)
 
-      const result = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
+      const result = await readHarnessConfigs(tmpDir, ['goose'] as HarnessType[], BODY)
 
       expect(result).toHaveLength(1)
-      expect(result[0].path).toBe('.cursorrules')
+      expect(result[0].path).toBe('.goosehints')
       expect(result[0].content).toBe(content)
       expect(result[0].contentHash).toMatch(/^[a-f0-9]{64}$/) // SHA-256
     })
 
-    it('reads CLAUDE.md for claude-code harness', async () => {
+    it('reads AGENTS.md for the codex harness', async () => {
       const content = '# Claude Code Rules\nBe concise.'
-      await node_fs.writeFile(node_path.join(tmpDir, 'CLAUDE.md'), content)
+      await node_fs.writeFile(node_path.join(tmpDir, 'AGENTS.md'), content)
 
-      const result = await readHarnessConfigs(tmpDir, ['claude-code'] as HarnessType[], BODY)
+      const result = await readHarnessConfigs(tmpDir, ['codex'] as HarnessType[], BODY)
 
       expect(result).toHaveLength(1)
-      expect(result[0].path).toBe('CLAUDE.md')
+      expect(result[0].path).toBe('AGENTS.md')
       expect(result[0].content).toBe(content)
     })
 
     it('skips harnesses whose config file does not exist', async () => {
       // Don't create any files
-      const result = await readHarnessConfigs(tmpDir, ['cursor', 'claude-code'] as HarnessType[], BODY)
+      const result = await readHarnessConfigs(tmpDir, ['goose', 'codex'] as HarnessType[], BODY)
       expect(result).toHaveLength(0)
     })
 
     it('reads multiple harness configs simultaneously', async () => {
-      await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), 'cursor rules')
-      await node_fs.writeFile(node_path.join(tmpDir, 'CLAUDE.md'), 'claude rules')
+      await node_fs.writeFile(node_path.join(tmpDir, '.goosehints'), 'goose hints')
+      await node_fs.writeFile(node_path.join(tmpDir, 'AGENTS.md'), 'agents rules')
 
-      const result = await readHarnessConfigs(tmpDir, ['cursor', 'claude-code'] as HarnessType[], BODY)
+      const result = await readHarnessConfigs(tmpDir, ['goose', 'codex'] as HarnessType[], BODY)
 
       expect(result).toHaveLength(2)
       const paths = result.map(r => r.path)
-      expect(paths).toContain('.cursorrules')
-      expect(paths).toContain('CLAUDE.md')
+      expect(paths).toContain('.goosehints')
+      expect(paths).toContain('AGENTS.md')
     })
 
     it('produces different hashes for different content', async () => {
-      await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), 'content A')
-      const resultA = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
+      await node_fs.writeFile(node_path.join(tmpDir, '.goosehints'), 'content A')
+      const resultA = await readHarnessConfigs(tmpDir, ['goose'] as HarnessType[], BODY)
 
-      await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), 'content B')
-      const resultB = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
+      await node_fs.writeFile(node_path.join(tmpDir, '.goosehints'), 'content B')
+      const resultB = await readHarnessConfigs(tmpDir, ['goose'] as HarnessType[], BODY)
 
       expect(resultA[0].contentHash).not.toBe(resultB[0].contentHash)
     })
 
     it('returns same hash for identical content', async () => {
-      await node_fs.writeFile(node_path.join(tmpDir, '.cursorrules'), 'identical')
-      const resultA = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
+      await node_fs.writeFile(node_path.join(tmpDir, '.goosehints'), 'identical')
+      const resultA = await readHarnessConfigs(tmpDir, ['goose'] as HarnessType[], BODY)
 
       // Re-read same content
-      const resultB = await readHarnessConfigs(tmpDir, ['cursor'] as HarnessType[], BODY)
+      const resultB = await readHarnessConfigs(tmpDir, ['goose'] as HarnessType[], BODY)
 
       expect(resultA[0].contentHash).toBe(resultB[0].contentHash)
     })
@@ -230,7 +230,8 @@ describe('Config Reader', () => {
       // Distinct harness (not used by any other test in this file) so the
       // module-level content-hash cache in configReader.ts cannot leak state
       // in from an earlier test.
-      await node_fs.writeFile(node_path.join(tmpDir2, '.aider.conf.yml'), 'v1 rules', 'utf-8')
+      await node_fs.mkdir(node_path.join(tmpDir2, '.intutic'), { recursive: true })
+      await node_fs.writeFile(node_path.join(tmpDir2, '.intutic', 'aider-sops.md'), 'v1 rules', 'utf-8')
       const { calls } = stubFetchCapturingCalls()
 
       await captureAndUpload({
@@ -252,24 +253,23 @@ describe('Config Reader', () => {
     })
 
     it('does not fire a second snapshot on a later cycle when the file content is unchanged', async () => {
-      await node_fs.writeFile(node_path.join(tmpDir2, '.roorules'), 'unchanged content', 'utf-8')
+      await node_fs.writeFile(node_path.join(tmpDir2, '.goosehints'), 'unchanged content', 'utf-8')
       const { calls } = stubFetchCapturingCalls()
 
-      await captureAndUpload(target(tmpDir2, ['roo-code']))
+      await captureAndUpload(target(tmpDir2, ['goose']))
       expect(calls.filter((c) => c.url.includes('/governance-coverage/snapshot'))).toHaveLength(1)
 
       calls.length = 0
       // Second cycle, same content on disk — uploadConfigCapture's
       // content-hash dedup must skip both the config-capture upload AND the
       // governance-coverage snapshot this test exists to pin.
-      await captureAndUpload(target(tmpDir2, ['roo-code']))
+      await captureAndUpload(target(tmpDir2, ['goose']))
       expect(calls.filter((c) => c.url.includes('/config/capture'))).toHaveLength(0)
       expect(calls.filter((c) => c.url.includes('/governance-coverage/snapshot'))).toHaveLength(0)
     })
 
     it('falls back to hasRulesFile:true and everything else false when no governance inputs are passed', async () => {
-      await node_fs.mkdir(node_path.join(tmpDir2, '.hermes'), { recursive: true })
-      await node_fs.writeFile(node_path.join(tmpDir2, '.hermes', 'config.yaml'), 'rules', 'utf-8')
+      await node_fs.writeFile(node_path.join(tmpDir2, 'AGENTS.md'), 'rules', 'utf-8')
       const { calls } = stubFetchCapturingCalls()
 
       await captureAndUpload(target(tmpDir2, ['hermes']))
@@ -327,12 +327,12 @@ describe('Config Reader', () => {
 
     it('on: sends the content with credential-shaped strings redacted', async () => {
       await node_fs.writeFile(
-        node_path.join(root, '.windsurfrules'),
+        node_path.join(root, '.goosehints'),
         `# Rules\nUse ${anthropicKey} for tests.\nINTUTIC_KEY=${virtualKey}\nKeep this line.\n`,
       )
       const calls = stubFetch()
 
-      await captureAndUpload(target(root, ['windsurf'], true))
+      await captureAndUpload(target(root, ['goose'], true))
 
       const [file] = captures(calls)[0].body.files
       expect(file.content).toContain('Keep this line.')
@@ -346,13 +346,13 @@ describe('Config Reader', () => {
     })
 
     it('turning it on uploads the content at the next capture, not the next edit', async () => {
-      await node_fs.writeFile(node_path.join(root, '.roorules'), 'unchanged rules\n')
+      await node_fs.writeFile(node_path.join(root, '.goosehints'), 'unchanged rules\n')
       const calls = stubFetch()
 
-      await captureAndUpload(target(root, ['roo-code'], false))
-      await captureAndUpload(target(root, ['roo-code'], false))
-      await captureAndUpload(target(root, ['roo-code'], true))
-      await captureAndUpload(target(root, ['roo-code'], true))
+      await captureAndUpload(target(root, ['goose'], false))
+      await captureAndUpload(target(root, ['goose'], false))
+      await captureAndUpload(target(root, ['goose'], true))
+      await captureAndUpload(target(root, ['goose'], true))
 
       const sent = captures(calls).map((c) => c.body.files[0])
       expect(sent).toHaveLength(2)

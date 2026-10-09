@@ -611,8 +611,13 @@ export const NO_GATE: ReadonlyArray<{
   },
   {
     file: 'rulesSection.ts',
-    harness: 'antigravity',
-    why: 'writes the rule sets as a marked section of GEMINI.md (instructions, not a tool-call gate); antigravityHooks.ts and antigravityCliHooks.ts are the gates',
+    harness: null,
+    why: 'writes the rule sets and the decisions log as marked sections of instruction files the user also writes (AGENTS.md, GEMINI.md, ...); instructions, not a tool-call gate',
+  },
+  {
+    file: 'claudeAgentsMd.ts',
+    harness: null,
+    why: 'reads whether Claude Code loads the workspace AGENTS.md, so its own rules and decisions files do not repeat it; writes nothing',
   },
   {
     file: 'codexConfigMerger.ts',

@@ -39,7 +39,7 @@ human-in-the-loop validation or in-process local interception:
 
 ### Comparison: Local Harness Rules vs. LLM-as-a-Judge
 
-| Feature | Local Harness Rules (`CLAUDE.md` / WASM) | LLM-as-a-Judge (LLMProbe) |
+| Feature | Local Harness Rules (rules files / WASM) | LLM-as-a-Judge (LLMProbe) |
 | :--- | :--- | :--- |
 | **Execution Timing** | **Pre-flight (Before execution)** | **Post-flight / Async (During/After execution)** |
 | **Latency** | **No model call and no network hop**: checked on the machine before the action runs (WASM rules are stopped at a 5 ms execution timeout) | **A model call**: seconds, while or after the response streams |
@@ -86,7 +86,7 @@ that are tested in both directions rather than examples that were never executab
 
 ### 1. Secret & Credential Redaction (Markdown SOP)
 
-Save as `CLAUDE.md`, `.cursorrules`, or `.windsurfrules`:
+Save under `.intutic/sops/` (for example `.intutic/sops/secrets-dlp/rules.md`); `intutic connect` writes it into each harness's rules file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)):
 
 ```markdown
 # SOP: Secrets DLP & Credential Protection

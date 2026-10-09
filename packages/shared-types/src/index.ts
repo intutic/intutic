@@ -134,7 +134,7 @@ export type {
   SopProvenanceSource,
 } from './sop.js'
 
-export { SOURCE_PROVIDERS, DOCUMENT_PROVIDERS, PRIVILEGED_SOURCE_PROVIDERS, isSourceProvider, isDocumentProvider } from './sourceProviders.js'
+export { SOURCE_PROVIDERS, DOCUMENT_PROVIDERS, isSourceProvider, isDocumentProvider } from './sourceProviders.js'
 export type { SourceProvider, DocumentProvider } from './sourceProviders.js'
 
 export {
@@ -394,6 +394,13 @@ export type {
   BranchUsageResponse,
   CommitUsage,
   CommitUsageResponse,
+  PullRequestState,
+  PullRequestUsage,
+  PullRequestSources,
+  PullRequestUsageResponse,
+  PullRequestRefreshResult,
+  GitHubWebhookInfo,
+  GitHubWebhookSecret,
 } from './usage.js'
 export { normalizeGitRemote } from './gitRemote.js'
 
@@ -608,9 +615,8 @@ export {
 } from './posturePresets.js'
 
 export {
-  SQL_GAP,
   DESTRUCTIVE_SQL_STATEMENTS,
-  DESTRUCTIVE_SQL_PATTERNS,
+  findDestructiveSql,
   type DestructiveSqlStatement,
 } from './destructiveSql.js'
 
@@ -688,3 +694,7 @@ export {
   anthropicBaseUrl,
   openaiBaseUrl,
 } from './proxyBaseUrls.js'
+export { HARNESS_RULES_FILES, rulesFileOf, harnessesReading, decisionsTargetOf, rulesFrontMatterOf } from './harnessRules.js'
+export type { HarnessRulesTarget } from './harnessRules.js'
+export { phraseText, hasPhrase, PHRASES_JS_SOURCE } from './phrases.js'
+export type { PhraseText } from './phrases.js'

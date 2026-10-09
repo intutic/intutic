@@ -56,6 +56,8 @@ const SHARED = [
   'packages/proxy/scripts',
   'packages/proxy/tests',
   'packages/shared-types',
+  // The Terraform provider: open core so customers can read what it sends.
+  'packages/terraform-provider-intutic',
   'packages/theme',
   'packages/vscode-extension',
   'packages/wasm-sdk',
