@@ -3,8 +3,8 @@
  * post-merge hook invokes. The property this file exists to prove: opt-in
  * gating. `WorkspaceSettings.decisionsLogEnabled = false` (or absent —
  * indistinguishable once `resolveWorkspaceSettings` fills in the default) →
- * neither `.intutic/DECISIONS.md` nor the bounded CLAUDE.md section is
- * written or touched. Never throws either way.
+ * neither `.intutic/DECISIONS.md` nor any harness's decisions section or
+ * file is written or touched. Never throws either way.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
@@ -16,11 +16,14 @@ vi.mock('../config/store.js', () => ({
     email: 'dev@example.com',
     storedAt: '2026-08-17T00:00:00.000Z',
   })),
+  loadConfig: vi.fn(() => ({ harnesses: ['codex', 'cursor'] })),
 }))
 
 const refreshDecisionsDigestMock = vi.fn()
+const retireClaudeMdDigestMock = vi.fn(async (_root: string) => undefined)
 vi.mock('@intutic/sync-daemon', () => ({
   refreshDecisionsDigest: (...args: unknown[]) => refreshDecisionsDigestMock(...args),
+  retireClaudeMdDigest: (root: string) => retireClaudeMdDigestMock(root),
 }))
 
 import { refreshDecisionsLog } from './decisionsLogRefresh.js'
@@ -81,6 +84,9 @@ describe('refreshDecisionsLog', () => {
     const call = refreshDecisionsDigestMock.mock.calls[0][0]
     expect(call.workspaceId).toBe('ws_test')
     expect(call.workspaceRoot).toBe('/tmp/some-workspace')
+    // Every harness this machine governs, not Claude Code alone.
+    expect(call.harnesses).toEqual(['codex', 'cursor'])
+    expect(retireClaudeMdDigestMock).toHaveBeenCalledWith('/tmp/some-workspace')
   })
 
   it('a settings-fetch failure is caught, not thrown', async () => {

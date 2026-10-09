@@ -681,8 +681,8 @@ program
 program
   .command('decisions-log-refresh')
   .description(
-    'One-shot refresh of the governed decisions log (.intutic/DECISIONS.md + the claude-code ' +
-      'harness config section) — no-ops if decisionsLogEnabled is off. Invoked by the optional ' +
+    'One-shot refresh of the governed decisions log (.intutic/DECISIONS.md, and the recent ' +
+      'entries in each governed harness\'s instructions file) — no-ops if decisionsLogEnabled is off. Invoked by the optional ' +
       'post-merge Git hook `intutic init` installs; safe to run manually.',
   )
   .action(async () => {

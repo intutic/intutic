@@ -675,7 +675,7 @@ export {
   anthropicBaseUrl,
   openaiBaseUrl,
 } from './proxyBaseUrls.js'
-export { HARNESS_RULES_FILES, rulesFileOf, harnessesReading } from './harnessRules.js'
+export { HARNESS_RULES_FILES, rulesFileOf, harnessesReading, decisionsTargetOf, rulesFrontMatterOf } from './harnessRules.js'
 export type { HarnessRulesTarget } from './harnessRules.js'
 export { phraseText, hasPhrase, PHRASES_JS_SOURCE } from './phrases.js'
 export type { PhraseText } from './phrases.js'

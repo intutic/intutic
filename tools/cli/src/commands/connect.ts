@@ -38,8 +38,8 @@ import { reportDeviceState } from '../lib/deviceReport.js'
 import { reportMachineInventory, shouldReportInventoryThisIteration } from '../lib/inventory.js'
 import { parseChecksums, verifyChecksum } from '../lib/binaryChecksum.js'
 import { newIso } from '@intutic/id'
-import { rulesFileOf } from '@intutic/shared-types'
-import type { SopFileHash, HarnessType, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
+import { HarnessType, rulesFileOf } from '@intutic/shared-types'
+import type { SopFileHash, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
 import pc from 'picocolors'
 
 import { SyncWsClient,
@@ -66,6 +66,8 @@ import { SyncWsClient,
   captureAndUpload,
   shouldCaptureThisIteration,
   refreshDecisionsDigest,
+  retireClaudeMdDigest,
+  claudeCodeReadsAgentsMd,
   writeBundledSkills,
   clearImmutable,
   setImmutable,
@@ -121,6 +123,13 @@ function isPortInUse(port: number): Promise<boolean> {
  * them that is configured here: one section, the same for every writer, so
  * the last writer no longer replaces the others' rules.
  *
+ * Claude Code reads its own `.claude/rules/` file at every launch, and also
+ * the workspace's `AGENTS.md` when there is no `CLAUDE.md` on the path (or
+ * the user chose `claude-md-and-agents-md`; see claudeAgentsMd.ts). When it
+ * does, a rule set aimed at both Claude Code and an `AGENTS.md` reader
+ * reaches it through `AGENTS.md`, so its own file leaves that rule set out
+ * rather than load it twice.
+ *
  * @returns how many rule sets were written into rules files.
  */
 export async function writeHarnessConfigs(
@@ -132,6 +141,9 @@ export async function writeHarnessConfigs(
 ): Promise<number> {
   let written = 0
   const writtenFiles = new Set<string>()
+  const agentsMdReaders = harnesses.filter((h) => rulesFileOf(h as HarnessType) === 'AGENTS.md')
+  const claudeFromAgentsMd =
+    harnesses.includes(HarnessType.CLAUDE_CODE) && agentsMdReaders.length > 0 && (await claudeCodeReadsAgentsMd(workspaceRoot))
   for (const harnessType of harnesses) {
     const adapter = getAdapter(harnessType)
     if (!adapter) continue
@@ -140,8 +152,12 @@ export async function writeHarnessConfigs(
 
     const file = rulesFileOf(harnessType as HarnessType)
     const readers = file === null ? [harnessType] : harnesses.filter((h) => rulesFileOf(h as HarnessType) === file)
-    const targetSops = sops.filter((sop) => sop.harnessTargets.some((t) => readers.includes(t)))
-    if (targetSops.length === 0 && !force) continue
+    const aimed = sops.filter((sop) => sop.harnessTargets.some((t) => readers.includes(t)))
+    const viaAgentsMd = harnessType === HarnessType.CLAUDE_CODE && claudeFromAgentsMd
+    const targetSops = viaAgentsMd ? aimed.filter((sop) => !sop.harnessTargets.some((t) => agentsMdReaders.includes(t))) : aimed
+    // Claude Code's own file is rewritten even when every rule set aimed at
+    // it now comes through AGENTS.md, so it stops carrying them.
+    if (aimed.length === 0 && !force) continue
     if (!(await adapter.writeConfig(workspaceRoot, targetSops, proxyUrl))) continue
     // A shared file counts once, however many of its readers wrote it.
     if (file === null || !writtenFiles.has(file)) written += targetSops.length
@@ -599,11 +615,23 @@ export async function runConnect(opts: {
       .filter((f): f is string => Boolean(f))
       .map((f) => node_path.resolve(safeConfig.workspaceRoot, f))
 
+  // Whether Claude Code read the workspace's AGENTS.md at the last sync. A
+  // CLAUDE.md added or removed (or the user's Project instructions setting
+  // changed) moves rule sets between AGENTS.md and Claude Code's own file, so
+  // a change rewrites the rules files as a new config would.
+  let lastClaudeFromAgentsMd: boolean | undefined
+
   // 3. Define configuration applier function
   async function applySyncConfig(syncConfig: SyncConfigPayload, force = false): Promise<number> {
     let sopsWritten = 0
     lastCachedConfig = syncConfig
     await refreshGateCachesForConnect()
+
+    const claudeFromAgentsMd = safeConfig.harnesses.includes(HarnessType.CLAUDE_CODE)
+      ? await claudeCodeReadsAgentsMd(safeConfig.workspaceRoot)
+      : false
+    const claudeDeliveryMoved = lastClaudeFromAgentsMd !== undefined && claudeFromAgentsMd !== lastClaudeFromAgentsMd
+    lastClaudeFromAgentsMd = claudeFromAgentsMd
 
     // Write-protect (`bypassEnforcementTier: 'immutable'`, macOS): the rules
     // files carry the user-immutable flag between cycles, so it comes off
@@ -611,7 +639,7 @@ export async function runConnect(opts: {
     // comes off whenever the config moved, so a workspace that switched away
     // from write-protect is not left with files nothing can rewrite.
     const writeProtect = syncConfig.settings?.bypassEnforcementTier === 'immutable'
-    const configMoved = syncConfig.configVersion > localConfigVersion || force
+    const configMoved = syncConfig.configVersion > localConfigVersion || force || claudeDeliveryMoved
     if (writeProtect || configMoved) {
       for (const file of rulesFilePaths()) await clearImmutable(file)
     }
@@ -734,7 +762,11 @@ export async function runConnect(opts: {
     })
 
     // e. The governed decisions log, opt-in (`decisionsLogEnabled`, off by
-    // default). Also before the hashes: it writes a section into CLAUDE.md.
+    // default), into each harness's instructions file. Also before the hashes:
+    // it writes into shared files such as AGENTS.md, whose rules section they
+    // cover. The section earlier versions put in CLAUDE.md comes out whether
+    // or not the log is on.
+    await retireClaudeMdDigest(safeConfig.workspaceRoot)
     if (syncConfig.settings?.decisionsLogEnabled) {
       await refreshDecisionsDigest({
         controlPlaneUrl,

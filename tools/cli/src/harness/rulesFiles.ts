@@ -95,7 +95,9 @@ export async function writeOwnRulesFile(
   if (sops.length === 0) return null
   const filePath = join(workspaceRoot, relPath)
   const body = `${buildRulesBody(sops, proxyUrl, 'file')}\n`
-  await writeOwnedFile(filePath, workspaceRoot, frontMatter ? `---\n${frontMatter.trimEnd()}\n---\n\n${body}` : body)
+  const content = frontMatter ? `---\n${frontMatter.trimEnd()}\n---\n\n${body}` : body
+  // Unchanged rule sets leave the file, and its modification time, alone.
+  if ((await readFile(filePath, 'utf-8').catch(() => null)) !== content) await writeOwnedFile(filePath, workspaceRoot, content)
   return filePath
 }
 

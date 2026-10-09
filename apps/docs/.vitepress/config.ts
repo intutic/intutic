@@ -127,6 +127,7 @@ if (!IS_OSS) {
       { text: 'Session Safety & Budgets (Cloud)', link: '/guide/loops' },
       { text: 'Trajectory Monitor (Cloud)', link: '/guide/trajectory-monitor' },
       { text: 'Settings & Config (Cloud)', link: '/guide/settings' },
+      { text: 'Manage with Terraform (Cloud)', link: '/guide/terraform' },
       { text: 'Audit Timeline (Cloud)', link: '/guide/audit-timeline' },
       { text: 'Organizations, Teams & Billing (Cloud)', link: '/guide/organizations' },
       { text: 'Intelligent Model Routing (Cloud)', link: '/guide/intelligent-routing' },
@@ -223,6 +224,17 @@ const sidebarReference = [
       ...(!IS_OSS ? [
         { text: 'REST API (Cloud)', link: '/reference/api' },
         { text: 'SOP Format (Cloud)', link: '/reference/sop-format' },
+        {
+          text: 'Terraform Provider (Cloud)',
+          collapsed: true,
+          items: [
+            { text: 'Provider', link: '/reference/terraform/' },
+            ...['sop', 'policy', 'workspace_settings', 'virtual_key', 'gateway', 'notification_rule', 'mcp_server_decision']
+              .map((r) => ({ text: `intutic_${r}`, link: `/reference/terraform/resources/${r}` })),
+            ...['workspace', 'members']
+              .map((d) => ({ text: `intutic_${d} (data)`, link: `/reference/terraform/data-sources/${d}` })),
+          ],
+        },
       ] : []),
       { text: 'clawde SDK (Open-Core)', link: '/reference/clawde-sdk' },
       { text: 'Tool Gate SDK (Open-Core)', link: '/reference/gate-sdk' },

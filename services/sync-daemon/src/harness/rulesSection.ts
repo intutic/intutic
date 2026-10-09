@@ -38,31 +38,45 @@ const log = createLogger('sync-rules-section')
 export const RULES_SECTION_START = '<!-- INTUTIC:RULES:START -->'
 export const RULES_SECTION_END = '<!-- INTUTIC:RULES:END -->'
 
-/** The section's offsets: the first end marker, and the last start marker before it. */
-function locate(content: string): { start: number; end: number } | null {
-  const endAt = content.indexOf(RULES_SECTION_END)
-  if (endAt === -1) return null
-  const start = content.lastIndexOf(RULES_SECTION_START, endAt)
-  if (start === -1) return null
-  return { start, end: endAt + RULES_SECTION_END.length }
+/** A marker pair delimiting one of Intutic's sections. */
+export interface SectionMarkers {
+  start: string
+  end: string
 }
 
-function section(body: string): string {
-  return `${RULES_SECTION_START}\n${body.trimEnd()}\n${RULES_SECTION_END}`
+export const RULES_MARKERS: SectionMarkers = { start: RULES_SECTION_START, end: RULES_SECTION_END }
+
+/** The governed decisions log's section, kept apart from the rules. */
+export const DECISIONS_MARKERS: SectionMarkers = {
+  start: '<!-- INTUTIC:DECISIONS_LOG:START -->',
+  end: '<!-- INTUTIC:DECISIONS_LOG:END -->',
+}
+
+/** The section's offsets: the first end marker, and the last start marker before it. */
+function locate(content: string, markers: SectionMarkers): { start: number; end: number } | null {
+  const endAt = content.indexOf(markers.end)
+  if (endAt === -1) return null
+  const start = content.lastIndexOf(markers.start, endAt)
+  if (start === -1) return null
+  return { start, end: endAt + markers.end.length }
+}
+
+function section(body: string, markers: SectionMarkers): string {
+  return `${markers.start}\n${body.trimEnd()}\n${markers.end}`
 }
 
 /** `content` with the section holding `body`: replaced in place, or appended. */
-export function injectRulesSection(content: string, body: string): string {
-  const at = locate(content)
-  if (at) return content.slice(0, at.start) + section(body) + content.slice(at.end)
-  if (content === '') return `${section(body)}\n`
+export function injectRulesSection(content: string, body: string, markers: SectionMarkers = RULES_MARKERS): string {
+  const at = locate(content, markers)
+  if (at) return content.slice(0, at.start) + section(body, markers) + content.slice(at.end)
+  if (content === '') return `${section(body, markers)}\n`
   const sep = content.endsWith('\n') ? '\n' : '\n\n'
-  return `${content}${sep}${section(body)}\n`
+  return `${content}${sep}${section(body, markers)}\n`
 }
 
 /** The text between the markers, markers included; null when there is no section. */
-export function rulesSectionOf(content: string): string | null {
-  const at = locate(content)
+export function rulesSectionOf(content: string, markers: SectionMarkers = RULES_MARKERS): string | null {
+  const at = locate(content, markers)
   return at ? content.slice(at.start, at.end) : null
 }
 
@@ -71,8 +85,8 @@ export function rulesSectionOf(content: string): string | null {
  * end of the file, without the blank lines before it either. Null when there
  * is no section.
  */
-export function removeRulesSection(content: string): string | null {
-  const at = locate(content)
+export function removeRulesSection(content: string, markers: SectionMarkers = RULES_MARKERS): string | null {
+  const at = locate(content, markers)
   if (!at) return null
   const before = content.slice(0, at.start)
   const after = content.slice(at.end).replace(/^\r?\n/, '')
@@ -81,10 +95,16 @@ export function removeRulesSection(content: string): string | null {
 }
 
 /**
- * Write `body` as the rules section of `filePath`, keeping the rest of the
- * file. An unreadable file is reported and left alone.
+ * Write `body` as the rules section (or the section `markers` names) of
+ * `filePath`, keeping the rest of the file. An unreadable file is reported
+ * and left alone.
  */
-export async function writeRulesSection(filePath: string, workspaceRoot: string, body: string): Promise<void> {
+export async function writeRulesSection(
+  filePath: string,
+  workspaceRoot: string,
+  body: string,
+  markers: SectionMarkers = RULES_MARKERS,
+): Promise<void> {
   let current = ''
   let mode: number | undefined
   try {
@@ -96,8 +116,9 @@ export async function writeRulesSection(filePath: string, workspaceRoot: string,
       return
     }
   }
-  const base = locate(current) === null && startsWithRulesHeader(current) ? await beforeWholeFile(filePath, workspaceRoot, current) : current
-  const next = injectRulesSection(base, body)
+  const wholeFile = startsWithRulesHeader(current) && locate(current, RULES_MARKERS) === null && locate(current, DECISIONS_MARKERS) === null
+  const base = wholeFile ? await beforeWholeFile(filePath, workspaceRoot, current) : current
+  const next = injectRulesSection(base, body, markers)
   if (next === current) return
 
   await keepOriginal(filePath, workspaceRoot)
@@ -106,7 +127,7 @@ export async function writeRulesSection(filePath: string, workspaceRoot: string,
   await fs.writeFile(tmp, next, 'utf-8')
   if (mode !== undefined) await fs.chmod(tmp, mode)
   await fs.rename(tmp, filePath)
-  log.info({ action: 'rules_section_written', path: filePath }, `Wrote the Intutic rules section of ${filePath}`)
+  log.info({ action: 'rules_section_written', path: filePath, marker: markers.start }, `Wrote the Intutic section of ${filePath}`)
 }
 
 /**
