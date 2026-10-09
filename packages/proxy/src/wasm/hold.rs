@@ -15,8 +15,11 @@
 //!
 //! A hold needs the control plane both ways, so without one, or when it does
 //! not answer, the call stays held: a rule that says a person must approve is
-//! not satisfied by nobody being reachable to ask.
+//! not satisfied by nobody being reachable to ask. The same holds for a request
+//! made with a provider key: the control plane is asked only with a virtual
+//! key, so that request's hold is not recorded either.
 
+use crate::credential::VirtualKey;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -69,13 +72,14 @@ fn new_hold_id() -> String {
 pub async fn request(
     client: &reqwest::Client,
     control_plane_url: Option<&str>,
-    token: &str,
+    virtual_key: Option<&VirtualKey>,
     call: &HeldCall<'_>,
 ) -> HoldOutcome {
     let hold_id = new_hold_id();
-    let Some(base) = control_plane_url
+    let Some((base, virtual_key)) = control_plane_url
         .map(|u| u.trim_end_matches('/'))
         .filter(|u| !u.is_empty())
+        .zip(virtual_key)
     else {
         return HoldOutcome::Held {
             hold_id,
@@ -83,7 +87,7 @@ pub async fn request(
         };
     };
 
-    if let Some(bypass) = find_bypass(client, base, token, call).await {
+    if let Some(bypass) = find_bypass(client, base, virtual_key, call).await {
         return bypass;
     }
 
@@ -111,9 +115,8 @@ pub async fn request(
             },
         }]
     });
-    let recorded = match client
-        .post(format!("{base}/api/v1/decisions"))
-        .bearer_auth(token)
+    let recorded = match virtual_key
+        .authorize(client.post(format!("{base}/api/v1/decisions")))
         .timeout(TIMEOUT)
         .json(&body)
         .send()
@@ -142,12 +145,11 @@ pub async fn request(
 async fn find_bypass(
     client: &reqwest::Client,
     base: &str,
-    token: &str,
+    virtual_key: &VirtualKey,
     call: &HeldCall<'_>,
 ) -> Option<HoldOutcome> {
-    let body: Value = match client
-        .get(format!("{base}/api/v1/decisions/approved-bypasses"))
-        .bearer_auth(token)
+    let body: Value = match virtual_key
+        .authorize(client.get(format!("{base}/api/v1/decisions/approved-bypasses")))
         .timeout(TIMEOUT)
         .send()
         .await
@@ -193,7 +195,8 @@ pub fn refusal(outcome: &HoldOutcome, rule_id: &str, reason: &str) -> String {
         ),
         HoldOutcome::Held { .. } => format!(
             "HELD for approval: {reason} [{rule_id}], but the hold could not be recorded (no \
-             Intutic control plane reachable), so there is nothing to approve yet."
+             Intutic control plane reachable, or the request was not made with an Intutic \
+             virtual key), so there is nothing to approve yet."
         ),
         HoldOutcome::Bypassed { .. } => String::new(),
     }
@@ -206,6 +209,13 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const HASH: &str = "ab12";
+
+    fn vk_test() -> VirtualKey {
+        crate::credential::RequestCredential::classify("vk_test")
+            .virtual_key()
+            .cloned()
+            .expect("a virtual key")
+    }
 
     fn call() -> HeldCall<'static> {
         HeldCall {
@@ -249,7 +259,7 @@ mod tests {
         let outcome = request(
             &reqwest::Client::new(),
             Some(&server.uri()),
-            "vk_test",
+            Some(&vk_test()),
             &call(),
         )
         .await;
@@ -288,7 +298,7 @@ mod tests {
             request(
                 &reqwest::Client::new(),
                 Some(&server.uri()),
-                "vk_test",
+                Some(&vk_test()),
                 &call()
             )
             .await,
@@ -308,7 +318,7 @@ mod tests {
             let outcome = request(
                 &reqwest::Client::new(),
                 Some(&server.uri()),
-                "vk_test",
+                Some(&vk_test()),
                 &call(),
             )
             .await;
@@ -337,7 +347,7 @@ mod tests {
         let outcome = request(
             &reqwest::Client::new(),
             Some(&server.uri()),
-            "vk_test",
+            Some(&vk_test()),
             &call(),
         )
         .await;
@@ -350,9 +360,26 @@ mod tests {
         ));
     }
 
+    /// A request made with a provider key has no virtual key to ask with. The
+    /// call stays held and the control plane is not contacted at all, so the
+    /// provider key never reaches it.
+    #[tokio::test]
+    async fn without_a_virtual_key_the_call_stays_held_and_nothing_is_sent() {
+        let server = server(json!({ "bypasses": [] })).await;
+        let outcome = request(&reqwest::Client::new(), Some(&server.uri()), None, &call()).await;
+        assert!(matches!(
+            outcome,
+            HoldOutcome::Held {
+                recorded: false,
+                ..
+            }
+        ));
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
     #[tokio::test]
     async fn without_a_control_plane_the_call_stays_held() {
-        let outcome = request(&reqwest::Client::new(), None, "vk_test", &call()).await;
+        let outcome = request(&reqwest::Client::new(), None, Some(&vk_test()), &call()).await;
         assert!(matches!(
             outcome,
             HoldOutcome::Held {
@@ -365,7 +392,7 @@ mod tests {
         let outcome = request(
             &reqwest::Client::new(),
             Some("http://127.0.0.1:9"),
-            "vk_test",
+            Some(&vk_test()),
             &call(),
         )
         .await;

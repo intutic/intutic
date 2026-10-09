@@ -1,5 +1,7 @@
 pub mod commands;
 pub mod config;
+/// The caller's credential, typed by where it may be sent
+pub mod credential;
 pub mod dlp;
 pub mod graph;
 pub mod injection;

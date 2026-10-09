@@ -21,6 +21,7 @@ use serde_json::json;
 
 use tower_http::trace::TraceLayer;
 
+use crate::credential::{RequestCredential, VirtualKey};
 use crate::proxy::AppState;
 use crate::tls_mitm::handle_connect;
 
@@ -269,7 +270,11 @@ async fn run_probes(
 /// the concrete gap named in TD-333: a session recorded as `SANDBOX` because
 /// the host CLI said so, whether or not the sandboxed process ever started.
 /// What must be true before this handler forwards anything: a configured
-/// control plane, a `sessionId` in the body, and a non-empty bearer. Pure and
+/// control plane, a `sessionId` in the body, and an Intutic virtual key as the
+/// bearer. The sandbox attests with its `INTUTIC_API_KEY`; any other bearer is
+/// refused rather than forwarded, because the only other credential a caller
+/// of this proxy holds is a provider key, and that never goes to the control
+/// plane. Pure and
 /// exported so these three checks — the entire request-shape contract — are
 /// unit-testable without constructing a full `AppState` (which needs a live
 /// `wasm_registry`/`reward_engine`/`store`/`control_plane`, none of which this
@@ -280,7 +285,7 @@ fn validate_attest_request(
     control_plane_url: Option<&str>,
     body: &serde_json::Value,
     headers: &HeaderMap,
-) -> Result<(String, String), (StatusCode, serde_json::Value)> {
+) -> Result<(String, VirtualKey), (StatusCode, serde_json::Value)> {
     let Some(control_plane_url) = control_plane_url else {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
@@ -305,13 +310,23 @@ fn validate_attest_request(
             json!({"error": "authorization required"}),
         ));
     }
+    let token = auth
+        .strip_prefix("Bearer ")
+        .or_else(|| auth.strip_prefix("bearer "))
+        .unwrap_or(auth);
+    let Some(virtual_key) = RequestCredential::classify(token).virtual_key().cloned() else {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            json!({"error": "an Intutic virtual key is required"}),
+        ));
+    };
 
     let url = format!(
         "{}/api/v1/sessions/{}/attest-sandbox",
         control_plane_url.trim_end_matches('/'),
         session_id
     );
-    Ok((url, auth.to_string()))
+    Ok((url, virtual_key))
 }
 
 async fn attest_sandbox(
@@ -325,7 +340,7 @@ async fn attest_sandbox(
         .policy
         .control_plane_url
         .as_deref();
-    let (url, auth) = match validate_attest_request(control_plane_url, &body, &headers) {
+    let (url, virtual_key) = match validate_attest_request(control_plane_url, &body, &headers) {
         Ok(v) => v,
         Err((status, body)) => {
             if status == StatusCode::SERVICE_UNAVAILABLE {
@@ -338,10 +353,8 @@ async fn attest_sandbox(
     // `url` is built from `CONTROL_PLANE_URL`, operator configuration, and
     // `http://localhost:3001` is the documented development value; the same
     // header already travels to the same URL from the auth middleware.
-    let resp = state
-        .http_client
-        .patch(&url) // codeql[rust/cleartext-transmission]
-        .header("authorization", auth)
+    let resp = virtual_key
+        .authorize(state.http_client.patch(&url)) // codeql[rust/cleartext-transmission]
         .timeout(std::time::Duration::from_millis(3000))
         .send()
         .await;
@@ -415,7 +428,19 @@ mod attest_sandbox_tests {
             url,
             "http://control-plane:3001/api/v1/sessions/ses_abc123/attest-sandbox"
         );
-        assert_eq!(auth, "Bearer vk_x");
+        assert_eq!(auth.as_str(), "vk_x");
+    }
+
+    /// The sandbox attests with its virtual key. A provider key in the header
+    /// is refused, never forwarded to the control plane.
+    #[test]
+    fn refuses_a_bearer_that_is_not_a_virtual_key() {
+        let body = json!({"sessionId": "ses_1"});
+        let provider_key = ["sk-ant-", "api03-", "fixture"].concat();
+        let err =
+            validate_attest_request(Some("http://cp"), &body, &headers_with_auth(&provider_key))
+                .expect_err("a provider key must not be forwarded");
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
     }
 
     #[test]

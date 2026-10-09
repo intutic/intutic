@@ -2,7 +2,7 @@
 //! directory (`~/.intutic/wasm`), both hot-reloaded on a 5 s TTL rescan.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -121,6 +121,20 @@ pub struct PluginRegistry {
     workspace_modules: RwLock<HashMap<String, WorkspaceModules>>,
     local_dir: PathBuf,
     local_rules: RwLock<LocalRules>,
+    /// `(workspace, descriptor hash, received hash)` of every refused binary
+    /// already reported. The sync reruns every 5 s and a tampered binary stays
+    /// tampered, so without this one bad upload would raise an incident every
+    /// five seconds for as long as it sat in the cache.
+    integrity_reported: std::sync::Mutex<HashSet<(String, String, String)>>,
+}
+
+/// Whether `bytes` are the binary a descriptor names. The control plane keys
+/// the binary by the lowercase hex SHA-256 of its bytes (`wasmRules.ts`); case
+/// is not significant in hex.
+fn binary_matches(bytes: &[u8], sha256: &str) -> (bool, String) {
+    use sha2::{Digest, Sha256};
+    let actual = hex::encode(Sha256::digest(bytes));
+    (actual.eq_ignore_ascii_case(sha256), actual)
 }
 
 impl PluginRegistry {
@@ -140,6 +154,7 @@ impl PluginRegistry {
             workspace_modules: RwLock::new(HashMap::new()),
             local_dir,
             local_rules: RwLock::new(LocalRules::default()),
+            integrity_reported: std::sync::Mutex::new(HashSet::new()),
         }))
     }
 
@@ -542,9 +557,11 @@ impl PluginRegistry {
             let descriptors: Vec<WasmPluginDescriptor> = serde_json::from_str(&json_str)?;
 
             let mut existing_map = HashMap::new();
+            let mut previous_by_rule = HashMap::new();
             if let Some(ws_mods) = guard.get(workspace_id) {
                 for m in &ws_mods.modules {
                     existing_map.insert(m.sha256.clone(), (m.module.clone(), m.rego.clone()));
+                    previous_by_rule.insert(m.rule_id.clone(), m.clone());
                 }
             }
 
@@ -563,6 +580,30 @@ impl PluginRegistry {
                 } else {
                     let bin_bytes = control_plane.wasm_binary(&desc.sha256).await?;
                     if let Some(bytes) = bin_bytes {
+                        // The binary is fetched by the hash its descriptor
+                        // names, but nothing about a cache key makes the bytes
+                        // under it hash to it. Whoever can write that key could
+                        // swap a governance rule for one that allows
+                        // everything, and the proxy would run it as the rule
+                        // the dashboard lists. Refused like any rule that
+                        // cannot load, with one difference: the version this
+                        // workspace already enforces, if any, keeps enforcing,
+                        // because a tampered replacement is no reason to drop
+                        // a rule that was verified.
+                        let (matches, actual) = binary_matches(&bytes, &desc.sha256);
+                        if !matches {
+                            self.report_integrity_failure(
+                                control_plane,
+                                workspace_id,
+                                &desc,
+                                &actual,
+                            )
+                            .await;
+                            if let Some(previous) = previous_by_rule.get(&desc.rule_id) {
+                                new_modules.push(previous.clone());
+                            }
+                            continue;
+                        }
                         let module = Module::from_binary(&self.engine, &bytes)?;
                         // Same checks the local loader runs. Without them a rule
                         // pushed from the dashboard installs, counts as active,
@@ -615,6 +656,48 @@ impl PluginRegistry {
         );
 
         Ok(())
+    }
+
+    /// Logs a refused rule binary and raises it with the control plane as a
+    /// system anomaly (an incident), once per workspace, rule hash and received
+    /// hash.
+    async fn report_integrity_failure(
+        &self,
+        control_plane: &Arc<dyn ControlPlaneCache>,
+        workspace_id: &str,
+        desc: &WasmPluginDescriptor,
+        actual: &str,
+    ) {
+        let first = self
+            .integrity_reported
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert((
+                workspace_id.to_string(),
+                desc.sha256.clone(),
+                actual.to_string(),
+            ));
+        if !first {
+            return;
+        }
+        tracing::error!(
+            workspace_id = %workspace_id,
+            rule_id = %desc.rule_id,
+            rule = %desc.name,
+            expected_sha256 = %desc.sha256,
+            actual_sha256 = %actual,
+            "Refusing control-plane WASM rule: the binary does not match its descriptor's SHA-256"
+        );
+        control_plane
+            .publish_system_anomaly(
+                workspace_id,
+                &format!(
+                    "WASM rule '{}' ({}) was refused: its binary hashes to {} but its descriptor names {}. \
+                     The previously loaded version, if any, stays in force.",
+                    desc.name, desc.rule_id, actual, desc.sha256
+                ),
+            )
+            .await;
     }
 }
 

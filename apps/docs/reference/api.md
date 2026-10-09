@@ -1436,6 +1436,6 @@ The Intutic proxy (default port `4000`, set by `PORT`) serves these besides the 
 | GET | `/intutic/spend` | Loopback | Today's spend on this machine: `{ local_spend_usd_today, local_cap_usd, enforced }` |
 | GET | `/intutic/instance` | Loopback | `{ proxy_instance_id, shared_gateway }`, the id every trace from this process carries |
 | GET | `/intutic/probes` | Loopback | The last scheduled guard self-test: `{ probes, total, failed, ran_at }`; `503` before the first run finishes |
-| POST | `/intutic/attest-sandbox` | The request's `Authorization` bearer | Called from inside an `intutic exec --sandbox` container, whose firewall lets it reach only the proxy. Forwards `{ "sessionId": "…" }` to the control plane's `PATCH /api/v1/sessions/:sessionId/attest-sandbox` and answers `{ attested }`. `400` without `sessionId`, `401` without a bearer, `503` when no control plane is configured, `502` when it cannot be reached |
+| POST | `/intutic/attest-sandbox` | The request's `Authorization` bearer, an Intutic key (`vk_…`) | Called from inside an `intutic exec --sandbox` container, whose firewall lets it reach only the proxy. Forwards `{ "sessionId": "…" }` to the control plane's `PATCH /api/v1/sessions/:sessionId/attest-sandbox` and answers `{ attested }`. `400` without `sessionId`, `401` without a bearer or with one that is not an Intutic key, `503` when no control plane is configured, `502` when it cannot be reached |
 
 `/v1beta/models/:model` (Gemini) is routed but not translated, so Gemini requests do not work through the proxy yet.

@@ -32,6 +32,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::config::ProxyConfig;
 use crate::config::SnipCompactorConfig;
+use crate::credential::{RequestCredential, VirtualKey};
 use crate::dlp;
 use crate::metering::{check_budget, VirtualKeyRecord};
 use crate::pricing;
@@ -451,12 +452,11 @@ struct PolicyCheckResponse {
 async fn validate_key_via_control_plane(
     client: &Client,
     control_plane_url: &str,
-    token: &str,
+    key: &VirtualKey,
 ) -> Result<Option<VirtualKeyRecord>, ()> {
     let url = format!("{}/api/v1/auth/key-context", control_plane_url);
-    let resp = client
-        .get(&url)
-        .header("authorization", format!("Bearer {}", token))
+    let resp = key
+        .authorize(client.get(&url))
         .timeout(std::time::Duration::from_millis(1500))
         .send()
         .await
@@ -485,9 +485,8 @@ async fn validate_key_via_control_plane(
             "Control-plane key validation rate-limited; retrying once"
         );
         tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
-        let retry = client
-            .get(&url)
-            .header("authorization", format!("Bearer {}", token))
+        let retry = key
+            .authorize(client.get(&url))
             .timeout(std::time::Duration::from_millis(1500))
             .send()
             .await
@@ -502,14 +501,14 @@ async fn validate_key_via_control_plane(
             tracing::warn!(%retry_status, "Control-plane key validation still failing after retry");
             return Err(());
         }
-        return parse_key_context(retry, token).await;
+        return parse_key_context(retry, key.as_str()).await;
     }
     if !status.is_success() {
         tracing::warn!(%status, "Control-plane key validation returned an unexpected status");
         return Err(());
     }
 
-    parse_key_context(resp, token).await
+    parse_key_context(resp, key.as_str()).await
 }
 
 /// Turn a 200 from `/auth/key-context` into an identity-only key record.
@@ -561,7 +560,12 @@ async fn parse_key_context(
 /// route answers whether a workspace is over its budget cap or plan limits, so
 /// it must know the asker holds a key of that workspace; the prefix in the body
 /// is not a secret (the dashboard shows it and this file logs it).
-// Nine request-scoped values forwarded to a single control-plane call, with one
+///
+/// A request with no virtual key is answered here, without asking: the route
+/// refuses anything but a `vk_` bearer, and the caller's provider key is not
+/// sent to the control plane to be refused. The refusal follows the configured
+/// fail mode exactly as the route's own 401 did.
+// Request-scoped values forwarded to a single control-plane call, with one
 // call site. Grouping them into a struct would add a type whose only purpose is
 // to satisfy the argument-count threshold.
 #[allow(clippy::too_many_arguments)]
@@ -569,32 +573,34 @@ async fn policy_check(
     client: &Client,
     control_plane_url: &str,
     workspace_id: &str,
-    virtual_key: Option<&str>,
-    virtual_key_prefix: &str,
+    virtual_key: Option<&VirtualKey>,
     provider: &Provider,
     model: &str,
     session_id: Option<&str>,
     loop_run_id: Option<&str>,
     timeout_ms: u64,
 ) -> Result<(), String> {
+    let Some(virtual_key) = virtual_key else {
+        return Err(
+            "the control plane checks only requests made with an Intutic virtual key".to_string(),
+        );
+    };
     let url = format!("{}/api/v1/policy/check", control_plane_url);
     let body = PolicyCheckRequest {
         workspace_id: workspace_id.to_string(),
-        virtual_key_prefix: virtual_key_prefix.to_string(),
+        virtual_key_prefix: virtual_key.prefix().to_string(),
         provider: provider.harness_name().to_string(),
         model: model.to_string(),
         session_id: session_id.map(|s| s.to_string()),
         loop_run_id: loop_run_id.map(|s| s.to_string()),
     };
 
-    let mut request = client
-        .post(&url)
+    let result = virtual_key
+        .authorize(client.post(&url))
         .timeout(std::time::Duration::from_millis(timeout_ms))
-        .json(&body);
-    if let Some(key) = virtual_key {
-        request = request.bearer_auth(key);
-    }
-    let result = request.send().await;
+        .json(&body)
+        .send()
+        .await;
 
     match result {
         Ok(resp) if resp.status().is_success() => {
@@ -942,6 +948,48 @@ fn judge_unavailable_note(reason: &str) -> String {
     )
 }
 
+/// One response segment sent to the SaaS judge, as the verdict entry finalize
+/// reads. `kind` names the segment in the logs ("chunk", "trailing chunk").
+///
+/// A check that never ran is recorded as UNAVAILABLE, never as
+/// `{"triggered": false}` — that is the shape of a clean pass, and finalize
+/// used to read these fabricated entries as verdicts, presenting a segment
+/// nothing checked as one that cleared. judge.ts renders UNAVAILABLE entries as
+/// UNCHECKED and instructs the synthesis judge to grade the segment itself.
+/// A request made with a provider key is one such: the judge is not asked,
+/// because the key is never sent to the control plane.
+async fn judge_chunk_verdict(
+    client: &reqwest::Client,
+    check_url: &str,
+    virtual_key: Option<&VirtualKey>,
+    body: &serde_json::Value,
+    kind: &str,
+) -> serde_json::Value {
+    let Some(virtual_key) = virtual_key else {
+        return serde_json::json!({"verdict": "UNAVAILABLE", "error": "request not made with an Intutic virtual key — segment not checked"});
+    };
+    tracing::info!(url = %check_url, "Sending {kind} to judge");
+    match virtual_key
+        .authorize(client.post(check_url))
+        .json(body)
+        .send()
+        .await
+    {
+        Ok(r) => {
+            tracing::info!(status = %r.status(), "Received response from {kind} judge");
+            if r.status().is_success() {
+                r.json::<serde_json::Value>().await.unwrap_or(serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}))
+            } else {
+                serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "{kind} judge request failed");
+            serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
+        }
+    }
+}
+
 /// Deadline on the post-stream judge tail (chunk-handle joins, the trailing
 /// chunk, and finalize) before the client-visible terminal event is
 /// released regardless of whether the judge has finished. 2026-08-30
@@ -973,7 +1021,10 @@ pub fn judge_finalize_deadline_ms() -> Option<u64> {
 struct FinalizeJudgeParams<'a> {
     http_client: &'a reqwest::Client,
     control_plane_url: &'a str,
-    auth_token: &'a str,
+    /// `None` on a request authenticated with a provider key, which never
+    /// goes to the control plane: the SaaS judge then reports itself
+    /// unavailable rather than being asked.
+    virtual_key: Option<&'a VirtualKey>,
     workspace_id: &'a str,
     session_id: &'a str,
     full_content: &'a str,
@@ -994,7 +1045,7 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
             p.http_client,
             Some(p.control_plane_url),
             Some(p.workspace_id),
-            Some(p.auth_token),
+            p.virtual_key,
             None,
         )
         .await;
@@ -1018,12 +1069,15 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
         };
     }
 
+    let Some(virtual_key) = p.virtual_key else {
+        return Some(judge_unavailable_note(
+            "the request was not made with an Intutic virtual key, so the judge could not be asked",
+        ));
+    };
     let finalize_url = format!("{}/api/v1/judge/finalize", p.control_plane_url);
     tracing::info!(url = %finalize_url, "Sending finalize call to judge");
-    let finalize_res = p
-        .http_client
-        .post(&finalize_url)
-        .header("Authorization", format!("Bearer {}", p.auth_token))
+    let finalize_res = virtual_key
+        .authorize(p.http_client.post(&finalize_url))
         .json(&serde_json::json!({
             "workspaceId": p.workspace_id,
             "sessionId": p.session_id,
@@ -1823,32 +1877,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         workspace_id = key_wid.clone();
     }
     let claimed_workspace = key_workspace.or(header_workspace);
-    let key_prefix = if raw_token.len() > 12 {
-        &raw_token[..12]
-    } else {
-        raw_token
-    };
-
-    // Dynamic session credential capture (for developer OAuth/Pro sessions).
-    // Already unreachable when the gateway front door requires vk_ (rejected
-    // above), but the condition is repeated explicitly rather than relied on
-    // implicitly — this function is thousands of lines long, and "an earlier
-    // return makes this safe" is exactly the kind of invariant that breaks
-    // silently if the two blocks are ever reordered.
-    if !crate::gateway::requires_vk_only()
-        && !raw_token.is_empty()
-        && !raw_token.starts_with("vk_")
-        && workspace_id != "unknown"
-    {
-        if let Some(field) = session_credential_field(raw_token) {
-            let store = Arc::clone(&state.store);
-            let wid = workspace_id.clone();
-            let tok = raw_token.to_string();
-            spawn(async move {
-                store.set_workspace_credential(&wid, field, &tok).await;
-            });
-        }
-    }
+    // Which destinations the bearer may reach: a virtual key may go to the
+    // control plane, a provider key only to its provider's upstream. Every
+    // control-plane call below takes the `VirtualKey` this yields.
+    let credential = RequestCredential::classify(raw_token);
+    // Names the key in logs, traces and the rule context. A provider key gets
+    // none: traces reach the control plane, and a provider key's characters,
+    // even a prefix of them, are not Intutic's to record.
+    let key_prefix = credential.virtual_key().map_or("", VirtualKey::prefix);
 
     tracing::debug!(workspace_id = %workspace_id, key_prefix = %key_prefix, provider = ?provider, "Request received");
 
@@ -2284,7 +2320,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // judge-ranked path lives server-side; a missing control plane or a
             // timeout just yields no memory section. The prompt has already
             // passed input DLP by this point in the enterprise deployment
-            // model, and only the prompt is sent — never the whole body.
+            // model, and only the prompt is sent — never the whole body. Asked
+            // only with a virtual key: this runs before authentication, and a
+            // provider key is never sent to the control plane.
             let mut memory_chunks: Vec<(String, String)> = Vec::new();
 
             // Local vaults first: Obsidian/Logseq/Foam notes on this machine.
@@ -2307,23 +2345,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
 
             if matches!(cmd, crate::commands::Command::Fix) && !prompt.is_empty() {
-                if let Some(cp_url) = state
-                    .config
-                    .intutic_settings
-                    .policy
-                    .control_plane_url
-                    .as_deref()
-                {
+                if let (Some(cp_url), Some(virtual_key)) = (
+                    state
+                        .config
+                        .intutic_settings
+                        .policy
+                        .control_plane_url
+                        .as_deref(),
+                    credential.virtual_key(),
+                ) {
                     let client = reqwest::Client::builder()
                         .timeout(std::time::Duration::from_secs(6))
                         .build();
                     if let Ok(client) = client {
-                        let resp = client
-                            .post(format!(
+                        let resp = virtual_key
+                            .authorize(client.post(format!(
                                 "{}/api/v1/fix/enhance",
                                 cp_url.trim_end_matches('/')
-                            ))
-                            .bearer_auth(raw_token)
+                            )))
                             .json(&serde_json::json!({ "prompt": prompt, "role": node.agent_role }))
                             .send()
                             .await;
@@ -2503,19 +2542,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // an LLM proxy credential. That endpoint rejects non-vk_ tokens too;
             // this is the second half of the check, so neither side alone is
             // load-bearing.
-            let cp_url = if raw_token.starts_with("vk_") {
-                state
-                    .config
-                    .intutic_settings
-                    .policy
-                    .control_plane_url
-                    .as_deref()
-            } else {
-                None
-            };
-            match cp_url {
-                Some(url) => {
-                    match validate_key_via_control_plane(&state.http_client, url, raw_token).await {
+            let cp = state
+                .config
+                .intutic_settings
+                .policy
+                .control_plane_url
+                .as_deref()
+                .zip(credential.virtual_key());
+            match cp {
+                Some((url, virtual_key)) => {
+                    match validate_key_via_control_plane(&state.http_client, url, virtual_key).await
+                    {
                         Ok(Some(mut record)) => {
                             // Identity came from the control plane; budgets still
                             // come from the cache, so this path enforces the same
@@ -2603,6 +2640,34 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         ControlPlaneAuth::Unmanaged => None,
     };
 
+    // Dynamic session credential capture (for developer OAuth/Pro sessions).
+    //
+    // After authentication on purpose. A managed proxy refuses a provider key
+    // above, so only a standalone one, whose store is in this process, gets
+    // here with one. Captured before authentication, as it was, an
+    // unauthenticated caller wrote whatever `sk-ant-` string it sent into the
+    // shared credential store of any workspace it named in `x-workspace-id`,
+    // replacing that workspace's provisioned key.
+    //
+    // Already unreachable when the gateway front door requires vk_ (rejected
+    // above), but the condition is repeated explicitly rather than relied on
+    // implicitly — this function is thousands of lines long, and "an earlier
+    // return makes this safe" is exactly the kind of invariant that breaks
+    // silently if the two blocks are ever reordered.
+    if !crate::gateway::requires_vk_only()
+        && credential.virtual_key().is_none()
+        && workspace_id != "unknown"
+    {
+        if let Some(field) = session_credential_field(raw_token) {
+            let store = Arc::clone(&state.store);
+            let wid = workspace_id.clone();
+            let tok = raw_token.to_string();
+            spawn(async move {
+                store.set_workspace_credential(&wid, field, &tok).await;
+            });
+        }
+    }
+
     // ── Step 2.6: bind the request to the identity we just authenticated ─────
     //
     // `workspace_id` was derived from the token's suffix or the x-workspace-id
@@ -2657,17 +2722,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     crate::gateway::OrgPinDecision::Unverified => {
                         // Stale cache entry — ask the control plane, which now
                         // returns orgId from /auth/key-context.
-                        let cp_url = state
+                        let cp = state
                             .config
                             .intutic_settings
                             .policy
                             .control_plane_url
-                            .as_deref();
-                        match cp_url {
-                            Some(url) => match validate_key_via_control_plane(
+                            .as_deref()
+                            .zip(credential.virtual_key());
+                        match cp {
+                            Some((url, virtual_key)) => match validate_key_via_control_plane(
                                 &state.http_client,
                                 url,
-                                raw_token,
+                                virtual_key,
                             )
                             .await
                             {
@@ -2681,8 +2747,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     );
                                 }
                             },
-                            // A pinned cell with no control plane cannot verify
-                            // anything — misconfiguration, fail closed.
+                            // A pinned cell with no control plane, or a key
+                            // record without a virtual key, cannot be verified —
+                            // misconfiguration, fail closed.
                             None => false,
                         }
                     }
@@ -3225,7 +3292,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         &state.http_client,
         control_plane_url_for_sops.as_deref(),
         Some(workspace_id.as_str()),
-        Some(raw_token),
+        credential.virtual_key(),
         Some(state.control_plane.as_ref()),
     )
     .await;
@@ -3998,19 +4065,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     tool: &tool,
                     target_hash: &target_hash,
                 };
-                // Only a virtual key goes to the control plane: any other
-                // bearer here is a provider credential, never sent onward.
-                let control_plane_url = state
-                    .config
-                    .intutic_settings
-                    .policy
-                    .control_plane_url
-                    .as_deref()
-                    .filter(|_| raw_token.starts_with("vk_"));
                 let outcome = crate::wasm::hold::request(
                     &state.http_client,
-                    control_plane_url,
-                    raw_token,
+                    state
+                        .config
+                        .intutic_settings
+                        .policy
+                        .control_plane_url
+                        .as_deref(),
+                    credential.virtual_key(),
                     &held,
                 )
                 .await;
@@ -4064,8 +4127,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 &state.http_client,
                 cp_url,
                 &workspace_id,
-                raw_token.starts_with("vk_").then_some(raw_token),
-                key_prefix,
+                credential.virtual_key(),
                 &provider,
                 &model,
                 Some(&session_id),
@@ -4115,15 +4177,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // enforcement switches off.
     let sso_group_gate: Option<crate::sso_groups::SsoGroupGate> = {
         let policy_cfg = &state.config.intutic_settings.policy;
-        match policy_cfg.control_plane_url.as_deref() {
-            Some(cp_url) if raw_token.starts_with("vk_") => {
+        match policy_cfg
+            .control_plane_url
+            .as_deref()
+            .zip(credential.virtual_key())
+        {
+            Some((cp_url, virtual_key)) => {
                 // Read before the fetch, like the SOP cache's, so a change
                 // announced during this request is seen as moved next time.
                 let policy_version = state.control_plane.policy_version(&workspace_id).await;
                 match crate::sso_groups::resolve(
                     &state.http_client,
                     cp_url,
-                    raw_token,
+                    virtual_key,
                     std::time::Duration::from_millis(policy_cfg.timeout_ms),
                     policy_version,
                 )
@@ -4154,7 +4220,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         if let Some(msgs) = &messages {
             let pre_processor = RequestPreProcessor::new(&control_plane_url);
             if let Some(intercepted) = pre_processor
-                .process(&session_id, &workspace_id, msgs, &protocol, raw_token)
+                .process(
+                    &session_id,
+                    &workspace_id,
+                    msgs,
+                    &protocol,
+                    credential.virtual_key(),
+                )
                 .await
             {
                 tracing::info!(
@@ -5407,7 +5479,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let judge_active_clone = judge_active;
         let personal_sops_clone = personal_sops.clone();
         let protocol_clone = protocol.clone();
-        let client_api_key_clone = raw_token.to_string();
+        let virtual_key_clone = credential.virtual_key().cloned();
         let reward_engine_clone = Arc::clone(&state.reward_engine);
         let reward_store_clone = Arc::clone(&state.store);
         let cp_clone = Arc::clone(&state.control_plane);
@@ -5565,49 +5637,23 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 // further down, and the judge must not depend on
                                 // which of the two runs first.
                                 let judge_monitored = actual_model_clone.clone();
-                                let api_key_for_chunk = client_api_key_clone.clone();
+                                let virtual_key_for_chunk = virtual_key_clone.clone();
                                 let handle = spawn(async move {
-                                    let check_url = format!("{}/api/v1/judge/chunk", cp_url);
-                                    tracing::info!(url = %check_url, "Sending chunk to judge");
-                                    let response = client
-                                        .post(&check_url)
-                                        .header(
-                                            "Authorization",
-                                            format!("Bearer {}", api_key_for_chunk),
-                                        )
-                                        .json(&serde_json::json!({
+                                    let verdict = judge_chunk_verdict(
+                                        &client,
+                                        &format!("{}/api/v1/judge/chunk", cp_url),
+                                        virtual_key_for_chunk.as_ref(),
+                                        &serde_json::json!({
                                             "workspaceId": ws_id,
                                             "sessionId": sess_id,
                                             "chunkContent": chunk_content,
                                             "monitoredModel": judge_monitored.clone(),
                                             "contextParagraphs": context_paras,
                                             "personalSops": personal_sops_chunk,
-                                        }))
-                                        .send()
-                                        .await;
-
-                                    // A check that never ran is recorded as UNAVAILABLE,
-                                    // never as `{"triggered": false}` — that is the shape
-                                    // of a clean pass, and finalize used to read these
-                                    // fabricated entries as verdicts, presenting a
-                                    // segment nothing checked as one that cleared.
-                                    // judge.ts renders UNAVAILABLE entries as UNCHECKED
-                                    // and instructs the synthesis judge to grade the
-                                    // segment itself.
-                                    let verdict = match response {
-                                        Ok(r) => {
-                                            tracing::info!(status = %r.status(), "Received response from chunk judge");
-                                            if r.status().is_success() {
-                                                r.json::<serde_json::Value>().await.unwrap_or(serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}))
-                                            } else {
-                                                serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::error!(error = %e, "Chunk judge request failed");
-                                            serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
-                                        }
-                                    };
+                                        }),
+                                        "chunk",
+                                    )
+                                    .await;
 
                                     tracing::info!(verdict = ?verdict, "Chunk verdict recorded");
                                     let chunk_json = serde_json::json!({
@@ -6457,7 +6503,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // publishing, further use of the session/workspace ids,
                 // etc.), so the spawned task gets its own clones rather than
                 // moving the outer bindings — everything else referenced
-                // below (control_plane_url_clone, client_api_key_clone,
+                // below (control_plane_url_clone, virtual_key_clone,
                 // personal_sops_clone, paragraph_history, chunk_index,
                 // last_processed_len, chunk_handles) is either Copy or
                 // genuinely unused past this point, so it moves in as-is.
@@ -6485,13 +6531,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             paragraph_history.clone()
                         };
 
-                        let check_url = format!("{}/api/v1/judge/chunk", control_plane_url_clone);
-                        tracing::info!(url = %check_url, "Sending trailing chunk to judge");
-                        let api_key_for_trailing = client_api_key_clone.clone();
-                        let response = http_client_clone
-                            .post(&check_url)
-                            .header("Authorization", format!("Bearer {}", api_key_for_trailing))
-                            .json(&serde_json::json!({
+                        let verdict = judge_chunk_verdict(
+                            &http_client_clone,
+                            &format!("{}/api/v1/judge/chunk", control_plane_url_clone),
+                            virtual_key_clone.as_ref(),
+                            &serde_json::json!({
                                 "workspaceId": workspace_id_clone,
                                 "sessionId": session_id_clone,
                                 "chunkContent": trailing,
@@ -6503,26 +6547,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 // trailing chunk) personal rules reached the judge
                                 // only at finalize.
                                 "personalSops": personal_sops_clone.clone(),
-                            }))
-                            .send()
-                            .await;
-
-                        let verdict = match response {
-                            Ok(r) => {
-                                tracing::info!(status = %r.status(), "Received response from trailing chunk judge");
-                                if r.status().is_success() {
-                                    r.json::<serde_json::Value>().await.unwrap_or(
-                                        serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge response unparsable — segment not checked"}),
-                                    )
-                                } else {
-                                    serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge returned an error status — segment not checked"})
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!(error = %e, "Trailing chunk judge request failed");
-                                serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
-                            }
-                        };
+                            }),
+                            "trailing chunk",
+                        )
+                        .await;
 
                         tracing::info!(verdict = ?verdict, "Trailing chunk verdict recorded");
                         let chunk_json = serde_json::json!({
@@ -6543,7 +6571,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     resolve_finalize_judge_note(FinalizeJudgeParams {
                         http_client: &http_client_clone,
                         control_plane_url: &control_plane_url_clone,
-                        auth_token: &client_api_key_clone,
+                        virtual_key: virtual_key_clone.as_ref(),
                         workspace_id: &workspace_id_clone,
                         session_id: &session_id_clone,
                         full_content: &accumulated_content,
@@ -7179,7 +7207,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // still needed below (splicing the note into the response body).
         let http_client_task = state.http_client.as_ref().clone();
         let control_plane_url_task = control_plane_url.clone();
-        let auth_token_task = raw_token.to_string();
+        let virtual_key_task = credential.virtual_key().cloned();
         let workspace_id_task = workspace_id.clone();
         let session_id_task = session_id.clone();
         let accumulated_content_task = accumulated_content.clone();
@@ -7188,7 +7216,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             resolve_finalize_judge_note(FinalizeJudgeParams {
                 http_client: &http_client_task,
                 control_plane_url: &control_plane_url_task,
-                auth_token: &auth_token_task,
+                virtual_key: virtual_key_task.as_ref(),
                 workspace_id: &workspace_id_task,
                 session_id: &session_id_task,
                 full_content: &accumulated_content_task,
@@ -7839,6 +7867,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Reporting it would assert a substitution the harness executed, when in
     // fact the harness executed nothing — the same false claim the review-hold
     // producer refuses to make by writing `null`.
+    //
+    // Recorded under the caller's virtual key, which is what tells the control
+    // plane whose workspace the row belongs to. A request made with a provider
+    // key has none to record it under, and the provider key is not sent.
     if !redaction_hijacks.is_empty() && response_denial.is_none() {
         let cp_url = state
             .config
@@ -7846,23 +7878,36 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .policy
             .control_plane_url
             .clone()
-            .unwrap_or_default();
-        if cp_url.is_empty() {
-            tracing::warn!(
+            .filter(|url| !url.is_empty());
+        match (cp_url, credential.virtual_key()) {
+            (Some(cp_url), Some(virtual_key)) => {
+                let client = state.http_client.clone();
+                let virtual_key = virtual_key.clone();
+                let ws = workspace_id.clone();
+                let sess = session_id.clone();
+                let tid = trace.trace_id.clone();
+                let calls = std::mem::take(&mut redaction_hijacks);
+                spawn(async move {
+                    crate::plugins::hijack::report(
+                        &client,
+                        &cp_url,
+                        &virtual_key,
+                        &ws,
+                        &sess,
+                        &tid,
+                        &calls,
+                    )
+                    .await;
+                });
+            }
+            (None, _) => tracing::warn!(
                 count = redaction_hijacks.len(),
                 "Output DLP substituted a tool call but no control plane is configured to record it"
-            );
-        } else {
-            let client = state.http_client.clone();
-            let token = raw_token.to_string();
-            let ws = workspace_id.clone();
-            let sess = session_id.clone();
-            let tid = trace.trace_id.clone();
-            let calls = std::mem::take(&mut redaction_hijacks);
-            spawn(async move {
-                crate::plugins::hijack::report(&client, &cp_url, &token, &ws, &sess, &tid, &calls)
-                    .await;
-            });
+            ),
+            (Some(_), None) => tracing::warn!(
+                count = redaction_hijacks.len(),
+                "Output DLP substituted a tool call; not recorded, because the request was not made with an Intutic virtual key"
+            ),
         }
     }
 

@@ -1062,6 +1062,14 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// split never reaches the half that needed real work.
     async fn wasm_binary(&self, sha256: &str) -> anyhow::Result<Option<Vec<u8>>>;
 
+    /// Raise an infrastructure anomaly on `intutic:system_anomalies`, the
+    /// channel `LocalStore::publish_system_anomaly` writes and the control
+    /// plane turns into an incident. Here as well for the rule registry, which
+    /// reads rules through this trait and holds no `LocalStore`. The default
+    /// does nothing: standalone has no control plane to raise it with, and no
+    /// control-plane rules to raise it about.
+    async fn publish_system_anomaly(&self, _workspace_id: &str, _description: &str) {}
+
     // ── Token intelligence ───────────────────────────────────────────
 
     /// Per-workspace cost-gate threshold in USD.

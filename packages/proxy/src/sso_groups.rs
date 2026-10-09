@@ -274,11 +274,11 @@ fn cache() -> &'static Mutex<HashMap<String, Cached>> {
 pub async fn resolve(
     client: &reqwest::Client,
     control_plane_url: &str,
-    token: &str,
+    virtual_key: &crate::credential::VirtualKey,
     timeout: Duration,
     policy_version: Option<u64>,
 ) -> Result<Option<SsoGroupGate>, String> {
-    let key = crate::store::valkey::sha256_hex(token);
+    let key = crate::store::valkey::sha256_hex(virtual_key.as_str());
     // `Some(gate)` when an earlier answer exists for this key, fresh or not.
     let previous: Option<Option<SsoGroupGate>> = {
         let guard = cache().lock().unwrap_or_else(|p| p.into_inner());
@@ -295,9 +295,8 @@ pub async fn resolve(
         }
     };
 
-    let resp = client
-        .get(format!("{control_plane_url}/api/v1/auth/key-context"))
-        .header("authorization", format!("Bearer {token}"))
+    let resp = virtual_key
+        .authorize(client.get(format!("{control_plane_url}/api/v1/auth/key-context")))
         .timeout(timeout)
         .send()
         .await
@@ -482,6 +481,13 @@ mod tests {
         use wiremock::matchers::{header, method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
+        fn key(token: &str) -> crate::credential::VirtualKey {
+            crate::credential::RequestCredential::classify(token)
+                .virtual_key()
+                .cloned()
+                .expect("a virtual key")
+        }
+
         fn body() -> Value {
             serde_json::json!({
                 "workspaceId": "ws_a",
@@ -526,14 +532,14 @@ mod tests {
             let client = reqwest::Client::new();
             let t = Duration::from_secs(2);
             for _ in 0..3 {
-                let gate = resolve(&client, &server.uri(), &token_a, t, Some(1))
+                let gate = resolve(&client, &server.uri(), &key(&token_a), t, Some(1))
                     .await
                     .unwrap()
                     .unwrap();
                 assert_eq!(gate.decide("Bash").clearance, Clearance::Denied);
             }
             assert_eq!(
-                resolve(&client, &server.uri(), &token_b, t, None).await,
+                resolve(&client, &server.uri(), &key(&token_b), t, None).await,
                 Ok(None)
             );
             // `expect(1)` on each mock is verified when the server drops.
@@ -551,10 +557,10 @@ mod tests {
                 .await;
             let client = reqwest::Client::new();
             let t = Duration::from_secs(2);
-            assert!(resolve(&client, &server.uri(), &token, t, None)
+            assert!(resolve(&client, &server.uri(), &key(&token), t, None)
                 .await
                 .is_err());
-            assert!(resolve(&client, &server.uri(), &token, t, None)
+            assert!(resolve(&client, &server.uri(), &key(&token), t, None)
                 .await
                 .is_err());
         }
@@ -573,7 +579,7 @@ mod tests {
             let client = reqwest::Client::new();
             let t = Duration::from_secs(2);
             for version in [Some(4), Some(4), Some(5), Some(5)] {
-                assert!(resolve(&client, &server.uri(), &token, t, version)
+                assert!(resolve(&client, &server.uri(), &key(&token), t, version)
                     .await
                     .unwrap()
                     .is_some());
@@ -605,12 +611,12 @@ mod tests {
                 .await;
             let client = reqwest::Client::new();
             let t = Duration::from_secs(2);
-            let cleared = resolve(&client, &server.uri(), &token, t, Some(1))
+            let cleared = resolve(&client, &server.uri(), &key(&token), t, Some(1))
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(cleared.decide("Bash").clearance, Clearance::Granted);
-            let refused = resolve(&client, &server.uri(), &token, t, Some(2))
+            let refused = resolve(&client, &server.uri(), &key(&token), t, Some(2))
                 .await
                 .unwrap()
                 .unwrap();
@@ -620,7 +626,7 @@ mod tests {
             // A key refused before any policy was seen for it is a failure,
             // which the proxy's fail mode decides.
             let unseen = format!("vk_{}", "f".repeat(32));
-            assert!(resolve(&client, &server.uri(), &unseen, t, None)
+            assert!(resolve(&client, &server.uri(), &key(&unseen), t, None)
                 .await
                 .is_err());
         }

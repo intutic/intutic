@@ -397,8 +397,10 @@ Filters are hot-reloaded into the proxy without requiring a service restart:
 
 1. The compiled WASM binary is stored in the database and the workspace's active rule set is published to Valkey
 2. Each connected proxy polls that rule set every 5 seconds (there is no push channel)
-3. A new WebAssembly module is instantiated on the fly when the descriptor changes
+3. A new WebAssembly module is instantiated on the fly when the descriptor changes, once its bytes match the SHA-256 the descriptor names
 4. The filter is active on the request path within one poll interval
+
+A module whose bytes do not match its SHA-256 is not loaded. The proxy logs it and raises an incident for the workspace, and the version of that filter it already runs, if any, stays in force.
 
 ---
 
