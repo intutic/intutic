@@ -267,10 +267,20 @@ function gateEnv(g: GateEntry, snapshot?: boolean | string): NodeJS.ProcessEnv {
   }
 }
 
+/**
+ * Runs a gate once per call, rerunning a `GATE_DEADLINE` refusal up to twice.
+ *
+ * The suite fans out four gates at a time across every fixture, and on a loaded
+ * machine an interpreter can take most of the 4 s deadline to start. The gate
+ * then refuses, which is correct in production but says nothing about the
+ * fixture: a benign case reads as a false positive. A rerun that decides is the
+ * verdict. `expectDeadline` turns the rerun off for the tests that are about
+ * the deadline itself.
+ */
 async function runGate(
   g: GateEntry,
   toolInput: Record<string, string>,
-  opts: { tool?: string; snapshot?: boolean | string } = {},
+  opts: { tool?: string; snapshot?: boolean | string; expectDeadline?: boolean } = {},
 ): Promise<RunResult & { signal: NodeJS.Signals | null }> {
   const artifact = join(roots.get(g.name)!, g.artifact)
   const payload = JSON.stringify({
@@ -278,11 +288,14 @@ async function runGate(
     tool_input: toolInput,
     session_id: 'sess_test',
   })
-  return runProcess(g.runner, [artifact], {
+  const once = () => runProcess(g.runner, [artifact], {
     input: payload,
     env: gateEnv(g, opts.snapshot),
     timeoutMs: 20_000,
   })
+  let r = await once()
+  for (let i = 0; i < 2 && !opts.expectDeadline && /GATE_DEADLINE/.test(r.stdout + r.stderr); i++) r = await once()
+  return r
 }
 
 /**
@@ -594,7 +607,7 @@ for (const g of GATES) {
         argPattern: '(a+)+$',
       }])
       const started = Date.now()
-      const r = await runGate(g, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap })
+      const r = await runGate(g, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap, expectDeadline: true })
       const elapsed = Date.now() - started
       assertCleanExit(g, r, 'a call whose WHERE pattern does not finish')
       expect(wasBlocked(g, r), `${g.name} let a call through that its rules never decided`).toBe(true)
