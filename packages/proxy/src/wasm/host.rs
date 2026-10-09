@@ -66,7 +66,7 @@ pub fn module_reads_referenced_files(module: &Module) -> bool {
 /// request, and the runner's fail-open converted that into `Bypass`. The
 /// operator had an installed rule enforcing nothing, permanently.
 ///
-/// A link failure is not the transient condition fail-open exists for. It is a
+/// A link failure is not the transient condition the fail mode exists for. It is a
 /// property of the file and will hold for every request that file is present
 /// for, so the honest moment to report it is once, at load.
 pub fn check_imports_resolvable(module: &Module) -> anyhow::Result<()> {
@@ -117,14 +117,14 @@ pub fn check_imports_resolvable(module: &Module) -> anyhow::Result<()> {
 /// # Failure is always a value
 ///
 /// Every path returns one of the negative codes in [`super::referenced_files`]
-/// and none of them trap. A host trap would unwind the guest, fail the whole
-/// evaluation, and land in the runner's fail-open arm — so a single malformed
-/// call would silently switch off every *other* check the rule performs. A
+/// and none of them trap. A host trap would unwind the guest and leave the
+/// whole evaluation without a verdict — so a single malformed call would
+/// override every *other* check the rule performs with the proxy's fail mode. A
 /// refusal has to be something the rule can see and act on.
 ///
-/// This function fails **closed** (an unreadable file is refused). That is not a
-/// change to the runner's fail-open verdict semantics: it is a read decision,
-/// and what the rule concludes from a refusal is still the rule's to decide.
+/// This function fails **closed** (an unreadable file is refused). That is a
+/// read decision, not a verdict: what the rule concludes from a refusal is
+/// still the rule's to decide.
 fn read_referenced_file_impl(
     caller: &mut Caller<'_, super::runner::WasmState>,
     path_ptr: i32,
@@ -670,8 +670,8 @@ mod referenced_file_tests {
     }
 
     /// A rule that lies about its own memory gets a value back, not a trap.
-    /// A trap would unwind the evaluation into the runner's fail-open arm, so
-    /// one malformed call would switch off every other check the rule performs.
+    /// A trap would leave the evaluation without a verdict, so one malformed
+    /// call would override every other check the rule performs.
     #[test]
     fn hostile_pointers_are_refused_without_trapping() {
         let hostile = format!(

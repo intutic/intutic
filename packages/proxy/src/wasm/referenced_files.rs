@@ -132,9 +132,9 @@ const MAX_COMMAND_SCAN_BYTES: usize = 64 * 1024;
 //
 // A negative return is always a refusal and never a trap. The host must not
 // abort the guest for asking a bad question: an abort would kill the whole
-// evaluation, and the runner converts a failed evaluation into `Bypass` — so a
-// rule that made one malformed call would silently stop enforcing everything
-// else it checks. Refusals are values, deliberately.
+// evaluation, which then reaches no verdict — so a rule that made one malformed
+// call would have everything else it checks replaced by the proxy's fail mode.
+// Refusals are values, deliberately.
 
 /// The call itself was malformed: pointers outside guest memory, a negative
 /// length, a path that is not UTF-8, or no `memory` export to read from.

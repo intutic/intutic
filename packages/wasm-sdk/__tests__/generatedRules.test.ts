@@ -178,7 +178,7 @@ describe('a rendered predicate is a working rule', () => {
     for (const i of imports) {
       expect(
         WASM_HOST_IMPORTS.some((n) => i === `env.${n}`),
-        `${i} is not provided by the proxy; this rule would fail open on every request`,
+        `${i} is not provided by the proxy; the proxy would refuse to load this rule`,
       ).toBe(true)
     }
   }, 120_000)

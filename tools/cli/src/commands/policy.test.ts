@@ -196,7 +196,7 @@ describe('host import enforcement', () => {
    * and never registered by the proxy. A rule reaching `Math.random()` — which
    * AssemblyScript compiles to `env.seed` — passed `policy test` and
    * `policy install`, then failed to instantiate in the proxy. The proxy's WASM
-   * runner fails OPEN on every error path, so the rule enforced nothing and
+   * runner failed OPEN on every error path, so the rule enforced nothing and
    * nothing said so.
    */
   it('names an import the sandbox does not provide', async () => {
