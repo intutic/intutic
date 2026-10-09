@@ -67,6 +67,7 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 403 | `model_not_allowed` | `kill` | The model is not on the approved-models list |
 | 403 | `LOOP_RUN_TERMINATED` | `kill` | The loop run this request belongs to has stopped |
 | 403 | `LOOP_RUN_PENDING_REVIEW` | `hold` | The loop run is paused until a reviewer approves or rejects it |
+| 403 | `policy_held` | `hold` | A Rego or WASM rule held the request for approval; the error names the hold id |
 | 409 | `policy_reask` | `reask` | Revise the approach and try again; repeated attempts escalate to `policy_denied` |
 | 429 | `BUDGET_EXCEEDED` | `kill` | The key's remaining budget does not cover the request |
 | 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The daily spend cap is reached |

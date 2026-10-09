@@ -9,6 +9,7 @@
       { "code": "model_not_allowed", "status": 403, "verdict": "kill", "inBand": false, "meaning": "The model is not on the approved-models list" },
       { "code": "LOOP_RUN_TERMINATED", "status": 403, "verdict": "kill", "inBand": false, "meaning": "The loop run this request belongs to has stopped" },
       { "code": "LOOP_RUN_PENDING_REVIEW", "status": 403, "verdict": "hold", "inBand": false, "meaning": "The loop run is paused until a reviewer approves or rejects it" },
+      { "code": "policy_held", "status": 403, "verdict": "hold", "inBand": false, "meaning": "A Rego or WASM rule held the request for approval; the error names the hold id" },
       { "code": "policy_reask", "status": 409, "verdict": "reask", "inBand": false, "meaning": "Revise the approach and try again; repeated attempts escalate to `policy_denied`" },
       { "code": "BUDGET_EXCEEDED", "status": 429, "verdict": "kill", "inBand": false, "meaning": "The key's remaining budget does not cover the request" },
       { "code": "OVERAGE_HARD_CAP_EXCEEDED", "status": 429, "verdict": "kill", "inBand": false, "meaning": "The daily spend cap is reached" },

@@ -27,6 +27,7 @@ export const PROXY_REFUSALS: Readonly<Record<string, { status: number; verdict: 
   model_not_allowed: { status: 403, verdict: 'kill' },
   LOOP_RUN_TERMINATED: { status: 403, verdict: 'kill' },
   LOOP_RUN_PENDING_REVIEW: { status: 403, verdict: 'hold' },
+  policy_held: { status: 403, verdict: 'hold' },
   policy_reask: { status: 409, verdict: 'reask' },
   BUDGET_EXCEEDED: { status: 429, verdict: 'kill' },
   OVERAGE_HARD_CAP_EXCEEDED: { status: 429, verdict: 'kill' },
