@@ -39,6 +39,7 @@ import {
   noteProxyUrl,
   planDisconnect,
   updatePreToolUseHooks,
+  writeBundledSkills,
 } from '@intutic/sync-daemon'
 import { getAdapter } from '../harness/detector.js'
 import { planN8nDisconnect } from '../harness/n8n.js'
@@ -571,6 +572,32 @@ describe('intutic disconnect, the command', () => {
     expect(Object.fromEntries(after)).toEqual(Object.fromEntries(before))
     expect(JSON.parse(await fs.readFile(config, 'utf-8')).configVersion).toBe(0)
     expect(existsSync(credentials)).toBe(true)
+  })
+
+  // connect writes the Kitkat and rule-author skills into the workspace when
+  // they are missing; disconnect takes back exactly those, and nothing the
+  // user wrote or changed.
+  it('removes the agent skills connect wrote, and keeps a skill the user had or edited', async () => {
+    const kitkat = join(ws, '.agents', 'skills', 'intutic-governance-kitkat', 'SKILL.md')
+    const ruleAuthor = join(ws, '.agents', 'skills', 'intutic-rule-author', 'SKILL.md')
+    await seedUser()
+    await put(kitkat, '# the copy I downloaded\n')
+    const before = await snapshot()
+    await connectAs(['cursor'])
+    expect(await writeBundledSkills(ws)).toEqual([ruleAuthor])
+    await runDisconnect({ keepLogin: true })
+    const after = await snapshot()
+    for (const path of [config, credentials, join(home, '.intutic')]) after.delete(relative(home, path))
+    expect(Object.fromEntries(after)).toEqual(Object.fromEntries(before))
+
+    await clear()
+    await seedUser()
+    await connectAs(['cursor'])
+    expect(await writeBundledSkills(ws)).toEqual([ruleAuthor, kitkat])
+    await fs.appendFile(kitkat, '\nOur team also asks you to name the ticket.\n')
+    await runDisconnect({ keepLogin: true })
+    expect(existsSync(ruleAuthor)).toBe(false)
+    expect(await fs.readFile(kitkat, 'utf-8')).toContain('Our team also asks you to name the ticket.')
   })
 
   it('--harness takes one harness out and leaves the others connected', async () => {

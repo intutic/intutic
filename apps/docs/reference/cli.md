@@ -371,7 +371,9 @@ that login.
 1. Starts Valkey if none is running (connected mode needs it), and spawns a managed proxy if
    nothing is listening on the proxy port (the port of `INTUTIC_PROXY_URL`, else `4000`).
 2. Seeds the policy snapshot (`~/.intutic/hooks/policy-snapshot.rules`) so the harness gates
-   enforce workspace policy from the first tool call.
+   enforce workspace policy from the first tool call, and writes the
+   [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) agent skills into
+   `.agents/skills/` when they are missing.
 3. Every `--interval`, and whenever the control plane pushes a change, fetches the workspace
    config and writes each detected harness's config file from the workspace SOPs plus the local
    SOP folders under `.intutic/sops/`, then refreshes the policy snapshot.
@@ -495,6 +497,7 @@ intutic disconnect [options]
 - **MCP servers**: each server connect wrapped gets its original entry back, every key included; the `intutic` server connect added is removed; and the copies of approved `.mcp.json` servers connect added to `~/.claude.json` are removed.
 - **What connect replaced or removed** comes back: the Claude Code `permissions.deny` rules connect replaced, and Aider's `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint`.
 - **n8n**: the `intutic_proxy_url` and `intutic_governance_rules` variables connect set on your workflows, through the n8n API at `N8N_URL` (default `http://localhost:5678`).
+- **Agent skills** (without `--harness`): the [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) skills connect wrote into `.agents/skills/`, unless you have edited them. A copy that was there before connect, or that an earlier version of connect wrote, stays.
 
 Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted in the macOS login keychain, the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
 
