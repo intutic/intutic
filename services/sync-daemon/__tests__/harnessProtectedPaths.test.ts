@@ -22,8 +22,11 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   GOVERNANCE_BYPASS_PATTERNS,
+  UNIVERSAL_PROTECTED_PATHS,
   protectedPathShellPatterns,
 } from '../src/harness/protectedPaths.js'
+import { PI_AGENT_DIR, PI_EXTENSION_FILE } from '../src/harness/piHooks.js'
+import { OPENCLAW_PLUGIN_FILE } from '../src/harness/openclawHooks.js'
 import { GATES, NO_GATE } from './harness/gateRegistry.js'
 
 const HARNESS_DIR = join(__dirname, '../src/harness')
@@ -107,6 +110,19 @@ describe('harness protected paths', () => {
       missing,
       `These writers emit a gate that does not come from harness/gateBody.ts.`,
     ).toEqual([])
+  })
+
+  it('protects the Pi and OpenClaw gates and what loads them, so an agent cannot remove its own gate', () => {
+    // Both load from the user's home: Pi every file in its extensions
+    // directory, OpenClaw the plugins `~/.openclaw/openclaw.json` lists.
+    const files = [
+      PI_EXTENSION_FILE,
+      join(PI_AGENT_DIR, 'extensions', 'another-extension.ts'),
+      OPENCLAW_PLUGIN_FILE,
+      join('.openclaw', 'openclaw.json'),
+    ]
+    const unprotected = files.filter((f) => !UNIVERSAL_PROTECTED_PATHS.some((p) => f.split('\\').join('/').includes(p)))
+    expect(unprotected).toEqual([])
   })
 
   it('accounts for every harness writer in the registry', () => {

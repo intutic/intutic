@@ -39,6 +39,8 @@ Intutic configures:
 * **Plugin:** `~/.intutic/hooks/openclaw/intutic-governance.cjs`, a standalone plugin with the id `intutic-governance`. Its hook registers a 10-second timeout.
 * **Config:** the plugin's path added to `plugins.load.paths` in `~/.openclaw/openclaw.json`, and its id added to `plugins.allow` when that list is not empty. The rest of the file is kept, written back as JSON, so comments in a JSON5 file are dropped (disconnect puts the original back); a file that does not parse is left untouched and reported in the `intutic connect` log. The Gateway's default `hybrid` reload mode picks the plugin up; with reload mode `off`, restart the Gateway. If `plugins.enabled` is `false`, or `plugins.deny` lists `intutic-governance`, OpenClaw does not load the plugin, and the `intutic connect` log says so.
 
+An agent cannot edit OpenClaw's config to unload the plugin: the Intutic gate refuses a tool call that names `.openclaw/openclaw.json` or `.intutic/hooks`, reading them included, under OpenClaw and under every other harness with a hook gate. Change the config yourself.
+
 Connect does not route OpenClaw's model traffic. To send it through the proxy, set `baseUrl` on the provider under `models.providers` in `~/.openclaw/openclaw.json`.
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness openclaw`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out. Disconnect also removes the `hooks.internal.entries.intutic-governance` entry and `~/.intutic/hooks/openclaw-check.js` that earlier versions wrote. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

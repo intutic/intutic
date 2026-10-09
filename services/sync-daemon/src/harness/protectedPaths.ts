@@ -152,6 +152,14 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.opencode/plugins',
   '.opencode/plugin',
   '.config/opencode/plugins',
+
+  // Pi — the extensions directory, whose every file Pi loads into its own
+  // process (`intutic-governance.js` is the gate). The whole directory, as
+  // for OpenCode. OpenClaw — the config that lists the gate plugin in
+  // `plugins.load.paths`: dropping that entry, or setting `plugins.enabled`
+  // to false, unloads the gate. The plugin file is under `.intutic/hooks`.
+  '.pi/agent/extensions',
+  '.openclaw/openclaw.json',
 ]
 
 // ───────────────────────────────────────────────────────────────────────────

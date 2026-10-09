@@ -1837,6 +1837,15 @@ describe('Pi and OpenClaw plugin gates', () => {
         }
       }, 180_000)
 
+      it("refuses an edit to the Pi extensions directory or OpenClaw's config, by absolute path", async () => {
+        for (const p of ['/home/u/.pi/agent/extensions/intutic-governance.js', '/home/u/.pi/agent/extensions/other.ts', '/home/u/.openclaw/openclaw.json']) {
+          const asWrite = await runPluginGate(g, 'write', { path: p, content: 'export default function () {}' })
+          expect(asWrite.refused, `write to ${p} was allowed`).toBe(true)
+          const asCommand = await runPluginGate(g, shell, { command: `sed -i 's/intutic-governance//' ${p}` })
+          expect(asCommand.refused, `editing ${p} from the shell was allowed`).toBe(true)
+        }
+      })
+
       it('refuses a destructive command only when the snapshot supplies the rule', async () => {
         const without = await runPluginGate(g, shell, { command: 'rm -rf /' })
         expect(without.refused, 'destructive tier fired with no snapshot').toBe(false)

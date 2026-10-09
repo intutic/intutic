@@ -717,6 +717,8 @@ INTUTIC_FLOOR=(
   'path.opencode_plugins	block	-	any	Shell command references the governance-protected path .opencode/plugins	\\.opencode/plugins'
   'path.opencode_plugin	block	-	any	Shell command references the governance-protected path .opencode/plugin	\\.opencode/plugin'
   'path.config_opencode_plugins	block	-	any	Shell command references the governance-protected path .config/opencode/plugins	\\.config/opencode/plugins'
+  'path.pi_agent_extensions	block	-	any	Shell command references the governance-protected path .pi/agent/extensions	\\.pi/agent/extensions'
+  'path.openclaw_openclaw_json	block	-	any	Shell command references the governance-protected path .openclaw/openclaw.json	\\.openclaw/openclaw\\.json'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -1865,6 +1867,8 @@ INTUTIC_FLOOR=(
   'path.opencode_plugins	block	-	any	Shell command references the governance-protected path .opencode/plugins	\\.opencode/plugins'
   'path.opencode_plugin	block	-	any	Shell command references the governance-protected path .opencode/plugin	\\.opencode/plugin'
   'path.config_opencode_plugins	block	-	any	Shell command references the governance-protected path .config/opencode/plugins	\\.config/opencode/plugins'
+  'path.pi_agent_extensions	block	-	any	Shell command references the governance-protected path .pi/agent/extensions	\\.pi/agent/extensions'
+  'path.openclaw_openclaw_json	block	-	any	Shell command references the governance-protected path .openclaw/openclaw.json	\\.openclaw/openclaw\\.json'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -3014,6 +3018,8 @@ INTUTIC_FLOOR=(
   'path.opencode_plugins	block	-	any	Shell command references the governance-protected path .opencode/plugins	\\.opencode/plugins'
   'path.opencode_plugin	block	-	any	Shell command references the governance-protected path .opencode/plugin	\\.opencode/plugin'
   'path.config_opencode_plugins	block	-	any	Shell command references the governance-protected path .config/opencode/plugins	\\.config/opencode/plugins'
+  'path.pi_agent_extensions	block	-	any	Shell command references the governance-protected path .pi/agent/extensions	\\.pi/agent/extensions'
+  'path.openclaw_openclaw_json	block	-	any	Shell command references the governance-protected path .openclaw/openclaw.json	\\.openclaw/openclaw\\.json'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
@@ -4161,6 +4167,8 @@ INTUTIC_FLOOR=(
   'path.opencode_plugins	block	-	any	Shell command references the governance-protected path .opencode/plugins	\\.opencode/plugins'
   'path.opencode_plugin	block	-	any	Shell command references the governance-protected path .opencode/plugin	\\.opencode/plugin'
   'path.config_opencode_plugins	block	-	any	Shell command references the governance-protected path .config/opencode/plugins	\\.config/opencode/plugins'
+  'path.pi_agent_extensions	block	-	any	Shell command references the governance-protected path .pi/agent/extensions	\\.pi/agent/extensions'
+  'path.openclaw_openclaw_json	block	-	any	Shell command references the governance-protected path .openclaw/openclaw.json	\\.openclaw/openclaw\\.json'
 )
 
 # The dynamic tier, read from the policy snapshot. Additive only: it can turn an
