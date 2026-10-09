@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { classify } from '../actions.js'
 import { evaluate, loadSnapshot, SEV_WARN } from '../snapshot.js'
+import { rulesText } from './fixtures/rulesFile.js'
 
 const VECTORS = join(__dirname, '../../../shared-types/fixtures/destructive-sql-vectors.json')
 const doc = JSON.parse(readFileSync(VECTORS, 'utf-8')) as {
@@ -25,7 +26,7 @@ const cases = doc.cases.map((c) => [JSON.stringify(c.text), c] as const)
 
 function sqlDropSnapshot() {
   const file = join(mkdtempSync(join(tmpdir(), 'intutic-gate-sql-')), 'policy-snapshot.rules')
-  writeFileSync(file, [doc.rule.id, 'warn', 'i', doc.rule.subject, 'Destructive SQL statement', doc.rule.source].join('\t') + '\n')
+  writeFileSync(file, rulesText([[doc.rule.id, 'warn', 'i', doc.rule.subject, 'Destructive SQL statement', doc.rule.source].join('\t')]))
   return loadSnapshot('', file)
 }
 

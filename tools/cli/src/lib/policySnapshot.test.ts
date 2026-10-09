@@ -141,11 +141,13 @@ describe('parsePolicySnapshot', () => {
     expect(snap.state).toBe('empty')
   })
 
-  it('leaves the digest unverified when the file declares none', () => {
-    const text = snapshotText([rule('sop.1', ' (Bash) ')], { digest: 'none' })
-    const snap = parsePolicySnapshot(text)
-    expect(snap.digest).toBe('none')
-    expect(snap.state).toBe('ok')
+  it('reports invalid when the file declares no digest, as every gate reads it', () => {
+    const declaredNone = parsePolicySnapshot(snapshotText([rule('sop.1', ' (Bash) ')], { digest: 'none' }))
+    expect(declaredNone.state).toBe('invalid')
+    const missing = parsePolicySnapshot(snapshotText([rule('sop.1', ' (Bash) ')]).replace(/^#digest .*\n/m, ''))
+    expect(missing.digest).toBe('none')
+    expect(missing.state).toBe('invalid')
+    expect(missing.ruleCount).toBe(0)
   })
 
   it('surfaces a future-dated snapshot as a negative age rather than hiding it', () => {

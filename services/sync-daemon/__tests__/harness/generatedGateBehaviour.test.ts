@@ -39,6 +39,7 @@ import {
   GATE_DEADLINE_MS,
   HarnessType,
   encodeMcpAllowlistRecord,
+  mcpSnapshotUnverifiedRefusal,
   holdApprovalHint,
 } from '@intutic/shared-types'
 import {
@@ -46,6 +47,7 @@ import {
   GOVERNANCE_BYPASS_PATTERNS,
   DESTRUCTIVE_COMMAND_PATTERNS,
   SECRET_CONTENT_PATTERNS,
+  HOOK_SETTING_PATTERNS,
   SKILL_SURFACE_PATTERNS,
   SKILL_CONTENT_PATTERNS,
   NORMALISE_CONTRACT,
@@ -89,6 +91,18 @@ function writeRulesFixture(
 
 const home = mkdtempSync(join(tmpdir(), 'intutic-gate-'))
 const roots = new Map<string, string>()
+
+/**
+ * A snapshot whose observe-only allowlist of github was widened by hand, so
+ * its digest fails: every gate must refuse every MCP call on it.
+ */
+function unverifiedAllowlistSnapshot(name: string): string {
+  const snap = writeRulesFixture(join(home, `unverified-${name}.rules`), [], '', [
+    encodeMcpAllowlistRecord({ severity: 'shadow', servers: ['github'] }),
+  ])
+  writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,newcomer\n'))
+  return snap
+}
 
 /** A snapshot carrying the destructive tier at `block`, so the dynamic path is
  *  exercised at full strength regardless of what ships by default. */
@@ -703,6 +717,27 @@ for (const g of GATES) {
       })
     }, FAN_OUT_TIMEOUT)
 
+    it('refuses an edit or a command that sets a VS Code hook setting, and spares the counter-examples', async () => {
+      // chat.useHooks and chat.hookFilesLocations can switch off the GitHub
+      // Copilot gate, which loads from a default location no policy locks.
+      const cases = HOOK_SETTING_PATTERNS.flatMap((pat) => [
+        ...pat.matches.map((m) => ({ pat, m, wantBlock: true })),
+        ...pat.notMatches.map((m) => ({ pat, m, wantBlock: false })),
+      ])
+      await mapLimit(cases, GATE_CONCURRENCY, async ({ pat, m, wantBlock }) => {
+        const input = pat.subject === 'content' ? (JSON.parse(m) as Record<string, string>) : { command: m }
+        const tool = pat.subject === 'content' ? ('new_string' in input ? 'Edit' : 'Write') : 'Bash'
+        const r = await runGate(g, input, { tool })
+        assertCleanExit(g, r, `hook setting ${pat.id}`)
+        expect(
+          wasBlocked(g, r),
+          wantBlock
+            ? `${g.name} allowed ${pat.id}: ${m}`
+            : `${g.name} wrongly blocked ${m} via ${pat.id}`,
+        ).toBe(wantBlock)
+      })
+    }, FAN_OUT_TIMEOUT)
+
     it('blocks a Bash command that would use the dev-.env honeytoken (Wave 4 item 7)', async () => {
       // The developer-workstation honeytoken (infra/scripts/
       // gen-dev-honeytoken.sh, packages/proxy/src/dlp.rs's
@@ -1144,6 +1179,18 @@ for (const g of GATES) {
       expect(auditLogText(g), `${g.name} dropped the snapshot silently`).toMatch(/snapshot_invalid/)
     })
 
+    it('refuses an MCP call on a snapshot whose allowlist was edited, observe-only included, with its code', async () => {
+      // Every contract refuses with the rule id; the stdout contracts' JSON
+      // decisions carry the code too (Antigravity's in its reason).
+      const r = await runGate(g, {}, { tool: 'mcp__github__create_issue', snapshot: unverifiedAllowlistSnapshot(g.name) })
+      assertCleanExit(g, r, 'an MCP call on an unverified snapshot')
+      expect(wasBlocked(g, r), `${g.name} admitted an MCP server on a tampered snapshot`).toBe(true)
+      expect(r.stdout + r.stderr).toContain('[policy_snapshot]')
+      if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {
+        expect(r.stdout).toContain('POLICY_SNAPSHOT_UNVERIFIED')
+      }
+    })
+
     it('is not disarmed by whitespace', async () => {
       // grep is line-oriented and the portable pattern subset has no whitespace
       // class, so normalisation is the only thing standing between a tab and a
@@ -1339,6 +1386,16 @@ describe('Open WebUI prompt filter', () => {
     writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
     expect((await ask('here is a canary-string', snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
   })
+
+  it('reads a snapshot with no digest line as unverified', async () => {
+    const rule: GuardPattern = {
+      id: 'deny.canary', source: 'canary-string', subject: 'command', severity: 'block',
+      reason: 'No canary', rationale: '', matches: [], notMatches: [],
+    }
+    const snap = writeRulesFixture(join(home, 'owui-nodigest.rules'), [rule])
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace(/^#digest .*\n/m, ''))
+    expect((await ask('here is a canary-string', snap)).refused, 'a snapshot without its digest was enforced as valid').toBe(false)
+  })
 })
 
 describe('n8n workflow gate', () => {
@@ -1434,6 +1491,22 @@ describe('n8n workflow gate', () => {
     expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a valid snapshot with the record lost its rules').toBe(true)
     writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
     expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
+  })
+
+  it('refuses a workflow with an MCP client node on an unverified snapshot, observe-only too', async () => {
+    // n8n's MCP Client Tool node calls tools on an MCP server, and a snapshot
+    // that failed its integrity check admits none.
+    const mcpNode = { name: 'Ask GitHub', type: '@n8n/n8n-nodes-langchain.mcpClientTool', typeVersion: 1, parameters: { endpointUrl: 'https://mcp.example/sse' } }
+    const snap = writeRulesFixture(join(home, 'unverified-n8n-wf.rules'), DESTRUCTIVE_COMMAND_PATTERNS.map((p) => ({ ...p, severity: 'shadow' as const })), '', [
+      encodeMcpAllowlistRecord({ severity: 'shadow', servers: ['github'] }),
+    ])
+    expect((await runWorkflow(wf([mcpNode]), snap)).refused, 'refused an MCP node on a verified snapshot').toBe(false)
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
+    const r = await runWorkflow(wf([commandNode('npm run build'), mcpNode]), snap)
+    expect(r.refused, 'an MCP node ran on a tampered snapshot').toBe(true)
+    expect(r.stderr).toContain(mcpSnapshotUnverifiedRefusal('Ask GitHub').reason + ' [policy_snapshot]')
+    // A workflow without one is left to the other rules.
+    expect((await runWorkflow(wf([commandNode('npm run build')]), snap)).refused).toBe(false)
   })
 
   it('applies destructive rules only when the snapshot supplies them', async () => {
@@ -1682,6 +1755,12 @@ describe('OpenCode plugin gate', () => {
         expect(withSnap.refused, 'destructive command allowed with the snapshot present').toBe(true)
       })
 
+      it('refuses an MCP call on a snapshot that fails its digest, observe-only included', async () => {
+        const r = await runPlugin(shape, 'mcp__github__create_issue', {}, unverifiedAllowlistSnapshot(`opencode-${shape}`))
+        expect(r.refused, 'an MCP server was admitted on a tampered snapshot').toBe(true)
+        expect(r.stderr).toContain('[policy_snapshot]')
+      })
+
       it('records the verdict with harnessType opencode, under an eventId of its own', async () => {
         await expectEventIds(gate, async () => { await runPlugin(shape, 'bash', { command: 'chflags nouchg .intutic/hooks/x' }) }, 1)
         const text = auditLogText(gate)
@@ -1917,6 +1996,14 @@ describe('Pi and OpenClaw plugin gates', () => {
         expect(without.refused, 'destructive tier fired with no snapshot').toBe(false)
         const withSnap = await runPluginGate(g, shell, { command: 'rm -rf /' }, { snapshot: snapshotRules })
         expect(withSnap.refused, 'destructive command allowed with the snapshot present').toBe(true)
+      })
+
+      it('refuses an MCP call on a snapshot that fails its digest, observe-only included', async () => {
+        // Pi names an MCP tool mcp__<server>__<tool>; OpenClaw <server>__<tool>.
+        const tool = g.name === 'pi' ? 'mcp__github__create_issue' : 'github__create_issue'
+        const r = await runPluginGate(g, tool, {}, { snapshot: unverifiedAllowlistSnapshot(g.name) })
+        expect(r.refused, 'an MCP server was admitted on a tampered snapshot').toBe(true)
+        expect(r.stderr).toContain('[policy_snapshot]')
       })
 
       it('refuses tool arguments over the size limit as COMMAND_TOO_LARGE', async () => {

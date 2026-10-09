@@ -745,16 +745,33 @@ workspace's MCP settings, delivered through the sync daemon's policy snapshot:
   are refused with the proxy's own codes (`SERVER_BLOCKED`, `SERVER_HELD`,
   `SERVER_NOT_APPROVED`, `TOOL_DISABLED`), rule ids and reasons: the proxy
   and the gates run one decision. The registry rides in `policy-snapshot.rules`
-  as an `@mcp_registry` record inside the snapshot's digest. A gate that finds
-  the digest broken keeps the registry's refusals and ignores its approvals,
-  so editing the file approves nothing.
+  as an `@mcp_registry` record inside the snapshot's digest.
 - **The allowlist.** A server not on `mcpAllowedServers` (see
   [The allowlist](#the-allowlist-mcpallowedservers) above) is refused with
   `SERVER_NOT_ALLOWED` (rule `mcp_allowlist`), or reported as
   `tool_would_block` in an observe-only (`SILENT_LOG`) workspace. The list
-  rides as an `@mcp_allowlist` record, also inside the digest. A gate that
-  finds the digest broken keeps the allowlist but admits no server and
-  refuses rather than reports, so adding a server to the file admits nothing.
+  rides as an `@mcp_allowlist` record, also inside the digest.
+
+### A snapshot that fails verification
+
+A policy takes effect only when it verifies. A snapshot whose digest is broken
+or missing, or that was issued to another workspace, admits no MCP server: every
+gate refuses every `mcp__<server>__<tool>` call with `POLICY_SNAPSHOT_UNVERIFIED`
+(rule `policy_snapshot`), at block in an observe-only workspace too. Neither
+record can be trusted then, and a deleted record looks exactly like one the
+workspace never set, so changing a server's default policy, taking a server off
+the blocked list, adding one to the allowlist, setting the allowlist to shadow
+or deleting either record admits nothing. The gates also drop the snapshot's
+other rules except its SSO-group refusals, and report `snapshot_invalid`.
+
+The sync daemon keeps the last snapshot it wrote, and so verified, in
+`~/.intutic/hooks/verified/`. It watches the live snapshot, and when either
+file differs from that copy (edited, deleted, or an older snapshot copied back)
+it puts the verified copy back at once, or fetches a fresh snapshot if it has
+none. It reports each tamper as a `config_tamper` event: an incident on the
+[Audit Timeline](/guide/audit-timeline), and a `TAMPER` gate decision in the
+[SIEM export](/guide/siem-export). The gates allow again as soon as the copy is
+back.
 
 Under `mcpDefaultPolicy: deny` this reaches servers the proxy never sees, the
 harness's own included: Claude Code's IDE tools (`mcp__ide__…`) are refused
@@ -764,11 +781,12 @@ A harness that reads a JSON decision from the gate gets the code in `code`
 ([refusal codes](/reference/harness-security-matrix#hook-refusal-codes)).
 
 The [tool gate SDKs](/reference/gate-sdk) apply both records the same way, from
-the same snapshot, for agents built on a framework with no hook file, and
-report a server they refuse as unapproved for the approval queue too. The
-control plane's `POST /api/v1/hook-gate`, which the SDKs call when they have a
-client, applies the registry from the workspace's own records, with the same
-codes in `code`.
+the same snapshot, for agents built on a framework with no hook file, refuse
+every MCP call on a snapshot that fails verification, and report a server they
+refuse as unapproved for the approval queue too. The control plane's
+`POST /api/v1/hook-gate`, which the SDKs call when they have a client, applies
+the registry and then `mcpAllowedServers` from the workspace's own settings, with
+the same codes in `code`, in every intervention mode.
 
 **This is a backstop, not a second primary control.** It is:
 

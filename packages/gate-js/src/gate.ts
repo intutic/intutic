@@ -13,7 +13,7 @@
  *
  *   A0  SSO group policy  from the policy snapshot       unknown groups refused
  *   A1  policy snapshot   port of intuticGate()          fails CLOSED
- *   M   MCP registry      from the policy snapshot       edited approvals refused
+ *   M   MCP registry      from the policy snapshot       unverified snapshot admits none
  *   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
  *   A2  image integrity   local check                    fails CLOSED
  *   B   POST /hook-gate   control-plane check             fail posture set by GateClient
@@ -23,7 +23,10 @@
  * `@mcp_registry` and `@mcp_allowlist` records, with the decision, codes,
  * rule ids and reasons the hook gates and the MCP proxy use
  * (`mcpRegistryRecord.ts`, a byte-identical copy of `@intutic/shared-types`'
- * module). A refusal of an unapproved server reaches the control plane as a
+ * module). On a snapshot that fails its integrity check, Tier M refuses
+ * every MCP call with `POLICY_SNAPSHOT_UNVERIFIED`, observe-only or not: a
+ * deleted or edited record cannot be told from the workspace's own. A
+ * refusal of an unapproved server reaches the control plane as a
  * `tool_blocked` event whose reason ends `[mcpDefaultPolicy]`, which puts the
  * server in the approval queue, as a hook gate's refusal does.
  *
@@ -68,7 +71,7 @@ import { IntuticGateHold, IntuticGateRefusal, type GateRefusalCode } from './err
 import { holdMessage, requestHold } from './hold.js'
 import { tooLargeReason } from './limits.js'
 import { GateClient } from './client.js'
-import { evaluateMcpAllowlist, evaluateMcpRegistry } from './mcpRegistryRecord.js'
+import { evaluateMcpAllowlist, evaluateMcpRegistry, mcpSnapshotUnverifiedRefusal } from './mcpRegistryRecord.js'
 import * as imagecheck from './imagecheck.js'
 import * as snapshot from './snapshot.js'
 import * as soprules from './soprules.js'
@@ -378,6 +381,7 @@ export class Gate {
    * Throws when the workspace's MCP server registry or allowlist refuses an
    * `mcp__<server>__<tool>` call: the registry first, as every gate orders
    * them. An allowlist in `shadow` records the refusal and lets the call on.
+   * A snapshot that failed its integrity check admits no MCP server.
    */
   private async guardMcp(toolName: string, toolInput: ToolInput): Promise<void> {
     if (!toolName.startsWith('mcp__')) return
@@ -386,6 +390,12 @@ export class Gate {
     if (sep <= 0) return
     const snap = this.getSnapshot()
     const server = rest.slice(0, sep)
+    if (snap.state === 'invalid') {
+      const refusal = mcpSnapshotUnverifiedRefusal(server)
+      const reason = `${refusal.reason} [${refusal.ruleId}]`
+      await this.emit('tool_blocked', toolName, reason, toolInput)
+      throw new IntuticGateRefusal(reason, refusal.code)
+    }
     const registry = snap.mcpRegistry ? evaluateMcpRegistry(snap.mcpRegistry, server, rest.slice(sep + 2)) : null
     if (registry) {
       const reason = `${registry.reason} [${registry.ruleId}]`

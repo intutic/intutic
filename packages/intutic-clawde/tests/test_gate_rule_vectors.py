@@ -16,6 +16,7 @@ from linear_time import assert_linear_time
 from intutic_clawde.gate import snapshot as snapshot_mod
 from intutic_clawde.gate.gate import Gate, GateConfig, IntuticGateRefusal
 from intutic_clawde.gate.limits import ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT
+from conftest import rules_text
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = ROOT / "packages" / "shared-types" / "fixtures"
@@ -37,7 +38,7 @@ def build_text(c: dict, scale: int = 4) -> str:
 
 def decide(tmp_path: Path, v: dict, call: dict) -> bool:
     path = tmp_path / "rule.rules"
-    path.write_text(v["line"] + "\n", encoding="utf-8")
+    path.write_text(rules_text([v["line"]]), encoding="utf-8")
     snap = snapshot_mod.load_snapshot("", str(path))
     assert len(snap.rules) == 1, f"{v['id']} did not load"
     inp = call["input"]

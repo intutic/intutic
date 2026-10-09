@@ -320,6 +320,165 @@
       ]
     },
     {
+      "id": "hook_settings.vscode_key_written",
+      "subject": "content",
+      "flags": "-",
+      "line": "hook_settings.vscode_key_written\tblock\t-\tcontent\tGovernance bypass pattern: setting chat.useHooks or chat.hookFilesLocations, which can switch off the GitHub Copilot governance hook. Change VS Code hook settings yourself, not through an agent.\tchat\\.(useHooks|hookFilesLocations)(\\\\)?\" *:",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Write",
+          "input": {
+            "file_path": ".vscode/settings.json",
+            "content": "{\n  \"chat.useHooks\": false\n}"
+          }
+        },
+        {
+          "tool": "Write",
+          "input": {
+            "file_path": "/u/Code/User/settings.json",
+            "old_string": "{",
+            "new_string": "{ \"chat.hookFilesLocations\": {\".github/hooks\": false},"
+          }
+        },
+        {
+          "tool": "Write",
+          "input": {
+            "file_path": "app.code-workspace",
+            "content": "{\"settings\":{\"chat.useHooks\":false}}"
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Write",
+          "input": {
+            "file_path": "notes.md",
+            "content": "VS Code reads chat.useHooks from settings"
+          }
+        },
+        {
+          "tool": "Write",
+          "input": {
+            "file_path": ".vscode/settings.json",
+            "content": "{\"chat.useHooksLater\": 1}"
+          }
+        },
+        {
+          "tool": "Write",
+          "input": {
+            "file_path": ".vscode/settings.json",
+            "content": "{\"editor.tabSize\": 2}"
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the key with no colon, repeated",
+          "prefix": "",
+          "unit": "chat.useHooks ",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Write",
+          "input": {
+            "file_path": "notes.txt",
+            "content": ""
+          },
+          "fill": "content"
+        },
+        {
+          "name": "the key in key position after a long text",
+          "prefix": "",
+          "unit": "x ",
+          "suffix": "chat.useHooks\":",
+          "length": 262144,
+          "held": true,
+          "tool": "Write",
+          "input": {
+            "file_path": "notes.txt",
+            "content": ""
+          },
+          "fill": "content"
+        }
+      ]
+    },
+    {
+      "id": "hook_settings.vscode_key_command",
+      "subject": "command",
+      "flags": "-",
+      "line": "hook_settings.vscode_key_command\tblock\t-\tcommand\tGovernance bypass pattern: a shell command naming chat.useHooks or chat.hookFilesLocations, which can switch off the GitHub Copilot governance hook. Change VS Code hook settings yourself, not through an agent.\tchat\\.(useHooks|hookFilesLocations)",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " jq '.\"chat.useHooks\"=false' .vscode/settings.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " sed -i s/chat.hookFilesLocations/x/ settings.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " python3 set.py chat.useHooks false "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " echo useHooks "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " cat chat.md "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the key less its last letter, repeated",
+          "prefix": "",
+          "unit": " chat.useHook",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the key after a long command",
+          "prefix": " echo",
+          "unit": " x",
+          "suffix": " chat.useHooks",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
       "id": "skill_surface.agents_skills_write",
       "subject": "target",
       "flags": "-",

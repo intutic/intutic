@@ -81,6 +81,15 @@ class TestIntegrity:
         s = snap.load_snapshot(WS, p)
         assert s.state == "invalid" and s.rules == []
 
+    def test_missing_digest_invalidates_as_in_every_gate(self, tmp_path):
+        p = _rules_file(tmp_path, [line("d", "block", "-", "command", "r", "rm")])
+        with open(p, encoding="utf-8") as fh:
+            text = "".join(l for l in fh if not l.startswith("#digest "))
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        s = snap.load_snapshot(WS, p)
+        assert s.state == "invalid" and s.rules == []
+
     def test_workspace_mismatch_invalidates(self, tmp_path):
         p = _rules_file(tmp_path, [line("d", "block", "-", "command", "r", "rm")],
                         workspace="ws_someone_else")

@@ -62,7 +62,7 @@ Every event carries a `sourceTable` naming its source:
 | `decision_reviews` | A [held decision](/guide/decisions#slack-interactive-reviews) approved or rejected, in Slack or with `intutic decision`: `status` (`APPROVED` or `REJECTED`), the reviewer, `via` (`API`, or the Slack account), the reviewer's reason, the decision summary, and whether a review-hold bypass was written |
 | `secret_rotations` | A signing secret replaced: `target` (`notification_rule`, `siem_destination` or `github_webhook`), its id and name, and who replaced it. Never the secret |
 | `evidence_exports` | A compliance evidence download: `kind` (`soc2_archive`, `framework_report` or `human_oversight`), `format`, the framework, the evidence run, the period, whether it was signed, and who downloaded it |
-| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
+| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also `TAMPER`: a governance file (a gate, a hook registration, the policy snapshot or a VS Code hook setting) changed outside the sync daemon, which the daemon put back. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
 
 ### Who: the `actor` object {#the-actor}
 
@@ -114,7 +114,7 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 
 | Source | Event class | Severity |
 |---|---|---|
-| `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
+| `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block or a tamper, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
 | `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
 | `workspace_settings_changes` | `SETTINGS_CHANGE` | 5 |
 | `sop_registry` | `POLICY_CHANGE_UPDATE` | 4 |

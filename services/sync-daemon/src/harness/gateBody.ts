@@ -64,6 +64,7 @@ import {
   MCP_ALLOWLIST_RECORD_TAG,
   MCP_REGISTRY_JS_SOURCE,
   MCP_REGISTRY_RECORD_TAG,
+  MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE,
   PHRASES_JS_SOURCE,
   SEQUENCE_JS_SOURCE,
 } from '@intutic/shared-types'
@@ -211,8 +212,23 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * registry decision is `intutic_clawde/gate/mcp_registry.py`, emitted
  * verbatim. A v15 gate reading a v16 snapshot enforces no allowlist; the
  * daemon regenerates every gate each sync cycle.
+ *
+ * v17: an unverified snapshot admits no MCP server. A snapshot whose digest
+ * is broken or missing, or that names another workspace, used to keep the
+ * registry's refusals and an allowlist that admitted nothing; but a deleted
+ * record looks exactly like one never set, and an edit to the registry's
+ * blocked list or default policy still widened it. Every gate now refuses
+ * every MCP call on such a snapshot as `POLICY_SNAPSHOT_UNVERIFIED`
+ * (`mcpSnapshotUnverifiedRefusal` in `@intutic/shared-types`), at `block`
+ * in an observe-only workspace too, and the sync daemon restores the last
+ * snapshot it verified. The JS and Python readers also read a snapshot with
+ * no `#digest` line as unverified, as the bash gates already did. And the
+ * compiled floor refuses an edit to a VS Code settings file that sets
+ * `chat.useHooks` or `chat.hookFilesLocations` (`HOOK_SETTING_PATTERNS`),
+ * which can switch off the GitHub Copilot gate. The `.rules` format is
+ * unchanged.
  */
-export const GATE_VERSION = 16
+export const GATE_VERSION = 17
 
 /**
  * The timeout every writer sets on its gate's hook entry, in seconds, where
@@ -245,6 +261,8 @@ export const HOOK_TIMEOUT_SECONDS = 10
  * - `SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`:
  *   the MCP server registry;
  * - `SERVER_NOT_ALLOWED`: the workspace's `mcpAllowedServers` list;
+ * - `POLICY_SNAPSHOT_UNVERIFIED`: an MCP call on a snapshot that failed its
+ *   integrity check, which admits no MCP server;
  * - `COMMAND_TOO_LARGE`: the call is over the size a gate evaluates;
  * - `GATE_DEADLINE`: the gate did not decide within `GATE_DEADLINE_MS`;
  * - `UNREADABLE_CALL`: the payload held no tool call the gate could read;
@@ -260,6 +278,7 @@ export const HOOK_REFUSAL_CODES = [
   'SERVER_NOT_APPROVED',
   'TOOL_DISABLED',
   'SERVER_NOT_ALLOWED',
+  'POLICY_SNAPSHOT_UNVERIFIED',
   'COMMAND_TOO_LARGE',
   'GATE_DEADLINE',
   'UNREADABLE_CALL',
@@ -315,15 +334,17 @@ export const REVIEW_REQUEST_VERSION = 1
 /**
  * The Python the bash gates run, defined once per gate script: the phrase
  * matcher ({@link PHRASES_PY_SOURCE}), the MCP registry decision
- * ({@link MCP_REGISTRY_PY_SOURCE}) and three entry points over them.
+ * ({@link MCP_REGISTRY_PY_SOURCE}) and four entry points over them.
  *
  * - `intutic_actions(tool, command)` — the hold classifier, called by
  *   {@link SHELL_EXTRACT}'s Python, which already reads the raw tool input:
  *   space-padded action tokens (" action:deploy ") or " ".
  * - `intutic_phrase_rule(source, command)` — a `phrase`-subject rule: its
  *   source is `|`-separated phrases, each matched as words with boundaries.
- * - `intutic_mcp_registry(record_b64, tool, trust_approvals)` — the
- *   `@mcp_registry` record's decision on an MCP call.
+ * - `intutic_mcp_registry(record_b64, tool)` — the `@mcp_registry` record's
+ *   decision on an MCP call.
+ * - `intutic_mcp_unverified(tool)` — the refusal of an MCP call on a
+ *   snapshot that failed its integrity check.
  *
  * The classifier used to be `grep -E` with a gap regex over the normalised
  * command, and bash's own pattern substitution on it took a minute on a long
@@ -353,19 +374,24 @@ def intutic_phrase_rule(source, command):
     return any(has_phrase(words, p, True) for p in source.split("|"))
 
 
-def intutic_mcp_registry(record_b64, tool, trust_approvals):
+def intutic_mcp_registry(record_b64, tool):
     # The registry decision for one mcp__<server>__<tool> call, from the
     # snapshot's @mcp_registry record: "code<TAB>ruleId<TAB>reason", or "" to
-    # let the call continue. Without trust_approvals (the snapshot failed its
-    # digest) the record's approvals count for nothing.
+    # let the call continue.
     call = split_mcp_tool_name(tool)
     registry = decode_registry_record(MCP_REGISTRY_RECORD_TAG + "\\t" + record_b64)
     if call is None or registry is None:
         return ""
-    if not trust_approvals:
-        registry["approvedServers"] = []
     refusal = evaluate_registry(registry, call[0], call[1])
     return "\\t".join(refusal) if refusal else ""
+
+
+def intutic_mcp_unverified(tool):
+    # The refusal of an mcp__<server>__<tool> call on a snapshot that failed
+    # its integrity check, as "code<TAB>ruleId<TAB>reason"; "" for a call that
+    # is not an MCP call.
+    call = split_mcp_tool_name(tool)
+    return "\\t".join(unverified_refusal(call[0])) if call else ""
 `
 
 /**
@@ -837,10 +863,8 @@ INTUTIC_SNAPSHOT_GENERATED=""
 INTUTIC_MCP_ALLOWLIST=0
 INTUTIC_MCP_SEVERITY=""
 INTUTIC_MCP_SERVERS=""
-# The MCP server registry record (base64 JSON, inside the digest), and whether
-# its approvals count: not once the snapshot fails its integrity check.
+# The MCP server registry record (base64 JSON, inside the digest).
 INTUTIC_MCP_REGISTRY=""
-INTUTIC_MCP_REGISTRY_APPROVALS=1
 if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   INTUTIC_SNAPSHOT_STATE="ok"
   while IFS= read -r _line || [ -n "$_line" ]; do
@@ -905,13 +929,10 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
     fi
     INTUTIC_DYNAMIC=()
     if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
-    # The registry's refusals stay for the same reason; its approvals do not,
-    # so an approval added to this file clears nothing.
-    INTUTIC_MCP_REGISTRY_APPROVALS=0
-    # Likewise the allowlist: it still applies, but neither its servers nor
-    # its severity can be vouched for, so it admits no server and refuses.
-    INTUTIC_MCP_SEVERITY="block"
-    INTUTIC_MCP_SERVERS=""
+    # Neither MCP record can be vouched for, and a deleted one looks like one
+    # never set: the snapshot admits no MCP server (the refusal below).
+    INTUTIC_MCP_REGISTRY=""
+    INTUTIC_MCP_ALLOWLIST=0
   fi
 fi
 
@@ -932,7 +953,7 @@ fi
 
 case "$INTUTIC_SNAPSHOT_STATE" in
   absent)  ${log} "snapshot_absent" "\${TOOL:-}" "No policy snapshot at $INTUTIC_SNAPSHOT_RULES — built-in protections only" || true ;;
-  invalid) ${log} "snapshot_invalid" "\${TOOL:-}" "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals" || true ;;
+  invalid) ${log} "snapshot_invalid" "\${TOOL:-}" "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused" || true ;;
   empty)   ${log} "snapshot_empty" "\${TOOL:-}" "Policy snapshot contains no rules — the compile produced nothing" || true ;;
   stale)   ${log} "snapshot_stale" "\${TOOL:-}" "Policy snapshot is \${_intutic_age_days} days old and still enforced" || true ;;
 esac
@@ -1169,6 +1190,34 @@ if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
   done
 fi
 
+# ── Unverified snapshot (gate body v17) ──────────────────────────────────────
+# A snapshot that failed its digest or workspace check admits no MCP server:
+# neither record in it can be vouched for, and a deleted one looks like one
+# never set. Refused at block, in an observe-only workspace too, with the code,
+# rule id and reason of mcpSnapshotUnverifiedRefusal (intutic_mcp_unverified
+# in GATE_PY_LIB).
+if [ "$INTUTIC_SNAPSHOT_STATE" = "invalid" ]; then
+  case "\${TOOL:-}" in
+    mcp__*__*)
+      _intutic_unv="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_mcp_unverified"](sys.argv[1]))' "\${TOOL:-}" 2>/dev/null || true)"
+      if [ -n "$_intutic_unv" ]; then
+        IFS=$'\\t' read -r _ _intutic_unv_rid _intutic_unv_reason <<< "$_intutic_unv"
+      else
+        # python3 could not say why (it is required, and checked, before any
+        # rule runs): still a refusal, never an allow.
+        _intutic_unv_rid="policy_snapshot"
+        _intutic_unv_reason="POLICY_SNAPSHOT_UNVERIFIED — the policy snapshot failed its integrity check and admits no MCP server"
+      fi
+      echo "[Intutic Governance] BLOCKED: \${_intutic_unv_reason} [\${_intutic_unv_rid}]" >&2
+      ${log} "tool_blocked" "\${TOOL:-}" "\${_intutic_unv_reason} [\${_intutic_unv_rid}]"
+      exit 2
+      ;;
+  esac
+fi
+
 # ── MCP server registry backstop (gate body v14) ─────────────────────────────
 # The workspace's registry decisions from the snapshot's @mcp_registry record,
 # applied to every mcp__<server>__<tool> call: a blocked or held server, a
@@ -1182,7 +1231,7 @@ if [ -n "$INTUTIC_MCP_REGISTRY" ]; then
       _intutic_reg="$(python3 -c 'import os, sys
 lib = {}
 exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2], sys.argv[3] == "1"))' "$INTUTIC_MCP_REGISTRY" "\${TOOL:-}" "$INTUTIC_MCP_REGISTRY_APPROVALS" 2>/dev/null || true)"
+sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2]))' "$INTUTIC_MCP_REGISTRY" "\${TOOL:-}" 2>/dev/null || true)"
       if [ -n "$_intutic_reg" ]; then
         IFS=$'\\t' read -r _ _intutic_reg_rid _intutic_reg_reason <<< "$_intutic_reg"
         echo "[Intutic Governance] BLOCKED: \${_intutic_reg_reason} [\${_intutic_reg_rid}]" >&2
@@ -1327,7 +1376,9 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   try {
     const body = text.split('\\n').filter(function (l) { return l && l.charAt(0) !== '#'; }).join('\\n');
     const actual = require('crypto').createHash('sha256').update(body).digest('hex').slice(0, 32);
-    if (out.digest !== 'none' && actual !== out.digest) out.state = 'invalid';
+    // A snapshot with no digest line is unverified too: the daemon always
+    // writes one, so its absence means the file was edited.
+    if (actual !== out.digest) out.state = 'invalid';
   } catch (e) { /* no crypto — leave the digest unverified rather than fail the gate */ }
 
   if (out.state === 'ok' && out.workspaceId && INTUTIC_WORKSPACE_ID && out.workspaceId !== INTUTIC_WORKSPACE_ID) {
@@ -1344,12 +1395,10 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   // clear a tool the workspace's group policy refuses.
   if (out.state === 'invalid') {
     out.rules = out.rules.filter(function (r) { return r.id.indexOf('sso_group.') === 0 && r.severity === 'block'; });
-    // The registry's refusals stay for the same reason; its approvals do not,
-    // so an approval added to this file clears nothing.
-    if (out.mcpRegistry) out.mcpRegistry.approvedServers = [];
-    // Likewise the allowlist: it still applies, but neither its servers nor
-    // its severity can be vouched for, so it admits no server and refuses.
-    if (out.mcpAllowlist) out.mcpAllowlist = { severity: 'block', servers: [] };
+    // Neither MCP record can be vouched for, and a deleted one looks like one
+    // never set: the gate admits no MCP server on this snapshot at all.
+    out.mcpRegistry = null;
+    out.mcpAllowlist = null;
   }
 
   if (out.state === 'ok' && out.generatedAt) {
@@ -1469,6 +1518,8 @@ ${MCP_REGISTRY_JS_SOURCE}
 
 ${MCP_ALLOWLIST_JS_SOURCE}
 
+${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}
+
 /**
  * Evaluates one tool call. Returns normally to allow; refuses via this harness's
  * contract otherwise.
@@ -1567,7 +1618,7 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
     var _msg = snap.state === 'absent'
       ? 'No policy snapshot — built-in protections only'
       : snap.state === 'invalid'
-        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals'
+        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused'
         : snap.state === 'empty'
           ? 'Policy snapshot contains no rules — the compile produced nothing'
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
@@ -1660,6 +1711,21 @@ ${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId')}
       try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
       try { record('tool_blocked', toolName, reason); } catch (e) {}
 ${refuseWith('intuticRuleCode(rule)', 'rule.id')}
+    }
+  }
+
+  // An unverified snapshot admits no MCP server (gate body v17): neither
+  // record in it can be vouched for, and a deleted one looks like one never
+  // set. Refused at block, in an observe-only workspace too.
+  if (snap.state === 'invalid' && toolName.indexOf('mcp__') === 0) {
+    var _unvRest = toolName.slice('mcp__'.length);
+    var _unvSep = _unvRest.indexOf('__');
+    if (_unvSep > 0) {
+      var _unv = mcpSnapshotUnverifiedRefusal(_unvRest.slice(0, _unvSep));
+      var reason = _unv.reason + ' [' + _unv.ruleId + ']';
+      try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+      try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuseWith('_unv.code', '_unv.ruleId')}
     }
   }
 
@@ -2192,7 +2258,8 @@ def _intutic_snapshot_rules():
             body = "\\n".join(l.rstrip("\\n") for l in fh
                             if l.strip() and not l.startswith("#"))
         actual = hashlib.sha256(body.encode()).hexdigest()[:32]
-        if _state["digest"] and actual != _state["digest"]:
+        # No digest line is unverified too: the daemon always writes one.
+        if actual != _state["digest"]:
             return []
     except Exception:
         pass
@@ -2298,6 +2365,9 @@ ${PHRASES_JS_SOURCE}
 
 ${JS_SNAPSHOT_LOADER}
 
+// The refusal of an MCP call on an unverified snapshot (mcpRegistryRecord.ts).
+${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}
+
 /**
  * Evaluates one workflow. Returns normally to allow; throws to abort the
  * execution. \`record\` is called as (verdict, toolName, reason), the same
@@ -2321,7 +2391,7 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
     var _msg = snap.state === 'absent'
       ? 'No policy snapshot — built-in protections only'
       : snap.state === 'invalid'
-        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals'
+        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused'
         : snap.state === 'empty'
           ? 'Policy snapshot contains no rules — the compile produced nothing'
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
@@ -2358,6 +2428,18 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
     if (!node || typeof node !== 'object') continue;
     const nodeType = String(node.type || '');
     const nodeName = String(node.name || nodeType || 'node');
+    // An MCP client node (n8n's MCP Client and MCP Client Tool, and the
+    // community package's) calls tools on an MCP server. A snapshot that
+    // failed its integrity check admits no MCP server (gate body v17), so a
+    // workflow that would call one is refused, observe-only or not. The node
+    // stands in for the server: n8n names it, the URL it reaches does not.
+    if (snap.state === 'invalid' && /^mcpclient/i.test(nodeType.slice(nodeType.lastIndexOf('.') + 1))) {
+      const _unv = mcpSnapshotUnverifiedRefusal(nodeName);
+      const reason = _unv.reason + ' [' + _unv.ruleId + '] (node "' + nodeName + '", type ' + nodeType + ')';
+      try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+      try { record('tool_blocked', 'n8n:' + nodeName, reason); } catch (e) {}
+      throw new Error('[Intutic Governance] BLOCKED: ' + reason);
+    }
     // Compact stringify, insertion order, non-ASCII intact — the same shape
     // matchSopRule and every per-tool gate pin for argPattern matching.
     var paramsJson = '{}';

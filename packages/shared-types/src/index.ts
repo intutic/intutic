@@ -472,12 +472,15 @@ export {
   evaluateMcpAllowlist,
   MCP_ALLOWLIST_RECORD_TAG,
   MCP_ALLOWLIST_JS_SOURCE,
+  mcpSnapshotUnverifiedRefusal,
+  MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE,
 } from './mcpRegistryRecord.js'
 export type {
   McpRegistryRecord,
   McpRegistryRefusal,
   McpAllowlistRecord,
   McpAllowlistRefusal,
+  McpSnapshotUnverifiedRefusal,
 } from './mcpRegistryRecord.js'
 export { GEMINI_CLI_GATE_ID, gateIdentitiesOf, harnessOfGate } from './gateIdentity.js'
 

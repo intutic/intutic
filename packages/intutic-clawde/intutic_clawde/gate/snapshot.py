@@ -89,9 +89,10 @@ class Snapshot:
     sso_groups: Optional[sso.SsoGroupRecord] = None
     # The workspace's MCP server registry decisions (the @mcp_registry record)
     # and its mcpAllowedServers list (@mcp_allowlist), as mcp_registry.py
-    # reads them; None when there are none. On a snapshot that fails its
-    # integrity check the registry has no approvals and the allowlist admits
-    # no server and refuses at block, so an edit to either widens nothing.
+    # reads them; None when there are none. None on a snapshot that fails its
+    # integrity check, on which the gate admits no MCP server at all
+    # (mcp_registry.unverified_refusal): a deleted record looks like one
+    # never set, so neither can be vouched for.
     mcp_registry: Optional[dict] = None
     mcp_allowlist: Optional[dict] = None
 
@@ -99,7 +100,7 @@ class Snapshot:
     def health_message(self) -> str:
         return {
             "absent": "No policy snapshot — built-in protections only",
-            "invalid": "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals",
+            "invalid": "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused",
             "empty": "Policy snapshot contains no rules — the compile produced nothing",
             "stale": f"Policy snapshot is {self.age_days} days old and still enforced",
         }.get(self.state, "")
@@ -185,7 +186,9 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
     # events attribute A's policy to B.
     body = "\n".join(l for l in text.split("\n") if l and not l.startswith("#"))
     actual = hashlib.sha256(body.encode("utf-8")).hexdigest()[:32]
-    if snap.digest != "none" and actual != snap.digest:
+    # No digest line is unverified too: the sync daemon always writes one, so
+    # its absence means the file was edited.
+    if actual != snap.digest:
         snap.state = "invalid"
 
     if snap.state == "ok" and snap.workspace_id and workspace_id and snap.workspace_id != workspace_id:
@@ -202,12 +205,9 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
         # to a member whose groups this gate can no longer vouch for.
         if snap.sso_groups is not None:
             snap.sso_groups = sso.SsoGroupRecord(snap.sso_groups.policy, None, None, snap.sso_groups.issued_at)
-        # The MCP registry's refusals stay for the same reason, and its
-        # approvals go; the allowlist stays, admitting no server.
-        if snap.mcp_registry is not None:
-            snap.mcp_registry = dict(snap.mcp_registry, approvedServers=[])
-        if snap.mcp_allowlist is not None:
-            snap.mcp_allowlist = {"severity": "block", "servers": []}
+        # Neither MCP record can be vouched for: the gate admits no MCP server.
+        snap.mcp_registry = None
+        snap.mcp_allowlist = None
 
     if snap.state == "ok" and snap.generated_at:
         try:

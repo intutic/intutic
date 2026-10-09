@@ -20,9 +20,12 @@
  *
  * The workspace's `mcpAllowedServers` list rides beside it as an
  * `@mcp_allowlist` record ({@link evaluateMcpAllowlist}). Both records sit
- * inside the snapshot's digest, and a gate that finds the digest broken keeps
- * what they refuse and drops what they admit: the registry loses its
- * approvals, and the allowlist admits no server and refuses at `block`.
+ * inside the snapshot's digest, and a gate that finds the snapshot unverified
+ * (its digest broken or missing, or another workspace's) trusts neither: it
+ * refuses every MCP call with {@link mcpSnapshotUnverifiedRefusal}, at `block`
+ * even in an observe-only workspace. An edit that widens either record, or
+ * deletes one, therefore admits nothing. A policy activates only when it
+ * verifies; the sync daemon restores the last snapshot it verified.
  *
  * Self-contained (no imports) so `@intutic/gate`, which has no workspace
  * dependencies, can carry the copy.
@@ -218,6 +221,37 @@ export function evaluateMcpAllowlist(allowlist: McpAllowlistRecord, serverName: 
 
 /** {@link evaluateMcpAllowlist} as source, for the JavaScript hook gates. */
 export const MCP_ALLOWLIST_JS_SOURCE = evaluateMcpAllowlist.toString()
+
+/** The refusal of an MCP call on a snapshot that failed its integrity check. */
+export interface McpSnapshotUnverifiedRefusal {
+  code: 'POLICY_SNAPSHOT_UNVERIFIED'
+  ruleId: 'policy_snapshot'
+  reason: string
+}
+
+/**
+ * Refuses one MCP call because the policy snapshot failed its digest or
+ * workspace check. Neither the registry's approvals nor the allowlist's
+ * servers can be vouched for then, and a deleted record is indistinguishable
+ * from one the workspace never set, so the snapshot admits no MCP server at
+ * all. Every gate that reads the snapshot refuses with this, at `block`.
+ *
+ * Self-contained, like {@link evaluateMcpRegistry}, because the JavaScript
+ * hook gates run it as emitted source.
+ */
+export function mcpSnapshotUnverifiedRefusal(serverName: string): McpSnapshotUnverifiedRefusal {
+  return {
+    code: 'POLICY_SNAPSHOT_UNVERIFIED',
+    ruleId: 'policy_snapshot',
+    reason:
+      'MCP server "' + serverName + '" is refused because the policy snapshot on this machine failed its ' +
+      'integrity check, so its MCP server registry and allowlist admit no server until the sync daemon ' +
+      'restores a verified snapshot',
+  }
+}
+
+/** {@link mcpSnapshotUnverifiedRefusal} as source, for the JavaScript hook gates. */
+export const MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE = mcpSnapshotUnverifiedRefusal.toString()
 
 /**
  * First column of the allowlist's line in `policy-snapshot.rules`. A data

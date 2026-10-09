@@ -100,7 +100,7 @@ Continue without it, or tell the user what would have to change and who can chan
 - **Size:** `COMMAND_TOO_LARGE`: the command is over 256 KiB, or the tool's arguments over 1 MiB, more than any gate evaluates. Split the work: smaller commands, or a file written in parts. A hook gate that could not finish deciding in time says `GATE_DEADLINE` in its reason; the call did not run, and the same call will be refused again, so tell the user.
 
 ### Not checked: retry once, later
-`GOVERNANCE_UNAVAILABLE`, `REGISTRY_UNAVAILABLE`, `BUDGET_UNAVAILABLE`, `TOFU_UNAVAILABLE`, `RESPONSE_UNPARSEABLE`, `GATE_CRASHED` (the hook gate failed while deciding), and `HOOK_GATE` when its reason says the control plane was unreachable: governance could not check the call, so it did not run. One later retry is fine; if it fails again, tell the user.
+`GOVERNANCE_UNAVAILABLE`, `REGISTRY_UNAVAILABLE`, `BUDGET_UNAVAILABLE`, `TOFU_UNAVAILABLE`, `RESPONSE_UNPARSEABLE`, `GATE_CRASHED` (the hook gate failed while deciding), `POLICY_SNAPSHOT_UNVERIFIED` (the policy snapshot on this machine failed its integrity check, so no MCP call runs until the sync daemon restores it), and `HOOK_GATE` when its reason says the control plane was unreachable: governance could not check the call, so it did not run. One later retry is fine; if it fails again, tell the user.
 
 ### Ran, but the result was withheld
 `RESULT_WITHHELD_DLP`, `RESULT_WITHHELD_INJECTION` (MCP proxy) and `OUTPUT_DLP` (proxy): the tool or model ran, and its output was not delivered. Do not run it again blindly, since it may already have had its effect; tell the user.

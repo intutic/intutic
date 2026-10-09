@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -87,6 +87,14 @@ describe('parsing', () => {
 describe('integrity', () => {
   it('a bad digest invalidates and drops rules', () => {
     const p = rulesFile([line('d', 'block', '-', 'command', 'r', 'rm')], { digest: '0'.repeat(32) })
+    const s = loadSnapshot(WS, p)
+    expect(s.state).toBe('invalid')
+    expect(s.rules).toEqual([])
+  })
+
+  it('a missing digest invalidates, as it does in every gate', () => {
+    const p = rulesFile([line('d', 'block', '-', 'command', 'r', 'rm')])
+    writeFileSync(p, readFileSync(p, 'utf-8').replace(/^#digest .*\n/m, ''), 'utf-8')
     const s = loadSnapshot(WS, p)
     expect(s.state).toBe('invalid')
     expect(s.rules).toEqual([])

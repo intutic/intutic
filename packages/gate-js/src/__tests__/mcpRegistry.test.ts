@@ -5,10 +5,11 @@
  * `evaluateMcpRegistry`, the MCP proxy, the control plane's hook gate, the
  * emitted hook gates and intutic-clawde. This runs it through `Gate.guard`
  * reading a real policy snapshot file, which is how the registry reaches this
- * package in production, and checks the tamper rule the hook gates apply: a
- * snapshot that fails its digest keeps the registry's and the allowlist's
- * refusals and drops what they admit.
+ * package in production, and through the hook script `intuticSandboxBootstrap`
+ * writes into a sandbox. Both also run the vectors' unverified cases: a
+ * snapshot tampered with in any of the named ways admits no MCP server.
  */
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -18,7 +19,9 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { GateClient, type GateResponse } from '../client.js'
 import { IntuticGateRefusal } from '../errors.js'
 import { Gate } from '../gate.js'
+import { _internal } from '../harness.js'
 import {
+  decodeMcpRegistryRecord,
   encodeMcpAllowlistRecord,
   encodeMcpRegistryRecord,
   type McpAllowlistRecord,
@@ -31,6 +34,8 @@ interface Vectors {
   cases: Array<Case & { registry: string }>
   allowlists: Record<string, McpAllowlistRecord>
   allowlistCases: Array<Case & { allowlist: string }>
+  unverifiedSnapshots: Record<string, { registry: string; allowlist: string; interventionMode: string }>
+  unverifiedCases: Array<Case & { snapshot: string; tamper: string }>
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -48,6 +53,41 @@ function snapshotFile(body: string[], digestOf: string[] = body): string {
   const digest = createHash('sha256').update(digestOf.join('\n')).digest('hex').slice(0, 32)
   const path = join(dir, `snap-${n++}.rules`)
   writeFileSync(path, `#digest ${digest}\n#workspace ws_test\n#generated ${new Date().toISOString()}\n${body.join('\n')}\n`)
+  return path
+}
+
+/**
+ * The vectors' snapshot for an unverified case, written with its digest and
+ * then tampered with as the case names (the digest left as written, except
+ * where the tamper removes it).
+ */
+function unverifiedSnapshot(c: Vectors['unverifiedCases'][number]): string {
+  const base = VECTORS.unverifiedSnapshots[c.snapshot]!
+  const severity = base.interventionMode === 'SILENT_LOG' ? 'shadow' : 'block'
+  const lines = [
+    encodeMcpRegistryRecord(VECTORS.registries[base.registry]!),
+    encodeMcpAllowlistRecord({ severity, servers: VECTORS.allowlists[base.allowlist]!.servers }),
+    WRITE_RULE,
+  ]
+  const text = readFileSync(snapshotFile(lines), 'utf8').split('\n')
+  const at = (prefix: string) => text.findIndex((l) => l.startsWith(prefix))
+  const reg = at('@mcp_registry\t')
+  const allow = at('@mcp_allowlist\t')
+  switch (c.tamper) {
+    case 'registryDenyToAllow': text[reg] = encodeMcpRegistryRecord({ ...decodeMcpRegistryRecord(text[reg]!)!, defaultPolicy: 'allow' }); break
+    case 'registryUnblock': text[reg] = encodeMcpRegistryRecord({ ...decodeMcpRegistryRecord(text[reg]!)!, blockedServers: [] }); break
+    case 'registryLineDeleted': text.splice(reg, 1); break
+    case 'allowlistLineDeleted': text.splice(allow, 1); break
+    case 'allowlistWidened': text[allow] += ',newcomer'; break
+    case 'allowlistShadowed': text[allow] = text[allow]!.replace('\tblock\t', '\tshadow\t'); break
+    case 'digestLineDeleted':
+      text[allow] += ',newcomer'
+      text.splice(at('#digest '), 1)
+      break
+    default: throw new Error(`unknown tamper ${c.tamper}`)
+  }
+  const path = join(dir, `snap-${n++}.rules`)
+  writeFileSync(path, text.join('\n'))
   return path
 }
 
@@ -138,35 +178,88 @@ describe('the shared allowlist vectors through Gate.guard', () => {
   })
 })
 
-describe('a snapshot edited by hand', () => {
-  const deny = VECTORS.registries['deny']!
+describe('the shared unverified-snapshot vectors through Gate.guard', () => {
+  for (const c of VECTORS.unverifiedCases) {
+    it(c.name, async () => {
+      const snap = unverifiedSnapshot(c)
+      expectCase(await guard(snap, c.toolName), c)
+      // The SOP rule beside the records is gone: the gate read the snapshot as unverified.
+      expect(await guard(snap, 'Write')).toBeNull()
+    })
+  }
 
-  it('keeps the registry\'s refusals and ignores an approval added to it', async () => {
-    const original = [encodeMcpRegistryRecord(deny), WRITE_RULE]
-    const snap = snapshotFile(
-      [encodeMcpRegistryRecord({ ...deny, approvedServers: [...deny.approvedServers, 'newcomer'] }), WRITE_RULE],
-      original,
-    )
-    expect((await guard(snap, 'mcp__newcomer__query'))?.code).toBe('SERVER_NOT_APPROVED')
-    // An approval the control plane made does not survive either.
-    expect((await guard(snap, 'mcp__github__create_issue'))?.code).toBe('SERVER_NOT_APPROVED')
-    expect((await guard(snap, 'mcp__pastebin__paste'))?.code).toBe('SERVER_BLOCKED')
-    // The SOP rule beside it is gone: the gate read the snapshot as invalid.
-    expect(await guard(snap, 'Write')).toBeNull()
+  it('reports the refusal as tool_blocked with its rule id', async () => {
+    const client = new RecordingClient()
+    const snap = unverifiedSnapshot(VECTORS.unverifiedCases.find((c) => c.tamper === 'allowlistWidened')!)
+    expect((await guard(snap, 'mcp__github__create_issue', client))?.code).toBe('POLICY_SNAPSHOT_UNVERIFIED')
+    expect(client.events.find((e) => e.event === 'tool_blocked')?.reason).toMatch(/\[policy_snapshot\]$/)
   })
+})
 
-  it('keeps the allowlist and admits no server when one is added to it', async () => {
-    const original = [encodeMcpAllowlistRecord({ severity: 'block', servers: ['github'] }), WRITE_RULE]
-    const snap = snapshotFile([encodeMcpAllowlistRecord({ severity: 'block', servers: ['github', 'newcomer'] }), WRITE_RULE], original)
-    expect((await guard(snap, 'mcp__newcomer__query'))?.code).toBe('SERVER_NOT_ALLOWED')
-    expect((await guard(snap, 'mcp__github__create_issue'))?.code).toBe('SERVER_NOT_ALLOWED')
-    expect(await guard(snap, 'Write')).toBeNull()
-  })
+describe('the sandbox hook script intuticSandboxBootstrap writes', () => {
+  const script = join(dir, 'sandbox-check.js')
+  const rules = join(dir, 'policy-snapshot.rules')
+  writeFileSync(script, _internal.renderSandboxGateScript('policy-snapshot.rules', 'ws_test'))
 
-  it('refuses when block is edited to shadow', async () => {
-    const original = [encodeMcpAllowlistRecord({ severity: 'block', servers: ['github'] }), WRITE_RULE]
-    const snap = snapshotFile([encodeMcpAllowlistRecord({ severity: 'shadow', servers: ['github'] }), WRITE_RULE], original)
-    expect((await guard(snap, 'mcp__pastebin__paste'))?.code).toBe('SERVER_NOT_ALLOWED')
+  /** Runs the script on one call against `snapshot`, copied to where it reads its rules. */
+  function run(snapshot: string, tool: string): Promise<{ status: number | null; stderr: string }> {
+    writeFileSync(rules, readFileSync(snapshot))
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [script], { stdio: ['pipe', 'ignore', 'pipe'] })
+      let stderr = ''
+      child.stderr.setEncoding('utf8')
+      child.stderr.on('data', (d: string) => { stderr += d })
+      child.on('error', reject)
+      child.on('close', (status) => resolve({ status, stderr }))
+      child.stdin.end(JSON.stringify({ tool_name: tool, tool_input: {} }))
+    })
+  }
+
+  function expectScript(r: { status: number | null; stderr: string }, c: Case): void {
+    if (c.code === null) {
+      expect(r.status, `${c.name}: expected an allow.\nstderr: ${r.stderr}`).toBe(0)
+    } else {
+      expect(r.status, `${c.name}: expected a refusal.\nstderr: ${r.stderr}`).toBe(2)
+      expect(r.stderr).toContain(`${c.code}: ${c.reason} [${c.ruleId}]`)
+    }
+  }
+
+  it('reaches every registry vector\'s decision', async () => {
+    for (const c of VECTORS.cases) {
+      expectScript(await run(snapshotFile([encodeMcpRegistryRecord(VECTORS.registries[c.registry]!), WRITE_RULE]), c.toolName), c)
+    }
+  }, 60_000)
+
+  it('reaches every allowlist vector\'s decision, and reports a shadow refusal without refusing', async () => {
+    for (const c of VECTORS.allowlistCases) {
+      expectScript(await run(snapshotFile([encodeMcpAllowlistRecord(VECTORS.allowlists[c.allowlist]!), WRITE_RULE]), c.toolName), c)
+    }
+    const shadow = await run(snapshotFile([encodeMcpAllowlistRecord({ severity: 'shadow', servers: ['github'] }), WRITE_RULE]), 'mcp__pastebin__paste')
+    expect(shadow.status).toBe(0)
+    expect(shadow.stderr).toContain('FLAGGED (shadow)')
+  }, 60_000)
+
+  it('refuses every MCP call on a tampered snapshot, observe-only too', async () => {
+    for (const c of VECTORS.unverifiedCases) {
+      const snap = unverifiedSnapshot(c)
+      expectScript(await run(snap, c.toolName), c)
+      expect((await run(snap, 'Write')).status, `${c.name}: the SOP rule survived`).toBe(0)
+    }
+  }, 60_000)
+
+  it('applies the rules of a verified snapshot, and treats one issued to another workspace as unverified', async () => {
+    const snap = snapshotFile([encodeMcpAllowlistRecord({ severity: 'block', servers: ['github'] }), WRITE_RULE])
+    expect((await run(snap, 'Write')).status).toBe(2)
+    const other = join(dir, `snap-${n++}.rules`)
+    writeFileSync(other, readFileSync(snap, 'utf8').replace('#workspace ws_test', '#workspace ws_other'))
+    expect((await run(other, 'Write')).status).toBe(0)
+    expect((await run(other, 'mcp__github__create_issue')).stderr).toContain('POLICY_SNAPSHOT_UNVERIFIED')
+  }, 60_000)
+
+  it('treats an empty rules file as no snapshot', async () => {
+    const empty = join(dir, `snap-${n++}.rules`)
+    writeFileSync(empty, '')
+    expect((await run(empty, 'mcp__anything__run')).status).toBe(0)
   })
 })
 
