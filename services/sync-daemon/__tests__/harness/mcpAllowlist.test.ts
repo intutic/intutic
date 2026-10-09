@@ -410,7 +410,7 @@ describe('an allowlist edited in the snapshot', () => {
     const snap = await edited('TRANSPARENT', (r) => `${r},evil_corp`)
     const added = await run('mcp__evil_corp__steal_secrets', snap)
     expect(added.status, `the edit widened the allowlist. stderr: ${added.stderr}`).toBe(2)
-    expect(added.stderr).toContain('[mcp_allowlist]')
+    expect(added.stderr).toContain('[policy_snapshot]')
     // None of the file's servers can be vouched for once its digest fails.
     expect((await run('mcp__github__create_issue', snap)).status).toBe(2)
     // The SOP rule beside it is gone, which is how we know the gate read the

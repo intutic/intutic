@@ -18,8 +18,9 @@
  *              wait" would be a supported way to disarm governance.
  *   empty    — parsed, but no rules. The writer always ships the destructive
  *              tier, so zero rules means the compile produced nothing.
- *   invalid  — digest or workspace mismatch. The gates drop the dynamic tier,
- *              keeping only its SSO-group refusals.
+ *   invalid  — digest missing or mismatched, or another workspace's. The
+ *              gates drop the dynamic tier, keeping only its SSO-group
+ *              refusals, and refuse every MCP call.
  *   absent   — no file. The compiled floor still applies; nothing else does.
  *
  * Kept deliberately faithful rather than improved: a reader that disagrees with
@@ -147,7 +148,9 @@ export function parsePolicySnapshot(
   // machine, with B's audit events attributing A's policy to B.
   const body = lines.filter((l) => l && l.charAt(0) !== '#').join('\n')
   const actual = createHash('sha256').update(body).digest('hex').slice(0, 32)
-  if (out.digest !== 'none' && actual !== out.digest) out.state = 'invalid'
+  // No digest line fails too, as it does in every gate: the daemon always
+  // writes one.
+  if (actual !== out.digest) out.state = 'invalid'
 
   if (
     out.state === 'ok' &&

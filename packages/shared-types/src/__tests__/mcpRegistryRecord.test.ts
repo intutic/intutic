@@ -14,6 +14,8 @@ import {
   MCP_ALLOWLIST_RECORD_TAG,
   MCP_REGISTRY_JS_SOURCE,
   MCP_REGISTRY_RECORD_TAG,
+  MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE,
+  mcpSnapshotUnverifiedRefusal,
   parseMcpRegistryRecord,
   type McpAllowlistRecord,
   type McpRegistryRecord,
@@ -24,6 +26,7 @@ interface Vectors {
   cases: Array<{ name: string; registry: string; toolName: string; code: string | null; ruleId: string | null; reason: string | null }>
   allowlists: Record<string, McpAllowlistRecord>
   allowlistCases: Array<{ name: string; allowlist: string; toolName: string; code: string | null; ruleId: string | null; reason: string | null }>
+  unverifiedCases: Array<{ name: string; toolName: string; code: string | null; ruleId: string | null; reason: string | null }>
 }
 
 const VECTORS: Vectors = JSON.parse(
@@ -40,6 +43,7 @@ function split(toolName: string): [string, string] {
 // The emitted source, run the way the JavaScript hook gates run it.
 const emitted = new Function(`${MCP_REGISTRY_JS_SOURCE}\nreturn evaluateMcpRegistry`)() as typeof evaluateMcpRegistry
 const emittedAllowlist = new Function(`${MCP_ALLOWLIST_JS_SOURCE}\nreturn evaluateMcpAllowlist`)() as typeof evaluateMcpAllowlist
+const emittedUnverified = new Function(`${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}\nreturn mcpSnapshotUnverifiedRefusal`)() as typeof mcpSnapshotUnverifiedRefusal
 
 describe('MCP registry vectors', () => {
   it('cover every refusal code and an allow', () => {
@@ -74,6 +78,26 @@ describe('MCP allowlist vectors', () => {
         expect(d?.code ?? null).toBe(c.code)
         expect(d?.ruleId ?? null).toBe(c.ruleId)
         expect(d?.reason ?? null).toBe(c.reason)
+      }
+    })
+  }
+})
+
+describe('MCP unverified-snapshot vectors', () => {
+  it('cover a refusal and a call that is not an MCP call', () => {
+    expect(new Set(VECTORS.unverifiedCases.map((c) => c.code))).toEqual(new Set([null, 'POLICY_SNAPSHOT_UNVERIFIED']))
+  })
+
+  // The tamper does not change the refusal, only how a gate reaches it; the
+  // gates' own suites apply each one to a written snapshot.
+  for (const c of VECTORS.unverifiedCases.filter((v) => v.code !== null)) {
+    it(c.name, () => {
+      const [server] = split(c.toolName)
+      for (const refuse of [mcpSnapshotUnverifiedRefusal, emittedUnverified]) {
+        const d = refuse(server)
+        expect(d.code).toBe(c.code)
+        expect(d.ruleId).toBe(c.ruleId)
+        expect(d.reason).toBe(c.reason)
       }
     })
   }

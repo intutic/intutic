@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from intutic_clawde.gate import actions, snapshot
+from conftest import rules_text
 
 VECTORS_PATH = Path(__file__).resolve().parents[2] / "shared-types" / "fixtures" / "destructive-sql-vectors.json"
 
@@ -52,7 +53,7 @@ def sql_drop_snapshot(tmp_path_factory) -> snapshot.Snapshot:
     path = tmp_path_factory.mktemp("rules") / "policy-snapshot.rules"
     rule = DOC["rule"]
     line = "\t".join([rule["id"], "warn", "i", rule["subject"], "Destructive SQL statement", rule["source"]])
-    path.write_text(line + "\n", encoding="utf-8")
+    path.write_text(rules_text([line]), encoding="utf-8")
     snap = snapshot.load_snapshot("", str(path))
     assert snap.state == "ok" and len(snap.rules) == 1, "the reader dropped the rule"
     return snap

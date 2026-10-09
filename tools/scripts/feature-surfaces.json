@@ -34,14 +34,20 @@
           "SERVER_BLOCKED",
           "SERVER_NOT_APPROVED",
           "TOOL_DISABLED",
+          "POLICY_SNAPSHOT_UNVERIFIED",
           { "file": "packages/gate-js/src/snapshot.ts", "contains": "mcpRegistry" },
+          { "file": "packages/gate-js/src/harness.ts", "contains": "evaluateMcp(toolName, snap)" },
           { "file": "packages/intutic-clawde/intutic_clawde/gate/snapshot.py", "contains": "mcp_registry" }
         ],
         "clawdeSdk": { "none": "MCP tool calls never pass through the clawde chat client" },
         "mcpTools": ["intutic_mcp_registry_status"],
-        "kitkat": ["SERVER_NOT_APPROVED", "intutic_mcp_registry_status"],
+        "kitkat": ["SERVER_NOT_APPROVED", "intutic_mcp_registry_status", "POLICY_SNAPSHOT_UNVERIFIED"],
         "terraform": ["intutic_mcp_server_decision", "workspace_settings.mcpDefaultPolicy"],
-        "docs": ["guide/mcp-governance.md#the-registry", { "ref": "guide/mcp-governance.md#the-gate-backstop", "badge": false }],
+        "docs": [
+          "guide/mcp-governance.md#the-registry",
+          { "ref": "guide/mcp-governance.md#the-gate-backstop", "badge": false },
+          { "ref": "guide/mcp-governance.md#a-snapshot-that-fails-verification", "badge": false }
+        ],
         "website": [{ "file": "index.html", "contains": "How does Intutic govern MCP servers?" }],
         "events": {
           "gap": "approve, block, reset and tool switches reach the audit timeline but no notification event or SIEM source",
@@ -59,7 +65,10 @@
           "gate:SERVER_BLOCKED",
           "gate:SERVER_NOT_APPROVED",
           "gate:TOOL_DISABLED",
+          "hook:POLICY_SNAPSHOT_UNVERIFIED",
+          "gate:POLICY_SNAPSHOT_UNVERIFIED",
           { "file": "services/sync-daemon/src/lib/policySnapshot.ts", "contains": "mcpRegistry" },
+          { "file": "services/sync-daemon/src/lib/policySnapshot.ts", "contains": "restoreVerifiedSnapshot" },
           { "file": "packages/shared-types/fixtures/mcp-registry-vectors.json" }
         ]
       }

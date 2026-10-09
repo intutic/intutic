@@ -124,16 +124,16 @@ export class Snapshot {
   ssoGroups: SsoGroupRecord | null = null
   /**
    * The workspace's MCP server registry decisions (the `@mcp_registry`
-   * record), or null when it made none. On a snapshot that fails its
-   * integrity check the approvals are dropped, so an approval added to the
-   * file clears nothing.
+   * record), or null when it made none. Null on a snapshot that fails its
+   * integrity check, on which the gate admits no MCP server at all
+   * (`mcpSnapshotUnverifiedRefusal`): a deleted record looks like one never
+   * set, so neither record can be vouched for.
    */
   mcpRegistry: McpRegistryRecord | null = null
   /**
    * The workspace's `mcpAllowedServers` list (the `@mcp_allowlist` record),
-   * or null when it set none. On a snapshot that fails its integrity check it
-   * admits no server and refuses at `block`, so a server added to the file,
-   * or `block` edited to `shadow`, admits nothing.
+   * or null when it set none. Null on a snapshot that fails its integrity
+   * check, as {@link mcpRegistry} is.
    */
   mcpAllowlist: McpAllowlistRecord | null = null
 
@@ -142,7 +142,7 @@ export class Snapshot {
       case 'absent':
         return 'No policy snapshot — built-in protections only'
       case 'invalid':
-        return 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals'
+        return 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused'
       case 'empty':
         return 'Policy snapshot contains no rules — the compile produced nothing'
       case 'stale':
@@ -248,7 +248,9 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
     .filter((l) => l && !l.startsWith('#'))
     .join('\n')
   const actual = createHash('sha256').update(body, 'utf-8').digest('hex').slice(0, 32)
-  if (snap.digest !== 'none' && actual !== snap.digest) {
+  // No digest line is unverified too: the sync daemon always writes one, so
+  // its absence means the file was edited.
+  if (actual !== snap.digest) {
     snap.state = 'invalid'
   }
 
@@ -267,10 +269,9 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
     // Except the group policy, which only ever refuses: it still applies, to a
     // member whose groups this gate can no longer vouch for.
     if (snap.ssoGroups) snap.ssoGroups = { ...snap.ssoGroups, member: null }
-    // The MCP registry's refusals stay for the same reason, and its approvals
-    // go; the allowlist stays, admitting no server.
-    if (snap.mcpRegistry) snap.mcpRegistry = { ...snap.mcpRegistry, approvedServers: [] }
-    if (snap.mcpAllowlist) snap.mcpAllowlist = { severity: 'block', servers: [] }
+    // Neither MCP record can be vouched for: the gate admits no MCP server.
+    snap.mcpRegistry = null
+    snap.mcpAllowlist = null
   }
 
   if (snap.state === 'ok' && snap.generatedAt) {

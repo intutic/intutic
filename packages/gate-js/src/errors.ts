@@ -51,6 +51,8 @@ export const GATE_REFUSAL_CODES = [
   'SERVER_NOT_APPROVED',
   'TOOL_DISABLED',
   'SERVER_NOT_ALLOWED',
+  // Any MCP call on a policy snapshot that failed its integrity check.
+  'POLICY_SNAPSHOT_UNVERIFIED',
   'SOP_RULE',
   'HOOK_GATE',
   // The call is too large to evaluate (limits.ts), before any tier runs.

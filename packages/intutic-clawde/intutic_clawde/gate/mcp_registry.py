@@ -14,9 +14,10 @@ self-contained: the standard library only, no module state beyond the
 constants below, and no backtick or dollar-brace, which the TypeScript copy
 cannot hold.
 
-Both records sit inside the snapshot's digest. When the digest fails, a gate
-keeps what they refuse and drops what they admit: the registry loses its
-approvals, and the allowlist admits no server and refuses at block.
+Both records sit inside the snapshot's digest. A gate that finds the snapshot
+unverified (its digest broken or missing, or another workspace's) trusts
+neither: it refuses every MCP call with unverified_refusal, at block, in an
+observe-only workspace too.
 """
 
 import base64
@@ -142,4 +143,20 @@ def evaluate_allowlist(allowlist, server):
         "SERVER_NOT_ALLOWED",
         "mcp_allowlist",
         "MCP server \"" + server + "\" is not on the MCP server allowlist for this workspace",
+    )
+
+
+def unverified_refusal(server):
+    """(code, rule_id, reason) refusing an MCP call on an unverified snapshot.
+
+    Neither the registry's approvals nor the allowlist's servers can be
+    vouched for, and a deleted record looks like one never set, so the
+    snapshot admits no MCP server at all.
+    """
+    return (
+        "POLICY_SNAPSHOT_UNVERIFIED",
+        "policy_snapshot",
+        "MCP server \"" + server + "\" is refused because the policy snapshot on this machine failed its "
+        "integrity check, so its MCP server registry and allowlist admit no server until the sync daemon "
+        "restores a verified snapshot",
     )

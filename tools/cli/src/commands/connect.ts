@@ -47,6 +47,7 @@ import { SyncWsClient,
   updatePreToolUseHooks,
   injectMcpServer,
   noteProxyUrl,
+  guardPolicySnapshot,
   guardSettingsFile,
   isGuardedPath,
   warnIfDshCoverageGap,
@@ -582,7 +583,12 @@ export async function runConnect(opts: {
   // The snapshot also carries this workspace's `review_before:` tokens as hold
   // rules (synced SOPs, settings and local `.intutic/sops`), so every gate —
   // not only the Claude Code hook — holds on them (TD-474 item 4).
-  async function refreshGateCachesForConnect(): Promise<void> {
+  //
+  // First, the snapshot's self-heal: a snapshot changed while the daemon was
+  // stopped is put back to the last verified copy, and reported, before the
+  // refresh replaces it. With `checkSnapshot` false the caller is that check.
+  async function refreshGateCachesForConnect(checkSnapshot = true): Promise<void> {
+    if (checkSnapshot) await guardPolicySnapshot(safeConfig.workspaceRoot, async () => {})
     const localHoldTokens = await localHoldTokensFor(
       safeConfig.workspaceRoot,
       lastCachedConfig?.sops ?? [],
@@ -1312,6 +1318,7 @@ export async function runConnect(opts: {
           lastCachedConfig?.proxyUrl ?? '',
           undefined,
           new Set(safeConfig.disconnectedHarnesses ?? []),
+          () => refreshGateCachesForConnect(false),
         )
         if (tampered) {
           log.warn(`[Security] Governance settings tamper detected and restored: ${changedPath}`)

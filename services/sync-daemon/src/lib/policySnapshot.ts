@@ -89,6 +89,29 @@ export const SNAPSHOT_JSON = 'policy-snapshot.json'
 export const SNAPSHOT_RULES = 'policy-snapshot.rules'
 
 /**
+ * The subdirectory of the snapshot directory holding the last snapshot the
+ * daemon wrote and so verified: both artifacts, byte for byte, read-only.
+ * Inside `.intutic/hooks`, which every gate refuses to touch. The settings
+ * guard compares the live snapshot with it and restores it when they differ
+ * ({@link restoreVerifiedSnapshot}), the way a policy agent keeps its last
+ * verified bundle active when a new one fails verification.
+ */
+export const VERIFIED_SNAPSHOT_DIR = 'verified'
+
+/**
+ * Whether a `.rules` text verifies: it carries a `#digest` line, and the
+ * digest of its data lines matches it — the check every gate makes. A
+ * missing digest fails, since the writer always writes one.
+ */
+export function snapshotRulesVerify(text: string): boolean {
+  const lines = text.split('\n')
+  const header = lines.find((l) => l.startsWith('#digest '))
+  if (!header) return false
+  const body = lines.filter((l) => l && !l.startsWith('#')).join('\n')
+  return createHash('sha256').update(body).digest('hex').slice(0, 32) === header.slice(8).trim()
+}
+
+/**
  * Whether the destructive tier ships as `block` or as `warn`.
  *
  * `warn`. These seven patterns qualify for `block` on the merits — every one is
@@ -881,6 +904,13 @@ export async function writePolicySnapshot(
     lines.join('\n') +
     '\n'
 
+  // The verified copy first, then the live one. The settings guard restores
+  // the copy whenever the two differ, so this order means an interrupted
+  // write ends with the new snapshot in force, never the old one.
+  const verifiedDir = path.join(snapshotDir, VERIFIED_SNAPSHOT_DIR)
+  await fs.mkdir(verifiedDir, { recursive: true, mode: 0o700 })
+  await writeAtomic(path.join(verifiedDir, SNAPSHOT_JSON), json)
+  await writeAtomic(path.join(verifiedDir, SNAPSHOT_RULES), rulesText)
   await writeAtomic(path.join(snapshotDir, SNAPSHOT_JSON), json)
   await writeAtomic(path.join(snapshotDir, SNAPSHOT_RULES), rulesText)
 
@@ -900,6 +930,45 @@ async function writeAtomic(target: string, content: string): Promise<void> {
   // `.intutic/hooks` at all.
   await fs.chmod(tmp, 0o444)
   await fs.rename(tmp, target)
+}
+
+/**
+ * Puts the last verified snapshot back when the live one differs from it.
+ *
+ * `'intact'`: the live snapshot is the verified one, or there is nothing to
+ * compare (no snapshot written yet, or a live one from before the verified
+ * copy existed that still verifies). `'restored'`: either live artifact was
+ * edited, replaced or deleted, and both are the verified copy again.
+ * `'unverifiable'`: the live `.rules` fails its digest and there is no
+ * verified copy to restore, so the caller fetches a fresh snapshot. Any
+ * difference counts, a valid-looking one included: the daemon is the only
+ * writer of these files, so an older snapshot copied back in is tampering
+ * too. Never throws.
+ */
+export async function restoreVerifiedSnapshot(
+  snapshotDir: string = DEFAULT_SNAPSHOT_DIR,
+): Promise<'intact' | 'restored' | 'unverifiable'> {
+  const read = (file: string) => fs.readFile(file, 'utf-8').catch(() => null)
+  const verifiedDir = path.join(snapshotDir, VERIFIED_SNAPSHOT_DIR)
+  const [liveRules, liveJson, keptRules, keptJson] = await Promise.all([
+    read(path.join(snapshotDir, SNAPSHOT_RULES)),
+    read(path.join(snapshotDir, SNAPSHOT_JSON)),
+    read(path.join(verifiedDir, SNAPSHOT_RULES)),
+    read(path.join(verifiedDir, SNAPSHOT_JSON)),
+  ])
+  if (keptRules === null || keptJson === null || !snapshotRulesVerify(keptRules)) {
+    return liveRules !== null && !snapshotRulesVerify(liveRules) ? 'unverifiable' : 'intact'
+  }
+  if (liveRules === keptRules && liveJson === keptJson) return 'intact'
+  try {
+    await writeAtomic(path.join(snapshotDir, SNAPSHOT_JSON), keptJson)
+    await writeAtomic(path.join(snapshotDir, SNAPSHOT_RULES), keptRules)
+  } catch (err) {
+    log.warn({ action: 'policy_snapshot_restore_failed', err }, 'Could not restore the verified policy snapshot')
+    return liveRules !== null && snapshotRulesVerify(liveRules) ? 'intact' : 'unverifiable'
+  }
+  log.warn({ action: 'policy_snapshot_restored' }, 'The policy snapshot was changed outside the sync daemon; restored the last verified copy')
+  return 'restored'
 }
 
 /**
@@ -944,7 +1013,12 @@ export async function refreshPolicySnapshot(
  */
 async function forgetSnapshotMember(dir: string, localHoldTokens: readonly string[]): Promise<void> {
   try {
-    const doc = JSON.parse(await fs.readFile(path.join(dir, SNAPSHOT_JSON), 'utf-8')) as Record<string, unknown>
+    // Rebuilt from the verified copy, not the live JSON, which no digest
+    // covers: an edit to it must not come back as a valid snapshot. A machine
+    // whose last write predates the verified copy has only the live one.
+    const verified = path.join(dir, VERIFIED_SNAPSHOT_DIR, SNAPSHOT_JSON)
+    const source = await fs.readFile(verified, 'utf-8').catch(() => fs.readFile(path.join(dir, SNAPSHOT_JSON), 'utf-8'))
+    const doc = JSON.parse(source) as Record<string, unknown>
     const record = doc.ssoGroups as { policy?: unknown; member?: unknown } | undefined
     const ssoGroupPolicy = parseSsoGroupPolicy(record?.policy)
     if (!ssoGroupPolicy || !record?.member || typeof doc.workspaceId !== 'string') return

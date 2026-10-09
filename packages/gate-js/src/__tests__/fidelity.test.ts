@@ -31,6 +31,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { evaluate, loadSnapshot, SEV_BLOCK, SEV_SHADOW, SEV_WARN } from '../snapshot.js'
 import { allFloorFixtures, type FixturePattern } from './fixtures/protectedPathsFixtures.js'
+import { rulesText } from './fixtures/rulesFile.js'
 
 let dir: string
 
@@ -42,12 +43,12 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-/** Writes a one-rule `.rules` file (no header, so no digest/workspace check
- *  gets in the way of an isolated fidelity check) and loads it. */
+/** Writes a one-rule `.rules` file (a digest and no workspace, so the
+ *  integrity check passes for an isolated fidelity check) and loads it. */
 function loadIsolated(p: FixturePattern) {
   const line = [p.id, p.severity, (p.ignoreCase ? 'i' : '') + (p.sequence ? 's' : '') || '-', p.subject ?? 'any', p.reason, p.source].join('\t')
   const file = join(dir, 'policy-snapshot.rules')
-  writeFileSync(file, line + '\n', 'utf-8')
+  writeFileSync(file, rulesText([line]), 'utf-8')
   return loadSnapshot('', file)
 }
 

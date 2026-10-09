@@ -7,6 +7,7 @@ import { Gate } from '../gate.js'
 import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MS } from '../limits.js'
 import { evaluate, loadSnapshot, SEV_BLOCK } from '../snapshot.js'
 import { expectLinearTime } from './linearTime.js'
+import { rulesText } from './fixtures/rulesFile.js'
 
 // Every gate rule this reader can load, decided as the shared vectors say and
 // in bounded time. packages/shared-types/fixtures/gate-rule-vectors.json is
@@ -62,7 +63,7 @@ const dir = mkdtempSync(join(tmpdir(), 'gate-rule-vectors-'))
 
 function decide(v: VectorRule, call: Call): boolean {
   const path = join(dir, `${v.id}.rules`)
-  writeFileSync(path, v.line + '\n')
+  writeFileSync(path, rulesText([v.line]))
   const snap = loadSnapshot('', path)
   expect(snap.rules.length, `${v.id} did not load`).toBe(1)
   const d = evaluate(call.tool, call.input.file_path ?? '', call.input.command ?? '', snap)

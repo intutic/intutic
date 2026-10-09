@@ -4,9 +4,9 @@ packages/shared-types/fixtures/mcp-registry-vectors.json is run by
 evaluateMcpRegistry, the MCP proxy, the control plane's hook gate, the emitted
 hook gates and @intutic/gate. This runs it through mcp_registry.py, which the
 bash hook gates also run, and through Gate.guard reading a real policy-snapshot
-file, and checks the tamper rule the hook gates apply: a snapshot that fails
-its digest keeps the registry's and the allowlist's refusals and drops what
-they admit. The Python twin of packages/gate-js/src/__tests__/mcpRegistry.test.ts.
+file, including the vectors' unverified cases: a snapshot tampered with in any
+of the named ways admits no MCP server. The Python twin of
+packages/gate-js/src/__tests__/mcpRegistry.test.ts.
 
 The file is read from the monorepo checkout. A missing file is a failure, not a
 skip: a skip would read as "every vector agrees".
@@ -37,6 +37,7 @@ def _vectors() -> dict:
 VECTORS = _vectors()
 CASES = VECTORS["cases"]
 ALLOWLIST_CASES = VECTORS["allowlistCases"]
+UNVERIFIED_CASES = VECTORS["unverifiedCases"]
 
 # A block SOP rule on Write, so a test can see whether the snapshot was read as valid.
 WRITE_RULE = "\t".join(["sop.s_write", "block", "", "tool", "no writes", " (Write) "])
@@ -57,6 +58,43 @@ def snapshot_file(tmp_path, body: list[str], digest_of: list[str] | None = None)
     p = tmp_path / "policy-snapshot.rules"
     p.write_text("\n".join([f"#digest {digest}", "#workspace ws_test", *body]) + "\n", encoding="utf-8")
     return str(p)
+
+
+def unverified_snapshot(tmp_path, case: dict) -> str:
+    """The vectors' snapshot for an unverified case, written with its digest
+    and then tampered with as the case names (the digest left as written,
+    except where the tamper removes it)."""
+    base = VECTORS["unverifiedSnapshots"][case["snapshot"]]
+    severity = "shadow" if base["interventionMode"] == "SILENT_LOG" else "block"
+    path = snapshot_file(tmp_path, [
+        registry_line(VECTORS["registries"][base["registry"]]),
+        allowlist_line({"severity": severity, "servers": VECTORS["allowlists"][base["allowlist"]]["servers"]}),
+        WRITE_RULE,
+    ])
+    lines = Path(path).read_text(encoding="utf-8").split("\n")
+    reg = next(i for i, l in enumerate(lines) if l.startswith("@mcp_registry\t"))
+    allow = next(i for i, l in enumerate(lines) if l.startswith("@mcp_allowlist\t"))
+    registry = mcp_registry.decode_registry_record(lines[reg])
+    tamper = case["tamper"]
+    if tamper == "registryDenyToAllow":
+        lines[reg] = registry_line(dict(registry, defaultPolicy="allow"))
+    elif tamper == "registryUnblock":
+        lines[reg] = registry_line(dict(registry, blockedServers=[]))
+    elif tamper == "registryLineDeleted":
+        del lines[reg]
+    elif tamper == "allowlistLineDeleted":
+        del lines[allow]
+    elif tamper == "allowlistWidened":
+        lines[allow] += ",newcomer"
+    elif tamper == "allowlistShadowed":
+        lines[allow] = lines[allow].replace("\tblock\t", "\tshadow\t")
+    elif tamper == "digestLineDeleted":
+        lines[allow] += ",newcomer"
+        lines = [l for l in lines if not l.startswith("#digest ")]
+    else:
+        raise AssertionError(f"unknown tamper {tamper}")
+    Path(path).write_text("\n".join(lines), encoding="utf-8")
+    return path
 
 
 class RecordingClient(GateClient):
@@ -141,29 +179,19 @@ class TestRecords:
         assert guard(monkeypatch, path, "Read") is None
 
 
-class TestEditedSnapshot:
-    DENY = VECTORS["registries"]["deny"]
+@pytest.mark.parametrize("case", UNVERIFIED_CASES, ids=[c["name"] for c in UNVERIFIED_CASES])
+def test_gate_over_an_unverified_snapshot_reaches_the_vector(case: dict, tmp_path, monkeypatch) -> None:
+    path = unverified_snapshot(tmp_path, case)
+    assert snap.load_snapshot("ws_test", path).state == "invalid"
+    expect_case(guard(monkeypatch, path, case["toolName"]), case)
+    # The SOP rule beside the records is gone: the gate read the snapshot as unverified.
+    assert guard(monkeypatch, path, "Write") is None
 
-    def test_an_approval_added_by_hand_clears_nothing(self, tmp_path, monkeypatch) -> None:
-        edited = dict(self.DENY, approvedServers=[*self.DENY["approvedServers"], "newcomer"])
-        path = snapshot_file(tmp_path, [registry_line(edited), WRITE_RULE], digest_of=[registry_line(self.DENY), WRITE_RULE])
-        assert snap.load_snapshot("ws_test", path).state == "invalid"
-        assert guard(monkeypatch, path, "mcp__newcomer__query").code == "SERVER_NOT_APPROVED"
-        assert guard(monkeypatch, path, "mcp__github__create_issue").code == "SERVER_NOT_APPROVED"
-        assert guard(monkeypatch, path, "mcp__pastebin__paste").code == "SERVER_BLOCKED"
-        assert guard(monkeypatch, path, "Write") is None
 
-    def test_a_server_added_to_the_allowlist_by_hand_admits_nothing(self, tmp_path, monkeypatch) -> None:
-        original = [allowlist_line({"severity": "block", "servers": ["github"]}), WRITE_RULE]
-        path = snapshot_file(tmp_path, [allowlist_line({"severity": "block", "servers": ["github", "newcomer"]}), WRITE_RULE], digest_of=original)
-        assert guard(monkeypatch, path, "mcp__newcomer__query").code == "SERVER_NOT_ALLOWED"
-        assert guard(monkeypatch, path, "mcp__github__create_issue").code == "SERVER_NOT_ALLOWED"
-        assert guard(monkeypatch, path, "Write") is None
-
-    def test_block_edited_to_shadow_still_refuses(self, tmp_path, monkeypatch) -> None:
-        original = [allowlist_line({"severity": "block", "servers": ["github"]}), WRITE_RULE]
-        path = snapshot_file(tmp_path, [allowlist_line({"severity": "shadow", "servers": ["github"]}), WRITE_RULE], digest_of=original)
-        assert guard(monkeypatch, path, "mcp__pastebin__paste").code == "SERVER_NOT_ALLOWED"
+@pytest.mark.parametrize("case", [c for c in UNVERIFIED_CASES if c["code"]], ids=[c["name"] for c in UNVERIFIED_CASES if c["code"]])
+def test_unverified_refusal_reaches_the_vector(case: dict) -> None:
+    server, _ = mcp_registry.split_mcp_tool_name(case["toolName"])
+    assert mcp_registry.unverified_refusal(server) == (case["code"], case["ruleId"], case["reason"])
 
 
 class TestReporting:
@@ -184,6 +212,14 @@ class TestReporting:
         blocked = [e for e in client.events if e[0] == "tool_blocked"]
         # hookEvents.ts queues the server from the bracketed rule id.
         assert blocked and blocked[0][1] == "mcp__ide__getDiagnostics" and blocked[0][2].endswith("[mcpDefaultPolicy]")
+
+    def test_an_unverified_snapshot_refusal_is_reported(self, tmp_path, monkeypatch) -> None:
+        client = RecordingClient()
+        case = next(c for c in UNVERIFIED_CASES if c["tamper"] == "allowlistWidened")
+        path = unverified_snapshot(tmp_path, case)
+        assert guard(monkeypatch, path, "mcp__github__create_issue", client).code == "POLICY_SNAPSHOT_UNVERIFIED"
+        blocked = [e for e in client.events if e[0] == "tool_blocked"]
+        assert blocked and blocked[0][2].endswith("[policy_snapshot]")
 
     def test_the_hook_gate_code_is_kept_for_the_registry_only(self, tmp_path, monkeypatch) -> None:
         path = snapshot_file(tmp_path, [WRITE_RULE])

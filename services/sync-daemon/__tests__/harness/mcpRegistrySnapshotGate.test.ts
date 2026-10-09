@@ -12,8 +12,9 @@
  * `evaluateMcpRegistry` and the MCP proxy also run, and the allowlist cases
  * `evaluateMcpAllowlist` runs — through one node gate and one bash gate, each
  * case with a snapshot written by the real `writePolicySnapshot`. The tamper
- * half adds an approval, or an allowlisted server, to a written snapshot and
- * checks it clears nothing.
+ * half runs the vectors' unverified cases: each tampers with a written
+ * snapshot the way the case names, and the gate must refuse every MCP call
+ * as `POLICY_SNAPSHOT_UNVERIFIED`, observe-only workspaces included.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
@@ -48,6 +49,8 @@ interface Vectors {
   cases: Array<Case & { registry: string }>
   allowlists: Record<string, McpAllowlistRecord>
   allowlistCases: Array<Case & { allowlist: string }>
+  unverifiedSnapshots: Record<string, { registry: string; allowlist: string; interventionMode: string }>
+  unverifiedCases: Array<Case & { snapshot: string; tamper: string }>
 }
 const VECTORS: Vectors = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../../packages/shared-types/fixtures/mcp-registry-vectors.json'), 'utf8'),
@@ -70,6 +73,32 @@ function policy(over: Partial<ResolvedPolicy> = {}): ResolvedPolicy {
     sqlDropStrictBlock: false,
     ...over,
   }
+}
+
+/**
+ * A written snapshot's text with one of the vectors' tampers applied, the
+ * digest left as written (except where the tamper removes it).
+ */
+function tamper(text: string, kind: string): string {
+  const lines = text.split('\n')
+  const at = (tag: string) => lines.findIndex((l) => l.startsWith(`${tag}\t`))
+  const reg = at(MCP_REGISTRY_RECORD_TAG)
+  const allow = at(MCP_ALLOWLIST_RECORD_TAG)
+  const registry = () => decodeMcpRegistryRecord(lines[reg]!)!
+  switch (kind) {
+    case 'registryDenyToAllow': lines[reg] = encodeMcpRegistryRecord({ ...registry(), defaultPolicy: 'allow' }); break
+    case 'registryUnblock': lines[reg] = encodeMcpRegistryRecord({ ...registry(), blockedServers: [] }); break
+    case 'registryLineDeleted': lines.splice(reg, 1); break
+    case 'allowlistLineDeleted': lines.splice(allow, 1); break
+    case 'allowlistWidened': lines[allow] += ',newcomer'; break
+    case 'allowlistShadowed': lines[allow] = lines[allow]!.replace('\tblock\t', '\tshadow\t'); break
+    case 'digestLineDeleted':
+      lines[allow] += ',newcomer'
+      lines.splice(lines.findIndex((l) => l.startsWith('#digest ')), 1)
+      break
+    default: throw new Error(`unknown tamper ${kind}`)
+  }
+  return lines.join('\n')
 }
 
 const dataLines = (file: string) => readFileSync(file, 'utf8').split('\n').filter((l) => l && !l.startsWith('#'))
@@ -157,8 +186,8 @@ const roots = new Map<string, string>()
 /** One snapshot per registry in the vectors, and one per allowlist. */
 const registrySnapshots = new Map<string, string>()
 const allowlistSnapshots = new Map<string, string>()
-let tampered = ''
-let tamperedAllowlist = ''
+/** One tampered snapshot per unverified case, by case name. */
+const unverifiedSnapshots = new Map<string, string>()
 
 beforeAll(async () => {
   for (const name of Object.keys(VECTORS.registries)) {
@@ -183,31 +212,24 @@ beforeAll(async () => {
     allowlistSnapshots.set(name, file)
   }
 
-  // A deny registry approving github — then an approval for "newcomer" and
-  // the removal of pastebin's block written into the file by hand.
-  const dir = join(home, 'tampered')
-  await writePolicySnapshot(policy({
-    mcpRegistry: DENY,
-    sopRules: [{ id: 's_write', toolPattern: 'Write', action: 'block', reason: 'no writes' }],
-  }), dir)
-  tampered = join(dir, SNAPSHOT_RULES)
-  const text = readFileSync(tampered, 'utf8')
-  const recordLine = text.split('\n').find((l) => l.startsWith(`${MCP_REGISTRY_RECORD_TAG}\t`))!
-  const edited = encodeMcpRegistryRecord({ ...DENY, approvedServers: ['github', 'newcomer'] })
-  chmodSync(tampered, 0o644)
-  writeFileSync(tampered, text.replace(recordLine, edited))
-
-  // An allowlist of github — then "newcomer" added to it by hand.
-  const allowDir = join(home, 'tampered-allowlist')
-  await writePolicySnapshot(policy({
-    mcpAllowedServers: ['github'],
-    sopRules: [{ id: 's_write', toolPattern: 'Write', action: 'block', reason: 'no writes' }],
-  }), allowDir)
-  tamperedAllowlist = join(allowDir, SNAPSHOT_RULES)
-  const allowText = readFileSync(tamperedAllowlist, 'utf8')
-  const allowLine = allowText.split('\n').find((l) => l.startsWith(`${MCP_ALLOWLIST_RECORD_TAG}\t`))!
-  chmodSync(tamperedAllowlist, 0o644)
-  writeFileSync(tamperedAllowlist, allowText.replace(allowLine, encodeMcpAllowlistRecord({ severity: 'block', servers: ['github', 'newcomer'] })))
+  // The unverified cases: the vectors' snapshot, with a SOP rule beside it
+  // (gone on an unverified snapshot, which shows the gate read it as one),
+  // then tampered with as each case says.
+  for (const c of VECTORS.unverifiedCases) {
+    const base = VECTORS.unverifiedSnapshots[c.snapshot]!
+    const dir = join(home, `unverified-${unverifiedSnapshots.size}`)
+    await writePolicySnapshot(policy({
+      interventionMode: base.interventionMode,
+      mcpRegistry: VECTORS.registries[base.registry]!,
+      mcpAllowedServers: VECTORS.allowlists[base.allowlist]!.servers,
+      sopRules: [{ id: 's_write', toolPattern: 'Write', action: 'block', reason: 'no writes' }],
+    }), dir)
+    const file = join(dir, SNAPSHOT_RULES)
+    const text = readFileSync(file, 'utf8')
+    chmodSync(file, 0o644)
+    writeFileSync(file, tamper(text, c.tamper))
+    unverifiedSnapshots.set(c.name, file)
+  }
 
   for (const g of gates) {
     const root = join(home, g.name)
@@ -304,31 +326,24 @@ describe('the shared MCP registry vectors through the emitted gates', () => {
   }
 })
 
-describe('an approval written into the snapshot', () => {
+describe('the shared unverified-snapshot vectors through the emitted gates', () => {
   for (const g of gates) {
-    it(`${g.name} (${g.runner}): fails the digest, clears nothing, and keeps the registry's refusals`, async () => {
-      const added = await runGate(g, 'mcp__newcomer__query', tampered)
-      expect(added.status, `the edit approved a server.\nstderr: ${added.stderr.slice(0, 400)}`).toBe(2)
-      expect(added.stderr).toContain('[mcpDefaultPolicy]')
-      // An approval the control plane made does not survive an invalid file
-      // either: unknown is never approved.
-      expect((await runGate(g, 'mcp__github__create_issue', tampered)).status).toBe(2)
-      expect((await runGate(g, 'mcp__pastebin__paste', tampered)).stderr).toContain('[mcp_registry.pastebin]')
-      // The SOP rule beside it is gone, which is how we know the gate read the
-      // snapshot as invalid rather than missing the edit.
-      expect((await runGate(g, 'Write', tampered)).status).toBe(0)
-    }, 60_000)
-  }
-})
-
-describe('a server added to the allowlist in the snapshot', () => {
-  for (const g of gates) {
-    it(`${g.name} (${g.runner}): fails the digest, admits nothing, and keeps the allowlist`, async () => {
-      const added = await runGate(g, 'mcp__newcomer__query', tamperedAllowlist)
-      expect(added.status, `the edit widened the allowlist.\nstderr: ${added.stderr.slice(0, 400)}`).toBe(2)
-      expect(added.stderr).toContain('[mcp_allowlist]')
-      expect((await runGate(g, 'mcp__github__create_issue', tamperedAllowlist)).status).toBe(2)
-      expect((await runGate(g, 'Write', tamperedAllowlist)).status).toBe(0)
-    }, 60_000)
+    it(`${g.name} (${g.runner}): refuses every MCP call on a tampered snapshot, observe-only too`, async () => {
+      expect(roots.get(`${g.name}:error`), `the ${g.name} writer failed`).toBeUndefined()
+      await mapLimit(VECTORS.unverifiedCases, 4, async (c) => {
+        const snapshot = unverifiedSnapshots.get(c.name)!
+        const r = await runGate(g, c.toolName, snapshot)
+        const label = `${g.name}: ${c.name}`
+        if (c.code === null) {
+          expect(r.status, `${label}: expected an allow.\nstderr: ${r.stderr.slice(0, 400)}`).toBe(0)
+        } else {
+          expect(r.status, `${label}: expected a refusal.\nstderr: ${r.stderr.slice(0, 400)}`).toBe(2)
+          expect(r.stderr, `${label}: the refusal did not carry the reason and rule`).toContain(`${c.reason} [${c.ruleId}]`)
+        }
+        // The SOP rule beside the records is gone, which is how we know the
+        // gate read the snapshot as unverified rather than missing the edit.
+        expect((await runGate(g, 'Write', snapshot)).status, `${label}: the SOP rule survived`).toBe(0)
+      })
+    }, 180_000)
   }
 })

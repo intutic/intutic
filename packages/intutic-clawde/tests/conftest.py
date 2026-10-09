@@ -15,6 +15,7 @@ verdict.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -40,6 +41,15 @@ BLOCK_RULE = {
 }
 
 _EMPTY_SNAPSHOT = snapshot_mod.Snapshot(rules=[], state="ok", workspace_id="ws_1")
+
+
+def rules_text(lines) -> str:
+    """A `.rules` text as the sync daemon writes it: a #digest line over the
+    data lines, then the lines. Every reader treats a file without a digest as
+    unverified and drops its rules, so a fixture that wants them loaded
+    carries one."""
+    digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:32]
+    return "#digest " + digest + "\n" + "\n".join(lines) + "\n"
 
 
 def make_gate(tmp_path, monkeypatch, *, rules=(), enforce: bool = True) -> Gate:

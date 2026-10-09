@@ -55,6 +55,7 @@ rule id in brackets.
 | `SERVER_NOT_APPROVED` | The workspace refuses MCP servers it has not approved (`mcpDefaultPolicy: deny`), and this one is not approved |
 | `TOOL_DISABLED` | The tool is switched off on this MCP server in the registry |
 | `SERVER_NOT_ALLOWED` | The MCP server is not on the workspace's `mcpAllowedServers` list |
+| `POLICY_SNAPSHOT_UNVERIFIED` | The policy snapshot on this machine failed its integrity check, so it admits no MCP server; the sync daemon restores the last verified snapshot |
 | `COMMAND_TOO_LARGE` | The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls |
 | `GATE_DEADLINE` | The gate did not finish deciding within its 4-second deadline, and refuses rather than let the harness's hook timeout allow the call |
 | `UNREADABLE_CALL` | The hook received no tool call it could read, and refuses rather than allow a call it cannot evaluate |

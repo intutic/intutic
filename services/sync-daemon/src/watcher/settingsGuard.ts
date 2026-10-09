@@ -11,7 +11,10 @@
  *   - Registrations that name the gate script (Codex, GitHub Copilot, Hermes,
  *     the Goose config, OpenClaw's openclaw.json): restored while the gate is installed.
  *   - Immutable files (Goose plugin): log governance_override_attempt incident instead of restoring.
- *   - Settings files (VS Code, claude_desktop_config.json, Grok's TOML): a deletion is logged as drift.
+ *   - VS Code settings: `chat.useHooks` or a `chat.hookFilesLocations` entry that switches
+ *     off the GitHub Copilot gate is set back, and nothing else in the file is touched.
+ *   - The policy snapshot: restored from the last copy the daemon verified when it differs.
+ *   - Other settings files (claude_desktop_config.json, Grok's TOML): a deletion is logged as drift.
  *   - Gemini CLI's ~/.gemini/settings.json and Antigravity's
  *     ~/.gemini/config/hooks.json: restore when the gate registration is gone.
  *
@@ -49,6 +52,8 @@ import { writeOpenWebuiHooks } from '../harness/openWebuiHooks.js'
 import { GATE_ARTIFACTS } from '../harness/gateArtifacts.js'
 import { isImmutable } from '../harness/gooseHardener.js'
 import { readOriginal } from '../disconnect/originals.js'
+import { DEFAULT_SNAPSHOT_DIR, SNAPSHOT_JSON, SNAPSHOT_RULES, restoreVerifiedSnapshot } from '../lib/policySnapshot.js'
+import { repairHookSettings } from './vscodeHookSettings.js'
 
 const log = createLogger('sync-settings-guard')
 
@@ -78,11 +83,27 @@ function gateArtifactPaths(workspaceRoot: string): Array<{ harness: string; file
 
 // ─── All protected paths, grouped by harness ─────────────────────────
 
+/** The live policy snapshot every gate reads, both artifacts. */
+function policySnapshotFiles(snapshotDir: string = DEFAULT_SNAPSHOT_DIR): string[] {
+  return [path.join(snapshotDir, SNAPSHOT_RULES), path.join(snapshotDir, SNAPSHOT_JSON)]
+}
+
+/** VS Code's user settings (both platforms' locations) and the workspace's. */
+function vscodeSettingsFiles(workspaceRoot: string): string[] {
+  return [
+    path.join(home, '.config', 'Code', 'User', 'settings.json'),
+    path.join(home, 'Library', 'Application Support', 'Code', 'User', 'settings.json'),
+    path.join(workspaceRoot, '.vscode', 'settings.json'),
+  ]
+}
+
 /** Returns the full list of protected paths to watch. */
 export function buildProtectedPaths(workspaceRoot: string): string[] {
   return [
     // ── Every harness's gate file ────────────────────────────────────
     ...gateArtifactPaths(workspaceRoot).map((g) => g.file),
+    // ── The policy snapshot every gate reads ─────────────────────────
+    ...policySnapshotFiles(),
     // ── Claude Code ──────────────────────────────────────────────────
     path.join(home, '.claude', 'settings.json'),
     path.join(workspaceRoot, '.claude', 'settings.json'),
@@ -113,10 +134,8 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     path.join(home, '.copilot', 'hooks', 'intutic-governance.json'),
     // ── Hermes: `hooks.pre_tool_call` registers the gate ────────────
     path.join(home, '.hermes', 'config.yaml'),
-    // ── VS Code settings (Cline / Roo Code) ──────────────────────────
-    path.join(home, '.config', 'Code', 'User', 'settings.json'),
-    path.join(home, 'Library', 'Application Support', 'Code', 'User', 'settings.json'),
-    path.join(workspaceRoot, '.vscode', 'settings.json'),
+    // ── VS Code settings (Cline, Roo Code, the GitHub Copilot hooks) ──
+    ...vscodeSettingsFiles(workspaceRoot),
     // ── Claude Desktop ────────────────────────────────────────────────
     path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
     path.join(home, '.config', 'Claude', 'claude_desktop_config.json'),
@@ -203,6 +222,68 @@ async function resolveWorkspaceId(workspaceRoot: string): Promise<string> {
   return 'unknown'
 }
 
+/**
+ * Appends a `config_tamper` event to the workspace's hook-events log, the file
+ * the daemon drains to `POST /api/v1/hook-events`: the control plane files it
+ * as an incident (on the audit timeline) and exports it to SIEM as a
+ * `TAMPER` gate decision. Never throws.
+ */
+async function reportTamper(
+  workspaceRoot: string,
+  event: { toolName: string; reason: string; filePath: string; harnessType?: string },
+): Promise<void> {
+  try {
+    const line = JSON.stringify({
+      event: 'config_tamper',
+      ...event,
+      workspaceId: await resolveWorkspaceId(workspaceRoot),
+      timestamp: new Date().toISOString(),
+      incidentId: crypto.createHash('sha1').update(event.filePath + Date.now()).digest('hex').slice(0, 16),
+      // Made once and resent with this line: processed once however often the drain retries.
+      eventId: crypto.randomBytes(16).toString('hex'),
+    }) + '\n'
+    const file = path.join(workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.appendFile(file, line)
+  } catch (err) {
+    log.warn({ err, filePath: event.filePath }, 'Failed to write a tamper event to the hook-events log')
+  }
+}
+
+/**
+ * The policy snapshot's self-heal. When the live snapshot differs from the
+ * last one the daemon verified, the verified copy goes back in force at once;
+ * when there is no verified copy and the live one fails its digest, `resync`
+ * fetches a fresh one. Either way the tamper is reported. A gate reading the
+ * damaged snapshot in between refuses every MCP call
+ * (`POLICY_SNAPSHOT_UNVERIFIED`) and drops its other dynamic rules. Returns
+ * whether it found tampering.
+ */
+export async function guardPolicySnapshot(
+  workspaceRoot: string,
+  resync: () => Promise<unknown>,
+  snapshotDir: string = DEFAULT_SNAPSHOT_DIR,
+): Promise<boolean> {
+  const outcome = await restoreVerifiedSnapshot(snapshotDir)
+  if (outcome === 'intact') return false
+  if (outcome === 'unverifiable') {
+    try {
+      await resync()
+    } catch (err) {
+      log.error({ action: 'policy_snapshot_resync_failed', err }, 'Could not fetch a fresh policy snapshot')
+    }
+  }
+  await reportTamper(workspaceRoot, {
+    toolName: 'policy_snapshot',
+    filePath: path.join(snapshotDir, SNAPSHOT_RULES),
+    reason:
+      outcome === 'restored'
+        ? 'The policy snapshot was changed outside the sync daemon; the last verified snapshot was restored.'
+        : 'The policy snapshot failed its digest check and no verified copy was kept; a fresh one was fetched.',
+  })
+  return true
+}
+
 // ─── Public entry point ──────────────────────────────────────────────
 
 /**
@@ -216,6 +297,8 @@ async function resolveWorkspaceId(workspaceRoot: string): Promise<string> {
  * @param skip          - Harnesses `intutic disconnect --harness` took out:
  *                        their files are no longer governed, so a change to
  *                        one is not tampering and is not restored.
+ * @param resyncPolicy  - Fetches a fresh policy snapshot, for a damaged one
+ *                        with no verified copy to restore.
  * @returns true if tampering was detected.
  */
 export async function guardSettingsFile(
@@ -225,7 +308,21 @@ export async function guardSettingsFile(
   proxyUrl = '',
   settings?: Record<string, unknown>,
   skip: ReadonlySet<string> = new Set(),
+  resyncPolicy: () => Promise<unknown> = async () => {},
 ): Promise<boolean> {
+  // ── The policy snapshot: the last verified copy, back in force ────
+  if (policySnapshotFiles().includes(changedPath)) {
+    return guardPolicySnapshot(workspaceRoot, resyncPolicy)
+  }
+
+  // ── VS Code settings: the keys that switch off the Copilot gate ───
+  // Only while the gate is installed, and only those keys; anything else in
+  // the file is the person's own. A deletion falls through to drift below.
+  if (vscodeSettingsFiles(workspaceRoot).includes(changedPath) && !skip.has('github-copilot')) {
+    const repaired = await guardVsCodeHookSettings(changedPath, workspaceRoot)
+    if (repaired !== null) return repaired
+  }
+
   // ── Goose plugin: immutable file tamper → incident, not restore ───
   // The plugin directory, not the bare name: the OpenCode, Pi and OpenClaw
   // gate files are called intutic-governance too, and a name match sent
@@ -238,26 +335,14 @@ export async function guardSettingsFile(
         'SECURITY: Immutable Goose governance file was modified — OS immutable flag bypassed. Emitting incident.',
       )
       
-      const workspaceId = await resolveWorkspaceId(workspaceRoot)
-
-      // Emit incident to control plane via local hook-events queue
-      try {
-        const tamperEntry = JSON.stringify({
-          event: 'config_tamper',
-          toolName: 'goose_plugin',
-          reason: 'SECURITY: Immutable Goose governance file was modified — OS immutable flag bypassed.',
-          workspaceId,
-          filePath: changedPath,
-          timestamp: new Date().toISOString(),
-          incidentId: crypto.createHash('sha1').update(changedPath + Date.now()).digest('hex').slice(0, 16),
-          // Made once and resent with this line: processed once however often the drain retries.
-          eventId: crypto.randomBytes(16).toString('hex'),
-        }) + '\n'
-        const hookEventsJsonl = path.join(os.homedir(), '.intutic', 'events', 'hook-events.jsonl')
-        await fs.appendFile(hookEventsJsonl, tamperEntry, { flag: 'a' })
-      } catch (err) {
-        log.warn({ err }, 'Failed to write Goose tamper incident to hook-events log')
-      }
+      // The workspace's log, which the daemon drains; one under the home
+      // directory was never read unless the workspace was the home directory.
+      await reportTamper(workspaceRoot, {
+        toolName: 'goose_plugin',
+        harnessType: 'goose',
+        reason: 'SECURITY: Immutable Goose governance file was modified — OS immutable flag bypassed.',
+        filePath: changedPath,
+      })
 
       return true
     }
@@ -416,6 +501,41 @@ export async function guardSettingsFile(
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────
+
+/**
+ * Sets `chat.useHooks`, and any `chat.hookFilesLocations` entry that drops the
+ * Copilot gate's location, back to `true` (vscodeHookSettings.ts). Null when
+ * this is not the guard's to judge: the Copilot gate is not installed, or the
+ * file is gone or not a settings object.
+ */
+async function guardVsCodeHookSettings(filePath: string, workspaceRoot: string): Promise<boolean | null> {
+  const copilotGate = path.join(workspaceRoot, '.intutic', 'hooks', 'github-copilot-check.js')
+  if (!(await fileExists(copilotGate))) return null
+  let raw: string
+  try {
+    raw = await fs.readFile(filePath, 'utf-8')
+  } catch {
+    return null
+  }
+  const repaired = repairHookSettings(raw, workspaceRoot)
+  if (!repaired) return false
+  try {
+    await fs.writeFile(filePath, repaired.text, 'utf-8')
+  } catch (err) {
+    log.error({ action: 'vscode_hook_settings_restore_failed', path: filePath, err }, 'Could not restore the VS Code hook settings')
+  }
+  log.warn(
+    { action: 'vscode_hook_settings_restored', path: filePath, keys: repaired.keys },
+    'A VS Code setting switched off the GitHub Copilot gate — set back',
+  )
+  await reportTamper(workspaceRoot, {
+    toolName: 'vscode_settings',
+    harnessType: 'github-copilot',
+    filePath,
+    reason: `VS Code setting ${repaired.keys.join(', ')} switched off the GitHub Copilot governance hook; set back to true.`,
+  })
+  return true
+}
 
 interface RestoreContext {
   workspaceRoot: string

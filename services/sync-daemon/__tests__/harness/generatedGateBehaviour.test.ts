@@ -39,6 +39,7 @@ import {
   GATE_DEADLINE_MS,
   HarnessType,
   encodeMcpAllowlistRecord,
+  mcpSnapshotUnverifiedRefusal,
   holdApprovalHint,
 } from '@intutic/shared-types'
 import {
@@ -46,6 +47,7 @@ import {
   GOVERNANCE_BYPASS_PATTERNS,
   DESTRUCTIVE_COMMAND_PATTERNS,
   SECRET_CONTENT_PATTERNS,
+  HOOK_SETTING_PATTERNS,
   SKILL_SURFACE_PATTERNS,
   SKILL_CONTENT_PATTERNS,
   NORMALISE_CONTRACT,
@@ -703,6 +705,27 @@ for (const g of GATES) {
       })
     }, FAN_OUT_TIMEOUT)
 
+    it('refuses an edit or a command that sets a VS Code hook setting, and spares the counter-examples', async () => {
+      // chat.useHooks and chat.hookFilesLocations can switch off the GitHub
+      // Copilot gate, which loads from a default location no policy locks.
+      const cases = HOOK_SETTING_PATTERNS.flatMap((pat) => [
+        ...pat.matches.map((m) => ({ pat, m, wantBlock: true })),
+        ...pat.notMatches.map((m) => ({ pat, m, wantBlock: false })),
+      ])
+      await mapLimit(cases, GATE_CONCURRENCY, async ({ pat, m, wantBlock }) => {
+        const input = pat.subject === 'content' ? (JSON.parse(m) as Record<string, string>) : { command: m }
+        const tool = pat.subject === 'content' ? ('new_string' in input ? 'Edit' : 'Write') : 'Bash'
+        const r = await runGate(g, input, { tool })
+        assertCleanExit(g, r, `hook setting ${pat.id}`)
+        expect(
+          wasBlocked(g, r),
+          wantBlock
+            ? `${g.name} allowed ${pat.id}: ${m}`
+            : `${g.name} wrongly blocked ${m} via ${pat.id}`,
+        ).toBe(wantBlock)
+      })
+    }, FAN_OUT_TIMEOUT)
+
     it('blocks a Bash command that would use the dev-.env honeytoken (Wave 4 item 7)', async () => {
       // The developer-workstation honeytoken (infra/scripts/
       // gen-dev-honeytoken.sh, packages/proxy/src/dlp.rs's
@@ -1339,6 +1362,16 @@ describe('Open WebUI prompt filter', () => {
     writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
     expect((await ask('here is a canary-string', snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
   })
+
+  it('reads a snapshot with no digest line as unverified', async () => {
+    const rule: GuardPattern = {
+      id: 'deny.canary', source: 'canary-string', subject: 'command', severity: 'block',
+      reason: 'No canary', rationale: '', matches: [], notMatches: [],
+    }
+    const snap = writeRulesFixture(join(home, 'owui-nodigest.rules'), [rule])
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace(/^#digest .*\n/m, ''))
+    expect((await ask('here is a canary-string', snap)).refused, 'a snapshot without its digest was enforced as valid').toBe(false)
+  })
 })
 
 describe('n8n workflow gate', () => {
@@ -1434,6 +1467,22 @@ describe('n8n workflow gate', () => {
     expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a valid snapshot with the record lost its rules').toBe(true)
     writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
     expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
+  })
+
+  it('refuses a workflow with an MCP client node on an unverified snapshot, observe-only too', async () => {
+    // n8n's MCP Client Tool node calls tools on an MCP server, and a snapshot
+    // that failed its integrity check admits none.
+    const mcpNode = { name: 'Ask GitHub', type: '@n8n/n8n-nodes-langchain.mcpClientTool', typeVersion: 1, parameters: { endpointUrl: 'https://mcp.example/sse' } }
+    const snap = writeRulesFixture(join(home, 'unverified-n8n-wf.rules'), DESTRUCTIVE_COMMAND_PATTERNS.map((p) => ({ ...p, severity: 'shadow' as const })), '', [
+      encodeMcpAllowlistRecord({ severity: 'shadow', servers: ['github'] }),
+    ])
+    expect((await runWorkflow(wf([mcpNode]), snap)).refused, 'refused an MCP node on a verified snapshot').toBe(false)
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
+    const r = await runWorkflow(wf([commandNode('npm run build'), mcpNode]), snap)
+    expect(r.refused, 'an MCP node ran on a tampered snapshot').toBe(true)
+    expect(r.stderr).toContain(mcpSnapshotUnverifiedRefusal('Ask GitHub').reason + ' [policy_snapshot]')
+    // A workflow without one is left to the other rules.
+    expect((await runWorkflow(wf([commandNode('npm run build')]), snap)).refused).toBe(false)
   })
 
   it('applies destructive rules only when the snapshot supplies them', async () => {

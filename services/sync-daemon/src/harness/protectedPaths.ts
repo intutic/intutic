@@ -671,6 +671,76 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly GuardPattern[] = assertGuardTa
 ])
 
 /**
+ * The VS Code settings that can switch off the GitHub Copilot gate.
+ *
+ * VS Code loads hook files from `.github/hooks` (workspace) and
+ * `~/.copilot/hooks` (user) by default, so the Copilot gate needs no setting
+ * of its own, and no VS Code policy locks the setting that can drop one of
+ * those locations. Two keys are what an agent would reach for: `chat.useHooks`
+ * set to false turns every hook off, and `chat.hookFilesLocations` mapping a
+ * location to false drops it. Both are read from user, workspace, profile and
+ * `.code-workspace` settings, and no other file has reason to set them, so an
+ * edit that sets either key is refused whatever file it writes, and a shell
+ * command that names either key is refused too. The settings guard restores
+ * the keys if a change reaches the file another way (`settingsGuard.ts`), and
+ * the `ChatHooks` policy is the administrator's hard lock.
+ */
+export const HOOK_SETTING_PATTERNS: readonly GuardPattern[] = assertGuardTableSane([
+  {
+    id: 'hook_settings.vscode_key_written',
+    // The key in key position: followed by its closing quote (escaped, inside
+    // the serialized tool input) and a colon.
+    source: 'chat\\.(useHooks|hookFilesLocations)(\\\\)?" *:',
+    subject: 'content',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: setting chat.useHooks or chat.hookFilesLocations, which can switch off ' +
+      'the GitHub Copilot governance hook. Change VS Code hook settings yourself, not through an agent.',
+    rationale:
+      'The key as a JSON key in any content an agent writes (Write, Edit, MultiEdit). Does not catch a ' +
+      'comment between the key and its colon in a JSONC file, a key assembled from parts, or the setting ' +
+      'changed through the VS Code UI; the settings guard restores the keys after any of those.',
+    matches: [
+      '{"file_path":".vscode/settings.json","content":"{\\n  \\"chat.useHooks\\": false\\n}"}',
+      '{"file_path":"/u/Code/User/settings.json","old_string":"{","new_string":"{ \\"chat.hookFilesLocations\\": {\\".github/hooks\\": false},"}',
+      '{"file_path":"app.code-workspace","content":"{\\"settings\\":{\\"chat.useHooks\\":false}}"}',
+    ],
+    notMatches: [
+      '{"file_path":"notes.md","content":"VS Code reads chat.useHooks from settings"}',
+      '{"file_path":".vscode/settings.json","content":"{\\"chat.useHooksLater\\": 1}"}',
+      '{"file_path":".vscode/settings.json","content":"{\\"editor.tabSize\\": 2}"}',
+    ],
+    adversarial: [
+      { name: 'the key with no colon, repeated', unit: 'chat.useHooks ', held: false },
+      { name: 'the key in key position after a long text', unit: 'x ', suffix: 'chat.useHooks":', held: true },
+    ],
+  },
+  {
+    id: 'hook_settings.vscode_key_command',
+    source: 'chat\\.(useHooks|hookFilesLocations)',
+    subject: 'command',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: a shell command naming chat.useHooks or chat.hookFilesLocations, which can ' +
+      'switch off the GitHub Copilot governance hook. Change VS Code hook settings yourself, not through an agent.',
+    rationale:
+      'Any mention, as the protected-path rules do: a command that edits a settings file with jq, sed or a ' +
+      'script names the key. Refuses reading it with grep as well. Does not catch the key assembled from ' +
+      'parts or held in a variable; the settings guard restores the keys after those.',
+    matches: [
+      " jq '.\"chat.useHooks\"=false' .vscode/settings.json ",
+      ' sed -i s/chat.hookFilesLocations/x/ settings.json ',
+      ' python3 set.py chat.useHooks false ',
+    ],
+    notMatches: [' git status ', ' echo useHooks ', ' cat chat.md '],
+    adversarial: [
+      { name: 'the key less its last letter, repeated', unit: ' chat.useHook', held: false },
+      { name: 'the key after a long command', prefix: ' echo', unit: ' x', suffix: ' chat.useHooks', held: true },
+    ],
+  },
+])
+
+/**
  * Credential VALUES in the content an agent is about to write.
  *
  * The gap this closes, measured before it was built: the PreToolUse gate —
@@ -1425,6 +1495,7 @@ export function protectedPathShellPatterns(): readonly GuardPattern[] {
 export function staticFloorPatterns(): readonly GuardPattern[] {
   return [
     ...GOVERNANCE_BYPASS_PATTERNS,
+    ...HOOK_SETTING_PATTERNS,
     ...SECRET_CONTENT_PATTERNS,
     ...SKILL_SURFACE_PATTERNS,
     ...protectedPathShellPatterns(),

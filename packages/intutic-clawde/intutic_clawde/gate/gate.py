@@ -17,7 +17,7 @@ Six tiers, in order:
 
   A0  SSO group policy  from the policy snapshot       unknown groups refused
   A1  policy snapshot   port of intuticGate()          fails CLOSED
-  M   MCP registry      from the policy snapshot       edited approvals refused
+  M   MCP registry      from the policy snapshot       unverified snapshot admits none
   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
   A2  image integrity   local check                    fails CLOSED
   B   POST /hook-gate   control-plane check            fail posture set by GateClient
@@ -25,7 +25,10 @@ Six tiers, in order:
 Tier M applies the workspace's MCP server registry and mcpAllowedServers list
 to an mcp__<server>__<tool> call, from the snapshot's @mcp_registry and
 @mcp_allowlist records, with the decision, codes, rule ids and reasons the hook
-gates and the MCP proxy use (mcp_registry.py). A refusal of an unapproved
+gates and the MCP proxy use (mcp_registry.py). On a snapshot that fails its
+integrity check, Tier M refuses every MCP call with POLICY_SNAPSHOT_UNVERIFIED,
+observe-only or not: a deleted or edited record cannot be told from the
+workspace's own. A refusal of an unapproved
 server reaches the control plane as a tool_blocked event whose reason ends
 [mcpDefaultPolicy], which puts the server in the approval queue, as a hook
 gate's refusal does.
@@ -84,6 +87,8 @@ GATE_REFUSAL_CODES = (
     "SERVER_NOT_APPROVED",
     "TOOL_DISABLED",
     "SERVER_NOT_ALLOWED",
+    # Any MCP call on a policy snapshot that failed its integrity check.
+    "POLICY_SNAPSHOT_UNVERIFIED",
     "SOP_RULE",
     "HOOK_GATE",
     # The call is too large to evaluate (limits.py), before any tier runs.
@@ -366,11 +371,16 @@ class Gate:
     def _guard_mcp(self, tool_name: str, tool_input: dict) -> None:
         """Raise when the workspace's MCP server registry or allowlist refuses
         an mcp__<server>__<tool> call: the registry first, as every gate orders
-        them. An allowlist in shadow records the refusal and lets the call on."""
+        them. An allowlist in shadow records the refusal and lets the call on.
+        A snapshot that failed its integrity check admits no MCP server."""
         call = mcp_registry.split_mcp_tool_name(tool_name)
         if call is None:
             return
         snap = self.snapshot()
+        if snap.state == "invalid":
+            code, rule_id, reason = mcp_registry.unverified_refusal(call[0])
+            self._emit("tool_blocked", tool_name, f"{reason} [{rule_id}]", tool_input)
+            raise IntuticGateRefusal(f"{reason} [{rule_id}]", code)
         if snap.mcp_registry is not None:
             refusal = mcp_registry.evaluate_registry(snap.mcp_registry, call[0], call[1])
             if refusal is not None:

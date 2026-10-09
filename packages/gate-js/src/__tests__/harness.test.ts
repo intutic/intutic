@@ -65,6 +65,7 @@ import {
   type HarnessSessionLike,
   type HarnessToolApprovalContinuation,
 } from '../harness.js'
+import { rulesText } from './fixtures/rulesFile.js'
 
 class FakeGate extends Gate {
   calls: Array<{ toolName: string; toolInput: Record<string, unknown> }> = []
@@ -880,7 +881,7 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
   }
 
   function runGeneratedScript(p: FixturePattern, fixture: string): number | null {
-    writeFileSync(join(dir, 'policy-snapshot.rules'), rulesLine(p) + '\n', 'utf-8')
+    writeFileSync(join(dir, 'policy-snapshot.rules'), rulesText([rulesLine(p)]), 'utf-8')
     const scriptPath = join(dir, 'claude-code-check.js')
     writeFileSync(scriptPath, _internal.renderSandboxGateScript('policy-snapshot.rules'), 'utf-8')
     const result = spawnSync(process.execPath, [scriptPath], {
@@ -938,7 +939,7 @@ describe('intuticSandboxBootstrap: generated hook script and hold rules', () => 
     try {
       writeFileSync(
         join(dir, 'policy-snapshot.rules'),
-        ['sop.local.review_before.Deploy', 'hold', 'i', 'tool', 'Held for human review: Deploy', ' (Deploy) '].join('\t') + '\n',
+        rulesText([['sop.local.review_before.Deploy', 'hold', 'i', 'tool', 'Held for human review: Deploy', ' (Deploy) '].join('\t')]),
         'utf-8',
       )
       const scriptPath = join(dir, 'claude-code-check.js')
@@ -961,7 +962,7 @@ describe('intuticSandboxBootstrap: generated hook script and hold rules', () => 
 function writeIsolatedRules(dir: string, p: FixturePattern): string {
   const line = [p.id, p.severity, (p.ignoreCase ? 'i' : '') + (p.sequence ? 's' : '') || '-', p.subject ?? 'any', p.reason, p.source].join('\t')
   const file = join(dir, `isolated-${p.id.replace(/[^a-zA-Z0-9]/g, '_')}.rules`)
-  writeFileSync(file, line + '\n', 'utf-8')
+  writeFileSync(file, rulesText([line]), 'utf-8')
   return file
 }
 
