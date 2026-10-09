@@ -430,16 +430,16 @@ The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority n
 
 ### 2. Hot-Reload
 
-Filters are hot-reloaded into the proxy without requiring a service restart:
+Filters are hot-reloaded into both proxies, the LLM proxy and the MCP governance proxy, without a restart:
 
-1. The compiled WASM binary is stored in the database and the workspace's active rule set is published to Valkey
-2. Each connected proxy polls that rule set every 5 seconds (there is no push channel)
-3. A new WebAssembly module is instantiated on the fly when the descriptor changes, once its bytes match the SHA-256 the descriptor names
+1. The compiled WASM binary is stored in the database, and the workspace's active rule set is published to Valkey and delivered with the MCP proxy's workspace policy
+2. The LLM proxy polls the rule set every 5 seconds; the MCP proxy receives it at its next policy refresh, within 60 seconds (there is no push channel)
+3. A new WebAssembly module is instantiated when the descriptor changes, once its bytes match the SHA-256 the descriptor names; the MCP proxy fetches each module by that hash, once
 4. The filter is active on the request path within one poll interval
 
-A module whose bytes do not match its SHA-256 is not loaded. The proxy logs it and raises an incident for the workspace, and the version of that filter it already runs, if any, stays in force.
+A module that is missing, does not match its SHA-256 or cannot load is not loaded. The proxy logs it and raises an incident for the workspace, once per version, and the version of that filter it already runs, if any, stays in force.
 
-Uploaded filters reach the LLM proxy. The MCP governance proxy runs only the rules in the local rules directory (`~/.intutic/wasm/`, or `INTUTIC_WASM_DIR`), so a filter meant for MCP tool calls is installed there with `intutic policy install` as well.
+Both proxies run uploaded filters together with the rules in their local rules directory, as one list: lower priority first, and on equal priority the uploaded filter first. A filter in **Shadow** mode is evaluated and never decides a request or call; the LLM proxy records what it would have done, which is the evidence a promotion to **Enforce** is judged on, and the MCP proxy logs it. Until the MCP proxy has loaded the workspace's filters, its [fail setting](/integrations/mcp-proxy#custom-rules) decides whether a call goes ahead on the local rules alone.
 
 ---
 
