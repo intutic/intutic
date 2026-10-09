@@ -330,8 +330,7 @@ function resolveGuestAbi(instance: WebAssembly.Instance): WasmGuestAbi {
   // Accept exactly the allocator exports the proxy runner accepts
   // (packages/proxy/src/wasm/runner.rs: `allocate`, then `__new`) — anything
   // looser would validate rules the proxy then cannot run: they reach no
-  // verdict on every call, which refuses everything or enforces nothing,
-  // depending on the proxy's fail setting.
+  // verdict on every call, so every call is refused.
   let allocate: (size: number) => number
   const allocateExport = exportedFunction(exports, 'allocate')
   if (allocateExport) {
@@ -887,15 +886,13 @@ export async function runPolicyInstall(opts: {
   }
 
   // Refuse to install a rule that cannot instantiate or evaluate — a broken
-  // rule reaches no verdict on any call, so it either refuses every call or
-  // enforces nothing, depending on the proxy's fail setting.
+  // rule reaches no verdict on any call, so every call would be refused.
   if (!rego) {
     try {
       const validationVerdict = await instantiateAndEvaluate(wasmBuffer, DEFAULT_ALLOW_MOCK)
       // Refuse a code the proxy does not map. Everything outside {0,1,2,3} is
-      // no verdict at runtime, so a rule inventing a rung installs clean and
-      // then refuses every call or enforces nothing, depending on the proxy's
-      // fail setting. 2 is accepted here because already-installed rules use it,
+      // no verdict at runtime, so a rule inventing a rung would install clean
+      // and then refuse every call. 2 is accepted here because already-installed rules use it,
       // but it is deprecated and reported as such.
       if (validationVerdict === 2) {
         // Accepted, because refusing it would break reinstalling a rule that

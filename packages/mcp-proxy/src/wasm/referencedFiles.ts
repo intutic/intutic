@@ -60,6 +60,14 @@ export const ERR_NOT_FOUND = -3
 export const ERR_TOO_LARGE = -4
 export const ERR_BUFFER_TOO_SMALL = -5
 export const ERR_BUDGET = -6
+/**
+ * Not read, and not because the call never named it: the tool calls name
+ * more manifests than the host reads (`MAX_REFERENCED_FILES`), or carry a
+ * command longer than it scans, and this path is not among those read. Kept
+ * apart from `ERR_REFUSED` so decoy paths cannot make the manifest that
+ * matters look like one the call never named.
+ */
+export const ERR_NOT_READ = -7
 
 /** Host calls one evaluation may make, charged before argument validation. */
 export const MAX_READS_PER_EVALUATION = 64
@@ -80,7 +88,19 @@ export type Outcome =
   | { kind: 'too_large'; size: number }
 
 /** The structured-clone-safe wire form the runner posts to the worker. */
-export type ReferencedFilesTable = Array<[string, Outcome]>
+export interface ReferencedFilesTable {
+  entries: Array<[string, Outcome]>
+  /** The request named more than was read: a missing path answers `ERR_NOT_READ`. */
+  pastLimits: boolean
+}
+
+/** The paths a request's tool calls name, and whether it named more than the host reads. */
+export interface Candidates {
+  /** At most `MAX_REFERENCED_FILES`, deduped, in first-seen order. */
+  tokens: string[]
+  /** A manifest-shaped path past `MAX_REFERENCED_FILES`, or a command longer than the scan. */
+  pastLimits: boolean
+}
 
 export interface ToolCallLike {
   name: string
@@ -92,18 +112,26 @@ export interface ToolCallLike {
  * worker rebuilds it from `toTable()` on its side of `postMessage`.
  */
 export class ReferencedFiles {
-  private constructor(private readonly entries: ReferencedFilesTable) {}
+  private constructor(
+    private readonly entries: Array<[string, Outcome]>,
+    private readonly pastLimits: boolean,
+  ) {}
 
   static empty(): ReferencedFiles {
-    return new ReferencedFiles([])
+    return new ReferencedFiles([], false)
   }
 
   static fromTable(table: ReferencedFilesTable | undefined): ReferencedFiles {
-    return new ReferencedFiles(table ? table.map(([t, o]) => [t, o]) : [])
+    return new ReferencedFiles(table ? table.entries.map(([t, o]) => [t, o]) : [], table?.pastLimits ?? false)
   }
 
   toTable(): ReferencedFilesTable {
-    return this.entries.map(([t, o]) => [t, o])
+    return { entries: this.entries.map(([t, o]) => [t, o]), pastLimits: this.pastLimits }
+  }
+
+  /** The same entries, recording whether the request named more than was read. */
+  withPastLimits(pastLimits: boolean): ReferencedFiles {
+    return new ReferencedFiles(this.entries, pastLimits)
   }
 
   isEmpty(): boolean {
@@ -117,7 +145,7 @@ export class ReferencedFiles {
   /** The bytes for `requested`, or the error code the guest gets. */
   lookup(requested: string): { ok: true; bytes: Uint8Array } | { ok: false; code: number } {
     const hit = this.entries.find(([t]) => t === requested)
-    if (!hit) return { ok: false, code: ERR_REFUSED }
+    if (!hit) return { ok: false, code: this.pastLimits ? ERR_NOT_READ : ERR_REFUSED }
     const o = hit[1]
     switch (o.kind) {
       case 'content':
@@ -134,7 +162,11 @@ export class ReferencedFiles {
   /** Operator-facing reason. Never handed to the guest. */
   refusalReason(requested: string): string {
     const hit = this.entries.find(([t]) => t === requested)
-    if (!hit) return "not referenced by this request's tool calls"
+    if (!hit) {
+      return this.pastLimits
+        ? 'not read: the request names more files, or a longer command, than the host reads'
+        : "not referenced by this request's tool calls"
+    }
     const o = hit[1]
     switch (o.kind) {
       case 'refused':
@@ -177,10 +209,11 @@ export function resolveRoot(env: NodeJS.ProcessEnv = process.env): string | unde
 
 /**
  * Guard 1 and 2: every manifest-shaped path the tool calls literally name,
- * deduped, capped at `MAX_REFERENCED_FILES`, in first-seen order.
+ * deduped, capped at `MAX_REFERENCED_FILES`, in first-seen order, and whether
+ * they named more than that.
  */
-export function candidateTokens(toolCalls: readonly ToolCallLike[]): string[] {
-  const out: string[] = []
+export function candidateTokens(toolCalls: readonly ToolCallLike[]): Candidates {
+  const out: Candidates = { tokens: [], pastLimits: false }
   for (const call of toolCalls) {
     const args = call.arguments
     if (typeof args !== 'object' || args === null || Array.isArray(args)) continue
@@ -192,17 +225,16 @@ export function candidateTokens(toolCalls: readonly ToolCallLike[]): string[] {
     for (const key of COMMAND_ARG_KEYS) {
       const value = map[key]
       if (typeof value === 'string') {
+        if (value.length > MAX_COMMAND_SCAN_BYTES) out.pastLimits = true
         const scanned = value.length > MAX_COMMAND_SCAN_BYTES ? value.slice(0, MAX_COMMAND_SCAN_BYTES) : value
         for (const token of shellTokens(scanned)) consider(token, out)
       }
     }
-    if (out.length >= MAX_REFERENCED_FILES) break
   }
   return out
 }
 
-function consider(raw: string, out: string[]): void {
-  if (out.length >= MAX_REFERENCED_FILES) return
+function consider(raw: string, out: Candidates): void {
   const trimmed = raw.replace(/^["']+|["']+$/g, '')
   // `--values=charts/prod.yaml` is one shell word carrying one path. Only
   // option-shaped words are split, so a filename that legitimately contains
@@ -211,8 +243,12 @@ function consider(raw: string, out: string[]): void {
   const eq = trimmed.indexOf('=')
   if (eq > 0 && trimmed.startsWith('-')) candidate = trimmed.slice(eq + 1)
   if (candidate.length === 0 || Buffer.byteLength(candidate) > MAX_GUEST_PATH_BYTES || !hasManifestExtension(candidate)) return
-  if (out.includes(candidate)) return
-  out.push(candidate)
+  if (out.tokens.includes(candidate)) return
+  if (out.tokens.length >= MAX_REFERENCED_FILES) {
+    out.pastLimits = true
+    return
+  }
+  out.tokens.push(candidate)
 }
 
 function hasManifestExtension(token: string): boolean {
@@ -269,12 +305,13 @@ export async function readTokens(tokens: readonly string[], root: string): Promi
       { action: 'wasm_manifest_root_unresolvable', root, err: err instanceof Error ? err.message : String(err) },
       `${MANIFEST_ROOT_ENV} does not resolve — every referenced-file read will be refused`,
     )
-    return ReferencedFiles.fromTable(
-      tokens.map((t) => [t, { kind: 'refused', why: 'the configured manifest root does not resolve' }]),
-    )
+    return ReferencedFiles.fromTable({
+      entries: tokens.map((t) => [t, { kind: 'refused', why: 'the configured manifest root does not resolve' }]),
+      pastLimits: false,
+    })
   }
 
-  const table: ReferencedFilesTable = []
+  const entries: Array<[string, Outcome]> = []
   for (const token of tokens) {
     const outcome = await readOne(canonicalRoot, token)
     if (outcome.kind === 'content') {
@@ -296,9 +333,9 @@ export async function readTokens(tokens: readonly string[], root: string): Promi
         'referenced file withheld from WASM rules',
       )
     }
-    table.push([token, outcome])
+    entries.push([token, outcome])
   }
-  return ReferencedFiles.fromTable(table)
+  return ReferencedFiles.fromTable({ entries, pastLimits: false })
 }
 
 function describeOutcome(o: Outcome): string {
@@ -314,9 +351,14 @@ function describeOutcome(o: Outcome): string {
   }
 }
 
+/** `readTokens` for a request's candidates, keeping whether it named more than was read. */
+export async function readCandidates(candidates: Candidates, root: string): Promise<ReferencedFiles> {
+  return (await readTokens(candidates.tokens, root)).withPastLimits(candidates.pastLimits)
+}
+
 /** Convenience for callers with tool calls in hand. */
 export function prefetch(toolCalls: readonly ToolCallLike[], root: string): Promise<ReferencedFiles> {
-  return readTokens(candidateTokens(toolCalls), root)
+  return readCandidates(candidateTokens(toolCalls), root)
 }
 
 /**

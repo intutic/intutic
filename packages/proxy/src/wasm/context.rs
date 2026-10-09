@@ -66,9 +66,9 @@ pub enum Verdict {
         target_hash: String,
     },
     /// A custom rule reached no verdict — its deadline, its instruction
-    /// budget, an error, or a result that is not a verdict — and the proxy
-    /// fails closed (`intutic_settings.policy.fail_closed`, the default).
-    /// Refused as `GOVERNANCE_UNAVAILABLE`. Ranks with a block: nobody
+    /// budget, an error, or a result that is not a verdict. Refused as
+    /// `GOVERNANCE_UNAVAILABLE` whatever the proxy's fail mode, because an
+    /// agent can cause it by padding its input. Ranks with a block: nobody
     /// cleared the call, so neither a retry nor an approval may pass it.
     Unavailable {
         reason: String,

@@ -13,7 +13,7 @@ To guarantee that custom user code cannot degrade proxy performance or compromis
 * **CPU Fuel Limit**: Bound to **1,000,000 fuel units** to prevent infinite loops.
 * **Execution Timeout**: **5ms** budget per evaluation. A rule still running at 5ms is terminated. The engine uses `wasmtime` epoch interruption: a ticker advances the engine's epoch every millisecond, and a rule still running at its deadline traps at its next loop or function entry.
 
-A rule stopped by either bound, one that traps, or one that returns something other than a verdict reaches no verdict, and the proxy's fail mode (`intutic_settings.policy.fail_closed`, default `true`) decides: closed refuses the request with `403 GOVERNANCE_UNAVAILABLE`, naming the rule and the cause; open skips the rule. See [When a rule reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
+A rule stopped by either bound, one that traps, or one that returns something other than a verdict reaches no verdict, and the request is refused with `403 GOVERNANCE_UNAVAILABLE`, naming the rule and the cause, whatever `intutic_settings.policy.fail_closed` says: that setting is for control-plane outages, and an agent can exhaust a rule's budget by padding its input. See [When a rule reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
 
 A Rego rule runs with 100,000,000 fuel units and a 20 ms deadline instead, in the same 16MB; see [Limits](/guide/rego-policies#limits).
 

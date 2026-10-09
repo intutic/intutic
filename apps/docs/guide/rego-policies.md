@@ -1,6 +1,6 @@
 # Rego policies <Badge type="tip" text="Open-Core" />
 
-Write governance rules in Rego, compile them with OPA, and run them in the Intutic proxy and the MCP governance proxy on every tool call. A Rego policy is a [custom filter](/guide/wasm-rules) like any other: it installs into the same rules directory, uploads through the same dashboard page, runs in the same sandbox and follows the same [fail setting](/guide/wasm-rules#when-a-rule-reaches-no-verdict) when it reaches no verdict. Only the language and the build step differ.
+Write governance rules in Rego, compile them with OPA, and run them in the Intutic proxy and the MCP governance proxy on every tool call. A Rego policy is a [custom filter](/guide/wasm-rules) like any other: it installs into the same rules directory, uploads through the same dashboard page, runs in the same sandbox and is [refused the same way](/guide/wasm-rules#when-a-rule-reaches-no-verdict) when it reaches no verdict. Only the language and the build step differ.
 
 Rego rules are on wherever WASM rules are. `INTUTIC_DISABLE_REGO_RULES=1` switches them off on a proxy, which then refuses Rego modules at load.
 
@@ -34,7 +34,7 @@ A policy needs one rule to be its entrypoint. The rule's value decides:
 
 A decision object may also carry `"risk_tier"`: `low`, `medium`, `high` or `critical`. Without one, the rule's default from `intutic rules build --risk-tier` applies. The risk tier travels with a hold into the review queue and appears in `intutic rules test` output.
 
-Anything else, such as an object without a known `decision`, is not a decision: the rule reached no verdict, as a native rule returning an unknown verdict code does, and the proxy's [fail setting](/guide/wasm-rules#when-a-rule-reaches-no-verdict) decides. Failing closed, the default in the LLM proxy, the call is refused with `GOVERNANCE_UNAVAILABLE`.
+Anything else, such as an object without a known `decision`, is not a decision: the rule reached no verdict, as a native rule returning an unknown verdict code does, and the call is [refused](/guide/wasm-rules#when-a-rule-reaches-no-verdict) with `GOVERNANCE_UNAVAILABLE`, whatever the proxy's fail setting.
 
 Reasons are trimmed, stripped of control characters and cut to 480 characters, as for every rule.
 
@@ -264,7 +264,7 @@ Replay (`intutic policy replay`, `POST /api/v1/wasm-rules/:id/replay`) runs nati
 
 ## Limits
 
-A Rego rule runs in the same sandbox as a native rule, with a larger budget, because OPA does inside the sandbox what a native rule leaves out: it parses the whole input document and compiles each regular expression the policy uses, on every evaluation. Both bounds stop the rule, which then reaches no verdict: the proxy's [fail setting](/guide/wasm-rules#when-a-rule-reaches-no-verdict) decides, as for every rule. In the LLM proxy, a rule that reaches no verdict on one call of a turn refuses the request when it fails closed, unless it denied another call of that turn.
+A Rego rule runs in the same sandbox as a native rule, with a larger budget, because OPA does inside the sandbox what a native rule leaves out: it parses the whole input document and compiles each regular expression the policy uses, on every evaluation. Both bounds stop the rule, which then reaches no verdict and [refuses the call](/guide/wasm-rules#when-a-rule-reaches-no-verdict), as for every rule, whatever the proxy's fail setting. In the LLM proxy, a rule that reaches no verdict on one call of a turn refuses the request; a deny it reached on another call of that turn is the refusal reported.
 
 | | Native rule | Rego rule, LLM proxy | Rego rule, MCP proxy |
 | :--- | :--- | :--- | :--- |

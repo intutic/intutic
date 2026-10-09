@@ -261,8 +261,7 @@ export async function runRulesTest(modulePath: string, opts: { input: string[] }
       } catch (err) {
         failed += 1
         log.error(
-          `${label}: evaluation reached no decision (a proxy refuses the call when it fails closed, ` +
-            `the default): ${(err as Error).message}`,
+          `${label}: evaluation reached no decision (a proxy refuses the call): ${(err as Error).message}`,
         )
         continue
       }

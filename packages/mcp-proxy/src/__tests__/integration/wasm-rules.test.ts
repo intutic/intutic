@@ -242,7 +242,7 @@ describe('WasmRunner + read_referenced_file (TD-441) and the memory ceiling (TD-
 })
 
 describe('WasmRunner + purpose-built fixtures', () => {
-  it('an infinite-loop rule is stopped by its instruction budget, without waiting out the deadline, and follows the fail setting', async () => {
+  it('an infinite-loop rule is stopped by its instruction budget, without waiting out the deadline, and refuses the call', async () => {
     const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-loop-'))
     try {
       const wasmPath = await compileScratchRule('infinite-loop', INFINITE_LOOP, outDir)
@@ -257,12 +257,11 @@ describe('WasmRunner + purpose-built fixtures', () => {
         // path traps inside a healthy worker and never does. So no respawn
         // proves the budget stopped the loop, without a timing assertion.
         const respawn = vi.spyOn(runner as unknown as { respawnWorker: () => Promise<void> }, 'respawnWorker')
-        const closed: WasmVerdict = await runner.evaluate(baseContext)
-        expect(closed).toMatchObject({ code: 'unavailable', stop: 'budget', ruleId: 'local:10_infinite-loop.wasm' })
-        if (closed.code === 'unavailable') {
-          expect(closed.reason).toContain('Custom rule local:10_infinite-loop.wasm reached no verdict (budget)')
+        const verdict: WasmVerdict = await runner.evaluate(baseContext)
+        expect(verdict).toMatchObject({ code: 'unavailable', stop: 'budget', ruleId: 'local:10_infinite-loop.wasm' })
+        if (verdict.code === 'unavailable') {
+          expect(verdict.reason).toContain('Custom rule local:10_infinite-loop.wasm reached no verdict (budget)')
         }
-        expect(await runner.evaluate(baseContext, { failOpen: true })).toEqual({ code: 'allow' })
         expect(respawn).not.toHaveBeenCalled()
       } finally {
         await runner.shutdown()
@@ -272,44 +271,34 @@ describe('WasmRunner + purpose-built fixtures', () => {
     }
   }, 30_000)
 
-  it.each([
-    { failOpen: false, expected: 'unavailable' },
-    { failOpen: true, expected: 'allow' },
-  ])('quarantines a rule after 3 runaways in a row; then, failOpen=$failOpen, answers $expected without evaluating it', async ({ failOpen, expected }) => {
+  it('quarantines a rule after 3 runaways in a row, then refuses without evaluating it until the next rescan', async () => {
     const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-loop3-'))
     try {
-      const wasmPath = await compileScratchRule(`infinite-loop-3x-${String(failOpen)}`, INFINITE_LOOP, outDir)
+      const wasmPath = await compileScratchRule('infinite-loop-3x', INFINITE_LOOP, outDir)
       copyFileSync(wasmPath, join(wasmDir, '10_loop3.wasm'))
 
       const runner = new WasmRunner(wasmDir)
       try {
         await runner.rescan()
         const verdicts: WasmVerdict[] = []
-        for (let i = 0; i < 3; i++) verdicts.push(await runner.evaluate(baseContext, { failOpen }))
-        expect(verdicts.map((v) => v.code)).toEqual([expected, expected, expected])
-        if (!failOpen) {
-          // The third runaway is the one that quarantines it, and says so.
-          expect(verdicts.map((v) => (v.code === 'unavailable' ? v.stop : v.code))).toEqual(['budget', 'budget', 'budget'])
-          expect(verdicts[2]?.code === 'unavailable' && verdicts[2].reason).toContain('now quarantined')
-        }
+        for (let i = 0; i < 3; i++) verdicts.push(await runner.evaluate(baseContext))
+        expect(verdicts.map((v) => (v.code === 'unavailable' ? v.stop : v.code))).toEqual(['budget', 'budget', 'budget'])
+        // The third runaway is the one that quarantines it, and says so.
+        expect(verdicts[2]?.code === 'unavailable' && verdicts[2].reason).toContain('now quarantined')
 
-        // Quarantined: answered without running anything, so neither a padded
-        // call nor a slow machine can turn it into an allow under fail-closed.
+        // Quarantined: refused without running anything, so three padded
+        // calls cannot switch the rule off.
         const evaluateOne = vi.spyOn(runner as unknown as { evaluateOne: () => Promise<unknown> }, 'evaluateOne')
-        const fourth = await runner.evaluate(baseContext, { failOpen })
+        const fourth = await runner.evaluate(baseContext)
         expect(evaluateOne).not.toHaveBeenCalled()
-        if (failOpen) {
-          expect(fourth).toEqual({ code: 'allow' })
-        } else {
-          expect(fourth).toMatchObject({ code: 'unavailable', stop: 'quarantined', ruleId: 'local:10_loop3.wasm' })
-          expect(fourth.code === 'unavailable' && fourth.reason).toContain('quarantined')
-        }
+        expect(fourth).toMatchObject({ code: 'unavailable', stop: 'quarantined', ruleId: 'local:10_loop3.wasm' })
+        expect(fourth.code === 'unavailable' && fourth.reason).toContain('quarantined')
 
         // The next rescan releases it: evaluated again, and stopped again.
         await runner.rescan()
-        const released = await runner.evaluate(baseContext, { failOpen })
+        const released = await runner.evaluate(baseContext)
         expect(evaluateOne).toHaveBeenCalledTimes(1)
-        expect(released.code === 'unavailable' ? released.stop : released.code).toBe(failOpen ? 'allow' : 'budget')
+        expect(released).toMatchObject({ code: 'unavailable', stop: 'budget' })
       } finally {
         await runner.shutdown()
       }
@@ -321,7 +310,7 @@ describe('WasmRunner + purpose-built fixtures', () => {
   it.each([
     { name: 'traps', source: 'export function evaluate(offset: i32, len: i32): i32 {\n  unreachable();\n  return 0;\n}\n', stop: 'error' },
     { name: 'returns a code that is not a verdict', source: 'export function evaluate(offset: i32, len: i32): i32 {\n  return 7;\n}\n', stop: 'result' },
-  ])('a rule that $name reaches no verdict: refused fail-closed, allowed fail-open', async ({ name, source, stop }) => {
+  ])('a rule that $name reaches no verdict and refuses the call', async ({ name, source, stop }) => {
     const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-noverdict-'))
     try {
       const wasmPath = await compileScratchRule(
@@ -334,10 +323,9 @@ describe('WasmRunner + purpose-built fixtures', () => {
       const runner = new WasmRunner(wasmDir)
       try {
         await runner.rescan()
-        const closed = await runner.evaluate(baseContext)
-        expect(closed, name).toMatchObject({ code: 'unavailable', stop, ruleId: 'local:10_no-verdict.wasm' })
-        expect(closed.code === 'unavailable' && closed.reason).toContain(`(${stop})`)
-        expect(await runner.evaluate(baseContext, { failOpen: true })).toEqual({ code: 'allow' })
+        const verdict = await runner.evaluate(baseContext)
+        expect(verdict, name).toMatchObject({ code: 'unavailable', stop, ruleId: 'local:10_no-verdict.wasm' })
+        expect(verdict.code === 'unavailable' && verdict.reason).toContain(`(${stop})`)
       } finally {
         await runner.shutdown()
       }

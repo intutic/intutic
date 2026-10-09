@@ -196,15 +196,19 @@ context stays per process.
 
 An empty allowlist means unrestricted at every allowlist step above — never
 "permit nothing." A check that cannot complete fails **open** by default:
-DLP/SOP/TOFU checks that error out, a registry the proxy has never been able
-to load, and a custom rule that reaches no verdict let the call through rather
-than blocking every request while policy is unreachable. The workspace's
-`mcpProxyFailBehavior` chooses, and `INTUTIC_MCP_FAIL_OPEN=false` sets it
-locally until the proxy has loaded the workspace's choice — see [When the
-registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded).
-Failing closed, each of them refuses the call; for a custom rule the refusal
-is `GOVERNANCE_UNAVAILABLE` with `ruleId` `wasm:<rule id>` — see [When a rule
-reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
+DLP/SOP/TOFU checks that error out, and a registry the proxy has never been
+able to load, let the call through rather than blocking every request while
+policy is unreachable. The workspace's `mcpProxyFailBehavior` chooses, and
+`INTUTIC_MCP_FAIL_OPEN=false` sets it locally until the proxy has loaded the
+workspace's choice — see [When the registry has not
+loaded](/guide/mcp-governance#when-the-registry-has-not-loaded).
+
+A custom rule that reaches no verdict is the exception: it always refuses the
+call, with `GOVERNANCE_UNAVAILABLE` and `ruleId` `wasm:<rule id>`, whatever
+the fail setting. The setting is for an unreachable control plane, which an
+agent cannot cause; a rule's deadline or budget an agent can exhaust by
+padding its arguments — see [When a rule reaches no
+verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
 
 **The RESPONSE direction is a separate code path** (`processServerLine`,
 `src/proxy.ts`), because by the time a result comes back the call has already

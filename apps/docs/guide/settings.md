@@ -227,7 +227,7 @@ What the MCP governance proxy does when it cannot reach Intutic, and how firmly 
 
 | Setting | Behavior |
 |---------|----------|
-| **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard |
+| **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard. Custom rule failures are excluded: a [rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict) always refuses the call |
 | **Fail closed** | The tool call is blocked with "Governance check failed: Intutic control plane unreachable." The dashboard asks you to confirm before switching to it |
 
 The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). It also decides what happens to a call an [MCP call budget](/guide/mcp-governance#call-budgets) covers when the proxy cannot reach Valkey to count it: fail open lets the call through uncounted, fail closed refuses it.

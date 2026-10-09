@@ -367,8 +367,8 @@ function sanitize(text: unknown): string | undefined {
 
 /**
  * Thrown by {@link regoDecision} for a result in none of the documented
- * shapes: the rule reached no decision, and the host's fail setting decides
- * what that means for the call, as for a rule that ran out of time.
+ * shapes: the rule reached no decision, and the host refuses the call, as for
+ * a rule that ran out of time.
  */
 export class RegoResultError extends Error {
   override name = 'RegoResultError'

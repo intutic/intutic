@@ -83,8 +83,8 @@ export type WasmVerdict =
   /** A Rego rule's `hold`: the interceptor puts the call through the decisions API. */
   | { code: 'hold'; reason: string; ruleId: string; riskTier?: string }
   /**
-   * A rule reached no verdict and the proxy fails closed: the call is refused
-   * as `GOVERNANCE_UNAVAILABLE`. Under fail-open the rule is skipped instead.
+   * A rule reached no verdict: the call is refused as `GOVERNANCE_UNAVAILABLE`,
+   * whatever the proxy's fail setting (see {@link WasmRunner.evaluate}).
    */
   | { code: 'unavailable'; reason: string; ruleId: string; stop: RuleStop }
 
@@ -97,16 +97,6 @@ type RuleResult =
 interface RuleFailure {
   stop: Exclude<RuleStop, 'quarantined'>
   detail: string
-}
-
-/** Options for {@link WasmRunner.evaluate}. */
-export interface EvaluateOptions {
-  /**
-   * The proxy's fail setting (`mcpProxyFailBehavior`, else
-   * `INTUTIC_MCP_FAIL_OPEN`): whether a rule that reaches no verdict lets
-   * the call through. Defaults to `false`, fail closed.
-   */
-  failOpen?: boolean
 }
 
 interface PendingEntry {
@@ -278,35 +268,33 @@ export class WasmRunner implements CompileBridge {
    * still blocks, `allow` when nothing fired.
    *
    * A rule that reaches no verdict — its deadline, its instruction budget, a
-   * trap or other error, or a result that is not a verdict — follows
-   * `failOpen`. Fail-open skips it, as before. Fail-closed refuses the call
-   * (`unavailable`), outranking a hold and a reask, since neither an approval
-   * nor a retry can clear a call a rule never judged; a later rule's block
-   * still wins, because it says what is wrong with the call.
+   * trap or other error, or a result that is not a verdict — refuses the call
+   * (`unavailable`), whatever `mcpProxyFailBehavior` or
+   * `INTUTIC_MCP_FAIL_OPEN` say. That setting exists for control-plane
+   * outages, which an agent cannot cause; a rule's timeout an agent can cause
+   * by padding its input, so it must never become an allow. The refusal
+   * outranks a hold and a reask, since neither an approval nor a retry can
+   * clear a call a rule never judged; a later rule's block still wins,
+   * because it says what is wrong with the call.
    *
-   * A quarantined rule (see {@link countRunaway}) is not evaluated. Fail-open
-   * skips it until the next rescan. Fail-closed refuses at once, without
-   * evaluating anything: otherwise three padded calls would switch a rule off.
+   * A quarantined rule (see {@link countRunaway}) refuses at once, without
+   * anything being evaluated, until the next rescan.
    */
-  async evaluate(input: WasmContextInput, options: EvaluateOptions = {}): Promise<WasmVerdict> {
-    const failOpen = options.failOpen ?? false
-    const loaded = this.loader.getRules()
-    if (!failOpen) {
-      const held = loaded.find((r) => this.quarantined.has(r.ruleId))
-      if (held) {
-        return {
-          code: 'unavailable',
-          stop: 'quarantined',
-          ruleId: held.ruleId,
-          reason: noVerdictReason(
-            held.ruleId,
-            'quarantined',
-            `it is quarantined after ${MAX_CONSECUTIVE_RUNAWAYS} runaway evaluations in a row (deadline or budget), until the next rescan`,
-          ),
-        }
+  async evaluate(input: WasmContextInput): Promise<WasmVerdict> {
+    const rules = this.loader.getRules()
+    const held = rules.find((r) => this.quarantined.has(r.ruleId))
+    if (held) {
+      return {
+        code: 'unavailable',
+        stop: 'quarantined',
+        ruleId: held.ruleId,
+        reason: noVerdictReason(
+          held.ruleId,
+          'quarantined',
+          `it is quarantined after ${MAX_CONSECUTIVE_RUNAWAYS} runaway evaluations in a row (deadline or budget), until the next rescan`,
+        ),
       }
     }
-    const rules = loaded.filter((r) => !this.quarantined.has(r.ruleId))
     if (rules.length === 0) return { code: 'allow' }
 
     // Each built once, and only if a rule of that kind is loaded.
@@ -338,10 +326,10 @@ export class WasmRunner implements CompileBridge {
           ? `${failure.detail}; it is now quarantined until the next rescan, after ${MAX_CONSECUTIVE_RUNAWAYS} runaway evaluations in a row`
           : failure.detail
         log.warn(
-          { action: 'wasm_rule_no_verdict', ruleId: rule.ruleId, stop: failure.stop, failOpen },
-          `WASM rule reached no verdict: ${detail} — ${failOpen ? 'failing open' : 'refusing (fail-closed)'}`,
+          { action: 'wasm_rule_no_verdict', ruleId: rule.ruleId, stop: failure.stop },
+          `WASM rule reached no verdict: ${detail} — refusing`,
         )
-        if (!failOpen && !unavailable) {
+        if (!unavailable) {
           unavailable = {
             code: 'unavailable',
             stop: failure.stop,
@@ -514,8 +502,8 @@ function undefinedVerdict(result: RuleResult): RuleFailure | null {
 /** The refusal an agent reads when a rule reached no verdict: which rule, and why. */
 function noVerdictReason(ruleId: string, stop: RuleStop, detail: string): string {
   return (
-    `Custom rule ${ruleId} reached no verdict (${stop}): ${detail}. Tool call blocked ` +
-    `(fail-closed mode: mcpProxyFailBehavior or INTUTIC_MCP_FAIL_OPEN=false).`
+    `Custom rule ${ruleId} reached no verdict (${stop}): ${detail}. Tool call blocked: a ` +
+    `rule that cannot decide never allows.`
   )
 }
 

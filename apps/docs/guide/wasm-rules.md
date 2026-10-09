@@ -52,24 +52,19 @@ The context is never cut: a rule receives every tool call and its full arguments
 
 ### When a rule reaches no verdict
 
-A rule reaches no verdict when it runs past its deadline, uses up its instruction budget, traps or otherwise fails while running, or returns something that is not a verdict: a code other than `0`, `1`, `2` or `3`, or a Rego result in none of the [documented shapes](/guide/rego-policies#writing-a-policy). What the request gets is the proxy's fail setting, the one it already uses when a policy check cannot complete:
-
-| | Fail closed (the default) | Fail open |
-| :--- | :--- | :--- |
-| **LLM proxy** (`intutic_settings.policy.fail_closed`, default `true`) | HTTP 403, `GOVERNANCE_UNAVAILABLE` | The rule is skipped and the request continues |
-| **MCP proxy** (`mcpProxyFailBehavior`, else `INTUTIC_MCP_FAIL_OPEN`, default open) | The call is refused with `GOVERNANCE_UNAVAILABLE`, `ruleId` `wasm:<rule id>` | The rule is skipped and the call continues |
-
-The refusal names the rule and the cause, one of `deadline`, `budget`, `error` or `result`:
+A rule reaches no verdict when it runs past its deadline, uses up its instruction budget, traps or otherwise fails while running, or returns something that is not a verdict: a code other than `0`, `1`, `2` or `3`, or a Rego result in none of the [documented shapes](/guide/rego-policies#writing-a-policy). The call is then refused with `GOVERNANCE_UNAVAILABLE`, in both proxies: HTTP 403 from the LLM proxy, and a refused call with `ruleId` `wasm:<rule id>` from the MCP proxy. The refusal names the rule and the cause, one of `deadline`, `budget`, `error` or `result`:
 
 ```text
-Custom rule local:50_budget-guard.wasm reached no verdict (deadline): it ran past its 5 ms deadline. Request blocked because the proxy fails closed (intutic_settings.policy.fail_closed).
+Custom rule local:50_budget-guard.wasm reached no verdict (deadline): it ran past its 5 ms deadline. Request blocked: a rule that cannot decide never allows.
 ```
 
-Failing closed is what policy engines do when they cannot decide: Envoy's external authorization denies unless `failure_mode_allow` is set, and a Kubernetes admission webhook defaults to `failurePolicy: Fail`. A rule that cannot judge a call has not cleared it, so it ranks with a block: it outranks another rule's hold or reask, which an approval or a retry could otherwise get past, and another rule's block still wins, because it says what is wrong with the call. Either way the proxy logs a warning naming the rule and the cause. A rule in shadow mode reports what it would have done and changes nothing.
+**The fail setting does not apply.** The LLM proxy's `intutic_settings.policy.fail_closed`, and the MCP proxy's `mcpProxyFailBehavior` and `INTUTIC_MCP_FAIL_OPEN`, decide what happens when the control plane cannot be reached: an outage an agent cannot cause. An agent can make a rule run out of time or budget by padding its input, so a rule that could not decide is refused even on a proxy that fails open. This is what policy engines do when they cannot decide: Envoy's external authorization denies unless `failure_mode_allow` is set, and a Kubernetes admission webhook defaults to `failurePolicy: Fail`.
 
-**Quarantine (MCP proxy).** A rule that runs past its deadline or its budget three times in a row is quarantined until the proxy next rescans the rules directory. Failing closed, every call is refused at once with `GOVERNANCE_UNAVAILABLE` (cause `quarantined`) without the rule running; otherwise padding three calls would switch the rule off. The call that quarantined the rule is recorded as a blocked call; the refusals after it are not, one per retry. Failing open, a quarantined rule is skipped. The LLM proxy has no quarantine: each request runs every rule within its deadline.
+A rule that cannot judge a call has not cleared it, so the refusal ranks with a block: it outranks another rule's hold or reask, which an approval or a retry could otherwise get past, and another rule's block still wins, because it says what is wrong with the call. The proxy logs a warning naming the rule and the cause. A rule in shadow mode reports what it would have done and changes nothing.
 
-**A rule that cannot load** is not a rule that reached no verdict, and neither fail setting applies. The proxy keeps the version of that rule it already runs, if any, and logs the error. A rule pushed from the dashboard that is refused also raises an incident once per version, saying whether an earlier version stays in force or the rule enforces nothing until a version loads.
+**Quarantine (MCP proxy).** A rule that runs past its deadline or its budget three times in a row is quarantined until the proxy next rescans the rules directory. Every call is then refused at once with `GOVERNANCE_UNAVAILABLE` (cause `quarantined`) without the rule running. The call that quarantined the rule is recorded as a blocked call; the refusals after it are not, one per retry. The LLM proxy has no quarantine: each request runs every rule within its deadline.
+
+**A rule that cannot load** is not a rule that reached no verdict, and is not refused per call. The proxy keeps the version of that rule it already runs, if any, and logs the error. A rule pushed from the dashboard that is refused also raises an incident once per version, saying whether an earlier version stays in force or the rule enforces nothing until a version loads.
 
 
 
@@ -102,11 +97,25 @@ refusal, never a trap:
 | Code | Meaning |
 | :--- | :--- |
 | `-1` | Malformed call — pointers outside your memory, a bad length, a non-UTF-8 path. |
-| `-2` | Refused. Either your request's tool calls never named this path, it failed a path guard, or it is past the scan limits below. |
+| `-2` | Refused. Either your request's tool calls never named this path, or it failed a path guard. |
 | `-3` | Referenced and allowed, but not on disk. |
 | `-4` | Larger than the 256 KiB cap. **No bytes are exposed** — a rule must not scan a prefix and conclude a manifest is clean. |
 | `-5` | Your buffer was smaller than the file. Nothing was written; ask for the size first. |
 | `-6` | This evaluation used its 64 reads. |
+| `-7` | Not read: the request names more manifests than the host reads, or a command longer than it scans (the limits below), and this path is not among those read. Refuse on it for a path your rule governs: padding a command with decoy paths produces exactly this. |
+
+The SDK wraps the import as `readReferencedFile(path)`, in
+`assembly/referencedFiles.ts` (import it only in a rule that reads files, so
+no other rule carries the import). It sizes the buffer, copies the bytes, and
+returns them with the code; its `unread` is true for every code except `-3`,
+which is the cue for a rule governing that path to refuse:
+
+```typescript
+import { readReferencedFile } from "../assembly/referencedFiles";
+
+const manifest = readReferencedFile("k8s/prod.yaml");
+if (manifest.unread) return 1; // named by the call, not seen by the rule
+```
 
 What you can read is decided entirely by the host, before your rule is even
 instantiated:
@@ -122,11 +131,7 @@ instantiated:
   leading out of the root is refused too, because confinement is checked against
   the fully resolved path.
 - **At most 8 files per request, 256 KiB each**, taken from the first 64 KiB of
-  a command. A ninth path, or one further into a longer command, answers `-2`
-  like a path the call never named. A rule that parsed the path out of the
-  command itself knows the call named it, so it should treat `-2` as "not
-  read" and refuse, not as "nothing to check" — otherwise padding a command
-  hides the manifest that matters.
+  a command. A ninth path, or one further into a longer command, answers `-7`.
 
 ::: warning Off unless configured
 Set `INTUTIC_WASM_MANIFEST_ROOT` to the directory rules may read manifests from.

@@ -289,7 +289,7 @@ Intutic's options live under `intutic_settings`:
 | Setting | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
 | `control_plane_url` | string | `CONTROL_PLANE_URL` | Where the pre-request policy check goes. `CONTROL_PLANE_URL` takes precedence |
-| `fail_closed` | boolean | `true` | Refuse the request (`403 policy_denied`) when the check fails or cannot be reached. `false` lets it through. The same setting decides what a [custom rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict) means: `true` refuses with `403 GOVERNANCE_UNAVAILABLE`, `false` skips the rule |
+| `fail_closed` | boolean | `true` | Refuse the request (`403 policy_denied`) when the check fails or cannot be reached. `false` lets it through. It does not cover a [custom rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict), which refuses with `403 GOVERNANCE_UNAVAILABLE` either way: an agent can cause that by padding its input |
 | `timeout_ms` | number | `3000` | How long the check may take |
 
 ### DLP (`intutic_settings.dlp`)

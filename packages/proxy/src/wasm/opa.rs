@@ -24,7 +24,7 @@
 //! - a set or array of messages denies with the first when non-empty;
 //! - an object `{"decision": "allow"|"deny"|"hold"|"reask", "reason", "risk_tier"}`;
 //! - undefined allows;
-//! - anything else is no verdict, and the proxy's fail mode decides.
+//! - anything else is no verdict, and the request is refused.
 //!
 //! **Packaging**: `intutic rules build --rego` appends an `intutic.rule`
 //! custom section with the entrypoint and a default risk tier. A module
@@ -32,7 +32,7 @@
 //!
 //! **Limits**: [`limits::REGO`] — a separate fuel and time budget, still
 //! bounded — and the same 16 MB of memory as every rule. A rule stopped by
-//! either reaches no verdict, and the proxy's fail mode decides.
+//! either reaches no verdict, and the request is refused.
 
 use super::context::{RequestContext, RiskLevel, ToolCall, Verdict};
 use super::limits::{self, Failure};
@@ -618,8 +618,8 @@ pub enum Decision {
 /// Map an `opa_eval` result to a decision and the risk tier it names.
 ///
 /// A result in none of the documented shapes is no decision: a [`Failure`],
-/// which the proxy's fail mode turns into a refusal or an allow, as for a
-/// native rule returning a code that is not a verdict.
+/// which the registry turns into a refusal, as for a native rule returning a
+/// code that is not a verdict.
 pub fn decision(
     result: &Value,
     entrypoint: &str,
@@ -702,7 +702,7 @@ pub fn target_hash(args: &Value) -> String {
 /// The most restrictive decision wins — a deny ends it, a hold outranks a
 /// reask. A call the rule reached no verdict on is skipped and returned as
 /// the [`Failure`], with the verdict the other calls reached: the registry
-/// applies the fail mode, and a deny elsewhere in the turn refuses either way.
+/// refuses on the failure, unless a deny elsewhere in the turn already does.
 pub fn evaluate(
     engine: &Engine,
     module: &Module,
@@ -1328,7 +1328,7 @@ mod tests {
                 .0,
             Decision::Reask("Refused by Rego policy p/r".into())
         );
-        // Not a verdict: the rule reached none, and the fail mode decides.
+        // Not a verdict: the rule reached none, and the request is refused.
         for result in [
             json!([{"result": {"decision": "maybe"}}]),
             json!([{"result": 7}]),

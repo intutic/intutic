@@ -33,7 +33,7 @@ The proxy calls `evaluate(offset, len)` with a JSON-serialized `RequestContext`:
 
 Start from the `@intutic/wasm-sdk` template (`packages/wasm-sdk/` in the open-core repo). Add one function per business rule and call it from `runRules()` in `assembly/index.ts`.
 
-Sandbox constraints — a rule that breaks one reaches no verdict, and the proxy's fail setting decides: failing closed (the LLM proxy's default) refuses every call the rule could not judge with `GOVERNANCE_UNAVAILABLE`; failing open skips the rule, which then enforces nothing:
+Sandbox constraints — a rule that breaks one reaches no verdict, and every call it could not judge is refused with `GOVERNANCE_UNAVAILABLE`, whatever the proxy's fail setting:
 
 - 5 ms wall-clock budget, 1,000,000 fuel, 16 MB memory.
 - Keep logic simple: no unbounded loops over `arguments`, no recursion, no I/O (none exists in the sandbox).

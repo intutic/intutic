@@ -275,9 +275,11 @@ pub struct PolicyConfig {
 
 | Setting | Behavior |
 |---|---|
-| `fail_closed: true` (default) | If the policy check times out or fails → block the request. A custom WASM or Rego rule that reaches no verdict (deadline, budget, error, or a result that is not a verdict) → block it with `GOVERNANCE_UNAVAILABLE` |
-| `fail_closed: false` | If the policy check times out or fails → allow the request (fail-open). A custom rule that reaches no verdict is skipped |
+| `fail_closed: true` (default) | If the policy check times out or fails → block the request |
+| `fail_closed: false` | If the policy check times out or fails → allow the request (fail-open) |
 | `timeout_ms: 3000` | Maximum time to wait for the control plane policy check response |
+
+A custom WASM or Rego rule that reaches no verdict (deadline, budget, an error, or a result that is not a verdict) is outside this setting: it blocks the request with `GOVERNANCE_UNAVAILABLE` either way, because an agent can cause it by padding its input. See [When a rule reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
 
 ::: warning Fail-closed is the safe default
 In production, always use `fail_closed: true`. Fail-open mode should only be used during initial setup or development when the control plane is not yet deployed.

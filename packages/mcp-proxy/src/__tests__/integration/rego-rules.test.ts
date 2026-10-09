@@ -11,7 +11,7 @@
  * deadline used to be read only after the guest returned; this host's never
  * was, because it races the worker from the main thread and terminates it.
  * A rule stopped by it, or returning something that is not a decision,
- * reaches no verdict: refused fail-closed, allowed fail-open.
+ * reaches no verdict and refuses the call.
  *
  * @module
  */
@@ -125,10 +125,9 @@ describe('Rego rules in the MCP proxy', () => {
     // The conformance policy's entrypoint is an object of builtin results,
     // with no `decision`.
     const r = await runnerWith({ '10_conformance.wasm': fixture('conformance.wasm') })
-    const closed = await r.evaluate(bash('ls'))
-    expect(closed).toMatchObject({ code: 'unavailable', stop: 'result', ruleId: 'local:10_conformance.wasm' })
-    expect(closed.code === 'unavailable' && closed.reason).toContain('without a known `decision`')
-    expect(await r.evaluate(bash('ls'), { failOpen: true })).toEqual({ code: 'allow' })
+    const verdict = await r.evaluate(bash('ls'))
+    expect(verdict).toMatchObject({ code: 'unavailable', stop: 'result', ruleId: 'local:10_conformance.wasm' })
+    expect(verdict.code === 'unavailable' && verdict.reason).toContain('without a known `decision`')
   }, 30_000)
 })
 
@@ -160,7 +159,7 @@ function slowLoopRule(): Uint8Array {
 }
 
 describe('the per-rule deadline', () => {
-  it('stops a rule that never returns while spending little fuel: refused fail-closed, allowed fail-open', async () => {
+  it('stops a rule that never returns while spending little fuel, and refuses the call', async () => {
     dir = mkdtempSync(join(tmpdir(), 'intutic-mcp-deadline-'))
     writeFileSync(join(dir, '10_slow.wasm'), slowLoopRule())
     runner = new WasmRunner(dir)
@@ -170,11 +169,9 @@ describe('the per-rule deadline', () => {
     // Each iteration fills a megabyte for one instruction of fuel, so the
     // 1,000,000-instruction budget alone would let it run for most of a minute.
     const started = Date.now()
-    const closed = await runner.evaluate(bash('ls'))
+    const verdict = await runner.evaluate(bash('ls'))
     expect(Date.now() - started).toBeLessThan(5_000)
-    expect(closed).toMatchObject({ code: 'unavailable', stop: 'deadline', ruleId: 'local:10_slow.wasm' })
-    expect(closed.code === 'unavailable' && closed.reason).toContain('ran past its 50 ms deadline')
-
-    expect(await runner.evaluate(bash('ls'), { failOpen: true })).toEqual({ code: 'allow' })
+    expect(verdict).toMatchObject({ code: 'unavailable', stop: 'deadline', ruleId: 'local:10_slow.wasm' })
+    expect(verdict.code === 'unavailable' && verdict.reason).toContain('ran past its 50 ms deadline')
   }, 30_000)
 })

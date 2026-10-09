@@ -16,8 +16,7 @@
 //! stops a running guest, which is what the deadline was always meant to do.
 //!
 //! Either bound stopping a rule is a [`Failure`]: the rule reached no verdict.
-//! What the request then gets is the proxy's fail mode, decided by the
-//! registry, not here.
+//! The registry refuses the request for it.
 
 use std::time::Duration;
 use wasmtime::{Config, Engine, Store, Trap};

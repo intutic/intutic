@@ -244,8 +244,9 @@ Which one applies is the workspace's `mcpProxyFailBehavior`
 (**Settings › AI Routing & Caching › MCP Proxy Enforcement**) once a proxy has loaded it,
 and the local `INTUTIC_MCP_FAIL_OPEN` (`false` for fail closed) before that or
 for a workspace that never chose. The same setting governs every other check
-that cannot complete, such as a failed DLP scan, an unreadable TOFU pin, or a
-[custom rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
+that cannot complete, such as a failed DLP scan or an unreadable TOFU pin, but
+not a [custom rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict),
+which always refuses the call.
 
 ## The allowlist: `mcpAllowedServers` <Badge type="tip" text="Cloud" /> {#the-allowlist-mcpallowedservers}
 

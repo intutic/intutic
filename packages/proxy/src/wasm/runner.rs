@@ -147,8 +147,8 @@ pub(super) fn sanitize_reason(text: &str) -> Option<String> {
 /// case for every module that does not import `env.read_referenced_file`, which
 /// is every module that existed before it did.
 ///
-/// A [`Failure`] is a rule that reached no verdict. What the request gets
-/// instead is the proxy's fail mode, which the registry applies.
+/// A [`Failure`] is a rule that reached no verdict, which the registry turns
+/// into a refusal.
 pub fn evaluate_wasm_rule(
     engine: &Engine,
     module: &Module,
@@ -268,9 +268,9 @@ pub fn evaluate_wasm_rule(
             attempts_remaining: 0,
             policy_id: None,
         }),
-        // Not a verdict, so the rule reached none: the fail mode decides, as
-        // for a rule that ran out of time. Allowing it unconditionally would
-        // turn an author's typo into a rule that enforces nothing.
+        // Not a verdict, so the rule reached none and the request is refused,
+        // as for a rule that ran out of time. Allowing it would turn an
+        // author's typo into a rule that enforces nothing.
         code => Err(Failure::result(format!(
             "it returned {code}, which is not a verdict code (0 allow, 1 block, 3 reask)"
         ))),

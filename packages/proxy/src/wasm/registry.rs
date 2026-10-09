@@ -194,15 +194,12 @@ impl PluginRegistry {
     /// no counted evidence cannot support a promotion decision — and promotion
     /// is gated on exactly that evidence. A `tracing::info!` line is not a
     /// denominator.
-    ///
-    /// Under the default fail mode, closed; the request path passes the
-    /// configured one to [`Self::evaluate_with_shadow_exempting`].
     pub async fn evaluate_with_shadow(
         &self,
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
     ) -> (Verdict, Vec<ShadowReport>) {
-        self.evaluate_with_shadow_exempting(control_plane, ctx, None, true)
+        self.evaluate_with_shadow_exempting(control_plane, ctx, None)
             .await
     }
 
@@ -211,32 +208,26 @@ impl PluginRegistry {
     /// exactly that rule. Every other rule runs and may still Kill or Reask.
     /// An exempted rule is neither evaluated nor shadow-reported — a report
     /// would record a verdict nobody computed.
-    ///
-    /// `fail_closed` is the proxy's fail mode
-    /// (`intutic_settings.policy.fail_closed`): what a rule that reaches no
-    /// verdict means for the request. See [`Self::apply_fail_mode`].
     pub async fn evaluate_with_shadow_exempting(
         &self,
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
         exempt_rule_id: Option<&str>,
-        fail_closed: bool,
     ) -> (Verdict, Vec<ShadowReport>) {
         let mut shadow = Vec::new();
         let verdict = self
-            .evaluate_inner(control_plane, ctx, &mut shadow, exempt_rule_id, fail_closed)
+            .evaluate_inner(control_plane, ctx, &mut shadow, exempt_rule_id)
             .await;
         (verdict, shadow)
     }
 
-    /// Every rule's union verdict, under the default fail mode (closed).
     pub async fn evaluate(
         &self,
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
     ) -> Verdict {
         let mut sink = Vec::new();
-        self.evaluate_inner(control_plane, ctx, &mut sink, None, true)
+        self.evaluate_inner(control_plane, ctx, &mut sink, None)
             .await
     }
 
@@ -246,7 +237,6 @@ impl PluginRegistry {
         ctx: &RequestContext,
         shadow_out: &mut Vec<ShadowReport>,
         exempt_rule_id: Option<&str>,
-        fail_closed: bool,
     ) -> Verdict {
         let workspace_id = &ctx.workspace_id;
 
@@ -312,7 +302,7 @@ impl PluginRegistry {
                 }
             };
             let verdict = match failure {
-                Some(failure) => Self::apply_fail_mode(&m, verdict, failure, fail_closed),
+                Some(failure) => Self::no_verdict(&m, verdict, failure),
                 None => verdict,
             };
 
@@ -412,30 +402,26 @@ impl PluginRegistry {
             .unwrap_or(Verdict::Bypass)
     }
 
-    /// What a rule that reached no verdict means for the request.
+    /// What a rule that reached no verdict means for the request: a refusal,
+    /// whatever `intutic_settings.policy.fail_closed` says.
     ///
-    /// Fail-closed refuses: the call is not cleared by a rule that never judged
-    /// it — the `ext_authz` and admission-webhook default. Fail-open keeps the
-    /// verdict the rule did reach (a Rego rule judges each call in a turn, and
-    /// may have reached one on the others) and logs the failure.
+    /// The fail setting exists for control-plane outages, which an agent
+    /// cannot cause. A rule running out of time or budget is something an
+    /// agent can cause, by padding its input, so it must never become an
+    /// allow: a rule that never judged the call has not cleared it — the
+    /// `ext_authz` and admission-webhook default.
     ///
-    /// A block the same rule reached on another call stands either way: it
+    /// A block the same rule reached on another call of the turn stands: it
     /// refuses already, and says why.
-    fn apply_fail_mode(
-        m: &LoadedModule,
-        verdict: Verdict,
-        failure: Failure,
-        fail_closed: bool,
-    ) -> Verdict {
+    fn no_verdict(m: &LoadedModule, verdict: Verdict, failure: Failure) -> Verdict {
         let kind = if m.rego.is_some() {
             "Rego rule"
         } else {
             "WASM rule"
         };
-        let outcome = match (m.mode, fail_closed) {
-            (RuleMode::Shadow, _) => "shadow mode, request unchanged",
-            (RuleMode::Enforce, true) => "refusing (fail-closed)",
-            (RuleMode::Enforce, false) => "fail-open",
+        let outcome = match m.mode {
+            RuleMode::Shadow => "shadow mode, request unchanged",
+            RuleMode::Enforce => "refusing",
         };
         tracing::warn!(
             rule_id = %m.rule_id,
@@ -443,13 +429,13 @@ impl PluginRegistry {
             "{kind} reached no verdict: {}; {outcome}",
             failure.reason
         );
-        if !fail_closed || matches!(verdict, Verdict::Kill { .. }) {
+        if matches!(verdict, Verdict::Kill { .. }) {
             return verdict;
         }
         Verdict::Unavailable {
             reason: format!(
-                "Custom rule {} reached no verdict ({}): {}. Request blocked because the proxy \
-                 fails closed (intutic_settings.policy.fail_closed).",
+                "Custom rule {} reached no verdict ({}): {}. Request blocked: a rule that \
+                 cannot decide never allows.",
                 m.rule_id,
                 failure.stop.as_str(),
                 failure.reason
@@ -472,8 +458,8 @@ impl PluginRegistry {
         // Cheap and pure, and the common answer is "no candidates" — done on
         // this thread so a request with no manifest in it never touches the
         // blocking pool.
-        let tokens = referenced_files::candidate_tokens(ctx);
-        if tokens.is_empty() {
+        let candidates = referenced_files::candidate_tokens(ctx);
+        if candidates.tokens.is_empty() && !candidates.past_limits {
             return Arc::new(ReferencedFiles::empty());
         }
 
@@ -491,8 +477,9 @@ impl PluginRegistry {
         };
 
         let started = Instant::now();
-        let read =
-            tokio::task::spawn_blocking(move || referenced_files::read_tokens(tokens, &root));
+        let read = tokio::task::spawn_blocking(move || {
+            referenced_files::read_candidates(candidates, &root)
+        });
         let files = match tokio::time::timeout(PREFETCH_BUDGET, read).await {
             Ok(Ok(files)) => files,
             Ok(Err(e)) => {

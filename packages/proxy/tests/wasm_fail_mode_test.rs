@@ -1,11 +1,14 @@
-//! A custom rule that reaches no verdict follows the proxy's fail mode
-//! (`intutic_settings.policy.fail_closed`): closed refuses the request with
-//! `Verdict::Unavailable`, naming the rule and the cause; open allows it, as
-//! every rule failure did before.
+//! A custom rule that reaches no verdict refuses the request with
+//! `Verdict::Unavailable`, naming the rule and the cause. Every rule failure
+//! used to allow.
+//!
+//! There is no fail mode to test it under: the registry takes none. The proxy's
+//! `intutic_settings.policy.fail_closed` is for control-plane outages, which an
+//! agent cannot cause; a rule's timeout it can cause by padding its input.
 //!
 //! One rule per way of reaching no verdict — the deadline, the instruction
 //! budget, a trap, and a result that is not a verdict — each run through the
-//! registry in both modes, from the local rules directory.
+//! registry from the local rules directory.
 
 use intutic_proxy::store::{ControlPlaneCache, NullControlPlaneCache};
 use intutic_proxy::wasm::context::{RequestContext, Verdict};
@@ -93,27 +96,24 @@ fn ctx() -> RequestContext {
     ctx
 }
 
-async fn evaluate(registry: &PluginRegistry, fail_closed: bool) -> Verdict {
+async fn evaluate(registry: &PluginRegistry) -> Verdict {
     let cp: Arc<dyn ControlPlaneCache> = Arc::new(NullControlPlaneCache);
-    registry
-        .evaluate_with_shadow_exempting(&cp, &ctx(), None, fail_closed)
-        .await
-        .0
+    registry.evaluate(&cp, &ctx()).await
 }
 
-/// Fail-closed refuses naming the rule and `cause`; fail-open allows.
-async fn assert_follows_fail_mode(tag: &str, rule: Vec<u8>, cause: &str) {
+/// Refused, naming the rule and `cause`.
+async fn assert_refused(tag: &str, rule: Vec<u8>, cause: &str) {
     let dir = rule_dir(tag, &[("10_rule.wasm", rule)]);
     let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
 
-    let mut verdict = evaluate(&registry, true).await;
+    let mut verdict = evaluate(&registry).await;
     // A starved test thread can miss the 5 ms deadline before the budget runs
     // out; one rerun separates that from a rule stopped for the wrong cause,
     // which is stopped for it every time.
     if cause != "deadline"
         && matches!(&verdict, Verdict::Unavailable { reason, .. } if reason.contains("(deadline)"))
     {
-        verdict = evaluate(&registry, true).await;
+        verdict = evaluate(&registry).await;
     }
     match verdict {
         Verdict::Unavailable { reason, policy_id } => {
@@ -123,40 +123,35 @@ async fn assert_follows_fail_mode(tag: &str, rule: Vec<u8>, cause: &str) {
                 "{tag}: {reason}"
             );
         }
-        other => panic!("{tag}: fail-closed must refuse, got {other:?}"),
+        other => panic!("{tag}: must refuse, got {other:?}"),
     }
-    assert_eq!(
-        evaluate(&registry, false).await,
-        Verdict::Bypass,
-        "{tag}: fail-open allows"
-    );
     assert_eq!(registry.plugin_count().await, 1, "{tag}: the rule loaded");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
-async fn a_rule_past_its_deadline_follows_the_fail_mode() {
-    assert_follows_fail_mode("deadline", wat(SLOW_LOOP), "deadline").await;
+async fn a_rule_past_its_deadline_is_refused() {
+    assert_refused("deadline", wat(SLOW_LOOP), "deadline").await;
 }
 
 #[tokio::test]
-async fn a_rule_out_of_budget_follows_the_fail_mode() {
-    assert_follows_fail_mode("budget", wat(SPIN), "budget").await;
+async fn a_rule_out_of_budget_is_refused() {
+    assert_refused("budget", wat(SPIN), "budget").await;
 }
 
 #[tokio::test]
-async fn a_rule_that_traps_follows_the_fail_mode() {
-    assert_follows_fail_mode("trap", wat(TRAP), "error").await;
+async fn a_rule_that_traps_is_refused() {
+    assert_refused("trap", wat(TRAP), "error").await;
 }
 
 #[tokio::test]
-async fn a_native_result_that_is_not_a_verdict_follows_the_fail_mode() {
-    assert_follows_fail_mode("code", wat(&returning(7)), "result").await;
+async fn a_native_result_that_is_not_a_verdict_is_refused() {
+    assert_refused("code", wat(&returning(7)), "result").await;
 }
 
 #[tokio::test]
-async fn a_rego_result_that_is_not_a_decision_follows_the_fail_mode() {
-    assert_follows_fail_mode("rego", CONFORMANCE.to_vec(), "result").await;
+async fn a_rego_result_that_is_not_a_decision_is_refused() {
+    assert_refused("rego", CONFORMANCE.to_vec(), "result").await;
 }
 
 /// A block from another rule is the more useful refusal, and wins; the
@@ -171,7 +166,7 @@ async fn a_block_outranks_a_failure_and_a_failure_outranks_a_reask() {
         ],
     );
     let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
-    match evaluate(&registry, true).await {
+    match evaluate(&registry).await {
         Verdict::Kill { policy_id, .. } => {
             assert_eq!(policy_id.as_deref(), Some("local:20_block.wasm"))
         }
@@ -188,12 +183,8 @@ async fn a_block_outranks_a_failure_and_a_failure_outranks_a_reask() {
     );
     let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
     assert!(
-        matches!(evaluate(&registry, true).await, Verdict::Unavailable { .. }),
-        "fail-closed: a reask must not let an unjudged call through on retry"
-    );
-    assert!(
-        matches!(evaluate(&registry, false).await, Verdict::Reask { .. }),
-        "fail-open: the failed rule is skipped and the reask stands"
+        matches!(evaluate(&registry).await, Verdict::Unavailable { .. }),
+        "a reask must not let an unjudged call through on retry"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
