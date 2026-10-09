@@ -493,7 +493,7 @@ jobs:
           #
           # Detached + logs + kill is indifferent to that: it works whether the
           # binary exits immediately, runs forever, or dies halfway.
-          cid="$(docker run -d -v "$PWD/smoke:/smoke:ro" debian:12 \
+          cid="$(docker run -d -v "$PWD/smoke:/smoke:ro" mirror.gcr.io/library/debian:12 \
                    "/smoke/${{ matrix.asset }}")"
           sleep 10
           out="$(docker logs "$cid" 2>&1 | head -40 || true)"
@@ -515,4 +515,4 @@ jobs:
             exit 1
           fi
 
-          echo "✅ ${{ matrix.asset }} starts on Debian 12 (glibc $(docker run --rm debian:12 sh -c 'ldd --version | head -1' | grep -oE '[0-9]+\.[0-9]+$'))"
+          echo "✅ ${{ matrix.asset }} starts on Debian 12 (glibc $(docker run --rm mirror.gcr.io/library/debian:12 sh -c 'ldd --version | head -1' | grep -oE '[0-9]+\.[0-9]+$'))"

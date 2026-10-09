@@ -148,7 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       valkey:
-        image: valkey/valkey:8-alpine
+        image: mirror.gcr.io/valkey/valkey:8-alpine
         ports:
           - 6379:6379
         options: >-
@@ -269,7 +269,7 @@ jobs:
     # job reports green on tests that never ran.
     services:
       valkey:
-        image: valkey/valkey:8-alpine
+        image: mirror.gcr.io/valkey/valkey:8-alpine
         ports:
           - 6379:6379
         options: >-
