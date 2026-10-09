@@ -17,6 +17,12 @@
  *   A2  image integrity   local check                    fails CLOSED
  *   B   POST /hook-gate   control-plane check             fail posture set by GateClient
  *
+ * A hold rule in A1 or A3 (a `REQUIRE_APPROVAL:` SOP, or a local
+ * `review_before:` token) refuses with {@link IntuticGateHold} after
+ * recording the hold for review, unless an approved bypass lets this exact
+ * call through — the hook gates' and the MCP proxy's mechanism, through the
+ * same decisions API. See hold.ts.
+ *
  * A1 and A2 are load-bearing and local. Tier B contributes the DLP regexes
  * and workspace policy from the control plane; whether an unreachable control
  * plane blocks is the client's `failClosed` setting (default true).
@@ -48,7 +54,8 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { isDeploy, touchesInfra } from './actions.js'
-import { IntuticGateRefusal } from './errors.js'
+import { IntuticGateHold, IntuticGateRefusal } from './errors.js'
+import { holdMessage, requestHold } from './hold.js'
 import { GateClient } from './client.js'
 import * as imagecheck from './imagecheck.js'
 import * as snapshot from './snapshot.js'
@@ -252,8 +259,14 @@ export class Gate {
       )
     }
 
+    // Hold rules an approved bypass let through on this call, so the register's
+    // copy of the same rule in Tier A3 does not hold it a second time.
+    const approved = new Set<string>()
     const d = snapshot.evaluate(toolName, target, command, this.getSnapshot(), disabled)
-    if (d.severity === snapshot.SEV_BLOCK) {
+    if (d.severity === snapshot.SEV_HOLD) {
+      await this.hold({ id: d.ruleId, reason: d.reason }, toolName, toolInput)
+      approved.add(d.ruleId)
+    } else if (d.severity === snapshot.SEV_BLOCK) {
       await this.emit('tool_blocked', toolName, d.reason, toolInput)
       throw new IntuticGateRefusal(d.reason, 'SNAPSHOT')
     }
@@ -277,17 +290,13 @@ export class Gate {
           throw new IntuticGateRefusal(reason, 'SOP_RULE')
         }
         if (rule.action === soprules.ACTION_APPROVAL) {
-          // No human is at the keyboard during an agent run, so an approval
-          // that cannot be granted is a block.
-          await this.emit(
-            'tool_blocked',
-            toolName,
-            `${reason} (approval required; no reviewer in an unattended run)`,
-            toolInput,
-          )
-          throw new IntuticGateRefusal(reason, 'SOP_RULE_APPROVAL')
+          // Held for a person, under the id the snapshot gives the same rule
+          // (`sop.<id>`), so one approval covers the call in either tier.
+          const id = `sop.${rule.id}`
+          if (!approved.has(id)) await this.hold({ id, reason: rule.reason }, toolName, toolInput)
+        } else {
+          await this.emit('tool_flagged', toolName, reason, toolInput)
         }
-        await this.emit('tool_flagged', toolName, reason, toolInput)
       }
     }
 
@@ -334,6 +343,28 @@ export class Gate {
     if (!READ_ONLY_TOOLS.has(toolName)) {
       await this.emit('tool_allowed', toolName, '', toolInput)
     }
+  }
+
+  /**
+   * A hold rule matched: resolves when an approved bypass lets this exact
+   * call through (the remaining tiers still apply), and otherwise throws
+   * {@link IntuticGateHold} after recording the hold.
+   */
+  private async hold(rule: { id: string; reason: string }, toolName: string, toolInput: ToolInput): Promise<void> {
+    const outcome = await requestHold(this.client, rule, toolName, toolInput)
+    if (outcome.kind === 'bypassed') {
+      // Let through, loudly: a bypass nobody can see used is no better than
+      // no review at all.
+      await this.emit(
+        'hold_approved_bypass_used',
+        toolName,
+        `Approved bypass for ${rule.id} — approved by ${outcome.decidedBy || 'an approver'} on hold ${outcome.holdId}`,
+        toolInput,
+      )
+      return
+    }
+    await this.emit('tool_held', toolName, `${rule.reason} [${rule.id}]`, toolInput)
+    throw new IntuticGateHold(holdMessage(rule.reason, rule.id, outcome), outcome.recorded ? outcome.holdId : undefined)
   }
 }
 

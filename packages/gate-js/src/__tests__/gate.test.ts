@@ -94,9 +94,9 @@ describe('Gate.guard: SOP tier', () => {
     }
   })
 
-  it('require_approval blocks in an unattended run', async () => {
+  it('require_approval holds the call (hold.test.ts covers the hold itself)', async () => {
     const g = buildGate([{ ...DIGEST_RULE, action: 'require_approval' }])
-    await expect(g.guard('shell', APPLY)).rejects.toMatchObject({ code: 'SOP_RULE_APPROVAL' })
+    await expect(g.guard('shell', APPLY)).rejects.toMatchObject({ code: 'HELD', holdId: undefined })
   })
 
   it('warn does not stop the call', async () => {

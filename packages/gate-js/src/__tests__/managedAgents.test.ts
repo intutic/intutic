@@ -63,7 +63,7 @@ class FakeGate extends Gate {
   }
   override async guard(toolName: string, toolInput: Record<string, unknown>): Promise<void> {
     this.calls.push({ toolName, toolInput })
-    if (this.mode === 'refuse') throw new IntuticGateRefusal('deploy must reference a digest-pinned image', 'TEST')
+    if (this.mode === 'refuse') throw new IntuticGateRefusal('deploy must reference a digest-pinned image', 'SNAPSHOT')
     if (this.mode === 'crash') throw new TypeError('boom')
   }
 }

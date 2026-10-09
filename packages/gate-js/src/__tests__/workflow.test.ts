@@ -50,7 +50,7 @@ class FakeGate extends Gate {
   }
   override async guard(toolName: string, toolInput: Record<string, unknown>): Promise<void> {
     this.calls.push({ toolName, toolInput })
-    if (this.mode === 'refuse') throw new IntuticGateRefusal('nope', 'TEST')
+    if (this.mode === 'refuse') throw new IntuticGateRefusal('nope', 'SNAPSHOT')
     if (this.mode === 'crash') throw new TypeError('boom')
   }
 }
@@ -142,27 +142,27 @@ function _typeCheckOnly(): void {
 
 describe('IntuticWorkflowRefusal: the FatalError duck-type contract', () => {
   it("passes the REAL workflow package's FatalError.is() — a denial aborts instead of retry-looping", () => {
-    const refusal = new IntuticWorkflowRefusal('nope', 'TEST')
+    const refusal = new IntuticWorkflowRefusal('nope', 'SNAPSHOT')
     expect(FatalError.is(refusal)).toBe(true)
   })
 
   it('a plain IntuticGateRefusal does NOT pass FatalError.is() — the rewrap is load-bearing, not decoration', () => {
-    expect(FatalError.is(new IntuticGateRefusal('nope', 'TEST'))).toBe(false)
+    expect(FatalError.is(new IntuticGateRefusal('nope', 'SNAPSHOT'))).toBe(false)
   })
 
   it('remains a real IntuticGateRefusal with the structured verdict and BLOCKED message intact', () => {
-    const refusal = new IntuticWorkflowRefusal('nope', 'TEST', 'inc_1')
+    const refusal = new IntuticWorkflowRefusal('nope', 'SNAPSHOT', 'inc_1')
     expect(refusal).toBeInstanceOf(IntuticGateRefusal)
     expect(refusal.message).toBe('[Intutic Governance] BLOCKED: nope')
     expect(refusal.reason).toBe('nope')
-    expect(refusal.code).toBe('TEST')
+    expect(refusal.code).toBe('SNAPSHOT')
     expect(refusal.incidentId).toBe('inc_1')
     expect(refusal.name).toBe('FatalError')
     expect(refusal.fatal).toBe(true)
   })
 
   it('IntuticWorkflowRefusal.is() detects a refusal cross-realm (name + message prefix, no instanceof)', () => {
-    const refusal = new IntuticWorkflowRefusal('nope', 'TEST')
+    const refusal = new IntuticWorkflowRefusal('nope', 'SNAPSHOT')
     // Simulate the vm-realm boundary: a structurally identical plain object.
     const crossRealm = { name: refusal.name, message: refusal.message }
     expect(IntuticWorkflowRefusal.is(crossRealm)).toBe(true)

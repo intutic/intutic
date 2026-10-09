@@ -214,11 +214,14 @@ class TestGateIntegration:
         assert "digest-pinned" in e.value.reason
         assert "sp_pin" in e.value.reason
 
-    def test_require_approval_blocks_in_an_unattended_run(self, monkeypatch, tmp_path):
+    def test_require_approval_holds_the_call(self, monkeypatch, tmp_path):
+        # test_gate_hold.py covers the hold itself; with no client there is
+        # nothing to record it in, so it stays held with no id.
         g = self._gate(monkeypatch, [{**DIGEST_RULE, "action": "require_approval"}], tmp_path)
-        with pytest.raises(gate_mod.IntuticGateRefusal) as e:
+        with pytest.raises(gate_mod.IntuticGateHold) as e:
             g.guard("shell", APPLY)
-        assert e.value.code == "SOP_RULE_APPROVAL"
+        assert e.value.code == "HELD"
+        assert e.value.hold_id is None
 
     def test_warn_does_not_stop_the_call(self, monkeypatch, tmp_path):
         g = self._gate(monkeypatch, [{**DIGEST_RULE, "action": "warn"}], tmp_path)

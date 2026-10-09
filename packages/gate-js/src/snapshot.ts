@@ -84,8 +84,13 @@ export const SNAPSHOT_STALE_AFTER_DAYS = 7
 export const SEV_SHADOW = 'shadow' as const
 export const SEV_WARN = 'warn' as const
 export const SEV_BLOCK = 'block' as const
+/**
+ * A hold rule (a `REQUIRE_APPROVAL:` SOP, or a local `review_before:` token):
+ * refuses like a block, but asks a person rather than denying — see hold.ts.
+ */
+export const SEV_HOLD = 'hold' as const
 
-export type Severity = typeof SEV_SHADOW | typeof SEV_WARN | typeof SEV_BLOCK
+export type Severity = typeof SEV_SHADOW | typeof SEV_WARN | typeof SEV_BLOCK | typeof SEV_HOLD
 export type RuleSubject = 'tool' | 'command' | 'target' | 'any'
 export type SnapshotState = 'ok' | 'absent' | 'invalid' | 'empty' | 'stale'
 
@@ -133,6 +138,7 @@ export class Snapshot {
 export interface Decision {
   /** `null` means allow. */
   severity: Severity | null
+  /** The rule's reason and `[id]`; for a hold, the reason alone, which the gate words as a hold. */
   reason: string
   ruleId: string
 }
@@ -291,7 +297,12 @@ export function evaluate(
           ruleId: rule.id,
         }
       }
-      // The rule's own reason, not a generic one — resolveSeverity reads it.
+      if (rule.severity === SEV_HOLD) {
+        return { severity: SEV_HOLD, reason: rule.reason, ruleId: rule.id }
+      }
+      // Any other severity blocks, as an unknown one does in the shipped
+      // gates: a severity this reader does not know must not allow. The
+      // rule's own reason, not a generic one — resolveSeverity reads it.
       return { severity: SEV_BLOCK, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id }
     }
   }

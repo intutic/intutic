@@ -59,16 +59,28 @@ except IntuticGateRefusal as e:
 
 ## What a call goes through
 
-`gate.guard(toolName, toolInput)` evaluates four tiers in order and stops at the first refusal:
+`gate.guard(toolName, toolInput)` evaluates five tiers in order and stops at the first refusal:
 
 | Tier | Check | Needs a client | On failure |
 |---|---|---|---|
+| SSO group policy | The workspace's SSO group policy, decided for the member the policy snapshot was issued to | No | Refuses a high-risk tool when the member's groups are unknown |
 | Policy snapshot | The rules in `~/.intutic/hooks/policy-snapshot.rules`, which the sync daemon compiles for the workspace | No | Fails closed |
 | SOP rules | Rules authored in the SOP register, including their `WHERE` argument clauses, fetched once per process | Yes | Fails open; the image check below covers the same case |
 | Image integrity | On a deploy command, every container image it names (inline or in a referenced manifest) must be pinned to a digest approved in `.intutic/image-allowlist.json` | No | Fails closed, including when the allowlist is missing or unreadable |
 | Hook gate | `POST /api/v1/hook-gate` on the control plane: DLP patterns over the arguments, plus workspace policy | Yes | Set by the client's `failClosed` (default: block) |
 
-Read-only tools (`read_file`, `list_files`, `read`, `cat`, `view`, exported as `READ_ONLY_TOOLS`) get the snapshot check only. Every decision is reported to `POST /api/v1/hook-events` (`tool_blocked`, `tool_flagged`, `tool_would_block`, `tool_allowed`, plus one snapshot-health event per process). Setting `INTUTIC_GUARD_DISABLE=1` skips the snapshot rules and reports `guards_disabled`.
+Read-only tools (`read_file`, `list_files`, `read`, `cat`, `view`, exported as `READ_ONLY_TOOLS`) get the snapshot check only. Every decision is reported to `POST /api/v1/hook-events` (`tool_blocked`, `tool_held`, `hold_approved_bypass_used`, `tool_flagged`, `tool_would_block`, `tool_allowed`, plus one snapshot-health event per process). Setting `INTUTIC_GUARD_DISABLE=1` skips the snapshot's destructive-command rules and reports `guards_disabled`.
+
+### Holds
+
+A hold rule asks a person before the call runs: a `REQUIRE_APPROVAL:` SOP, which reaches the gate both in the policy snapshot and in the SOP register, or a `review_before:` entry in a local SOP or the workspace settings, which reaches it in the snapshot. The gate handles it the way the harness hook gates and the [MCP proxy](/guide/mcp-governance#approval-holds) do, through the same decisions API:
+
+1. It looks for an approval of this exact call in `GET /api/v1/decisions/approved-bypasses`. "Exact" means the same rule, the same tool and the same arguments, compared as a SHA-256 of the arguments with their keys sorted. If it finds one that has not expired, the call goes on to the next tier and the gate reports `hold_approved_bypass_used`.
+2. Otherwise it records a hold with `POST /api/v1/decisions`, reports `tool_held`, and throws `IntuticGateHold`, a subclass of `IntuticGateRefusal` with `code` `HELD` and the hold's id in `holdId` (`hold_id`). Its message starts with `[Intutic Governance] HELD:` and tells the agent who can approve the hold and when a retry passes. The hold appears in **Findings › Review Queue**, and the workspace gets the `decision.pending` notification, Slack card included.
+3. An owner, admin or engineering manager approves or rejects it with `intutic decision approve <holdId>` (or `reject`), the review API, or the Slack card. A developer cannot approve their own hold.
+4. With the workspace's `reviewHoldBypassEnabled` setting on, approval lets the identical call through for `reviewHoldBypassTtlMinutes` (10 by default). With it off, the default, approval records the decision only and a retry is held again.
+
+A hold needs the control plane, to look for an approval and to record the request. Without a client, or when the control plane cannot be reached, the call stays held whatever `failClosed` says, and `holdId` is unset because there is nothing to approve yet.
 
 ### Without a client
 
@@ -112,7 +124,23 @@ The image allowlist is JSON: `require_digest` (default `true`), `registries_allo
 
 ## Refusals
 
-A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Governance] BLOCKED:`; `reason`, `code` and `incidentId` (`incident_id`) carry the structured verdict. `code` names the tier: `SNAPSHOT`, `SOP_RULE`, `SOP_RULE_APPROVAL` (an SOP rule that requires approval, which an unattended run cannot get), `HOOK_GATE`, or an image code (`E_UNPINNED_LATEST`, `E_UNPINNED_TAG`, `E_UNKNOWN_REGISTRY`, `E_UNKNOWN_IMAGE`, `E_DIGEST_MISMATCH`, `E_MANIFEST_UNPARSEABLE`).
+A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Governance] BLOCKED:`; `reason`, `code` and `incidentId` (`incident_id`) carry the structured verdict. A hold throws the subclass `IntuticGateHold` instead, which adds `holdId` (`hold_id`) and starts its message with `[Intutic Governance] HELD:` (see [Holds](#holds)). `code` is one of these, exported as `GATE_REFUSAL_CODES` and, in TypeScript, typed as `GateRefusalCode`:
+
+| Code | Meaning |
+|---|---|
+| `SSO_GROUP` | The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown |
+| `SNAPSHOT` | A block rule in the policy snapshot matched |
+| `HELD` | A hold rule matched: the call is held for a person's approval, and `holdId` names the hold |
+| `SOP_RULE` | A block rule in the SOP register matched |
+| `HOOK_GATE` | The control plane's hook gate refused the call, or could not be reached while `failClosed` is on |
+| `E_UNPINNED_LATEST` | A deploy uses an image tagged `latest` |
+| `E_UNPINNED_TAG` | A deploy uses an image by tag where the allowlist requires a digest |
+| `E_UNKNOWN_REGISTRY` | A deploy uses an image from a registry the allowlist does not name |
+| `E_UNKNOWN_IMAGE` | A deploy uses an image the allowlist does not name |
+| `E_DIGEST_MISMATCH` | A deploy uses an image digest the allowlist does not approve |
+| `E_MANIFEST_UNPARSEABLE` | The image allowlist, or a manifest the deploy names, is missing or unreadable |
+| `WORKFLOW_SANDBOX` | TypeScript only: the Workflow DevKit adapter was called inside the workflow sandbox, where the gate cannot run; run it in a step |
+| `NO_GATE` | TypeScript only: the Workflow DevKit adapter has no gate to call, because none was passed and none was installed |
 
 ## Wrapping tools
 

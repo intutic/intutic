@@ -51,6 +51,9 @@ SNAPSHOT_STALE_AFTER_DAYS = 7
 SEV_SHADOW = "shadow"
 SEV_WARN = "warn"
 SEV_BLOCK = "block"
+# A hold rule (a REQUIRE_APPROVAL: SOP, or a local review_before: token):
+# refuses like a block, but asks a person rather than denying — see hold.py.
+SEV_HOLD = "hold"
 
 
 @dataclass
@@ -90,6 +93,8 @@ class Snapshot:
 @dataclass
 class Decision:
     severity: str | None    # None == allow
+    # The rule's reason and [id]; for a hold, the reason alone, which the gate
+    # words as a hold.
     reason: str = ""
     rule_id: str = ""
 
@@ -206,7 +211,11 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
             if rule.severity == SEV_WARN:
                 verb = n_command.strip().split(" ")[0] if n_command else ""
                 return Decision(SEV_WARN, f"{rule.reason} [{rule.id}] verb={verb}", rule.id)
-            # The rule's own reason, not a generic one — resolveSeverity reads it.
+            if rule.severity == SEV_HOLD:
+                return Decision(SEV_HOLD, rule.reason, rule.id)
+            # Any other severity blocks, as an unknown one does in the shipped
+            # gates: a severity this reader does not know must not allow. The
+            # rule's own reason, not a generic one — resolveSeverity reads it.
             return Decision(SEV_BLOCK, f"{rule.reason} [{rule.id}]", rule.id)
 
     return Decision(None)
