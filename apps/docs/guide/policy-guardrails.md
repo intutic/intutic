@@ -173,8 +173,10 @@ the rule is the same, so its status and evidence stand, and the edit is an
 version under a new id, proposed, with no evidence, and retires the version it
 replaces in the same step; if that version was an enforcing allowed-models or
 egress guardrail, its setting write is undone as a retirement undoes it.
-Shadow evidence belongs to the rule that earned it, the way an edited SOP
-becomes a new draft. The retired version keeps its evidence and history and
+A WASM version's rule candidate is retired with it, and the new version is
+handed a candidate of its own only when it is approved for shadow. Shadow
+evidence belongs to the rule that earned it, the way an edited SOP becomes a
+new draft. The retired version keeps its evidence and history and
 names its successor; the new one names the version it replaced.
 
 **Extracted guardrails are read-only here.** A guardrail extracted from a
@@ -182,7 +184,8 @@ document changes when the document changes; the edit and delete routes refuse
 it. Its review actions are unchanged.
 
 **Deleting retires.** Deleting an authored guardrail retires it from any state
-but retired, and undoes what an enforcing settings-class guardrail wrote. Its
+but retired, undoes what an enforcing settings-class guardrail wrote, and
+retires a WASM guardrail's rule candidate. Its
 history stays readable.
 
 Four ways in, one API:

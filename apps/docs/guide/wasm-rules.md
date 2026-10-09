@@ -437,6 +437,8 @@ From there the candidate takes the same three human steps as a mined one, with t
 2. **The bundle must be compiled from the source of record.** `intutic policy compile --candidate <id> --upload` fetches `GET /api/v1/rule-candidates/<id>/source`, verifies its hash, compiles it, and uploads the bundle together with that hash. `/bundle` recomputes the hash from the candidate row and refuses a bundle built from anything else. The dashboard's upload control is disabled for these candidates for the same reason.
 
 Promotion is unchanged — at least 200 shadow evaluations, at most 1 % would-block, by a named member — and it moves the originating guardrail to *Enforcing* with the same member on its authority chain. A gate rejection moves it to *Rejected* with the gate's reason. The guardrail row itself is never promoted directly; its Review card says so and points at the candidate.
+
+The candidate also ends with its guardrail. Retiring or rejecting the guardrail, deleting an authored one, or editing an authored one's rule (which creates a new version) retires the candidate in the same step: it shows as *Retired*, it can no longer be promoted, and its bundle, if it has one, stops being distributed to the proxy. A new version of an authored guardrail gets a candidate of its own only when it is approved for shadow.
 <!-- ENTERPRISE_ONLY_END -->
 
 ---
