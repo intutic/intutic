@@ -4,7 +4,9 @@
  * Merges proxy routing into .aider.conf.yml using the aiderConfigMerger,
  * which keeps the user's own keys, strips dangerous auto-exec keys
  * (test-cmd, lint-cmd) that Aider auto-executes on startup, and lists the
- * SOP text as a read-only context file (.intutic/aider-sops.md).
+ * SOP text as a read-only context file (.intutic/aider-sops.md) by absolute
+ * path: Aider loads no instructions file it is not told about
+ * (https://aider.chat/docs/usage/conventions.html).
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -16,13 +18,15 @@ import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
-import { mergeAiderConfig } from '@intutic/sync-daemon/harness/aiderConfigMerger'
+import { AIDER_SOPS_FILE, mergeAiderConfig } from '@intutic/sync-daemon/harness/aiderConfigMerger'
+import { buildSopSections } from './rulesFiles.js'
 
 const CONFIG_FILE = '.aider.conf.yml'
 
 export const aiderAdapter: IHarnessAdapter = {
   type: HarnessType.AIDER,
-  configFileName: CONFIG_FILE,
+  // Drift is tracked on the rules file, which .aider.conf.yml lists under `read:`.
+  configFileName: AIDER_SOPS_FILE,
 
   async detect(workspaceRoot: string): Promise<boolean> {
     try {
@@ -36,9 +40,7 @@ export const aiderAdapter: IHarnessAdapter = {
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
     const filePath = join(workspaceRoot, CONFIG_FILE)
 
-    const sopsText = sops.length > 0
-      ? sops.map((sop) => `## ${sop.title}\n\n${sop.content}`).join('\n\n---\n\n')
-      : undefined
+    const sopsText = sops.length > 0 ? buildSopSections(sops) : undefined
 
     // Safe merge: strips test-cmd/lint-cmd, preserves all other user keys,
     // routes OpenAI (openai-api-base) and Anthropic (set-env) models through
@@ -48,7 +50,7 @@ export const aiderAdapter: IHarnessAdapter = {
 
   async readCurrentHash(workspaceRoot: string): Promise<string | null> {
     try {
-      return await hashFile(join(workspaceRoot, CONFIG_FILE))
+      return await hashFile(join(workspaceRoot, AIDER_SOPS_FILE))
     } catch {
       return null
     }

@@ -143,14 +143,15 @@ All config writes are **atomic** — write to a temp file, then rename. With the
 
 ### Config file formats
 
-SOPs are written in each harness's native format:
+SOPs are written in each harness's native format. [Where rule sets go](/guide/how-it-works#where-rule-sets-go) lists the file for every harness:
 
 | Format | Harnesses | Example file |
 |---|---|---|
-| Markdown | Cursor, Claude Code, Windsurf, GitHub Copilot, OpenHands | `.cursorrules` |
-| Markdown section in your own file | Antigravity and Gemini CLI | `GEMINI.md` |
-| YAML | Aider | `.aider.conf.yml` |
-| Env | Codex | `.env.intutic` |
+| Markdown file of Intutic's own | Claude Code, Cursor, Windsurf, Cline, Continue, OpenHands, Aider | `.cursor/rules/intutic-governance.mdc` |
+| Markdown section in your own file | Codex, Muse Code, Grok Build, OpenCode, Pi, Hermes, Roo Code, dsh, OpenClaw (`AGENTS.md`); Antigravity and Gemini CLI (`GEMINI.md`); GitHub Copilot (`.github/copilot-instructions.md`); Goose (`.goosehints`) | `AGENTS.md` |
+| YAML | Aider (the `read:` entry that loads its rules file) | `.aider.conf.yml` |
+| Env | Codex and the SDK frameworks (proxy URLs) | `.env.intutic` |
+| No instructions file | n8n, Claude Desktop, Open WebUI, Xirp, Agentic Orchestrator, AgentCore, the SDK frameworks | — |
 | Native hooks | Claude Code, Cursor, Windsurf, Cline, Codex, GitHub Copilot (agent mode), Continue CLI, Antigravity, Goose, OpenHands, OpenClaw, Hermes, Pi, Muse Code, Grok Build, OpenCode (plugin), dsh (plugin), n8n (workflow hook) | Harness-specific — see the [coverage matrix](/reference/harness-security-matrix#coverage-matrix) |
 
 → Source: [services/sync-daemon/](https://github.com/intutic/intutic/tree/main/services/sync-daemon)

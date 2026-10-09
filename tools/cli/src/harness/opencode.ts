@@ -3,10 +3,9 @@
  * binary `opencode`).
  *
  * OpenCode is a terminal coding agent whose instructions file is `AGENTS.md`
- * (project, with a `CLAUDE.md` fallback, and `~/.config/opencode/AGENTS.md`)
- * — delivered here through the shared markdown builder every other
- * `AGENTS.md`/`CLAUDE.md` harness uses, so it grows no rules format of its
- * own.
+ * (project, with a `CLAUDE.md` fallback, and `~/.config/opencode/AGENTS.md`;
+ * https://opencode.ai/docs/rules/). The rule sets go there through the
+ * shared `AGENTS.md` writer (agentsMd.ts).
  *
  * The governance-critical half is a **plugin**, not a hook file: OpenCode
  * loads `.opencode/plugins/*.js` into its own process and runs the plugin's
@@ -27,13 +26,8 @@ import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { hashFile } from '../lib/hash.js'
-import { buildMarkdownContent } from './base.js'
 import { writeOpenCodeHooks } from '@intutic/sync-daemon/harness/openCodeHooks'
-import { writeOwnedFile } from '@intutic/sync-daemon'
-
-/** Workspace-relative rules file. OpenCode reads this, falling back to CLAUDE.md. */
-const CONFIG_FILE = 'AGENTS.md'
+import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 
 /** `$OPENCODE_CONFIG_DIR` or `~/.config/opencode` — the user-level config dir. */
 function openCodeConfigDir(): string {
@@ -42,7 +36,7 @@ function openCodeConfigDir(): string {
 
 export const opencodeAdapter: IHarnessAdapter = {
   type: HarnessType.OPENCODE,
-  configFileName: CONFIG_FILE,
+  configFileName: AGENTS_MD,
 
   async detect(workspaceRoot: string): Promise<boolean> {
     // 1. Project-local `.opencode/` directory or `opencode.json{,c}`. Not
@@ -80,20 +74,11 @@ export const opencodeAdapter: IHarnessAdapter = {
     await writeOpenCodeHooks(workspaceRoot, proxyUrl, '')
   },
 
-  /** AGENTS.md rules file — same "skip when there is nothing to write"
-   *  convention every markdown adapter uses. */
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    if (sops.length === 0) return null
-    const agentsPath = join(workspaceRoot, CONFIG_FILE)
-    await writeOwnedFile(agentsPath, workspaceRoot, buildMarkdownContent(sops, proxyUrl))
-    return agentsPath
+  writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    return writeAgentsMd(workspaceRoot, sops, proxyUrl)
   },
 
-  async readCurrentHash(workspaceRoot: string): Promise<string | null> {
-    try {
-      return await hashFile(join(workspaceRoot, CONFIG_FILE))
-    } catch {
-      return null
-    }
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return agentsMdHash(workspaceRoot)
   },
 }

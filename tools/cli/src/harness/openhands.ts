@@ -22,9 +22,9 @@ import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { writeOpenHandsHooks, mergeOpenHandsToml, isOpenHandsConfig } from '@intutic/sync-daemon/harness/openhandsHooks'
-import { keepOriginal, writeOwnedFile } from '@intutic/sync-daemon'
+import { keepOriginal } from '@intutic/sync-daemon'
 import { log } from '../lib/logger.js'
-import { buildMarkdownContent } from './base.js'
+import { writeOwnRulesFile } from './rulesFiles.js'
 
 const CONFIG_FILE = 'config.toml'
 const RULES_FILE = '.openhands/microagents/intutic-governance.md'
@@ -75,10 +75,7 @@ export const openhandsAdapter: IHarnessAdapter = {
       written = configPath
     }
 
-    if (sops.length === 0) return written
-    const rulesPath = join(workspaceRoot, RULES_FILE)
-    await writeOwnedFile(rulesPath, workspaceRoot, buildMarkdownContent(sops, proxyUrl))
-    return rulesPath
+    return (await writeOwnRulesFile(workspaceRoot, RULES_FILE, sops, proxyUrl)) ?? written
   },
 
   async readCurrentHash(workspaceRoot: string): Promise<string | null> {

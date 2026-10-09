@@ -25,7 +25,6 @@ import {
   DECISIONS_LOG_RELATIVE_PATH,
   type DecisionsDigestEntry,
 } from '../src/lib/decisionsDigest.js'
-import { HARNESS_FILES } from '../src/configWriter.js'
 
 const ENTRIES: DecisionsDigestEntry[] = [
   { id: 'decision:1', kind: 'decision', timestamp: '2026-08-17T10:00:00.000Z', summary: 'Decision: rollout approved → approved' },
@@ -119,7 +118,7 @@ describe('refreshDecisionsDigest', () => {
 
   it('injects the bounded section into CLAUDE.md only when claude-code is an active harness', async () => {
     const dir = await mkWorkspace()
-    const claudeMdPath = path.join(dir, HARNESS_FILES[HarnessType.CLAUDE_CODE])
+    const claudeMdPath = path.join(dir, 'CLAUDE.md')
     await fs.mkdir(path.dirname(claudeMdPath), { recursive: true })
     await fs.writeFile(claudeMdPath, '# CLAUDE.md\n\nExisting SOP content\n', 'utf-8')
 
@@ -142,7 +141,7 @@ describe('refreshDecisionsDigest', () => {
 
   it('does NOT touch CLAUDE.md when claude-code is not an active harness this cycle', async () => {
     const dir = await mkWorkspace()
-    const claudeMdPath = path.join(dir, HARNESS_FILES[HarnessType.CLAUDE_CODE])
+    const claudeMdPath = path.join(dir, 'CLAUDE.md')
     await fs.mkdir(path.dirname(claudeMdPath), { recursive: true })
     const original = '# CLAUDE.md\n\nExisting SOP content\n'
     await fs.writeFile(claudeMdPath, original, 'utf-8')
@@ -162,7 +161,7 @@ describe('refreshDecisionsDigest', () => {
 
   it('render idempotence: running the fetch-and-write cycle twice with the same digest produces a byte-identical DECISIONS.md and CLAUDE.md', async () => {
     const dir = await mkWorkspace()
-    const claudeMdPath = path.join(dir, HARNESS_FILES[HarnessType.CLAUDE_CODE])
+    const claudeMdPath = path.join(dir, 'CLAUDE.md')
     await fs.mkdir(path.dirname(claudeMdPath), { recursive: true })
     await fs.writeFile(claudeMdPath, '# CLAUDE.md\n\nExisting SOP content\n', 'utf-8')
 

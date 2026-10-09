@@ -15,6 +15,11 @@ What changed is not the shape. It is that a node now *interprets* its task
 instead of following a fixed rule, which is what makes explicit budgets, vetoes
 and stop conditions necessary rather than optional.
 
+Everything here runs in the proxy and the gates on your machine, with no
+account, except the three sections badged <Badge type="tip" text="Cloud" />: a
+run budget, a hold for human review, and sandbox attestation each need a
+connected workspace's control plane.
+
 ## The problem a graph creates
 
 The failure mode most often raised about graph systems is that **agents checking
@@ -229,7 +234,7 @@ Three details that decide whether this actually works:
 To re-approve after a legitimate change, clear the pin: `~/.intutic/tool-pins.json`
 standalone, or `tools:pin:{workspace}` in Valkey.
 
-### 3. One budget for the whole graph
+### 3. One budget for the whole graph <Badge type="tip" text="Cloud" /> {#_3-one-budget-for-the-whole-graph}
 
 A per-node budget is not a budget: a graph that fans out to eight workers spends
 eight times what you capped. The ceiling is set on the run, so every hop,
@@ -504,7 +509,7 @@ This works because the proxy records a **change manifest** for every request —
 the files, URLs and commands its tool calls actually named, derived from the
 argument keys, not guessed. You can see it per request in the trace detail view.
 
-### Stop and ask me first
+### Stop and ask me first <Badge type="tip" text="Cloud" /> {#stop-and-ask-me-first}
 
 `deny_tools` refuses something forever. `review_before` does something different:
 it holds the whole run until a person looks.
@@ -718,7 +723,7 @@ a governance rule into a privilege-escalation path. Authorisation stays bound to
 the virtual key.
 :::
 
-## Sandbox attestation
+## Sandbox attestation <Badge type="tip" text="Cloud" /> {#sandbox-attestation}
 
 `node_id` and `agent_role` are unverifiable by design — see the warning above.
 Sandbox attestation is a different, narrower signal: a session's [sandbox](/guide/sandboxed-execution)

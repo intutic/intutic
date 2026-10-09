@@ -81,7 +81,7 @@ Not everyone on your team can access the Review Queue. Access requires one of th
 | **DEVELOPER** | No access to the Review Queue |
 | **VIEWER** | No access to the Review Queue |
 
-## Slack Interactive Reviews (Enterprise)
+## Slack Interactive Reviews
 
 When Slack OAuth is configured and `FF_NOTIFICATION_HUB=true` is enabled, pending override requests are automatically routed to the Slack team workspace as rich Block Kit cards.
 

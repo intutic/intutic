@@ -11,10 +11,11 @@ import {
   removeRulesSection,
   rulesSectionOf,
   writeRulesSection,
+  retireRulesFile,
   RULES_SECTION_START,
   RULES_SECTION_END,
 } from '../../src/harness/rulesSection.js'
-import { readOriginal } from '../../src/disconnect/originals.js'
+import { readOriginal, writeOwnedFile } from '../../src/disconnect/originals.js'
 
 const BODY = '# Rules\n\nNever print a secret.'
 const SECTION = `${RULES_SECTION_START}\n${BODY}\n${RULES_SECTION_END}`
@@ -90,5 +91,74 @@ describe('writeRulesSection', () => {
     await writeRulesSection(file(), root, BODY)
     expect(await fs.readFile(file(), 'utf-8')).toBe(`${SECTION}\n`)
     expect((await readOriginal(file(), root))?.existed).toBe(false)
+  })
+
+  // Earlier versions wrote AGENTS.md, CLAUDE.md and the rest whole. The first
+  // write of the section takes the file back to what it held before that,
+  // rather than keeping the old copy of the rules next to the new one.
+  const LEGACY = '# Intutic Governance Rules (auto-generated)\n# DO NOT EDIT — managed by intutic sync daemon\n\n## Old rule\n'
+
+  it('turns a file an earlier version wrote whole back into the user\'s, with the section', async () => {
+    await fs.writeFile(file(), '# Mine\n')
+    await writeOwnedFile(file(), root, LEGACY)
+    await writeRulesSection(file(), root, BODY)
+    expect(await fs.readFile(file(), 'utf-8')).toBe(`# Mine\n\n${SECTION}\n`)
+  })
+
+  it('drops a whole file it created, or one with no record, down to the section', async () => {
+    await writeOwnedFile(file(), root, LEGACY)
+    await writeRulesSection(file(), root, BODY)
+    expect(await fs.readFile(file(), 'utf-8')).toBe(`${SECTION}\n`)
+
+    const other = path.join(root, 'AGENTS.md')
+    await fs.writeFile(other, LEGACY)
+    await writeRulesSection(other, root, BODY)
+    expect(await fs.readFile(other, 'utf-8')).toBe(`${SECTION}\n`)
+  })
+
+  it('keeps an edit made to the whole file since, and adds the section after it', async () => {
+    await writeOwnedFile(file(), root, LEGACY)
+    await fs.writeFile(file(), `${LEGACY}\nMy addition.\n`)
+    await writeRulesSection(file(), root, BODY)
+    expect(await fs.readFile(file(), 'utf-8')).toBe(`${LEGACY}\nMy addition.\n\n${SECTION}\n`)
+  })
+})
+
+describe('retireRulesFile', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-rules-retire-'))
+  })
+
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  const LEGACY = '# Intutic Governance Rules (auto-generated)\n\n## Old rule\n'
+
+  it('restores the user\'s file, deletes one Intutic created, and leaves an edited or foreign one', async () => {
+    const restored = path.join(root, '.cursorrules')
+    await fs.writeFile(restored, 'Prefer small functions.\n')
+    await writeOwnedFile(restored, root, LEGACY)
+    await retireRulesFile(restored, root)
+    expect(await fs.readFile(restored, 'utf-8')).toBe('Prefer small functions.\n')
+    expect(await readOriginal(restored, root)).toBeNull()
+
+    const created = path.join(root, '.windsurfrules')
+    await writeOwnedFile(created, root, LEGACY)
+    await retireRulesFile(created, root)
+    await expect(fs.access(created)).rejects.toThrow()
+
+    const edited = path.join(root, '.roorules')
+    await writeOwnedFile(edited, root, LEGACY)
+    await fs.appendFile(edited, 'Mine.\n')
+    await retireRulesFile(edited, root)
+    expect(await fs.readFile(edited, 'utf-8')).toBe(`${LEGACY}Mine.\n`)
+
+    const foreign = path.join(root, 'rules.md')
+    await fs.writeFile(foreign, 'Not Intutic\'s.\n')
+    await retireRulesFile(foreign, root)
+    expect(await fs.readFile(foreign, 'utf-8')).toBe('Not Intutic\'s.\n')
   })
 })

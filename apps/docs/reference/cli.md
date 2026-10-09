@@ -447,27 +447,20 @@ interval. Files larger than 512 KB are not captured.
 
 | File | Harnesses |
 |------|-----------|
-| `.agents/plugins/intutic-governance/hooks/hooks.json` | `goose` |
-| `.aider.conf.yml` | `aider` |
+| `.claude/rules/intutic-governance.md` | `claude-code` |
 | `.clinerules/intutic-governance.md` | `cline` |
-| `.continue/config.json` | `continue` |
-| `.cursorrules` | `cursor` |
-| `.env.intutic` | `codex`, `langgraph`, `langchain`, `crewai`, `autogen`, `ag2`, `google-adk`, `openai-agents`, `pydantic-ai`, `smolagents`, `strands`, `agent-framework`, `mastra`, `vercel-ai-sdk`, `eve`, `trueforge`, `ai-sdk-harness`, `ai-sdk-workflow` |
+| `.continue/rules/intutic-governance.md` | `continue` |
+| `.cursor/rules/intutic-governance.mdc` | `cursor` |
+| `.env.intutic` | `langgraph`, `langchain`, `crewai`, `autogen`, `ag2`, `google-adk`, `openai-agents`, `pydantic-ai`, `smolagents`, `strands`, `agent-framework`, `mastra`, `vercel-ai-sdk`, `eve`, `trueforge`, `ai-sdk-harness`, `ai-sdk-workflow` |
 | `.github/copilot-instructions.md` | `github-copilot` |
-| `.hermes/config.yaml` | `hermes` |
-| `.intutic/n8n/governance-workflow.json` | `n8n` |
-| `.open-webui/intutic-governance-filter.py` | `open-webui` |
-| `.openclaw/openclaw.json` | `openclaw` |
+| `.goosehints` | `goose` |
+| `.intutic/aider-sops.md` | `aider` |
 | `.openhands/microagents/intutic-governance.md` | `openhands` |
-| `.pi/hooks.json` | `pi` |
-| `.roorules` | `roo-code` |
-| `.windsurfrules` | `windsurf` |
-| `AGENTS.md` | `muse-code`, `grok`, `opencode` |
-| `claude_desktop_config.json` | `claude-desktop` |
-| `CLAUDE.md` | `claude-code` |
+| `.windsurf/rules/intutic-governance.md` | `windsurf` |
+| `AGENTS.md` | `codex`, `hermes`, `pi`, `roo-code`, `muse-code`, `grok`, `opencode`, `dsh` |
 | `GEMINI.md` | `antigravity` |
 
-`GEMINI.md` is often your own file with Intutic's rules in a marked section; it is captured whole, your own text included.
+`AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md` and `.goosehints` are often your own files with Intutic's rules in a marked section; they are captured whole, your own text included.
 
 ---
 
@@ -489,12 +482,13 @@ intutic disconnect [options]
 
 **What it undoes**, for every harness (one with `--harness`):
 
-- **Rules files connect writes whole** (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `AGENTS.md`, `.github/copilot-instructions.md`, `.roorules`, `.clinerules/intutic-governance.md`, `.env.intutic`): the file you had before comes back, or the file is deleted if connect created it.
+- **Rules files of Intutic's own** (`.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc`, `.windsurf/rules/intutic-governance.md`, `.clinerules/intutic-governance.md`, `.continue/rules/intutic-governance.md`, `.openhands/microagents/intutic-governance.md`, `.intutic/aider-sops.md`) and `.env.intutic`: deleted, or the file you had before at that path comes back.
+- **Rules sections** in files you also write (`AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.goosehints`, and the `AGENTS.md` of OpenClaw's agent workspace): the section between the `INTUTIC:RULES` markers is taken out, and the file comes back byte for byte when you did not edit it, or is deleted if connect created it. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
+- **Rules files earlier versions wrote whole** (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `.roorules`, `AGENTS.md`): the file you had before comes back, or the file is deleted if connect created it.
 - **Hook registrations** in each harness's settings (`.claude/settings.json`, Cursor's and Windsurf's `hooks.json`, and the rest): only the entries that run an Intutic gate are removed. The gate scripts are deleted.
 - **Proxy routing**: base URLs and proxy settings connect pointed at the proxy (Codex `openai_base_url`, Continue `apiBase`, Goose `provider.host`, Grok `base_url`, Pi and OpenHands base URLs, Aider `openai-api-base`, Windsurf `http.proxy`, the JetBrains IDE proxy for the Windsurf plugin, dsh's `llm-deepseek` route) go back to the values they had.
 - **MCP servers**: each server connect wrapped gets its original entry back, every key included; the `intutic` server connect added is removed; and the copies of approved `.mcp.json` servers connect added to `~/.claude.json` are removed.
 - **What connect replaced or removed** comes back: the Claude Code `permissions.deny` rules connect replaced, and Aider's `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint`.
-- **n8n**: the `intutic_proxy_url` and `intutic_governance_rules` variables connect set on your workflows, through the n8n API at `N8N_URL` (default `http://localhost:5678`).
 
 Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted in the macOS login keychain, the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
 
@@ -506,7 +500,7 @@ Without `--harness` it also removes the services [`intutic daemon install`](#int
 
 **While connect runs:** a running `intutic connect` would write everything straight back. A real run stops the services first, then exits with status `1` before changing any file if an `intutic connect` you started yourself is still running. `--dry-run` only warns.
 
-**One harness:** `--harness` leaves a file another connected harness also writes (`AGENTS.md` is shared by Muse Code, Grok Build and OpenCode; `.env.intutic` by Codex and the SDK frameworks). It removes the harness from `~/.intutic/config.json`, so connect stops writing its config and stops wrapping its MCP servers; run `intutic init` to manage it again.
+**One harness:** `--harness` leaves a file another connected harness also writes (`AGENTS.md` is shared by Codex, Muse Code, Grok Build, OpenCode, Pi, Hermes, Roo Code and dsh; `.env.intutic` by Codex and the SDK frameworks). It removes the harness from `~/.intutic/config.json`, so connect stops writing its config and stops wrapping its MCP servers; run `intutic init` to manage it again.
 
 **Examples:**
 
@@ -1192,6 +1186,12 @@ List loop runs and cost accounting details for the workspace.
 intutic loop list [options]
 ```
 
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
 ---
 
 ## `intutic loop complete <loop_run_id>` <Badge type="tip" text="Cloud" />
@@ -1202,6 +1202,12 @@ Mark a running loop as successfully completed.
 intutic loop complete <loop_run_id> [options]
 ```
 
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
 ---
 
 ## `intutic loop kill <loop_run_id>` <Badge type="tip" text="Cloud" />
@@ -1211,6 +1217,12 @@ Kill an active loop and prevent subsequent API requests.
 ```bash
 intutic loop kill <loop_run_id> [options]
 ```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
 
 ---
 
@@ -2651,6 +2663,804 @@ Creates the workspace with the org's plan, spend caps and trial end date, adds y
 ```bash
 intutic team create-workspace tm_abc123 --name "payments-service"
 ```
+
+---
+
+## `intutic settings get [key]` <Badge type="tip" text="Cloud" />
+
+Print the workspace's settings, or one of them.
+
+```bash
+intutic settings get [key] [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `key` | One setting, e.g. `mcpDefaultPolicy`. Omit it for every setting |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON: the whole response, or with a key just its value (`null` when it is not set) |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Reads `GET /api/v1/workspace/settings`: the stored settings merged with their defaults, with storage credentials redacted. Any member can read them.
+
+**Example:**
+
+```bash
+intutic settings get mcpBudgets --json
+```
+
+---
+
+## `intutic settings set <key> [value]` <Badge type="tip" text="Cloud" />
+
+Change one workspace setting.
+
+```bash
+intutic settings set <key> (<value> | --file <path>) [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `key` | The setting to change |
+| `value` | The new value. Read as JSON when it parses as JSON (`true`, `30`, `null`, `["a","b"]`), otherwise as a string (`deny`) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--file <path>` | Read the value from a JSON file instead of the argument |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sends `PUT /api/v1/workspace/settings` with only this key, so every other setting keeps its value, and prints the key's new value. You need the OWNER or ADMIN role, and the change is recorded in the settings history. The server refuses an unknown key or a bad value with a message naming it. `mcpBudgets` and `sso_group_policy` are also checked by the CLI before sending, and a mistake is reported with the path of the field at fault.
+
+Settings often changed this way:
+
+| Key | Values |
+|-----|--------|
+| `mcpDefaultPolicy` | `allow` or `deny`: what MCP proxies do with a server the [registry](/guide/mcp-governance#the-registry) has not approved |
+| `mcpHighRiskToolChange` | `notify` or `hold`: what a [high-risk tool change](/guide/mcp-governance#tool-change-risk) does to a server |
+| `mcpBudgets` | [MCP call budgets](/guide/mcp-governance#call-budgets), as a JSON object; usually given with `--file` |
+| `mcpInjectionAction` | `warn` or `block`, for prompt-injection matches in MCP calls |
+| `mcpInjectionPatterns` | Extra prompt-injection patterns, a JSON list of regular expressions |
+| `mcpAnomalyMode` | `enforce`, `warn` or `off` |
+| `mcpAnomalyOverrides` | A JSON object of detector id to `steer`, `reask`, `kill` or `off` |
+| `sso_group_policy` | The [group policy for high-risk tools](/guide/settings#security), as a JSON object of `highRiskTools`, `requiredGroups` and `requireOboFor`; `null` clears it. Setting one needs a <Badge type="warning" text="Biz Org+" /> plan |
+| `configBodyUpload` | `true` or `false`: [config content upload](#config-content-upload) |
+
+**Examples:**
+
+```bash
+intutic settings set mcpDefaultPolicy deny
+intutic settings set mcpBudgets --file mcp-budgets.json
+intutic settings set sso_group_policy null
+```
+
+---
+
+## `intutic mcp list` <Badge type="tip" text="Cloud" />
+
+List the MCP servers the workspace's MCP proxies have seen.
+
+```bash
+intutic mcp list [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints the registry's default policy, what a high-risk tool change does, how many servers await a decision, and each server with its status (`candidate`, `approved` or `blocked`), its tools and the ones switched off. With `--json` it also includes the MCP call budgets and each server's latest scored tool change. Any member can list the registry. See [The registry](/guide/mcp-governance#the-registry).
+
+---
+
+## `intutic mcp approve <server_id>` <Badge type="tip" text="Cloud" />
+
+Approve an MCP server, so MCP proxies let it run.
+
+```bash
+intutic mcp approve <server_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `server_id` | The server, as `intutic mcp list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sets the server's status to `approved`, attributed to you. You need the OWNER or ADMIN role. Every decision is recorded with who made it and reaches MCP proxies with the policy they poll, within a minute for a per-session proxy. Approving also releases a server held by a high-risk tool change.
+
+---
+
+## `intutic mcp block <server_id>` <Badge type="tip" text="Cloud" />
+
+Block an MCP server, so MCP proxies refuse it.
+
+```bash
+intutic mcp block <server_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `server_id` | The server, as `intutic mcp list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sets the server's status to `blocked`, attributed to you. You need the OWNER or ADMIN role.
+
+---
+
+## `intutic mcp reset <server_id>` <Badge type="tip" text="Cloud" />
+
+Return an MCP server to the approval queue.
+
+```bash
+intutic mcp reset <server_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `server_id` | The server, as `intutic mcp list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sets the server's status back to `candidate`, the **Reset** button on **Policies › MCP Servers**. A candidate runs or not according to `mcpDefaultPolicy`. You need the OWNER or ADMIN role.
+
+---
+
+## `intutic mcp enable-tool <server_id> <tool>` <Badge type="tip" text="Cloud" />
+
+Switch one tool of an MCP server back on.
+
+```bash
+intutic mcp enable-tool <server_id> <tool> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `server_id` | The server, as `intutic mcp list` shows it |
+| `tool` | The tool's name, as the server declares it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Removes the tool from the server's disabled list. You need the OWNER or ADMIN role.
+
+---
+
+## `intutic mcp disable-tool <server_id> <tool>` <Badge type="tip" text="Cloud" />
+
+Switch one tool of an MCP server off.
+
+```bash
+intutic mcp disable-tool <server_id> <tool> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `server_id` | The server, as `intutic mcp list` shows it |
+| `tool` | The tool's name, as the server declares it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Adds the tool to the server's disabled list: MCP proxies refuse calls to it while the rest of the server keeps working. You need the OWNER or ADMIN role.
+
+**Example:**
+
+```bash
+intutic mcp disable-tool mcps_abc123 delete_repository
+```
+
+---
+
+## `intutic notifications list` <Badge type="tip" text="Cloud" />
+
+List the workspace's notification rules.
+
+```bash
+intutic notifications list [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints each rule's id, event type, channel and target, filters, cooldown and whether it is on. Signing secrets are never shown, and PagerDuty routing keys are masked. See [Notifications](/guide/settings#notifications).
+
+---
+
+## `intutic notifications create` <Badge type="tip" text="Cloud" />
+
+Create a notification rule.
+
+```bash
+intutic notifications create --event <type> --channel <channel> <target option> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--event <type>` | The event type, e.g. `incident.created`, `decision.pending` or `mcp.server.candidate` (required) |
+| `--channel <channel>` | `slack`, `email`, `webhook` or `pagerduty` (required) |
+| `--slack-channel <id>` | Slack channel ID, for the `slack` channel |
+| `--email <addresses>` | Comma-separated recipients, up to 20, for the `email` channel |
+| `--webhook-url <url>` | HTTPS URL, for the `webhook` channel |
+| `--pagerduty-key <key>` | Routing key, for the `pagerduty` channel |
+| `--severity <list>` | Only events of these comma-separated severities |
+| `--harness <list>` | Only events from these comma-separated harnesses |
+| `--user <ids>` | Only events from these comma-separated user ids |
+| `--cooldown <minutes>` | Minimum minutes between two notifications from this rule, 1 to 1440 (default 15) |
+| `--disabled` | Create the rule switched off |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Creates the rule and prints it. Each channel needs its own target option; the server refuses a rule without one. A webhook URL must be HTTPS and must not point at an internal address. A webhook rule is always signed: the server generates its signing secret and returns it once, in this response, so copy it then. `intutic notifications rotate-secret` replaces it.
+
+**Example:**
+
+```bash
+intutic notifications create --event incident.created --channel webhook \
+  --webhook-url https://hooks.example.com/intutic --severity high,critical
+```
+
+---
+
+## `intutic notifications update <rule_id>` <Badge type="tip" text="Cloud" />
+
+Change a notification rule.
+
+```bash
+intutic notifications update <rule_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `rule_id` | The rule, as `intutic notifications list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--event <type>` | New event type |
+| `--channel <channel>` | New channel: `slack`, `email`, `webhook` or `pagerduty` |
+| `--slack-channel <id>` | Slack channel ID |
+| `--email <addresses>` | Comma-separated recipients, up to 20 |
+| `--webhook-url <url>` | HTTPS URL |
+| `--pagerduty-key <key>` | Routing key |
+| `--severity <list>` | Only events of these comma-separated severities |
+| `--harness <list>` | Only events from these comma-separated harnesses |
+| `--user <ids>` | Only events from these comma-separated user ids |
+| `--cooldown <minutes>` | Minimum minutes between two notifications, 1 to 1440 |
+| `--enable` | Switch the rule on |
+| `--disable` | Switch the rule off |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Changes only what you pass. The channel target options replace the rule's whole target, and the filter options its whole filter set. A rule switched to the `webhook` channel gets a signing secret, printed once; a webhook rule that stays one keeps its secret.
+
+**Example:**
+
+```bash
+intutic notifications update nr_abc123 --disable
+```
+
+---
+
+## `intutic notifications delete <rule_id>` <Badge type="tip" text="Cloud" />
+
+Delete a notification rule.
+
+```bash
+intutic notifications delete <rule_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `rule_id` | The rule, as `intutic notifications list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+---
+
+## `intutic notifications rotate-secret <rule_id>` <Badge type="tip" text="Cloud" />
+
+Replace a webhook rule's signing secret.
+
+```bash
+intutic notifications rotate-secret <rule_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `rule_id` | A webhook rule |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Generates a new signing secret and prints it once. Deliveries are signed with the new secret from then on, so update the receiver's copy straight away. Only webhook rules are signed; any other rule is refused.
+
+---
+
+## `intutic siem list` <Badge type="warning" text="Biz Org+" />
+
+List the workspace's SIEM export destinations.
+
+```bash
+intutic siem list [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON, including the valid source names (`sources.all`) and the default set (`sources.defaults`) |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints each destination's id, name, type, whether it is active, the sources it receives, its batching and its last heartbeat or error. Credentials are never shown. See [SIEM Export](/guide/siem-export).
+
+---
+
+## `intutic siem show <destination_id>` <Badge type="warning" text="Biz Org+" />
+
+Show one SIEM destination.
+
+```bash
+intutic siem show <destination_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `destination_id` | The destination, as `intutic siem list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints the destination with its adapter config, secrets masked to at most their last four characters.
+
+---
+
+## `intutic siem sources` <Badge type="warning" text="Biz Org+" />
+
+List the event sources a destination can receive.
+
+```bash
+intutic siem sources [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON: `all` and `defaults` |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints every source name. The ones marked opt-in, such as `gate_decisions` (one record per tool call), reach only a destination that lists them; a destination with no list receives every other source. See [Choosing sources](/guide/siem-export#choosing-sources).
+
+---
+
+## `intutic siem create` <Badge type="warning" text="Biz Org+" />
+
+Create a SIEM export destination.
+
+```bash
+intutic siem create --name <name> --type <adapter> --config <path> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--name <name>` | Display name, up to 128 characters (required) |
+| `--type <adapter>` | `syslog_cef`, `webhook_https`, `splunk_hec`, `datadog_logs`, `gcs` or `s3` (required) |
+| `--config <path>` | JSON file with the adapter's settings and credentials (required) |
+| `--sources <list>` | Comma-separated sources to receive; omit for the default set |
+| `--default-sources` | Receive the default set (the same as omitting `--sources`) |
+| `--batch-size <n>` | Events per delivery batch (default 100) |
+| `--flush-interval-ms <ms>` | Longest wait before a partial batch is sent (default 60000) |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Creates the destination. The config is read from a file so credentials stay out of your shell history; each type needs its own keys, e.g. `host` and `port` for `syslog_cef`, `webhookUrl` for `webhook_https`, `hecUrl` and `token` for `splunk_hec`, `apiKey` for `datadog_logs`, `bucketName` for `gcs` and `s3`. The server encrypts the config, refuses one that points at an internal address, and refuses an unknown source name. A `webhook_https` destination gets a signing secret, printed once. You need the OWNER or ADMIN role.
+
+**Example:**
+
+```bash
+intutic siem create --name "Splunk prod" --type splunk_hec --config splunk.json \
+  --sources governance_incidents,detector_findings,gate_decisions
+```
+
+---
+
+## `intutic siem update <destination_id>` <Badge type="warning" text="Biz Org+" />
+
+Change a SIEM destination.
+
+```bash
+intutic siem update <destination_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `destination_id` | The destination, as `intutic siem list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--name <name>` | New display name |
+| `--config <path>` | JSON file with the new adapter settings; a secret left as its masked value keeps the stored one |
+| `--sources <list>` | Comma-separated sources to receive, replacing the current list |
+| `--default-sources` | Go back to the default set |
+| `--batch-size <n>` | Events per delivery batch |
+| `--flush-interval-ms <ms>` | Longest wait before a partial batch is sent |
+| `--enable` | Turn a deactivated destination back on |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Changes only what you pass. A new config makes the events the address check refused before retryable again. You need the OWNER or ADMIN role.
+
+**Example:**
+
+```bash
+intutic siem update siemdest_abc123 --default-sources
+```
+
+---
+
+## `intutic siem delete <destination_id>` <Badge type="warning" text="Biz Org+" />
+
+Deactivate a SIEM destination.
+
+```bash
+intutic siem delete <destination_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `destination_id` | The destination, as `intutic siem list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Stops the destination receiving events. It stays listed with its config, and `intutic siem update <destination_id> --enable` turns it back on. You need the OWNER or ADMIN role.
+
+---
+
+## `intutic siem rotate-secret <destination_id>` <Badge type="warning" text="Biz Org+" />
+
+Replace a webhook destination's signing secret.
+
+```bash
+intutic siem rotate-secret <destination_id> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `destination_id` | A `webhook_https` destination |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Generates a new signing secret and prints it once. Deliveries are signed with it from then on. The other types authenticate with their own credentials and are refused. You need the OWNER or ADMIN role.
+
+---
+
+## `intutic compliance coverage <framework_id>` <Badge type="tip" text="Cloud" />
+
+How the latest compliance probe results cover one framework.
+
+```bash
+intutic compliance coverage <framework_id> [--format <format>] [--out <path>] [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `framework_id` | `eu_ai_act`, `iso_42001`, `nist_ai_rmf` or `mitre_atlas` |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--format <format>` | Download the report instead of the summary: `json`, `md`, `csv` or `pdf` |
+| `--out <path>` | Write the report to this file instead of stdout |
+| `--json` | The same as `--format json` |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Without `--format`, prints the control counts by coverage and state. With it, writes the report the dashboard downloads: to stdout, so it can be piped, or to `--out`. A PDF needs `--out` or a redirect, never the terminal. Any member can read coverage. These live reports are unsigned; the signed copies are in the evidence pack. See [Framework Mapping](/guide/framework-mapping).
+
+**Example:**
+
+```bash
+intutic compliance coverage eu_ai_act --format pdf --out eu-ai-act.pdf
+```
+
+---
+
+## `intutic usage members` <Badge type="warning" text="Biz Org+" />
+
+LLM usage per member.
+
+```bash
+intutic usage members [--period <period>] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--period <period>` | `daily` (today) or `monthly` (this month), both in UTC; default `monthly` |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints each member's cost, calls, tokens and active days, attributed to the owner of the virtual key that made each call, plus an unattributed row. OWNER, ADMIN and EM see every member; anyone else sees only their own row, and the output says so. See [Budgets & FinOps](/guide/budgets).
+
+---
+
+## `intutic usage teams` <Badge type="warning" text="Biz Org+" />
+
+LLM usage per team, a team being a SCIM group.
+
+```bash
+intutic usage teams [--period <period>] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--period <period>` | `daily` or `monthly`; default `monthly` |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sums each SCIM group's members, nested groups included; a member in several groups counts in each. A workspace without SCIM groups has no teams, and the output says so. You need the OWNER, ADMIN or EM role.
+
+---
+
+## `intutic usage branches` <Badge type="warning" text="Biz Org+" />
+
+LLM usage per repository and branch.
+
+```bash
+intutic usage branches [--period <period>] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--period <period>` | `daily` or `monthly`; default `monthly` |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Groups calls by the git repository and branch the sync daemon reported for the session; calls with no git context form one row. Scoped like `intutic usage members`.
+
+---
+
+## `intutic usage commits` <Badge type="warning" text="Biz Org+" />
+
+LLM usage per HEAD commit.
+
+```bash
+intutic usage commits [--period <period>] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--period <period>` | `daily` or `monthly`; default `monthly` |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Groups calls by the commit checked out when each was made: the work that led to the next commit. Scoped like `intutic usage members`.
+
+---
+
+## `intutic inventory summary` <Badge type="tip" text="Cloud" />
+
+Counts of the AI tools on connected developer machines.
+
+```bash
+intutic inventory summary [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints how many machines report (and how many are stale), how many harnesses are governed, ungoverned, gate-stale or unverified, how many MCP servers run ungoverned, and how many skill bundles there are. OWNER, ADMIN and EM see every machine; a DEVELOPER sees only their own; VIEWER is refused. See [AI inventory](/guide/ai-inventory).
+
+---
+
+## `intutic inventory harnesses` <Badge type="tip" text="Cloud" />
+
+AI harnesses by machine, with gate state and status.
+
+```bash
+intutic inventory harnesses [filters] [--csv [--out <path>]] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--status <status>` | Only `governed`, `ungoverned`, `gate_stale` or `unverified` rows |
+| `--harness <harness>` | Only rows for this harness, e.g. `cursor` |
+| `--device <device_id>` | Only rows from this machine |
+| `--search <text>` | Only rows whose harness or hostname contains this text |
+| `--csv` | Download as CSV, the file **Export CSV** gives on the dashboard |
+| `--out <path>` | With `--csv`: write to this file instead of stdout |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints one line per harness per machine with its status, and why when it is not governed. The filters apply on the server, to the list and the CSV alike. Visibility is as for `intutic inventory summary`.
+
+**Example:**
+
+```bash
+intutic inventory harnesses --status ungoverned --csv --out ungoverned.csv
+```
+
+---
+
+## `intutic inventory mcp-servers` <Badge type="tip" text="Cloud" />
+
+MCP servers by machine, wrapped by the MCP proxy or not.
+
+```bash
+intutic inventory mcp-servers [filters] [--csv [--out <path>]] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--status <status>` | Only `governed` or `ungoverned` rows |
+| `--harness <harness>` | Only servers configured in this harness |
+| `--device <device_id>` | Only rows from this machine |
+| `--search <text>` | Only rows whose server name or hostname contains this text |
+| `--csv` | Download as CSV, the file **Export CSV** gives on the dashboard |
+| `--out <path>` | With `--csv`: write to this file instead of stdout |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints one line per MCP server per machine, with its harness, transport and status. Visibility is as for `intutic inventory summary`.
+
+---
+
+## `intutic gate-liveness` <Badge type="tip" text="Cloud" />
+
+Whether each installed harness's gate is reporting.
+
+```bash
+intutic gate-liveness [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints, per harness installed in the workspace, whether its gate is `reporting` (an event inside the liveness window), `silent` (installed long enough to have reported, and has not) or `new` (too recently installed to tell), when its gate and its agent were last heard from, and whether a silent-gate alert is open. You need the OWNER, ADMIN or EM role.
 
 ---
 

@@ -29,7 +29,7 @@ intutic init
 ```
 
 ```
-  ✔ dsh →
+  ✔ dsh → AGENTS.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
@@ -95,9 +95,9 @@ Two places surface the "silent no-profile window" (dsh installed but never run, 
 - **Not redirected:** the signed-in DeepSeek *account* route (`llm-deepseek-account`), whose token dsh only releases to DeepSeek's own origin, and `llm-pi-ai` routes you configure yourself. Earlier versions of this integration also wrote an `llm-pi-ai` route into `$DSH_HOME/settings.yaml`; dsh 0.2 no longer reads that file (it imports it once into the first profile that boots and renames it `settings.yaml.imported`), so Intutic no longer writes it.
 - **`$DSH_HOME/INSTALL.md`:** regenerated every sync (write-if-changed) — lists the manual `dsh plugin --profile <name> add @intutic/gate` command for every currently-registered profile. See step 5 above.
 - **Protected paths:** agent tool calls that touch `.dsh/profiles`, `.dsh/cordis.patch.yml` (the home-level patch layer, which outranks every profile's) or `.dsh/settings.yaml` are blocked by the generated gates.
-- **No rules file.** dsh has no workspace-relative rules/instructions file this integration writes governance text into — its config lives entirely under `$DSH_HOME`, not the project workspace.
+- **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, which the default profile's agent-instructions plugin reads. It is written when at least one SOP targets dsh or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)).
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness dsh`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic connect` writes here, run `intutic disconnect --harness dsh`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (blocking)
 
@@ -132,7 +132,7 @@ The proxy's DeepSeek route is tested against a mock DeepSeek upstream (`packages
 | Property | Value |
 |----------|-------|
 | Harness type | `dsh` |
-| Config file | none (dsh has no workspace-relative rules file) |
+| Rules file | `AGENTS.md` (a marked section) |
 | Registration files | `$DSH_HOME/profiles/*/cordis.patch.yml` (plugin row + `llm-deepseek` egress row), `$DSH_HOME/profiles/*/package.json` |
 | Gate module | [`@intutic/gate/dsh`](https://www.npmjs.com/package/@intutic/gate) — a real, checked-in TypeScript Cordis plugin, not a generated script |
 | Detection | `$DSH_HOME`/`~/.dsh/` (`settings.yaml`, `.credentials.yaml`, or `profiles/`), or `dsh` in `PATH` |

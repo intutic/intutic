@@ -28,20 +28,17 @@ const fake = vi.hoisted(() => {
 import * as fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import * as os from 'node:os'
-import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { join, dirname, relative, extname } from 'node:path'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import {
-  DisconnectPlan,
   injectMcpServer,
   keepOriginal,
   noteProxyUrl,
+  writeOwnedFile,
   planDisconnect,
   updatePreToolUseHooks,
 } from '@intutic/sync-daemon'
 import { getAdapter } from '../harness/detector.js'
-import { planN8nDisconnect } from '../harness/n8n.js'
 import { runDisconnect } from './disconnect.js'
 
 const PROXY = 'http://localhost:4000'
@@ -447,6 +444,63 @@ const CASES: Case[] = [
     },
     edit: () => editJson(join(home, '.dsh', 'profiles', 'main', 'package.json'), (d) => { d.dependencies.y = '2.0.0' }),
   },
+  {
+    // Codex and OpenCode share AGENTS.md: one section, the team's text kept around it.
+    harness: 'codex',
+    name: 'codex and opencode, with an AGENTS.md of the team\'s own',
+    seed: () => put(join(ws, 'AGENTS.md'), '# Team\n\nRun the tests.\n'),
+    connect: async () => {
+      await connectHarness('codex')
+      await connectHarness('opencode')
+    },
+    edit: () => editText(join(ws, 'AGENTS.md'), 'Run the tests.', 'Run every test.'),
+    connected: async () => {
+      const text = await fs.readFile(join(ws, 'AGENTS.md'), 'utf-8')
+      expect(text).toMatch(/^# Team\n\nRun the tests\.\n\n<!-- INTUTIC:RULES:START -->\n[\s\S]*Never print a secret\.[\s\S]*<!-- INTUTIC:RULES:END -->\n$/)
+      expect(text.match(/INTUTIC:RULES:START/g)).toHaveLength(1)
+    },
+  },
+  ...(['muse-code', 'claude-code', 'cursor', 'windsurf', 'roo-code'] as const).map((harness): Case => {
+    // Earlier versions wrote these files whole. Connect gives the user's copy
+    // back (or turns AGENTS.md into the section), and disconnect still
+    // restores everything byte for byte.
+    const legacy = { 'muse-code': 'AGENTS.md', 'claude-code': 'CLAUDE.md', cursor: '.cursorrules', windsurf: '.windsurfrules', 'roo-code': '.roorules' }[harness]
+    return {
+      harness,
+      name: `${harness}, ${legacy} an earlier version wrote whole`,
+      seed: () => put(join(ws, legacy), 'The team\'s own rules.\n'),
+      connect: async () => {
+        const file = join(ws, legacy)
+        await keepOriginal(file, ws)
+        await writeOwnedFile(file, ws, '# Intutic Governance Rules (auto-generated)\n# DO NOT EDIT — managed by intutic sync daemon\n\n## Old rule\n')
+        await getAdapter(harness)!.writeConfig(ws, SOPS, PROXY)
+      },
+      edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+      connected: async () => {
+        const text = await fs.readFile(join(ws, legacy), 'utf-8')
+        expect(text).not.toContain('Old rule')
+        expect(text.startsWith('The team\'s own rules.\n')).toBe(true)
+      },
+    }
+  }),
+  {
+    harness: 'openclaw',
+    name: 'openclaw, with an AGENTS.md of the user\'s own in a configured agent workspace',
+    seed: async () => {
+      await put(join(home, '.openclaw', 'openclaw.json'), { agents: { defaults: { workspace: '~/assistant' } } })
+      await put(join(home, 'assistant', 'AGENTS.md'), '# How I work\n\nAsk first.\n')
+    },
+    // The rules only: the gate writer runs `openclaw hooks check`, which an
+    // installed OpenClaw answers slowly for a configured workspace.
+    connect: async () => {
+      await getAdapter('openclaw')!.writeConfig(ws, SOPS, PROXY)
+    },
+    edit: () => editText(join(home, 'assistant', 'AGENTS.md'), 'Ask first.', 'Ask twice.'),
+    connected: async () => {
+      expect(await fs.readFile(join(home, 'assistant', 'AGENTS.md'), 'utf-8')).toContain('Never print a secret.')
+      expect(existsSync(join(home, '.openclaw', 'workspace'))).toBe(false)
+    },
+  },
 ]
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -581,7 +635,8 @@ describe('intutic disconnect, the command', () => {
       version: 1,
       hooks: { beforeShellExecution: [{ command: './audit.sh' }] },
     })
-    expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toContain('Intutic Governance Rules')
+    expect(await fs.readFile(join(ws, '.claude', 'rules', 'intutic-governance.md'), 'utf-8')).toContain('Intutic Governance Rules')
+    expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toBe('team rules\n')
     expect(existsSync(join(ws, '.cursor', 'mcp.json'))).toBe(false)
     const saved = JSON.parse(await fs.readFile(config, 'utf-8'))
     expect(saved.harnesses).toEqual(['claude-code'])
@@ -603,44 +658,5 @@ describe('intutic disconnect, the command', () => {
   it('rejects a harness it does not know', async () => {
     await runDisconnect({ harness: 'no-such-harness' })
     expect(process.exitCode).toBe(1)
-  })
-})
-
-describe('n8n workflow variables', () => {
-  it('removes the two variables connect set and keeps the workflow\'s own', async () => {
-    const puts: unknown[] = []
-    const workflow = {
-      id: 'w1',
-      name: 'Flow',
-      nodes: [],
-      connections: {},
-      settings: { executionOrder: 'v1', variables: { intutic_proxy_url: PROXY, intutic_governance_rules: 'x', mine: 'keep' } },
-    }
-    const server = createServer((req, res) => {
-      let body = ''
-      req.on('data', (c) => { body += c })
-      req.on('end', () => {
-        res.setHeader('content-type', 'application/json')
-        if (req.method === 'PUT') {
-          puts.push(JSON.parse(body))
-          res.end('{}')
-        } else if (req.url === '/api/v1/workflows') res.end(JSON.stringify({ data: [{ id: 'w1', name: 'Flow' }] }))
-        else res.end(JSON.stringify(workflow))
-      })
-    })
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-    const prev = process.env.N8N_URL
-    process.env.N8N_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-    try {
-      const plan = new DisconnectPlan()
-      await planN8nDisconnect(plan)
-      expect(plan.visible()).toHaveLength(1)
-      expect(puts).toHaveLength(0)
-      await plan.apply()
-      expect(puts).toEqual([{ name: 'Flow', nodes: [], connections: {}, settings: { executionOrder: 'v1', variables: { mine: 'keep' } } }])
-    } finally {
-      process.env.N8N_URL = prev
-      server.close()
-    }
   })
 })

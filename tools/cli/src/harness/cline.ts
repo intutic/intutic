@@ -23,9 +23,9 @@ import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { loadCredentials } from '../config/store.js'
-import { newIso } from '@intutic/id'
 import { writeClineHooks, ensureClinerulesDirectory } from '@intutic/sync-daemon/harness/clineHooks'
-import { keepOriginal, writeOwnedFile } from '@intutic/sync-daemon'
+import { keepOriginal } from '@intutic/sync-daemon'
+import { writeOwnRulesFile } from './rulesFiles.js'
 
 const CONFIG_FILE = '.clinerules/intutic-governance.md'
 
@@ -58,30 +58,14 @@ export const clineAdapter: IHarnessAdapter = {
     await writeClineHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
   },
 
-  /** Rules, as one file in the .clinerules directory Cline reads. */
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], _proxyUrl: string): Promise<string | null> {
-    let filePath: string | null = null
+  /** Rules, as one file in the .clinerules directory Cline reads; every
+   *  file there is applied (https://docs.cline.bot/features/cline-rules). */
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    if (sops.length === 0) return null
     // Kept before `.clinerules` is created, so disconnect knows it made the directory.
     await keepOriginal(join(workspaceRoot, CONFIG_FILE), workspaceRoot)
-    if (await ensureClinerulesDirectory(workspaceRoot)) {
-      filePath = join(workspaceRoot, CONFIG_FILE)
-      const instructions = sops.length > 0
-        ? sops.map((sop) => `## ${sop.title}\n\n${sop.content}`).join('\n\n---\n\n')
-        : '# Intutic governance active — no SOP rules configured yet.'
-
-      const content = [
-        '# Intutic Governance Rules (auto-generated)',
-        '# DO NOT EDIT — managed by intutic sync daemon',
-        `# Last sync: ${newIso()}`,
-        '',
-        instructions,
-        '',
-      ].join('\n')
-
-      await writeOwnedFile(filePath, workspaceRoot, content)
-    }
-
-    return filePath
+    if (!(await ensureClinerulesDirectory(workspaceRoot))) return null
+    return writeOwnRulesFile(workspaceRoot, CONFIG_FILE, sops, proxyUrl)
   },
 
   async readCurrentHash(workspaceRoot: string): Promise<string | null> {

@@ -4,7 +4,7 @@ Integrate Intutic governance with [Pi](https://github.com/earendil-works/pi) —
 
 ## How it works
 
-Intutic registers a PreToolUse hook in Pi's user config, `~/.pi/hooks.json`, that runs before every tool call (file reads, writes and command executions) and blocks it with exit code 2 when it breaks a rule. It also points Pi's Anthropic and OpenAI providers at the proxy in `~/.pi/models.json`.
+Intutic registers a PreToolUse hook in Pi's user config, `~/.pi/hooks.json`, that runs before every tool call (file reads, writes and command executions) and blocks it with exit code 2 when it breaks a rule. It also points Pi's Anthropic and OpenAI providers at the proxy in `~/.pi/models.json`, and writes your SOPs into a marked section of the workspace's `AGENTS.md`, which Pi reads as instructions.
 
 ## Setup
 
@@ -17,7 +17,7 @@ intutic init
 The CLI detects Pi Agent and registers it as a harness:
 
 ```
-  ✔ pi → .pi/hooks.json
+  ✔ pi → AGENTS.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
@@ -33,10 +33,11 @@ intutic start
 ## What gets written
 
 Intutic writes rules and configures:
+* **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, written when at least one SOP targets Pi or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Once connect creates `AGENTS.md` in a workspace that only had a `CLAUDE.md`, Pi reads `AGENTS.md` in its place.
 * **Hook configuration:** `~/.pi/hooks.json` — PreToolUse entries for `Bash`, `Edit`, `Write` and `.*`, merged with your own hooks.
 * **Hook script:** `~/.intutic/hooks/pi-check.sh` (runs before each tool call; exit code 2 blocks it).
 * **Provider routing:** `~/.pi/models.json` — `baseUrl` for the `anthropic` provider set to `http://localhost:4000` and for `openai` to `http://localhost:4000/v1`. Other providers and keys are kept; Google is not routed, because the proxy does not serve the Gemini API.
 
 Both JSON files are merged; one that does not parse is left untouched and reported in the `intutic connect` log.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness pi`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic connect` writes here, run `intutic disconnect --harness pi`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

@@ -44,7 +44,7 @@ Run `intutic connect` as normal, against the **main checkout** of the repository
 
 ### 3. What gets written
 
-- **For Agentic Orchestrator itself:** nothing. `tools/cli/src/harness/agenticOrchestrator.ts`'s `writeConfig` is a no-op by design, matching Xirp's exact pattern.
+- **For Agentic Orchestrator itself:** nothing. `tools/cli/src/harness/agenticOrchestrator.ts`'s `writeConfig` is a no-op by design, matching Xirp's exact pattern. Agentic Orchestrator has no instructions file; the backends it runs read their own ([Where rule sets go](/guide/how-it-works#where-rule-sets-go)).
 - **For each wrapped backend:** what that backend's own adapter writes. User-level hook registrations (Claude Code, Codex) govern every feature worktree; project-level files, including OpenCode's plugin, exist only in the main checkout.
 
 ## Config details

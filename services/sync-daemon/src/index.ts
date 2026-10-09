@@ -55,7 +55,7 @@ export type { DisconnectOptions, PlannedChange, PlanNote } from './disconnect/in
 export { guardSettingsFile, warnIfDshCoverageGap } from './watcher/settingsGuard.js'
 
 export { readJsonObjectForMerge } from './harness/jsonMergeTarget.js'
-export { writeRulesSection, rulesSectionOf, RULES_SECTION_START, RULES_SECTION_END } from './harness/rulesSection.js'
+export { writeRulesSection, retireRulesFile, rulesSectionOf, RULES_SECTION_START, RULES_SECTION_END } from './harness/rulesSection.js'
 export { gateKindForHarness } from './harness/gateKind.js'
 
 // Gap 3 fix — Antigravity (Gemini CLI) hook coverage
@@ -70,7 +70,7 @@ export { writeN8nHooks } from './harness/n8nHooks.js'
 
 // WS-C — Proprietary harness hook coverage (Hermes, Openclaw, Pi)
 export { writeHermesHooks } from './harness/hermesHooks.js'
-export { writeOpenclawHooks } from './harness/openclawHooks.js'
+export { writeOpenclawHooks, openclawAgentWorkspace } from './harness/openclawHooks.js'
 export { writePiHooks } from './harness/piHooks.js'
 
 // Formerly ungated harnesses with verified native mechanisms

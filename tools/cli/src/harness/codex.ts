@@ -1,7 +1,12 @@
 /**
  * codex.ts — Codex adapter.
  *
- * Writes three things:
+ * Writes four things:
+ * - the rule sets, as the marked section of the workspace's `AGENTS.md`,
+ *   which Codex reads before any work, merged from `~/.codex` and every
+ *   directory from the project root down to where it runs
+ *   (https://developers.openai.com/codex/guides/agents-md), through the
+ *   shared writer (agentsMd.ts);
  * - `.env.intutic` in the workspace, with the proxy base URLs for shells and
  *   scripts that source it;
  * - `openai_base_url` in Codex's user config (`$CODEX_HOME/config.toml`,
@@ -20,12 +25,12 @@ import { homedir } from 'node:os'
 import { HarnessType, anthropicBaseUrl, openaiBaseUrl, proxyHost } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { hashFile } from '../lib/hash.js'
 import { loadCredentials } from '../config/store.js'
 import { newIso } from '@intutic/id'
 import { writeCodexHooks, mergeCodexConfig, writeOwnedFile } from '@intutic/sync-daemon'
+import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 
-const CONFIG_FILE = '.env.intutic'
+const ENV_FILE = '.env.intutic'
 
 /** Codex's user config directory, resolved at call time so CODEX_HOME and
  *  HOME changes (and tests that move them) are honoured. */
@@ -35,7 +40,7 @@ function codexHome(): string {
 
 export const codexAdapter: IHarnessAdapter = {
   type: HarnessType.CODEX,
-  configFileName: CONFIG_FILE,
+  configFileName: AGENTS_MD,
 
   async detect(_workspaceRoot: string): Promise<boolean> {
     if (process.env.CODEX_HOME) return true
@@ -60,9 +65,9 @@ export const codexAdapter: IHarnessAdapter = {
     await writeCodexHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
   },
 
-  /** Workspace .env.intutic. */
+  /** The `AGENTS.md` section, and the workspace `.env.intutic`. */
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    const filePath = join(workspaceRoot, CONFIG_FILE)
+    const filePath = join(workspaceRoot, ENV_FILE)
     const envContent = [
       '# Intutic Governance Rules (auto-generated)',
       '# DO NOT EDIT — managed by intutic sync daemon',
@@ -77,14 +82,10 @@ export const codexAdapter: IHarnessAdapter = {
     ].join('\n')
 
     await writeOwnedFile(filePath, workspaceRoot, envContent)
-    return filePath
+    return (await writeAgentsMd(workspaceRoot, sops, proxyUrl)) ?? filePath
   },
 
-  async readCurrentHash(workspaceRoot: string): Promise<string | null> {
-    try {
-      return await hashFile(join(workspaceRoot, CONFIG_FILE))
-    } catch {
-      return null
-    }
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return agentsMdHash(workspaceRoot)
   },
 }

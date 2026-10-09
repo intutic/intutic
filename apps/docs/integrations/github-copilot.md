@@ -4,7 +4,7 @@ Integrate Intutic governance with [GitHub Copilot](https://github.com/features/c
 
 ## How it works
 
-Intutic monitors and modifies `.github/copilot-instructions.md` config in your workspace root. It writes active SOP governance rules as repository-specific instructions. GitHub Copilot automatically loads these instructions for chat queries and inline completions, ensuring recommendations align with your guidelines. In VS Code agent mode it also installs a PreToolUse hook that refuses tool calls breaking a rule — see [Pre-tool hooks](#pre-tool-hooks-preview).
+Intutic writes active SOP governance rules into a marked section of `.github/copilot-instructions.md`, Copilot's repository-specific instructions file. Your own instructions in the file are kept. GitHub Copilot automatically loads these instructions for chat queries and inline completions, ensuring recommendations align with your guidelines. In VS Code agent mode it also installs a PreToolUse hook that refuses tool calls breaking a rule — see [Pre-tool hooks](#pre-tool-hooks-preview).
 
 ## Setup
 
@@ -31,10 +31,10 @@ npx @intutic/cli connect
 ## What gets written
 
 Intutic writes rules and configures:
-* **Instructions File:** `.github/copilot-instructions.md` containing formatted markdown of all active rules and the proxy URL reference.
+* **Instructions:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in `.github/copilot-instructions.md`, holding the active rules and the proxy URL reference. The file is created if it does not exist; nothing outside the markers is changed. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
 * **Agent-mode hook (Preview):** `.github/hooks/intutic-governance.json` (workspace) and `~/.copilot/hooks/intutic-governance.json` (user), registering the blocking gate `.intutic/hooks/github-copilot-check.js`.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness github-copilot`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic connect` writes here, run `intutic disconnect --harness github-copilot`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `.github/copilot-instructions.md` only the marked section is taken out. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (Preview)
 

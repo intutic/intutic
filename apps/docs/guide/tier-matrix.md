@@ -30,8 +30,9 @@ Everything here works fully offline, today, in open core — nothing on this
 list is a trial or a degraded preview of a paid feature:
 
 - **Local rule sync** — the sync daemon compiles your `.intutic/sops/`
-  markdown into `.cursorrules`, `CLAUDE.md`, `.windsurfrules`, and every
-  other harness's own config format as files change.
+  markdown into each harness's rules file, such as
+  `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md`
+  or the rules section of `AGENTS.md`, as files change.
 - **Local policy enforcement** — the Rust proxy intercepts every LLM
   request/response, evaluates it against local WASM rules, blocks prohibited
   tool calls, and injects steering warnings into the stream in real time.
@@ -61,7 +62,7 @@ list is a trial or a degraded preview of a paid feature:
 | Corporate SOP distribution | local files only | centralized, tamper-proof, pushed to every developer |
 | Guardrails from policy documents | hand-written SOP files and rules | Notion, Confluence, GitHub, Google Docs and uploads become cited, shadow-first guardrails a person promotes |
 | LLM-as-judge (L2/L3 semantic checks) | — | requires server compute |
-| MCP server governance | the proxy's local checks: DLP, injection scanning, anomaly detectors, WASM rules, TOFU pinning | plus the [server registry](/guide/mcp-governance#the-registry) with approvals and default-deny, [approval holds](/guide/mcp-governance#approval-holds), allowlists and the calling member on every event, on every plan; the [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) on plans with single sign-on |
+| MCP server governance | the proxy's local checks: DLP, injection scanning, anomaly detectors, WASM rules, TOFU pinning | plus the [server registry](/guide/mcp-governance#the-registry) with approvals and default-deny, [approval holds](/guide/mcp-governance#approval-holds), allowlists, the calling member on every event, [call budgets](/guide/mcp-governance#call-budgets) and [tool-change risk scoring](/guide/mcp-governance#tool-change-risk), on every plan; the [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) on plans with single sign-on |
 
 Arm state carries over rather than resetting when you connect: a workspace
 that learned standalone keeps that learning, and the local loop stands down
@@ -88,13 +89,16 @@ list. In short:
 | [Custom Filters](/guide/wasm-rules) (WASM rules) | | ✓ | ✓ | ✓ |
 | [SOP Optimizer](/guide/metaclaw) | | ✓ | ✓ | ✓ |
 | [Evaluator Sandbox](/guide/evaluator-sandbox) | | ✓ | ✓ | ✓ |
+| [Fleet analytics](/guide/budgets#dashboard-widgets): cost by developer, team, branch and commit | | ✓ | ✓ | ✓ |
+| [SIEM export](/guide/siem-export) | | ✓ | ✓ | ✓ |
 | [SCIM provisioning](/guide/scim) | | | ✓ | ✓ |
 | Data residency (Cloud: US; EU on request) | | | ✓ | ✓ |
 | [Self-hosted gateway](/external/self-hosted-gateway) | | | ✓ | ✓ |
 | Runs in your VPC or an air-gapped network | | | | ✓ |
 
 The 14-day Free trial includes Policy Guardrails, single sign-on, SCIM,
-Custom Filters, the SOP Optimizer and data residency; the 14-day Enterprise
+Custom Filters, the SOP Optimizer, fleet analytics, SIEM export and data
+residency; the 14-day Enterprise
 trial adds the Evaluator Sandbox and SOP write-back. Plan changes take effect
 at the next sync-daemon handshake; no CLI or proxy binary change is needed on
 any developer's machine.
