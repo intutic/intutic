@@ -2822,7 +2822,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     "LOOP_RUN_PENDING_REVIEW",
                     &format!(
                         "Loop run {} is paused for human review. Held by: {}. \
-                         A reviewer must approve or reject it before work continues — \
+                         An Owner, Admin or EM must approve or reject it before work continues — \
                          `intutic loop review {} --approve`, or the Held Changes tab in the dashboard.",
                         lr_id, reason, lr_id
                     ),

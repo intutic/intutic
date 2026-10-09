@@ -35,32 +35,9 @@ describe('classify', () => {
 })
 
 describe('db_write, whatever separates the keywords', () => {
-  // A plain "drop table" substring missed every one of these.
-  it.each([
-    "psql -c 'DROP\nTABLE users'",
-    "psql -c 'DROP\tTABLE users'",
-    "psql -c 'DROP/**/TABLE users'",
-    "psql -c 'DROP /* why */ TABLE users'",
-    "psql -c 'DROP -- why\nTABLE users'",
-    "psql -c 'dRoP tAbLe users'",
-    String.raw`printf 'DROP\nTABLE users' | psql`,
-    String.raw`printf 'DROP -- why\nTABLE users' | psql`,
-  ])('%j is a db_write', (command) => {
-    expect(classify('bash', { command })).toEqual(['action:db_write'])
-  })
-
-  it('reads JSON-escaped arguments decoded', () => {
-    const decoded = JSON.parse(String.raw`{"command": "psql -c \"DROP\nTABLE users\""}`)
-    expect(classify('bash', decoded)).toEqual(['action:db_write'])
-  })
-
-  it.each(['git stash drop', 'psql --table-only', 'drop_table_helper.sh', 'dropdb --help'])(
-    '%j alone is not a db_write',
-    (command) => {
-      expect(classify('bash', { command })).not.toContain('action:db_write')
-    },
-  )
-
+  // The commands and answers are the shared destructive-SQL vectors, run by
+  // every classifier and text rule (destructiveSqlVectors.test.ts); this pins
+  // the gap they all depend on.
   it('uses the same SQL_GAP as the proxy', () => {
     const rust = readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/actions.rs'), 'utf-8')
     const m = rust.match(/const SQL_GAP: &str =\s*r"(.*?)";/s)

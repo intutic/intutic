@@ -12,7 +12,7 @@
  *    (`POST /api/v1/decisions`), which puts it in the review queue, notifies
  *    the workspace (`decision.pending`, Slack included), and gives the agent a
  *    hold id to quote.
- * 3. An approver approves it (`intutic decision approve <holdId>`, the review
+ * 3. An Owner, Admin or EM approves it (`intutic decision approve <holdId>`, the review
  *    API, or the Slack card — all one code path in the control plane). The
  *    approval lets the identical retry pass only while the workspace's
  *    review-hold bypass (`reviewHoldBypassEnabled`) is on: approving then

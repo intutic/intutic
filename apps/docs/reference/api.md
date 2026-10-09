@@ -650,7 +650,7 @@ Every route the control plane serves: 393 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/break-glass/approve` | Authenticated |  |
+| POST | `/api/v1/break-glass/approve` | OWNER/ADMIN/EM |  |
 | POST | `/api/v1/break-glass/request` | Authenticated |  |
 | GET | `/api/v1/break-glass/requests` | Authenticated |  |
 
@@ -843,7 +843,7 @@ Every route the control plane serves: 393 routes, grouped by the source file tha
 | POST | `/api/v1/skillopt/:suggestionId/dismiss` | Authenticated |  |
 | POST | `/api/v1/skillopt/:suggestionId/revert` | Authenticated | Revert an applied suggestion |
 | GET | `/api/v1/workspaces/:workspaceId/config-snapshots` | Authenticated |  |
-| GET | `/api/v1/workspaces/:workspaceId/config-snapshots/:snapshotId/diff` | Authenticated |  |
+| GET | `/api/v1/workspaces/:workspaceId/config-snapshots/:snapshotId/diff` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/workspaces/:workspaceId/skillopt-suggestions` | Authenticated |  |
 | POST | `/api/v1/workspaces/:workspaceId/skillopt/generate` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/skills/report` | Authenticated |  |
@@ -929,7 +929,7 @@ Every route the control plane serves: 393 routes, grouped by the source file tha
 | POST | `/api/v1/loops/:loopRunId/complete` | Authenticated |  |
 | GET | `/api/v1/loops/:loopRunId/duplicates` | Authenticated |  |
 | POST | `/api/v1/loops/:loopRunId/kill` | Authenticated |  |
-| POST | `/api/v1/loops/:loopRunId/review` | Authenticated |  |
+| POST | `/api/v1/loops/:loopRunId/review` | OWNER/ADMIN/EM |  |
 | POST | `/api/v1/loops/:loopRunId/verify` | Authenticated |  |
 | GET | `/api/v1/loops/reviews` | OWNER/ADMIN/EM |  |
 | POST | `/api/v1/loops/start` | Authenticated |  |
@@ -977,10 +977,10 @@ Every route the control plane serves: 393 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | GET | `/api/v1/notifications/log` | Authenticated | Notification history |
 | GET | `/api/v1/notifications/rules` | Authenticated | List rules |
-| POST | `/api/v1/notifications/rules` | Authenticated | Create rule |
-| DELETE | `/api/v1/notifications/rules/:ruleId` | Authenticated | Delete rule |
-| PUT | `/api/v1/notifications/rules/:ruleId` | Authenticated | Update rule |
-| POST | `/api/v1/notifications/rules/:ruleId/signing-secret` | Authenticated | Replace a webhook rule's signing secret (returned once) |
+| POST | `/api/v1/notifications/rules` | OWNER/ADMIN | Create rule |
+| DELETE | `/api/v1/notifications/rules/:ruleId` | OWNER/ADMIN | Delete rule |
+| PUT | `/api/v1/notifications/rules/:ruleId` | OWNER/ADMIN | Update rule |
+| POST | `/api/v1/notifications/rules/:ruleId/signing-secret` | OWNER/ADMIN | Replace a webhook rule's signing secret (returned once) |
 
 ### `oauth.ts` <Badge type="tip" text="Cloud" />
 

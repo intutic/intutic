@@ -1282,7 +1282,7 @@ export async function runLoopExec(
         )
         if (current?.loop?.status === 'PENDING_REVIEW') {
           log.warn('This loop run is held for human review — it has not finished.')
-          log.info(`Approve or reject it:  intutic loop review ${loopRunId} --approve`)
+          log.info(`An Owner, Admin or EM approves or rejects it:  intutic loop review ${loopRunId} --approve`)
           // loop.env is deliberately left in place: the resumed agent needs the
           // run id, and removing it here would orphan the run.
           process.exit(code || 0)

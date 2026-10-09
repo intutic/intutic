@@ -1240,7 +1240,7 @@ intutic loop review <loop_run_id> (--approve | --reject) [--note <note>] [option
 Exactly one of `--approve` and `--reject` is required; passing neither or both exits `1`.
 
 **What it does:**
-Resolves a run in `PENDING_REVIEW`: the state a `review_before:` SOP puts a whole run in when the proxy sees a declared action, after which every request in the run is refused until someone reviews it. A run in any other state is refused. If the workspace requires a different approver, the person who started the run cannot approve it.
+Resolves a run in `PENDING_REVIEW`: the state a `review_before:` SOP puts a whole run in when the proxy sees a declared action, after which every request in the run is refused until someone reviews it. A run in any other state is refused. It needs the OWNER, ADMIN or EM role. When the workspace requires a different approver (`loop_review.requireDistinctApprover`, off by default), the member who started the run cannot approve or reject it; an owner or admin turns that on with `PUT /api/v1/workspace/settings` and `{"loop_review": {"requireDistinctApprover": true}}`, and the change is recorded in the settings history.
 
 **How it differs from `intutic decision approve|reject`:** `loop review` acts on a whole **loop run**, addressed by its loop run id. `decision` acts on a single **held tool call**, the `hold_…` id a harness hook gate prints when it holds a call. The two ids are not interchangeable: a hold id given to `loop review` is not found.
 

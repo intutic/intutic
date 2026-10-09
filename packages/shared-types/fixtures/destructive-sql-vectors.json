@@ -1,0 +1,264 @@
+{
+  "$comment": "Destructive SQL: one set of answers that every implementation is tested against. `text` is a tool argument or shell command as the tool receives it. `statement` is what a blocking text rule reports for it: DROP TABLE, DROP DATABASE, DROP SCHEMA or TRUNCATE TABLE, or null. Checked against the control plane DLP (findDlpMatch, behind POST /api/v1/hook-gate and the AgentCore check; the QM screen and OpenAI Agents trace redaction), the MCP proxy DLP, and the hook gates' destructive.sql_drop rule, whose ERE is `ere` below (pinned to protectedPaths.ts) as the sync daemon (JavaScript and grep -E), @intutic/gate and intutic_clawde.gate snapshot readers run it. `dbWrite` is whether the action classifiers read it as action:db_write: actions.rs in the proxy, actions.ts in @intutic/gate, gate/actions.py in intutic_clawde. The proxy's sql_guard parses the SQL a client will run and ignores quoted text, so it answers a different question and is not run against these.",
+  "version": 1,
+  "ere": "([^a-zA-Z0-9_]|\\\\[ntr])(drop(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]*( |\\\\[n]))?|--[^;&|]*( |\\\\[n]))(table|database|schema)|truncate(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]*( |\\\\[n]))?|--[^;&|]*( |\\\\[n]))table)[^a-zA-Z0-9_.]",
+  "cases": [
+    {
+      "text": "psql -c 'DROP TABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true
+    },
+    {
+      "text": "DROP TABLE users",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "at the very start of the command"
+    },
+    {
+      "text": "psql -c 'DROP\nTABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a newline"
+    },
+    {
+      "text": "DROP\nTABLE users",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a newline, at the start"
+    },
+    {
+      "text": "psql -c 'DROP\r\nTABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "CRLF"
+    },
+    {
+      "text": "psql -c 'DROP\tTABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a tab"
+    },
+    {
+      "text": "psql -c 'DROP  TABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "two spaces"
+    },
+    {
+      "text": "psql -c 'DROP/**/TABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "an empty block comment"
+    },
+    {
+      "text": "psql -c 'DROP /* why */ TABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a block comment"
+    },
+    {
+      "text": "psql -c 'DROP /* a ** b */ TABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a block comment with stars inside"
+    },
+    {
+      "text": "psql -c 'DROP -- why\nTABLE users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a line comment"
+    },
+    {
+      "text": "DROP--why\nTABLE users",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a line comment with no space before it"
+    },
+    {
+      "text": "psql -c 'dRoP tAbLe users'",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "mixed case"
+    },
+    {
+      "text": "printf 'DROP\\nTABLE users' | psql",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "an escaped newline printf expands"
+    },
+    {
+      "text": "printf 'DROP\\tTABLE users' | psql",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "an escaped tab"
+    },
+    {
+      "text": "printf 'DROP -- why\\nTABLE users' | psql",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a line comment ended by an escaped newline"
+    },
+    {
+      "text": "printf 'select 1;\\nDROP TABLE users' | psql",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "after an escaped newline"
+    },
+    {
+      "text": "psql -h db -c \"DROP TABLE users\"",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "double-quoted"
+    },
+    {
+      "text": "psql -c \"select 1;drop table users\"",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "after a semicolon"
+    },
+    {
+      "text": "SELECT 'drop table' AS note",
+      "statement": "DROP TABLE",
+      "dbWrite": true,
+      "note": "a quoted mention: a text rule refuses it, because quoting is how a shell carries the real statement"
+    },
+    {
+      "text": "psql -c 'DROP DATABASE app'",
+      "statement": "DROP DATABASE",
+      "dbWrite": true
+    },
+    {
+      "text": "psql -c 'DROP/**/DATABASE app'",
+      "statement": "DROP DATABASE",
+      "dbWrite": true,
+      "note": "a block comment"
+    },
+    {
+      "text": "psql -c 'drop\ndatabase app'",
+      "statement": "DROP DATABASE",
+      "dbWrite": true,
+      "note": "a newline"
+    },
+    {
+      "text": "psql -c 'DROP SCHEMA analytics CASCADE'",
+      "statement": "DROP SCHEMA",
+      "dbWrite": true
+    },
+    {
+      "text": "psql -c 'DROP -- why\nSCHEMA analytics'",
+      "statement": "DROP SCHEMA",
+      "dbWrite": true,
+      "note": "a line comment"
+    },
+    {
+      "text": "psql -c 'TRUNCATE TABLE events'",
+      "statement": "TRUNCATE TABLE",
+      "dbWrite": true
+    },
+    {
+      "text": "truncate\ttable events",
+      "statement": "TRUNCATE TABLE",
+      "dbWrite": true,
+      "note": "a tab, at the start"
+    },
+    {
+      "text": "printf 'TRUNCATE\\nTABLE events' | psql",
+      "statement": "TRUNCATE TABLE",
+      "dbWrite": true,
+      "note": "an escaped newline"
+    },
+    {
+      "text": "psql -c 'TRUNCATE events'",
+      "statement": null,
+      "dbWrite": true,
+      "note": "TRUNCATE without TABLE: a write to the classifiers, too ambiguous for a text rule that refuses"
+    },
+    {
+      "text": "psql -c \"INSERT INTO t VALUES (1)\"",
+      "statement": null,
+      "dbWrite": true
+    },
+    {
+      "text": "psql --command 'insert\tinto t values (1)'",
+      "statement": null,
+      "dbWrite": true,
+      "note": "a tab"
+    },
+    {
+      "text": "psql -c 'DELETE /* all */ FROM users'",
+      "statement": null,
+      "dbWrite": true,
+      "note": "a block comment"
+    },
+    {
+      "text": "psql -c 'ALTER\nTABLE users ADD c int'",
+      "statement": null,
+      "dbWrite": true,
+      "note": "a newline"
+    },
+    {
+      "text": "psql -c 'UPDATE users SET a = 1'",
+      "statement": null,
+      "dbWrite": true
+    },
+    {
+      "text": "truncate -s 0 app.log",
+      "statement": null,
+      "dbWrite": true,
+      "note": "the classifiers read any `truncate` followed by a gap as a write; the text rules need TABLE"
+    },
+    {
+      "text": "truncate --size 0 table.log",
+      "statement": null,
+      "dbWrite": true,
+      "note": "a long flag is not a comment that ends at TABLE"
+    },
+    {
+      "text": "git stash drop",
+      "statement": null,
+      "dbWrite": false
+    },
+    {
+      "text": "git stash drop && cat table.md",
+      "statement": null,
+      "dbWrite": false,
+      "note": "the gap joins only the two keywords"
+    },
+    {
+      "text": "psql --table-only",
+      "statement": null,
+      "dbWrite": false
+    },
+    {
+      "text": "drop_table_helper.sh",
+      "statement": null,
+      "dbWrite": false,
+      "note": "an underscore is not a gap"
+    },
+    {
+      "text": "dropdb --help",
+      "statement": null,
+      "dbWrite": false
+    },
+    {
+      "text": "echo drop it",
+      "statement": null,
+      "dbWrite": false
+    },
+    {
+      "text": "pg_dump --exclude-table=audit app",
+      "statement": null,
+      "dbWrite": false
+    },
+    {
+      "text": "SELECT * FROM users",
+      "statement": null,
+      "dbWrite": false
+    },
+    {
+      "text": "psql --command \"SELECT 1\" --table",
+      "statement": null,
+      "dbWrite": false
+    }
+  ]
+}

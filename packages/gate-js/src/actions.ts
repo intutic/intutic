@@ -103,6 +103,8 @@ export const DB_WRITE_PATTERNS: readonly string[] = [
   'update ',
   'delete from',
   'drop table',
+  'drop database',
+  'drop schema',
   'truncate ',
   'alter table',
 ]

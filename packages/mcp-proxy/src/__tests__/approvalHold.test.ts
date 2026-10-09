@@ -15,6 +15,7 @@ import { ToolCallInterceptor } from '../interceptor.js'
 import { PolicyClient, UNRESTRICTED_REGISTRY, type McpRegistryPolicy, type SopRule } from '../policy.js'
 import { GovernanceEmitter } from '../emitter.js'
 import { handleHarnessLine, type PendingRequest } from '../proxy.js'
+import { holdApprovalHint } from '@intutic/shared-types'
 
 const RULE: SopRule = { id: 'sop_deploy', toolPattern: '^deploy$', action: 'require_approval', reason: 'Deploys need a second pair of eyes' }
 
@@ -114,7 +115,12 @@ describe('approval holds', () => {
     expect(holdId).toMatch(/^hold_[0-9a-z]+_[0-9a-f]{8}$/)
     expect(reason).toContain(`Hold id: ${holdId}`)
     expect(reason).toContain(`intutic decision approve ${holdId}`)
-    expect(reason).toContain('Retry this exact call')
+    // Who can approve, and that the retry passes only under the bypass, which
+    // is off by default: a Developer cannot approve their own hold, and a
+    // promise that the retry passes would be false on a default workspace.
+    expect(reason).toContain('An Owner, Admin or EM can approve it')
+    expect(reason).toContain('only if the workspace has turned on the review-hold bypass')
+    expect(reason).toBe(`HELD for approval: Deploys need a second pair of eyes [sop_deploy]. Hold id: ${holdId}. ${holdApprovalHint(holdId)}`)
 
     expect(holds).toHaveLength(1)
     expect(holds[0]).toMatchObject({

@@ -102,8 +102,18 @@ def snapshot_path() -> str:
 
 
 def _normalise(value) -> str:
-    """Lowercase and collapse whitespace, as the shipped gates do."""
-    return " ".join(str(value or "").lower().split())
+    """The shipped gates' normalisation (NORMALISE_CONTRACT in protectedPaths.ts).
+
+    Whitespace collapses to one space, and the result is padded with a space at
+    each end: the rules use a plain space, or a non-word character, where they
+    mean the start or end of a word, because POSIX ERE has neither a word boundary nor a
+    usable ``^`` in the emitted shell gates. Without the padding a command that
+    starts with the dangerous verb (``DROP TABLE users``) matched nothing.
+
+    Case is left alone: each rule's own ``i`` flag decides it, and two floor
+    rules key on an uppercase letter without one.
+    """
+    return " " + re.sub(r"\s+", " ", str(value if value is not None else "")) + " "
 
 
 def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:

@@ -91,6 +91,12 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.windsurf/hooks.json',
   '.openhands/hooks.json',
   '.gemini/settings.json',
+  // Antigravity's PreToolUse gate (antigravityCliHooks.ts): registered in the
+  // user-level file, and Antigravity also runs hooks from the project-level
+  // one. An agent rewriting either can remove its own gate or add a hook that
+  // runs first.
+  '.gemini/config/hooks.json',
+  '.agents/hooks.json',
   '.agents/plugins/intutic-governance',
 
   // Muse Code — project-level hooks, user settings (managed_hooks_path lives
@@ -885,14 +891,15 @@ function assertSkillContentArgSane(
  * before the client reads it), a block comment, or a `--` comment.
  *
  * Normalisation has also removed the newline that ends a `--` comment, so the
- * comment is taken to run up to the keyword — but not across `;`, `&` or `|`,
- * which end the shell command it is in. The gap is matched rather than removed
+ * comment is taken to run up to the keyword, ending at a space or at an
+ * escaped `\n` (`printf 'DROP -- why\nTABLE x'`) — but not across `;`, `&`
+ * or `|`, which end the shell command it is in. The gap is matched rather than removed
  * from the text: `--` also begins every long shell flag, and deleting
  * "comments" from `psql --command "drop table x"` would delete the statement.
  * The other gates use the same gap in their own regex dialect (`SQL_GAP` in
  * the proxy's anomaly/actions.rs).
  */
-const SQL_GAP_ERE = '( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* )?|--[^;&|]* '
+const SQL_GAP_ERE = '( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]*( |\\\\[n]))?|--[^;&|]*( |\\\\[n])'
 
 /**
  * Commands that destroy the machine or its data irrecoverably.
@@ -1039,7 +1046,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
   },
   {
     id: 'destructive.sql_drop',
-    source: `[^a-zA-Z0-9_](drop(${SQL_GAP_ERE})(table|database|schema)|truncate(${SQL_GAP_ERE})table)[^a-zA-Z0-9_.]`,
+    source: `([^a-zA-Z0-9_]|\\\\[ntr])(drop(${SQL_GAP_ERE})(table|database|schema)|truncate(${SQL_GAP_ERE})table)[^a-zA-Z0-9_.]`,
     ignoreCase: true,
     severity: 'warn',
     reason: 'Destructive SQL statement',
@@ -1052,7 +1059,10 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
       'Warn keeps the signal without owning a decision it lacks the context to make. ' +
       'The statement may follow any non-word character, not only a space, so ' +
       '`psql -c "DROP TABLE x"` (quoted) counts — the space-only version missed ' +
-      'it. The keywords may be split by anything SQL_GAP_ERE allows. A text rule: ' +
+      'it — or an escaped newline, tab or return, so `printf "select 1;\\nDROP ' +
+      'TABLE x" | psql` counts too. The keywords may be split by anything ' +
+      'SQL_GAP_ERE allows. Held to the other text rules by ' +
+      'fixtures/destructive-sql-vectors.json in shared-types. A text rule: ' +
       'a quoted mention (`SELECT \'drop table\'`) also matches, because quoting ' +
       'is how a shell command carries the real statement.',
     matches: [
@@ -1069,6 +1079,8 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
       ' DROP--why\nTABLE users ',
       ' dRoP tAbLe users ',
       ' printf "DROP\\nTABLE users" | psql ',
+      ' printf "select 1;\\nDROP TABLE users" | psql ',
+      ' DROP SCHEMA analytics CASCADE ',
     ],
     notMatches: [
       ' SELECT * FROM users ',

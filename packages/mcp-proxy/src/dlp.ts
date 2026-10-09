@@ -13,6 +13,7 @@
  * @module
  */
 
+import { DESTRUCTIVE_SQL_PATTERNS } from '@intutic/shared-types'
 import { PII_DETECTORS, findPii, resolvePiiActions } from './dlpPii.js'
 import type { PiiDetector } from './dlpPii.js'
 import { createStderrLogger } from './stderrLog.js'
@@ -26,19 +27,6 @@ export interface DlpScanResult {
   hasFinding: boolean
   findings: DlpFinding[]
 }
-
-/**
- * What may separate two SQL keywords: whitespace, a two-character escaped
- * newline, tab or carriage return, a block comment, or a `--` comment that runs
- * to a newline. `DROP\s+TABLE` let through either kind of comment between the
- * words, and, matched against the JSON-encoded arguments, a newline too (it is
- * the two characters `\n` there). Byte-identical to `SQL_GAP` in the proxy's
- * `actions.rs` (a test compares them), where the comment explains why the gap
- * is matched rather than stripped from the text.
- */
-const SQL_GAP = String.raw`(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+`
-
-const sqlStatement = (...keywords: string[]): RegExp => new RegExp(keywords.join(SQL_GAP), 'i')
 
 /**
  * Compiled DLP patterns.
@@ -68,13 +56,13 @@ const DLP_PATTERNS: Array<{ regex: RegExp; description: string; redactable: bool
   // High-entropy strings that look like secrets (≥40 chars of hex or base64)
   { regex: /[0-9a-f]{40,}/, description: 'High-entropy hex string (possible secret)', redactable: true },
   // Destructive commands — input-only, and matched against each decoded
-  // argument string (see scanToolInput). A text rule: it does not parse SQL,
-  // so a quoted mention (`SELECT 'drop table'`) is blocked too, because quoting
-  // is also how a shell command carries the real thing (`psql -c 'DROP TABLE x'`).
+  // argument string (see scanToolInput). The SQL statements are the shared
+  // text rule (destructiveSql.ts in shared-types), the one the control plane's
+  // DLP reads too: it does not parse SQL, so a quoted mention
+  // (`SELECT 'drop table'`) is blocked as well, because quoting is also how a
+  // shell command carries the real thing (`psql -c 'DROP TABLE x'`).
   { regex: /rm\s+-rf?\s+\//, description: 'Destructive rm -rf / command', redactable: false },
-  { regex: sqlStatement('DROP', 'TABLE'), description: 'SQL DROP TABLE statement', redactable: false },
-  { regex: sqlStatement('DROP', 'DATABASE'), description: 'SQL DROP DATABASE statement', redactable: false },
-  { regex: sqlStatement('TRUNCATE', 'TABLE'), description: 'SQL TRUNCATE TABLE statement', redactable: false },
+  ...DESTRUCTIVE_SQL_PATTERNS.map(({ regex, description }) => ({ regex, description, redactable: false })),
   // Private key material
   { regex: /-----BEGIN\s+(RSA\s+)?PRIVATE KEY-----/, description: 'PEM private key material', redactable: true },
   { regex: /-----BEGIN\s+EC\s+PRIVATE KEY-----/, description: 'EC private key material', redactable: true },

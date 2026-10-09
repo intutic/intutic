@@ -29,41 +29,20 @@
  *   * Snapshot health is reported as an event — "snapshot missing on 400
  *     machines" must not look identical to "snapshot present and healthy".
  *
- * ## Two deliberate divergences from the Python SDK reader
+ * ## Padding and case
  *
- * Both were found empirically, by running `src/__tests__/fidelity.test.ts`
- * against a hand-port of `intutic_clawde/gate/snapshot.py`'s `_normalise()`
- * and watching real patterns from `protectedPaths.ts` fail to fire. Neither
- * is a stylistic choice; both are confirmed gaps in `intutic_clawde`'s
- * reader relative to the shipped contract it claims to port, carried here
- * only as a documented finding, not as behaviour to reproduce.
- *
- * 1. **No padding.** `_normalise()` lowercases and collapses whitespace but
- *    does not pad the result with a leading/trailing space. The actual
- *    shipped gate (`intuticNormalise` in gateBody.ts, emitted from
- *    `NORMALISE_CONTRACT.jsSource`) pads. Padding is what lets a
- *    floor/destructive pattern use a plain leading space as a stand-in for
- *    `^` (`' rm( +-[a-zA-Z-]+)+ +/( |\\*)'` requires a literal space before
- *    `rm`) — POSIX ERE has no `\b` and no reliable `^`/`$` inside the emitted
- *    shell gates, so the whole pattern table is authored against the padded
- *    contract. It is also why `policySnapshot.ts`'s `toGuardPattern` strips
- *    the `^`/`$` off an SOP `toolPattern` and re-wraps it as `' (name) '`
- *    before shipping it as a `subject: 'tool'` snapshot rule — that
- *    transformation only makes sense against a padded reader. Without
- *    padding, a command that BEGINS with the dangerous verb (`"rm -rf /"`,
- *    no leading space) never matches `' rm...'` at all, and the block
- *    silently never fires.
- * 2. **Forced lowercasing.** `_normalise()` lowercases unconditionally; the
- *    real `NORMALISE_CONTRACT.jsSource` does not — case sensitivity is
- *    governed entirely by each rule's own `ignoreCase`/`i`-flag column.
- *    `bypass.env_kill_switch` (` [A-Z][A-Z0-9_]*_HOOKS?=`) and
- *    `destructive.chmod_recursive_root`/`chown_recursive_root`
- *    (`[a-zA-Z]*R[a-zA-Z]*`, a literal uppercase `R` for the recursive flag)
- *    both key on case WITHOUT setting that flag; forcing the subject to
- *    lowercase first makes them never fire, on real production patterns.
- *
- * This reader pads and preserves case, matching the real shipped contract;
- * see the fidelity suite for the evidence.
+ * Normalisation pads the subject with a space at each end and collapses
+ * whitespace, and does not lowercase, as the shipped gates do
+ * (`NORMALISE_CONTRACT` in `protectedPaths.ts`). Padding is what lets a
+ * floor/destructive pattern use a plain leading space or non-word character as
+ * a stand-in for `^` (POSIX ERE has no `\b` and no reliable `^`/`$` inside the
+ * emitted shell gates), so without it a command that BEGINS with the dangerous
+ * verb (`"rm -rf /"`, `"DROP TABLE users"`) never matches. Case sensitivity is
+ * each rule's own `ignoreCase` flag: `bypass.env_kill_switch` and the
+ * recursive chmod/chown rules key on an uppercase letter without one. The
+ * Python SDK's reader once lowercased and did not pad, and missed both; it now
+ * follows the same contract, and `destructive-sql-vectors.json` in
+ * shared-types runs both readers over the same commands.
  *
  * The regex-dialect divergence the Python module documents (`.rules` patterns
  * are authored as JavaScript regexes; compiling them with a different engine

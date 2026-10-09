@@ -62,7 +62,7 @@ Intutic's circuit breaker evaluates every tool call against your policy stack. H
 | 💸 **Budget overruns** | Token spend exceeding session ceilings triggers automatic session suspension |
 | 🌐 **Unapproved API calls** | Outbound HTTP to non-allowlisted domains is blocked at the proxy layer, and `intutic enforce` closes the escape hatch — a host firewall that makes the proxy the *only* path off the machine |
 | 🧩 **MCP tool violations** | Calls to unapproved MCP servers or tools are intercepted before execution |
-| 💉 **Destructive SQL** | `DROP TABLE` / `DROP DATABASE` / `TRUNCATE` in an MCP tool call are blocked by the MCP governance proxy; the same shapes in a harness shell command are flagged for triage at the hook gate (advisory tier, not blocked), and refused at the LLM proxy — before the harness runs them — when they target a database outside the workspace's DSN allowlist ([`sql_guard:`](/reference/sop-front-matter#destructive-sql), opt-in) |
+| 💉 **Destructive SQL** | `DROP TABLE` / `DROP DATABASE` / `DROP SCHEMA` / `TRUNCATE TABLE` in an MCP tool call are blocked by the MCP governance proxy, and in an SDK gate's tool call by the control-plane check; the same shapes in a harness shell command are flagged for triage at the hook gate (advisory tier, not blocked), and refused at the LLM proxy — before the harness runs them — when they target a database outside the workspace's DSN allowlist ([`sql_guard:`](/reference/sop-front-matter#destructive-sql), opt-in) |
 
 Every blocked action generates an audit log entry with full context — who, what, when, and why it was stopped.
 

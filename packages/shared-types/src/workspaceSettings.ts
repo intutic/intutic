@@ -299,6 +299,20 @@ export interface WorkspaceSettings {
   reviewHoldBypassTtlMinutes?: number
 
   /**
+   * Held loop runs (`review_before:` on a whole run, reviewed with `intutic
+   * loop review`). With `requireDistinctApprover` true, the member who started
+   * a run cannot approve or reject it; another OWNER, ADMIN or EM must. Off by
+   * default: the person who ran the agent is usually best placed to judge its
+   * change manifest, and a small team must not be locked out of its own
+   * deploys. Break-glass requests always need a second person, whatever this
+   * says. Stored under the snake_case key the reader
+   * (`requiresDistinctApprover` in loopGovernanceService.ts) uses.
+   */
+  loop_review?: {
+    requireDistinctApprover?: boolean
+  }
+
+  /**
    * Central egress-enforcement posture, distributed to this workspace's proxies
    * (LLD #63 §4). One of `'off'` | `'monitor'` | `'enforce'`. When set, the
    * sync-daemon writes it to `.intutic/hooks/egress-policy.json` and the proxy
@@ -702,6 +716,8 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Only load-bearing once reviewHoldBypassEnabled is true; the value here is
   // what "enabled but unset" resolves to.
   reviewHoldBypassTtlMinutes: 10,
+  // Off by default, as the reader's fallback is: see the field doc.
+  loop_review: { requireDistinctApprover: false },
   // Off by default — see the field doc for why a growing auto-written
   // context file must be opt-in.
   decisionsLogEnabled: false,

@@ -16,7 +16,7 @@ import * as os from 'node:os'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { toRulesLine, REVIEW_REQUESTS_LOG } from '../../src/harness/gateBody.js'
-import { DESTRUCTIVE_COMMAND_PATTERNS, type GuardPattern } from '../../src/harness/protectedPaths.js'
+import { DESTRUCTIVE_COMMAND_PATTERNS, UNIVERSAL_PROTECTED_PATHS, type GuardPattern } from '../../src/harness/protectedPaths.js'
 import { writeAntigravityCliHooks, ANTIGRAVITY_HOOK_NAME } from '../../src/harness/antigravityCliHooks.js'
 
 const PROXY_URL = 'http://127.0.0.1:4000'
@@ -152,6 +152,23 @@ describe('writeAntigravityCliHooks', () => {
       gateEnv(path.join(root, 'no-such.rules')),
     )
     expect(documentedResult(r).decision).toBe('deny')
+  })
+
+  // The files the gate is registered in. An agent that could rewrite them
+  // could remove its own gate before its next call, or register a hook that
+  // runs ahead of it, so every gate refuses an edit to either, as it does for
+  // every other harness's gate file.
+  it.each([
+    ['the user-level registration', '~/.gemini/config/hooks.json'],
+    ['the project-level hooks file', '/w/.agents/hooks.json'],
+  ])('denies an edit to %s, by file write and by shell', async (_, file) => {
+    expect(UNIVERSAL_PROTECTED_PATHS).toContain(file.replace(/^~\/|^\/w\//, ''))
+    await writeAntigravityCliHooks(root, PROXY_URL, 'ws_test')
+    const noRules = gateEnv(path.join(root, 'no-such.rules'))
+    const write = await run(script(), toolCall('write_to_file', { TargetFile: file, CodeContent: '{}' }), noRules)
+    expect(documentedResult(write)).toEqual({ decision: 'deny', reason: expect.stringContaining(path.basename(file)) })
+    const shell = await run(script(), toolCall('run_command', { CommandLine: `echo '{}' > ${file}`, Cwd: '/w' }), noRules)
+    expect(documentedResult(shell).decision).toBe('deny')
   })
 
   it('holds a deploy run_command under review_before: action:deploy', async () => {

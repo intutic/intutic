@@ -88,6 +88,23 @@ category, so redactions read `[REDACTED_PII]` and SOP `pii()` taint rules see
 them. The [MCP governance proxy](/guide/mcp-governance#configuration-reference) runs the
 same detectors with the same defaults, set by `INTUTIC_MCP_DLP_DETECTORS`.
 
+#### What each surface does with a match
+
+The detectors and their defaults are one definition, shared by the two proxies, and both run
+on your machines with no control plane involved. What a match does depends on what the surface
+can change:
+
+| Surface | What it scans | An enabled detector's match |
+|---|---|---|
+| LLM proxy | Request bodies and forwarded headers; responses, streaming included | The detector's action: `redact` replaces it with `[REDACTED_PII]`, `block` refuses the request |
+| MCP governance proxy | Tool-call arguments | Blocks the call, whether the action is `redact` or `block`: the proxy cannot rewrite the arguments a tool receives, so the only way not to pass the value on is to refuse the call |
+| MCP governance proxy | Tool results | Redacts it, whether the action is `redact` or `block` |
+| Hook gates and SDK gates | Not scanned for PII | None. A gate can only allow or block a tool call, and the calls it sees are the ones an agent makes on the developer's own machine, where card numbers in test fixtures and personal data in local files are routine. Blocking each one would stop ordinary work, as blocking a pasted JWT would. The gates block credential-shaped values, not PII |
+
+So the same Social Security Number is redacted from a model request, blocked as an MCP tool
+argument, and allowed in a harness's shell command. When the agent's model traffic goes
+through the LLM proxy, the model never sees the number unredacted to put it in a tool call.
+
 ### Custom patterns
 
 Add patterns for data shaped by your own systems (customer IDs, record numbers, health identifiers) under `dlp.patterns`:

@@ -35,7 +35,8 @@
  * only ships SOP-authored rules, the destructive tier, and the tier-promoted
  * skill-surface rules — never the floor's secret-content patterns). Copied
  * as of 2026-08-19, against the version of `protectedPaths.ts` this worktree
- * branched from.
+ * branched from. `UNIVERSAL_PROTECTED_PATHS` is held equal to the source by
+ * `services/sync-daemon/__tests__/harness/protectedPathCopies.test.ts`.
  */
 
 export type Subject = 'tool' | 'command' | 'target' | 'any'
@@ -221,7 +222,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'destructive.sql_drop',
-    source: '[^a-zA-Z0-9_](drop(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* )?|--[^;&|]* )(table|database|schema)|truncate(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* )?|--[^;&|]* )table)[^a-zA-Z0-9_.]',
+    source: '([^a-zA-Z0-9_]|\\\\[ntr])(drop(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]*( |\\\\[n]))?|--[^;&|]*( |\\\\[n]))(table|database|schema)|truncate(( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]*( |\\\\[n]))?|--[^;&|]*( |\\\\[n]))table)[^a-zA-Z0-9_.]',
     ignoreCase: true,
     subject: 'command',
     severity: 'warn',
@@ -240,6 +241,8 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
       ' DROP--why\nTABLE users ',
       ' dRoP tAbLe users ',
       ' printf "DROP\\nTABLE users" | psql ',
+      ' printf "select 1;\\nDROP TABLE users" | psql ',
+      ' DROP SCHEMA analytics CASCADE ',
     ],
     notMatches: [
       ' SELECT * FROM users ',
@@ -277,7 +280,21 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.windsurf/hooks.json',
   '.openhands/hooks.json',
   '.gemini/settings.json',
+  '.gemini/config/hooks.json',
+  '.agents/hooks.json',
   '.agents/plugins/intutic-governance',
+  '.muse/hooks.json',
+  '.config/muse/settings.json',
+  '.config/muse/intutic-managed-hooks.json',
+  '.grok/hooks',
+  '.grok/config.toml',
+  '.grok/trusted_folders.toml',
+  '.dsh/profiles',
+  '.dsh/cordis.patch.yml',
+  '.dsh/settings.yaml',
+  '.opencode/plugins',
+  '.opencode/plugin',
+  '.config/opencode/plugins',
 ]
 
 /** Escapes a literal string for use inside a portable ERE — mirrors

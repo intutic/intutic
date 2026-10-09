@@ -608,6 +608,19 @@ export {
 } from './posturePresets.js'
 
 export {
+  SQL_GAP,
+  DESTRUCTIVE_SQL_STATEMENTS,
+  DESTRUCTIVE_SQL_PATTERNS,
+  type DestructiveSqlStatement,
+} from './destructiveSql.js'
+
+export {
+  HOLD_APPROVAL_HINT_TEMPLATE,
+  HOLD_ID_PLACEHOLDER,
+  holdApprovalHint,
+} from './holdMessages.js'
+
+export {
   SECRET_VALUE_PATTERNS,
   secretPatternAlternation,
   type SecretValuePattern,

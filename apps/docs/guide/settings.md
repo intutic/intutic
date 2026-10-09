@@ -209,6 +209,9 @@ next sync and applies from its next capture, within a few minutes. Changing it n
 Admin role, and the change is recorded in the settings history like any other. The API key is
 `configBodyUpload` in `PUT /api/v1/workspace/settings`.
 
+Only owners, admins and engineering managers can open a diff, because it shows the file's text.
+Every member can see the history itself: paths, hashes, sizes and how many lines changed.
+
 ---
 
 ## AI Routing & Caching {#routing-proxy}
@@ -314,7 +317,7 @@ If agents are using stale governance rules, clear the policy cache from this tab
 
 ## Notifications {#notifications}
 
-Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity.
+Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity. Only an owner or admin can create, change or delete a rule or replace its signing secret, as for SIEM destinations; every member can see the rules and the delivery log.
 
 ### Channel Routing
 

@@ -15,7 +15,7 @@
 
 import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
-import { evaluateSsoGroupClearance } from '@intutic/shared-types'
+import { evaluateSsoGroupClearance, holdApprovalHint } from '@intutic/shared-types'
 import { scanToolInput, formatDlpBlockReason, setDynamicPatterns } from './dlp.js'
 import type { DlpFinding } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns } from './injection.js'
@@ -170,9 +170,9 @@ export class ToolCallInterceptor {
   /**
    * A `require_approval` rule matched. Returns the hold decision, or `null`
    * when an approved bypass for this exact call lets it continue. Every hold
-   * reason names the hold id and the command that approves it, the same
-   * wording the hook gates print, so a person reading the agent's transcript
-   * knows what to run.
+   * reason names the hold id, who may approve it and when a retry passes, in
+   * the words the hook gates print (`holdApprovalHint`), so a person reading
+   * the agent's transcript knows what to do.
    */
   private async hold(rule: SopRule, toolName: string, toolInput: unknown): Promise<Decision | null> {
     const outcome = this.holds
@@ -188,8 +188,7 @@ export class ToolCallInterceptor {
 
     const reason = outcome.recorded
       ? `HELD for approval: ${rule.reason} [${rule.id}]. Hold id: ${outcome.holdId}. ` +
-        `An approver can run: intutic decision approve ${outcome.holdId} (or reject it). ` +
-        `Retry this exact call after it is approved.`
+        holdApprovalHint(outcome.holdId)
       : `HELD for approval: ${rule.reason} [${rule.id}], but the hold could not be recorded ` +
         `(Intutic control plane unreachable), so there is nothing to approve yet. Retry once the ` +
         `control plane is reachable to request approval.`
