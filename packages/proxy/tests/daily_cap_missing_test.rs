@@ -42,6 +42,11 @@ impl ControlPlaneCache for KnowsKeysNotCaps {
             expires: None,
             org_id: None,
             byok_required: None,
+            // An entry without `hardBudgets`, from a control plane older than
+            // the field: the daily cap is the one this test is about.
+            key_id: None,
+            hard_budgets: None,
+            rate_limit: None,
         }))
     }
     async fn wasm_plugins(&self, _w: &str) -> anyhow::Result<Option<String>> {

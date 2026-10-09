@@ -40,7 +40,7 @@ Set the workspace's daily and monthly caps, the alert threshold, and whether eac
 - **The daily cap is hard** unless you set `daily_enforcement` to `soft`.
 - **The monthly cap is soft** unless you set `monthly_enforcement` to `hard`. Then a request the rest of the month's cap does not cover is refused like one over the daily cap.
 - A cap of `0` is no cap.
-- A workspace that has never saved its caps is held to $100 a day. Settings › Billing shows such a workspace a daily cap of a thirtieth of its monthly cap; that figure raises alerts, and saving the caps makes the daily cap you see the one that is enforced.
+- A workspace that has never saved its caps has a monthly cap of $500 and a daily cap of a thirtieth of its monthly cap: the figures Settings › Billing shows are the ones enforced and alerted on.
 
 The caps belong to the workspace: every member and every virtual key in it draws on the same amount. A change applies from each key's next request.
 
