@@ -354,7 +354,8 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
  * `resolvePolicy`'s cold path is a blocking HTTP GET with a 5s socket timeout,
  * taken on the daemon's first request for a workspace after every restart. The
  * sync daemon already writes the same policy to
- * `~/.intutic/hooks/policy-snapshot.json` every cycle, so on the machine's own
+ * `~/.intutic/hooks/policy-snapshot.json` every cycle, and a verified copy under
+ * `~/.intutic/hooks/verified/`, which this reads; so on the machine's own
  * workspace that round trip is avoidable.
  *
  * # Two things that make the obvious version wrong
@@ -386,10 +387,14 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
     const { readFile } = await import('node:fs/promises')
     const os = await import('node:os')
     const path = await import('node:path')
+    // The sync daemon's verified copy (VERIFIED_SNAPSHOT_DIR in
+    // services/sync-daemon/src/lib/policySnapshot.ts), not the live file next
+    // to it: the live JSON carries the server allowlist with no digest over
+    // it, so an edit to it would otherwise seed this cache until the refresh.
     const file =
       snapshotPath ??
       process.env['INTUTIC_POLICY_SNAPSHOT'] ??
-      path.join(os.homedir(), '.intutic', 'hooks', 'policy-snapshot.json')
+      path.join(os.homedir(), '.intutic', 'hooks', 'verified', 'policy-snapshot.json')
 
     const parsed: unknown = JSON.parse(await readFile(file, 'utf-8'))
     if (!isRecord(parsed)) return null
