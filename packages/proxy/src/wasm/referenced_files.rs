@@ -161,11 +161,11 @@ pub const ERR_BUDGET: i32 = -6;
 
 /// Host reads one evaluation may make.
 ///
-/// The 5 ms wall-clock timeout in the runner cannot preempt a synchronous
-/// guest call, so the real bound on guest work is fuel — and fuel counts
-/// instructions, not the bytes a host function copies on the guest's behalf. A
-/// tight loop calling this import would therefore buy an unbounded memcpy for a
-/// handful of fuel. This budget is the bound instead: at worst
+/// The runner's deadline interrupts guest code, not a host function in the
+/// middle of a copy, and fuel counts instructions, not the bytes a host
+/// function copies on the guest's behalf. A tight loop calling this import
+/// would therefore buy a memcpy per call for a handful of fuel, each one
+/// uninterruptible. This budget bounds the total: at worst
 /// 64 × 256 KiB ≈ 16 MiB of copying, which is a millisecond or two.
 ///
 /// A rule needs two calls per file (size query, then read), so this is eight

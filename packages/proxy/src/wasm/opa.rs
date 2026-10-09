@@ -1,50 +1,100 @@
-//! EXPERIMENTAL: Rego policies compiled by OPA (`opa build -t wasm`) as WASM rules.
+//! Rego policies compiled by OPA (`opa build -t wasm`), run as WASM rules.
 //!
-//! Off unless `INTUTIC_EXPERIMENTAL_REGO_WASM=1`, and then only for rules in the
-//! local rules directory. A spike, not a supported rule format: rules from the
-//! control plane, the CLI's install-time checks, host builtins and the shadow and
-//! replay tooling all still speak only the native ABI.
+//! An OPA module speaks a different ABI from a native Intutic rule. It
+//! *imports* its linear memory (`env.memory`) instead of exporting it, imports
+//! `opa_abort` and the `opa_builtinN` dispatchers for builtins it cannot run
+//! itself, and is driven through `opa_eval` rather than `evaluate(offset,
+//! len)`. This module is that host: it recognises an OPA build, refuses at load
+//! one it cannot run, builds the policy's `input` from the request, evaluates
+//! the entrypoint and maps its result to a verdict.
 //!
-//! An OPA module speaks a different ABI from an Intutic rule. It *imports* its
-//! linear memory (`env.memory`) instead of exporting it, imports `opa_abort`
-//! and the `opa_builtinN` dispatchers for builtins it cannot run itself, and is
-//! driven through `opa_eval` rather than `evaluate(offset, len)`. This module is
-//! the shim: it supplies those imports, writes the request context as the
-//! policy's `input` (`policy_input`), and maps the result to a verdict.
+//! Rego rules load from the same places as native ones (the local rules
+//! directory and the control plane) and are on wherever WASM rules are.
+//! `INTUTIC_DISABLE_REGO_RULES=1` switches them off: an OPA module is then
+//! refused at load, as before this host existed.
 //!
-//! Contract with the policy: package `intutic`, a `deny` set of messages, built
-//! with `-e intutic/deny`. A non-empty set blocks with its first message; an
-//! empty or undefined one allows. Evaluation runs under the same limits as every
-//! rule — 16 MB of memory, 1,000,000 fuel, a 5 ms timeout — and fails open the
-//! same way.
+//! # The contract with a policy
 //!
-//! Builtins that need the host (`sprintf`, `time.now_ns`, `http.send`, …) are
-//! not provided. A policy that uses one is refused at load, by asking the
-//! module's own `builtins` export, instead of failing on every request.
+//! **Input** (`input.v = 1`), built per tool call by [`policy_input`]:
+//! `tool`, `args`, `session`, `request` and `truncated`. The guide page
+//! "Rego policies" documents every field; the MCP proxy builds the same shape.
+//!
+//! **Result** of the entrypoint, mapped by [`decision`]:
+//! - `true` denies, `false` allows;
+//! - a set or array of messages denies with the first when non-empty;
+//! - an object `{"decision": "allow"|"deny"|"hold"|"reask", "reason", "risk_tier"}`;
+//! - undefined allows.
+//!
+//! **Packaging**: `intutic rules build --rego` appends an `intutic.rule`
+//! custom section with the entrypoint and a default risk tier. A module
+//! without one is accepted when it has exactly one entrypoint.
+//!
+//! **Limits**: [`limits::REGO`] — a separate fuel and time budget, still
+//! bounded and still failing open — and the same 16 MB of memory as every rule.
 
-use super::context::{RequestContext, Verdict};
-use super::referenced_files::ReferencedFiles;
-use super::runner::{sanitize_reason, WasmState};
-use std::sync::Arc;
-use std::time::Duration;
+use super::context::{RequestContext, RiskLevel, ToolCall, Verdict};
+use super::limits;
+use super::opa_builtins::{self, Builtin, EvalCtx};
+use super::runner::sanitize_reason;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::time::{SystemTime, UNIX_EPOCH};
 use wasmtime::{
-    Engine, ExternType, Instance, Linker, Memory, MemoryType, Module, Store, StoreLimitsBuilder,
+    Caller, Engine, ExternType, Instance, Linker, Memory, MemoryType, Module, Store, StoreLimits,
+    StoreLimitsBuilder,
 };
 
-/// The flag that turns the shim on.
-pub const FLAG: &str = "INTUTIC_EXPERIMENTAL_REGO_WASM";
+/// Set to `1` to refuse Rego rules on this host.
+pub const DISABLE_ENV: &str = "INTUTIC_DISABLE_REGO_RULES";
 
-/// The one entrypoint the shim evaluates.
-pub const ENTRYPOINT: &str = "intutic/deny";
+/// The custom section `intutic rules build` writes the rule's metadata into.
+pub const METADATA_SECTION: &str = "intutic.rule";
 
-/// 16 MB, the same cap `runner::evaluate_wasm_rule` puts on a rule's memory.
-const MAX_MEMORY_PAGES: u32 = 256;
-const FUEL: u64 = 1_000_000;
+/// `input.v`: bumped only for a change a policy could observe.
+pub const INPUT_VERSION: u64 = 1;
+
+/// Largest policy input, in bytes. Long strings in `args` are cut to fit.
+///
+/// 99.97% of 82,401 real coding-agent tool calls fit untouched; the rest are
+/// mostly whole files passed to `Write`. See [`limits::REGO`].
+pub const MAX_INPUT_BYTES: usize = 64 * 1024;
+
+/// String lengths `args` is cut to, in turn, until the input fits.
+const TRUNCATION_STEPS: [usize; 4] = [16 * 1024, 4 * 1024, 1024, 256];
+
+/// Largest JSON a builtin may hand back to the policy. A builtin runs on the
+/// host, outside fuel and the deadline, so its output is bounded here.
+const MAX_BUILTIN_RESULT_BYTES: usize = 1024 * 1024;
+
 const WASM_PAGE: usize = 64 * 1024;
+const MAX_MEMORY_PAGES: u64 = (limits::MAX_MEMORY_BYTES / WASM_PAGE) as u64;
 
-/// Whether the experimental shim is on in this process.
+/// Whether Rego rules may load on this host.
 pub fn enabled() -> bool {
-    std::env::var(FLAG).is_ok_and(|v| v == "1")
+    std::env::var(DISABLE_ENV).map_or(true, |v| v != "1")
+}
+
+/// What `intutic rules build` records about a rule.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct RuleMetadata {
+    pub v: u64,
+    pub abi: String,
+    #[serde(default)]
+    pub entrypoint: Option<String>,
+    #[serde(default)]
+    pub risk_tier: Option<String>,
+}
+
+/// A loaded Rego rule: what evaluation needs, resolved once at load.
+#[derive(Debug, Clone)]
+pub struct OpaRule {
+    pub entrypoint: String,
+    entrypoint_id: i32,
+    /// Indexed by the module's own builtin ids.
+    builtins: Vec<Option<Builtin>>,
+    /// Applied to a decision that does not name its own.
+    pub risk_tier: Option<RiskLevel>,
 }
 
 /// Whether `module` was produced by `opa build -t wasm`: it imports its memory
@@ -57,10 +107,90 @@ pub fn is_opa_module(module: &Module) -> bool {
     imports_memory && exports("opa_eval") && exports("opa_wasm_abi_version")
 }
 
-/// Refuse, at load, a module this shim cannot run: an import it does not
-/// provide, an ABI older than the one-shot `opa_eval` (1.2), no `intutic/deny`
-/// entrypoint, or builtins that need the host.
-pub fn check_loadable(engine: &Engine, module: &Module) -> anyhow::Result<()> {
+/// The payload of the custom section `name`, if the module has one.
+///
+/// Walks the binary's sections directly: wasmtime does not expose custom
+/// sections, and the format is a byte, a length and a payload per section.
+pub fn custom_section<'a>(bytes: &'a [u8], name: &str) -> Option<&'a [u8]> {
+    let mut rest = bytes.strip_prefix(b"\0asm")?.get(4..)?;
+    while let Some((&id, tail)) = rest.split_first() {
+        let (size, tail) = leb128(tail)?;
+        let payload = tail.get(..size)?;
+        rest = &tail[size..];
+        if id == 0 {
+            let (len, inner) = leb128(payload)?;
+            if inner.get(..len)? == name.as_bytes() {
+                return Some(&inner[len..]);
+            }
+        }
+    }
+    None
+}
+
+fn leb128(bytes: &[u8]) -> Option<(usize, &[u8])> {
+    let mut value: usize = 0;
+    for (i, &b) in bytes.iter().enumerate().take(5) {
+        value |= ((b & 0x7f) as usize) << (7 * i);
+        if b & 0x80 == 0 {
+            return Some((value, &bytes[i + 1..]));
+        }
+    }
+    None
+}
+
+/// The rule's metadata section, parsed. A section that does not parse is an
+/// error, not an absence: the module claims something it does not say.
+pub fn metadata(bytes: &[u8]) -> anyhow::Result<Option<RuleMetadata>> {
+    let Some(section) = custom_section(bytes, METADATA_SECTION) else {
+        return Ok(None);
+    };
+    let meta: RuleMetadata = serde_json::from_slice(section)
+        .map_err(|e| anyhow::anyhow!("unreadable `{METADATA_SECTION}` section: {e}"))?;
+    if meta.v != 1 {
+        anyhow::bail!(
+            "`{METADATA_SECTION}` version {} is not supported (1 is)",
+            meta.v
+        );
+    }
+    Ok(Some(meta))
+}
+
+fn parse_risk_tier(tier: &str) -> Option<RiskLevel> {
+    match tier.to_ascii_lowercase().as_str() {
+        "low" => Some(RiskLevel::Low),
+        "medium" => Some(RiskLevel::Medium),
+        "high" => Some(RiskLevel::High),
+        "critical" => Some(RiskLevel::Critical),
+        _ => None,
+    }
+}
+
+/// Load a module as a Rego rule: `Ok(None)` for a native rule, an error for an
+/// OPA build this host cannot run, naming what is missing.
+pub fn load(engine: &Engine, module: &Module, bytes: &[u8]) -> anyhow::Result<Option<OpaRule>> {
+    load_if(enabled(), engine, module, bytes)
+}
+
+fn load_if(
+    enabled: bool,
+    engine: &Engine,
+    module: &Module,
+    bytes: &[u8],
+) -> anyhow::Result<Option<OpaRule>> {
+    let meta = metadata(bytes)?;
+    let claims_opa = meta.as_ref().is_some_and(|m| m.abi == "opa");
+    if !is_opa_module(module) {
+        if claims_opa {
+            anyhow::bail!("the metadata says abi `opa`, but the module is not an OPA build");
+        }
+        return Ok(None);
+    }
+    if let Some(m) = meta.as_ref().filter(|m| m.abi != "opa") {
+        anyhow::bail!("an OPA build whose metadata says abi `{}`", m.abi);
+    }
+    if !enabled {
+        anyhow::bail!("Rego rules are switched off on this host ({DISABLE_ENV}=1)");
+    }
     for import in module.imports() {
         let ok = import.module() == "env"
             && (import.name() == "memory"
@@ -69,15 +199,15 @@ pub fn check_loadable(engine: &Engine, module: &Module) -> anyhow::Result<()> {
                 || import.name().starts_with("opa_builtin"));
         if !ok {
             anyhow::bail!(
-                "OPA module imports `{}.{}`, which the experimental Rego shim does not provide",
+                "the OPA module imports `{}.{}`, which the host does not provide",
                 import.module(),
                 import.name()
             );
         }
     }
 
-    let (mut store, instance, memory) = instantiate(engine, module)?;
-    let abi = |store: &mut Store<WasmState>, name: &str| -> anyhow::Result<i32> {
+    let (mut store, instance, memory) = instantiate(engine, module, Vec::new(), limits::REGO)?;
+    let abi = |store: &mut Store<OpaState>, name: &str| -> anyhow::Result<i32> {
         instance
             .get_global(&mut *store, name)
             .and_then(|g| g.get(&mut *store).i32())
@@ -88,34 +218,113 @@ pub fn check_loadable(engine: &Engine, module: &Module) -> anyhow::Result<()> {
         abi(&mut store, "opa_wasm_abi_minor_version")?,
     );
     if major != 1 || minor < 2 {
-        anyhow::bail!("OPA WASM ABI {major}.{minor}; the shim needs 1.2 or later (opa_eval)");
+        anyhow::bail!("OPA WASM ABI {major}.{minor}; the host needs 1.2 or later (opa_eval)");
     }
 
-    let builtins = dump_export(&mut store, &instance, &memory, "builtins")?;
-    if builtins.as_object().is_none_or(|b| !b.is_empty()) {
+    let wanted = dump_export(&mut store, &instance, &memory, "builtins")?;
+    let wanted = wanted
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("the `builtins` export is not an object"))?;
+    let mut builtins: Vec<Option<Builtin>> = Vec::new();
+    let mut missing = Vec::new();
+    for (name, id) in wanted {
+        let id = id
+            .as_u64()
+            .and_then(|i| usize::try_from(i).ok())
+            .ok_or_else(|| anyhow::anyhow!("builtin `{name}` has no numeric id"))?;
+        match opa_builtins::lookup(name) {
+            Some(f) => {
+                if builtins.len() <= id {
+                    builtins.resize(id + 1, None);
+                }
+                builtins[id] = Some(f);
+            }
+            None => missing.push(name.clone()),
+        }
+    }
+    if !missing.is_empty() {
+        missing.sort();
+        let supported: Vec<&str> = opa_builtins::SUPPORTED.iter().map(|(n, _)| *n).collect();
         anyhow::bail!(
-            "the policy needs builtins the host does not provide: {builtins}. Use builtins OPA \
-             compiles into the module (concat, contains, regex.match, startswith, …)"
+            "the policy uses builtins this host does not provide: {}. Host-provided builtins: \
+             {}; most others are compiled into the module by OPA",
+            missing.join(", "),
+            supported.join(", ")
         );
     }
-    entrypoint_id(&mut store, &instance, &memory)?;
-    Ok(())
+
+    let entrypoints = dump_export(&mut store, &instance, &memory, "entrypoints")?;
+    let entrypoints = entrypoints
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("the `entrypoints` export is not an object"))?;
+    let entrypoint = match meta.as_ref().and_then(|m| m.entrypoint.clone()) {
+        Some(name) => name,
+        None if entrypoints.len() == 1 => entrypoints.keys().next().cloned().unwrap_or_default(),
+        None => anyhow::bail!(
+            "the module has {} entrypoints and no metadata naming one; build it with \
+             `intutic rules build --rego <path> --entrypoint <package/rule>`",
+            entrypoints.len()
+        ),
+    };
+    let entrypoint_id = entrypoints
+        .get(&entrypoint)
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no `{entrypoint}` entrypoint in the module (it has {}); build with \
+                 `opa build -t wasm -e {entrypoint}`",
+                entrypoints.keys().cloned().collect::<Vec<_>>().join(", ")
+            )
+        })?;
+
+    let risk_tier = match meta.as_ref().and_then(|m| m.risk_tier.as_deref()) {
+        Some(tier) => Some(
+            parse_risk_tier(tier)
+                .ok_or_else(|| anyhow::anyhow!("unknown risk tier `{tier}` in the metadata"))?,
+        ),
+        None => None,
+    };
+
+    Ok(Some(OpaRule {
+        entrypoint,
+        entrypoint_id,
+        builtins,
+        risk_tier,
+    }))
 }
 
-/// Create the store, the imported memory and the stub imports, and instantiate.
+/// Store state for one OPA evaluation.
+pub struct OpaState {
+    limits: StoreLimits,
+    builtins: Vec<Option<Builtin>>,
+    eval: EvalCtx,
+}
+
+/// Create the store, the imported memory and the host imports, and
+/// instantiate, under the Rego budget.
 fn instantiate(
     engine: &Engine,
     module: &Module,
-) -> anyhow::Result<(Store<WasmState>, Instance, Memory)> {
-    let limits = StoreLimitsBuilder::new()
-        .memory_size(MAX_MEMORY_PAGES as usize * WASM_PAGE)
-        .build();
+    builtins: Vec<Option<Builtin>>,
+    budget: limits::Budget,
+) -> anyhow::Result<(Store<OpaState>, Instance, Memory)> {
+    let now_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or_default();
     let mut store = Store::new(
         engine,
-        WasmState::new(limits, Arc::new(ReferencedFiles::empty())),
+        OpaState {
+            limits: StoreLimitsBuilder::new()
+                .memory_size(limits::MAX_MEMORY_BYTES)
+                .build(),
+            builtins,
+            eval: EvalCtx { now_ns },
+        },
     );
-    store.limiter(|state| state);
-    store.set_fuel(FUEL)?;
+    store.limiter(|state| &mut state.limits);
+    budget.arm(&mut store)?;
 
     let minimum = module
         .imports()
@@ -124,48 +333,51 @@ fn instantiate(
             _ => None,
         })
         .ok_or_else(|| anyhow::anyhow!("not an OPA module: no env.memory import"))?;
-    let minimum = u32::try_from(minimum)?;
     if minimum > MAX_MEMORY_PAGES {
         anyhow::bail!(
             "the module asks for {minimum} pages of memory; the cap is {MAX_MEMORY_PAGES}"
         );
     }
-    let memory = Memory::new(&mut store, MemoryType::new(minimum, Some(MAX_MEMORY_PAGES)))?;
+    let memory = Memory::new(
+        &mut store,
+        MemoryType::new(u32::try_from(minimum)?, Some(MAX_MEMORY_PAGES as u32)),
+    )?;
 
-    let mut linker: Linker<WasmState> = Linker::new(engine);
+    let mut linker: Linker<OpaState> = Linker::new(engine);
     linker.define(&store, "env", "memory", memory)?;
     linker.func_wrap("env", "opa_abort", |_: i32| -> anyhow::Result<()> {
         anyhow::bail!("the OPA policy aborted")
     })?;
     linker.func_wrap("env", "opa_println", |_: i32| {})?;
-    // Unreachable for a module `check_loadable` accepted (its `builtins` map is
-    // empty); defined so the module links, and trapping if a call ever arrives.
-    let no_builtin = || anyhow::anyhow!("OPA host builtins are not provided");
     linker.func_wrap(
         "env",
         "opa_builtin0",
-        move |_: i32, _: i32| -> anyhow::Result<i32> { Err(no_builtin()) },
+        |mut c: Caller<'_, OpaState>, id: i32, _ctx: i32| call_builtin(&mut c, id, &[]),
     )?;
     linker.func_wrap(
         "env",
         "opa_builtin1",
-        move |_: i32, _: i32, _: i32| -> anyhow::Result<i32> { Err(no_builtin()) },
+        |mut c: Caller<'_, OpaState>, id: i32, _ctx: i32, a: i32| call_builtin(&mut c, id, &[a]),
     )?;
     linker.func_wrap(
         "env",
         "opa_builtin2",
-        move |_: i32, _: i32, _: i32, _: i32| -> anyhow::Result<i32> { Err(no_builtin()) },
+        |mut c: Caller<'_, OpaState>, id: i32, _ctx: i32, a: i32, b: i32| {
+            call_builtin(&mut c, id, &[a, b])
+        },
     )?;
     linker.func_wrap(
         "env",
         "opa_builtin3",
-        move |_: i32, _: i32, _: i32, _: i32, _: i32| -> anyhow::Result<i32> { Err(no_builtin()) },
+        |mut c: Caller<'_, OpaState>, id: i32, _ctx: i32, a: i32, b: i32, d: i32| {
+            call_builtin(&mut c, id, &[a, b, d])
+        },
     )?;
     linker.func_wrap(
         "env",
         "opa_builtin4",
-        move |_: i32, _: i32, _: i32, _: i32, _: i32, _: i32| -> anyhow::Result<i32> {
-            Err(no_builtin())
+        |mut c: Caller<'_, OpaState>, id: i32, _ctx: i32, a: i32, b: i32, d: i32, e: i32| {
+            call_builtin(&mut c, id, &[a, b, d, e])
         },
     )?;
 
@@ -173,14 +385,72 @@ fn instantiate(
     Ok((store, instance, memory))
 }
 
+/// Run one host builtin: dump its operands to JSON through the module, call
+/// the Rust implementation, and parse the result back in. `0` is OPA's
+/// "undefined", returned when the builtin fails.
+fn call_builtin(caller: &mut Caller<'_, OpaState>, id: i32, args: &[i32]) -> anyhow::Result<i32> {
+    let builtin = usize::try_from(id)
+        .ok()
+        .and_then(|i| caller.data().builtins.get(i).copied().flatten())
+        .ok_or_else(|| anyhow::anyhow!("the policy called builtin {id}, which was not provided"))?;
+    let func = |caller: &mut Caller<'_, OpaState>, name: &str| {
+        caller
+            .get_export(name)
+            .and_then(|e| e.into_func())
+            .ok_or_else(|| anyhow::anyhow!("the OPA module does not export `{name}`"))
+    };
+    let memory = caller
+        .get_export("memory")
+        .and_then(|e| e.into_memory())
+        .ok_or_else(|| anyhow::anyhow!("the OPA module does not export its memory"))?;
+    let dump = func(caller, "opa_json_dump")?.typed::<i32, i32>(&*caller)?;
+    let mut values = Vec::with_capacity(args.len());
+    for &addr in args {
+        let json = dump.call(&mut *caller, addr)?;
+        values.push(serde_json::from_slice::<Value>(&read_c_string(
+            memory.data(&*caller),
+            json,
+        )?)?);
+    }
+
+    let eval = caller.data().eval;
+    let encoded = builtin(&eval, &values)
+        .and_then(|v| serde_json::to_vec(&v).map_err(|e| e.to_string()))
+        .and_then(|bytes| {
+            if bytes.len() > MAX_BUILTIN_RESULT_BYTES {
+                Err(format!("result of {} bytes is over the cap", bytes.len()))
+            } else {
+                Ok(bytes)
+            }
+        });
+    let bytes = match encoded {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::debug!(
+                builtin = id,
+                "OPA builtin failed; its result is undefined: {e}"
+            );
+            return Ok(0);
+        }
+    };
+    let len = i32::try_from(bytes.len())?;
+    let addr = func(caller, "opa_malloc")?
+        .typed::<i32, i32>(&*caller)?
+        .call(&mut *caller, len)?;
+    memory.write(&mut *caller, usize::try_from(addr)?, &bytes)?;
+    func(caller, "opa_json_parse")?
+        .typed::<(i32, i32), i32>(&*caller)?
+        .call(&mut *caller, (addr, len))
+}
+
 /// Call a no-argument export that returns the address of an OPA value and dump
 /// it as JSON (`builtins`, `entrypoints`).
 fn dump_export(
-    store: &mut Store<WasmState>,
+    store: &mut Store<OpaState>,
     instance: &Instance,
     memory: &Memory,
     name: &str,
-) -> anyhow::Result<serde_json::Value> {
+) -> anyhow::Result<Value> {
     let value = instance
         .get_typed_func::<(), i32>(&mut *store, name)?
         .call(&mut *store, ())?;
@@ -188,30 +458,13 @@ fn dump_export(
         .get_typed_func::<i32, i32>(&mut *store, "opa_json_dump")?
         .call(&mut *store, value)?;
     Ok(serde_json::from_slice(&read_c_string(
-        store, memory, json,
+        memory.data(&*store),
+        json,
     )?)?)
 }
 
-fn entrypoint_id(
-    store: &mut Store<WasmState>,
-    instance: &Instance,
-    memory: &Memory,
-) -> anyhow::Result<i32> {
-    let entrypoints = dump_export(store, instance, memory, "entrypoints")?;
-    entrypoints
-        .get(ENTRYPOINT)
-        .and_then(|v| v.as_i64())
-        .and_then(|v| i32::try_from(v).ok())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "no `{ENTRYPOINT}` entrypoint (has {entrypoints}); build with `opa build -t wasm -e {ENTRYPOINT}`"
-            )
-        })
-}
-
 /// The NUL-terminated string OPA wrote at `addr`, bounded by memory.
-fn read_c_string(store: &Store<WasmState>, memory: &Memory, addr: i32) -> anyhow::Result<Vec<u8>> {
-    let data = memory.data(store);
+fn read_c_string(data: &[u8], addr: i32) -> anyhow::Result<Vec<u8>> {
     let start = usize::try_from(addr)?;
     let rest = data
         .get(start..)
@@ -223,131 +476,369 @@ fn read_c_string(store: &Store<WasmState>, memory: &Memory, addr: i32) -> anyhow
     Ok(rest[..len].to_vec())
 }
 
-/// The policy's `input`: the request context without `tools`.
-///
-/// OPA parses its input inside the sandbox at about 135 fuel per byte, so the
-/// 1,000,000-fuel budget covers roughly 7 KB of JSON. The tool schemas a coding
-/// agent declares on every request (names and full descriptions) run to tens of
-/// kilobytes and would exhaust the budget before the policy ran, failing every
-/// evaluation open. The calls being made (`tool_calls`) and everything else stay.
-fn policy_input(ctx: &RequestContext) -> serde_json::Result<Vec<u8>> {
-    let mut value = serde_json::to_value(ctx)?;
-    if let Some(obj) = value.as_object_mut() {
-        obj.remove("tools");
-    }
-    serde_json::to_vec(&value)
-}
-
-/// Evaluate one OPA rule against `ctx`.
-pub async fn evaluate_opa_rule(engine: &Engine, module: &Module, ctx: &RequestContext) -> Verdict {
-    let input = match policy_input(ctx) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            tracing::error!("Failed to serialize RequestContext for the OPA rule: {e}");
-            return Verdict::Bypass;
-        }
-    };
-    let run = async {
-        let (mut store, instance, memory) = instantiate(engine, module)?;
-        let entrypoint = entrypoint_id(&mut store, &instance, &memory)?;
-
-        // `data` is the empty document: Intutic passes everything as `input`.
-        let malloc = instance.get_typed_func::<i32, i32>(&mut store, "opa_malloc")?;
-        let parse = instance.get_typed_func::<(i32, i32), i32>(&mut store, "opa_json_parse")?;
-        let doc = malloc.call(&mut store, 2)?;
-        memory.write(&mut store, usize::try_from(doc)?, b"{}")?;
-        let data = parse.call(&mut store, (doc, 2))?;
-
-        // ABI 1.2 one-shot eval: the input is written at the heap pointer and
-        // the heap continues after it.
-        let heap = instance
-            .get_typed_func::<(), i32>(&mut store, "opa_heap_ptr_get")?
-            .call(&mut store, ())?;
-        let start = usize::try_from(heap)?;
-        let end = start + input.len();
-        if end > memory.data_size(&store) {
-            let pages = (end - memory.data_size(&store)).div_ceil(WASM_PAGE) as u64;
-            memory.grow(&mut store, pages)?;
-        }
-        memory.write(&mut store, start, &input)?;
-        let eval = instance
-            .get_typed_func::<(i32, i32, i32, i32, i32, i32, i32), i32>(&mut store, "opa_eval")?;
-        let len = i32::try_from(input.len())?;
-        let result = eval.call(&mut store, (0, entrypoint, data, heap, len, heap + len, 0))?;
-        let json = read_c_string(&store, &memory, result)?;
-        Ok::<_, anyhow::Error>(serde_json::from_slice::<serde_json::Value>(&json)?)
-    };
-
-    match tokio::time::timeout(Duration::from_millis(5), run).await {
-        Ok(Ok(result)) => verdict_from_result(&result),
-        Ok(Err(e)) => {
-            tracing::warn!("OPA rule execution error (fail-open): {e}");
-            Verdict::Bypass
-        }
-        Err(_) => {
-            tracing::warn!("OPA rule timed out after 5ms (fail-open)");
-            Verdict::Bypass
-        }
+/// A risk tier as the policy input and hold records spell it.
+pub fn risk_tier_name(tier: RiskLevel) -> &'static str {
+    match tier {
+        RiskLevel::Low => "low",
+        RiskLevel::Medium => "medium",
+        RiskLevel::High => "high",
+        RiskLevel::Critical => "critical",
     }
 }
 
-/// `[{"result": ["msg", …]}]` → block with the first message; an empty or
-/// undefined `deny` → allow.
-fn verdict_from_result(result: &serde_json::Value) -> Verdict {
-    let messages = result
-        .get(0)
-        .and_then(|r| r.get("result"))
-        .and_then(|r| r.as_array());
-    match messages {
-        Some(msgs) if !msgs.is_empty() => Verdict::Kill {
-            reason: msgs[0]
-                .as_str()
-                .and_then(sanitize_reason)
-                .unwrap_or_else(|| "Blocked by Rego policy".to_string()),
-            policy_id: None,
+/// The policy's `input` for one tool call (`None` when the request carries
+/// none), version 1, at most [`MAX_INPUT_BYTES`].
+pub fn policy_input(ctx: &RequestContext, call: Option<&ToolCall>) -> Vec<u8> {
+    let mut session = json!({
+        "id": ctx.session_id,
+        "workspace_id": ctx.workspace_id,
+        "model": ctx.model,
+        "risk_tier": risk_tier_name(ctx.risk_tier),
+        "tool_sequence": ctx.tool_sequence,
+        "calls_last_60s": ctx.calls_last_60s,
+    });
+    if !ctx.node.agent_role.is_empty() {
+        session["agent_role"] = json!(ctx.node.agent_role);
+    }
+    if !ctx.harness.is_empty() {
+        session["harness"] = json!(ctx.harness);
+    }
+    let input = json!({
+        "v": INPUT_VERSION,
+        "host": "proxy",
+        "tool": call.map(|c| c.name.as_str()),
+        "args": call.map(|c| &c.arguments),
+        "session": session,
+        "request": {
+            "estimated_input_tokens": ctx.estimated_input_tokens,
+            "budget_remaining_usd": ctx.budget_remaining_usd,
+            "dlp_findings": ctx.dlp_findings.iter().map(|f| json!({
+                "category": f.category,
+                "pattern_name": f.pattern_name,
+                "action": f.action,
+            })).collect::<Vec<_>>(),
+            "injection_findings": ctx.injection_findings,
         },
-        _ => Verdict::Bypass,
+        "truncated": false,
+    });
+    bounded(input)
+}
+
+/// Serialise `input`, cutting long strings in `args` until it fits.
+fn bounded(mut input: Value) -> Vec<u8> {
+    let encode = |v: &Value| serde_json::to_vec(v).unwrap_or_default();
+    let bytes = encode(&input);
+    if bytes.len() <= MAX_INPUT_BYTES {
+        return bytes;
     }
+    input["truncated"] = Value::Bool(true);
+    for limit in TRUNCATION_STEPS {
+        if let Some(args) = input.get_mut("args") {
+            truncate_strings(args, limit);
+        }
+        let bytes = encode(&input);
+        if bytes.len() <= MAX_INPUT_BYTES {
+            return bytes;
+        }
+    }
+    input["args"] = Value::Null;
+    encode(&input)
+}
+
+/// Cut every string in `v` to at most `limit` bytes, at a character boundary.
+fn truncate_strings(v: &mut Value, limit: usize) {
+    match v {
+        Value::String(s) if s.len() > limit => {
+            let mut end = limit;
+            while !s.is_char_boundary(end) {
+                end -= 1;
+            }
+            s.truncate(end);
+        }
+        Value::Array(items) => items.iter_mut().for_each(|i| truncate_strings(i, limit)),
+        Value::Object(map) => map.values_mut().for_each(|i| truncate_strings(i, limit)),
+        _ => {}
+    }
+}
+
+/// Evaluate `rule` once against an already-built input under `budget`
+/// ([`limits::REGO`] on the request path), returning the raw `opa_eval` result
+/// (`[{"result": …}]`, or `[]` when undefined) and the fuel it used.
+pub fn evaluate_input(
+    engine: &Engine,
+    module: &Module,
+    rule: &OpaRule,
+    input: &[u8],
+    budget: limits::Budget,
+) -> anyhow::Result<(Value, u64)> {
+    let (mut store, instance, memory) = instantiate(engine, module, rule.builtins.clone(), budget)?;
+
+    // `data` is the empty document: Intutic passes everything as `input`.
+    let malloc = instance.get_typed_func::<i32, i32>(&mut store, "opa_malloc")?;
+    let parse = instance.get_typed_func::<(i32, i32), i32>(&mut store, "opa_json_parse")?;
+    let doc = malloc.call(&mut store, 2)?;
+    memory.write(&mut store, usize::try_from(doc)?, b"{}")?;
+    let data = parse.call(&mut store, (doc, 2))?;
+
+    // ABI 1.2 one-shot eval: the input is written at the heap pointer and the
+    // heap continues after it.
+    let heap = instance
+        .get_typed_func::<(), i32>(&mut store, "opa_heap_ptr_get")?
+        .call(&mut store, ())?;
+    let start = usize::try_from(heap)?;
+    let end = start + input.len();
+    if end > memory.data_size(&store) {
+        let pages = (end - memory.data_size(&store)).div_ceil(WASM_PAGE) as u64;
+        memory.grow(&mut store, pages)?;
+    }
+    memory.write(&mut store, start, input)?;
+    let len = i32::try_from(input.len())?;
+    let result = instance
+        .get_typed_func::<(i32, i32, i32, i32, i32, i32, i32), i32>(&mut store, "opa_eval")?
+        .call(
+            &mut store,
+            (0, rule.entrypoint_id, data, heap, len, heap + len, 0),
+        )?;
+    let json = read_c_string(memory.data(&store), result)?;
+    let used = budget.fuel - store.get_fuel()?;
+    Ok((serde_json::from_slice(&json)?, used))
+}
+
+/// What a policy decided about one call.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Decision {
+    Allow,
+    Deny(String),
+    Hold(String),
+    Reask(String),
+}
+
+/// Map an `opa_eval` result to a decision and the risk tier it names.
+///
+/// A result that matches none of the documented shapes allows, with a warning
+/// naming the shape: the same fail-open a native rule returning an unmapped
+/// verdict code gets.
+pub fn decision(result: &Value, entrypoint: &str) -> (Decision, Option<RiskLevel>) {
+    let default_reason = || format!("Denied by Rego policy {entrypoint}");
+    let reason_of = |v: Option<&Value>, fallback: String| {
+        v.and_then(Value::as_str)
+            .and_then(sanitize_reason)
+            .unwrap_or(fallback)
+    };
+    let Some(value) = result.get(0).and_then(|r| r.get("result")) else {
+        return (Decision::Allow, None);
+    };
+    match value {
+        Value::Bool(true) => (Decision::Deny(default_reason()), None),
+        Value::Bool(false) => (Decision::Allow, None),
+        Value::Array(items) if items.is_empty() => (Decision::Allow, None),
+        Value::Array(items) => (
+            Decision::Deny(reason_of(items.first(), default_reason())),
+            None,
+        ),
+        Value::Object(obj) => {
+            let tier = obj
+                .get("risk_tier")
+                .and_then(Value::as_str)
+                .and_then(parse_risk_tier);
+            let reason = |verb: &str| {
+                reason_of(
+                    obj.get("reason"),
+                    format!("{verb} by Rego policy {entrypoint}"),
+                )
+            };
+            let decision = match obj.get("decision").and_then(Value::as_str) {
+                Some("allow") => Decision::Allow,
+                Some("deny") => Decision::Deny(reason("Denied")),
+                Some("hold") => Decision::Hold(reason("Held for approval")),
+                Some("reask") => Decision::Reask(reason("Refused")),
+                other => {
+                    tracing::warn!(
+                        entrypoint,
+                        decision = ?other,
+                        "Rego rule returned an object without a known `decision` (allow, deny, \
+                         hold, reask); allowing"
+                    );
+                    Decision::Allow
+                }
+            };
+            (decision, tier)
+        }
+        other => {
+            tracing::warn!(
+                entrypoint,
+                result = %other,
+                "Rego rule returned neither a boolean, a set of messages nor a decision \
+                 object; allowing"
+            );
+            (Decision::Allow, None)
+        }
+    }
+}
+
+/// SHA-256 of `args` as JSON with sorted keys: the hold's bypass key, so the
+/// same arguments in another key order are the same call.
+pub fn target_hash(args: &Value) -> String {
+    fn canonical(v: &Value) -> Value {
+        match v {
+            Value::Object(map) => {
+                let mut entries: Vec<_> = map.iter().collect();
+                entries.sort_by(|a, b| a.0.cmp(b.0));
+                Value::Object(
+                    entries
+                        .into_iter()
+                        .map(|(k, v)| (k.clone(), canonical(v)))
+                        .collect(),
+                )
+            }
+            Value::Array(items) => Value::Array(items.iter().map(canonical).collect()),
+            other => other.clone(),
+        }
+    }
+    hex::encode(Sha256::digest(
+        serde_json::to_vec(&canonical(args)).unwrap_or_default(),
+    ))
+}
+
+/// Evaluate `rule` against the request: once per call in its latest turn
+/// (`RequestContext::turn_tool_calls`), or once with no call when it has none.
+///
+/// The most restrictive decision wins — a deny ends it, a hold outranks a
+/// reask — and a call whose evaluation fails is allowed, as for every rule.
+pub fn evaluate(engine: &Engine, module: &Module, rule: &OpaRule, ctx: &RequestContext) -> Verdict {
+    let calls: Vec<Option<&ToolCall>> = if ctx.turn_tool_calls.is_empty() {
+        vec![None]
+    } else {
+        ctx.turn_tool_calls.iter().map(Some).collect()
+    };
+    let mut held: Option<Verdict> = None;
+    let mut reasked: Option<Verdict> = None;
+    for call in calls {
+        let input = policy_input(ctx, call);
+        let result = match evaluate_input(engine, module, rule, &input, limits::REGO) {
+            Ok((result, _)) => result,
+            Err(e) => {
+                limits::REGO.log_fail_open("Rego rule", &e);
+                continue;
+            }
+        };
+        let (decision, tier) = decision(&result, &rule.entrypoint);
+        let risk_tier = tier.or(rule.risk_tier);
+        match decision {
+            Decision::Allow => {}
+            Decision::Deny(reason) => {
+                return Verdict::Kill {
+                    reason,
+                    policy_id: None,
+                }
+            }
+            Decision::Hold(reason) if held.is_none() => {
+                held = Some(Verdict::Hold {
+                    reason,
+                    policy_id: None,
+                    risk_tier,
+                    tool: call.map(|c| c.name.clone()).unwrap_or_default(),
+                    target_hash: target_hash(call.map_or(&Value::Null, |c| &c.arguments)),
+                });
+            }
+            Decision::Reask(reason) if reasked.is_none() => {
+                reasked = Some(Verdict::Reask {
+                    reason,
+                    attempts_remaining: 0,
+                    policy_id: None,
+                });
+            }
+            Decision::Hold(_) | Decision::Reask(_) => {}
+        }
+    }
+    held.or(reasked).unwrap_or(Verdict::Bypass)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
-    /// `tests/fixtures/rego/deny_shell.wasm`, compiled from `deny_shell.rego`
-    /// beside it; see that directory's README for the command.
-    const POLICY: &[u8] = include_bytes!("../../tests/fixtures/rego/deny_shell.wasm");
+    /// A raw `opa build` (no metadata, one entrypoint) exercising every
+    /// host-provided builtin; see `tests/fixtures/rego/conformance.rego`.
+    const CONFORMANCE: &[u8] = include_bytes!("../../tests/fixtures/rego/conformance.wasm");
+    const SHELL: &[u8] =
+        include_bytes!("../../tests/fixtures/rego/examples/block_destructive_shell.wasm");
+    const DEPLOY: &[u8] =
+        include_bytes!("../../tests/fixtures/rego/examples/hold_prod_deploys.wasm");
+    const PATHS: &[u8] =
+        include_bytes!("../../tests/fixtures/rego/examples/deny_writes_outside_repo.wasm");
 
     fn engine() -> Engine {
-        let mut config = wasmtime::Config::new();
-        config.consume_fuel(true);
-        Engine::new(&config).expect("engine")
+        limits::engine().expect("engine")
     }
 
-    fn ctx(command: &str) -> RequestContext {
-        serde_json::from_value(json!({
+    fn rule(engine: &Engine, bytes: &[u8]) -> (Module, OpaRule) {
+        let module = Module::new(engine, bytes).expect("compiles");
+        let rule = load(engine, &module, bytes)
+            .expect("loads")
+            .expect("is OPA");
+        (module, rule)
+    }
+
+    fn ctx(calls: Value) -> RequestContext {
+        let mut ctx: RequestContext = serde_json::from_value(json!({
             "session_id": "ses_1",
             "workspace_id": "ws_1",
             "virtual_key_prefix": "vk_1",
             "model": "claude-sonnet-4",
             "tools": [],
-            "tool_calls": [{ "id": "call_1", "name": "Bash", "arguments": { "command": command } }],
+            "tool_calls": [],
             "estimated_input_tokens": 10,
             "budget_remaining_usd": 1.0,
-            "risk_tier": "Low",
+            "risk_tier": "High",
             "dlp_findings": [],
-            "tool_sequence": []
+            "tool_sequence": ["Read", "Bash"]
         }))
-        .expect("fixture context")
+        .expect("fixture context");
+        ctx.turn_tool_calls = serde_json::from_value(calls).expect("calls");
+        ctx
+    }
+
+    fn call(tool: &str, args: Value) -> Value {
+        json!([{ "id": "call_1", "name": tool, "arguments": args }])
+    }
+
+    fn bash(command: &str) -> Value {
+        call("Bash", json!({ "command": command }))
+    }
+
+    /// Every host builtin, against `opa eval` on the same input. The expected
+    /// file is `opa eval`'s output, unedited.
+    #[test]
+    fn host_builtins_match_opa_eval() {
+        let engine = engine();
+        let (module, rule) = rule(&engine, CONFORMANCE);
+        let input = include_bytes!("../../tests/fixtures/rego/conformance.input.json");
+        let expected: Value = serde_json::from_slice(include_bytes!(
+            "../../tests/fixtures/rego/conformance.expected.json"
+        ))
+        .unwrap();
+        // A semantic check, not a budget one: dozens of regular expressions
+        // and host calls in one evaluation, in a debug build, alongside every
+        // other test.
+        let generous = limits::Budget {
+            fuel: u64::MAX / 2,
+            deadline: std::time::Duration::from_secs(30),
+        };
+        let (result, _) = evaluate_input(&engine, &module, &rule, input, generous).unwrap();
+        let got = &result[0]["result"];
+        for (builtin, cases) in expected.as_object().unwrap() {
+            assert_eq!(&got[builtin], cases, "{builtin}");
+        }
+        assert_eq!(got, &expected);
     }
 
     #[test]
-    fn an_opa_build_is_recognised_and_loadable() {
+    fn a_raw_opa_build_with_one_entrypoint_loads_without_metadata() {
         let engine = engine();
-        let module = Module::new(&engine, POLICY).expect("compiles");
-        assert!(is_opa_module(&module));
-        check_loadable(&engine, &module).expect("loadable");
+        let (module, rule) = rule(&engine, CONFORMANCE);
+        assert_eq!(rule.entrypoint, "conformance/results");
+        assert_eq!(rule.risk_tier, None);
         // Not loadable through the native rule ABI: it imports its memory.
         assert!(super::super::host::check_imports_resolvable(&module).is_err());
     }
@@ -355,68 +846,370 @@ mod tests {
     #[test]
     fn a_native_rule_is_not_mistaken_for_an_opa_build() {
         let engine = engine();
-        let wat = r#"(module (memory (export "memory") 1)
-             (func (export "evaluate") (param i32 i32) (result i32) i32.const 0))"#;
-        assert!(!is_opa_module(&Module::new(&engine, wat).unwrap()));
+        let bytes = wat::parse_str(
+            r#"(module (memory (export "memory") 1)
+                 (func (export "evaluate") (param i32 i32) (result i32) i32.const 0))"#,
+        )
+        .unwrap();
+        let module = Module::new(&engine, &bytes).unwrap();
+        assert!(!is_opa_module(&module));
+        assert!(load(&engine, &module, &bytes).unwrap().is_none());
     }
 
-    #[tokio::test]
-    async fn the_rego_policy_blocks_a_destructive_shell_command() {
+    #[test]
+    fn metadata_claiming_opa_on_a_native_module_is_refused() {
         let engine = engine();
-        let module = Module::new(&engine, POLICY).unwrap();
-        match evaluate_opa_rule(&engine, &module, &ctx("rm -rf / --no-preserve-root")).await {
-            Verdict::Kill { reason, .. } => assert_eq!(
-                reason,
-                "destructive shell command blocked by Rego policy: rm -rf / --no-preserve-root"
-            ),
-            other => panic!("expected a block, got {other:?}"),
+        let mut bytes = wat::parse_str(
+            r#"(module (memory (export "memory") 1)
+                 (func (export "evaluate") (param i32 i32) (result i32) i32.const 0))"#,
+        )
+        .unwrap();
+        append_section(&mut bytes, br#"{"v":1,"abi":"opa","entrypoint":"x/y"}"#);
+        let module = Module::new(&engine, &bytes).unwrap();
+        let err = load(&engine, &module, &bytes).unwrap_err().to_string();
+        assert!(err.contains("not an OPA build"), "{err}");
+    }
+
+    /// The custom section `intutic rules build` appends.
+    fn append_section(bytes: &mut Vec<u8>, payload: &[u8]) {
+        let name = METADATA_SECTION.as_bytes();
+        let mut body = vec![name.len() as u8];
+        body.extend_from_slice(name);
+        body.extend_from_slice(payload);
+        bytes.push(0);
+        let mut size = body.len();
+        loop {
+            let byte = (size & 0x7f) as u8;
+            size >>= 7;
+            bytes.push(if size == 0 { byte } else { byte | 0x80 });
+            if size == 0 {
+                break;
+            }
         }
+        bytes.extend_from_slice(&body);
     }
 
-    #[tokio::test]
-    async fn the_rego_policy_allows_anything_else() {
+    #[test]
+    fn metadata_names_the_entrypoint_and_the_risk_tier() {
         let engine = engine();
-        let module = Module::new(&engine, POLICY).unwrap();
+        let mut bytes = CONFORMANCE.to_vec();
+        append_section(
+            &mut bytes,
+            br#"{"v":1,"abi":"opa","entrypoint":"conformance/results","risk_tier":"critical"}"#,
+        );
         assert_eq!(
-            evaluate_opa_rule(&engine, &module, &ctx("ls -la")).await,
+            metadata(&bytes).unwrap().unwrap().entrypoint.as_deref(),
+            Some("conformance/results")
+        );
+        let (_, loaded) = rule(&engine, &bytes);
+        assert_eq!(loaded.risk_tier, Some(RiskLevel::Critical));
+
+        let mut wrong = CONFORMANCE.to_vec();
+        append_section(
+            &mut wrong,
+            br#"{"v":1,"abi":"opa","entrypoint":"conformance/nope"}"#,
+        );
+        let module = Module::new(&engine, &wrong).unwrap();
+        let err = load(&engine, &module, &wrong).unwrap_err().to_string();
+        assert!(err.contains("no `conformance/nope` entrypoint"), "{err}");
+
+        let mut tier = CONFORMANCE.to_vec();
+        append_section(&mut tier, br#"{"v":1,"abi":"opa","risk_tier":"severe"}"#);
+        let module = Module::new(&engine, &tier).unwrap();
+        let err = load(&engine, &module, &tier).unwrap_err().to_string();
+        assert!(err.contains("unknown risk tier `severe`"), "{err}");
+    }
+
+    /// The conformance policy calls every builtin the host provides, so a
+    /// builtin added to the host without a conformance case fails here.
+    #[test]
+    fn the_conformance_policy_covers_every_host_builtin() {
+        let engine = engine();
+        let module = Module::new(&engine, CONFORMANCE).unwrap();
+        let (mut store, instance, memory) =
+            instantiate(&engine, &module, Vec::new(), limits::REGO).unwrap();
+        let wanted = dump_export(&mut store, &instance, &memory, "builtins").unwrap();
+        let mut names: Vec<&str> = wanted
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        names.sort_unstable();
+        let mut supported: Vec<&str> = opa_builtins::SUPPORTED.iter().map(|(n, _)| *n).collect();
+        supported.sort_unstable();
+        assert_eq!(names, supported);
+    }
+
+    #[test]
+    fn the_kill_switch_refuses_rego_rules_at_load() {
+        let engine = engine();
+        let module = Module::new(&engine, CONFORMANCE).unwrap();
+        let err = load_if(false, &engine, &module, CONFORMANCE)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(DISABLE_ENV), "{err}");
+    }
+
+    #[test]
+    fn the_shell_example_blocks_destructive_commands_and_allows_the_rest() {
+        let engine = engine();
+        let (module, rule) = rule(&engine, SHELL);
+        for command in [
+            "rm -rf /",
+            "sudo rm -rf / --no-preserve-root",
+            "rm -fr ~",
+            "rm -r -f ..",
+            "mkfs.ext4 /dev/sda1",
+            "dd if=/dev/zero of=/dev/sda bs=1M",
+            "git push --force origin main",
+        ] {
+            match evaluate(&engine, &module, &rule, &ctx(bash(command))) {
+                Verdict::Kill { reason, .. } => assert_eq!(
+                    reason,
+                    format!("destructive shell command blocked: {command}")
+                ),
+                other => panic!("{command}: expected a block, got {other:?}"),
+            }
+        }
+        for command in [
+            "ls -la",
+            "rm -rf ./build",
+            "rm -rf /tmp/scratch",
+            "git push origin main",
+        ] {
+            assert_eq!(
+                evaluate(&engine, &module, &rule, &ctx(bash(command))),
+                Verdict::Bypass,
+                "{command}"
+            );
+        }
+        // Another tool, and no call at all: evaluated, and allowed.
+        assert_eq!(
+            evaluate(
+                &engine,
+                &module,
+                &rule,
+                &ctx(call("Read", json!({"file_path": "/"})))
+            ),
+            Verdict::Bypass
+        );
+        assert_eq!(
+            evaluate(&engine, &module, &rule, &ctx(json!([]))),
             Verdict::Bypass
         );
     }
 
-    /// A coding agent declares dozens of tools with long descriptions on every
-    /// request. Passed through, they alone would exhaust the fuel budget and the
-    /// policy would fail open on exactly the traffic it exists for.
-    #[tokio::test]
-    async fn declared_tool_schemas_do_not_exhaust_the_fuel_budget() {
+    #[test]
+    fn the_deploy_example_holds_production_deploys() {
         let engine = engine();
-        let module = Module::new(&engine, POLICY).unwrap();
-        let mut c = ctx("rm -rf ~");
-        c.tools = serde_json::from_value(serde_json::Value::Array(
-            (0..30)
-                .map(|i| json!({ "name": format!("tool_{i}"), "description": "d".repeat(2000) }))
-                .collect(),
-        ))
-        .unwrap();
-        assert!(serde_json::to_vec(&c).unwrap().len() > 60_000);
+        let (module, rule) = rule(&engine, DEPLOY);
+        let command = "helm upgrade api ./chart -n prod";
+        match evaluate(&engine, &module, &rule, &ctx(bash(command))) {
+            Verdict::Hold {
+                reason,
+                risk_tier,
+                tool,
+                target_hash: hash,
+                ..
+            } => {
+                assert_eq!(
+                    reason,
+                    format!("production deploy needs approval: {command}")
+                );
+                assert_eq!(risk_tier, Some(RiskLevel::High));
+                assert_eq!(tool, "Bash");
+                assert_eq!(hash, target_hash(&json!({ "command": command })));
+            }
+            other => panic!("expected a hold, got {other:?}"),
+        }
+        assert_eq!(
+            evaluate(
+                &engine,
+                &module,
+                &rule,
+                &ctx(bash("helm upgrade api ./chart -n staging"))
+            ),
+            Verdict::Bypass
+        );
+    }
+
+    #[test]
+    fn the_paths_example_denies_writes_outside_the_repo() {
+        let engine = engine();
+        let (module, rule) = rule(&engine, PATHS);
+        let write = |path: &str| ctx(call("Write", json!({ "file_path": path, "content": "x" })));
+        assert_eq!(
+            evaluate(
+                &engine,
+                &module,
+                &rule,
+                &write("/workspace/app/src/main.rs")
+            ),
+            Verdict::Bypass
+        );
+        for path in [
+            "/etc/passwd",
+            "/workspace/app/../other/x",
+            "/workspace/application/x",
+        ] {
+            assert!(
+                matches!(
+                    evaluate(&engine, &module, &rule, &write(path)),
+                    Verdict::Kill { .. }
+                ),
+                "{path}"
+            );
+        }
         assert!(matches!(
-            evaluate_opa_rule(&engine, &module, &c).await,
+            evaluate(
+                &engine,
+                &module,
+                &rule,
+                &ctx(call(
+                    "NotebookEdit",
+                    json!({ "notebook_path": "/tmp/n.ipynb" })
+                ))
+            ),
+            Verdict::Kill { .. }
+        ));
+        // Reads are not writes.
+        assert_eq!(
+            evaluate(
+                &engine,
+                &module,
+                &rule,
+                &ctx(call("Read", json!({"file_path": "/etc/passwd"})))
+            ),
+            Verdict::Bypass
+        );
+    }
+
+    /// Of several calls in one turn, the most restrictive decision wins.
+    #[test]
+    fn every_call_in_the_turn_is_evaluated() {
+        let engine = engine();
+        let (module, rule) = rule(&engine, SHELL);
+        let calls = json!([
+            { "id": "a", "name": "Bash", "arguments": { "command": "ls" } },
+            { "id": "b", "name": "Bash", "arguments": { "command": "rm -rf /" } }
+        ]);
+        assert!(matches!(
+            evaluate(&engine, &module, &rule, &ctx(calls)),
             Verdict::Kill { .. }
         ));
     }
 
     #[test]
-    fn deny_results_map_to_verdicts() {
-        assert_eq!(verdict_from_result(&json!([])), Verdict::Bypass);
+    fn the_input_is_the_documented_v1_shape() {
+        let c = ctx(bash("ls"));
+        let input: Value =
+            serde_json::from_slice(&policy_input(&c, c.turn_tool_calls.first())).unwrap();
+        assert_eq!(input["v"], 1);
+        assert_eq!(input["host"], "proxy");
+        assert_eq!(input["tool"], "Bash");
+        assert_eq!(input["args"]["command"], "ls");
+        assert_eq!(input["session"]["risk_tier"], "high");
+        assert_eq!(input["session"]["tool_sequence"], json!(["Read", "Bash"]));
+        assert_eq!(input["truncated"], false);
+        assert!(
+            input.get("tools").is_none(),
+            "declared tool schemas stay out"
+        );
+        let none: Value = serde_json::from_slice(&policy_input(&c, None)).unwrap();
+        assert_eq!(none["tool"], Value::Null);
+        assert_eq!(none["args"], Value::Null);
+    }
+
+    /// A `Write` of a large file is the realistic way to exceed the input cap.
+    /// It is cut to fit, flagged, and a policy on the other arguments still
+    /// sees them.
+    #[test]
+    fn an_oversized_input_is_cut_to_fit_and_flagged() {
+        let c = ctx(call(
+            "Write",
+            json!({ "file_path": "/repo/big.txt", "content": "x".repeat(500_000) }),
+        ));
+        let bytes = policy_input(&c, c.turn_tool_calls.first());
+        assert!(bytes.len() <= MAX_INPUT_BYTES, "{}", bytes.len());
+        let input: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(input["truncated"], true);
+        assert_eq!(input["args"]["file_path"], "/repo/big.txt");
         assert_eq!(
-            verdict_from_result(&json!([{"result": []}])),
-            Verdict::Bypass
+            input["args"]["content"].as_str().unwrap().len(),
+            TRUNCATION_STEPS[0]
+        );
+    }
+
+    /// The largest input the builder produces evaluates well inside the fuel
+    /// budget, with room left for a policy heavier than the example.
+    #[test]
+    fn the_rego_budget_covers_the_largest_input() {
+        let engine = engine();
+        let (module, rule) = rule(&engine, SHELL);
+        // Chained commands, the realistic shape of a long one, and costlier to
+        // match than a run of one character.
+        let unit = "cd /workspace/app && npm test; ";
+        let c = ctx(bash(&unit.repeat((MAX_INPUT_BYTES - 1024) / unit.len())));
+        let input = policy_input(&c, c.turn_tool_calls.first());
+        assert!(input.len() > MAX_INPUT_BYTES - 1024, "{}", input.len());
+        let (_, fuel) =
+            evaluate_input(&engine, &module, &rule, &input, limits::REGO).expect("within budget");
+        assert!(
+            fuel < limits::REGO.fuel / 2,
+            "{fuel} fuel for a {} byte input leaves too little margin",
+            input.len()
+        );
+    }
+
+    #[test]
+    fn results_map_to_decisions() {
+        let ep = "p/r";
+        assert_eq!(decision(&json!([]), ep).0, Decision::Allow);
+        assert_eq!(decision(&json!([{"result": false}]), ep).0, Decision::Allow);
+        assert_eq!(
+            decision(&json!([{"result": true}]), ep).0,
+            Decision::Deny("Denied by Rego policy p/r".into())
+        );
+        assert_eq!(decision(&json!([{"result": []}]), ep).0, Decision::Allow);
+        assert_eq!(
+            decision(&json!([{"result": ["no\nthanks"]}]), ep).0,
+            Decision::Deny("nothanks".into())
         );
         assert_eq!(
-            verdict_from_result(&json!([{"result": ["no\nthanks"]}])),
-            Verdict::Kill {
-                reason: "nothanks".to_string(),
-                policy_id: None
-            }
+            decision(
+                &json!([{"result": {"decision": "hold", "reason": "prod deploy", "risk_tier": "high"}}]),
+                ep
+            ),
+            (Decision::Hold("prod deploy".into()), Some(RiskLevel::High))
         );
+        assert_eq!(
+            decision(&json!([{"result": {"decision": "reask"}}]), ep).0,
+            Decision::Reask("Refused by Rego policy p/r".into())
+        );
+        assert_eq!(
+            decision(&json!([{"result": {"decision": "maybe"}}]), ep).0,
+            Decision::Allow
+        );
+        assert_eq!(decision(&json!([{"result": 7}]), ep).0, Decision::Allow);
+    }
+
+    #[test]
+    fn the_hold_key_ignores_argument_order() {
+        assert_eq!(
+            target_hash(&json!({"a": 1, "b": [{"y": 2, "x": 1}]})),
+            target_hash(&json!({"b": [{"x": 1, "y": 2}], "a": 1}))
+        );
+        assert_ne!(target_hash(&json!({"a": 1})), target_hash(&json!({"a": 2})));
+    }
+
+    #[test]
+    fn custom_sections_are_found_by_name_only() {
+        let mut bytes = wat::parse_str("(module)").unwrap();
+        assert_eq!(custom_section(&bytes, METADATA_SECTION), None);
+        append_section(&mut bytes, b"{}");
+        assert_eq!(custom_section(&bytes, METADATA_SECTION), Some(&b"{}"[..]));
+        assert_eq!(custom_section(&bytes, "name"), None);
+        assert_eq!(custom_section(b"not wasm", METADATA_SECTION), None);
     }
 }

@@ -826,6 +826,7 @@ Settings are read from the environment first, then from
 | `INTUTIC_REMOTE_HEADERS` | none | A JSON object of headers for `--remote-url`, such as `Authorization`. Environment only, never a flag, so it stays out of `ps`. |
 | `INTUTIC_EVENTS_FILE` | `~/.intutic/events/hook-events.jsonl` | The local file every event is also appended to. |
 | `INTUTIC_WASM_LOCAL_DIR` | `~/.intutic/wasm` | Where the proxy loads custom WASM rules from. Read from runtime.env; `INTUTIC_WASM_DIR` in the environment takes precedence. |
+| `INTUTIC_DISABLE_REGO_RULES` | unset | `1` refuses [Rego rules](/guide/rego-policies) at load; native WASM rules still run. |
 
 The MCP daemon (`intutic-mcp-daemon`) is not an MCP server. It listens on a
 Unix socket, caches policy and batches events for proxies in `daemon` mode:

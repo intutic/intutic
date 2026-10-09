@@ -1481,7 +1481,7 @@ intutic policy replay wasm_abc123 --since 7d --limit 2000
 
 ## `intutic policy test`
 
-Run dry-run WASM policy evaluation locally.
+Run dry-run WASM policy evaluation locally. For a Rego rule, use [`intutic rules test`](#intutic-rules-test).
 
 ```bash
 intutic policy test --wasm <path> --mock <path>
@@ -1529,7 +1529,7 @@ Run it from a rule project that has `assembly/index.ts` (the SDK layout): the ge
 
 ## `intutic policy install`
 
-Validate and install a compiled WASM rule into the local proxy rules dir.
+Validate and install a compiled WASM rule, native or Rego, into the local proxy rules dir.
 
 ```bash
 intutic policy install --wasm <path> [options]
@@ -1544,7 +1544,7 @@ intutic policy install --wasm <path> [options]
 | `--priority <NN>` | Evaluation priority — lower runs first | `100` |
 
 **What it does:**
-1. Instantiates the rule and evaluates it against a built-in allow-mock context — a rule that fails to instantiate or evaluate is **not** installed
+1. Instantiates the rule and evaluates it against a built-in allow-mock context — a rule that fails to instantiate or evaluate is **not** installed. A [Rego rule](/guide/rego-policies) is loaded and evaluated through the Rego host instead, and refused if a proxy could not run it
 2. Writes it as `{priority}_{name}.wasm` into the local rules dir — `INTUTIC_WASM_DIR` if set, otherwise `~/.intutic/wasm`
 3. Prints the destination path, priority, and SHA-256 of the installed binary
 
@@ -1561,6 +1561,51 @@ intutic policy list-local
 ```
 
 No options. For each `.wasm` file in the local rules dir (`INTUTIC_WASM_DIR`, defaulting to `~/.intutic/wasm`) it prints the rule name, priority, size, mtime, and a SHA-256 prefix.
+
+---
+
+## `intutic rules build`
+
+Compile a Rego policy to a rule with OPA, and package it with the metadata the proxies read.
+
+```bash
+intutic rules build --rego <path> --entrypoint <package/rule> [options]
+```
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--rego <path>` | Rego file or directory (required) | — |
+| `--entrypoint <package/rule>` | The rule to evaluate, e.g. `intutic/shell/deny` (required) | — |
+| `--risk-tier <tier>` | Default risk tier for the rule's decisions: `low`, `medium`, `high` or `critical` | _(none)_ |
+| `--out <path>` | Output `.wasm` path | `build/<entrypoint>.wasm` |
+
+**What it does:**
+1. Runs `opa build -t wasm -e <entrypoint>` — OPA must be on the `PATH`, or set `INTUTIC_OPA_BIN`; without it the command says how to install it
+2. Takes `policy.wasm` from the bundle and appends an `intutic.rule` section with the entrypoint, the ABI (`opa`) and the risk tier
+3. Loads it as the proxies will and refuses one they would refuse, such as a policy needing a builtin Intutic does not provide, which it names
+4. Writes the module and prints its size and SHA-256
+
+Install the result with [`intutic policy install`](#intutic-policy-install). See [Rego policies](/guide/rego-policies).
+
+---
+
+## `intutic rules test`
+
+Evaluate a Rego rule against sample inputs locally, through the same Rego host the proxies use.
+
+```bash
+intutic rules test <module> --input <file...>
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--input <file...>` | JSON file(s), each holding one [input document](/guide/rego-policies#the-input-document) or an array of `{"name", "input", "expect"}` cases (required) |
+
+Prints each case's decision (`ALLOW`, `DENY`, `HOLD` or `REASK`), reason and risk tier. `expect` is optional; the command exits 1 when a case gets a decision other than the one it expects, or when evaluation fails. A native rule is refused, with a pointer to [`intutic policy test`](#intutic-policy-test).
 
 ---
 

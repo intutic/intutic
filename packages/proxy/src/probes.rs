@@ -99,6 +99,7 @@ fn base_ctx() -> RequestContext {
         virtual_key_prefix: "vk_probe".into(),
         model: "probe-model".into(),
         tools: vec![],
+        turn_tool_calls: Vec::new(),
         tool_calls: vec![],
         estimated_input_tokens: 100,
         budget_remaining_usd: 10.0,

@@ -70,6 +70,7 @@ fn test_ctx(workspace_id: &str) -> RequestContext {
         virtual_key_prefix: "vk_test".to_string(),
         model: "claude-3-5-sonnet".to_string(),
         tools: vec![],
+        turn_tool_calls: Vec::new(),
         tool_calls: vec![],
         estimated_input_tokens: 100,
         budget_remaining_usd: 10.0,
@@ -317,56 +318,6 @@ async fn a_wasm_rule_can_reask_and_two_still_kills() {
         matches!(registry.evaluate(&valkey, &ctx).await, Verdict::Kill { .. }),
         "a reask must not mask a block from a lower-priority rule"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// EXPERIMENTAL Rego support (`src/wasm/opa.rs`): a policy compiled by `opa
-/// build -t wasm`, dropped into the local rules directory, is enforced by the
-/// registry only while `INTUTIC_EXPERIMENTAL_REGO_WASM=1`. Without the flag it
-/// is refused at load like any other module that imports what the host lacks.
-///
-/// The flag is process-wide, but no other test here loads an OPA build, so
-/// setting it cannot change what they see.
-#[tokio::test]
-async fn an_opa_compiled_rego_rule_is_enforced_only_behind_the_experimental_flag() {
-    let valkey = control_plane();
-    let dir = temp_rule_dir("rego");
-    std::fs::write(
-        dir.join("10_deny_shell.wasm"),
-        include_bytes!("fixtures/rego/deny_shell.wasm"),
-    )
-    .unwrap();
-    let mut ctx = test_ctx("test-ws-rego");
-    ctx.tool_calls = serde_json::from_value(serde_json::json!([
-        { "id": "call_1", "name": "Bash", "arguments": { "command": "rm -rf / --no-preserve-root" } }
-    ]))
-    .unwrap();
-
-    std::env::remove_var("INTUTIC_EXPERIMENTAL_REGO_WASM");
-    let off = PluginRegistry::new(dir.to_str()).await.unwrap();
-    assert_eq!(off.evaluate(&valkey, &ctx).await, Verdict::Bypass);
-    assert_eq!(
-        off.plugin_count().await,
-        0,
-        "an OPA build must not load without the flag"
-    );
-
-    std::env::set_var("INTUTIC_EXPERIMENTAL_REGO_WASM", "1");
-    let on = PluginRegistry::new(dir.to_str()).await.unwrap();
-    match on.evaluate(&valkey, &ctx).await {
-        Verdict::Kill { reason, policy_id } => {
-            assert_eq!(policy_id.as_deref(), Some("local:10_deny_shell.wasm"));
-            assert!(reason.contains("rm -rf /"), "reason: {reason}");
-        }
-        other => panic!("expected the Rego rule to block, got {other:?}"),
-    }
-    ctx.tool_calls = serde_json::from_value(serde_json::json!([
-        { "id": "call_2", "name": "Bash", "arguments": { "command": "ls -la" } }
-    ]))
-    .unwrap();
-    assert_eq!(on.evaluate(&valkey, &ctx).await, Verdict::Bypass);
-    std::env::remove_var("INTUTIC_EXPERIMENTAL_REGO_WASM");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

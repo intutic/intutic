@@ -117,13 +117,15 @@ export interface LoadedRuleMeta {
   name: string
   priority: number
   readsReferencedFiles: boolean
+  /** A Rego policy compiled by OPA: evaluated against `buildRegoInput`'s document, not the native context. */
+  rego: boolean
   /** Cached raw bytes, so a worker respawn (wasm/runner.ts) can resend every
    *  currently-loaded rule without re-reading the directory from disk. */
   bytes: Uint8Array
 }
 
 export type CompileOutcome =
-  | { ok: true; readsReferencedFiles: boolean }
+  | { ok: true; readsReferencedFiles: boolean; rego: boolean }
   | { ok: false; error: string; unsupportedImports?: string[] }
 
 /** What `WasmLoader` needs from the worker to load/unload a rule — implemented by `WasmRunner`. */
@@ -218,6 +220,7 @@ export class WasmLoader {
           name,
           priority,
           readsReferencedFiles: result.readsReferencedFiles,
+          rego: result.rego,
           bytes,
         })
       } else {

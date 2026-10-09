@@ -1,0 +1,195 @@
+{
+  "crypto.sha1": {
+    "abc": "a9993e364706816aba3e25717850c26c9cd0d89d",
+    "empty": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+  },
+  "crypto.sha256": {
+    "abc": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    "empty": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "unicode": "3c48591d8d098a4538f5e013dfcf406e948eac4d3277b10bf614e295d6068179"
+  },
+  "indexof_n": {
+    "many": [
+      1,
+      4
+    ],
+    "none": [],
+    "overlap": [
+      0,
+      1,
+      2
+    ],
+    "unicode": [
+      2,
+      8
+    ]
+  },
+  "json.marshal_with_options": {
+    "compact": "{\"a\":\"\\u003c\\u0026\\u003e\",\"b\":[1,2]}",
+    "empty": "{\n\t\"a\": {},\n\t\"b\": []\n}",
+    "indent": "{\n  \"a\": [\n    1\n  ]\n}",
+    "prefix": "> {\n>  \"a\": 1\n> }",
+    "pretty": "{\n\t\"a\": {\n\t\t\"c\": null\n\t},\n\t\"b\": [\n\t\t1,\n\t\t2\n\t]\n}",
+    "pretty_false": "[1,\"x\"]"
+  },
+  "json.patch": {
+    "add": {
+      "a": 1,
+      "b": 2
+    },
+    "add_array_end": {
+      "a": [
+        1,
+        2,
+        3
+      ]
+    },
+    "add_array_index": {
+      "a": [
+        1,
+        9,
+        2
+      ]
+    },
+    "array_path": {
+      "a": {
+        "b": 1,
+        "c": 2
+      }
+    },
+    "copy": {
+      "a": [
+        1
+      ],
+      "b": [
+        1
+      ]
+    },
+    "escaped": {
+      "m~n": 3
+    },
+    "move": {
+      "b": 1
+    },
+    "remove": {
+      "b": 2
+    },
+    "replace": {
+      "a": {
+        "b": "x"
+      }
+    },
+    "root_replace": {
+      "b": 2
+    },
+    "test_ok": {
+      "a": 1,
+      "t": true
+    }
+  },
+  "regex.find_n": {
+    "all": [
+      "1",
+      "22",
+      "333"
+    ],
+    "empty_matches": [
+      "",
+      "aaa",
+      ""
+    ],
+    "none": [],
+    "two": [
+      "1",
+      "22"
+    ],
+    "zero": []
+  },
+  "regex.replace": {
+    "empty_pattern": "-a-b-c-",
+    "group": "08/10/2026",
+    "named": "value=key",
+    "simple": "a+b+c"
+  },
+  "regex.split": {
+    "comma": [
+      "a",
+      "b",
+      "",
+      "c"
+    ],
+    "empty_input": [
+      ""
+    ],
+    "empty_pattern": [
+      "a",
+      "b",
+      "c"
+    ],
+    "leading": [
+      "",
+      "a",
+      "b",
+      ""
+    ],
+    "spaces": [
+      "a",
+      "b",
+      "c"
+    ],
+    "star": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  "sprintf": {
+    "bad_verb_float": "%!d(float64=1.5)",
+    "bad_verb_int": "%!s(int64=12)",
+    "bad_verb_str": "%!d(string=x)",
+    "big_int": "9007199254740993",
+    "char": "H☃",
+    "exp": "1.234568e+03|1.234568E+03|1.23e-04|+1.235e+03",
+    "extra": "a%!(EXTRA int64=1, string=b)",
+    "floats": "3.141590|3.14|   3.142|3.14    |-003.142",
+    "general": "1234.5678|0.001|1.23e+03|0.5|1.23456725E+06",
+    "int_precision": "[0042][    0042]",
+    "missing": "a and %!d(MISSING)",
+    "neg_float_v": "-0.5",
+    "neg_hex": "-ff",
+    "neg_zero_pad": "[-0042][+0007]",
+    "no_verb_end": "trailing %!(NOVERB)",
+    "percent": "100% sure",
+    "q": "\"a\\\"b\\\\c\\n\"|\"tab\\there\"",
+    "q_unicode": "\"héllo ☃\"",
+    "radix": "ff FF 10 101 0xff 010 0b101",
+    "s_composite": "{\"k\": \"v\"}",
+    "s_d": "Bash ran 3 times",
+    "str_hex": "686921|686921",
+    "str_precision": "[abc][      ab][ab      ][000000ab]",
+    "t_on_bool": "%!t(string=true)",
+    "type": "int64 float64 string string",
+    "unknown_verb": "%!z(int64=1)",
+    "v_composite": "[\"a\", 1, true] and {\"a\": [1], \"b\": 2}",
+    "v_floats": "0.1|0.0001|1.2345675e+06|123456.5",
+    "v_scalars": "1.5|true|null|x",
+    "width": "[   42][42   ][00042][+42][ 42]"
+  },
+  "strings.any_prefix_match": {
+    "arr_arr": true,
+    "empty_base": false,
+    "none": false,
+    "str_str": true
+  },
+  "strings.any_suffix_match": {
+    "none": false,
+    "str_arr": true
+  },
+  "strings.count": {
+    "empty_sub": 5,
+    "overlap": 2,
+    "simple": 3,
+    "unicode": 5
+  },
+  "time.now_ns": true
+}

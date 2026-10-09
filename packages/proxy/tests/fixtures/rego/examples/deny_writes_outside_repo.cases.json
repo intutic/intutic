@@ -1,0 +1,8 @@
+[
+  { "name": "write inside the repo", "input": { "tool": "Write", "args": { "file_path": "/workspace/app/src/main.rs", "content": "fn main() {}" } }, "expect": "allow" },
+  { "name": "edit outside the repo", "input": { "tool": "Edit", "args": { "file_path": "/etc/hosts", "old_string": "a", "new_string": "b" } }, "expect": "deny" },
+  { "name": "climb out with ..", "input": { "tool": "Write", "args": { "file_path": "/workspace/app/../other/x", "content": "" } }, "expect": "deny" },
+  { "name": "sibling with a shared prefix", "input": { "tool": "Write", "args": { "file_path": "/workspace/application/x", "content": "" } }, "expect": "deny" },
+  { "name": "notebook outside the repo", "input": { "tool": "NotebookEdit", "args": { "notebook_path": "/tmp/n.ipynb", "new_source": "" } }, "expect": "deny" },
+  { "name": "reading is not writing", "input": { "tool": "Read", "args": { "file_path": "/etc/hosts" } }, "expect": "allow" }
+]

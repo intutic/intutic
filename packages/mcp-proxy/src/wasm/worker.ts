@@ -10,9 +10,13 @@
  * happen to share a rule.
  *
  * Protocol (see `runner.ts` for the main-thread side):
- *   compile  { type:'compile',  id, ruleId, bytes }  -> { type:'compile-result',  id, ruleId, ok, unsupportedImports?, readsReferencedFiles?, error? }
+ *   compile  { type:'compile',  id, ruleId, bytes }  -> { type:'compile-result',  id, ruleId, ok, unsupportedImports?, readsReferencedFiles?, rego?, error? }
  *   remove   { type:'remove', ruleId }                  (no reply)
- *   evaluate { type:'evaluate', id, ruleId, bytes, files? } -> { type:'evaluate-result', id, ruleId, ok, code?, reason?, error? }
+ *   evaluate { type:'evaluate', id, ruleId, bytes, files? } -> { type:'evaluate-result', id, ruleId, ok, code?, decision?, reason?, riskTier?, error? }
+ *
+ * A Rego rule (an OPA build, `@intutic/shared-types`' Rego host) is compiled
+ * and evaluated here too; its `evaluate` bytes are the Rego input document and
+ * its reply carries `decision` instead of `code`.
  *
  * `files` is the per-evaluation referenced-files table (TD-441), posted only
  * to a rule that imports `read_referenced_file`; it is rebuilt here into the
@@ -27,11 +31,22 @@
  */
 
 import { parentPort } from 'node:worker_threads'
-import { unsupportedWasmImports, WASM_HOST_IMPORTS } from '@intutic/shared-types'
+import { createHash } from 'node:crypto'
+import {
+  REGO_DISABLE_ENV,
+  evaluateRegoRule,
+  isOpaModule,
+  loadRegoRule,
+  regoDecision,
+  unsupportedWasmImports,
+  WASM_HOST_IMPORTS,
+  type RegoHostOptions,
+  type RegoRule,
+} from '@intutic/shared-types'
 import { createHostImports, newHostImportState } from './hostImports.js'
 import { ReferencedFiles, type ReferencedFilesTable } from './referencedFiles.js'
 import { capDeclaredMemory, WASM_PAGE_BYTES } from './memoryCap.js'
-import { DEFAULT_FUEL_BUDGET, FUEL_EXPORT, meterFuel } from './fuel.js'
+import { DEFAULT_FUEL_BUDGET, FUEL_EXPORT, REGO_FUEL_BUDGET, meterFuel } from './fuel.js'
 
 /**
  * Guest memory ceiling, `runner.rs`'s 16MB `StoreLimits` (TD-440). Enforced at
@@ -90,6 +105,29 @@ interface EvaluateMessage {
 type InMessage = CompileMessage | RemoveMessage | EvaluateMessage
 
 const modules = new Map<string, WebAssembly.Module>()
+/** Rego policies compiled by OPA, by rule id: a different ABI, run through the shared host. */
+const regoRules = new Map<string, RegoRule>()
+
+const regoHost: RegoHostOptions = {
+  digest: (algorithm, data) => createHash(algorithm).update(data).digest('hex'),
+}
+
+/**
+ * Load an OPA build as a Rego rule: metered like any rule, with the Rego
+ * budget (`REGO_FUEL_BUDGET`), and checked by the shared host, which refuses
+ * one needing a builtin it lacks.
+ */
+function compileRego(msg: CompileMessage): void {
+  if (process.env[REGO_DISABLE_ENV] === '1') {
+    throw new Error(`Rego rules are switched off on this host (${REGO_DISABLE_ENV}=1)`)
+  }
+  const bytes = new Uint8Array(msg.bytes)
+  const rule = loadRegoRule(bytes, new WebAssembly.Module(meterFuel(bytes, REGO_FUEL_BUDGET)), regoHost)
+  if (!rule) throw new Error('not an OPA build')
+  modules.delete(msg.ruleId)
+  regoRules.set(msg.ruleId, rule)
+  parentPort?.postMessage({ type: 'compile-result', id: msg.id, ruleId: msg.ruleId, ok: true, readsReferencedFiles: false, rego: true })
+}
 
 function importsUsingReadReferencedFile(module: WebAssembly.Module): boolean {
   return WebAssembly.Module.imports(module).some(
@@ -99,6 +137,10 @@ function importsUsingReadReferencedFile(module: WebAssembly.Module): boolean {
 
 function handleCompile(msg: CompileMessage): void {
   try {
+    if (isOpaModule(new WebAssembly.Module(new Uint8Array(msg.bytes)))) {
+      compileRego(msg)
+      return
+    }
     const capped = capDeclaredMemory(new Uint8Array(msg.bytes), MAX_GUEST_MEMORY_BYTES / WASM_PAGE_BYTES)
     const module = new WebAssembly.Module(meterFuel(capped, DEFAULT_FUEL_BUDGET))
     if (WebAssembly.Module.imports(module).some((i) => i.kind === 'memory')) {
@@ -115,6 +157,7 @@ function handleCompile(msg: CompileMessage): void {
       })
       return
     }
+    regoRules.delete(msg.ruleId)
     modules.set(msg.ruleId, module)
     parentPort?.postMessage({
       type: 'compile-result',
@@ -122,6 +165,7 @@ function handleCompile(msg: CompileMessage): void {
       ruleId: msg.ruleId,
       ok: true,
       readsReferencedFiles: importsUsingReadReferencedFile(module),
+      rego: false,
     })
   } catch (err) {
     parentPort?.postMessage({
@@ -136,6 +180,47 @@ function handleCompile(msg: CompileMessage): void {
 
 function handleRemove(msg: RemoveMessage): void {
   modules.delete(msg.ruleId)
+  regoRules.delete(msg.ruleId)
+}
+
+/**
+ * Evaluate a Rego rule against the input document the runner built
+ * (`buildRegoInput`). Replies with the decision rather than a verdict code:
+ * a hold has no native code.
+ */
+function evaluateRego(msg: EvaluateMessage, rule: RegoRule): void {
+  let fuel: WebAssembly.Global | undefined
+  try {
+    const result = evaluateRegoRule(rule, new TextDecoder().decode(msg.bytes), {
+      ...regoHost,
+      onInstance: (exportsObj) => {
+        const g = exportsObj[FUEL_EXPORT]
+        if (g instanceof WebAssembly.Global) fuel = g
+      },
+    })
+    const decision = regoDecision(result, rule.entrypoint)
+    parentPort?.postMessage({
+      type: 'evaluate-result',
+      id: msg.id,
+      ruleId: msg.ruleId,
+      ok: true,
+      decision: decision.decision,
+      reason: 'reason' in decision ? decision.reason : undefined,
+      riskTier: decision.riskTier ?? rule.riskTier,
+    })
+  } catch (err) {
+    const fuelExhausted = fuel !== undefined && (fuel.value as number) < 0
+    parentPort?.postMessage({
+      type: 'evaluate-result',
+      id: msg.id,
+      ruleId: msg.ruleId,
+      ok: false,
+      fuelExhausted,
+      error: fuelExhausted
+        ? `Rego rule ran out of its ${REGO_FUEL_BUDGET}-instruction budget`
+        : err instanceof Error ? err.message : String(err),
+    })
+  }
 }
 
 /**
@@ -183,6 +268,11 @@ function readGuestReason(exportsObj: Record<string, unknown>, memory: WebAssembl
 }
 
 function handleEvaluate(msg: EvaluateMessage): void {
+  const rego = regoRules.get(msg.ruleId)
+  if (rego) {
+    evaluateRego(msg, rego)
+    return
+  }
   const module = modules.get(msg.ruleId)
   if (!module) {
     parentPort?.postMessage({ type: 'evaluate-result', id: msg.id, ruleId: msg.ruleId, ok: false, error: 'rule not loaded' })

@@ -6,6 +6,8 @@ Write custom validation rules that run at wire speed in the Intutic proxy using 
 
 Custom Filters let you write policy rules in AssemblyScript (a TypeScript subset), compile them to WebAssembly, and run them inside the Intutic proxy on every request. They execute in a sandboxed environment with strict resource limits.
 
+Rules can also be written in Rego and compiled with OPA: see [Rego policies](/guide/rego-policies). They install, upload and run the same way, with a budget of their own.
+
 ::: info Availability
 Local filters installed into `~/.intutic/wasm/` need no capability and no role — the open-core proxy loads them on the request path in any build. Dashboard-managed filters (Cloud) require the `feature.wasm_rules` capability and are accessible to **Owner**, **Admin**, and **EM** roles.
 :::
@@ -38,9 +40,9 @@ Every custom filter runs inside a secure WebAssembly sandbox with strict constra
 |-------|-------|---------|
 | **Memory** | 16 MB | Prevents excessive memory consumption |
 | **CPU Fuel** | 1,000,000 units | Prevents infinite loops and excessive computation |
-| **Timeout** | 5 ms per request | Maintains low proxy latency |
+| **Timeout** | 5 ms per evaluation | Maintains low proxy latency |
 
-If a filter exceeds any limit, it's immediately terminated and **fails open** — the request proceeds to maintain availability.
+If a filter exceeds any limit, it's immediately terminated and **fails open** — the request proceeds to maintain availability. The timeout interrupts a rule that is still running; it is not checked only after the rule returns. A [Rego rule](/guide/rego-policies#limits) has a larger budget, because OPA parses its input and compiles its regular expressions inside the sandbox.
 
 ::: tip How the context arrives
 The host calls your `allocate(len)` export, writes the request context as UTF-8 JSON bytes into the buffer it returns, and calls `evaluate(offset, len)`. Parse those bytes directly. Building a string from them one character at a time allocates once per byte, which can use up the fuel budget on a large context; the rule is then skipped and the request allowed.
@@ -183,7 +185,7 @@ rule author ends up not knowing that `forbid_after`, `changes` or
 | Field | Type | What it is |
 | :--- | :--- | :--- |
 | `tools` | `ToolSchema[]` | Tools declared on this request. Name and description only — **not** the input schema. |
-| `tool_calls` | `ToolCall[]` | Calls in this turn's message. |
+| `tool_calls` | `ToolCall[]` | Every tool call in the request's messages, oldest first. Harnesses resend the conversation each turn, so this includes earlier turns' calls; `new_tool_calls` is this turn's. |
 | `tool_sequence` | `string[]` | Session history, oldest first. Includes this turn. |
 | `tool_call_counts` | `(string, i32)[]` | How many times each distinct tool/action appears in `tool_sequence` — a fold of it, not a fetch. AssemblyScript has no map type to fold `tool_sequence` into itself, so this is pre-resolved for you. |
 | `calls_last_60s` | `i32` | Tool calls in the last 60 seconds, across the whole session. Not derivable from `tool_sequence`/`tool_call_counts`: that window is a fixed entry count with no timestamps, so a burst that fills it in ten seconds and one spread over an hour look identical there. Always a real count — `0` means none, never "unknown". See [Temporal policy](#temporal-policy) below. |

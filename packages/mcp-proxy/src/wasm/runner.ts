@@ -22,6 +22,10 @@
  *   module's memory section to declare 16MB as its maximum before compiling
  *   (`memoryCap.ts`). A `memory.grow` past it returns -1 as it would under
  *   Wasmtime. Not a divergence any more; TD-440 records how it got here.
+ * - **Rego rules (OPA builds) run through `@intutic/shared-types`' Rego
+ *   host**, with their own instruction budget (`fuel.ts`'s
+ *   `REGO_FUEL_BUDGET`) and deadline (`REGO_EVALUATE_TIMEOUT_MS`), and
+ *   reply with a decision instead of a verdict code — a hold has none.
  * - **`read_referenced_file` is served from a pre-read table**
  *   (`referencedFiles.ts`, the port of `referenced_files.rs`), prefetched
  *   once per `evaluate()` only when a loaded rule imports the function and
@@ -36,7 +40,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createStderrLogger as createLogger } from '../stderrLog.js'
 import { WasmLoader, resolveWasmDir, type CompileBridge, type CompileOutcome } from './loader.js'
-import { buildWasmContext, type WasmContextInput } from './context.js'
+import { buildRegoInput, buildWasmContext, type WasmContextInput } from './context.js'
 import { prefetch, resolveRoot, ReferencedFiles, type ReferencedFilesTable } from './referencedFiles.js'
 
 const log = createLogger('mcp-proxy-wasm-runner')
@@ -46,6 +50,14 @@ const log = createLogger('mcp-proxy-wasm-runner')
  * is 50ms rather than `runner.rs`'s 5ms.
  */
 const EVALUATE_TIMEOUT_MS = 50
+
+/**
+ * A Rego rule's deadline. The Rust proxy gives a Rego rule 20 ms against a
+ * native rule's 5 ms (`limits::REGO`): OPA parses its input and compiles its
+ * regular expressions inside the sandbox on every evaluation. This keeps that
+ * headroom over the round trip the 50 ms above already allows for.
+ */
+const REGO_EVALUATE_TIMEOUT_MS = 100
 
 /** Generous — compilation is not guest-controlled per evaluation, but a
  *  pathological file must not hang a rescan forever. */
@@ -61,6 +73,13 @@ export type WasmVerdict =
   | { code: 'allow' }
   | { code: 'block'; reason: string; ruleId: string }
   | { code: 'reask'; reason: string; ruleId: string }
+  /** A Rego rule's `hold`: the interceptor puts the call through the decisions API. */
+  | { code: 'hold'; reason: string; ruleId: string; riskTier?: string }
+
+/** One rule's answer: a native verdict code, or a Rego rule's decision. */
+type RuleResult =
+  | { code: number; reason?: string }
+  | { decision: 'allow' | 'deny' | 'hold' | 'reask'; reason?: string; riskTier?: string }
 
 interface PendingEntry {
   resolve: (value: unknown) => void
@@ -168,6 +187,7 @@ export class WasmRunner implements CompileBridge {
     const reply = await this.send<{
       ok: boolean
       readsReferencedFiles?: boolean
+      rego?: boolean
       unsupportedImports?: string[]
       error?: string
     }>({ type: 'compile', id, ruleId, bytes: toArrayBuffer(bytes) }, COMPILE_TIMEOUT_MS)
@@ -179,7 +199,7 @@ export class WasmRunner implements CompileBridge {
           : 'unknown compile error'
       return { ok: false, error: reply.error ?? fallback, unsupportedImports: reply.unsupportedImports }
     }
-    return { ok: true, readsReferencedFiles: reply.readsReferencedFiles ?? false }
+    return { ok: true, readsReferencedFiles: reply.readsReferencedFiles ?? false, rego: reply.rego ?? false }
   }
 
   remove(ruleId: string): void {
@@ -234,16 +254,40 @@ export class WasmRunner implements CompileBridge {
     const rules = this.loader.getRules().filter((r) => !this.disabledRuleIds.has(r.ruleId))
     if (rules.length === 0) return { code: 'allow' }
 
-    const contextBytes = Buffer.from(JSON.stringify(buildWasmContext(input)))
+    // Each built once, and only if a rule of that kind is loaded.
+    let contextBytes: Buffer | undefined
+    let regoBytes: Buffer | undefined
+    const bytesFor = (rego: boolean): Buffer =>
+      rego
+        ? (regoBytes ??= Buffer.from(buildRegoInput(input)))
+        : (contextBytes ??= Buffer.from(JSON.stringify(buildWasmContext(input))))
     let pendingReask: { code: 'reask'; reason: string; ruleId: string } | null = null
+    let pendingHold: { code: 'hold'; reason: string; ruleId: string; riskTier?: string } | null = null
 
     // Read once per evaluation, before any rule runs, so the per-rule
     // deadline covers guest execution only — and only when a rule will ask.
     const files = rules.some((r) => r.readsReferencedFiles) ? await this.prefetchReferencedFiles(input) : undefined
 
     for (const rule of rules) {
-      const result = await this.evaluateOne(rule.ruleId, contextBytes, rule.readsReferencedFiles ? files : undefined)
+      const result = await this.evaluateOne(
+        rule.ruleId,
+        bytesFor(rule.rego),
+        rule.rego ? REGO_EVALUATE_TIMEOUT_MS : EVALUATE_TIMEOUT_MS,
+        rule.readsReferencedFiles ? files : undefined,
+      )
       if (result === null) continue // fail-open ALLOW for this rule (timeout, trap, or worker error)
+
+      if ('decision' in result) {
+        // A Rego rule. Same ordering as the native codes below: a block ends
+        // it, and a hold waits for a person, so it outranks a reask.
+        const reason = result.reason ?? 'Refused by Rego policy'
+        if (result.decision === 'deny') return { code: 'block', reason, ruleId: rule.ruleId }
+        if (result.decision === 'hold' && !pendingHold) {
+          pendingHold = { code: 'hold', reason, ruleId: rule.ruleId, ...(result.riskTier ? { riskTier: result.riskTier } : {}) }
+        }
+        if (result.decision === 'reask' && !pendingReask) pendingReask = { code: 'reask', reason, ruleId: rule.ruleId }
+        continue
+      }
 
       switch (result.code) {
         case 0:
@@ -282,7 +326,7 @@ export class WasmRunner implements CompileBridge {
       }
     }
 
-    return pendingReask ?? { code: 'allow' }
+    return pendingHold ?? pendingReask ?? { code: 'allow' }
   }
 
   /**
@@ -299,23 +343,32 @@ export class WasmRunner implements CompileBridge {
     return files.toTable()
   }
 
-  /** One rule's evaluation, raced against `EVALUATE_TIMEOUT_MS`. `null` means fail-open (timeout, worker error, or guest trap). */
+  /** One rule's evaluation, raced against its deadline. `null` means fail-open (timeout, worker error, or guest trap). */
   private async evaluateOne(
     ruleId: string,
     contextBytes: Buffer,
+    timeoutMs: number,
     files?: ReferencedFilesTable,
-  ): Promise<{ code: number; reason?: string } | null> {
+  ): Promise<RuleResult | null> {
     const id = this.allocId()
-    const reply = await this.send<{ ok: boolean; code?: number; reason?: string; error?: string; fuelExhausted?: boolean }>(
+    const reply = await this.send<{
+      ok: boolean
+      code?: number
+      decision?: 'allow' | 'deny' | 'hold' | 'reask'
+      reason?: string
+      riskTier?: string
+      error?: string
+      fuelExhausted?: boolean
+    }>(
       { type: 'evaluate', id, ruleId, bytes: toArrayBuffer(contextBytes), ...(files ? { files } : {}) },
-      EVALUATE_TIMEOUT_MS,
+      timeoutMs,
     )
 
     if (reply === null) {
       // Timed out. Mirrors `runner.rs`'s `Err(_) => Bypass` — this call
       // fails open — plus the MCP-specific per-rule consecutive-timeout
       // disable ladder the task calls for.
-      log.warn({ action: 'wasm_evaluate_timeout', ruleId, timeoutMs: EVALUATE_TIMEOUT_MS }, 'WASM rule evaluation timed out — failing open')
+      log.warn({ action: 'wasm_evaluate_timeout', ruleId, timeoutMs }, 'WASM rule evaluation timed out — failing open')
       // terminate + lazily respawn: the NEXT evaluate() call pays the
       // respawn cost via ensureWorker()/rescan(force); triggered here so a
       // wedged worker does not keep timing out every rule behind it in this
@@ -344,6 +397,13 @@ export class WasmRunner implements CompileBridge {
 
     // A clean reply resets this rule's timeout streak.
     this.consecutiveTimeouts.delete(ruleId)
+    if (reply.decision) {
+      return {
+        decision: reply.decision,
+        ...(reply.reason ? { reason: reply.reason } : {}),
+        ...(reply.riskTier ? { riskTier: reply.riskTier } : {}),
+      }
+    }
     return { code: reply.code ?? -1, reason: reply.reason }
   }
 

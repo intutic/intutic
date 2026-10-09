@@ -66,6 +66,7 @@ fn clean_ctx(sequence: Vec<String>) -> RequestContext {
         virtual_key_prefix: "sk-bench".into(),
         model: "gpt-4o".into(),
         tools: Vec::new(),
+        turn_tool_calls: Vec::new(),
         tool_calls: Vec::new(),
         estimated_input_tokens: 1200,
         budget_remaining_usd: 50.0,

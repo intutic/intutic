@@ -6,12 +6,14 @@ This page documents how the WebAssembly (WASM) Rules Engine is structured, compi
 
 ## 1. Overview & Sandboxing
 
-The WASM Rules Engine enables developers to write custom, high-performance policy rules in AssemblyScript (a TypeScript subset), compile them to WebAssembly, and run them inside a sandboxed `wasmtime` environment inside the Intutic Proxy.
+The WASM Rules Engine enables developers to write custom, high-performance policy rules in AssemblyScript (a TypeScript subset), compile them to WebAssembly, and run them inside a sandboxed `wasmtime` environment inside the Intutic Proxy. Rules written in Rego and compiled by OPA run in the same engine through a second ABI; see [Rego rules](#rego-rules) below.
 
 To guarantee that custom user code cannot degrade proxy performance or compromise host security, each rule is strictly constrained:
 * **Memory Cap**: Limited to **16MB** of linear memory.
 * **CPU Fuel Limit**: Bound to **1,000,000 fuel units** to prevent infinite loops.
-* **Execution Timeout**: **5ms** budget per request. If a rule exceeds 5ms, it is immediately terminated and fails open to maintain low latency.
+* **Execution Timeout**: **5ms** budget per evaluation. If a rule exceeds 5ms, it is immediately terminated and fails open to maintain low latency. The engine uses `wasmtime` epoch interruption: a ticker advances the engine's epoch every millisecond, and a rule still running at its deadline traps at its next loop or function entry.
+
+A Rego rule runs with 100,000,000 fuel units and a 20 ms deadline instead, in the same 16MB; see [Limits](/guide/rego-policies#limits).
 
 ---
 
@@ -35,7 +37,7 @@ In pure Open-Core mode, rule binaries run completely offline on your local machi
                                       (wasmtime module compile)
 ```
 
-1. **Compilation**: `intutic policy compile --src assembly/index.ts --out build/rule.wasm` (wraps the AssemblyScript compiler `asc`).
+1. **Compilation**: `intutic policy compile --src assembly/index.ts --out build/rule.wasm` (wraps the AssemblyScript compiler `asc`), or `intutic rules build --rego <path> --entrypoint <package/rule>` for a Rego policy (wraps `opa build`).
 2. **Dry-run**: `intutic policy test --wasm build/rule.wasm --mock mock.json` — validate both a should-block and a should-allow context before installing.
 3. **Install**: `intutic policy install --wasm build/rule.wasm --name <name> --priority NN` copies the validated binary into `~/.intutic/wasm/` as `NN_name.wasm`. Inspect with `intutic policy list-local`. Override the directory with the `INTUTIC_WASM_DIR` env var or `intutic_settings.wasm_local_dir` in `config.yaml`.
 4. **Hot-Reload**: The proxy rescans the directory's file signatures (mtime + size) at most every **5 seconds, on the request path** — rules only matter when a request arrives, so no background watcher process is needed. Changed files are recompiled to `wasmtime::Module`s without a service restart. Loading is **fail-open per file**: a corrupt or mid-copy file is logged and skipped, and the previous good version of that rule keeps enforcing until a valid replacement compiles.
@@ -183,3 +185,15 @@ rung enforces nothing, which is why `intutic policy install` refuses codes
 outside this table.
 
 *Note: If multiple rules are active, the runner evaluates all instances sequentially and returns the **most restrictive** verdict.*
+
+---
+
+## 5. Rego rules {#rego-rules}
+
+A module built by `opa build -t wasm` is recognised by its shape: it imports its memory (`env.memory`) and exports `opa_eval` and `opa_wasm_abi_version`. The host loads it through OPA's ABI (1.2 or later) instead of the one above:
+
+1. **At load**, it reads the module's `intutic.rule` custom section (written by `intutic rules build`: the entrypoint, `abi: "opa"`, a default risk tier), asks the module which builtins it needs from the host, and refuses the rule, naming them, if any is not provided. A module without the section is accepted when it has exactly one entrypoint.
+2. **Per tool call**, it creates the module's memory (capped at 16MB), instantiates the module, writes the [input document](/guide/rego-policies#the-input-document) at OPA's heap pointer and calls `opa_eval` with the entrypoint. Builtin calls arrive through `opa_builtin0`…`opa_builtin4`; the host reads their operands with the module's `opa_json_dump` and writes results with `opa_json_parse`.
+3. **The result** maps to a verdict: a deny to `BLOCK`, a reask to `REASK`, and a hold to a hold through the decisions API. See [Decisions](/guide/rego-policies#decisions).
+
+Rego rules load from the local rules directory and from the control plane, enforce or shadow like native rules, and are switched off by `INTUTIC_DISABLE_REGO_RULES=1`.

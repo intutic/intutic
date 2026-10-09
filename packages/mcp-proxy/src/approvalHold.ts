@@ -92,7 +92,7 @@ export class ApprovalHolds {
   ) {}
 
   /** Lets the call through on an approved bypass, or records a hold and returns its id. Never throws. */
-  async request(rule: SopRule, toolName: string, toolInput: unknown): Promise<HoldOutcome> {
+  async request(rule: Pick<SopRule, 'id' | 'reason'>, toolName: string, toolInput: unknown): Promise<HoldOutcome> {
     const { toolNameNormalized, targetHash } = holdKey(this.serverName, toolName, toolInput)
 
     const bypass = await this.findBypass(rule.id, toolNameNormalized, targetHash)

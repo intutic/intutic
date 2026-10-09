@@ -16,6 +16,7 @@ import { ToolCallInterceptor } from '../interceptor.js'
 import { PolicyClient, UNRESTRICTED_REGISTRY, type McpRegistryPolicy, type SopRule } from '../policy.js'
 import { GovernanceEmitter } from '../emitter.js'
 import { handleHarnessLine, type PendingRequest } from '../proxy.js'
+import type { WasmRunner } from '../wasm/runner.js'
 import { holdApprovalHint } from '@intutic/shared-types'
 
 const RULE: SopRule = { id: 'sop_deploy', toolPattern: '^deploy$', action: 'require_approval', reason: 'Deploys need a second pair of eyes' }
@@ -173,6 +174,28 @@ describe('approval holds', () => {
     await interceptor.decide('deploy', { env: 'prod' })
     approve({ ...holds[0]!, toolNameNormalized: 'mcp__other__deploy' })
     expect((await interceptor.decide('deploy', { env: 'prod' })).action).toBe('hold')
+  })
+
+  it("a Rego rule's hold takes the same path, keyed on the rule id", async () => {
+    const runner = {
+      evaluate: async () => ({ code: 'hold', reason: 'release needs approval', ruleId: 'local:20_release.wasm', riskTier: 'high' }),
+    } as unknown as WasmRunner
+    const emitter = new Emitter()
+    const interceptor = new ToolCallInterceptor(
+      new Policy(), emitter, true, 'deployer', 'warn', undefined, 'off', {}, runner, 'ws_hold',
+      new ApprovalHolds(baseUrl, 'vk_test', 'ws_hold', 'deployer'),
+    )
+    const decision = await interceptor.decide('release', { version: '2.2.0' })
+    expect(decision.action).toBe('hold')
+    expect(holds[0]).toMatchObject({
+      reason: 'local:20_release.wasm',
+      toolNameNormalized: 'mcp__deployer__release',
+      targetHash: holdKey('deployer', 'release', { version: '2.2.0' }).targetHash,
+    })
+    expect(emitter.emitted[0]!.reason).toBe('release needs approval [local:20_release.wasm]')
+
+    approve(holds[0]!)
+    expect((await interceptor.decide('release', { version: '2.2.0' })).action).toBe('allow')
   })
 
   it('stays held, and says nothing was recorded, when the control plane is unreachable', async () => {

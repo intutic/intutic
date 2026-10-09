@@ -9,7 +9,11 @@ import {
   WASM_HOST_IMPORTS,
   unsupportedWasmImports,
   explainWasmImport,
+  isOpaModule,
+  loadRegoRule,
+  type RegoRule,
 } from '@intutic/shared-types'
+import { REGO_HOST, decideCase } from './rules.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient, type ApiClient } from '../lib/api.js'
@@ -583,6 +587,11 @@ export async function runPolicyTest(opts: { wasm: string; mock: string }): Promi
     process.exit(1)
   }
 
+  if (isOpaModule(new WebAssembly.Module(new Uint8Array(wasmBuffer)))) {
+    log.error(`"${opts.wasm}" is a Rego rule. Test it with: intutic rules test ${opts.wasm} --input <cases.json>`)
+    process.exit(1)
+  }
+
   try {
     const verdict = await instantiateAndEvaluate(wasmBuffer, mockStr)
     log.info(`Dry-run evaluation executed successfully.`)
@@ -864,35 +873,48 @@ export async function runPolicyInstall(opts: {
     process.exit(1)
   }
 
+  // A Rego rule is validated by the Rego host: it must load (a builtin the
+  // host lacks is refused here, by name) and evaluate an input.
+  let rego: RegoRule | null
+  try {
+    rego = loadRegoRule(wasmBuffer, undefined, REGO_HOST)
+    if (rego) decideCase(rego, { tool: null, args: null })
+  } catch (err) {
+    log.error(`Rego rule failed validation and was NOT installed: ${errMessage(err)}`)
+    process.exit(1)
+  }
+
   // Refuse to install a rule that cannot instantiate or evaluate — a broken
   // rule enforces nothing (the proxy sandbox fails open).
-  try {
-    const validationVerdict = await instantiateAndEvaluate(wasmBuffer, DEFAULT_ALLOW_MOCK)
-    // Refuse a code the proxy does not map. Everything outside {0,1,2,3} is
-    // allowed at runtime with a warning, so a rule inventing a rung installs
-    // clean and then enforces nothing — the same silent shape as a rule that
-    // cannot link. 2 is accepted here because already-installed rules use it,
-    // but it is deprecated and reported as such.
-    if (validationVerdict === 2) {
-      // Accepted, because refusing it would break reinstalling a rule that
-      // already shipped — but never silently. The guest never receives the
-      // request body, so redaction was never expressible, and the proxy maps 2
-      // to a block. An author who believes they are redacting is blocking.
-      log.warn(
-        'Rule returned verdict code 2 (REDACT), which is deprecated. The proxy treats it ' +
-          'as a block. Return 1 to block, or 3 to reask.'
-      )
-    }
-    if (![0, 1, 2, 3].includes(validationVerdict)) {
-      log.error(
-        `Rule returned verdict code ${validationVerdict}, which the proxy does not map — ` +
-          'it would be allowed on every request. Valid codes: 0 allow, 1 block, 3 reask.'
-      )
+  if (!rego) {
+    try {
+      const validationVerdict = await instantiateAndEvaluate(wasmBuffer, DEFAULT_ALLOW_MOCK)
+      // Refuse a code the proxy does not map. Everything outside {0,1,2,3} is
+      // allowed at runtime with a warning, so a rule inventing a rung installs
+      // clean and then enforces nothing — the same silent shape as a rule that
+      // cannot link. 2 is accepted here because already-installed rules use it,
+      // but it is deprecated and reported as such.
+      if (validationVerdict === 2) {
+        // Accepted, because refusing it would break reinstalling a rule that
+        // already shipped — but never silently. The guest never receives the
+        // request body, so redaction was never expressible, and the proxy maps 2
+        // to a block. An author who believes they are redacting is blocking.
+        log.warn(
+          'Rule returned verdict code 2 (REDACT), which is deprecated. The proxy treats it ' +
+            'as a block. Return 1 to block, or 3 to reask.'
+        )
+      }
+      if (![0, 1, 2, 3].includes(validationVerdict)) {
+        log.error(
+          `Rule returned verdict code ${validationVerdict}, which the proxy does not map — ` +
+            'it would be allowed on every request. Valid codes: 0 allow, 1 block, 3 reask.'
+        )
+        process.exit(1)
+      }
+    } catch (err) {
+      log.error(`Rule failed validation and was NOT installed: ${errMessage(err)}`)
       process.exit(1)
     }
-  } catch (err) {
-    log.error(`Rule failed validation and was NOT installed: ${errMessage(err)}`)
-    process.exit(1)
   }
 
   const priority = parseInt(opts.priority ?? '100', 10)
@@ -914,7 +936,8 @@ export async function runPolicyInstall(opts: {
   }
 
   const sha256 = createHash('sha256').update(wasmBuffer).digest('hex')
-  log.success(`Installed rule "${name}"`)
+  log.success(`Installed ${rego ? 'Rego ' : ''}rule "${name}"`)
+  if (rego) log.field('Entrypoint', rego.entrypoint)
   log.field('Path', dest)
   log.field('Priority', String(priority))
   log.field('SHA-256', sha256)

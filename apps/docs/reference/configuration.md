@@ -46,6 +46,7 @@ The proxy picks the provider from the model name, so these are the only way to p
 | :--- | :--- | :--- |
 | `INTUTIC_SOPS_DIR` | unset | Absolute path to a directory of `.md` SOP files. Overrides the default search, which walks up from the proxy's working directory looking for `.intutic/sops`. Set this when the proxy does not run beside a workspace — a container, or a shared gateway. A blank value counts as unset. A path that is set but is not a directory is **not** silently replaced by the walk: the proxy reports it and loads no SOPs, so a typo cannot be answered with policy from somewhere else. When the resolved SOP set is empty the proxy warns at startup, naming each control that is consequently inactive — including when the directory exists but is empty, which enforces exactly as much as no directory at all. The bundled Kubernetes manifests set this to `/etc/intutic-sops` and mount the `proxy-sops` ConfigMap there; see [SOPs → where the proxy looks](/guide/sops#where-the-proxy-looks-for-sops). |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | The local WASM rule directory; takes precedence over `intutic_settings.wasm_local_dir` |
+| `INTUTIC_DISABLE_REGO_RULES` | unset | `1`: refuse [Rego rules](/guide/rego-policies) (OPA builds) at load, from the rules directory and the control plane. Native WASM rules are unaffected. The MCP proxy reads it too |
 | `INTUTIC_WASM_MANIFEST_ROOT` | unset (off) | The directory WASM rules may read files from: when a tool call names a manifest (`kubectl apply -f k8s/deploy.yaml`), the proxy reads that file under this root and hands its contents to the rule. Unset, rules see only the path. `~/` is expanded |
 | `WASM_CONTEXT_SNAPSHOT_RATE` | `0.05` | The fraction of requests (0–1) whose rule-evaluation context is attached to the trace, so a new rule can be replayed against real traffic before it ships. The context holds the request's tool calls with their arguments, tool names and descriptions, DLP finding names and session counters, not the message text. Traces go to the control plane when one is connected, and to `~/.intutic/logs` otherwise. `0` turns it off |
 | `INTUTIC_LOCAL_BUDGET_ENFORCE` | on | `0`, `false` or `no`: keep counting spend against the [local daily cap](/guide/budgets#local-daily-cap) but stop refusing requests over it |
@@ -106,6 +107,7 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | Where the CLI writes the policy snapshot the hook gate reads |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | Where `intutic policy install` puts WASM rules |
+| `INTUTIC_OPA_BIN` | `opa` on the `PATH` | The OPA binary `intutic rules build` compiles Rego with |
 | `N8N_URL` | `http://localhost:5678` | The n8n instance `intutic connect` configures |
 | `N8N_API_TOKEN` | unset | Its API key |
 | `INTUTIC_FC_KERNEL` | none (required) | For `intutic exec --sandbox firecracker`: the guest kernel image |

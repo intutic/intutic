@@ -147,6 +147,7 @@ sidebarGuide.push({
   text: 'Advanced Features',
   items: [
     { text: 'Custom Filters (Open-Core)', link: '/guide/wasm-rules' },
+    { text: 'Rego Policies (Open-Core)', link: '/guide/rego-policies' },
     { text: 'Graph Guardrails (Open-Core)', link: '/guide/graph-guardrails' },
     { text: 'Sandboxed Execution (Open-Core)', link: '/guide/sandboxed-execution' },
     { text: 'Governance Controls Checklist (Open-Core)', link: '/guide/governance-controls' },

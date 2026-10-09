@@ -1,12 +1,16 @@
-# Rego fixture for the experimental OPA shim
+# Rego fixtures
 
-`deny_shell.wasm` is `deny_shell.rego` compiled by OPA 1.20.2, unmodified:
+OPA builds of Rego policies, shared by every host's tests: the Rust proxy
+(`src/wasm/opa.rs`, `tests/rego_*`), the TypeScript host
+(`packages/shared-types`), the MCP proxy and the CLI.
 
-```sh
-opa build -t wasm -e intutic/deny deny_shell.rego -o bundle.tar.gz
-tar -xzf bundle.tar.gz /policy.wasm && mv policy.wasm deny_shell.wasm
-```
+| File | What it is |
+|---|---|
+| `examples/*.rego` | The three example policies the docs show, with `*.cases.json` for `intutic rules test` |
+| `examples/*.wasm` | Built by `intutic rules build`, with the `intutic.rule` metadata section |
+| `conformance.rego` | Calls every host-provided builtin over the cases in `conformance.input.json` |
+| `conformance.expected.json` | `opa eval` on those cases: the oracle both hosts must reproduce |
+| `unsupported_builtin.*` | Needs `crypto.md5`, which no host provides: refused at load |
 
-`src/wasm/opa.rs` embeds it to prove that a module OPA built, not a hand-written
-imitation of one, runs under the proxy's WASM host. Rebuild it with the command
-above after changing the policy.
+Rebuild everything with `./build.sh` (needs OPA and a built CLI). It records the
+OPA version it used; these were built with OPA 1.20.2.

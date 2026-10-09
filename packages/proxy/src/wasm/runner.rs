@@ -2,9 +2,9 @@
 
 use super::context::{RequestContext, Verdict};
 use super::host::register_host_imports;
+use super::limits;
 use super::referenced_files::{ReferencedFiles, MAX_READS_PER_EVALUATION};
 use std::sync::Arc;
-use std::time::Duration;
 use wasmtime::{Engine, Linker, Module, ResourceLimiter, Store, StoreLimits, StoreLimitsBuilder};
 
 /// Host state passed to wasmtime Store.
@@ -73,8 +73,6 @@ impl ResourceLimiter for WasmState {
     }
 }
 
-/// Evaluates a RequestContext against a loaded WASM module.
-/// Enforces a 16MB memory limit, 1,000,000 fuel limit, and a 5ms timeout.
 /// Longest reason a guest may return. A rule that needs more than this is
 /// writing prose, and the string lands in an HTTP error body and an incident
 /// description that are themselves length-capped downstream.
@@ -148,7 +146,7 @@ pub(super) fn sanitize_reason(text: &str) -> Option<String> {
 /// Pass [`ReferencedFiles::empty`] when no rule asked for files. That is the
 /// case for every module that does not import `env.read_referenced_file`, which
 /// is every module that existed before it did.
-pub async fn evaluate_wasm_rule(
+pub fn evaluate_wasm_rule(
     engine: &Engine,
     module: &Module,
     ctx: &RequestContext,
@@ -162,17 +160,15 @@ pub async fn evaluate_wasm_rule(
         }
     };
 
-    // Configure memory limit of 16MB (256 pages)
     let limits = StoreLimitsBuilder::new()
-        .memory_size(16 * 1024 * 1024)
+        .memory_size(limits::MAX_MEMORY_BYTES)
         .build();
 
     let mut store = Store::new(engine, WasmState::new(limits, files.clone()));
     store.limiter(|state| state);
 
-    // Set fuel limit of 1,000,000 units
-    if let Err(e) = store.set_fuel(1_000_000) {
-        tracing::error!("Failed to set WASM store fuel: {}", e);
+    if let Err(e) = limits::NATIVE.arm(&mut store) {
+        tracing::error!("Failed to arm the WASM store's limits: {}", e);
         return Verdict::Bypass;
     }
 
@@ -183,8 +179,9 @@ pub async fn evaluate_wasm_rule(
         return Verdict::Bypass;
     }
 
-    // Wrap execution in a tokio timeout (5ms)
-    let eval_future = async {
+    // Bounded by the fuel and deadline armed above; either one stopping the
+    // guest surfaces here as an error.
+    let mut eval = || -> anyhow::Result<(i32, Option<String>)> {
         let instance = linker.instantiate(&mut store, module)?;
 
         // Find memory export
@@ -227,7 +224,7 @@ pub async fn evaluate_wasm_rule(
         // so every already-installed module keeps working byte-for-byte — this
         // must not become a flag day for rules that are already deployed.
         //
-        // Read inside the same fuel/timeout budget as evaluate, deliberately: a
+        // Read inside the same fuel/deadline budget as evaluate, deliberately: a
         // guest that returns a hostile length must not be able to buy extra time
         // by doing it after the verdict.
         let reason = read_guest_reason(&mut store, &instance, &memory);
@@ -235,8 +232,8 @@ pub async fn evaluate_wasm_rule(
         Ok((res, reason))
     };
 
-    match tokio::time::timeout(Duration::from_millis(5), eval_future).await {
-        Ok(Ok((verdict_val, guest_reason))) => {
+    match eval() {
+        Ok((verdict_val, guest_reason)) => {
             match verdict_val {
                 0 => Verdict::Bypass,
                 1 => Verdict::Kill {
@@ -297,12 +294,8 @@ pub async fn evaluate_wasm_rule(
                 }
             }
         }
-        Ok(Err(e)) => {
-            tracing::warn!("WASM plugin execution error (fail-open): {}", e);
-            Verdict::Bypass
-        }
-        Err(_) => {
-            tracing::warn!("WASM plugin execution timed out after 5ms (fail-open)");
+        Err(e) => {
+            limits::NATIVE.log_fail_open("WASM rule", &e);
             Verdict::Bypass
         }
     }
@@ -320,12 +313,10 @@ mod referenced_file_evaluation_tests {
     use crate::wasm::referenced_files as rf;
     use serde_json::json;
 
-    /// Fuel is required — the runner sets it, and an engine without
-    /// `consume_fuel` makes every evaluation bail to `Bypass` before it starts.
+    /// The registry's engine: fuel metering, which the runner requires, and the
+    /// epoch ticker its deadline needs.
     fn engine() -> Engine {
-        let mut config = wasmtime::Config::new();
-        config.consume_fuel(true);
-        Engine::new(&config).expect("engine")
+        crate::wasm::limits::engine().expect("engine")
     }
 
     /// Built from a legacy-shaped payload rather than a struct literal:
@@ -372,8 +363,8 @@ mod referenced_file_evaluation_tests {
     /// with a populated one, must produce the same verdict — and the registry
     /// must be able to tell from the module alone that it need not read
     /// anything at all.
-    #[tokio::test]
-    async fn a_module_that_does_not_import_the_reader_is_completely_unaffected() {
+    #[test]
+    fn a_module_that_does_not_import_the_reader_is_completely_unaffected() {
         let engine = engine();
         let module = Module::new(&engine, LEGACY_RULE).expect("legacy rule compiles");
 
@@ -387,14 +378,13 @@ mod referenced_file_evaluation_tests {
 
         let ctx = ctx();
         let without =
-            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty())).await;
+            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty()));
         let with = evaluate_wasm_rule(
             &engine,
             &module,
             &ctx,
             &Arc::new(rf::read_tokens(vec!["deploy.yaml".to_string()], &root)),
-        )
-        .await;
+        );
 
         assert_eq!(
             without,
@@ -411,8 +401,8 @@ mod referenced_file_evaluation_tests {
     /// A rule that *does* use the import blocks on the manifest it was given
     /// and allows when there is nothing to read — the same module, the same
     /// request, differing only in what the host made available.
-    #[tokio::test]
-    async fn a_rule_reading_a_referenced_manifest_reaches_a_verdict_from_it() {
+    #[test]
+    fn a_rule_reading_a_referenced_manifest_reaches_a_verdict_from_it() {
         const MANIFEST_READER: &str = r#"(module
              (import "env" "read_referenced_file"
                (func $read (param i32 i32 i32 i32) (result i32)))
@@ -440,17 +430,63 @@ mod referenced_file_evaluation_tests {
             &module,
             &ctx,
             &Arc::new(rf::read_tokens(vec!["deploy.yaml".to_string()], &root)),
-        )
-        .await;
+        );
         assert!(matches!(blocked, Verdict::Kill { .. }), "got {blocked:?}");
 
         // Nothing readable: the refusal is a negative code, the rule allows,
         // and — importantly — the evaluation completes rather than trapping.
         let allowed =
-            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty())).await;
+            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty()));
         assert_eq!(allowed, Verdict::Bypass);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// The deadline is a real bound, not a timer read after the fact.
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Loops forever while spending little fuel: each iteration fills a
+    /// megabyte of memory for one instruction's worth of fuel, so the 1,000,000
+    /// fuel budget alone would let it run for tens of seconds.
+    const SLOW_LOOP: &str = r#"(module
+         (memory (export "memory") 17)
+         (func (export "allocate") (param i32) (result i32) i32.const 0)
+         (func (export "evaluate") (param i32 i32) (result i32)
+           (loop $l
+             (memory.fill (i32.const 65536) (i32.const 7) (i32.const 1048576))
+             (br $l))
+           i32.const 1))"#;
+
+    #[test]
+    fn a_rule_that_never_returns_is_interrupted_at_the_deadline_and_fails_open() {
+        let engine = crate::wasm::limits::engine().expect("engine");
+        let module = Module::new(&engine, SLOW_LOOP).expect("compiles");
+        let ctx: RequestContext = serde_json::from_value(serde_json::json!({
+            "session_id": "ses_1", "workspace_id": "ws_1", "virtual_key_prefix": "vk_1",
+            "model": "m", "tools": [], "tool_calls": [], "estimated_input_tokens": 1,
+            "budget_remaining_usd": 1.0, "risk_tier": "Low", "dlp_findings": [],
+            "tool_sequence": []
+        }))
+        .unwrap();
+
+        let started = Instant::now();
+        let verdict =
+            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty()));
+        let elapsed = started.elapsed();
+
+        assert_eq!(verdict, Verdict::Bypass, "a runaway rule fails open");
+        assert!(
+            elapsed >= crate::wasm::limits::NATIVE.deadline,
+            "{elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "not interrupted: {elapsed:?}"
+        );
     }
 }
 

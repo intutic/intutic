@@ -120,7 +120,7 @@ variants:
 5. **DLP scan** — blocks a request whose arguments contain a credential-shaped value or a destructive command pattern (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`). Command patterns are matched against each argument string as the tool receives it, object keys included, and the SQL keywords may be separated by any whitespace, a line continuation, a block or `--` comment, or an escaped `\n` / `\t`: `DROP/**/TABLE` and `DROP` and `TABLE` on separate lines are blocked. The scan reads text, not SQL, so a quoted mention such as `SELECT 'drop table'` is blocked too — a quoted string is also how a shell command carries the real statement.
 6. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` holds the call for a person's approval (`hold` above).
 7. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
-8. **Anomaly detectors** and **WASM rules** — see the session-scope note below.
+8. **Anomaly detectors** and **WASM rules**, native or [Rego](/guide/rego-policies) — see the session-scope note below. A Rego rule's hold takes the same path as a `require_approval` rule.
 9. **Call budgets** (`mcpBudgets`) — counts the call in Valkey against every budget that covers it, and refuses it when one is used up. Last, so a call another step refuses spends nothing. See [Call budgets](/guide/mcp-governance#call-budgets).
 
 The DLP scan also runs the enabled [PII detectors](/guide/policies#pii-detectors):

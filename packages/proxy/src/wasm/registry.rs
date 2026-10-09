@@ -92,10 +92,10 @@ pub struct LoadedModule {
     /// what makes a module that does not import the function cost exactly what
     /// it cost before the function existed.
     pub reads_referenced_files: bool,
-    /// EXPERIMENTAL: an OPA-compiled Rego policy, evaluated through
-    /// [`super::opa`] instead of the native rule ABI. Only a local rule loaded
-    /// while `INTUTIC_EXPERIMENTAL_REGO_WASM=1` can be one.
-    pub rego: bool,
+    /// A Rego policy compiled by OPA, evaluated through [`super::opa`]
+    /// instead of the native rule ABI. Resolved at load, wherever the rule
+    /// came from.
+    pub rego: Option<Arc<super::opa::OpaRule>>,
 }
 
 struct WorkspaceModules {
@@ -128,9 +128,7 @@ impl PluginRegistry {
     /// (see [`local_loader::resolve_local_dir`]); control-plane-distributed
     /// rules are fetched lazily per workspace via [`Self::evaluate`].
     pub async fn new(local_dir_override: Option<&str>) -> anyhow::Result<Arc<Self>> {
-        let mut config = wasmtime::Config::new();
-        config.consume_fuel(true);
-        let engine = Engine::new(&config)?;
+        let engine = super::limits::engine()?;
 
         let local_dir = local_loader::resolve_local_dir(local_dir_override);
         tracing::info!(
@@ -267,6 +265,7 @@ impl PluginRegistry {
         // the first reask would let a low-priority advisory rule mask a
         // high-priority refusal simply by sorting first.
         let mut pending_reask: Option<Verdict> = None;
+        let mut pending_hold: Option<Verdict> = None;
 
         for m in modules {
             if exempt_rule_id == Some(m.rule_id.as_str()) {
@@ -277,10 +276,10 @@ impl PluginRegistry {
                 );
                 continue;
             }
-            let verdict = if m.rego {
-                super::opa::evaluate_opa_rule(&self.engine, &m.module, ctx).await
+            let verdict = if let Some(rule) = &m.rego {
+                super::opa::evaluate(&self.engine, &m.module, rule, ctx)
             } else {
-                evaluate_wasm_rule(&self.engine, &m.module, ctx, &files).await
+                evaluate_wasm_rule(&self.engine, &m.module, ctx, &files)
             };
 
             // A shadowed rule reports and falls through. It is evaluated exactly
@@ -333,6 +332,23 @@ impl PluginRegistry {
                 // on its second *distinct* correction rather than on a repeated
                 // failure to correct — the exact inversion the counter exists to
                 // prevent, already documented for `detector_id` in proxy.rs.
+                // A hold waits for a person, which a retry cannot replace, so
+                // it outranks a reask; a later block still outranks it.
+                Verdict::Hold {
+                    reason,
+                    policy_id,
+                    risk_tier,
+                    tool,
+                    target_hash,
+                } if pending_hold.is_none() => {
+                    pending_hold = Some(Verdict::Hold {
+                        reason,
+                        policy_id: policy_id.or_else(|| Some(m.rule_id.clone())),
+                        risk_tier,
+                        tool,
+                        target_hash,
+                    });
+                }
                 Verdict::Reask {
                     reason,
                     attempts_remaining,
@@ -348,7 +364,7 @@ impl PluginRegistry {
             }
         }
 
-        pending_reask.unwrap_or(Verdict::Bypass)
+        pending_hold.or(pending_reask).unwrap_or(Verdict::Bypass)
     }
 
     /// Resolve and read the files this request's tool calls reference.
@@ -528,12 +544,12 @@ impl PluginRegistry {
             let mut existing_map = HashMap::new();
             if let Some(ws_mods) = guard.get(workspace_id) {
                 for m in &ws_mods.modules {
-                    existing_map.insert(m.sha256.clone(), m.module.clone());
+                    existing_map.insert(m.sha256.clone(), (m.module.clone(), m.rego.clone()));
                 }
             }
 
             for desc in descriptors {
-                if let Some(module) = existing_map.get(&desc.sha256) {
+                if let Some((module, rego)) = existing_map.get(&desc.sha256) {
                     new_modules.push(LoadedModule {
                         rule_id: desc.rule_id,
                         name: desc.name,
@@ -541,26 +557,33 @@ impl PluginRegistry {
                         priority: desc.priority,
                         mode: desc.mode,
                         reads_referenced_files: super::host::module_reads_referenced_files(module),
-                        rego: false,
+                        rego: rego.clone(),
                         module: module.clone(),
                     });
                 } else {
                     let bin_bytes = control_plane.wasm_binary(&desc.sha256).await?;
                     if let Some(bytes) = bin_bytes {
                         let module = Module::from_binary(&self.engine, &bytes)?;
-                        // Same check the local loader runs. Without it a rule
+                        // Same checks the local loader runs. Without them a rule
                         // pushed from the dashboard installs, counts as active,
                         // and then fails to link on every request — which the
                         // runner turns into Bypass. The operator sees a rule
                         // listed and enforcing nothing.
-                        if let Err(e) = super::host::check_imports_resolvable(&module) {
-                            tracing::error!(
-                                rule = %desc.name,
-                                sha256 = %desc.sha256,
-                                "Refusing control-plane WASM rule: {e}"
-                            );
-                            continue;
-                        }
+                        let rego = match super::local_loader::check_loadable(
+                            &self.engine,
+                            &module,
+                            &bytes,
+                        ) {
+                            Ok(rego) => rego,
+                            Err(e) => {
+                                tracing::error!(
+                                    rule = %desc.name,
+                                    sha256 = %desc.sha256,
+                                    "Refusing control-plane WASM rule: {e}"
+                                );
+                                continue;
+                            }
+                        };
                         new_modules.push(LoadedModule {
                             rule_id: desc.rule_id,
                             name: desc.name,
@@ -570,7 +593,7 @@ impl PluginRegistry {
                             reads_referenced_files: super::host::module_reads_referenced_files(
                                 &module,
                             ),
-                            rego: false,
+                            rego,
                             module,
                         });
                     } else {

@@ -1489,25 +1489,88 @@ fn extract_tools(body: &serde_json::Value) -> Vec<crate::wasm::context::ToolSche
 }
 
 fn extract_wasm_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context::ToolCall> {
-    let mut tc_list = Vec::new();
+    let mut tc_list = root_tool_calls(body);
+    if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
+        tc_list.extend(messages.iter().flat_map(message_tool_calls));
+    }
+    tc_list
+}
 
-    // Check root tool_calls (for simulation/test convenience)
-    if let Some(root_tc) = body.get("tool_calls").and_then(|t| t.as_array()) {
-        for tc in root_tc {
+/// The calls in the latest message that made any: the turn whose results this
+/// request carries (`RequestContext::turn_tool_calls`). Falls back to the root
+/// `tool_calls` a simulation request may carry instead of messages.
+fn latest_turn_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context::ToolCall> {
+    body.get("messages")
+        .and_then(|m| m.as_array())
+        .and_then(|messages| {
+            messages
+                .iter()
+                .rev()
+                .map(message_tool_calls)
+                .find(|calls| !calls.is_empty())
+        })
+        .unwrap_or_else(|| root_tool_calls(body))
+}
+
+/// Root `tool_calls`, for simulation/test convenience.
+fn root_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context::ToolCall> {
+    body.get("tool_calls")
+        .and_then(|t| t.as_array())
+        .into_iter()
+        .flatten()
+        .map(|tc| crate::wasm::context::ToolCall {
+            id: tc
+                .get("id")
+                .and_then(|i| i.as_str())
+                .unwrap_or("")
+                .to_string(),
+            name: tc
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string(),
+            arguments: tc
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        })
+        .collect()
+}
+
+/// One message's tool calls, OpenAI (`tool_calls`) or Anthropic (`tool_use`
+/// content blocks) style.
+fn message_tool_calls(msg: &serde_json::Value) -> Vec<crate::wasm::context::ToolCall> {
+    let mut tc_list = Vec::new();
+    // OpenAI style
+    if let Some(tool_calls) = msg.get("tool_calls").and_then(|tc| tc.as_array()) {
+        for tc in tool_calls {
             let id = tc
                 .get("id")
                 .and_then(|i| i.as_str())
                 .unwrap_or("")
                 .to_string();
-            let name = tc
-                .get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or("")
-                .to_string();
-            let arguments = tc
-                .get("arguments")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
+            let name = if let Some(func) = tc.get("function") {
+                func.get("name").and_then(|n| n.as_str()).unwrap_or("")
+            } else {
+                tc.get("name").and_then(|n| n.as_str()).unwrap_or("")
+            }
+            .to_string();
+
+            let arguments = if let Some(func) = tc.get("function") {
+                if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
+                    serde_json::from_str(args_str)
+                        .unwrap_or(serde_json::Value::String(args_str.to_string()))
+                } else {
+                    func.get("arguments")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null)
+                }
+            } else {
+                tc.get("arguments")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null)
+            };
+
             tc_list.push(crate::wasm::context::ToolCall {
                 id,
                 name,
@@ -1516,76 +1579,26 @@ fn extract_wasm_tool_calls(body: &serde_json::Value) -> Vec<crate::wasm::context
         }
     }
 
-    // Check messages array
-    if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
-        for msg in messages {
-            // OpenAI style
-            if let Some(tool_calls) = msg.get("tool_calls").and_then(|tc| tc.as_array()) {
-                for tc in tool_calls {
-                    let id = tc
+    // Anthropic style
+    if let Some(arr) = msg.get("content").and_then(|c| c.as_array()) {
+        for block in arr {
+            if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                tc_list.push(crate::wasm::context::ToolCall {
+                    id: block
                         .get("id")
                         .and_then(|i| i.as_str())
                         .unwrap_or("")
-                        .to_string();
-                    let name = if let Some(func) = tc.get("function") {
-                        func.get("name").and_then(|n| n.as_str()).unwrap_or("")
-                    } else {
-                        tc.get("name").and_then(|n| n.as_str()).unwrap_or("")
-                    }
-                    .to_string();
-
-                    let arguments = if let Some(func) = tc.get("function") {
-                        if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
-                            serde_json::from_str(args_str)
-                                .unwrap_or(serde_json::Value::String(args_str.to_string()))
-                        } else {
-                            func.get("arguments")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null)
-                        }
-                    } else {
-                        tc.get("arguments")
-                            .cloned()
-                            .unwrap_or(serde_json::Value::Null)
-                    };
-
-                    tc_list.push(crate::wasm::context::ToolCall {
-                        id,
-                        name,
-                        arguments,
-                    });
-                }
-            }
-
-            // Anthropic style
-            if let Some(content) = msg.get("content") {
-                if let Some(arr) = content.as_array() {
-                    for block in arr {
-                        if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
-                            if block_type == "tool_use" {
-                                let id = block
-                                    .get("id")
-                                    .and_then(|i| i.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let name = block
-                                    .get("name")
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let arguments = block
-                                    .get("input")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null);
-                                tc_list.push(crate::wasm::context::ToolCall {
-                                    id,
-                                    name,
-                                    arguments,
-                                });
-                            }
-                        }
-                    }
-                }
+                        .to_string(),
+                    name: block
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    arguments: block
+                        .get("input")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                });
             }
         }
     }
@@ -3255,6 +3268,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         model: model.clone(),
         tools: extract_tools(&body_json),
         tool_calls: extract_wasm_tool_calls(&body_json),
+        turn_tool_calls: latest_turn_tool_calls(&body_json),
         estimated_input_tokens: (body_str.len() / 4) as u32,
         budget_remaining_usd: local_budget_remaining,
         // Declared by the applicable SOPs, not hardcoded.
@@ -3961,6 +3975,75 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         if remaining == 1 { "" } else { "s" },
                     ),
                 );
+            }
+            // A Rego rule's hold: the call waits for a person, through the
+            // decisions API like every other hold (`wasm::hold`). Suppressed
+            // under shadow enforcement with the reask above, for the same
+            // reason: a mode whose contract is "just watch" must not stop a
+            // run until someone approves it.
+            crate::wasm::context::Verdict::Hold {
+                reason,
+                policy_id,
+                risk_tier,
+                tool,
+                target_hash,
+            } if !shadow_enforcement => {
+                let rule_id = policy_id.unwrap_or_else(|| "wasm".to_string());
+                let held = crate::wasm::hold::HeldCall {
+                    workspace_id: &workspace_id,
+                    session_id: &session_id,
+                    rule_id: &rule_id,
+                    reason: &reason,
+                    risk_tier: risk_tier.map(crate::wasm::opa::risk_tier_name),
+                    tool: &tool,
+                    target_hash: &target_hash,
+                };
+                // Only a virtual key goes to the control plane: any other
+                // bearer here is a provider credential, never sent onward.
+                let control_plane_url = state
+                    .config
+                    .intutic_settings
+                    .policy
+                    .control_plane_url
+                    .as_deref()
+                    .filter(|_| raw_token.starts_with("vk_"));
+                let outcome = crate::wasm::hold::request(
+                    &state.http_client,
+                    control_plane_url,
+                    raw_token,
+                    &held,
+                )
+                .await;
+                match &outcome {
+                    crate::wasm::hold::HoldOutcome::Bypassed {
+                        hold_id,
+                        decided_by,
+                    } => {
+                        tracing::warn!(
+                            workspace_id = %workspace_id,
+                            rule_id = %rule_id,
+                            hold_id = %hold_id,
+                            decided_by = %decided_by,
+                            "WASM rule hold: approved bypass used"
+                        );
+                    }
+                    crate::wasm::hold::HoldOutcome::Held { hold_id, recorded } => {
+                        tracing::warn!(
+                            workspace_id = %workspace_id,
+                            session_id = %session_id,
+                            rule_id = %rule_id,
+                            hold_id = %hold_id,
+                            recorded,
+                            "WASM rule held this request for approval"
+                        );
+                        crate::metrics::record_policy_refusal("wasm", "hold");
+                        return json_error(
+                            StatusCode::FORBIDDEN,
+                            "policy_held",
+                            &crate::wasm::hold::refusal(&outcome, &rule_id, &reason),
+                        );
+                    }
+                }
             }
             _ => {}
         }

@@ -292,7 +292,7 @@ policyCmd
 
 policyCmd
   .command('install')
-  .description('Validate and install a compiled WASM rule into the local proxy rules dir')
+  .description('Validate and install a compiled WASM rule (native or Rego) into the local proxy rules dir')
   .requiredOption('--wasm <path>', 'Path to compiled WASM rule binary')
   .option('--name <name>', 'Rule name (defaults to the file name)')
   .option('--priority <NN>', 'Evaluation priority — lower runs first', '100')
@@ -321,6 +321,45 @@ policyCmd
   .action(async (ruleId, opts) => {
     const { runPolicyReplay } = await import('./commands/policy.js')
     await runPolicyReplay(ruleId, opts)
+  })
+
+// Rego policies as rules: compiled with OPA and packaged with the metadata
+// the proxies read (`intutic rules build`), tested through the same host
+// (`intutic rules test`). Installing and uploading are the same as for any rule.
+const rulesCmd = program
+  .command('rules')
+  .description('Build and test Rego policies as Intutic rules')
+
+rulesCmd
+  .command('build')
+  .description(
+    'Compile Rego to a rule with OPA (opa build -t wasm) and package it with its entrypoint and risk tier.\n' +
+    '\n' +
+    '  Needs the opa binary on the PATH, or INTUTIC_OPA_BIN. Refuses a policy that\n' +
+    '  needs a builtin Intutic does not provide, naming it.'
+  )
+  .requiredOption('--rego <path>', 'Rego file or directory')
+  .requiredOption('--entrypoint <package/rule>', 'The rule to evaluate, e.g. intutic/shell/deny')
+  .option('--risk-tier <tier>', 'Default risk tier for its decisions: low | medium | high | critical')
+  .option('--out <path>', 'Output .wasm path (default: build/<entrypoint>.wasm)')
+  .action(async (opts) => {
+    const { runRulesBuild } = await import('./commands/rules.js')
+    await runRulesBuild(opts)
+  })
+
+rulesCmd
+  .command('test <module>')
+  .description(
+    'Evaluate a Rego rule against sample inputs locally, through the same host the proxies use.\n' +
+    '\n' +
+    '  Each --input file holds one input document, or an array of\n' +
+    '  {"name", "input", "expect": "allow|deny|hold|reask"} cases. Exits 1 when a\n' +
+    '  case gets a decision other than the one it expects.'
+  )
+  .requiredOption('--input <file...>', 'JSON file(s) of inputs or cases')
+  .action(async (module, opts) => {
+    const { runRulesTest } = await import('./commands/rules.js')
+    await runRulesTest(module, opts)
   })
 
 // Policy Clause Ledger (LLD #71). `intutic policy` is the WASM loop and

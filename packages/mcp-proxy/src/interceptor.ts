@@ -199,7 +199,7 @@ export class ToolCallInterceptor {
    * the words the hook gates print (`holdApprovalHint`), so a person reading
    * the agent's transcript knows what to do.
    */
-  private async hold(rule: SopRule, toolName: string, toolInput: unknown): Promise<Decision | null> {
+  private async hold(rule: Pick<SopRule, 'id' | 'reason'>, toolName: string, toolInput: unknown): Promise<Decision | null> {
     const outcome = this.holds
       ? await this.holds.request(rule, toolName, toolInput)
       : { kind: 'held' as const, holdId: '', recorded: false }
@@ -562,6 +562,7 @@ export class ToolCallInterceptor {
           injectionSources: injectionSourcesForContext,
           corroboratingDetectors: corroboratingDetectorsForContext,
           toolContractChanged: this.session.getToolContractChanged(),
+          serverName: this.serverName,
         })
 
         if (verdict.code === 'block') {
@@ -573,6 +574,13 @@ export class ToolCallInterceptor {
           // Keyed per-rule-id, independent of every anomaly detector's own
           // counter — see applyReaskLadder's doc comment.
           return await this.applyReaskLadder(`wasm:${verdict.ruleId}`, verdict.reason, toolName, toolInput)
+        }
+        if (verdict.code === 'hold') {
+          // A Rego rule's hold takes the `require_approval` path: the same
+          // approved-bypass lookup and hold record, keyed on the rule id.
+          const held = await this.hold({ id: verdict.ruleId, reason: verdict.reason }, toolName, toolInput)
+          if (held) return held
+          // An approved bypass: the remaining checks still apply.
         }
         // 'allow': fall through.
       } catch (err) {

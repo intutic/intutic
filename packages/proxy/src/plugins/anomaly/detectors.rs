@@ -2196,6 +2196,7 @@ pub mod test_support {
             virtual_key_prefix: "vk_test".into(),
             model: "claude-sonnet-4".into(),
             tools: vec![],
+            turn_tool_calls: Vec::new(),
             tool_calls: vec![],
             estimated_input_tokens: 100,
             // Positive by default, so the budget detector stays quiet unless a

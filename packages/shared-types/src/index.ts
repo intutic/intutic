@@ -590,6 +590,16 @@ export {
   type WasmHostImport,
 } from './wasmHost.js'
 
+// Rego policies compiled by OPA, run as rules (packages/proxy/src/wasm/opa.rs).
+export * from './regoRules.js'
+export {
+  REGO_HOST_BUILTINS,
+  REGO_HOST_BUILTIN_NAMES,
+  type RegoBuiltin,
+  type RegoBuiltinContext,
+  type RegoDigest,
+} from './regoBuiltins.js'
+
 export {
   FIELDS as RULE_DSL_FIELDS,
   OPERATORS as RULE_DSL_OPERATORS,
