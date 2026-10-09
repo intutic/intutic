@@ -422,11 +422,12 @@ The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Report
 
 ## Integrations {#integrations}
 
-Task trackers, memory providers, file scanning and SIEM export.
+Task trackers, memory providers, file scanning, the GitHub pull-request webhook and SIEM export.
 
 - **Task Management & Alerting** — connect Jira Cloud, PagerDuty, Linear, GitHub Issues or Asana to sync tickets and route governance alerts. **Add Connection** takes the provider, its base URL, an API token or auth secret, and a project key or routing key.
 - **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. See [Prompt Commands](/guide/agent-commands).
 - **VirusTotal Skill Scanning** — opt in to checking the sha256 hash of skill-bundled scripts against VirusTotal; file content is never uploaded. See [VirusTotal Integration](/guide/virustotal-scanning).
+- **GitHub Pull Request Webhook** — the payload URL and signing secret for GitHub's pull request events, which map branches to pull requests for cost per pull request without a GitHub token. **Create webhook** makes it; **Replace secret** makes a new secret and keeps the URL. The secret is shown once. Owners and admins, Biz Org and above. See [Cost per pull request](/guide/budgets#cost-per-pull-request).
 - **SIEM Export** — stream governance events to Splunk, Datadog, a webhook, syslog/CEF, S3 or GCS; **Add Destination** creates one. Biz Org and above: on another plan the card says so, and destinations kept from before a downgrade show as **Paused**. See [SIEM Export](/guide/siem-export#plans).
 
 ---
