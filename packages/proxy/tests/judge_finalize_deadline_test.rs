@@ -223,7 +223,8 @@ async fn a_slow_finalize_releases_the_stream_at_the_deadline_but_keeps_running()
     // for it, up to the finalize delay, rather than for a fixed time.
     let cp_ref = &cp;
     let finalize_calls = || async move {
-        cp_ref.received_requests()
+        cp_ref
+            .received_requests()
             .await
             .expect("wiremock recording on")
             .iter()
