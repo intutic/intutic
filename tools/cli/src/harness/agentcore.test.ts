@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { agentcoreAdapter } from './agentcore.js'
 import { ALL_ADAPTERS } from './detector.js'
-import { HARNESS_CONFIG_FILES } from './types.js'
+import { HARNESS_FILES } from '@intutic/sync-daemon'
 
 const PROXY_URL = 'http://127.0.0.1:4000/v1'
 
@@ -122,8 +122,8 @@ describe('agentcore adapter (AWS Bedrock AgentCore Runtime)', () => {
       expect(ALL_ADAPTERS.some((a) => a.type === 'agentcore-runtime')).toBe(true)
     })
 
-    it('is registered in HARNESS_CONFIG_FILES with an empty (no-file) entry', () => {
-      expect(HARNESS_CONFIG_FILES['agentcore-runtime']).toBe('')
+    it('is registered in HARNESS_FILES with an empty (no-file) entry', () => {
+      expect(HARNESS_FILES['agentcore-runtime']).toBe('')
     })
   })
 })

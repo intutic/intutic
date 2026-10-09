@@ -1,13 +1,9 @@
 /**
  * muse.ts — Meta "Muse Code" adapter (binary `muse`, model Muse Spark).
  *
- * Muse Code is a CLI harness, beta since 2026-08-05. Its rules/instructions
- * file is `AGENTS.md` (it falls back to `CLAUDE.md` when that is absent) —
- * this codebase has no dedicated "AGENTS.md content builder" of its own to
- * reuse; the shared markdown content path every text-rules harness already
- * uses (`buildMarkdownContent`, the same function Claude Code's `CLAUDE.md`
- * adapter calls) is what gets reused here, so Muse does not grow a second
- * rules format.
+ * Muse Code is a CLI harness, beta since 2026-08-05. Its instructions file
+ * is `AGENTS.md` (it falls back to `CLAUDE.md` when that is absent); the rule
+ * sets go there through the shared `AGENTS.md` writer (agentsMd.ts).
  *
  * The governance-critical half — the PreToolUse/PermissionRequest hook
  * registration and the MCP `mcp_servers` proxy-wrap — is delegated to
@@ -24,13 +20,8 @@ import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { hashFile } from '../lib/hash.js'
-import { buildMarkdownContent } from './base.js'
 import { writeMuseHooks } from '@intutic/sync-daemon/harness/museHooks'
-import { writeOwnedFile } from '@intutic/sync-daemon'
-
-/** Workspace-relative rules file. Muse reads this, falling back to CLAUDE.md. */
-const CONFIG_FILE = 'AGENTS.md'
+import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 
 /** `~/.config/muse/settings.json` — carries `schema_version`, `mcp_servers`,
  *  and (once `museHooks.ts` has run) `managed_hooks_path`. */
@@ -38,7 +29,7 @@ const MUSE_SETTINGS = join(homedir(), '.config', 'muse', 'settings.json')
 
 export const museAdapter: IHarnessAdapter = {
   type: HarnessType.MUSE_CODE,
-  configFileName: CONFIG_FILE,
+  configFileName: AGENTS_MD,
 
   async detect(workspaceRoot: string): Promise<boolean> {
     // 1. Project-local `.muse/` directory.
@@ -72,20 +63,11 @@ export const museAdapter: IHarnessAdapter = {
     await writeMuseHooks(workspaceRoot, proxyUrl, '')
   },
 
-  /** AGENTS.md rules file — same "skip when there is nothing to write"
-   *  convention `createMarkdownAdapter` uses. */
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    if (sops.length === 0) return null
-    const agentsPath = join(workspaceRoot, CONFIG_FILE)
-    await writeOwnedFile(agentsPath, workspaceRoot, buildMarkdownContent(sops, proxyUrl))
-    return agentsPath
+  writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    return writeAgentsMd(workspaceRoot, sops, proxyUrl)
   },
 
-  async readCurrentHash(workspaceRoot: string): Promise<string | null> {
-    try {
-      return await hashFile(join(workspaceRoot, CONFIG_FILE))
-    } catch {
-      return null
-    }
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return agentsMdHash(workspaceRoot)
   },
 }

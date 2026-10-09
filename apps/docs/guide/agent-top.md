@@ -6,7 +6,7 @@
 
 AI coding agents are highly active but often hard to observe locally. Developer Sessions brings process activity and configuration sync audits together into a single screen:
 - **Process Activity (`abtop`)**: Which agent tools (Cursor, Claude Code, Aider, Windsurf) are running on the workstation.
-- **Config Sync Status**: Whether local rules files (`.cursorrules`, `CLAUDE.md`, `.windsurfrules`) are synced or have drifted from the central SOP policies.
+- **Config Sync Status**: Whether local rules files (such as `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`) are synced or have drifted from the central SOP policies.
 - **Rules Safety Auditing**: Findings from local skill audits (secrets, credentials, dangerous wildcards).
 
 ---

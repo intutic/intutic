@@ -40,7 +40,7 @@ The `agentcore-runtime` adapter is detected via any of:
 - `@aws/agentcore` in `package.json` — the npm CLI (confirmed at 0.27.0)
 - `.bedrock_agentcore.yaml` at the workspace root, or `agentcore/agentcore.json` / `agentcore/aws-targets.json` — config files the CLIs above write during `agentcore configure`/`agentcore launch`/`agentcore deploy`
 
-It writes **no config of its own**. Runtime hosts your agent code unchanged, so the actual tool-call gate is whichever already-supported framework adapter your code uses — if your project also matches `strands-agents`, `langgraph`, `crewai`, etc., THAT adapter writes the real `.env.intutic` proxy configuration and the gate stays SDK-side exactly as documented on that framework's own page. If your Runtime-hosted code uses no framework this product supports (raw `boto3`, a hand-rolled tool loop), coverage is genuinely zero — the same honest gap the [Agentic Orchestrator](/integrations/agentic-orchestrator) integration has for its OpenCode backend.
+It writes **no config of its own** and has no instructions file. Runtime hosts your agent code unchanged, so the actual tool-call gate is whichever already-supported framework adapter your code uses — if your project also matches `strands-agents`, `langgraph`, `crewai`, etc., THAT adapter writes the real `.env.intutic` proxy configuration and the gate stays SDK-side exactly as documented on that framework's own page. If your Runtime-hosted code uses no framework this product supports (raw `boto3`, a hand-rolled tool loop), coverage is genuinely zero — the same honest gap the [Agentic Orchestrator](/integrations/agentic-orchestrator) integration has for its OpenCode backend.
 
 ### Deployment-target constraints worth knowing
 

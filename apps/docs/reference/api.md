@@ -1132,7 +1132,7 @@ Every route the control plane serves: 393 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/scim/tokens` | OWNER/ADMIN |  |
-| POST | `/api/v1/scim/tokens` | OWNER/ADMIN |  |
+| POST | `/api/v1/scim/tokens` | OWNER/ADMIN | <Badge type="danger" text="Enterprise" /> |
 | DELETE | `/api/v1/scim/tokens/:id` | OWNER/ADMIN |  |
 
 ### `sessions.ts` <Badge type="tip" text="Cloud" />
@@ -1149,12 +1149,12 @@ Every route the control plane serves: 393 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/siem/destinations` | Authenticated | List destinations (masks credentials) and the source names a destination can filter on |
-| POST | `/api/v1/siem/destinations` | OWNER/ADMIN | Create a destination (encrypts credentials) |
+| POST | `/api/v1/siem/destinations` | OWNER/ADMIN | <Badge type="warning" text="Biz Org+" /> Create a destination (encrypts credentials) |
 | DELETE | `/api/v1/siem/destinations/:id` | OWNER/ADMIN | Deactivate a destination |
 | GET | `/api/v1/siem/destinations/:id` | Authenticated | Get destination details (masks credentials) |
-| PUT | `/api/v1/siem/destinations/:id` | OWNER/ADMIN | Update destination details |
-| POST | `/api/v1/siem/destinations/:id/signing-secret` | OWNER/ADMIN | Replace a webhook destination's signing secret (returned once) |
-| POST | `/api/v1/siem/destinations/:id/test` | OWNER/ADMIN | Health-check a destination |
+| PUT | `/api/v1/siem/destinations/:id` | OWNER/ADMIN | <Badge type="warning" text="Biz Org+" /> Update destination details |
+| POST | `/api/v1/siem/destinations/:id/signing-secret` | OWNER/ADMIN | <Badge type="warning" text="Biz Org+" /> Replace a webhook destination's signing secret (returned once) |
+| POST | `/api/v1/siem/destinations/:id/test` | OWNER/ADMIN | <Badge type="warning" text="Biz Org+" /> Health-check a destination |
 | GET | `/api/v1/siem/dlq` | Authenticated | List DLQ failed events |
 | POST | `/api/v1/siem/dlq/retry` | OWNER/ADMIN | Trigger a manual DLQ retry pass |
 
@@ -1302,14 +1302,14 @@ Every route the control plane serves: 393 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/usage/branches` | Authenticated | Usage per repository and branch |
+| GET | `/api/v1/usage/branches` | Authenticated | <Badge type="warning" text="Biz Org+" /> Usage per repository and branch |
 | POST | `/api/v1/usage/classify` | Authenticated | Classify tokens as USEFUL or WASTED |
-| GET | `/api/v1/usage/commits` | Authenticated | Usage per HEAD commit |
+| GET | `/api/v1/usage/commits` | Authenticated | <Badge type="warning" text="Biz Org+" /> Usage per HEAD commit |
 | GET | `/api/v1/usage/events` | Authenticated | Paginated raw execution trace events |
-| GET | `/api/v1/usage/members` | Authenticated | Per-developer usage (own row only below EM) |
+| GET | `/api/v1/usage/members` | Authenticated | <Badge type="warning" text="Biz Org+" /> Per-developer usage (own row only below EM) |
 | GET | `/api/v1/usage/models` | Authenticated | Per-model cost breakdown |
 | GET | `/api/v1/usage/summary` | Authenticated | Aggregated usage summary by period |
-| GET | `/api/v1/usage/teams` | OWNER/ADMIN/EM | Per-team usage by SCIM group |
+| GET | `/api/v1/usage/teams` | OWNER/ADMIN/EM | <Badge type="warning" text="Biz Org+" /> Per-team usage by SCIM group |
 | GET | `/api/v1/usage/virtual-keys` | Authenticated | Per-virtual-key cost breakdown (Wave 9) |
 
 ### `users.ts` <Badge type="tip" text="Cloud" />

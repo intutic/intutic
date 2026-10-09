@@ -28,6 +28,13 @@ the controls built on top of the MCP proxy-wrapping mechanism described in
   scoring**, which says how risky each change is and can send a server back
   to the approval queue.
 
+The proxy and the checks it makes on its own run in open core, with no
+account: TOFU pinning, prompt-injection scanning, the remote-server bridge and
+the gate backstop. The registry, the allowlists, approval holds, the calling
+member, call budgets and tool-change risk scoring come from a connected
+workspace's control plane, on every plan; their sections are badged
+<Badge type="tip" text="Cloud" />.
+
 ## How a server gets here at all
 
 `intutic connect` and the sync daemon's continuous sync loop rewrite each
@@ -139,7 +146,7 @@ window, on the order of the loop's own interval, where a freshly-added server
 talks to the harness directly. During that window none of the controls on
 this page apply to it.
 
-## The registry {#the-registry}
+## The registry <Badge type="tip" text="Cloud" /> {#the-registry}
 
 **Policies › MCP Servers** lists every MCP server the workspace's proxies
 have seen. A server gets there two ways:
@@ -224,7 +231,7 @@ and the local `INTUTIC_MCP_FAIL_OPEN` (`false` for fail closed) before that or
 for a workspace that never chose. The same setting governs every other check
 that cannot complete, such as a failed DLP scan or an unreadable TOFU pin.
 
-## The allowlist: `mcpAllowedServers`
+## The allowlist: `mcpAllowedServers` <Badge type="tip" text="Cloud" /> {#the-allowlist-mcpallowedservers}
 
 A workspace can set `mcpAllowedServers` (an array of server names) in its
 settings. **Absent or empty means unrestricted** — the same convention every
@@ -246,7 +253,7 @@ This is enforced by the same proxy process that already enforces
 `mcpAllowedTools` (per-tool scoping) and DLP/SOP policy — one interception
 point, not a second one that could disagree with the first.
 
-## Approval holds {#approval-holds}
+## Approval holds <Badge type="tip" text="Cloud" /> {#approval-holds}
 
 An SOP rule whose action is `require_approval` (a `REQUIRE_APPROVAL:` SOP)
 holds the call instead of blocking it, the same way the harness hook gates
@@ -286,7 +293,7 @@ A hold needs the control plane both to find an approval and to ask for one.
 While it is unreachable the call stays held, whatever the fail setting, and
 the message says the hold could not be recorded.
 
-## Who made the call {#caller-identity}
+## Who made the call <Badge type="tip" text="Cloud" /> {#caller-identity}
 
 Every event the proxy sends and every hold it records carries the caller as
 the proxy sees it:
@@ -317,7 +324,7 @@ or its member deactivated), the member's groups are unknown and a high-risk
 tool is refused rather than allowed. The decision is the one the hook gate, the
 proxy's response gate and the local gates make; see [SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
 
-## Call budgets {#call-budgets}
+## Call budgets <Badge type="tip" text="Cloud" /> {#call-budgets}
 
 A budget limits how many MCP tool calls run per **hour** or per **day**.
 Each one counts one of four things:
@@ -453,7 +460,7 @@ malicious one — it can only tell you that *something changed* after you
 already trusted it. A server engineered to be poisoned from day one passes
 this control cleanly, every time.
 
-## Tool-change risk scoring {#tool-change-risk}
+## Tool-change risk scoring <Badge type="tip" text="Cloud" /> {#tool-change-risk}
 
 TOFU says a server's tools changed; the registry says how much that change
 matters. Each proxy reports the tools a server declares — names,

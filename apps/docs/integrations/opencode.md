@@ -55,12 +55,12 @@ Intutic does not write your provider settings — `opencode.json` is your file, 
 
 ## What gets written
 
-- **Rules file:** `AGENTS.md` — governance text, formatted the same `---`-separated way as `.cursorrules`/`CLAUDE.md`/`.windsurfrules`. Written only when the workspace has SOPs.
+- **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, written when at least one SOP targets OpenCode or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Once connect creates `AGENTS.md` in a workspace that only had a `CLAUDE.md`, OpenCode reads `AGENTS.md` in its place.
 - **Plugin:** `.opencode/plugins/intutic-governance.js` and `.opencode/plugins/intutic-governance/index.js` — the gate, written twice with identical bytes because the two OpenCode lines discover local plugins differently: 1.x globs files in `.opencode/plugins/`, 2.x reads `<name>/index.js` sub-directories, and each ignores the other's layout. An ES module with the shared gate body embedded; a `tool.execute.before` hook for 1.x and a `tool` `execute.before` hook for 2.x in the same module. Written atomically; repeated syncs replace, never stack.
 - **MCP servers:** the `mcp` block of `opencode.json` (project) and `~/.config/opencode/opencode.json` (global) — each server is fronted by the MCP governance proxy. Every other key is left as it was. See [MCP servers](#mcp-servers).
 - **Not written:** the rest of `opencode.json` (egress and the optional static `permission` map are yours).
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness opencode`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `AGENTS.md` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic connect` writes here, run `intutic disconnect --harness opencode`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (blocking)
 
@@ -94,7 +94,7 @@ OpenCode names an MCP tool `<server>_<tool>`, with anything outside `A-Z a-z 0-9
 | Property | Value |
 |----------|-------|
 | Harness type | `opencode` |
-| Config file | `AGENTS.md` |
+| Rules file | `AGENTS.md` (a marked section) |
 | Plugin files | `.opencode/plugins/intutic-governance.js` (1.x layout), `.opencode/plugins/intutic-governance/index.js` (2.x layout) — same bytes |
 | MCP servers | `mcp` block of `opencode.json` (project) and `~/.config/opencode/opencode.json`, proxy-wrapped |
 | Detection | `.opencode/`, `opencode.json{,c}` in the project; `$OPENCODE_CONFIG_DIR` or `~/.config/opencode/`; `opencode`/`opencode2` in `PATH` |

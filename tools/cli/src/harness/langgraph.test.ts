@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { langgraphAdapter } from './langgraph.js'
 import { ALL_ADAPTERS } from './detector.js'
-import { HARNESS_CONFIG_FILES } from './types.js'
+import { HARNESS_FILES } from '@intutic/sync-daemon'
 
 const PROXY_URL = 'http://127.0.0.1:4000/v1'
 
@@ -87,8 +87,8 @@ describe('langgraph adapter', () => {
       expect(ALL_ADAPTERS.some((a) => a.type === 'langgraph')).toBe(true)
     })
 
-    it('is registered in HARNESS_CONFIG_FILES with its config file', () => {
-      expect(HARNESS_CONFIG_FILES['langgraph']).toBe('.env.intutic')
+    it('is registered in HARNESS_FILES with its config file', () => {
+      expect(HARNESS_FILES['langgraph']).toBe('.env.intutic')
     })
   })
 })

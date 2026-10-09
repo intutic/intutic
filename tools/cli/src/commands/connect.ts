@@ -38,6 +38,7 @@ import { reportDeviceState } from '../lib/deviceReport.js'
 import { reportMachineInventory, shouldReportInventoryThisIteration } from '../lib/inventory.js'
 import { parseChecksums, verifyChecksum } from '../lib/binaryChecksum.js'
 import { newIso } from '@intutic/id'
+import { rulesFileOf } from '@intutic/shared-types'
 import type { SopFileHash, HarnessType, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
 import pc from 'picocolors'
 
@@ -115,6 +116,11 @@ function isPortInUse(port: number): Promise<boolean> {
  * rules file is written only when a rule set targets the harness, or on a
  * forced sync.
  *
+ * Harnesses that read the same file (Codex, Grok Build, OpenCode, Muse Code
+ * and others all read `AGENTS.md`) each get every rule set aimed at any of
+ * them that is configured here: one section, the same for every writer, so
+ * the last writer no longer replaces the others' rules.
+ *
  * @returns how many rule sets were written into rules files.
  */
 export async function writeHarnessConfigs(
@@ -125,15 +131,21 @@ export async function writeHarnessConfigs(
   force: boolean,
 ): Promise<number> {
   let written = 0
+  const writtenFiles = new Set<string>()
   for (const harnessType of harnesses) {
     const adapter = getAdapter(harnessType)
     if (!adapter) continue
 
     await adapter.installGate?.(workspaceRoot, proxyUrl)
 
-    const targetSops = sops.filter((sop) => sop.harnessTargets.includes(harnessType as HarnessType))
+    const file = rulesFileOf(harnessType as HarnessType)
+    const readers = file === null ? [harnessType] : harnesses.filter((h) => rulesFileOf(h as HarnessType) === file)
+    const targetSops = sops.filter((sop) => sop.harnessTargets.some((t) => readers.includes(t)))
     if (targetSops.length === 0 && !force) continue
-    if (await adapter.writeConfig(workspaceRoot, targetSops, proxyUrl)) written += targetSops.length
+    if (!(await adapter.writeConfig(workspaceRoot, targetSops, proxyUrl))) continue
+    // A shared file counts once, however many of its readers wrote it.
+    if (file === null || !writtenFiles.has(file)) written += targetSops.length
+    if (file !== null) writtenFiles.add(file)
   }
   return written
 }
@@ -1303,9 +1315,10 @@ export async function runConnect(opts: {
       return
     }
 
-    // B. Handle governed harness file drift detection
+    // B. Handle governed harness file drift detection. By path, not
+    // basename: rules files sit in directories (`.cursor/rules/…`).
     const matchingHarness = safeConfig.harnesses.find(
-      (h) => getAdapter(h)?.configFileName === filename
+      (h) => getAdapter(h)?.configFileName === relativePath.split(node_path.sep).join('/')
     )
     if (!matchingHarness) return
 

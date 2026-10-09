@@ -2,8 +2,8 @@
  * grok.ts — xAI Grok Build adapter (binary `grok`, GA 2026-05, open-sourced
  * 2026-07-15).
  *
- * Detects the Grok Build CLI, writes AGENTS.md governance text (the same
- * cross-tool rules-file convention Codex/Amp read), and injects the Intutic
+ * Detects the Grok Build CLI, writes the rule sets into `AGENTS.md` through
+ * the shared writer (agentsMd.ts), and injects the Intutic
  * governance hook (`grokHooks.ts` — PreToolUse, no matcher, confirmed
  * `{"decision":"deny","reason":"..."}` stdout contract) plus the
  * `config.toml` `[model.*]` `base_url` merge.
@@ -18,20 +18,16 @@ import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { hashFile } from '../lib/hash.js'
-import { buildMarkdownContent } from './base.js'
 import { writeGrokHooks } from '@intutic/sync-daemon/harness/grokHooks'
-import { writeOwnedFile } from '@intutic/sync-daemon'
-
-const CONFIG_FILE = 'AGENTS.md'
+import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 
 export const grokAdapter: IHarnessAdapter = {
   type: HarnessType.GROK,
-  configFileName: CONFIG_FILE,
+  configFileName: AGENTS_MD,
 
   async detect(workspaceRoot: string): Promise<boolean> {
     // Workspace-local `.grok/` (project config/hooks dir) or AGENTS.md.
-    for (const marker of ['.grok', CONFIG_FILE]) {
+    for (const marker of ['.grok', AGENTS_MD]) {
       try { await access(join(workspaceRoot, marker)); return true } catch { /* fall through */ }
     }
     // `~/.grok` (user has Grok Build installed and has run it at least once).
@@ -53,16 +49,11 @@ export const grokAdapter: IHarnessAdapter = {
     await writeGrokHooks(workspaceRoot, proxyUrl, '')
   },
 
-  /** AGENTS.md — governance rules text, same markdown formatter every other
-   *  `---`-separated rules file in this codebase shares. */
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    const filePath = join(workspaceRoot, CONFIG_FILE)
-    const content = buildMarkdownContent(sops, proxyUrl)
-    await writeOwnedFile(filePath, workspaceRoot, content)
-    return filePath
+  writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    return writeAgentsMd(workspaceRoot, sops, proxyUrl)
   },
 
-  async readCurrentHash(workspaceRoot: string): Promise<string | null> {
-    try { return await hashFile(join(workspaceRoot, CONFIG_FILE)) } catch { return null }
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return agentsMdHash(workspaceRoot)
   },
 }

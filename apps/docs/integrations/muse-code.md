@@ -8,7 +8,7 @@ The `muse` binary could not be installed in the environment this integration was
 
 ## How it works
 
-Muse Code reads project rules from `AGENTS.md`, falling back to `CLAUDE.md` if `AGENTS.md` is absent — the shared markdown rules-file convention this product already reuses for every text-rules harness (the same `buildMarkdownContent` builder Claude Code's own `CLAUDE.md` adapter calls, so Muse does not grow a second rules format).
+Muse Code reads project rules from `AGENTS.md` once the workspace is trusted, falling back to `CLAUDE.md` when there is no `AGENTS.md`. Intutic writes the rule sets as a marked section of the workspace's `AGENTS.md` and keeps your own text in it. The section is shared with every other harness in the workspace that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Once connect creates `AGENTS.md` in a workspace that only had a `CLAUDE.md`, Muse Code reads `AGENTS.md` in its place.
 
 The governance-critical half — hook registration and MCP proxy-wrapping — is written by the sync daemon's `museHooks.ts`, the same split Goose's plugin installer uses. Hooks are registered at **two tiers**:
 
@@ -59,14 +59,14 @@ Muse exposes a `META_API_KEY` env var and a `--base-url` CLI flag for routing mo
 
 ## What gets written
 
-- **Rules file:** `AGENTS.md` — governance text, same shared builder every markdown-rules harness uses. Muse falls back to `CLAUDE.md` if `AGENTS.md` is absent from the project.
+- **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in `AGENTS.md`, written when at least one SOP targets Muse Code or another `AGENTS.md` reader in the workspace. The rest of the file is yours.
 - **Hook registration:** `<repo>/.muse/hooks.json` (project tier) and `~/.config/muse/intutic-managed-hooks.json` (managed tier, referenced via `managed_hooks_path` in `~/.config/muse/settings.json`). Both are assumed to share the same `{ hooks: { <Event>: [{ matcher, hooks: [{ type, command }] }] } }` shape `codexHooks.ts` established for Codex's `hooks.json` — the closest architectural analog, not a confirmed Muse-specific schema.
 - **Hook script:** `.intutic/hooks/muse-check.js` — the same shared gate evaluator (compiled protection floor + policy snapshot + ` WHERE `/argPattern rules) every other JavaScript-family harness in this product runs, registered for both `PreToolUse` and `PermissionRequest`.
 - **`~/.config/muse/settings.json`:** narrow merge-write — only `managed_hooks_path` is set/updated; `schema_version` (defaulted to `1` if the file is new) and everything else (`mcp_servers`, any user-set key) is preserved.
 - **MCP servers:** entries under `mcp_servers` in `settings.json` (both `stdio` and `streamable_http` transports) are proxy-wrapped the same way every other JSON-map harness's servers are — though the `streamable_http` entry shape itself is an assumption; see the callout below.
 - **Skills:** `~/.agents/skills` is already covered by this product's existing skill-scanning feature — nothing Muse-specific was needed there.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness muse-code`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `AGENTS.md` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic connect` writes here, run `intutic disconnect --harness muse-code`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (blocking, but the block contract is ASSUMED)
 
@@ -88,7 +88,7 @@ Each is a small, isolated edit in `museHooks.ts`/`mcpAutoWrite.ts` once a real i
 | Property | Value |
 |----------|-------|
 | Harness type | `muse-code` |
-| Config file | `AGENTS.md` (falls back from/to `CLAUDE.md`) |
+| Rules file | `AGENTS.md` (a marked section) |
 | Hook files | `<repo>/.muse/hooks.json`, `~/.config/muse/intutic-managed-hooks.json`, `~/.config/muse/settings.json` (`managed_hooks_path` merge), `.intutic/hooks/muse-check.js` |
 | Detection | `.muse/` or `muse` in `PATH`, or `~/.config/muse/settings.json` present |
 | Format | Markdown (rules), JSON (hooks/settings) |

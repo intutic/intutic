@@ -4,6 +4,11 @@
  * Detects Pi presence and invokes the sync-daemon hooks compiler
  * to inject Intutic pre-tool use gates.
  *
+ * Pi loads `AGENTS.md` from its agent directory and from every directory
+ * between where it runs and the filesystem root, so the rule sets go into the
+ * workspace's `AGENTS.md` through the shared writer (agentsMd.ts;
+ * https://github.com/earendil-works/pi/blob/6fb2e7815167e6b19006fc526d1a5d0f5f998787/packages/coding-agent/docs/configuration.md).
+ *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
  */
@@ -13,20 +18,21 @@ import { access } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
+import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { hashFile } from '../lib/hash.js'
 import { loadCredentials } from '../config/store.js'
+import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 import { writePiHooks } from '@intutic/sync-daemon'
 
-const CONFIG_FILE = '.pi/hooks.json'
+const DETECT_FILE = '.pi/hooks.json'
 
 export const piAdapter: IHarnessAdapter = {
   type: HarnessType.PI,
-  configFileName: CONFIG_FILE,
+  configFileName: AGENTS_MD,
 
   async detect(workspaceRoot: string): Promise<boolean> {
     const globalPi = join(homedir(), '.pi')
-    const localPi = join(workspaceRoot, CONFIG_FILE)
+    const localPi = join(workspaceRoot, DETECT_FILE)
     try {
       if (existsSync(globalPi)) return true
       await access(localPi)
@@ -41,16 +47,11 @@ export const piAdapter: IHarnessAdapter = {
     await writePiHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
   },
 
-  /** No rules file: the gate is this harness's governance. */
-  async writeConfig(): Promise<string | null> {
-    return null
+  writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    return writeAgentsMd(workspaceRoot, sops, proxyUrl)
   },
 
-  async readCurrentHash(workspaceRoot: string): Promise<string | null> {
-    try {
-      return await hashFile(join(workspaceRoot, CONFIG_FILE))
-    } catch {
-      return null
-    }
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return agentsMdHash(workspaceRoot)
   },
 }

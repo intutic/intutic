@@ -19,7 +19,7 @@ describe('appliedSuggestions', () => {
 
   beforeEach(async () => {
     tmpDir = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-applied-sugg-'))
-    targetFile = node_path.join(tmpDir, '.cursorrules')
+    targetFile = node_path.join(tmpDir, '.goosehints')
     // Seed target file with baseline rules
     await node_fs.writeFile(targetFile, `# Rules\n\n## Governance\n- Do not run rm -rf.`)
   })
@@ -36,8 +36,8 @@ describe('appliedSuggestions', () => {
       // First application
       await applyConfigEdits(tmpDir, [{
         suggestionId: 'sko_1',
-        harnessType: 'cursor',
-        filePath: '.cursorrules',
+        harnessType: 'goose',
+        filePath: '.goosehints',
         edits,
       }])
 
@@ -47,8 +47,8 @@ describe('appliedSuggestions', () => {
       // Second application (duplicate)
       await applyConfigEdits(tmpDir, [{
         suggestionId: 'sko_1',
-        harnessType: 'cursor',
-        filePath: '.cursorrules',
+        harnessType: 'goose',
+        filePath: '.goosehints',
         edits,
       }])
 
@@ -70,8 +70,8 @@ describe('appliedSuggestions', () => {
 
       const results = await applyConfigEdits(tmpDir, [{
         suggestionId: 'sko_ok',
-        harnessType: 'cursor',
-        filePath: '.cursorrules',
+        harnessType: 'goose',
+        filePath: '.goosehints',
         edits,
       }])
 
@@ -94,8 +94,8 @@ describe('appliedSuggestions', () => {
 
       const results = await applyConfigEdits(tmpDir, [{
         suggestionId: 'sko_missing_replace',
-        harnessType: 'cursor',
-        filePath: '.cursorrules',
+        harnessType: 'goose',
+        filePath: '.goosehints',
         edits,
       }])
 
@@ -126,8 +126,8 @@ describe('appliedSuggestions', () => {
 
       const results = await applyConfigEdits(tmpDir, [{
         suggestionId: 'sko_missing_delete',
-        harnessType: 'cursor',
-        filePath: '.cursorrules',
+        harnessType: 'goose',
+        filePath: '.goosehints',
         edits,
       }])
 
@@ -157,8 +157,8 @@ describe('appliedSuggestions', () => {
 
       await applyConfigEdits(tmpDir, [{
         suggestionId: 'sko_2',
-        harnessType: 'cursor',
-        filePath: '.cursorrules',
+        harnessType: 'goose',
+        filePath: '.goosehints',
         edits,
       }])
 
@@ -180,8 +180,8 @@ describe('appliedSuggestions', () => {
 
       await applyConfigEdits(tmpDir, [{
         suggestionId: 'sko_3',
-        harnessType: 'cursor',
-        filePath: '.cursorrules',
+        harnessType: 'goose',
+        filePath: '.goosehints',
         edits,
       }])
 

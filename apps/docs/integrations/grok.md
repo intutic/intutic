@@ -4,7 +4,7 @@ Integrate Intutic governance with [Grok Build](https://x.ai/) — xAI's terminal
 
 ## How it works
 
-Grok Build reads project rules from `AGENTS.md` — the same cross-tool rules-file convention Codex/Amp read — and executes `PreToolUse` hooks registered as individual JSON files under `.grok/hooks/`. Intutic writes a blocking hook there, plus merges the local proxy `base_url` into `config.toml`'s `[model.*]` tables so LLM traffic routes through governance without needing an env var sourced first.
+Grok Build reads project rules from `AGENTS.md`, once the folder is trusted — the same cross-tool rules-file convention Codex/Amp read — and executes `PreToolUse` hooks registered as individual JSON files under `.grok/hooks/`. Intutic writes a blocking hook there, plus merges the local proxy `base_url` into `config.toml`'s `[model.*]` tables so LLM traffic routes through governance without needing an env var sourced first.
 
 ## Setup
 
@@ -39,13 +39,13 @@ intutic start
 
 ## What gets written
 
-- **Rules file:** `AGENTS.md` — governance text, formatted the same `---`-separated way as `.cursorrules`/`CLAUDE.md`/`.windsurfrules`.
+- **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, written when at least one SOP targets Grok Build or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)).
 - **Hook registration:** `.grok/hooks/intutic-governance.json` (project) and `~/.grok/hooks/intutic-governance.json` (user) — a `PreToolUse` entry with no matcher, so every tool call is evaluated. Grok Build's hook directory is a glob of independent files, so this write never touches any other hook file you may already have there.
 - **Hook script:** `.intutic/hooks/grok-check.js` — the same shared gate evaluator (compiled protection floor + policy snapshot + ` WHERE `/argPattern rules) every other JavaScript-family harness in this product runs.
 - **LLM egress:** `base_url` merged into every existing `[model.*]` table in `config.toml`, at both `<repo>/.grok/config.toml` and `~/.grok/config.toml`. `XAI_API_KEY` remains the auth mechanism — only the endpoint moves.
 - **MCP servers:** any `[mcp_servers.*]` table in either `config.toml` is proxy-wrapped the same way every other harness's `mcpServers` map is (stdio entries wrapped with `--`, remote/`url`-keyed entries bridged with `--remote-url`/`--remote-transport`).
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness grok`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `AGENTS.md` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic connect` writes here, run `intutic disconnect --harness grok`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (blocking)
 
@@ -75,7 +75,7 @@ gate says so.
 | Property | Value |
 |----------|-------|
 | Harness type | `grok` |
-| Config file | `AGENTS.md` |
+| Rules file | `AGENTS.md` (a marked section) |
 | Hook files | `.grok/hooks/intutic-governance.json`, `~/.grok/hooks/intutic-governance.json`, `.intutic/hooks/grok-check.js` |
 | Detection | `.grok/` or `AGENTS.md` in the project, `~/.grok/`, or `grok` in `PATH` |
 | Format | Markdown (rules), TOML (`config.toml`) |
