@@ -43,6 +43,13 @@ _PIECE = re.compile(
     "|(?P<backslash>\\\\+)"
     "|(?P<other>[/;&|])"
 )
+# A run of words that need no decision, each followed by one plain space:
+# ordinary characters, after at most a leading run of dashes. Consumed in one
+# match and split in C — most of a long command is this.
+_BULK = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\/;&|-]+|-+[^" + _SPACE_CHARS + "\\\\/;&|-]*) )+")
+_BULK_NO_COMMENT = re.compile("(?:(?:[^" + _SPACE_CHARS + "\\\\;&|-]+|-+[^" + _SPACE_CHARS + "\\\\;&|-]*) )+")
+# A run of line continuations or escaped spaces between words: one break.
+_CONTINUATIONS = re.compile("(?:\\\\[" + _SPACE_CHARS + "])+")
 # The same once no "*/" is left in the text: no "/*" can open a comment, so a
 # slash is an ordinary character.
 _PIECE_NO_COMMENT = re.compile(
@@ -84,8 +91,33 @@ def phrase_text(value):
     pend_sep = pend_nl = pend_eol = False
     close = -2 if "*/" in s else -1  # the next "*/" at or after the last search; -1 once none is left
     piece = _PIECE if close != -1 else _PIECE_NO_COMMENT
+    bulk = _BULK if close != -1 else _BULK_NO_COMMENT
     i = 0
     while i < n:
+        if start < 0:
+            m = bulk.match(s, i)
+            if m is not None:
+                words = m.group().split(" ")
+                words.pop()
+                rest = len(words) - 1
+                toks.extend(words)
+                sep.append(pend_sep)
+                sep.extend([True] * rest)
+                nl.append(pend_nl)
+                nl.extend([False] * rest)
+                eol.append(pend_eol)
+                eol.extend([False] * rest)
+                dash.extend([w.startswith("--") for w in words])
+                bar.extend([False] * (rest + 1))
+                pend_sep = True
+                pend_nl = pend_eol = False
+                i = m.end()
+                continue
+            m = _CONTINUATIONS.match(s, i)
+            if m is not None:
+                pend_sep = True
+                i = m.end()
+                continue
         m = piece.match(s, i)
         kind = m.lastgroup
         j = m.end()
@@ -151,6 +183,7 @@ def phrase_text(value):
                     close = s.find("*/", i + 2)
                     if close == -1:
                         piece = _PIECE_NO_COMMENT
+                        bulk = _BULK_NO_COMMENT
                 if close != -1:
                     word_break = True
                     nxt = close + 2
