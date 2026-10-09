@@ -13,8 +13,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { PII_DETECTORS, detectPii, resolvePiiActions } from '../dlpPii.js'
-import { configurePii, redactText, scanToolInput } from '../dlp.js'
+import { effectivePiiActions } from '@intutic/shared-types'
+import { PII_DETECTORS, detectPii, parseLocalPiiActions } from '../dlpPii.js'
+import { configurePii, redactText, scanToolInput, setWorkspacePii } from '../dlp.js'
 
 const PACKAGES = join(dirname(fileURLToPath(import.meta.url)), '../../..')
 
@@ -52,7 +53,7 @@ describe('the shared definition', () => {
   })
 
   it('defaults card, IBAN and SSN to redact, email and phone to off', () => {
-    expect(PII_DETECTORS.map((d) => [d.id, d.defaultAction])).toEqual([
+    expect(PII_DETECTORS.map((d) => [d.id, effectivePiiActions({}, null)[d.id]])).toEqual([
       ['pii.card', 'redact'],
       ['pii.iban', 'redact'],
       ['pii.ssn', 'redact'],
@@ -65,29 +66,28 @@ describe('the shared definition', () => {
 describe('INTUTIC_MCP_DLP_DETECTORS', () => {
   afterEach(() => {
     configurePii(undefined)
+    setWorkspacePii({ kind: 'none' })
   })
 
-  it('overrides the defaults detector by detector', () => {
-    const { actions, problems } = resolvePiiActions('{"pii.email":"redact","pii.card":"off"}')
+  it('names the detectors it sets, and only those', () => {
+    const { configured, problems } = parseLocalPiiActions('{"pii.email":"redact","pii.card":"off"}')
     expect(problems).toEqual([])
-    expect(actions.get('pii.email')).toBe('redact')
-    expect(actions.get('pii.card')).toBe('off')
-    expect(actions.get('pii.iban')).toBe('redact')
+    expect(configured).toEqual({ 'pii.email': 'redact', 'pii.card': 'off' })
   })
 
-  it('keeps the default for an unknown id or action and says so', () => {
-    const { actions, problems } = resolvePiiActions('{"pii.passport":"redact","pii.card":"warn"}')
-    expect(actions.get('pii.card')).toBe('redact')
+  it('leaves out an unknown id or action and says so', () => {
+    const { configured, problems } = parseLocalPiiActions('{"pii.passport":"redact","pii.card":"warn"}')
+    expect(configured).toEqual({})
     expect(problems).toHaveLength(2)
     expect(problems[0]).toContain('pii.passport')
     expect(problems[1]).toContain('warn')
   })
 
-  it('keeps every default when the value is not a JSON object', () => {
+  it('sets nothing when the value is not a JSON object', () => {
     for (const raw of ['not json', '["pii.card"]']) {
-      const { actions, problems } = resolvePiiActions(raw)
+      const { configured, problems } = parseLocalPiiActions(raw)
       expect(problems).toHaveLength(1)
-      expect([...actions.values()]).toEqual(['redact', 'redact', 'redact', 'off', 'off'])
+      expect(configured).toEqual({})
     }
   })
 
@@ -97,6 +97,18 @@ describe('INTUTIC_MCP_DLP_DETECTORS', () => {
     configurePii('{"pii.email":"redact"}')
     expect(scanToolInput({ to: address }).findings).toEqual([{ pattern: 'pii.email', description: 'Email address' }])
     expect(redactText(`write to ${address}`).redacted).toBe('write to [REDACTED_PII]')
+  })
+
+  it("only tightens the workspace's setting, in both directions", () => {
+    const address = ['jane.doe', 'corp.io'].join('@')
+    configurePii('{"pii.email":"off","pii.card":"off"}')
+    setWorkspacePii({ kind: 'set', actions: { 'pii.email': 'redact' } })
+    expect(scanToolInput({ to: address }).hasFinding).toBe(true)
+    expect(redactText(`write to ${address}`).redacted).toBe('write to [REDACTED_PII]')
+    expect(scanToolInput({ note: `refund ${visaTestPan()}` }).hasFinding, 'a detector the workspace leaves out').toBe(false)
+
+    setWorkspacePii({ kind: 'unreadable', reason: 'test' })
+    expect(scanToolInput({ to: address }).hasFinding, 'unreadable scans with the local config').toBe(false)
   })
 })
 

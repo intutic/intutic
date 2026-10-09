@@ -124,7 +124,9 @@ variants:
 9. **Call budgets** (`mcpBudgets`) — counts the call in Valkey against every budget that covers it, and refuses it when one is used up. Last, so a call another step refuses spends nothing. See [Call budgets](/guide/mcp-governance#call-budgets).
 
 The DLP scan also runs the enabled [PII detectors](/guide/policies#pii-detectors):
-card numbers, IBANs and SSNs by default. Arguments are never rewritten, so a
+card numbers, IBANs and SSNs by default, or the actions the workspace's
+[`piiDetectors`](/guide/policies#setting-detector-actions-for-a-workspace)
+setting gives them. Arguments are never rewritten, so a
 match blocks the call even when its detector is set to `redact`. The LLM proxy
 and the hook gates treat the same value differently; see
 [What each surface does with a match](/guide/policies#what-each-surface-does-with-a-match).

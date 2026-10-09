@@ -682,11 +682,14 @@ export {
   PII_DEFINITION,
   PII_DETECTOR_IDS,
   PiiDetectorSettingsSchema,
+  effectivePiiActions,
+  parseWorkspacePiiDetectors,
   type PiiAction,
   type PiiDefinition,
   type PiiDetectorDefinition,
   type PiiDetectorId,
   type PiiDetectorSettings,
+  type WorkspacePiiDetectors,
 } from './piiDetectors.js'
 
 export {

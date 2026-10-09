@@ -1,0 +1,111 @@
+{
+  "$comment": "How a workspace's piiDetectors setting and a machine's own detector config combine. Run by packages/proxy/src/dlp/workspace.rs (the LLM proxy) and packages/shared-types/src/__tests__/piiDetectors.test.ts (parseWorkspacePiiDetectors and effectivePiiActions, which the MCP proxy scans with). `local` is the detectors the machine's config names. `field` is the control plane's piiDetectors value; a case without it is a control plane that sends none. `actions` is every detector's resulting action, defaults included; `unreadable: true` means the field cannot be used and the proxy's fail mode applies. Edit the cases, never one implementation's expectations.",
+  "cases": [
+    {
+      "name": "no field, no local config: the defaults",
+      "local": {},
+      "actions": { "pii.card": "redact", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "off", "pii.phone": "off" }
+    },
+    {
+      "name": "no field: the local config alone",
+      "local": { "pii.card": "off", "pii.phone": "block" },
+      "actions": { "pii.card": "off", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "off", "pii.phone": "block" }
+    },
+    {
+      "name": "an empty setting is no setting",
+      "local": { "pii.card": "off" },
+      "field": {},
+      "actions": { "pii.card": "off", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "off", "pii.phone": "off" }
+    },
+    {
+      "name": "the workspace action applies where the machine names nothing",
+      "local": {},
+      "field": { "pii.card": "block", "pii.email": "redact" },
+      "actions": { "pii.card": "block", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "redact", "pii.phone": "off" }
+    },
+    {
+      "name": "the workspace can switch a default-on detector off",
+      "local": {},
+      "field": { "pii.ssn": "off" },
+      "actions": { "pii.card": "redact", "pii.iban": "redact", "pii.ssn": "off", "pii.email": "off", "pii.phone": "off" }
+    },
+    {
+      "name": "the machine tightens redact to block",
+      "local": { "pii.card": "block" },
+      "field": { "pii.card": "redact" },
+      "actions": { "pii.card": "block", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "off", "pii.phone": "off" }
+    },
+    {
+      "name": "the machine tightens off to redact",
+      "local": { "pii.email": "redact" },
+      "field": { "pii.email": "off" },
+      "actions": { "pii.card": "redact", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "redact", "pii.phone": "off" }
+    },
+    {
+      "name": "the machine cannot loosen block to off",
+      "local": { "pii.card": "off" },
+      "field": { "pii.card": "block" },
+      "actions": { "pii.card": "block", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "off", "pii.phone": "off" }
+    },
+    {
+      "name": "the machine cannot loosen redact to off",
+      "local": { "pii.iban": "off" },
+      "field": { "pii.iban": "redact" },
+      "actions": { "pii.card": "redact", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "off", "pii.phone": "off" }
+    },
+    {
+      "name": "the same action on both sides",
+      "local": { "pii.phone": "redact" },
+      "field": { "pii.phone": "redact" },
+      "actions": { "pii.card": "redact", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "off", "pii.phone": "redact" }
+    },
+    {
+      "name": "a detector the workspace leaves out keeps the machine's action, looser or not",
+      "local": { "pii.card": "off", "pii.phone": "block" },
+      "field": { "pii.email": "redact" },
+      "actions": { "pii.card": "off", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "redact", "pii.phone": "block" }
+    },
+    {
+      "name": "each detector decided on its own",
+      "local": { "pii.card": "off", "pii.iban": "block", "pii.email": "redact" },
+      "field": { "pii.card": "redact", "pii.iban": "redact", "pii.email": "block", "pii.ssn": "off" },
+      "actions": { "pii.card": "redact", "pii.iban": "block", "pii.ssn": "off", "pii.email": "block", "pii.phone": "off" }
+    },
+    {
+      "name": "an id this build does not know is left out",
+      "local": {},
+      "field": { "pii.passport": "block", "pii.card": "block" },
+      "actions": { "pii.card": "block", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "off", "pii.phone": "off" }
+    },
+    {
+      "name": "only unknown ids is no setting",
+      "local": { "pii.card": "off" },
+      "field": { "pii.passport": "block" },
+      "actions": { "pii.card": "off", "pii.iban": "redact", "pii.ssn": "redact", "pii.email": "off", "pii.phone": "off" }
+    },
+    {
+      "name": "null: the control plane could not read the setting",
+      "local": {},
+      "field": null,
+      "unreadable": true
+    },
+    {
+      "name": "an action that does not exist",
+      "local": {},
+      "field": { "pii.card": "warn" },
+      "unreadable": true
+    },
+    {
+      "name": "an action that is not a string",
+      "local": {},
+      "field": { "pii.card": 2 },
+      "unreadable": true
+    },
+    {
+      "name": "not an object",
+      "local": {},
+      "field": ["pii.card"],
+      "unreadable": true
+    }
+  ]
+}

@@ -26,14 +26,14 @@
  * @module
  */
 
-import { PII_DEFINITION } from '@intutic/shared-types'
-import type { PiiAction, PiiDetectorDefinition } from '@intutic/shared-types'
+import { PII_DEFINITION, PII_DETECTOR_IDS } from '@intutic/shared-types'
+import type { PiiDetectorDefinition, PiiDetectorId, PiiDetectorSettings } from '@intutic/shared-types'
 
 export interface PiiDetector {
-  id: string
+  /** One of `PII_DETECTOR_IDS`, which shared-types holds equal to the definition's. */
+  id: PiiDetectorId
   category: string
   description: string
-  defaultAction: PiiAction
   /** Global flag: matched from `lastIndex`, which `findPii` sets. */
   regex: RegExp
   numeric: boolean
@@ -153,10 +153,9 @@ export const PII_DETECTORS: readonly PiiDetector[] = PII_DEFINITION.detectors.ma
   const validate = VALIDATORS[d.validator]
   if (!validate) throw new Error(`pii detector ${d.id} names unknown validator ${d.validator}`)
   return {
-    id: d.id,
+    id: d.id as PiiDetectorId,
     category: d.category,
     description: d.description,
-    defaultAction: d.default_action,
     regex: new RegExp(d.regex, 'g'),
     numeric: d.boundary === 'numeric',
     validate,
@@ -217,37 +216,38 @@ export function detectPii(text: string): Array<{ id: string; start: number; end:
 }
 
 /**
- * Resolve each detector's action from an `INTUTIC_MCP_DLP_DETECTORS` value —
- * a JSON object of detector id → `off` | `redact` | `block` — over the
- * defaults. Never throws, like the other `INTUTIC_MCP_*` JSON settings: an
- * unparseable value, an unknown id or an unknown action is reported in
- * `problems` and that entry keeps its default, which for card, IBAN and SSN
- * is on.
+ * The detectors an `INTUTIC_MCP_DLP_DETECTORS` value names — a JSON object of
+ * detector id → `off` | `redact` | `block` — with their actions. Detectors it
+ * leaves out are not listed: they keep their defaults, or the workspace's
+ * action (`effectivePiiActions` in `@intutic/shared-types`). Never throws,
+ * like the other `INTUTIC_MCP_*` JSON settings: an unparseable value, an
+ * unknown id or an unknown action is reported in `problems` and that entry is
+ * left out, so it keeps its default, which for card, IBAN and SSN is on.
  */
-export function resolvePiiActions(raw: string | undefined): {
-  actions: Map<string, PiiAction>
+export function parseLocalPiiActions(raw: string | undefined): {
+  configured: PiiDetectorSettings
   problems: string[]
 } {
-  const actions = new Map<string, PiiAction>(PII_DETECTORS.map((d) => [d.id, d.defaultAction]))
-  const problems: string[] = []
-  if (!raw) return { actions, problems }
+  const configured: PiiDetectorSettings = {}
+  if (!raw) return { configured, problems: [] }
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
-    return { actions, problems: ['INTUTIC_MCP_DLP_DETECTORS is not valid JSON; using the defaults'] }
+    return { configured, problems: ['INTUTIC_MCP_DLP_DETECTORS is not valid JSON; using the defaults'] }
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { actions, problems: ['INTUTIC_MCP_DLP_DETECTORS is not a JSON object; using the defaults'] }
+    return { configured, problems: ['INTUTIC_MCP_DLP_DETECTORS is not a JSON object; using the defaults'] }
   }
+  const problems: string[] = []
   for (const [id, action] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!actions.has(id)) {
-      problems.push(`INTUTIC_MCP_DLP_DETECTORS names unknown detector ${id}; known: ${[...actions.keys()].join(', ')}`)
+    if (!(PII_DETECTOR_IDS as readonly string[]).includes(id)) {
+      problems.push(`INTUTIC_MCP_DLP_DETECTORS names unknown detector ${id}; known: ${PII_DETECTOR_IDS.join(', ')}`)
     } else if (action !== 'off' && action !== 'redact' && action !== 'block') {
       problems.push(`INTUTIC_MCP_DLP_DETECTORS sets ${id} to ${String(action)}; only off, redact and block exist`)
     } else {
-      actions.set(id, action)
+      configured[id as PiiDetectorId] = action
     }
   }
-  return { actions, problems }
+  return { configured, problems }
 }

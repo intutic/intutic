@@ -86,12 +86,13 @@ An unknown id or action stops the proxy at startup with an error naming it.
 Findings carry the detector id as their pattern name and `pii` as their
 category, so redactions read `[REDACTED_PII]` and SOP `pii()` taint rules see
 them. The [MCP governance proxy](/guide/mcp-governance#configuration-reference) runs the
-same detectors with the same defaults, set by `INTUTIC_MCP_DLP_DETECTORS`.
+same detectors with the same defaults; on its machine, `INTUTIC_MCP_DLP_DETECTORS` sets
+their actions the way `dlp.detectors` does for the LLM proxy.
 
 #### Setting detector actions for a workspace <Badge type="tip" text="Cloud" />
 
-A connected workspace can set the actions centrally, so every developer's proxy
-handles PII the same way. The workspace setting `piiDetectors` gives an action
+A connected workspace can set the actions centrally, so every developer's proxies
+handle PII the same way. The workspace setting `piiDetectors` gives an action
 to each detector it names; an owner or admin sets it on **Settings › Security ›
 PII Detectors**, with `intutic settings set`, or with Terraform:
 
@@ -101,11 +102,13 @@ intutic settings set piiDetectors null   # stop governing the detectors centrall
 ```
 
 The LLM proxy reads the setting with each virtual key it serves and applies it
-to that key's requests and responses. The workspace's action is the baseline,
-and a machine's own `dlp.detectors` may make it stricter (`off` → `redact` →
-`block`) but never looser:
+to that key's requests and responses. The MCP governance proxy reads it with
+the rest of the workspace's policy and applies it to tool-call arguments and
+results. In both, the workspace's action is the baseline, and the machine's own
+config — `dlp.detectors` for the LLM proxy, `INTUTIC_MCP_DLP_DETECTORS` for the
+MCP proxy — may make it stricter (`off` → `redact` → `block`) but never looser:
 
-| Workspace | Machine's `dlp.detectors` | Action |
+| Workspace | Machine's config | Action |
 |---|---|---|
 | `pii.card: redact` | not set | `redact` |
 | `pii.card: redact` | `pii.card: block` | `block` |
@@ -115,20 +118,28 @@ and a machine's own `dlp.detectors` may make it stricter (`off` → `redact` →
 | not set | not set | the detector's default |
 
 A detector the workspace leaves out is governed by each machine's config, as it
-is on a proxy with no workspace. A change reaches every proxy within 30 seconds.
-If the proxy cannot read the setting, it follows its
+is on a proxy with no workspace. A change reaches every LLM proxy within 30
+seconds, and every MCP proxy with the rest of its policy: within a minute, or
+up to five minutes for a proxy in `daemon` mode, whose MCP daemon caches the
+policy.
+
+If the LLM proxy cannot read the setting, it follows its
 [fail mode](/concepts/circuit-breaker#proxy-side-fail-mode): with
 `fail_closed: true`, the default, it refuses the request; with
 `fail_closed: false`, or under a global break-glass override, it scans with the
-machine's config alone. The setting is
-available on every plan. It applies to the LLM proxy; the MCP governance proxy
-keeps reading `INTUTIC_MCP_DLP_DETECTORS`.
+machine's config alone. The MCP proxy keeps the setting it last loaded while
+the control plane is unreachable, as it keeps the rest of its policy. When the
+control plane answers that it cannot read the stored setting, the MCP proxy
+follows `mcpProxyFailBehavior`, or `INTUTIC_MCP_FAIL_OPEN` for a workspace that
+never chose: fail-closed refuses the tool call (`GOVERNANCE_UNAVAILABLE`),
+fail-open scans with `INTUTIC_MCP_DLP_DETECTORS` alone. The setting is
+available on every plan.
 
 #### What each surface does with a match
 
 The detectors and their defaults are one definition, shared by the two proxies, and both run
-on your machines; a workspace setting, when there is one, only changes the LLM proxy's actions.
-What a match does depends on what the surface can change:
+on your machines with the workspace's setting, when there is one. What a match does depends on
+what the surface can change:
 
 | Surface | What it scans | An enabled detector's match |
 |---|---|---|

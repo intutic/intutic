@@ -11,7 +11,12 @@ import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
 import { HttpStatusError, httpRequest } from './httpJson.js'
 import type { ResolvedPolicy } from './daemon/policyCache.js'
-import { parseMcpBudgetPolicy, type McpBudgetPolicy } from '@intutic/shared-types'
+import {
+  parseMcpBudgetPolicy,
+  parseWorkspacePiiDetectors,
+  type McpBudgetPolicy,
+  type WorkspacePiiDetectors,
+} from '@intutic/shared-types'
 
 const log = createLogger('mcp-proxy-policy')
 
@@ -238,6 +243,13 @@ export class PolicyClient {
   private ssoGroupPolicy: SsoGroupPolicy | undefined
   /** The workspace's MCP call budgets (`mcpBudgets`); no budgets until a policy says otherwise. */
   private mcpBudgets: McpBudgetPolicy = parseMcpBudgetPolicy(undefined)
+  /**
+   * The workspace's `piiDetectors` setting, read as the LLM proxy reads it
+   * from key-context (`parseWorkspacePiiDetectors`). `none` until a policy
+   * carries one. `unreadable` when the control plane says it could not read
+   * the stored value; the interceptor applies the fail setting to that.
+   */
+  private piiDetectors: WorkspacePiiDetectors = { kind: 'none' }
   /** The first refresh `start()` kicks off, so the first tool call can wait for it. */
   private firstRefresh: Promise<void> | null = null
   private lastRefreshAttemptAt = 0
@@ -325,6 +337,11 @@ export class PolicyClient {
   /** The workspace's MCP call budgets; an empty list means no limits. */
   getMcpBudgets(): McpBudgetPolicy {
     return this.mcpBudgets
+  }
+
+  /** The workspace's PII detector actions (see the field). */
+  getPiiDetectors(): WorkspacePiiDetectors {
+    return this.piiDetectors
   }
 
   /** The workspace's fail-open choice, or `undefined` to fall back to the local setting (see the field). */
@@ -423,6 +440,10 @@ export class PolicyClient {
     this.mcpBudgets = parseMcpBudgetPolicy(source['mcpBudgets'])
     const failBehavior = source['mcpProxyFailBehavior']
     this.failOpen = failBehavior === 'open' ? true : failBehavior === 'closed' ? false : undefined
+    this.piiDetectors = parseWorkspacePiiDetectors(source['piiDetectors'])
+    if (this.piiDetectors.kind === 'unreadable') {
+      log.warn({ action: 'pii_detectors_unreadable', reason: this.piiDetectors.reason }, 'Workspace PII detector actions unreadable')
+    }
   }
 
   /** Find the first matching rule for a given tool name + serialized args. */

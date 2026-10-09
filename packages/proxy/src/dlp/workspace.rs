@@ -122,6 +122,54 @@ mod tests {
         );
     }
 
+    /// `packages/shared-types/fixtures/pii-precedence-vectors.json`, which the
+    /// MCP proxy's reading of the same setting runs too
+    /// (`parseWorkspacePiiDetectors` and `effectivePiiActions` in
+    /// shared-types), so the two proxies cannot combine a workspace's setting
+    /// and a machine's config differently.
+    #[test]
+    fn precedence_vectors_shared_with_the_mcp_proxy() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../shared-types/fixtures/pii-precedence-vectors.json");
+        let body = std::fs::read_to_string(&path).expect("pii-precedence-vectors.json is readable");
+        let file: Value = serde_json::from_str(&body).expect("pii-precedence-vectors.json parses");
+        let cases = file["cases"].as_array().expect("cases");
+        assert!(cases.len() >= 15, "the vector file lost its cases");
+        let mut failures = Vec::new();
+        for case in cases {
+            let name = case["name"].as_str().unwrap_or("?");
+            let local: BTreeMap<String, String> =
+                serde_json::from_value(case["local"].clone()).expect("local is id -> action");
+            let mut body = serde_json::json!({"workspaceId": "ws"});
+            if let Some(field) = case.get("field") {
+                body["piiDetectors"] = field.clone();
+            }
+            let got = parse_key_context(&body).and_then(|workspace| match workspace {
+                None => super::super::build_pii_patterns(&local),
+                Some(ws) => super::super::effective_pii_actions(&local, &ws)
+                    .and_then(|eff| super::super::build_pii_patterns(&eff)),
+            });
+            let want_unreadable = case["unreadable"].as_bool().unwrap_or(false);
+            match (got, want_unreadable) {
+                (Err(_), true) => {}
+                (Ok(patterns), false) => {
+                    let got: BTreeMap<String, String> =
+                        super::super::action_table(&patterns).into_iter().collect();
+                    let want: BTreeMap<String, String> =
+                        serde_json::from_value(case["actions"].clone()).expect("actions");
+                    if got != want {
+                        failures.push(format!("{name}: want {want:?}, got {got:?}"));
+                    }
+                }
+                (got, _) => failures.push(format!(
+                    "{name}: want unreadable={want_unreadable}, got {:?}",
+                    got.map(|p| super::super::action_table(&p))
+                )),
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
     mod fetch {
         use super::super::*;
         use wiremock::matchers::{method, path};

@@ -6,15 +6,25 @@
  *
  * PII is the checksum-validated detectors in `dlpPii.ts`, shared with the
  * Rust proxy: card numbers, IBANs and SSNs on by default, email addresses and
- * phone numbers off. `INTUTIC_MCP_DLP_DETECTORS` sets each one's action.
+ * phone numbers off. The workspace's `piiDetectors` setting sets the actions
+ * it names, and `INTUTIC_MCP_DLP_DETECTORS` sets this machine's, which may
+ * only tighten the workspace's (see `setWorkspacePii`).
  * Arguments are never rewritten, so any enabled detector — `redact` or
  * `block` — blocks the call on the way in; on results both redact.
  *
  * @module
  */
 
-import { DESTRUCTIVE_SQL_STATEMENTS, hasPhrase, phraseText, type PhraseText } from '@intutic/shared-types'
-import { PII_DETECTORS, findPii, resolvePiiActions } from './dlpPii.js'
+import {
+  DESTRUCTIVE_SQL_STATEMENTS,
+  effectivePiiActions,
+  hasPhrase,
+  phraseText,
+  type PhraseText,
+  type PiiDetectorSettings,
+  type WorkspacePiiDetectors,
+} from '@intutic/shared-types'
+import { PII_DETECTORS, findPii, parseLocalPiiActions } from './dlpPii.js'
 import type { PiiDetector } from './dlpPii.js'
 import { createStderrLogger } from './stderrLog.js'
 
@@ -118,7 +128,16 @@ function allPatterns(): DlpPattern[] {
   return dynamicPatterns.length ? [...DLP_PATTERNS, ...dynamicPatterns] : DLP_PATTERNS
 }
 
+/** The detectors `INTUTIC_MCP_DLP_DETECTORS` names, with their actions. */
+let localPii: PiiDetectorSettings = {}
+/** The workspace's `piiDetectors` setting, when the last policy carried one. */
+let workspacePii: PiiDetectorSettings | null = null
 let enabledPii: readonly PiiDetector[] = []
+
+function rebuildPii(): void {
+  const actions = effectivePiiActions(localPii, workspacePii)
+  enabledPii = PII_DETECTORS.filter((d) => actions[d.id] !== 'off')
+}
 
 /**
  * Set the PII detectors' actions from an `INTUTIC_MCP_DLP_DETECTORS` value.
@@ -126,13 +145,28 @@ let enabledPii: readonly PiiDetector[] = []
  * problems it ignored, which are also logged.
  */
 export function configurePii(raw: string | undefined): string[] {
-  const { actions, problems } = resolvePiiActions(raw)
-  enabledPii = PII_DETECTORS.filter((d) => actions.get(d.id) !== 'off')
+  const { configured, problems } = parseLocalPiiActions(raw)
+  localPii = configured
+  rebuildPii()
   if (problems.length) createStderrLogger('mcp-proxy-dlp').warn({ problems }, 'DLP: PII detector settings ignored')
   return problems
 }
 
 configurePii(process.env['INTUTIC_MCP_DLP_DETECTORS'])
+
+/**
+ * Apply the workspace's `piiDetectors` setting as the policy last delivered
+ * it (`PolicyClient.getPiiDetectors`): the baseline for every detector it
+ * names, which `INTUTIC_MCP_DLP_DETECTORS` may only tighten — the rule the
+ * LLM proxy applies (`effectivePiiActions`). Called before each scan in both
+ * directions, like `setDynamicPatterns`. An unreadable setting scans with
+ * the local config alone; refusing the call instead under fail-closed is the
+ * interceptor's decision, not this scanner's.
+ */
+export function setWorkspacePii(setting: WorkspacePiiDetectors): void {
+  workspacePii = setting.kind === 'set' ? setting.actions : null
+  rebuildPii()
+}
 
 /**
  * Redact every redactable-pattern match in a string.

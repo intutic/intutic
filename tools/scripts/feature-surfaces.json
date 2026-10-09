@@ -737,7 +737,9 @@
         "api": [
           { "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" },
           { "file": "services/control-plane/src/routes/workspace.ts", "contains": "piiDetectors: PiiDetectorSettingsSchema" },
-          { "file": "services/control-plane/src/routes/auth.ts", "contains": "piiDetectors: await keyPiiDetectors(c, auth)" }
+          { "file": "services/control-plane/src/routes/auth.ts", "contains": "piiDetectors: await keyPiiDetectors(c, auth)" },
+          { "file": "services/control-plane/src/routes/sops.ts", "contains": "piiDetectors: curation.piiDetectors" },
+          { "file": "services/control-plane/src/routes/evaluate.ts", "contains": "piiDetectors: curation.piiDetectors" }
         ],
         "dashboard": [{ "file": "apps/dashboard/src/components/settings/PiiDetectorsPanel.tsx", "contains": "piiDetectors" }],
         "cli": [
@@ -760,7 +762,10 @@
           { "file": "packages/shared-types/fixtures/pii-detector-vectors.json" },
           { "file": "packages/proxy/src/dlp/pii.rs" },
           { "file": "packages/proxy/src/dlp/workspace.rs" },
-          { "file": "packages/mcp-proxy/src/dlp.ts", "contains": "INTUTIC_MCP_DLP_DETECTORS" }
+          { "file": "packages/shared-types/fixtures/pii-precedence-vectors.json" },
+          { "file": "packages/mcp-proxy/src/dlp.ts", "contains": "INTUTIC_MCP_DLP_DETECTORS" },
+          { "file": "packages/mcp-proxy/src/policy.ts", "contains": "parseWorkspacePiiDetectors(source['piiDetectors'])" },
+          { "file": "packages/mcp-proxy/src/interceptor.ts", "contains": "block('GOVERNANCE_UNAVAILABLE', 'piiDetectors', reason)" }
         ]
       }
     },

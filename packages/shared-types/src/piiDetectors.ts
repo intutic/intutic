@@ -23,14 +23,85 @@ export type PiiDetectorId = (typeof PII_DETECTOR_IDS)[number]
 
 /**
  * The workspace setting `piiDetectors`: an action for each detector the
- * workspace governs centrally. The LLM proxy reads it from
- * `/api/v1/auth/key-context` and uses it as the baseline for the
- * workspace's requests; a machine's own `dlp.detectors` config may only
- * tighten it (`packages/proxy/src/dlp.rs`). A detector left out keeps each
- * machine's action. Unknown ids and actions are refused.
+ * workspace governs centrally. Both proxies use it as the baseline for the
+ * workspace's traffic, and a machine's own config may only tighten it
+ * ({@link effectivePiiActions}). A detector left out keeps each machine's
+ * action. Unknown ids and actions are refused.
  */
 export const PiiDetectorSettingsSchema = z.record(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
 export type PiiDetectorSettings = Partial<Record<PiiDetectorId, PiiAction>>
+
+/**
+ * The `piiDetectors` field of a control-plane answer, as a proxy reads it.
+ * The LLM proxy gets it from `/api/v1/auth/key-context`, the MCP proxy from
+ * `/api/v1/sop/rules` or `/api/v1/policy/resolve`; all three send the same
+ * value. `unreadable` goes to the proxy's fail mode.
+ */
+export type WorkspacePiiDetectors =
+  | { kind: 'none' }
+  | { kind: 'set'; actions: PiiDetectorSettings }
+  | { kind: 'unreadable'; reason: string }
+
+const isPiiAction = (v: unknown): v is PiiAction => (PII_ACTIONS as readonly unknown[]).includes(v)
+const isPiiDetectorId = (v: string): v is PiiDetectorId => (PII_DETECTOR_IDS as readonly string[]).includes(v)
+
+/**
+ * Reads the field. Absent is a control plane older than the setting, and
+ * `{}` a workspace that sets none: both `none`. `null` is the control plane
+ * saying it could not read the stored setting. An id this build does not
+ * know is left out, since a newer control plane can name a detector an older
+ * proxy cannot run; an action that does not exist makes the whole field
+ * unreadable. The Rust proxy reads it the same way (`dlp/workspace.rs`), and
+ * `fixtures/pii-precedence-vectors.json` holds the two together.
+ */
+export function parseWorkspacePiiDetectors(field: unknown): WorkspacePiiDetectors {
+  if (field === undefined) return { kind: 'none' }
+  if (field === null) return { kind: 'unreadable', reason: "the control plane could not read the workspace's PII detector actions" }
+  if (typeof field !== 'object' || Array.isArray(field)) {
+    return { kind: 'unreadable', reason: `the workspace's PII detector actions are not an object: ${JSON.stringify(field)}` }
+  }
+  const actions: PiiDetectorSettings = {}
+  for (const [id, action] of Object.entries(field)) {
+    if (!isPiiDetectorId(id)) continue
+    if (!isPiiAction(action)) {
+      return {
+        kind: 'unreadable',
+        reason: `the workspace's piiDetectors setting sets '${id}' to ${JSON.stringify(action)}; only 'off', 'redact' and 'block' exist`,
+      }
+    }
+    actions[id] = action
+  }
+  return Object.keys(actions).length > 0 ? { kind: 'set', actions } : { kind: 'none' }
+}
+
+/**
+ * Every detector's action for a workspace's traffic on one machine.
+ *
+ * The workspace setting is the baseline for each detector it names, and the
+ * machine's own config (`local`, only the detectors it names) may tighten it
+ * (`off` → `redact` → `block`) but never loosen it, so a developer cannot
+ * switch off on their machine what the workspace turned on. A detector the
+ * workspace leaves out keeps the machine's action, else its default; with no
+ * workspace setting the machine's config applies alone. The Rust proxy's
+ * `effective_pii_actions` (`dlp.rs`) is the same rule, and both run
+ * `fixtures/pii-precedence-vectors.json`.
+ */
+export function effectivePiiActions(
+  local: PiiDetectorSettings,
+  workspace: PiiDetectorSettings | null,
+): Record<PiiDetectorId, PiiAction> {
+  const rank = (a: PiiAction): number => PII_ACTIONS.indexOf(a)
+  const table = Object.fromEntries(PII_DEFINITION.detectors.map((d) => [d.id, d.default_action])) as Record<
+    PiiDetectorId,
+    PiiAction
+  >
+  Object.assign(table, local)
+  for (const [id, baseline] of Object.entries(workspace ?? {}) as Array<[PiiDetectorId, PiiAction]>) {
+    const mine = local[id]
+    table[id] = mine !== undefined && rank(mine) > rank(baseline) ? mine : baseline
+  }
+  return table
+}
 
 export interface PiiDetectorDefinition {
   /** Stable finding id, `pii.*`. */

@@ -16,7 +16,7 @@
 import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { evaluateMcpRegistry, evaluateSsoGroupClearance, holdApprovalHint } from '@intutic/shared-types'
-import { scanToolInput, formatDlpBlockReason, setDynamicPatterns } from './dlp.js'
+import { scanToolInput, formatDlpBlockReason, setDynamicPatterns, setWorkspacePii } from './dlp.js'
 import type { DlpFinding } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns } from './injection.js'
 import { evaluateSequenceDetectors, resolveEffectiveDisposition, REASK_MAX_ATTEMPTS } from './anomaly/index.js'
@@ -370,6 +370,22 @@ export class ToolCallInterceptor {
     } catch {
       // Pattern delivery must never take the scanner down; the floor stands.
     }
+    // The workspace's PII detector actions, the baseline this machine's
+    // INTUTIC_MCP_DLP_DETECTORS may only tighten. When the control plane
+    // could not read them, which detectors the workspace requires is
+    // unknown: fail-closed refuses the call, as the LLM proxy refuses the
+    // request; fail-open scans with the local config alone.
+    const piiDetectors = this.policy.getPiiDetectors()
+    if (piiDetectors.kind === 'unreadable' && !this.failOpen) {
+      const reason =
+        `This workspace's PII detector actions could not be read (${piiDetectors.reason}), so which ` +
+        `detectors apply is unknown. Tool call blocked (fail-closed mode: mcpProxyFailBehavior or ` +
+        `INTUTIC_MCP_FAIL_OPEN=false).`
+      log.warn({ action: 'pii_detectors_unreadable_block', toolName }, reason)
+      this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+      return block('GOVERNANCE_UNAVAILABLE', 'piiDetectors', reason)
+    }
+    setWorkspacePii(piiDetectors)
     try {
       const dlp = scanToolInput(toolInput)
       // Captured regardless of outcome — by pipeline position, a non-empty

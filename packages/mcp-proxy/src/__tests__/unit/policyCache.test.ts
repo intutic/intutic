@@ -55,6 +55,14 @@ describe('policyCache Unit Tests', () => {
       if (latestWorkspaceId === 'ws_no_mode_test') {
         delete body['interventionMode']
       }
+      // `ws_pii_unreadable_test`: the control plane could not read the
+      // workspace's piiDetectors setting.
+      if (latestWorkspaceId === 'ws_pii_unreadable_test') {
+        body['piiDetectors'] = null
+      }
+      if (latestWorkspaceId === 'ws_pii_set_test') {
+        body['piiDetectors'] = { 'pii.email': 'redact' }
+      }
       res.end(JSON.stringify(body))
     })
 
@@ -117,6 +125,13 @@ describe('policyCache Unit Tests', () => {
     const policy = await resolvePolicy(wsId)
     expect(policy).not.toBeNull()
     expect(requestCount).toBe(2) // Request count increments to 2 on new fetch
+  })
+
+  it("carries piiDetectors as the control plane sent it, null included, for PolicyClient to read", async () => {
+    for (const ws of ['ws_pii_unreadable_test', 'ws_pii_set_test']) invalidatePolicy(ws)
+    expect((await resolvePolicy('ws_pii_unreadable_test'))?.piiDetectors).toBeNull()
+    expect((await resolvePolicy('ws_pii_set_test'))?.piiDetectors).toEqual({ 'pii.email': 'redact' })
+    expect((await resolvePolicy('ws_test_cache_miss'))?.piiDetectors, 'absent stays absent').toBeUndefined()
   })
 
   it('tracks cache entries stats correctly', () => {
