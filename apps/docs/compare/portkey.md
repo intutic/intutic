@@ -5,7 +5,7 @@ description: Portkey is a model gateway with routing, caching and inline guardra
 
 # Intutic vs Portkey
 
-*Last reviewed: 2026-10-08*
+*Last reviewed: 2026-10-09*
 
 Intutic decides agent tool calls before they run, across 43 supported harnesses: native hook gates in 18 of them and in-process SDK gates in 17 allow or block the call, hook gates, SDK gates and the MCP governance proxy can hold it for human approval, and the other eight are governed through the proxies, a bridge or the harness they orchestrate. Around the gates, a policy proxy redacts sensitive data in model traffic, an MCP governance proxy governs MCP tools, an egress firewall and sandboxed execution stop the agent routing around governance, and execution traces are sealed into a signed audit trail you can verify. Portkey is an AI gateway between applications and model providers, with routing, fallbacks, caching, budgets and guardrails that can reject a request inline. Palo Alto Networks completed its acquisition of Portkey on 2026-05-29 and makes it the AI gateway of Prisma AIRS. Portkey governs the model call; Intutic governs the action the agent takes with the answer.
 
@@ -22,6 +22,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Caching** | Exact and semantic cache | Simple cache on every plan; semantic cache on select Enterprise plans |
 | **Budgets** | Daily spend caps enforced before a request leaves; a loop run that exceeds its budget is stopped | Budget and rate limits on paid plans |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, verifiable in the browser or CLI | Request and response logs |
+| **Stored provider keys** | Envelope encryption (AES-256-GCM, a data key per value) under a key derived from your deployment's `ENCRYPTION_KEY`, rotatable; every change to a provider key or virtual key is recorded and streamed to SIEM. A cloud KMS key is not supported yet | Envelope encryption under your own AWS KMS key on Enterprise |
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | Hosted, or self-host the open-source gateway (Docker, Kubernetes, major clouds) |
 | **Source** | Open core (MIT) | Gateway is MIT |
 
@@ -29,6 +30,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 
 - **Provider breadth and routing controls.** A mature gateway with fallbacks, load balancing and conditional routing across many providers.
 - **Gateway-level guardrails for any application.** Inline checks on every model call, whether or not the caller is an agent.
+- **Customer-managed KMS keys.** Stored provider keys can be encrypted under a key you hold in AWS KMS.
 - **Platform backing.** As part of Prisma AIRS, it sits inside Palo Alto Networks' AI security portfolio.
 
 ## When to choose Intutic

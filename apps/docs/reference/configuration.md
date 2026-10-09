@@ -37,6 +37,8 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `OPENROUTER_UPSTREAM_URL` | `https://openrouter.ai/api` | Where requests for OpenRouter models go |
 | `DEEPSEEK_UPSTREAM_URL` | `https://api.deepseek.com` | Where requests for DeepSeek models go |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY` | unset | The provider key the proxy uses when a caller authenticates with an Intutic key (`vk_…`) and the workspace has not provisioned its own key for that provider. A caller that sends its own provider key uses that key, and the proxy sends it to that provider only, never to the control plane. A gateway with `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY` set refuses instead of falling back |
+| `ENCRYPTION_KEY` | unset | Opens the workspace provider keys a control plane stores encrypted in Valkey: the same value the control plane has. Without it, the proxy never sends an encrypted value upstream: it treats the key as not provisioned and logs why. A key the proxy captures from a request is stored encrypted when this is set |
+| `ENCRYPTION_KEY_PREVIOUS` | unset | While `ENCRYPTION_KEY` is being rotated: the key it replaces, or several separated by commas. Values sealed under them still open |
 
 The proxy picks the provider from the model name, so these are the only way to point a provider somewhere else; `model_list` in `config.yaml` does not route. For a single upstream used by every provider, see [Standalone](/integrations/standalone).
 
@@ -152,7 +154,8 @@ These configure the control plane in hosted and Self-host deployments.
 | :--- | :---: | :---: | :--- |
 | `DATABASE_URL` | ✅ | — | Postgres connection string |
 | `JWT_SECRET` | ✅ | — | Secret for signing session tokens |
-| `ENCRYPTION_KEY` | ✅ | — | 32-byte key for encrypting stored credentials and tokens |
+| `ENCRYPTION_KEY` | ✅ | — | 32-byte key for encrypting stored credentials and tokens. The proxy needs the same value to open stored provider keys. See [Stored credentials](/security#stored-credentials) |
+| `ENCRYPTION_KEY_PREVIOUS` | ❌ | — | Only while rotating `ENCRYPTION_KEY`: the key it replaces (several separated by commas). Stored credentials sealed under it still open, and the control plane re-encrypts provider keys under `ENCRYPTION_KEY` when it starts. See [Rotate the encryption key](/guide/self-host#rotate-the-encryption-key) |
 | `APP_URL` | Self-host | — | The dashboard's address; links in emails and invitations point here |
 | `API_BASE_URL` | Self-host | `http://localhost:3001` | The API's public address. Identity providers send users back here, so it builds the OIDC redirect URI (`/api/v1/auth/sso/callback`), the SAML ACS URL (`/api/v1/auth/saml/acs`) and the SCIM base URL |
 | `OIDC_CALLBACK_URL` | ❌ | built from `API_BASE_URL` | The full OIDC redirect URI, when users reach the API at a different address |

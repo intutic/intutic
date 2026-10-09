@@ -91,6 +91,49 @@ The bundle holds every image (`images.tar`), the installer, the Compose files an
 the Helm charts. On Kubernetes with registry access, the images and charts are
 also at `ghcr.io/intutic`, with a pull token Intutic issues to you.
 
+## Rotate the encryption key
+
+`ENCRYPTION_KEY` seals the credentials Intutic stores: provider keys, SSO client
+secrets, connector tokens, SIEM destination settings and webhook signing secrets
+(see [Stored credentials](/security#stored-credentials)). The control plane and
+the proxy both hold it. To replace it, add the new key first as a key that may
+open values, then make it the key that seals them:
+
+1. Generate the new key: `openssl rand -hex 32`.
+2. Set `ENCRYPTION_KEY_PREVIOUS` to the **new** key, and restart the control
+   plane and the proxy. Nothing is re-encrypted yet; both can now open a value
+   sealed under either key, so the order of the next restarts does not matter.
+3. Set `ENCRYPTION_KEY` to the new key and `ENCRYPTION_KEY_PREVIOUS` to the
+   **old** one, and restart both again. When it starts, the control plane
+   re-encrypts every stored provider key under the new key.
+4. Confirm it finished. This exits 0 once every provider key is under the new
+   key, and lists what is not:
+
+   ```bash
+   # Docker Compose, in /opt/intutic
+   docker compose exec control-plane node services/control-plane/dist/scripts/reencryptCredentials.js --check
+   # Kubernetes
+   kubectl -n intutic exec deploy/intutic-control-plane -- node services/control-plane/dist/scripts/reencryptCredentials.js --check
+   ```
+
+   Without `--check` it re-encrypts instead of reporting, for a run without a
+   restart.
+5. Re-save the other secrets. SSO client secrets, connector and task-tracker
+   tokens, SIEM destinations, notification webhook secrets, the GitHub webhook
+   secret and trace storage credentials stay sealed under the old key, and keep
+   working while it is in `ENCRYPTION_KEY_PREVIOUS`, until each is saved again.
+   If the old key was exposed, replace those secrets at their source as well.
+   Slack bot tokens are sealed with `SLACK_ENCRYPTION_KEY` when it is set, else
+   with `ENCRYPTION_KEY` itself and no fallback: set `SLACK_ENCRYPTION_KEY` to
+   the old key before step 3, or reconnect Slack after it.
+6. Remove `ENCRYPTION_KEY_PREVIOUS` and restart both.
+
+On Docker Compose the keys are in `/opt/intutic/.env`, and `docker compose up -d`
+in `/opt/intutic` restarts what changed. On Kubernetes they are keys of the
+Secret named by `secretName` (`intutic-secrets`):
+`kubectl -n intutic rollout restart deploy/intutic-control-plane deploy/intutic-proxy`
+restarts both.
+
 ## Next
 
 - [Install with Docker Compose](./self-host-compose), including an air-gapped host

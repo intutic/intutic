@@ -612,7 +612,7 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/audit/timeline` | OWNER/ADMIN | Sign-ins, enforcement verdicts, resolved decisions and incidents, settings changes, detector adjudications and MCP server registry decisions for a workspace over a date range. |
+| GET | `/api/v1/audit/timeline` | OWNER/ADMIN | Sign-ins, enforcement verdicts, resolved decisions and incidents, settings changes, detector adjudications, MCP server registry decisions, evidence downloads and credential changes for a workspace over a date range. |
 
 ### `auth.ts` <Badge type="tip" text="Cloud" />
 

@@ -94,6 +94,8 @@ export type NotificationEventType =
   | 'webhook.secret.rotated'
   /** A member downloaded compliance evidence: a SOC 2 archive, a framework coverage report file or the human-oversight export. The `evidence_exports` row. */
   | 'evidence.exported'
+  /** An API key, gateway token or SCIM token was created, rotated or revoked, or a provider credential was provisioned, replaced or removed. The `credential_changes` row: `credential_type`, `credential_id`, `action` and who; never the value. */
+  | 'credential.changed'
   // ── Workspace context ──
   | 'workspace.context.updated'
   // ── Self-hosted gateway (LLD #66) ──

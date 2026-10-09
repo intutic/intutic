@@ -2,6 +2,8 @@ pub mod commands;
 pub mod config;
 /// The caller's credential, typed by where it may be sent
 pub mod credential;
+/// Envelope encryption for the provider credentials stored in Valkey
+pub mod credential_crypto;
 pub mod dlp;
 pub mod graph;
 pub mod injection;

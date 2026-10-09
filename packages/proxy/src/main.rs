@@ -485,8 +485,23 @@ async fn main() -> anyhow::Result<()> {
         std::sync::Arc<dyn store::ControlPlaneCache>,
     ) = match &valkey {
         Some(conn) => {
-            let store: std::sync::Arc<dyn store::LocalStore> =
-                std::sync::Arc::new(store::ValkeyStore::new(conn.clone()));
+            // Provider credentials in Valkey are sealed by the control plane
+            // under ENCRYPTION_KEY (credential_crypto.rs); without it, an
+            // encrypted credential is refused rather than sent upstream.
+            let credential_keys = intutic_proxy::credential_crypto::CredentialKeyring::from_env();
+            match &credential_keys {
+                Some(keys) => tracing::info!(
+                    key_id = keys.current_id(),
+                    "provider credential encryption key loaded"
+                ),
+                None if managed => tracing::warn!(
+                    "ENCRYPTION_KEY is not set: provider credentials the control plane stored encrypted cannot be used"
+                ),
+                None => {}
+            }
+            let store: std::sync::Arc<dyn store::LocalStore> = std::sync::Arc::new(
+                store::ValkeyStore::new(conn.clone()).with_credential_keyring(credential_keys),
+            );
             // Upgrading from standalone must not reset the workspace to cold
             // start. Seeds only arms Valkey does not already have, so this is a
             // no-op on every boot after the first.
