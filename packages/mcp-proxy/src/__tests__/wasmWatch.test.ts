@@ -25,10 +25,13 @@ describe('watchWasmDir (TD-442)', () => {
     expect(w).not.toBeNull()
     fs.writeFileSync(path.join(dir, 'rule.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d]))
     fs.writeFileSync(path.join(dir, 'rule.wasm'), Buffer.from([0, 0x61, 0x73, 0x6d, 1]))
-    await new Promise((r) => setTimeout(r, 700))
+    // Wait for the event rather than a fixed time: a loaded machine delivers it
+    // late. Then one more debounce window, so a second call would have landed.
+    for (let waited = 0; calls === 0 && waited < 4_000; waited += 50) await new Promise((r) => setTimeout(r, 50))
+    await new Promise((r) => setTimeout(r, 400))
     w!.close()
     expect(calls).toBe(1)
-  }, 5_000)
+  }, 10_000)
 
   it('ignores files that are not .wasm', async () => {
     const dir = tmp()
