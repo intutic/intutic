@@ -489,11 +489,22 @@ async fn main() -> anyhow::Result<()> {
             // under ENCRYPTION_KEY (credential_crypto.rs); without it, an
             // encrypted credential is refused rather than sent upstream.
             let credential_keys = intutic_proxy::credential_crypto::CredentialKeyring::from_env();
+            // Announced with or without a key: a proxy that holds none must
+            // still hold the control plane back from sealing what it reads.
+            store::spawn_credential_key_announcer(
+                conn.clone(),
+                credential_keys
+                    .as_ref()
+                    .map(|k| k.ids())
+                    .unwrap_or_default(),
+            );
             match &credential_keys {
-                Some(keys) => tracing::info!(
-                    key_id = keys.current_id(),
-                    "provider credential encryption key loaded"
-                ),
+                Some(keys) => {
+                    tracing::info!(
+                        key_id = keys.current_id(),
+                        "provider credential encryption key loaded"
+                    );
+                }
                 None if managed => tracing::warn!(
                     "ENCRYPTION_KEY is not set: provider credentials the control plane stored encrypted cannot be used"
                 ),

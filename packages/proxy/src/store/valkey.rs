@@ -275,6 +275,50 @@ fn response_key(hash: &str) -> String {
     format!("cache:response:{}", hash)
 }
 
+/// Where a proxy says which credential keys it holds, one key per process.
+///
+/// The control plane reads these before it re-encrypts the provider
+/// credentials in this Valkey (`credentialEncryptionBackfill.ts`): it waits
+/// until at least one proxy has announced and every announcing proxy holds the
+/// current key, so a value is never sealed under a key a running proxy lacks.
+/// A proxy without `ENCRYPTION_KEY` announces an empty list, which holds the
+/// control plane back for as long as it runs.
+pub const CREDENTIAL_KEYS_ANNOUNCE_PREFIX: &str = "credential-keys:proxy:";
+
+/// An announcement outlives three missed refreshes, then a stopped proxy drops out.
+const CREDENTIAL_KEYS_ANNOUNCE_TTL_SECS: u64 = 90;
+
+/// Announce, once, the ids of the keys this proxy can open (current first).
+pub async fn announce_credential_keys(
+    conn: &ConnectionManager,
+    instance: &str,
+    key_ids: &[String],
+) -> redis::RedisResult<()> {
+    let mut conn = conn.clone();
+    conn.set_ex(
+        format!("{CREDENTIAL_KEYS_ANNOUNCE_PREFIX}{instance}"),
+        key_ids.join(","),
+        CREDENTIAL_KEYS_ANNOUNCE_TTL_SECS,
+    )
+    .await
+}
+
+/// Keep announcing for the life of the process.
+pub fn spawn_credential_key_announcer(conn: Arc<ConnectionManager>, key_ids: Vec<String>) {
+    let instance = uuid::Uuid::new_v4().to_string();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(
+            CREDENTIAL_KEYS_ANNOUNCE_TTL_SECS / 3,
+        ));
+        loop {
+            tick.tick().await;
+            if let Err(e) = announce_credential_keys(&conn, &instance, &key_ids).await {
+                tracing::warn!("could not announce this proxy's credential keys: {e}");
+            }
+        }
+    });
+}
+
 pub struct ValkeyStore {
     conn: Arc<ConnectionManager>,
     update_script: redis::Script,

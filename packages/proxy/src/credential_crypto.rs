@@ -155,6 +155,14 @@ impl CredentialKeyring {
         &self.current.id
     }
 
+    /// Every key id this keyring opens, current first.
+    pub fn ids(&self) -> Vec<String> {
+        std::iter::once(&self.current)
+            .chain(self.previous.iter())
+            .map(|k| k.id.clone())
+            .collect()
+    }
+
     fn by_id(&self, id: &str) -> Option<&Kek> {
         std::iter::once(&self.current)
             .chain(self.previous.iter())

@@ -897,7 +897,9 @@
         "enforcement": [
           { "file": "services/control-plane/src/lib/credentialEncryption.ts", "contains": "enc:v1:" },
           { "file": "packages/proxy/src/credential_crypto.rs", "contains": "enc:v1:" },
-          { "file": "services/control-plane/src/services/credentialEncryptionBackfill.ts" },
+          { "file": "services/control-plane/src/services/credentialEncryptionBackfill.ts", "contains": "proxyKeyReadiness" },
+          { "file": "services/control-plane/src/services/secretReencryption.ts" },
+          { "file": "packages/proxy/src/store/valkey.rs", "contains": "CREDENTIAL_KEYS_ANNOUNCE_PREFIX" },
           { "file": "services/control-plane/src/services/credentialChangeService.ts" }
         ]
       }

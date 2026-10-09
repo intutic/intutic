@@ -93,21 +93,26 @@ also at `ghcr.io/intutic`, with a pull token Intutic issues to you.
 
 ## Rotate the encryption key
 
-`ENCRYPTION_KEY` seals the credentials Intutic stores: provider keys, SSO client
-secrets, connector tokens, SIEM destination settings and webhook signing secrets
-(see [Stored credentials](/security#stored-credentials)). The control plane and
-the proxy both hold it. To replace it, add the new key first as a key that may
-open values, then make it the key that seals them:
+`ENCRYPTION_KEY` seals every credential Intutic stores: provider keys, SSO
+client secrets, connector and task-tracker tokens, SIEM destination settings,
+notification and GitHub webhook signing secrets, trace storage credentials and
+Slack bot tokens (see [Stored credentials](/security#stored-credentials)). The
+control plane and the proxy both hold it. Rotation re-encrypts all of them under
+the new key; nothing has to be saved again. To replace the key, add the new one
+first as a key that may open values, then make it the key that seals them:
 
 1. Generate the new key: `openssl rand -hex 32`.
 2. Set `ENCRYPTION_KEY_PREVIOUS` to the **new** key, and restart the control
    plane and the proxy. Nothing is re-encrypted yet; both can now open a value
-   sealed under either key, so the order of the next restarts does not matter.
+   sealed under either key.
 3. Set `ENCRYPTION_KEY` to the new key and `ENCRYPTION_KEY_PREVIOUS` to the
-   **old** one, and restart both again. When it starts, the control plane
-   re-encrypts every stored provider key under the new key.
-4. Confirm it finished. This exits 0 once every provider key is under the new
-   key, and lists what is not:
+   **old** one, and restart both again, in either order. When it starts, the
+   control plane re-encrypts every secret in the database under the new key.
+   Provider keys follow as soon as every running proxy holds the new key: each
+   proxy announces the keys it holds, and the control plane waits for that, so
+   no proxy is ever left unable to read one.
+4. Confirm it finished. This exits 0 once every stored secret is under the new
+   key, and lists what is not, store by store:
 
    ```bash
    # Docker Compose, in /opt/intutic
@@ -117,16 +122,11 @@ open values, then make it the key that seals them:
    ```
 
    Without `--check` it re-encrypts instead of reporting, for a run without a
-   restart.
-5. Re-save the other secrets. SSO client secrets, connector and task-tracker
-   tokens, SIEM destinations, notification webhook secrets, the GitHub webhook
-   secret and trace storage credentials stay sealed under the old key, and keep
-   working while it is in `ENCRYPTION_KEY_PREVIOUS`, until each is saved again.
-   If the old key was exposed, replace those secrets at their source as well.
-   Slack bot tokens are sealed with `SLACK_ENCRYPTION_KEY` when it is set, else
-   with `ENCRYPTION_KEY` itself and no fallback: set `SLACK_ENCRYPTION_KEY` to
-   the old key before step 3, or reconnect Slack after it.
-6. Remove `ENCRYPTION_KEY_PREVIOUS` and restart both.
+   restart. A deployment that runs no proxy adds `--ignore-proxies`. A secret
+   that neither key opens is reported and left as it is; save it again.
+5. Remove `ENCRYPTION_KEY_PREVIOUS` and restart both. `SLACK_ENCRYPTION_KEY`, if
+   you set it on a release before 2.4.0, can go too: Slack tokens are sealed
+   under `ENCRYPTION_KEY` now.
 
 On Docker Compose the keys are in `/opt/intutic/.env`, and `docker compose up -d`
 in `/opt/intutic` restarts what changed. On Kubernetes they are keys of the

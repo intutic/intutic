@@ -140,3 +140,33 @@ async fn a_captured_credential_is_stored_sealed() {
 
     let _: () = raw.del(hash_key(&ws)).await.unwrap();
 }
+
+#[tokio::test]
+async fn a_proxy_announces_the_keys_it_holds_and_the_announcement_expires() {
+    let Some(conn) = valkey_conn().await else {
+        eprintln!("note: VALKEY_URL not set or unreachable — skipped");
+        return;
+    };
+    let mut raw = conn.as_ref().clone();
+    let keys = CredentialKeyring::from_secrets(KEY, &["previous-test-key-32-bytes-ok!!!"]);
+    let instance = unique_ws("announce");
+    intutic_proxy::store::announce_credential_keys(&conn, &instance, &keys.ids())
+        .await
+        .unwrap();
+
+    let key = format!(
+        "{}{instance}",
+        intutic_proxy::store::CREDENTIAL_KEYS_ANNOUNCE_PREFIX
+    );
+    let announced: String = raw.get(&key).await.unwrap();
+    // Current first: the control plane re-encrypts only once every proxy holds it.
+    assert_eq!(announced, keys.ids().join(","));
+    assert_eq!(announced.split(',').next(), Some(keys.current_id()));
+    let ttl: i64 = raw.ttl(&key).await.unwrap();
+    assert!(
+        ttl > 0 && ttl <= 90,
+        "expires, so a stopped proxy drops out: {ttl}"
+    );
+
+    let _: () = raw.del(&key).await.unwrap();
+}
