@@ -890,9 +890,10 @@ function assertSkillContentArgSane(
  * from the text: `--` also begins every long shell flag, and deleting
  * "comments" from `psql --command "drop table x"` would delete the statement.
  * The other gates use the same gap in their own regex dialect (`SQL_GAP` in
- * the proxy's anomaly/actions.rs).
+ * the proxy's anomaly/actions.rs). The hold classifier (`ACTION_CLASSIFIER` in
+ * gateBody.ts) puts it between the words of every action needle.
  */
-const SQL_GAP_ERE = '( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* )?|--[^;&|]* '
+export const SQL_GAP_ERE = '( |\\\\[ntr]|/\\*([^*]|\\*+[^*/])*\\*+/)+(--[^;&|]* )?|--[^;&|]* '
 
 /**
  * Commands that destroy the machine or its data irrecoverably.

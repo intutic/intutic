@@ -34,23 +34,25 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 
 | Harness | Config File | Mechanism |
 |---------|-------------|-----------|
-| Cursor | `.cursorrules` | Markdown rules + project hooks.json |
-| Claude Code | `CLAUDE.md` | Markdown rules + PreToolUse hooks.json |
-| Windsurf | `.windsurfrules` | Markdown rules + Cascade settings.json HTTP proxy |
-| Aider | `.aider.conf.yml` | `extra-instructions` YAML field |
-| Antigravity | `GEMINI.md` | Marked markdown section + PreToolUse / BeforeTool hooks |
-| Codex | `.env.intutic` | `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` env vars |
-| OpenHands | `.openhands/microagents/intutic-governance.md` | Always-on microagent + `[llm] base_url` merged into `config.toml` |
-| n8n | `.intutic/n8n/governance-workflow.json` | Workflow parameters via n8n REST API |
-| Cline | `.cline/hooks/hooks.json` | PreToolUse hooks + apiBase injection |
-| Roo Code | `.roorules` | Markdown rules + cancel hooks |
-| Continue | `.continue/config.json` | JSONC config file manipulation |
+| Cursor | `.cursor/hooks.json`, `~/.cursor/hooks.json` | Project and user hooks; see [Cursor](/integrations/cursor) |
+| Claude Code | `.claude/settings.json` | PreToolUse hook and deny rules |
+| Windsurf | Windsurf's user `settings.json` | Cascade hooks + HTTP proxy setting |
+| Aider | `.aider.conf.yml` | `openai-api-base`, and `ANTHROPIC_BASE_URL` under `set-env` |
+| Antigravity | `~/.gemini/settings.json`, `~/.gemini/config/hooks.json` | BeforeTool / PreToolUse hooks |
+| Codex | `~/.codex/config.toml`, `.env.intutic` | `openai_base_url`, and `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` for shells that source the env file |
+| OpenHands | `config.toml` | `[llm] base_url` merged in, plus a PreToolUse hook in `.openhands/hooks.json` |
+| n8n | `~/.intutic/hooks/n8n-governance-hook.js` | External hook the n8n server loads through `EXTERNAL_HOOK_FILES` |
+| Cline | `.clinerules/hooks/PreToolUse` | PreToolUse hook; the base URL is set by hand in Cline's settings panel |
+| Roo Code | none | Base URL set by hand in Roo Code's settings panel; no hook system |
+| Continue | `~/.continue/config.yaml` | `apiBase` on each OpenAI and Anthropic model, plus a PreToolUse gate for the `cn` CLI |
 | Claude Desktop | `claude_desktop_config.json` | Dev override + MCP wrapping |
 | Goose | `.agents/plugins/intutic-governance/hooks/hooks.json` | JSON plugin hook structure |
 | Open WebUI | `.open-webui/intutic-governance-filter.py` | Python inlet() filter hook |
-| OpenClaw | `.openclaw/openclaw.json` | OpenClaw configuration file |
-| Hermes | `.hermes/config.yaml` | YAML configuration file |
-| Pi | `.pi/hooks.json` | Pi agent hooks config |
+| OpenClaw | `~/.openclaw/openclaw.json` | OpenClaw configuration file |
+| Hermes | `~/.hermes/config.yaml` | YAML configuration file |
+| Pi | `~/.pi/hooks.json` | Pi agent hooks config |
+
+Where the rule sets themselves go is a separate question; see [Where rule sets go](#where-rule-sets-go).
 
 ### Proxy Response Post-Processor
 
@@ -160,6 +162,64 @@ The `intutic connect` command starts a long-lived sync daemon that:
 
 The daemon supports 42 of Intutic's 43 harness adapters and handles each one's config format natively. The 43rd, TrueForge run as its own standalone/hosted server, is not something `intutic init` can detect in a repo at all (it's an operator-configured deployment, not a repo dependency) — it is governed instead by a separate, out-of-process service, `services/trueforge-bridge`. See the [TrueForge integration guide](/integrations/trueforge#server-mode-standalone-hosted).
 
+## Where rule sets go
+
+`intutic connect` writes the rule sets aimed at a harness into the file that product reads as standing instructions, and nowhere else. Three shapes:
+
+- **A file of Intutic's own** in a directory whose every file the product reads, such as `.cursor/rules/`. You keep your own rules in other files there.
+- **A marked section** of a file you also write, such as `AGENTS.md`. The rule sets sit between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->`; the rest of the file is yours, and connect never touches it. You can move the section within the file.
+- **No instructions file.** The product reads no file of standing instructions, so the rule-set text cannot reach the model. A harness with a gate still enforces the rules compiled from your rule sets. The dashboard's Compliance Scope card for such a harness says so.
+
+`AGENTS.md` is shared: every harness below that reads it gets one section holding every rule set aimed at any of them that is configured in the workspace. A rule set aimed at Codex is therefore also read by OpenCode in the same workspace. Muse Code, OpenCode, Pi and Hermes read `AGENTS.md` in place of a `CLAUDE.md` once both exist, so connect creating `AGENTS.md` in a workspace that only had `CLAUDE.md` changes what those harnesses read.
+
+`intutic disconnect` takes the section out, or puts back the file the rules file replaced, byte for byte when you have not edited it since. Earlier versions overwrote `CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `.roorules` and `AGENTS.md` whole; the first sync with this version gives you your own copy of each back.
+
+| Harness | Id | Rule sets go to | Notes |
+|---------|----|-----------------|-------|
+| Claude Code | `claude-code` | `.claude/rules/intutic-governance.md` | Loaded at launch. Not `CLAUDE.md`: by default a project `CLAUDE.md` stops Claude Code reading `AGENTS.md`. |
+| Cursor | `cursor` | `.cursor/rules/intutic-governance.mdc` | `alwaysApply: true`. |
+| Windsurf | `windsurf` | `.windsurf/rules/intutic-governance.md` | `trigger: always_on`; 12,000 characters per rule file. |
+| Antigravity and Gemini CLI | `antigravity` | `GEMINI.md` (section) | Gemini CLI reads it only in a trusted folder. |
+| Aider | `aider` | `.intutic/aider-sops.md` | Listed under `read:` in `.aider.conf.yml` by absolute path, so Aider finds it from any subdirectory. |
+| OpenHands | `openhands` | `.openhands/microagents/intutic-governance.md` | A microagent with no triggers is always active. |
+| Codex | `codex` | `AGENTS.md` (section) | Codex reads at most 32 KiB of `AGENTS.md` files in total. |
+| Muse Code | `muse-code` | `AGENTS.md` (section) | Read once the workspace is trusted. |
+| Grok Build | `grok` | `AGENTS.md` (section) | Read once the folder is trusted. |
+| OpenCode | `opencode` | `AGENTS.md` (section) | |
+| Pi | `pi` | `AGENTS.md` (section) | |
+| Hermes | `hermes` | `AGENTS.md` (section) | A `.hermes.md` or `HERMES.md` between the working directory and the git root takes the place of `AGENTS.md`; keep your Hermes instructions in `AGENTS.md`. |
+| Roo Code | `roo-code` | `AGENTS.md` (section) | Read unless `roo-cline.useAgentRules` is off. Not `.roo/rules/`, whose first file hides your `.roorules` and `.clinerules`. |
+| dsh | `dsh` | `AGENTS.md` (section) | Read by the default profile's agent-instructions plugin. |
+| GitHub Copilot | `github-copilot` | `.github/copilot-instructions.md` (section) | |
+| Cline | `cline` | `.clinerules/intutic-governance.md` | |
+| Continue | `continue` | `.continue/rules/intutic-governance.md` | `alwaysApply: true`. The `cn` CLI reads the `.continue/rules/` of the directory it runs in. |
+| Goose | `goose` | `.goosehints` (section) | |
+| OpenClaw | `openclaw` | `~/.openclaw/workspace/AGENTS.md` (section) | OpenClaw reads instructions only from its agent workspace, never from a project: connect writes to the one `agents.defaults.workspace` names, or `OPENCLAW_WORKSPACE_DIR`. 20,000 characters per file. |
+| n8n | `n8n` | No instructions file | An AI Agent node's system message is part of the workflow. The workflow gate still applies. |
+| Claude Desktop | `claude-desktop` | No instructions file | Instructions live in the app's projects. |
+| Open WebUI | `open-webui` | No instructions file | System prompts live in Open WebUI's settings. |
+| Xirp | `xirp` | No instructions file | The harnesses it runs read their own files. |
+| Agentic Orchestrator | `agentic-orchestrator` | No instructions file | The harnesses it runs read their own files. |
+| AWS Bedrock AgentCore | `agentcore-runtime` | No instructions file | Your framework's SDK gate applies. |
+| TrueForge server | `trueforge-server` | No instructions file | Governed by the TrueForge bridge. |
+| LangGraph | `langgraph` | No instructions file | SDK framework: the instructions are your code; the SDK gate applies. |
+| LangChain | `langchain` | No instructions file | SDK framework. |
+| CrewAI | `crewai` | No instructions file | SDK framework. |
+| AutoGen | `autogen` | No instructions file | SDK framework. |
+| AG2 | `ag2` | No instructions file | SDK framework. |
+| Google ADK | `google-adk` | No instructions file | SDK framework. |
+| OpenAI Agents SDK | `openai-agents` | No instructions file | SDK framework. |
+| Pydantic AI | `pydantic-ai` | No instructions file | SDK framework. |
+| smolagents | `smolagents` | No instructions file | SDK framework. |
+| Strands Agents | `strands` | No instructions file | SDK framework. |
+| Microsoft Agent Framework | `agent-framework` | No instructions file | SDK framework. |
+| Mastra | `mastra` | No instructions file | SDK framework. |
+| Vercel AI SDK | `vercel-ai-sdk` | No instructions file | SDK framework. |
+| eve | `eve` | No instructions file | SDK framework. |
+| TrueForge | `trueforge` | No instructions file | SDK framework. |
+| AI SDK Harness | `ai-sdk-harness` | No instructions file | SDK framework. |
+| AI SDK Workflow | `ai-sdk-workflow` | No instructions file | SDK framework. |
+
 ---
 
 ## Dual-Path Telemetry Fallback
@@ -170,6 +230,8 @@ To prevent data loss and bypasses during command executions, Intutic hooks imple
 2. **Path B (Local Log Fallback):** Simultaneously, the event is appended to `.intutic/events/hook-events.jsonl` in the workspace root.
 
 The `sync-daemon` monitors this log file in real time using FSEvents/inotify (`chokidar`). As soon as a modification is detected, the daemon drains the log file and sends the events to the control plane, ensuring that even if Path A fails due to network isolation, all governance audits are preserved.
+
+Most events therefore arrive more than once: over both paths, and again whenever the daemon resends a batch whose response it did not get. Each event carries an `eventId`, generated when it is recorded and kept in the line that is resent, and the control plane processes each id once per workspace. A resend files no second incident, finding or plan deviation and exports no second gate decision. Events from gates and SDKs older than the `eventId` field are processed every time they arrive.
 
 ---
 

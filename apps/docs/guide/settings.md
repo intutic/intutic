@@ -58,14 +58,14 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 
 | Card | What it does |
 |------|--------------|
-| **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. On a plan without SSO the card says which plans include it. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
+| **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. On a plan without SSO the card says which plans include it, and SCIM, which needs the Enterprise or Self-host plan, does the same on Biz Org. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
 | **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. Needs a plan with SSO. See [below](#group-policy-for-high-risk-tools). |
 | **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy. See [below](#virtual-api-keys). |
 | **Attenuated API Keys** | Child keys minted from a parent key with fewer capabilities by `intutic attenuate`; open a chain to see each step. |
 | **On-Behalf-Of Tokens** | A short-lived token that lets an agent act for you with only the tools you pick. See [below](#on-behalf-of-obo-tokens). |
 | **Provider Keys** | This workspace's own provider credentials. See [below](#provider-keys). |
 | **Gateways** | Register a [self-hosted gateway](/external/self-hosted-gateway) to run the proxy in your own infrastructure. |
-| **Data Residency** | Pin the workspace's data to a region, and block requests that violate the pin. |
+| **Data Residency** | Pin the workspace's data to a region, and block requests that violate the pin. Needs the Enterprise or Self-host plan; on another plan the card says so, and a pin set before a downgrade can still be turned off. |
 | **Network Egress Control** | The egress mode and allow list every proxy in the workspace hot-reloads. |
 | **Sandboxed Execution** | Require agents to run in a sandbox; enforced by the CLI on `intutic exec`. See [Sandboxed Execution](/guide/sandboxed-execution). |
 | **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
@@ -194,8 +194,8 @@ through the same enforcement path:
 
 ### Harness Config History
 
-`intutic connect` records each harness rules file (`CLAUDE.md`, `.cursorrules`, `AGENTS.md` and
-the others listed under [Config content upload](/reference/cli#config-content-upload)) in the
+`intutic connect` records each harness rules file (`.claude/rules/intutic-governance.md`,
+`.cursor/rules/intutic-governance.mdc`, `AGENTS.md` and the others listed under [Config content upload](/reference/cli#config-content-upload)) in the
 workspace's config history. The **Upload config file content** switch decides what that record
 holds. It is off by default.
 
@@ -427,7 +427,7 @@ Task trackers, memory providers, file scanning and SIEM export.
 - **Task Management & Alerting** — connect Jira Cloud, PagerDuty, Linear, GitHub Issues or Asana to sync tickets and route governance alerts. **Add Connection** takes the provider, its base URL, an API token or auth secret, and a project key or routing key.
 - **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. See [Prompt Commands](/guide/agent-commands).
 - **VirusTotal Skill Scanning** — opt in to checking the sha256 hash of skill-bundled scripts against VirusTotal; file content is never uploaded. See [VirusTotal Integration](/guide/virustotal-scanning).
-- **SIEM Export** — stream governance events to Splunk, Datadog, a webhook, syslog/CEF, S3 or GCS; **Add Destination** creates one. See [SIEM Export](/guide/siem-export).
+- **SIEM Export** — stream governance events to Splunk, Datadog, a webhook, syslog/CEF, S3 or GCS; **Add Destination** creates one. Biz Org and above: on another plan the card says so, and destinations kept from before a downgrade show as **Paused**. See [SIEM Export](/guide/siem-export#plans).
 
 ---
 

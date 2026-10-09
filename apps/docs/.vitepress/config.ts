@@ -184,7 +184,7 @@ if (!IS_OSS) {
       { text: 'Security & Identity (Cloud)', link: '/guide/security' },
       { text: 'SCIM Provisioning (Enterprise)', link: '/guide/scim' },
       { text: 'Emergency Overrides (Cloud)', link: '/guide/break-glass' },
-      { text: 'SIEM Export (Cloud)', link: '/guide/siem-export' },
+      { text: 'SIEM Export (Biz Org+)', link: '/guide/siem-export' },
       { text: 'Compliance Evidence (Cloud)', link: '/guide/compliance-evidence' },
       { text: 'Framework Mapping (Cloud)', link: '/guide/framework-mapping' },
       { text: 'VirusTotal Integration (Cloud)', link: '/guide/virustotal-scanning' },

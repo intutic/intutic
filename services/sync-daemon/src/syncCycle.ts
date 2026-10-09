@@ -99,6 +99,8 @@ export function emitSkillFlaggedEvents(opts: {
             .update(ts + skill.name + opts.workspaceId)
             .digest('hex')
             .slice(0, 16),
+          // Made once and resent with this line: processed once however often the drain retries.
+          eventId: crypto.randomBytes(16).toString('hex'),
           filePath: `${skill.source}/${skill.name}/SKILL.md`,
         }) + '\n'
       fs.mkdirSync(path.dirname(eventsLog), { recursive: true })

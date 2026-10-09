@@ -37,6 +37,8 @@ Intutic merges MCP server entries into the Claude Desktop configuration file `cl
 * **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 * **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
+Claude Desktop has **no instructions file**: its instructions live in the app's projects, so the text of your rule sets does not reach the model. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
+
 To undo what `intutic connect` writes here, run `intutic disconnect --harness claude-desktop`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Example `claude_desktop_config.json`

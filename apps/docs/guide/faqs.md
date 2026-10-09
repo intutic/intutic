@@ -19,7 +19,7 @@ The local Rust proxy acts as a transparent middleman. It doesn't run the slash c
 2.  If the prompt begins with `@intutic` or `/intutic`, the proxy **diverts** the request and posts it to the control-plane API endpoint `/api/v1/slash-command`.
 3.  The control-plane processes the command, generates the response markdown (like the locks card), and returns it to the proxy.
 4.  The proxy wraps this text inside a standard LLM chat completion structure and streams it back to Cursor or Claude Code. To the editor client, it looks like a normal response from Anthropic or OpenAI.
-5.  If the command locks active rules, the control plane immediately broadcasts a WebSocket message (`active_local_sops_update`). The local sync daemon receives this message, writes it locally to `.intutic/session-context.json`, and triggers `applySyncConfig` to rebuild your `CLAUDE.md` or `.cursorrules`.
+5.  If the command locks active rules, the control plane immediately broadcasts a WebSocket message (`active_local_sops_update`). The local sync daemon receives this message, writes it locally to `.intutic/session-context.json`, and triggers `applySyncConfig` to rebuild each harness's rules file, such as `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`.
 
 ---
 
@@ -39,7 +39,7 @@ It is a hybrid system divided between the **Local Rust Proxy** and the **Remote 
 
 **Yes, absolutely.** The open-core version is fully functional as a developer sandbox:
 *   Developers can define personal, local-only guidelines in `.intutic/sops/` subdirectories.
-*   The sync daemon compiles and merges these local guidelines directly into `.cursorrules`, `CLAUDE.md`, or `.windsurfrules` in real-time.
+*   The sync daemon compiles and merges these local guidelines into each harness's rules file in real-time, such as `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`.
 *   Outbound prompts and streams are evaluated against these files using the local WASM rules engine. If a rule is violated, warnings are printed directly in the terminal client.
 *   This setup protects developer privacy: local rule deviations are kept entirely offline in your workspace, while providing active stream-level interception and rule enforcement. Central database logging, trajectory analysis and config-drift reporting are only enabled when connected to the commercial control plane.
 
@@ -91,7 +91,7 @@ The local Rust proxy acts as an inline firewalled gateway between the developer'
     *   It injects a **Steering Advice** warning directly into the stream, forcing the agent to see the correction.
     *   It appends a **Synthesis Card** detailing the violation.
     *   In strict modes, it terminates the stream immediately (`KILL` action), preventing the agent from receiving the invalid code block.
-3.  **Local Configuration File Integrity (`driftWatcher.ts`):** The sync daemon runs `driftWatcher.ts`, a local filesystem watcher using `chokidar` that monitors critical workspace files (like `.cursorrules`, `CLAUDE.md`, or `.intutic/sops`). If the agent attempts to modify or delete these local guidelines, `driftWatcher.ts` immediately restores them, preventing the agent from silently disabling its own rules.
+3.  **Local Configuration File Integrity (`driftWatcher.ts`):** The sync daemon runs `driftWatcher.ts`, a local filesystem watcher using `chokidar` that monitors critical workspace files (like each harness's rules file, such as `.cursor/rules/intutic-governance.mdc`, or `.intutic/sops`). If the agent attempts to modify or delete these local guidelines, `driftWatcher.ts` immediately restores them, preventing the agent from silently disabling its own rules.
 4.  **Active Anomaly Correction (Enterprise Feature):** In remote connected environments, the control plane classifies each trace against the anomaly taxonomy as the agent interacts — `TOKEN_WASTE` measured against the developer's own median-cost baseline, `LOOP_DETECTED`, `SCOPE_VIOLATION`, `UNAUTHORIZED_TOOL`, and `WORKFLOW_GOAL_DRIFT`, raised when a session's plan-match score falls below threshold. When one fires, the `correctivePromptService` maps the anomaly to a steering recommendation (a corrective system prompt) and pushes it to the session's Valkey queue (`gov:notify:${sessionId}`) to be dynamically injected back into the agent's context window. The trigger is anomaly classification against measured thresholds — no embedding centroid is computed.
 
 ---
@@ -115,7 +115,7 @@ Agents are stateful, recursive loops where each turn appends the previous histor
 If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with zero connection to the control plane or SaaS free tier), here is exactly what works and what does not:
 
 #### What works 100% locally in Standalone Open-Core:
-*   **Local Rule Synthesis & Syncing:** The `sync-daemon` scans `.intutic/sops/` and dynamically compiles/merges your local markdown guidelines into `.cursorrules`, `CLAUDE.md`, or `.windsurfrules` as files change.
+*   **Local Rule Synthesis & Syncing:** The `sync-daemon` scans `.intutic/sops/` and dynamically compiles/merges your local markdown guidelines into each harness's rules file (such as `.cursor/rules/intutic-governance.mdc`, `.windsurf/rules/intutic-governance.md` or the rules section of `AGENTS.md`) as files change.
 *   **Local Interception & Policy Enforcement:** The local Rust proxy intercepts LLM prompt/response streams, evaluates them against local rules using the WASM rules engine, blocks prohibited tools, and injects steering warnings directly into the client stream.
 *   **Local Cost & Token Ledger:** Local JSON/JSONL logs store session traces and aggregate token metrics, query counts, and daily spend.
 *   **Local Cost Predictions:** `@intutic predict` queries your local JSONL history to compute sliding-window averages.
@@ -211,7 +211,7 @@ Intutic supports local-first development by letting developers test custom promp
     intutic sops push <rule-group-name>
     ```
     This packages the rule group's markdown files, posts them to `/api/v1/sops`, and writes them to the central the control plane’s datastore `sops` table.
-*   **Workspace-wide Distribution:** During subsequent sync cycles, the sync daemons of all other developers in the workspace automatically fetch the newly promoted rule, write it to their local `.intutic/sops/` folders, and update their respective adapter configs (like `.cursorrules` or `CLAUDE.md`).
+*   **Workspace-wide Distribution:** During subsequent sync cycles, the sync daemons of all other developers in the workspace automatically fetch the newly promoted rule, write it to their local `.intutic/sops/` folders, and update their respective adapter configs (like `.cursor/rules/intutic-governance.mdc` or `.claude/rules/intutic-governance.md`).
 
 ---
 
@@ -308,7 +308,7 @@ Intutic's active resilience and loop steering are supported by three newly optim
 *   **Cost Baselines**: An hourly sweep computes a median-cost baseline per (SOP, developer) from the trailing 14 days, published only once at least 20 traces support it. `TOKEN_WASTE` is raised against that baseline, so a run is compared to its own history rather than a global threshold.
 
 #### Sync-Daemon Overwrite Recovery
-*   **The Optimization:** If a base SOP version update rewrites `.cursorrules`, the control plane sync payload returns all active, approved suggestions. The local sync-daemon automatically re-overlays these active suggestions on top of the newly written baseline rules, preventing applied edits from being wiped out.
+*   **The Optimization:** If a base SOP version update rewrites a harness's rules file, the control plane sync payload returns all active, approved suggestions. The local sync-daemon automatically re-overlays these active suggestions on top of the newly written baseline rules, preventing applied edits from being wiped out.
 
 ---
 
@@ -319,7 +319,7 @@ Instead of acting as a simple reactive alert or blocking tool, Intutic implement
 1. **Telemetry & Incident Logging:** When developers run agent harnesses, all stream violations, blocked tool calls and config-drift incidents are logged in real-time.
 2. **Background Pattern Analysis (Sleep Cycle):** A background analytical service periodically processes these incident logs to cluster them by category and evaluate their severity and frequency.
 3. **Auto-Proposed Rule Tightening:** When a recurring mistake pattern crosses safety thresholds, the platform automatically drafts a tightened rule amendment targeted at preventing that specific mistake.
-4. **Approval & Real-Time Sync:** Once approved (either manually by an administrator or automatically for high-confidence safety policies), the new rule is written to the central SOP registry. The local sync-daemon then instantly pushes these rule updates directly into the active `.cursorrules`, `CLAUDE.md`, or harness config files in the developer's workspace.
+4. **Approval & Real-Time Sync:** Once approved (either manually by an administrator or automatically for high-confidence safety policies), the new rule is written to the central SOP registry. The local sync-daemon then instantly pushes these rule updates directly into each harness's rules file in the developer's workspace (such as `.cursor/rules/intutic-governance.mdc` or the rules section of `AGENTS.md`).
 5. **Proactive Prevention:** On the next prompt turn, the agent model ingests the updated rules in its context window and is steered away from making the same mistake, permanently closing the compliance loop.
 
 ---
@@ -329,7 +329,7 @@ Instead of acting as a simple reactive alert or blocking tool, Intutic implement
 Intutic automatically detects which harnesses are active in your workspace and applies rules using two primary integration paths:
 
 1. **Context-Steered Harnesses (Markdown Rules):**
-   For tools that read rules from the project workspace (like **Cursor** `.cursorrules`, **Claude Code** `CLAUDE.md`, **Windsurf** `.windsurfrules`, and **Cline / Roo Code** `.clinerules`), the sync-daemon compiles and updates these markdown files in real-time. The agent ingests these rules directly in its context window to steer output generation.
+   For tools that read rules from the project workspace (like **Cursor** `.cursor/rules/intutic-governance.mdc`, **Claude Code** `.claude/rules/intutic-governance.md`, **Windsurf** `.windsurf/rules/intutic-governance.md`, **Cline** `.clinerules/intutic-governance.md`, and **Codex / Roo Code** a marked section of `AGENTS.md`), the sync-daemon compiles and updates these markdown files in real-time ([Where rule sets go](/guide/how-it-works#where-rule-sets-go) lists every harness). The agent ingests these rules directly in its context window to steer output generation.
    
 2. **Runtime Interceptors (Hook Scripts & Plugins):**
    For terminal-based or executing daemons (like **Google Antigravity**, **Gemini CLI**, **Goose**, **OpenHands**, and **Open WebUI**), Intutic installs pre-tool check scripts and filters directly into their runtime settings. For example:

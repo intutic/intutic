@@ -34,6 +34,14 @@ export interface ApiClient {
    * leave the caller digging the break out of an error message.
    */
   getWithStatus<T>(path: string): Promise<{ status: number; body: T }>
+  /**
+   * GET for a file download: the body as bytes.
+   *
+   * `get()` parses JSON, which a report served as markdown, CSV or PDF is
+   * not (`/api/v1/compliance/frameworks/:id/coverage?format=pdf`). A non-2xx
+   * throws exactly as `get()` does, since those errors are JSON.
+   */
+  getFile(path: string): Promise<Uint8Array>
   /** Generic POST request for arbitrary API paths. */
   post<T>(path: string, body?: unknown): Promise<T>
   /**
@@ -132,6 +140,17 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
         body = { error: text }
       }
       return { status: res.status, body: body as T }
+    },
+
+    async getFile(path: string): Promise<Uint8Array> {
+      const headers: Record<string, string> = { Authorization: baseHeaders.Authorization }
+      injectTraceHeaders(headers)
+      const res = await fetch(`${controlPlaneUrl}${path}`, { method: 'GET', headers })
+      if (!res.ok) {
+        const text = await res.text().catch(() => 'Unknown error')
+        throw new Error(`API GET ${path} failed (${res.status}): ${text}`)
+      }
+      return new Uint8Array(await res.arrayBuffer())
     },
 
     async post<T>(path: string, body?: unknown): Promise<T> {

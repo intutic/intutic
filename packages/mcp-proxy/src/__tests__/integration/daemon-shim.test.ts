@@ -328,6 +328,7 @@ describe('Daemon-Shim Integration Tests', () => {
     // Both paths carry the event's own id: the control plane keys detector
     // findings on it, so a batch the daemon resends files nothing twice.
     expect(received.event['incidentId']).toMatch(/^[0-9a-f-]{36}$/)
+    expect(received.event['eventId'], 'the id the control plane processes the event once by').toMatch(/^[0-9a-f-]{36}$/)
   })
 
   it('shim client falls back to direct control plane requests if daemon socket is offline', async () => {

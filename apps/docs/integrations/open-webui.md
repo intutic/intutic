@@ -28,4 +28,6 @@ Intutic generates:
 * **Filter:** `~/.open-webui/intutic-governance-filter.py` — paste it into Open WebUI as a Function (see above).
 * **Notes:** `.intutic/env/open-webui.env` in the workspace, with the same installation steps.
 
+Open WebUI has **no instructions file**: system prompts live in its own settings, so the text of your rule sets does not reach the model. The filter still refuses prompts that match a block rule. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
+
 To undo what `intutic connect` writes here, run `intutic disconnect --harness open-webui`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

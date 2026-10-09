@@ -61,6 +61,21 @@ describe('db_write, whatever separates the keywords', () => {
     },
   )
 
+  // The vectors every classifier shares (actions.rs, actions.py, the hook
+  // gates' hold classifier): `git\tpush`, a line continuation or a long option
+  // between the words used to classify as nothing here.
+  const vectors = JSON.parse(
+    readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8'),
+  ) as { held: Array<[string, string[]]>; notHeld: string[] }
+
+  it.each(vectors.held)('classifies %j as %j', (command, tokens) => {
+    expect(classify('bash', { command })).toEqual(tokens)
+  })
+
+  it.each(vectors.notHeld)('classifies %j as nothing', (command) => {
+    expect(classify('bash', { command })).toEqual([])
+  })
+
   it('uses the same SQL_GAP as the proxy', () => {
     const rust = readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/actions.rs'), 'utf-8')
     const m = rust.match(/const SQL_GAP: &str =\s*r"(.*?)";/s)

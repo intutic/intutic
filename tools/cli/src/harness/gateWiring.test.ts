@@ -113,7 +113,7 @@ describe('harness adapters install their gates', () => {
 
   it('roo-code: writes rules and leaves VS Code settings alone', async () => {
     await connectAs('roo-code')
-    await access(join(root, '.roorules'))
+    await access(join(root, 'AGENTS.md'))
     await expect(access(join(root, '.vscode', 'settings.json'))).rejects.toThrow()
   })
 })

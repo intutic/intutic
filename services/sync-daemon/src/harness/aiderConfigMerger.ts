@@ -15,8 +15,14 @@
  *   option; its model layer (LiteLLM) reads this variable, and wants the bare
  *   host because it appends `/v1/messages` itself. Entries the user set for
  *   other variables are kept.
- * - `read: .intutic/aider-sops.md` — the SOP text, as a read-only context
- *   file (Aider's own mechanism for conventions), written next to the config.
+ * - `read: <workspace>/.intutic/aider-sops.md` — the SOP text, as a
+ *   read-only context file (Aider's own mechanism for conventions), written
+ *   next to the config. The path is absolute: Aider resolves `read` entries
+ *   against the directory it was started in (`Path(fn).expanduser().resolve()`,
+ *   https://github.com/Aider-AI/aider/blob/main/aider/main.py), while it finds
+ *   this config at the git root from any subdirectory
+ *   (https://aider.chat/docs/config/aider_conf.html). A relative entry was
+ *   missed whenever Aider ran below the workspace root.
  *
  * Earlier versions wrote `anthropic-api-base` and `extra-instructions`, which
  * are not Aider options and stopped Aider from starting; both are removed.
@@ -50,7 +56,7 @@ const SUPPRESSED_KEYS = ['test-cmd', 'lint-cmd', 'auto-test', 'auto-lint', 'test
 /** Keys earlier versions wrote that Aider rejects as unrecognized arguments. */
 const INVALID_LEGACY_KEYS = ['anthropic-api-base', 'extra-instructions']
 
-/** SOP file, relative to the workspace root (where Aider runs). */
+/** SOP file, relative to the workspace root. */
 export const AIDER_SOPS_FILE = '.intutic/aider-sops.md'
 
 /** Header written at the top of the file. Kept short: it sits above the
@@ -60,6 +66,12 @@ const HEADER = [
   `# ${AIDER_SOPS_FILE} read entry are managed by intutic connect. test-cmd,`,
   '# lint-cmd, auto-test and auto-lint are removed on every sync.',
 ]
+
+/** Whether a `read` entry is the SOP file: the absolute path this version
+ *  writes, or the workspace-relative one earlier versions wrote. */
+export function isAiderSopsEntry(value: unknown, workspaceRoot: string): boolean {
+  return value === AIDER_SOPS_FILE || value === path.join(workspaceRoot, AIDER_SOPS_FILE)
+}
 
 /** Leading lines this product wrote (the header above, or the one earlier
  *  versions wrote), removed before the file is parsed. */
@@ -95,11 +107,12 @@ function ensureSeq(doc: Document, key: string): YAMLSeq {
 /**
  * Merge the Intutic keys into the text of an `.aider.conf.yml`.
  *
- * @param raw      - Current file content ('' when the file does not exist).
- * @param proxyUrl - The proxy host (a trailing `/v1` is tolerated).
- * @param hasSops  - Whether the SOP file is to be listed under `read`.
+ * @param raw           - Current file content ('' when the file does not exist).
+ * @param proxyUrl      - The proxy host (a trailing `/v1` is tolerated).
+ * @param workspaceRoot - The directory holding the config.
+ * @param hasSops       - Whether the SOP file is to be listed under `read`.
  */
-export function mergeAiderYaml(raw: string, proxyUrl: string, hasSops: boolean): AiderMergeResult {
+export function mergeAiderYaml(raw: string, proxyUrl: string, workspaceRoot: string, hasSops: boolean): AiderMergeResult {
   const doc: Document = parseDocument(stripOwnHeader(raw))
   if (doc.errors.length > 0) return { content: null, stripped: [] }
   // A missing, empty or comment-only file starts as an empty mapping (its
@@ -121,8 +134,8 @@ export function mergeAiderYaml(raw: string, proxyUrl: string, hasSops: boolean):
   setEnv.add(`ANTHROPIC_BASE_URL=${anthropicBaseUrl(proxyUrl)}`)
 
   const read = ensureSeq(doc, 'read')
-  read.items = read.items.filter((item) => (isScalar(item) ? item.value : item) !== AIDER_SOPS_FILE)
-  if (hasSops) read.add(AIDER_SOPS_FILE)
+  read.items = read.items.filter((item) => !isAiderSopsEntry(isScalar(item) ? item.value : item, workspaceRoot))
+  if (hasSops) read.add(path.join(workspaceRoot, AIDER_SOPS_FILE))
   if (read.items.length === 0) doc.delete('read')
 
   return { content: `${HEADER.join('\n')}\n\n${doc.toString()}`, stripped }
@@ -151,7 +164,7 @@ export async function mergeAiderConfig(
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
 
-  const { content, stripped } = mergeAiderYaml(raw, proxyUrl, Boolean(sopsText))
+  const { content, stripped } = mergeAiderYaml(raw, proxyUrl, path.dirname(configPath), Boolean(sopsText))
   if (content === null) {
     log.warn(
       { action: 'aider_config_merge_skipped', path: configPath },

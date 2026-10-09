@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -196,6 +197,9 @@ class GateClient:
             "sessionId": self.session_id,
             "harnessType": self.harness,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            # The event's id, made once: if this post is ever repeated, the
+            # control plane processes the event once.
+            "eventId": uuid.uuid4().hex,
         }
         if tool_input is not None:
             ev["toolInput"] = tool_input

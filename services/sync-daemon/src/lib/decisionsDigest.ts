@@ -30,8 +30,8 @@
  *     artifacts stay untracked, the same rule this repo's own CLAUDE.md doc
  *     comment states for daemon-generated governance files.
  *  2. A bounded, marker-delimited section (last ~10 entries) idempotently
- *     injected into the `claude-code` harness's own regenerated config file
- *     (`HARNESS_FILES['claude-code']`, i.e. `CLAUDE.md`) — this is what makes
+ *     injected into the workspace's `CLAUDE.md` when it has one (rule sets go
+ *     to `.claude/rules/`, a file of Intutic's own) — this is what makes
  *     the digest something the agent actually reads without needing to know
  *     `.intutic/DECISIONS.md` exists. A marker pair
  *     (`INTUTIC:DECISIONS_LOG:START`/`END`) is replaced in place on every
@@ -51,7 +51,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
 import { HarnessType } from '@intutic/shared-types'
-import { HARNESS_FILES, atomicWrite } from '../configWriter.js'
+import { atomicWrite } from '../configWriter.js'
 
 const log = createLogger('sync-decisions-digest')
 
@@ -212,7 +212,7 @@ export async function refreshDecisionsDigest(
     await atomicWrite(fullPath, renderDecisionsMarkdown(digest.entries))
 
     if (opts.harnesses.includes(HarnessType.CLAUDE_CODE)) {
-      const claudeMdPath = path.join(opts.workspaceRoot, HARNESS_FILES[HarnessType.CLAUDE_CODE])
+      const claudeMdPath = path.join(opts.workspaceRoot, 'CLAUDE.md')
       let existing: string | null = null
       try {
         existing = await fs.readFile(claudeMdPath, 'utf-8')
@@ -228,7 +228,7 @@ export async function refreshDecisionsDigest(
       } else {
         log.debug(
           { action: 'decisions_digest_skip_inject' },
-          'claude-code config file not written yet this run — skipping bounded-section injection this cycle',
+          'no CLAUDE.md in the workspace — skipping bounded-section injection this cycle',
         )
       }
     }

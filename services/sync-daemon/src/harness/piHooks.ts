@@ -127,7 +127,11 @@ log_event() {
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   # incidentId = sha1(timestamp + toolName + workspaceId).slice(0,16)
   local incident_id; incident_id="$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo "$(date +%s)")"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"pi\\",\\"incidentId\\":\\"\${incident_id}\\",\\"timestamp\\":\\"\${ts}\\"\${sid:+,\\"sessionId\\":\\"\${sid}\\"}}"
+  # The event's id: random, made once here, and resent with the line it is
+  # written into, so the control plane processes the event once.
+  local event_id; event_id="\$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
+  [ -n "\$event_id" ] || event_id="\$(date +%s)\$\$\${RANDOM}\${RANDOM}\${RANDOM}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"pi\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\",\\"timestamp\\":\\"\${ts}\\"\${sid:+,\\"sessionId\\":\\"\${sid}\\"}}"
   # Path B: reliable file append (sync-daemon drains on FSEvents change)
   printf '%s\\n' "\$entry" >> "\$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP POST (near-real-time dashboard, non-blocking)

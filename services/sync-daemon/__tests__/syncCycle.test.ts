@@ -59,7 +59,7 @@ const add: ConfigEdit = { operation: 'ADD', section: 'Security', content: '- Enf
 const missingReplace: ConfigEdit = { operation: 'REPLACE', target: 'a line that is not there', content: 'x', reason: 'r' }
 
 function suggestion(id: string, edits: ConfigEdit[]) {
-  return { suggestionId: id, harnessType: 'cursor', filePath: '.cursorrules', edits }
+  return { suggestionId: id, harnessType: 'goose', filePath: '.goosehints', edits }
 }
 
 function appliedIds(): string[] {
@@ -68,7 +68,7 @@ function appliedIds(): string[] {
 
 describe('applySkillOptEdits', () => {
   beforeEach(() => {
-    fs.writeFileSync(join(root, '.cursorrules'), '## Security\n- Check auth headers.\n')
+    fs.writeFileSync(join(root, '.goosehints'), '## Security\n- Check auth headers.\n')
   })
 
   function apply(appliedEdits: ReturnType<typeof suggestion>[], reapplyAll = false) {
@@ -79,7 +79,7 @@ describe('applySkillOptEdits', () => {
     const results = await apply([suggestion('sko_ok', [add])])
 
     expect(results.map((r) => r.ok)).toEqual([true])
-    expect(fs.readFileSync(join(root, '.cursorrules'), 'utf-8')).toContain('- Enforce https.')
+    expect(fs.readFileSync(join(root, '.goosehints'), 'utf-8')).toContain('- Enforce https.')
     expect(posts).toEqual([
       {
         url: `${CONTROL_PLANE}/api/v1/skillopt/sko_ok/apply-result`,
@@ -110,11 +110,11 @@ describe('applySkillOptEdits', () => {
   it('re-applies every edit when the rules file was rewritten', async () => {
     await apply([suggestion('sko_ok', [add])])
     // `connect` rewrote the rules file from the SOPs: the overlay is gone.
-    fs.writeFileSync(join(root, '.cursorrules'), '## Security\n- Check auth headers.\n')
+    fs.writeFileSync(join(root, '.goosehints'), '## Security\n- Check auth headers.\n')
 
     await apply([suggestion('sko_ok', [add])], true)
 
-    const content = fs.readFileSync(join(root, '.cursorrules'), 'utf-8')
+    const content = fs.readFileSync(join(root, '.goosehints'), 'utf-8')
     expect(content).toContain('- Check auth headers.')
     expect(content.match(/- Enforce https\./g)).toHaveLength(1)
   })

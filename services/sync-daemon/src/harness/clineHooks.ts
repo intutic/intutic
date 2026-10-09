@@ -168,9 +168,12 @@ function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({ // Passed through, not collapsed to two values: the advisory tier emits
       // 'tool_flagged', and a ternary here silently recorded it as an allow.
-      event: verdict, toolName, reason: reason || '', workspaceId: _intuticWsId, harnessType: 'cline', timestamp: ts, incidentId, ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}) }) + '\\n';
+      event: verdict, toolName, reason: reason || '', workspaceId: _intuticWsId, harnessType: 'cline', timestamp: ts, incidentId, eventId, ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}) }) + '\\n';
     // mkdir first. This was a bare appendFileSync inside a swallowing catch, so
     // on any machine where nothing else had created ~/.intutic/events the append
     // threw ENOENT and was discarded — every Cline audit line, including blocks,

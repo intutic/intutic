@@ -197,6 +197,8 @@ export async function guardSettingsFile(
           filePath: changedPath,
           timestamp: new Date().toISOString(),
           incidentId: crypto.createHash('sha1').update(changedPath + Date.now()).digest('hex').slice(0, 16),
+          // Made once and resent with this line: processed once however often the drain retries.
+          eventId: crypto.randomBytes(16).toString('hex'),
         }) + '\n'
         const hookEventsJsonl = path.join(os.homedir(), '.intutic', 'events', 'hook-events.jsonl')
         await fs.appendFile(hookEventsJsonl, tamperEntry, { flag: 'a' })

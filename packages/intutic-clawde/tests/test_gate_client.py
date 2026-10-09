@@ -97,6 +97,15 @@ class TestEmit:
         c.emit("tool_flagged", "shell", "x" * 600)
         assert len(t.calls[0]["body"]["events"][0]["reason"]) == 512
 
+    def test_each_event_carries_its_own_event_id(self):
+        # The key the control plane processes each event once by.
+        c, t = make_client((200, {}), (200, {}))
+        c.emit("tool_allowed", "shell")
+        c.emit("tool_allowed", "shell")
+        ids = [call["body"]["events"][0]["eventId"] for call in t.calls]
+        assert all(len(i) == 32 and int(i, 16) >= 0 for i in ids)
+        assert ids[0] != ids[1]
+
     def test_valid_events_match_hook_event_schema(self):
         # Mirrors HookEventSchema in control-plane routes/hookEvents.ts.
         assert "tool_would_block" in VALID_EVENTS

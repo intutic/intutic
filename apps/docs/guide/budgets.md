@@ -104,8 +104,10 @@ The dashboard surfaces budget utilization in real time:
 - **Budget Limits** — on **Settings › Billing**: meters for **Spent this month** and **Spent today** against their caps (amber from 75%, red from 90%), the caps and alert threshold themselves, and the budget alerts raised so far.
 - **Cost by Virtual Key** — on Overview's **Cost & Token Efficiency** tab: cost per virtual key, today or this month (see below).
 - **Cost by Developer** — on the same tab: cost, tokens, calls, active days and models used per member, today or this month. Sort by any column; the top 10 show until you choose **Show all**. A call belongs to the member who owns the virtual key that made it. OWNER, ADMIN and EM see every member, plus an **Unattributed** row for calls with no virtual key. A DEVELOPER or VIEWER sees only their own usage.
-- **Cost by Team** — on the same tab, for OWNER, ADMIN and EM: the same figures per [SCIM group](/guide/scim), including members of nested groups. A member in several groups counts in each one, so team totals can add up to more than the workspace total. Without SCIM groups there are no teams, and cost by developer is the finest breakdown.
+- **Cost by Team** — on the same tab, for OWNER, ADMIN and EM: the same figures per [SCIM group](/guide/scim), including members of nested groups. A member in several groups counts in each one, so team totals can add up to more than the workspace total. Without SCIM groups there are no teams, and cost by developer is the finest breakdown. SCIM comes with the Enterprise and Self-host plans.
 - **Cost by Branch** — on the same tab: cost per repository and branch, or per HEAD commit, with the same role scoping as **Cost by Developer** (see [Cost per branch and commit](#cost-per-branch-and-commit)).
+
+Cost by Developer, Cost by Team and Cost by Branch are fleet analytics <Badge type="warning" text="Biz Org+" />: they come with the Biz Org, Enterprise and Self-host plans and the trials. On another plan each card says which plans include it.
 
 The dashboard has no daily spend trend or per-model spend view. **Token Efficiency by Model** on the same tab shows tokens per model, not cost.
 
@@ -148,7 +150,7 @@ This returns a clear breakdown containing:
 
 ---
 
-## Usage Reporting (Enterprise)
+## Usage Reporting
 
 Intutic keeps an append-only cost ledger — `execution_traces` forbids UPDATE and DELETE at the database level — and exposes it for reporting:
 
@@ -159,6 +161,8 @@ Intutic keeps an append-only cost ledger — `execution_traces` forbids UPDATE a
 - **Per-Team Breakdown:** The same totals per SCIM group (`/api/v1/usage/teams`, OWNER, ADMIN and EM).
 - **Per-Branch and Per-Commit Breakdown:** Cost grouped by repository and branch (`/api/v1/usage/branches`) or by HEAD commit (`/api/v1/usage/commits`).
 - **Event-Level Detail:** The individual billed calls behind those totals (`/api/v1/usage/events`).
+
+The per-developer, per-team, per-branch and per-commit breakdowns are fleet analytics, on Biz Org and above: on another plan they answer `403` with `Upgrade required — fleet analytics requires a Biz Org plan or higher`, from the first request after a downgrade. The other reports are on every plan.
 
 ::: info Chargebacks and GL mapping are not part of the product
 Cost-center GL mapping, period-end chargeback re-invoicing and the async PDF/CSV report workers were removed when the product narrowed to circuit-breaker scope, and their tables were dropped. The endpoints above are what ships.
@@ -177,7 +181,7 @@ virtual-key auth context (a standalone/offline trace synced back, for
 instance), report under a `null` key — shown as **unattributed** on the card —
 rather than being folded into whichever key happens to be first.
 
-### Cost per branch and commit
+### Cost per branch and commit <Badge type="warning" text="Biz Org+" /> {#cost-per-branch-and-commit}
 
 The sync daemon (`intutic connect`) reports the repository, Git branch and HEAD commit of the directory it runs in. It checks them on every poll (every 30 seconds by default) and reports them again when they change. When the control plane records a trace, it copies the session's current repository, branch and commit onto that trace. A call therefore stays with the commit it was made at, even after the session moves on.
 

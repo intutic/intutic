@@ -1,8 +1,11 @@
 /**
  * cursor.ts — Cursor adapter (full implementation with 3-level hooks).
  *
- * Replaces the minimal createMarkdownAdapter stub with a full adapter that:
- * - Writes .cursorrules governance text (existing behaviour, kept)
+ * - Writes the rule sets to `.cursor/rules/intutic-governance.mdc`, a project
+ *   rule with `alwaysApply: true`, which Cursor adds to every request
+ *   (https://cursor.com/docs/context/rules; a plain `.md` there is ignored).
+ *   Earlier versions overwrote `.cursorrules`, a single file the current docs
+ *   no longer describe; the user's own copy of it comes back.
  * - Injects hooks.json at project-level AND user-level
  * - Enterprise system-level (/etc/cursor) is handled by the system administrator
  *
@@ -16,12 +19,12 @@ import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { hashFile } from '../lib/hash.js'
-import { buildMarkdownContent } from './base.js'
 import { writeCursorHooks } from '@intutic/sync-daemon/harness/cursorHooks'
-import { writeOwnedFile } from '@intutic/sync-daemon'
+import { ownRulesFileHash, retireLegacyRulesFile, writeOwnRulesFile } from './rulesFiles.js'
 
-const CONFIG_FILE = '.cursorrules'
+const CONFIG_FILE = '.cursor/rules/intutic-governance.mdc'
+const LEGACY_FILE = '.cursorrules'
+const FRONT_MATTER = 'description: Intutic governance rules\nalwaysApply: true'
 
 export const cursorAdapter: IHarnessAdapter = {
   type: HarnessType.CURSOR,
@@ -29,7 +32,7 @@ export const cursorAdapter: IHarnessAdapter = {
 
   async detect(workspaceRoot: string): Promise<boolean> {
     // .cursorrules or .cursor/ directory
-    for (const marker of [CONFIG_FILE, '.cursor']) {
+    for (const marker of [LEGACY_FILE, '.cursor']) {
       try { await access(join(workspaceRoot, marker)); return true } catch { /* fall through */ }
     }
     // ~/.cursor directory (user has Cursor installed)
@@ -42,15 +45,12 @@ export const cursorAdapter: IHarnessAdapter = {
     await writeCursorHooks(workspaceRoot, proxyUrl, '', false)
   },
 
-  /** .cursorrules markdown governance text. */
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    const filePath = join(workspaceRoot, CONFIG_FILE)
-    const content = buildMarkdownContent(sops, proxyUrl)
-    await writeOwnedFile(filePath, workspaceRoot, content)
-    return filePath
+    await retireLegacyRulesFile(workspaceRoot, LEGACY_FILE)
+    return writeOwnRulesFile(workspaceRoot, CONFIG_FILE, sops, proxyUrl, FRONT_MATTER)
   },
 
-  async readCurrentHash(workspaceRoot: string): Promise<string | null> {
-    try { return await hashFile(join(workspaceRoot, CONFIG_FILE)) } catch { return null }
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return ownRulesFileHash(workspaceRoot, CONFIG_FILE)
   },
 }

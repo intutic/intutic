@@ -52,7 +52,7 @@ const XIRP_APP_PATH = '/Applications/Xirp.app'
 export const xirpAdapter: IHarnessAdapter = {
   type: HarnessType.XIRP,
   // No config file of its own — see module doc. Matches the goose/cline-
-  // style convention of an empty HARNESS_CONFIG_FILES entry for a harness
+  // style convention of an empty HARNESS_FILES entry for a harness
   // whose governance-relevant writes are not a single named file (in Xirp's
   // case: no writes of its own at all).
   configFileName: '',

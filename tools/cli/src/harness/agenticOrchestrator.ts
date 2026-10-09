@@ -63,7 +63,7 @@ const AGENTIC_ORCHESTRATOR_APP_PATH = '/Applications/Agentico.app'
 export const agenticOrchestratorAdapter: IHarnessAdapter = {
   type: HarnessType.AGENTIC_ORCHESTRATOR,
   // No config file of its own — see module doc. Matches xirp.ts's/goose.ts's
-  // convention of an empty HARNESS_CONFIG_FILES entry for a harness whose
+  // convention of an empty HARNESS_FILES entry for a harness whose
   // governance-relevant writes are not a single named workspace-relative
   // file (in this case: no writes of its own at all, same as Xirp).
   configFileName: '',

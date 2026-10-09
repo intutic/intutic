@@ -43,6 +43,7 @@ import json
 import urllib.request
 import hashlib
 import time
+import uuid
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -146,6 +147,10 @@ class Filter:
                 "harnessType": HARNESS_TYPE,
                 "timestamp": ts,
                 "incidentId": incident_id,
+                # The event's own id: one per event (the incident id is shared
+                # by every event of this call), so the control plane
+                # processes each one once however often it is resent.
+                "eventId": uuid.uuid4().hex,
                 **({"sessionId": session_id} if session_id else {}),
             })
 

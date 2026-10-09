@@ -28,7 +28,6 @@ import { log } from '../lib/logger.js'
 import { clearCredentials, loadConfig, saveConfig } from '../config/store.js'
 import { getCredentialsPath, getIntuticDir } from '../config/paths.js'
 import { getServicePaths, uninstallDaemon, uninstallMcpDaemon, uninstallProxyService, type ServiceTarget } from './install-daemon.js'
-import { planN8nDisconnect } from '../harness/n8n.js'
 
 export interface DisconnectOptions {
   /** One harness id; every harness when omitted. */
@@ -214,7 +213,6 @@ export async function runDisconnect(opts: DisconnectOptions): Promise<void> {
     harnesses: full ? undefined : [opts.harness!],
     remaining: full ? [] : (config?.harnesses ?? []).filter((h) => h !== opts.harness),
   })
-  if (config?.harnesses.includes('n8n' as HarnessType) && (full || opts.harness === 'n8n')) await planN8nDisconnect(files)
 
   const machine = new DisconnectPlan()
   if (full) {

@@ -298,6 +298,31 @@ function auditLogText(g: GateEntry): string {
   return out.join('\n')
 }
 
+/** The hook events (`{event, toolName, …}` lines) in a gate's audit logs. */
+function hookEvents(g: GateEntry): Array<Record<string, unknown>> {
+  return auditLogText(g)
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } })
+    .filter((e): e is Record<string, unknown> => !!e && typeof e['event'] === 'string' && 'toolName' in e)
+}
+
+/**
+ * Runs `act` and asserts every hook event it recorded carries an `eventId` of
+ * its own. The control plane processes each id once, so the id must be unique
+ * per event — the `incidentId` beside it hashes a timestamp, the tool and the
+ * workspace, and two calls in one second share it — and it must be in the
+ * line itself, which is what the daemon resends.
+ */
+async function expectEventIds(g: GateEntry, act: () => Promise<void>, atLeast: number): Promise<void> {
+  const before = new Set(hookEvents(g).map((e) => JSON.stringify(e)))
+  await act()
+  const added = hookEvents(g).filter((e) => !before.has(JSON.stringify(e)))
+  expect(added.length, `${g.name} recorded too few events`).toBeGreaterThanOrEqual(atLeast)
+  for (const e of added) expect(e['eventId'], `${g.name}: ${JSON.stringify(e)}`).toMatch(/^[0-9a-f]{16,64}$/)
+  expect(new Set(added.map((e) => e['eventId'])).size, `${g.name} reused an eventId`).toBe(added.length)
+}
+
 /** Reads a verdict out of a run according to the gate's declared contract. */
 function wasBlocked(g: GateEntry, r: RunResult): boolean {
   if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {
@@ -801,6 +826,31 @@ for (const g of GATES) {
       expect(wasBlocked(g, unrelated), `${g.name} held \`make test\``).toBe(false)
     })
 
+    it('stamps every event it records with an id of its own, which the line carries when it is resent', async () => {
+      await expectEventIds(g, async () => {
+        for (const command of ['echo one', 'echo two']) assertCleanExit(g, await runGate(g, { command }), command)
+      }, 2)
+    })
+
+    it('holds a command whose words are split by a tab, a line continuation or a SQL comment (gate body v10)', async () => {
+      // The classifier matched plain substrings, so each of these ran under a
+      // hold that should have stopped it. The full table, in both dialects, is
+      // holdActionClassifier.test.ts; this proves every real gate carries it.
+      const hold = (token: string): GuardPattern => ({
+        id: `sop.local.review_before.${token}`, source: ` (${token}) `, subject: 'action', ignoreCase: true, severity: 'hold',
+        reason: `Held for human review: ${token} — declared in review_before:`, rationale: '', matches: [], notMatches: [],
+      })
+      const snap = writeRulesFixture(join(home, `hold-gap-${g.name}.rules`), [hold('action:deploy'), hold('action:db_write')], 'ws_test')
+      for (const command of ['git\tpush origin main', 'git \\\npush origin main', 'psql -c "DROP/**/TABLE users"']) {
+        const r = await runGate(g, { command }, { snapshot: snap })
+        assertCleanExit(g, r, `a held ${JSON.stringify(command)}`)
+        expect(wasBlocked(g, r), `${g.name} let ${JSON.stringify(command)} run under a hold`).toBe(true)
+      }
+      const unrelated = await runGate(g, { command: 'apt-get update' }, { snapshot: snap })
+      assertCleanExit(g, unrelated, 'apt-get update under a db_write hold')
+      expect(wasBlocked(g, unrelated), `${g.name} held \`apt-get update\` as a database write`).toBe(false)
+    })
+
     it("holds a deploy run through Gemini CLI's shell tool, run_shell_command", async () => {
       // The classifier only reads the command of a tool on ACTION_TOOL_NAMES,
       // and Gemini CLI's shell tool was not on it: the deploy classified as no
@@ -1119,6 +1169,16 @@ describe('Open WebUI prompt filter', () => {
     expect((await ask('here is a canary-string', snap)).refused).toBe(false)
   })
 
+  it('gives each event of one prompt its own eventId — they share an incidentId', async () => {
+    const snap = join(home, 'owui-warn-ids.rules')
+    writeRulesFixture(snap, [{
+      id: 'deny.canary', source: 'canary-string', subject: 'command', severity: 'warn',
+      reason: 'No canary', rationale: '', matches: [], notMatches: [],
+    }])
+    // A flag and an allow for the prompt.
+    await expectEventIds(gate, async () => { await ask('here is a canary-string', snap) }, 2)
+  })
+
   it('refuses when severity is hold — a prompt has no tool call to hold and no reviewer to wait for', async () => {
     // Also the v7 fail-open edge: the old mapping sent every unrecognised
     // severity to `flags`, so a hold rule reaching a v7 filter was ALLOWED.
@@ -1311,7 +1371,7 @@ describe('n8n workflow gate', () => {
   })
 
   it('writes an audit line for a block', async () => {
-    await runWorkflow(wf([commandNode('chflags nouchg .intutic/hooks/x')]))
+    await expectEventIds(gate, async () => { await runWorkflow(wf([commandNode('chflags nouchg .intutic/hooks/x')])) }, 1)
     expect(
       auditLogText(gate),
       'the workflow gate aborted an execution without recording it — an unrecorded block is invisible to the control plane',
@@ -1491,8 +1551,8 @@ describe('OpenCode plugin gate', () => {
         expect(withSnap.refused, 'destructive command allowed with the snapshot present').toBe(true)
       })
 
-      it('records the verdict with harnessType opencode', async () => {
-        await runPlugin(shape, 'bash', { command: 'chflags nouchg .intutic/hooks/x' })
+      it('records the verdict with harnessType opencode, under an eventId of its own', async () => {
+        await expectEventIds(gate, async () => { await runPlugin(shape, 'bash', { command: 'chflags nouchg .intutic/hooks/x' }) }, 1)
         const text = auditLogText(gate)
         expect(text).toContain('"harnessType":"opencode"')
         expect(text).toContain('"event":"tool_blocked"')

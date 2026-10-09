@@ -70,6 +70,29 @@ def test_pattern_lists_match_rust(rust_name, py_value):
     )
 
 
+_VECTORS = Path(ACTIONS_RS).with_name("action_vectors.json")
+
+
+def _vectors() -> dict:
+    import json
+    return json.loads(_VECTORS.read_text(encoding="utf-8")) if _VECTORS.exists() else {"held": [], "notHeld": []}
+
+
+@pytestmark_parity
+@pytest.mark.parametrize("command,tokens", _vectors()["held"])
+def test_shared_vector_classifies_as_listed(command, tokens):
+    # The vectors every classifier shares (actions.rs, actions.ts, the hook
+    # gates' hold classifier): `git\tpush`, a line continuation or a long
+    # option between the words used to classify as nothing here.
+    assert actions.classify("bash", {"command": command}) == tokens
+
+
+@pytestmark_parity
+@pytest.mark.parametrize("command", _vectors()["notHeld"])
+def test_shared_vector_classifies_as_nothing(command):
+    assert actions.classify("bash", {"command": command}) == []
+
+
 @pytestmark_parity
 def test_sql_gap_matches_rust():
     import re
