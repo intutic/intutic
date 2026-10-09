@@ -586,6 +586,11 @@ export const NO_GATE: ReadonlyArray<{
     why: 'lists where each writer above puts its gate, so the AI inventory can check the file is there; writes nothing',
   },
   {
+    file: 'antigravityProducts.ts',
+    harness: null,
+    why: 'reads which of Google Antigravity and Gemini CLI a machine has, for the agent report and the AI inventory; writes nothing',
+  },
+  {
     file: 'gateSightings.ts',
     harness: null,
     why: 'records when each gate last wrote an event, from the logs the gates write; writes no config or gate',

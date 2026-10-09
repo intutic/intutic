@@ -80,7 +80,7 @@ gate says so.
 | Detection | `.grok/` or `AGENTS.md` in the project, `~/.grok/`, or `grok` in `PATH` |
 | Format | Markdown (rules), TOML (`config.toml`) |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
-| Block contract | `{"decision":"deny","reason":"..."}` on stdout, exit 0 — confirmed |
+| Block contract | `{"decision":"deny","reason":"..."}` on stdout, exit 0 — confirmed; the object also carries the refusal's `code` and `ruleId` ([refusal codes](/reference/harness-security-matrix#hook-refusal-codes)) |
 
 ::: tip Not live-verified
 Grok Build was not installable in the environment this integration was built

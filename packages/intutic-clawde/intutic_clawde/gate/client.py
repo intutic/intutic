@@ -196,6 +196,10 @@ class GateClient:
             "workspaceId": self.workspace_id,
             "sessionId": self.session_id,
             "harnessType": self.harness,
+            # No daemon reports an SDK gate, so the control plane expects one
+            # from its own events: one that keeps reporting and stops is a
+            # silent gate.
+            "gateSource": "sdk",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             # The event's id, made once: if this post is ever repeated, the
             # control plane processes the event once.

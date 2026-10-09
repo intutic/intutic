@@ -71,7 +71,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
 | **Repeat-Finding Enforcement** | Act on a sustained pattern of findings in one session, not only record it. |
 | **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |
-| **Gate health** | Whether each installed harness's gate is reporting. A gate reports every tool call, allowed ones included, so one that has sent nothing for 48 hours is **Silent**: its tool calls may not be governed. **Just installed** means the harness connected less than an hour ago. Owners, Admins and Engineering Managers can see it. |
+| **Gate health** | Whether each installed harness's gate is reporting. A gate reports every tool call, allowed ones included, so one that has sent nothing for 48 hours is **Silent**: its tool calls may not be governed. **Just installed** means the harness connected less than an hour ago. A harness is listed while a connected `intutic connect` reports it: a machine that ran `intutic disconnect`, or whose daemon has not reported for a day, is not waited on. Google Antigravity and Gemini CLI are listed apart. An **SDK gate** (`@intutic/gate`, `intutic_clawde.gate`) has no daemon; it is listed once its events have arrived on three different days within a week, and dropped after a week with none, so a script run once never alerts. Owners, Admins and Engineering Managers can see it. |
 | **Devices** | Enforcement posture each developer machine reports: visibility, not attestation. |
 
 ### Group policy for high-risk tools <Badge type="warning" text="Biz Org+" />
@@ -406,7 +406,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `gateway.stale.detected` | Self-Hosted Gateway Unreachable |
 | `device.enforcement.stale` | Device Enforcement Stale |
 | `device.enforcement.disabled` | Device Firewall Disabled |
-| `governance.gate.silent` | Gate Stopped Reporting: an installed harness's gate has sent no event for 48 hours |
+| `governance.gate.silent` | Gate Stopped Reporting: an installed harness's gate, or an SDK gate in regular use, has sent no event for 48 hours |
 | `governance.gate.recovered` | Gate Reporting Again |
 | `inventory.ungoverned.detected` | Ungoverned AI Tool Found: a machine's [AI inventory](/guide/ai-inventory) listed an ungoverned harness or MCP server for the first time; once per machine and item |
 | `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature or an altered append-only guard. See [Trace Integrity](/concepts/trace-integrity#alerts) |

@@ -83,6 +83,14 @@ class TestHookGate:
 
 
 class TestEmit:
+    def test_marks_the_event_as_an_sdk_gates(self):
+        # How the control plane tells an SDK gate's events from a hook
+        # gate's, and watches a regularly used one for silence.
+        c, t = make_client((200, {}))
+        assert c.emit("tool_allowed", "shell") is True
+        assert t.calls[0]["body"]["events"][0]["gateSource"] == "sdk"
+        assert t.calls[0]["body"]["events"][0]["harnessType"] == "langgraph"
+
     def test_never_raises(self):
         c, _ = make_client(ConnectionError("down"))
         assert c.emit("tool_blocked", "shell", "reason") is False

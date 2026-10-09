@@ -17,6 +17,10 @@ import { MCP_REFUSAL_CODES } from '../refusals.js'
 const HERE = node_path.dirname(fileURLToPath(import.meta.url))
 const SHARED = JSON.parse(readFileSync(node_path.join(HERE, '../../../shared-types/fixtures/refusal-codes.json'), 'utf8')).mcp
   .refusals as Array<{ code: string }>
+const REGISTRY_VECTORS = JSON.parse(readFileSync(node_path.join(HERE, '../../../shared-types/fixtures/mcp-registry-vectors.json'), 'utf8')) as {
+  registries: Record<string, McpRegistryPolicy>
+  cases: Array<{ name: string; registry: string; toolName: string; code: string | null; ruleId: string | null; reason: string | null }>
+}
 
 describe('MCP refusal codes', () => {
   it('are the shared list', () => {
@@ -101,6 +105,26 @@ describe('every request-side refusal names its code and deciding rule', () => {
     expect(d.ruleId.startsWith(ruleId)).toBe(true)
     expect(d.reason).toContain(inReason)
   })
+})
+
+// The shared registry vectors: the decisions the hook gates make from the
+// policy snapshot. A harness name mcp__<server>__<tool> is called as <tool>
+// on <server>, the way this proxy sees it.
+describe('the shared MCP registry vectors', () => {
+  for (const c of REGISTRY_VECTORS.cases) {
+    it(c.name, async () => {
+      const rest = c.toolName.slice('mcp__'.length)
+      const sep = rest.indexOf('__')
+      const policy = new Policy()
+      policy.registry = REGISTRY_VECTORS.registries[c.registry]
+      const d = await new ToolCallInterceptor(policy, new Emitter(), true, rest.slice(0, sep)).decide(rest.slice(sep + 2), {})
+      if (c.code === null) {
+        expect(d.action).toBe('allow')
+        return
+      }
+      expect(d).toMatchObject({ action: 'block', code: c.code, ruleId: c.ruleId, reason: c.reason })
+    })
+  }
 })
 
 describe('refusal frames', () => {

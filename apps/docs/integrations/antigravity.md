@@ -8,8 +8,12 @@ Integrate Intutic governance with Google's coding agents: [Google Antigravity](h
 |---|---|---|
 | Gate | `.intutic/hooks/antigravity-cli-check.js` | `.intutic/hooks/antigravity-check.sh` |
 | Registered in | `~/.gemini/config/hooks.json`, as a `PreToolUse` hook for every tool | `~/.gemini/settings.json`, as a `BeforeTool` hook for every tool |
-| How a call is refused | The gate prints `{"decision":"deny","reason":"..."}` | The gate exits with code 2 |
+| How a call is refused | The gate prints `{"decision":"deny","reason":"..."}`; the reason ends with the [refusal code](/reference/harness-security-matrix#hook-refusal-codes) | The gate exits with code 2 |
 | Rule sets | `GEMINI.md` in the project, a marked section | `GEMINI.md` in the project, the same section |
+| Found by | Its app-data directories under `~/.gemini` (`antigravity`, `antigravity-cli`, `antigravity-ide`), a project `.agents/hooks.json`, or `antigravity` on `PATH` | `gemini` on `PATH`, a project `.gemini` directory, or a `~/.gemini/settings.json` with a setting of its own |
+| Reports as | `antigravity` | `gemini-cli` |
+
+`intutic init` detects the harness when it finds either product, a plain Gemini CLI install included. Each gate reports its events under its own name, so [gate health](/guide/settings), the [AI inventory](/guide/ai-inventory) and the [SIEM export](/guide/siem-export) show which product a call came through, and a machine with only one of the two is not expected to report from the other. It is still one harness: one entry in `intutic init`, one rules file, and one count in the harness total.
 
 Both gates run before every tool call, with the call as JSON on stdin, and enforce the same policy: the built-in protections, the destructive-command tier, your rule sets, group rules and holds for review. They are installed whether or not any rule set targets the harness.
 

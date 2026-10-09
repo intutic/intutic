@@ -82,6 +82,47 @@ describe('collectDeviceInventory', () => {
     expect(inv).not.toHaveProperty('guardProbes')
   })
 
+  it('lists Google Antigravity and Gemini CLI apart, each with its own gate file and events', async () => {
+    setup()
+    write(join(root, '.intutic', 'hooks', 'antigravity-cli-check.js'), '// gate')
+    write(join(root, '.intutic', 'hooks', 'antigravity-check.sh'), '# gate')
+    await recordGateSightings(root, [{ event: 'tool_allowed', harnessType: 'gemini-cli', timestamp: '2026-10-08T10:00:00.000Z' }])
+    const empty = join(home, 'empty-bin')
+    mkdirSync(empty)
+
+    // Only Gemini CLI on this machine: one row, under its own gate id.
+    write(join(home, '.gemini', 'settings.json'), JSON.stringify({ security: { auth: { selectedType: 'gemini-api-key' } } }))
+    let inv = await collectDeviceInventory({ workspaceRoot: root, configured: ['antigravity'], detected: [{ type: 'antigravity' }], home, path: empty })
+    expect(inv.harnesses).toEqual([
+      {
+        type: 'gemini-cli',
+        configured: true,
+        gateKind: 'hook',
+        gateInstalled: true,
+        gateFile: '~/code/app/.intutic/hooks/antigravity-check.sh',
+        lastHookEventAt: '2026-10-08T10:00:00.000Z',
+        guardsDisabledAt: null,
+      },
+    ])
+
+    // Both: two rows. Neither found, but connected: one row under the harness id, with every gate's events.
+    mkdirSync(join(home, '.gemini', 'antigravity'))
+    inv = await collectDeviceInventory({ workspaceRoot: root, configured: ['antigravity'], detected: [], home, path: empty })
+    expect(inv.harnesses.map((h) => [h.type, h.gateFile, h.lastHookEventAt])).toEqual([
+      ['antigravity', '~/code/app/.intutic/hooks/antigravity-cli-check.js', null],
+      ['gemini-cli', '~/code/app/.intutic/hooks/antigravity-check.sh', '2026-10-08T10:00:00.000Z'],
+    ])
+    rmSync(join(home, '.gemini'), { recursive: true })
+    inv = await collectDeviceInventory({ workspaceRoot: root, configured: ['antigravity'], detected: [], home, path: empty })
+    expect(inv.harnesses.map((h) => [h.type, h.lastHookEventAt])).toEqual([['antigravity', '2026-10-08T10:00:00.000Z']])
+  })
+
+  it('marks a harness disconnected on purpose', async () => {
+    setup()
+    const inv = await collectDeviceInventory({ workspaceRoot: root, configured: [], disconnected: ['cursor'], detected: [{ type: 'cursor' }], home })
+    expect(inv.harnesses).toEqual([expect.objectContaining({ type: 'cursor', configured: false, disconnected: true, gateInstalled: false })])
+  })
+
   it('reports MCP servers without command lines, env values or URL credentials', async () => {
     setup()
     write(join(home, '.claude.json'), JSON.stringify({

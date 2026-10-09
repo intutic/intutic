@@ -4,7 +4,7 @@ Integrate Intutic governance with [Cline](https://github.com/cline/cline) — th
 
 ## How it works
 
-Cline runs *file hooks*: an executable named `PreToolUse` in a hooks directory runs before every tool call, with the call as JSON on stdin. Intutic installs its gate as `.clinerules/hooks/PreToolUse`. It refuses a call by printing `{"cancel": true, "errorMessage": "…"}` on stdout — Cline ignores the hook's exit code. The hook has no tool filter, so it sees every tool call, including MCP calls (`use_mcp_tool`). Governance rules are written next to it as `.clinerules/intutic-governance.md`, which Cline reads as a rules file.
+Cline runs *file hooks*: an executable named `PreToolUse` in a hooks directory runs before every tool call, with the call as JSON on stdin. Intutic installs its gate as `.clinerules/hooks/PreToolUse`. It refuses a call by printing `{"cancel": true, "errorMessage": "…"}` on stdout, with the refusal's `code` and `ruleId` ([refusal codes](/reference/harness-security-matrix#hook-refusal-codes)) — Cline ignores the hook's exit code. The hook has no tool filter, so it sees every tool call, including MCP calls (`use_mcp_tool`). Governance rules are written next to it as `.clinerules/intutic-governance.md`, which Cline reads as a rules file.
 
 The same file serves the VS Code extension and the Cline CLI, which read different payload shapes; the gate accepts both. In the VS Code extension, turn on **Enable Hooks** in Cline's feature settings — hooks do not run until you do.
 

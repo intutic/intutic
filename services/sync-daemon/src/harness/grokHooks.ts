@@ -223,7 +223,7 @@ process.stdin.on('end', () => {
     const errMsg = String(err);
     process.stderr.write('[Intutic Governance] Hook error (fail-closed): ' + errMsg + '\\n');
     logEvent('tool_blocked', 'unknown', errMsg);
-    process.stdout.write(JSON.stringify({ decision: 'deny', reason: '[Intutic Governance] Hook error (fail-closed): ' + errMsg }) + '\\n');
+    process.stdout.write(JSON.stringify({ decision: 'deny', reason: '[Intutic Governance] Hook error (fail-closed): ' + errMsg, code: 'GATE_CRASHED', ruleId: null }) + '\\n');
     process.exit(0);
   }
 });

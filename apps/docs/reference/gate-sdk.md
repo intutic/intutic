@@ -71,6 +71,8 @@ except IntuticGateRefusal as e:
 
 Read-only tools (`read_file`, `list_files`, `read`, `cat`, `view`, exported as `READ_ONLY_TOOLS`) get the snapshot check only. Every decision is reported to `POST /api/v1/hook-events` (`tool_blocked`, `tool_held`, `hold_approved_bypass_used`, `tool_flagged`, `tool_would_block`, `tool_allowed`, plus one snapshot-health event per process). Setting `INTUTIC_GUARD_DISABLE=1` skips the snapshot's destructive-command rules and reports `guards_disabled`.
 
+The events carry `gateSource: "sdk"` and the client's `harness`, which is how the control plane watches an SDK gate for silence with no daemon to report it: once a gate's events have arrived on three different days within a week, [Gate health](/guide/settings) lists it, and **Gate Stopped Reporting** fires if it then sends nothing for 48 hours. A script run once or twice is never listed. Give each long-running agent its own `harness` name to watch it on its own.
+
 ### Holds
 
 A hold rule asks a person before the call runs: a `REQUIRE_APPROVAL:` SOP, which reaches the gate both in the policy snapshot and in the SOP register, or a `review_before:` entry in a local SOP or the workspace settings, which reaches it in the snapshot. The gate handles it the way the harness hook gates and the [MCP proxy](/guide/mcp-governance#approval-holds) do, through the same decisions API:

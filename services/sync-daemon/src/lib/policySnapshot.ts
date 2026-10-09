@@ -61,9 +61,13 @@ import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
 import {
+  encodeMcpRegistryRecord,
   encodeSsoGroupRecord,
   evaluateSsoGroupClearance,
+  isUnrestrictedMcpRegistry,
+  parseMcpRegistryRecord,
   parseSsoGroupPolicy,
+  type McpRegistryRecord,
   type SsoGroupPolicy,
 } from '@intutic/shared-types'
 import { toRulesLine, GATE_VERSION, RULES_COLUMNS } from '../harness/gateBody.js'
@@ -225,6 +229,14 @@ export interface ResolvedPolicy {
    * control plane named no member, which every gate reads as "groups unknown".
    */
   principal?: { memberId: string; ssoGroups: string[] } | null
+  /**
+   * The workspace's MCP server registry decisions (`mcpRegistry`): blocked,
+   * held and approved servers, disabled tools and `mcpDefaultPolicy`. Written
+   * as an `@mcp_registry` record so the hook gates apply them to every
+   * `mcp__<server>__<tool>` call, not only the calls an MCP proxy fronts.
+   * Absent or null: an older control plane, and no record is written.
+   */
+  mcpRegistry?: McpRegistryRecord | null
 }
 
 export interface PolicySnapshotOptions {
@@ -504,6 +516,7 @@ async function requestResolvedPolicy(
       // the policy `resolveSsoGroupPrivilege` enforces.
       ssoGroupPolicy: parseSsoGroupPolicy(rec.ssoGroupPolicy),
       principal: parsePrincipal(rec.principal),
+      mcpRegistry: parseMcpRegistryRecord(rec.mcpRegistry),
     }
   } catch (err) {
     log.warn({ action: 'policy_fetch_failed', err }, 'Policy resolve unreachable')
@@ -658,14 +671,31 @@ function ssoGroupPatterns(policy: ResolvedPolicy): GuardPattern[] {
   if (!groupPolicy) return []
   const groups = policy.principal ? policy.principal.ssoGroups : null
   const out: GuardPattern[] = []
-  for (const tool of new Set([...groupPolicy.requireOboFor, ...groupPolicy.highRiskTools])) {
+  // The gates stop at the first rule that refuses, and the evaluator prefers
+  // an entry naming the call exactly: so within each list, the entries that
+  // already name the harness form (`mcp__…`) go before the ones that name an
+  // MCP tool by its own name and also match it on any server.
+  const harnessFormFirst = (list: readonly string[]) => [
+    ...list.filter((t) => t.startsWith('mcp__')),
+    ...list.filter((t) => !t.startsWith('mcp__')),
+  ]
+  const entries = new Set([...harnessFormFirst(groupPolicy.requireOboFor), ...harnessFormFirst(groupPolicy.highRiskTools)])
+  const compiled = new Set<string>()
+  for (const tool of entries) {
     const decision = evaluateSsoGroupClearance(groupPolicy, tool, groups)
     if (decision.clearance === 'GRANTED' || !decision.ruleId) continue
+    // An entry another entry already refuses (`mcp__pg__x` beside an
+    // on-behalf-of `x`) decides to that entry's rule, which already matches it.
+    if (compiled.has(decision.ruleId)) continue
+    compiled.add(decision.ruleId)
     // The gates match a whitespace-collapsed, space-padded tool name, so the
-    // name is collapsed the same way and escaped to a literal.
+    // name is collapsed the same way and escaped to a literal. An entry that
+    // is an MCP tool's own name also matches the name a harness gives that
+    // tool on any server, `mcp__<server>__<tool>` (ssoGroupToolMatches).
     const name = tool.replace(/\s+/g, ' ').trim()
     if (!name) continue
-    const source = ` (${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}) `
+    const literal = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const source = name.startsWith('mcp__') ? ` (${literal}) ` : ` (${literal}|mcp__.+__${literal}) `
     try {
       assertPortableEre(source, decision.ruleId)
     } catch (err) {
@@ -748,7 +778,15 @@ export async function writePolicySnapshot(
         issuedAt: generatedAt,
       }
     : null
-  const lines = [...(ssoGroups ? [encodeSsoGroupRecord(ssoGroups)] : []), ...rules.map(toRulesLine)]
+  // The MCP registry record rides the same way, so an edited registry fails
+  // the digest too. A registry that refuses nothing writes no line, which
+  // keeps the snapshot of a workspace that never used the registry unchanged.
+  const mcpRegistry = policy.mcpRegistry && !isUnrestrictedMcpRegistry(policy.mcpRegistry) ? policy.mcpRegistry : null
+  const lines = [
+    ...(ssoGroups ? [encodeSsoGroupRecord(ssoGroups)] : []),
+    ...(mcpRegistry ? [encodeMcpRegistryRecord(mcpRegistry)] : []),
+    ...rules.map(toRulesLine),
+  ]
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
 
   // M3: the per-server MCP allowlist, sanitised once and reused for both
@@ -793,8 +831,11 @@ export async function writePolicySnapshot(
       mcpAllowedServers: mcpServers,
       // The same record as the `.rules` file's `@sso_groups` line, readable.
       ...(ssoGroups ? { ssoGroups } : {}),
-      // With `sopRules`, `interventionMode` and `mcpAllowedServers`, enough to
-      // rebuild this snapshot without the control plane (`forgetSnapshotMember`).
+      // The same record as the `.rules` file's `@mcp_registry` line.
+      ...(mcpRegistry ? { mcpRegistry } : {}),
+      // With `sopRules`, `interventionMode`, `mcpAllowedServers` and
+      // `mcpRegistry`, enough to rebuild this snapshot without the control
+      // plane (`forgetSnapshotMember`).
       sqlDropStrictBlock: policy.sqlDropStrictBlock,
       /**
        * The resolve response verbatim, alongside the gate projection below.
@@ -932,6 +973,7 @@ async function forgetSnapshotMember(dir: string, localHoldTokens: readonly strin
         sqlDropStrictBlock: doc.sqlDropStrictBlock === true,
         ssoGroupPolicy,
         principal: null,
+        mcpRegistry: parseMcpRegistryRecord(doc.mcpRegistry),
       },
       dir,
       localHoldTokens,

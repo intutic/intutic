@@ -1458,6 +1458,7 @@ export async function runConnect(opts: {
           apiKey: safeCreds.apiKey,
           workspaceRoot: safeConfig.workspaceRoot,
           configured: safeConfig.harnesses,
+          disconnected: safeConfig.disconnectedHarnesses,
           cliVersion: cliPkgVersion,
         })
         if (!inventory.reported) log.dim(`AI inventory report not sent (will retry): ${inventory.reason}`)

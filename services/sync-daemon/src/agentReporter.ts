@@ -474,6 +474,12 @@ async function collectMcpTools(workspaceRoot: string): Promise<AgentFacets['mcp_
 export async function collectAgentReport(opts: {
   workspaceRoot: string
   harnessType: HarnessType
+  /**
+   * The gate id the agent registers under, when the harness has more than one
+   * gate (`gateIdentitiesOf` in `@intutic/shared-types`). Defaults to the
+   * harness id.
+   */
+  gateIdentity?: string
   agentRole?: string
   configSynced: boolean
   dlpEnabled: boolean
@@ -493,10 +499,11 @@ export async function collectAgentReport(opts: {
   ])
 
   const role = opts.agentRole ?? ''
+  const gateId = opts.gateIdentity ?? opts.harnessType
   return {
-    agentKey: `${opts.harnessType}:${role || 'default'}`,
-    displayName: role ? `${opts.harnessType} (${role})` : opts.harnessType,
-    harnessType: opts.harnessType,
+    agentKey: `${gateId}:${role || 'default'}`,
+    displayName: role ? `${gateId} (${role})` : gateId,
+    harnessType: gateId,
     agentRole: role,
     facets: {
       guardrails: {

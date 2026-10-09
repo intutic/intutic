@@ -14,6 +14,7 @@ import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from './api.js'
 import { readEnforcementState } from './enforcementState.js'
+import { inventoryDeviceIdentity } from './inventory.js'
 
 const { version: cliVersion } = createRequire(import.meta.url)('../../package.json') as { version: string }
 
@@ -60,6 +61,38 @@ export async function reportDeviceState(opts: ReportDeviceStateOptions = {}): Pr
     const client = createApiClient(resolveControlPlaneUrl(opts.dev), creds.apiKey)
     await client.post('/api/v1/devices/report', body)
     return { reported: true }
+  } catch (err) {
+    return { reported: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** How long `intutic disconnect` waits for the control plane before going on without it. */
+export const DISCONNECT_REPORT_TIMEOUT_MS = 5_000
+
+/**
+ * Tells the control plane this machine ran `intutic disconnect`
+ * (`POST /api/v1/devices/disconnect`), so it stops expecting the machine's
+ * gates and does not read the machine going quiet as a fault. Sent before
+ * disconnect removes the credentials, under the fingerprint the device and
+ * the AI inventory report. Never throws, and gives up after
+ * {@link DISCONNECT_REPORT_TIMEOUT_MS}: an unreachable control plane must not
+ * stop a disconnect.
+ */
+export async function reportDisconnect(opts: {
+  scope: 'machine' | 'harness'
+  harnesses: readonly string[]
+}): Promise<DeviceReportResult> {
+  try {
+    const creds = await loadCredentials()
+    if (!creds) return { reported: false, reason: 'not authenticated' }
+    const device = await inventoryDeviceIdentity(cliVersion)
+    const res = await fetch(`${resolveControlPlaneUrl()}/api/v1/devices/disconnect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.apiKey}` },
+      body: JSON.stringify({ fingerprint: device.fingerprint, hostname: device.hostname, scope: opts.scope, harnesses: opts.harnesses }),
+      signal: AbortSignal.timeout(DISCONNECT_REPORT_TIMEOUT_MS),
+    })
+    return res.ok ? { reported: true } : { reported: false, reason: `the control plane answered ${res.status}` }
   } catch (err) {
     return { reported: false, reason: err instanceof Error ? err.message : String(err) }
   }

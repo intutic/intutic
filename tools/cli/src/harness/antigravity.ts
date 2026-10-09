@@ -20,18 +20,19 @@
  *
  * A hooks file that is not a plain JSON object is left alone and reported.
  *
+ * The two gates report under their own gate ids, `antigravity` and
+ * `gemini-cli` (gateIdentity.ts in @intutic/shared-types), so the control
+ * plane can tell the products apart; the harness stays one.
+ *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
  */
 
-import { join } from 'node:path'
-import { access } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { loadCredentials } from '../config/store.js'
-import { writeAntigravityCliHooks, writeAntigravityHooks } from '@intutic/sync-daemon'
+import { antigravityGateIdentities, writeAntigravityCliHooks, writeAntigravityHooks } from '@intutic/sync-daemon'
 import { rulesSectionHash, writeRulesSectionFile } from './rulesFiles.js'
 
 const CONFIG_FILE = 'GEMINI.md'
@@ -40,24 +41,16 @@ export const antigravityAdapter: IHarnessAdapter = {
   type: HarnessType.ANTIGRAVITY,
   configFileName: CONFIG_FILE,
 
+  /**
+   * Either product, found the way the sync daemon finds it for the agent
+   * report and the AI inventory (antigravityProducts.ts): Antigravity's
+   * app-data directories or a project `.agents/hooks.json`; Gemini CLI's
+   * `gemini` on PATH, a project `.gemini` directory or its own
+   * `~/.gemini/settings.json`. A plain Gemini CLI install with no `.gemini`
+   * in the workspace is found by the binary and the settings file.
+   */
   async detect(workspaceRoot: string): Promise<boolean> {
-    const markers = [
-      join(workspaceRoot, '.gemini'),
-      join(workspaceRoot, '.agents', 'hooks.json'),
-      // Antigravity's app-data directories: the 2.0 app, the CLI and the IDE.
-      join(homedir(), '.gemini', 'antigravity'),
-      join(homedir(), '.gemini', 'antigravity-cli'),
-      join(homedir(), '.gemini', 'antigravity-ide'),
-    ]
-    for (const marker of markers) {
-      try {
-        await access(marker)
-        return true
-      } catch {
-        // fall through
-      }
-    }
-    return false
+    return (await antigravityGateIdentities(workspaceRoot)).length > 0
   },
 
   async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {

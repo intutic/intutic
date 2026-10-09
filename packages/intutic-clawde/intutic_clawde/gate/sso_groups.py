@@ -17,7 +17,9 @@ group list clears nothing.
 Algorithm, in order: no policy -> GRANTED; tool on ``requireOboFor`` ->
 REQUIRES_OBO; tool not on ``highRiskTools`` -> GRANTED; groups unknown ->
 DENIED; member holds a ``requiredGroups`` entry -> GRANTED; otherwise DENIED.
-Names and groups match exactly.
+Names and groups match exactly, except that an entry naming an MCP tool as its
+server declares it (``run_query``) also matches the name a harness gives it on
+any server (``mcp__postgres__run_query``).
 """
 
 from __future__ import annotations
@@ -77,16 +79,36 @@ def _rule_id(kind: str, tool_name: str) -> str:
     return f"sso_group.{kind}.{re.sub(r'[^A-Za-z0-9_.:-]', '_', tool_name)}"
 
 
+def tool_matches(entry: str, name: str) -> bool:
+    """Whether a call named ``name`` is the tool a policy entry names: exactly,
+    or, for an entry that is an MCP tool's own name (not starting with
+    ``mcp__``), as ``mcp__<server>__<entry>`` on any server."""
+    if name == entry:
+        return True
+    if entry.startswith("mcp__") or not name.startswith("mcp__"):
+        return False
+    suffix = "__" + entry
+    return len(name) > len("mcp__") + len(suffix) and name.endswith(suffix)
+
+
+def _matching_entry(entries: tuple[str, ...], tool_name: str) -> Optional[str]:
+    if tool_name in entries:
+        return tool_name
+    return next((e for e in entries if tool_matches(e, tool_name)), None)
+
+
 def evaluate(policy: Optional[SsoGroupPolicy], tool_name: str,
              member_groups: Optional[tuple[str, ...] | list[str]]) -> SsoGroupDecision:
     if policy is None:
         return SsoGroupDecision(GRANTED)
-    if tool_name in policy.require_obo_for:
+    obo = _matching_entry(policy.require_obo_for, tool_name)
+    if obo is not None:
         return SsoGroupDecision(
-            REQUIRES_OBO, _rule_id("require_obo", tool_name),
-            f"SSO group policy: {tool_name} is on-behalf-of only, and a tool-call gate has no OBO token to present",
+            REQUIRES_OBO, _rule_id("require_obo", obo),
+            f"SSO group policy: {obo} is on-behalf-of only, and a tool-call gate has no OBO token to present",
         )
-    if tool_name not in policy.high_risk_tools:
+    risky = _matching_entry(policy.high_risk_tools, tool_name)
+    if risky is None:
         return SsoGroupDecision(GRANTED)
     if member_groups is not None and any(g in member_groups for g in policy.required_groups):
         return SsoGroupDecision(GRANTED)
@@ -96,8 +118,8 @@ def evaluate(policy: Optional[SsoGroupPolicy], tool_name: str,
     else:
         why = "and this member holds none of them"
     return SsoGroupDecision(
-        DENIED, _rule_id("high_risk", tool_name),
-        f"SSO group policy: {tool_name} requires one of the SSO groups {groups}, {why}",
+        DENIED, _rule_id("high_risk", risky),
+        f"SSO group policy: {risky} requires one of the SSO groups {groups}, {why}",
     )
 
 

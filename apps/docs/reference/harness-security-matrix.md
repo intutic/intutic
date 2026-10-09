@@ -28,6 +28,38 @@ refuse a hold outright — neither runs in a workspace that could record one. Th
 SDK gates (`@intutic/gate`, `intutic_clawde.gate`) hold the call the same way, recording it
 through the decisions API themselves; see [Holds](/reference/gate-sdk#holds).
 
+### Refusal codes in a JSON decision {#hook-refusal-codes}
+
+Cline, Grok Build and Google Antigravity read a refusal from the hook's stdout
+rather than its exit code. The refusal carries a stable `code`, the deciding
+rule as `ruleId` (`null` when no rule decided), and for a hold the `holdId`:
+
+```json
+{"decision": "deny", "reason": "… [mcp_registry.pastebin]", "code": "SERVER_BLOCKED", "ruleId": "mcp_registry.pastebin"}
+```
+
+Cline's refusal is `{"cancel": true, "errorMessage": "…", "code": …, "ruleId": …}`.
+Google Antigravity's decision holds only the fields its hook contract documents,
+so its reason ends with the code instead, `(refusal code SERVER_BLOCKED)`. The
+harnesses that read the exit code get the refusal as text on stderr, with the
+rule id in brackets.
+
+| Code | Meaning |
+|---|---|
+| `BUILT_IN_RULE` | A rule built into the hook gate matched: a governance bypass, a write to a protected path or a skill directory, or a secret in written content |
+| `SNAPSHOT` | A block rule in the policy snapshot matched: an SOP, the destructive-command tier or a skill-content rule |
+| `SSO_GROUP` | The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown |
+| `HELD` | A hold rule matched: the call is held for a person's approval, and `holdId` names the hold |
+| `SERVER_BLOCKED` | The MCP server is blocked in the MCP server registry |
+| `SERVER_HELD` | The MCP server changed its tools in a way scored high risk and waits for an owner or admin to approve it again |
+| `SERVER_NOT_APPROVED` | The workspace refuses MCP servers it has not approved (`mcpDefaultPolicy: deny`), and this one is not approved |
+| `TOOL_DISABLED` | The tool is switched off on this MCP server in the registry |
+| `SERVER_NOT_ALLOWED` | The MCP server is not on the workspace's `mcpAllowedServers` list |
+| `COMMAND_TOO_LARGE` | The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls |
+| `GATE_DEADLINE` | The gate did not finish deciding within its 4-second deadline, and refuses rather than let the harness's hook timeout allow the call |
+| `UNREADABLE_CALL` | The hook received no tool call it could read, and refuses rather than allow a call it cannot evaluate |
+| `GATE_CRASHED` | The gate failed while deciding, and refuses rather than allow an unevaluated call |
+
 ### Vector D — Response Gate {#vector-d--response-gate}
 
 The response gate (`response_gate.rs`, open-core, default-on) is the product's only harness-agnostic **pre-execution** tool gate: because every response byte passes through the proxy before the client sees it, a denied tool call is refused before it ever reaches the harness's tool runner — no per-harness hook, no harness cooperation. It understands the Anthropic (`tool_use` blocks), OpenAI chat-completions (`tool_calls[]`), and OpenAI Responses (`function_call` output items) wire shapes, on both streaming and non-streaming paths. When a call is withheld, the agent receives an explicit in-band message that the call never ran, so it does not blindly retry, and an SDK reads the refusal's code and rule from the `x-intutic-refusal` headers or, on a stream, a `: intutic-refusal` comment line (see [clawde SDK](/reference/clawde-sdk#_5-verdicts-and-errors)).
@@ -75,7 +107,7 @@ copy its generated files into the worktree.
 | 9 | **n8n** | ⚠️ Workflow-level gate | ✅ API-configurable | ✅ gatekeeper node | Medium | `n8n-governance-hook.js` via `EXTERNAL_HOOK_FILES` (manual, deployment-side): `workflow.preExecute` receives the full Workflow and **throws** to abort — genuinely blocking, but per workflow, not per tool call. Node type ≈ tool name; argPattern matches the serialized node parameters. **Live-verified** (official n8n image, 2026-08-10): a running server with `EXTERNAL_HOOK_FILES` aborted the offending workflow (HTTP 500, error naming node and rule) and passed the clean one — after two live-only bugs were found and fixed (the real `workflow.preExecute` passes `nodes` as an object keyed by name, not the documented array; and the product snapshot's space-padded patterns cannot match dot-namespaced node types) |
 | 10 | **Continue** | ❌ no hook that runs | ✅ apiBase in config.yaml | ✅ config.yaml | Low | Governed by the proxy (`apiBase` on its OpenAI/Anthropic models) and the always-apply rules file. The IDE extension has no hook system, and the CLI (`cn`) loads `PreToolUse` hooks from `settings.json` but never fires them: `firePreToolUse` has no caller outside tests at continuedev/continue `main` `5522c6f`, and PR #11043, which would have wired it, was closed unmerged on 2026-03-24. Intutic no longer registers a gate there (`GateKind: 'none'`); disconnect removes the one earlier versions wrote |
 | 11 | **Goose** | ✅ Plugin PreToolUse | ✅ provider.host | ✅ Immutable plugin | HIGH | chmod 444 + OS immutable flags; `on_failure: "block"` on the gate's action. Earlier versions wrote a `hooks.json` shape Goose skips with a warning |
-| 12 | **Antigravity** (Google Antigravity and Gemini CLI) | ✅ antigravity-cli-check.js, antigravity-check.sh | ❌ Gemini API not served by the proxy | ✅ .gemini/settings.json, ~/.gemini/settings.json, ~/.gemini/config/hooks.json | Medium | Google Antigravity (app, IDE, CLI): blocking `PreToolUse` hook (`{"decision":"deny"}` on stdout) in `~/.gemini/config/hooks.json`. Gemini CLI: blocking `BeforeTool` hook (exit 2) in `~/.gemini/settings.json`. Drift guard restores both |
+| 12 | **Antigravity** (Google Antigravity and Gemini CLI) | ✅ antigravity-cli-check.js, antigravity-check.sh | ❌ Gemini API not served by the proxy | ✅ .gemini/settings.json, ~/.gemini/settings.json, ~/.gemini/config/hooks.json | Medium | Google Antigravity (app, IDE, CLI): blocking `PreToolUse` hook (`{"decision":"deny"}` on stdout) in `~/.gemini/config/hooks.json`. Gemini CLI: blocking `BeforeTool` hook (exit 2) in `~/.gemini/settings.json`. Drift guard restores both. The two gates report as `antigravity` and `gemini-cli`, so gate health and the AI inventory track each product found on the machine; it stays one harness |
 | 13 | **Claude Desktop** | ❌ No hook system | ❌ Locked to Anthropic | ✅ claude_desktop_config.json | Medium | MCP servers in `claude_desktop_config.json` wrapped by the MCP governance proxy; drift guard detects rogue MCP servers |
 | 14 | **Open-WebUI** | ⚠️ Prompt-level filter | ✅ Docker env | N/A | Low | intutic-governance-filter.py can refuse (Python raise), but filters see a prompt, not a tool call — only snapshot rules marked block refuse; the compiled floor flags |
 | 15 | **OpenClaw** | ✅ openclaw-check.js | ✅ | ✅ openclaw.json | Medium | Full coverage |

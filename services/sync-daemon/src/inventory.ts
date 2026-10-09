@@ -24,6 +24,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import {
   DEVICE_INVENTORY_SCHEMA_VERSION,
+  gateIdentitiesOf,
   homeRelativePath,
   type DeviceInventory,
   type HarnessType,
@@ -35,8 +36,9 @@ import { newIso } from '@intutic/id'
 import { collectSkillsIn, fetchGuardProbes } from './agentReporter.js'
 import { discoverMcpServers } from './harness/mcpAutoWrite.js'
 import { gateKindForHarness } from './harness/gateKind.js'
-import { findGateFile } from './harness/gateArtifacts.js'
+import { findGateFile, findIdentityGateFile } from './harness/gateArtifacts.js'
 import { mergeSightings, readGateSightings, sideLogSightings } from './harness/gateSightings.js'
+import { antigravityGateIdentities } from './harness/antigravityProducts.js'
 
 /** One harness the CLI's detection rules found on this machine. */
 export interface DetectedHarness {
@@ -56,11 +58,16 @@ export async function collectDeviceInventory(opts: {
   workspaceRoot: string
   detected: readonly DetectedHarness[]
   configured: readonly string[]
+  /** Harnesses `intutic disconnect --harness` removed Intutic from on this machine. */
+  disconnected?: readonly string[]
   home?: string
+  /** The PATH the product probes search (antigravityProducts.ts); defaults to this process's. */
+  path?: string
 }): Promise<DeviceInventory> {
   const home = opts.home ?? homedir()
   const versions = new Map(opts.detected.map((d) => [d.type, d.version]))
   const configured = new Set(opts.configured)
+  const disconnected = new Set(opts.disconnected ?? [])
   const types = [...new Set([...opts.configured, ...opts.detected.map((d) => d.type)])].sort()
 
   const [sightings, sideSightings, mcp, skillSets, probes] = await Promise.all([
@@ -78,19 +85,31 @@ export async function collectDeviceInventory(opts: {
   const harnesses: InventoryHarness[] = []
   for (const type of types) {
     const gateKind = gateKindForHarness(type as HarnessType)
-    const gateFile = gateKind === 'hook' ? await findGateFile(type, opts.workspaceRoot, home) : null
-    const sighting = mergeSightings(sightings[type], sideSightings[type])
-    const version = versions.get(type)
-    harnesses.push({
-      type,
-      ...(version ? { version } : {}),
-      configured: configured.has(type),
-      gateKind,
-      gateInstalled: gateKind === 'hook' ? gateFile !== null : null,
-      ...(gateFile ? { gateFile: homeRelativePath(gateFile, home) } : {}),
-      lastHookEventAt: sighting?.lastEventAt ?? null,
-      guardsDisabledAt: sighting?.guardsDisabledAt ?? null,
-    })
+    // The antigravity harness is listed once per product found, each under
+    // its own gate id with its own gate file and events (gateIdentity.ts in
+    // @intutic/shared-types); with neither found, once under its own id.
+    const gateIds = type === 'antigravity' ? await antigravityGateIdentities(opts.workspaceRoot, { home, path: opts.path }) : []
+    const split = gateIds.length > 0
+    for (const id of split ? gateIds : [type]) {
+      const gateFile =
+        gateKind !== 'hook' ? null : split ? await findIdentityGateFile(id, opts.workspaceRoot, home) : await findGateFile(type, opts.workspaceRoot, home)
+      // Listed under the harness id, it carries the events of every gate the harness has.
+      const sighting = (split ? [id] : gateIdentitiesOf(type))
+        .map((g) => mergeSightings(sightings[g], sideSightings[g]))
+        .reduce<ReturnType<typeof mergeSightings>>((acc, g) => mergeSightings(acc, g), undefined)
+      const version = versions.get(type)
+      harnesses.push({
+        type: id,
+        ...(version ? { version } : {}),
+        configured: configured.has(type),
+        ...(disconnected.has(type) ? { disconnected: true } : {}),
+        gateKind,
+        gateInstalled: gateKind === 'hook' ? gateFile !== null : null,
+        ...(gateFile ? { gateFile: homeRelativePath(gateFile, home) } : {}),
+        lastHookEventAt: sighting?.lastEventAt ?? null,
+        guardsDisabledAt: sighting?.guardsDisabledAt ?? null,
+      })
+    }
   }
 
   const skills: InventorySkill[] = skillSets.flat().map((s) => ({

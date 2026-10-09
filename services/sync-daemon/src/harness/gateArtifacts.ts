@@ -41,6 +41,16 @@ export const GATE_ARTIFACTS: Readonly<Partial<Record<HarnessType, readonly strin
   'open-webui': ['.open-webui/intutic-governance-filter.py'],
 }
 
+/**
+ * The gate file of each gate id of the harness with two (`gateIdentitiesOf`
+ * in `@intutic/shared-types`): Google Antigravity's and Gemini CLI's, both
+ * written by the `antigravity` writers and both listed under that harness above.
+ */
+export const GATE_IDENTITY_ARTIFACTS: Readonly<Record<string, readonly string[]>> = {
+  'antigravity': ['.intutic/hooks/antigravity-cli-check.js'],
+  'gemini-cli': ['.intutic/hooks/antigravity-check.sh'],
+}
+
 /** dsh's gate is a patch file in each profile under `$DSH_HOME/profiles`, whose names only the machine knows. */
 export const DSH_PROFILE_GATE_FILE = 'cordis.patch.yml'
 
@@ -64,7 +74,16 @@ export async function findGateFile(harness: string, workspaceRoot: string, home:
     }
     return null
   }
-  for (const rel of GATE_ARTIFACTS[harness as HarnessType] ?? []) {
+  return firstFile(GATE_ARTIFACTS[harness as HarnessType] ?? [], workspaceRoot, home)
+}
+
+/** As {@link findGateFile}, for one gate id of a harness with two ({@link GATE_IDENTITY_ARTIFACTS}). */
+export function findIdentityGateFile(gateId: string, workspaceRoot: string, home: string): Promise<string | null> {
+  return firstFile(GATE_IDENTITY_ARTIFACTS[gateId] ?? [], workspaceRoot, home)
+}
+
+async function firstFile(rels: readonly string[], workspaceRoot: string, home: string): Promise<string | null> {
+  for (const rel of rels) {
     for (const root of [workspaceRoot, home]) {
       const file = node_path.join(root, rel)
       if (await isFile(file)) return file

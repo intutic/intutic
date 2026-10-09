@@ -92,9 +92,9 @@ describe('buildSnapshotRules — SSO group refusals', () => {
       sopRules: [{ id: 's1', toolPattern: 'Edit', action: 'require_approval', reason: 'ask' }],
     }))
     expect(rules.slice(0, 3).map((r) => [r.id, r.severity, r.subject, r.source])).toEqual([
-      ['sso_group.require_obo.deploy_prod', 'block', 'tool', ' (deploy_prod) '],
-      ['sso_group.high_risk.Bash', 'block', 'tool', ' (Bash) '],
-      ['sso_group.high_risk.database_write', 'block', 'tool', ' (database_write) '],
+      ['sso_group.require_obo.deploy_prod', 'block', 'tool', ' (deploy_prod|mcp__.+__deploy_prod) '],
+      ['sso_group.high_risk.Bash', 'block', 'tool', ' (Bash|mcp__.+__Bash) '],
+      ['sso_group.high_risk.database_write', 'block', 'tool', ' (database_write|mcp__.+__database_write) '],
     ])
     expect(rules[3]!.id).toBe('sop.s1')
     expect(rules[1]!.reason).toBe('SSO group policy: Bash requires one of the SSO groups sre-oncall, and this member holds none of them')
@@ -118,9 +118,32 @@ describe('buildSnapshotRules — SSO group refusals', () => {
 
   it('escapes a tool name to a literal and leaves a workspace without a policy untouched', () => {
     const [dot] = buildSnapshotRules(policy({ ssoGroupPolicy: { highRiskTools: ['db.query'], requiredGroups: [], requireOboFor: [] }, principal: member([]) }))
-    expect(dot!.source).toBe(' (db\\.query) ')
+    expect(dot!.source).toBe(' (db\\.query|mcp__.+__db\\.query) ')
     expect(new RegExp(dot!.source).test(' dbXquery ')).toBe(false)
+    expect(new RegExp(dot!.source).test(' mcp__pg__dbXquery ')).toBe(false)
     expect(buildSnapshotRules(policy({ ssoGroupPolicy: null, principal: member([]) }))).toEqual(buildSnapshotRules(policy()))
+  })
+})
+
+describe("buildSnapshotRules — an MCP tool's two names", () => {
+  it('matches a harness-form entry on its own server only, and an MCP tool by its own name on any server', () => {
+    const rules = buildSnapshotRules(policy({
+      ssoGroupPolicy: { highRiskTools: ['run_query', 'mcp__github__delete_repo'], requiredGroups: ['dba'], requireOboFor: [] },
+      principal: member([]),
+    })).filter((r) => r.id.startsWith('sso_group.'))
+    // The harness-form entry first: the evaluator prefers an exact entry.
+    expect(rules.map((r) => [r.id, r.source])).toEqual([
+      ['sso_group.high_risk.mcp__github__delete_repo', ' (mcp__github__delete_repo) '],
+      ['sso_group.high_risk.run_query', ' (run_query|mcp__.+__run_query) '],
+    ])
+  })
+
+  it('compiles no second rule for an entry another entry already refuses', () => {
+    const rules = buildSnapshotRules(policy({
+      ssoGroupPolicy: { highRiskTools: ['mcp__pg__drop'], requiredGroups: [], requireOboFor: ['drop'] },
+      principal: member([]),
+    })).filter((r) => r.id.startsWith('sso_group.'))
+    expect(rules.map((r) => r.id)).toEqual(['sso_group.require_obo.drop'])
   })
 })
 

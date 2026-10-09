@@ -1,5 +1,5 @@
 {
-  "_comment": "Every refusal code an agent or SDK can receive, per surface. The Rust proxy (packages/proxy/src/refusal.rs), both clawde SDKs (PROXY_REFUSALS), both gate SDKs (GATE_REFUSAL_CODES), the MCP proxy (MCP_REFUSAL_CODES), the reference tables in apps/docs and the Kitkat skill are each checked against this file. Add a code here first, then to every implementation the checks name.",
+  "_comment": "Every refusal code an agent or SDK can receive, per surface. The Rust proxy (packages/proxy/src/refusal.rs), both clawde SDKs (PROXY_REFUSALS), both gate SDKs (GATE_REFUSAL_CODES), the MCP proxy (MCP_REFUSAL_CODES), the hook gates' JSON decisions (HOOK_REFUSAL_CODES in the sync daemon's gateBody.ts), the reference tables in apps/docs and the Kitkat skill are each checked against this file. Add a code here first, then to every implementation the checks name.",
   "proxy": {
     "header": "x-intutic-refusal",
     "ruleHeader": "x-intutic-refusal-rule",
@@ -49,6 +49,23 @@
       { "code": "E_MANIFEST_UNPARSEABLE", "meaning": "The image allowlist, or a manifest the deploy names, is missing or unreadable" },
       { "code": "WORKFLOW_SANDBOX", "only": "typescript", "meaning": "The Workflow DevKit adapter was called inside the workflow sandbox, where the gate cannot run; run it in a step" },
       { "code": "NO_GATE", "only": "typescript", "meaning": "The Workflow DevKit adapter has no gate to call: none was passed and none was installed" }
+    ]
+  },
+  "hook": {
+    "refusals": [
+      { "code": "BUILT_IN_RULE", "meaning": "A rule built into the hook gate matched: a governance bypass, a write to a protected path or a skill directory, or a secret in written content" },
+      { "code": "SNAPSHOT", "meaning": "A block rule in the policy snapshot matched: an SOP, the destructive-command tier or a skill-content rule" },
+      { "code": "SSO_GROUP", "meaning": "The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown" },
+      { "code": "HELD", "meaning": "A hold rule matched: the call is held for a person's approval, and `holdId` names the hold" },
+      { "code": "SERVER_BLOCKED", "meaning": "The MCP server is blocked in the MCP server registry" },
+      { "code": "SERVER_HELD", "meaning": "The MCP server changed its tools in a way scored high risk and waits for an owner or admin to approve it again" },
+      { "code": "SERVER_NOT_APPROVED", "meaning": "The workspace refuses MCP servers it has not approved (`mcpDefaultPolicy: deny`), and this one is not approved" },
+      { "code": "TOOL_DISABLED", "meaning": "The tool is switched off on this MCP server in the registry" },
+      { "code": "SERVER_NOT_ALLOWED", "meaning": "The MCP server is not on the workspace's `mcpAllowedServers` list" },
+      { "code": "COMMAND_TOO_LARGE", "meaning": "The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls" },
+      { "code": "GATE_DEADLINE", "meaning": "The gate did not finish deciding within its 4-second deadline, and refuses rather than let the harness's hook timeout allow the call" },
+      { "code": "UNREADABLE_CALL", "meaning": "The hook received no tool call it could read, and refuses rather than allow a call it cannot evaluate" },
+      { "code": "GATE_CRASHED", "meaning": "The gate failed while deciding, and refuses rather than allow an unevaluated call" }
     ]
   },
   "mcp": {

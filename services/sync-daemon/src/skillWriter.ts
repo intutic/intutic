@@ -193,7 +193,7 @@ When interacting with LLM providers through the local proxy, prepend requests wi
 
 ## 🚦 When a Call Is Refused or Held
 
-Intutic names every refusal with a code: an SDK raises it (\`ClawdeBlockedError.code\`, \`IntuticGateRefusal.code\`), the MCP proxy puts it in \`error.data.code\`, and the proxy names a withheld answer in its \`x-intutic-refusal\` header. A refusal you read as text, starting \`[Intutic]\` or \`[Intutic Governance]\`, is the same refusal: the call it names did not run (unless it says the result was withheld). Find the code below and act on it.
+Intutic names every refusal with a code: an SDK raises it (\`ClawdeBlockedError.code\`, \`IntuticGateRefusal.code\`), the MCP proxy puts it in \`error.data.code\`, a hook gate that answers in JSON (Cline, Grok Build, Antigravity) puts it in \`code\` beside \`ruleId\`, and the proxy names a withheld answer in its \`x-intutic-refusal\` header. A refusal you read as text, starting \`[Intutic]\` or \`[Intutic Governance]\`, is the same refusal: the call it names did not run (unless it says the result was withheld). Find the code below and act on it.
 
 ### Held: tell the user, then wait
 A hold rule wants a person to see this call before it runs. Codes: \`HELD\` (with a hold id, \`hold_…\`), a hook gate's \`[Intutic Governance] HELD:\` message, \`LOOP_RUN_PENDING_REVIEW\` (the loop run is paused for review), and the proxy's \`policy_held\` (a Rego or WASM rule held the request; the error names the hold id). \`SERVER_HELD\` is the MCP registry's version: the server changed its tools in a risky way and waits for an owner or admin on the MCP Servers page.
@@ -208,16 +208,17 @@ A hold rule wants a person to see this call before it runs. Codes: \`HELD\` (wit
 ### Blocked: do not retry the same call
 Continue without it, or tell the user what would have to change and who can change it.
 - **Policy:** \`policy_denied\`, \`TOOL_DENIED\`, \`SOP_RULE\`, \`SNAPSHOT\`, \`HOOK_GATE\`, \`ANOMALY\`, \`WASM_RULE\`, \`REASK_EXHAUSTED\`, \`LOOP_RUN_TERMINATED\`, \`model_not_allowed\`.
+- **Protected by the hook gate:** \`BUILT_IN_RULE\`: a governance bypass, a write to Intutic's own config or a skill directory, or a secret in written content. Do not look for another route to the same change; tell the user.
 - **Identity:** \`SSO_GROUP\`: the user's SSO groups do not clear this tool (rule \`sso_group.high_risk.<tool>\` or \`sso_group.require_obo.<tool>\`). An admin grants the group; you cannot work around it.
 - **Data:** \`dlp_policy_violation\` and \`DLP\` (a secret, destructive command or PII value in the input: remove it), \`INJECTION\` (the input carries a prompt-injection pattern), \`SQL_GUARD\` (destructive SQL against a database not on the SQL allowlist: use an allowlisted database, named explicitly on the command line).
 - **MCP servers:** \`SERVER_BLOCKED\`, \`SERVER_NOT_APPROVED\`, \`TOOL_DISABLED\`, \`SERVER_NOT_ALLOWED\`, \`TOOL_NOT_ALLOWED\`, \`TOOL_DEFINITIONS_CHANGED\`. An owner or admin decides on the MCP Servers page; the \`intutic_mcp_registry_status\` MCP tool shows what the registry says.
 - **Spend:** \`BUDGET_EXCEEDED\`, \`OVERAGE_HARD_CAP_EXCEEDED\`, \`COST_GATE_EXCEEDED\` (a smaller request may pass). An MCP \`BUDGET_EXCEEDED\` lasts until its \`resetAt\`; \`intutic_mcp_budget_remaining\` shows what is left.
 - **Images:** \`E_UNPINNED_LATEST\`, \`E_UNPINNED_TAG\`, \`E_UNKNOWN_REGISTRY\`, \`E_UNKNOWN_IMAGE\`, \`E_DIGEST_MISMATCH\`, \`E_MANIFEST_UNPARSEABLE\`: deploy an image pinned to a digest the image allowlist approves.
-- **Gate setup:** \`WORKFLOW_SANDBOX\`, \`NO_GATE\`: the gate is wired wrongly in the agent's code; fix the code, not the call.
+- **Gate setup:** \`WORKFLOW_SANDBOX\`, \`NO_GATE\`: the gate is wired wrongly in the agent's code; fix the code, not the call. \`UNREADABLE_CALL\`: the hook could not read the tool call from its harness, which is a setup fault to report, not something to retry.
 - **Size:** \`COMMAND_TOO_LARGE\`: the command is over 256 KiB, or the tool's arguments over 1 MiB, more than any gate evaluates. Split the work: smaller commands, or a file written in parts. A hook gate that could not finish deciding in time says \`GATE_DEADLINE\` in its reason; the call did not run, and the same call will be refused again, so tell the user.
 
 ### Not checked: retry once, later
-\`GOVERNANCE_UNAVAILABLE\`, \`REGISTRY_UNAVAILABLE\`, \`BUDGET_UNAVAILABLE\`, \`TOFU_UNAVAILABLE\`, \`RESPONSE_UNPARSEABLE\`, and \`HOOK_GATE\` when its reason says the control plane was unreachable: governance could not check the call, so it did not run. One later retry is fine; if it fails again, tell the user.
+\`GOVERNANCE_UNAVAILABLE\`, \`REGISTRY_UNAVAILABLE\`, \`BUDGET_UNAVAILABLE\`, \`TOFU_UNAVAILABLE\`, \`RESPONSE_UNPARSEABLE\`, \`GATE_CRASHED\` (the hook gate failed while deciding), and \`HOOK_GATE\` when its reason says the control plane was unreachable: governance could not check the call, so it did not run. One later retry is fine; if it fails again, tell the user.
 
 ### Ran, but the result was withheld
 \`RESULT_WITHHELD_DLP\`, \`RESULT_WITHHELD_INJECTION\` (MCP proxy) and \`OUTPUT_DLP\` (proxy): the tool or model ran, and its output was not delivered. Do not run it again blindly, since it may already have had its effect; tell the user.

@@ -154,4 +154,36 @@ describe('reportHarnessAgents', () => {
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({ event: 'skill_flagged', toolName: 'skill:poisoned', workspaceId: 'ws_1' })
   })
+
+  it('registers the antigravity harness under the gate id of each product on the machine', async () => {
+    const prevPath = process.env.PATH
+    // No `gemini` or `antigravity` binary from the machine running the test.
+    process.env.PATH = join(home, 'no-bin')
+    try {
+      fs.mkdirSync(join(home, '.gemini'), { recursive: true })
+      fs.writeFileSync(join(home, '.gemini', 'settings.json'), JSON.stringify({ ui: { theme: 'Default' } }))
+      const { governanceInputs, failures } = await reportHarnessAgents({
+        controlPlaneUrl: CONTROL_PLANE,
+        apiKey: 'k',
+        workspaceId: 'ws_1',
+        workspaceRoot: root,
+        harnesses: ['antigravity'] as HarnessType[],
+      })
+      expect(failures).toEqual([])
+      expect(Object.keys(governanceInputs)).toEqual(['antigravity'])
+      const reports = () =>
+        posts
+          .filter((p) => p.url.endsWith('/api/v1/agents/report'))
+          .map((p) => p.body as { agentKey: string; harnessType: string; facets: { harness: { type: string } } })
+      // Only Gemini CLI here: no Antigravity agent whose gate would never report.
+      expect(reports().map((r) => [r.agentKey, r.harnessType, r.facets.harness.type])).toEqual([['gemini-cli:default', 'gemini-cli', 'antigravity']])
+
+      posts.length = 0
+      fs.mkdirSync(join(home, '.gemini', 'antigravity'))
+      await reportHarnessAgents({ controlPlaneUrl: CONTROL_PLANE, apiKey: 'k', workspaceId: 'ws_1', workspaceRoot: root, harnesses: ['antigravity'] as HarnessType[] })
+      expect(reports().map((r) => r.harnessType)).toEqual(['antigravity', 'gemini-cli'])
+    } finally {
+      process.env.PATH = prevPath
+    }
+  })
 })

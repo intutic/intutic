@@ -8,6 +8,7 @@ import {
   evaluateSsoGroupClearance,
   parseSsoGroupPolicy,
   ssoGroupRuleId,
+  ssoGroupToolMatches,
   SSO_GROUP_RECORD_TAG,
   SsoGroupPolicySchema,
 } from '../ssoGroupClearance.js'
@@ -61,6 +62,29 @@ describe('evaluateSsoGroupClearance', () => {
       'SSO group policy: mcp__gh__deploy is on-behalf-of only, and a tool-call gate has no OBO token to present',
     )
     expect(evaluateSsoGroupClearance(policy, 'Read', null).reason).toBe('')
+  })
+})
+
+describe('ssoGroupToolMatches', () => {
+  it("matches an MCP tool's own name as the name a harness gives it on any server, and nothing looser", () => {
+    expect(ssoGroupToolMatches('run_query', 'run_query')).toBe(true)
+    expect(ssoGroupToolMatches('run_query', 'mcp__postgres__run_query')).toBe(true)
+    expect(ssoGroupToolMatches('run_query', 'mcp__a__b__run_query')).toBe(true)
+    expect(ssoGroupToolMatches('run_query', 'mcp____run_query')).toBe(false)
+    expect(ssoGroupToolMatches('run_query', 'mcp__postgres__rerun_query')).toBe(false)
+    expect(ssoGroupToolMatches('run_query', 'xmcp__postgres__run_query')).toBe(false)
+    expect(ssoGroupToolMatches('Bash', 'mcp__shell__bash')).toBe(false)
+  })
+
+  it('matches an entry that names the harness form only exactly', () => {
+    expect(ssoGroupToolMatches('mcp__github__delete_repo', 'mcp__github__delete_repo')).toBe(true)
+    expect(ssoGroupToolMatches('mcp__github__delete_repo', 'mcp__x__mcp__github__delete_repo')).toBe(false)
+    expect(ssoGroupToolMatches('mcp__github__delete_repo', 'delete_repo')).toBe(false)
+  })
+
+  it('prefers an exact entry to one matched by its own name', () => {
+    const p = parseSsoGroupPolicy({ highRiskTools: ['run_query', 'mcp__pg__run_query'], requiredGroups: [] })
+    expect(evaluateSsoGroupClearance(p, 'mcp__pg__run_query', []).ruleId).toBe('sso_group.high_risk.mcp__pg__run_query')
   })
 })
 

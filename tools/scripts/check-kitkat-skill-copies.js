@@ -44,7 +44,7 @@ for (const copy of COPIES) {
 const REFUSAL_CODES = 'packages/shared-types/fixtures/refusal-codes.json'
 const surfaces = JSON.parse(readFileSync(join(ROOT, REFUSAL_CODES), 'utf8'))
 const codes = new Set(
-  ['proxy', 'gate', 'mcp'].flatMap((surface) => surfaces[surface].refusals.map((r) => r.code)),
+  ['proxy', 'gate', 'hook', 'mcp'].flatMap((surface) => surfaces[surface].refusals.map((r) => r.code)),
 )
 const unexplained = [...codes].filter((code) => !canonical.includes(`\`${code}\``))
 if (codes.size < 20) {

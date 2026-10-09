@@ -81,6 +81,13 @@ describe('GateClient.hookGate', () => {
     expect(ids[1]).not.toBe(ids[0])
   })
 
+  it('emit marks each event as an SDK gate\'s, which is how the control plane watches it for silence', async () => {
+    respond = () => ({ status: 200, body: { ok: true } })
+    const client = new GateClient({ baseUrl, workspaceId: 'ws_1', sessionId: 's_1', harness: 'mastra' })
+    await client.emit('tool_allowed', 'shell')
+    expect((lastBody!['events'] as Array<Record<string, unknown>>)[0]).toMatchObject({ harnessType: 'mastra', gateSource: 'sdk' })
+  })
+
   it('emit rejects an event name outside the documented schema', async () => {
     const client = new GateClient({ baseUrl, workspaceId: 'ws_1' })
     await expect(client.emit('not_a_real_event', 'shell')).resolves.toBe(false)

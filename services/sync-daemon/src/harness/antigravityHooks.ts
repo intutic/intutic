@@ -25,7 +25,10 @@
  *
  * Hook events:
  *   Every block/allow is appended to `.intutic/events/hook-events.jsonl`
- *   and drained to the control plane via FSEvents-driven drain.
+ *   and drained to the control plane via FSEvents-driven drain, under the
+ *   gate id `gemini-cli` rather than the harness id: the Antigravity gate
+ *   reports as `antigravity`, so liveness, the AI inventory and SIEM can tell
+ *   the two products apart (gateIdentity.ts in @intutic/shared-types).
  *
  * LLD #14 — Phase 3 cross-harness defence (Gap 3)
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
@@ -40,6 +43,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
+import { GEMINI_CLI_GATE_ID } from '@intutic/shared-types'
 import { emitShellGate, HOOK_TIMEOUT_SECONDS, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
@@ -106,7 +110,7 @@ log_event() {
   # written into, so the control plane processes the event once.
   local event_id; event_id="\$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
   [ -n "\$event_id" ] || event_id="\$(date +%s)\$\$\${RANDOM}\${RANDOM}\${RANDOM}"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"antigravity\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\"}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"${GEMINI_CLI_GATE_ID}\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\"}"
   printf '%s\\n' "\$entry" >> "\$HOOK_EVENTS_LOG" 2>/dev/null || true
   if [ -n "\$INTUTIC_API_KEY" ]; then
     curl -s -o /dev/null --max-time 3 -X POST \\
@@ -117,7 +121,7 @@ log_event() {
   fi
 }
 
-${emitShellGate({ harness: "antigravity" })}
+${emitShellGate({ harness: GEMINI_CLI_GATE_ID })}
 log_event "tool_allowed" "$TOOL_NAME" ""
 exit 0
 `

@@ -38,7 +38,7 @@ The control plane removes credentials from MCP server URLs a second time when it
 | A machine sends its inventory | When `intutic connect` starts, then every five minutes (every tenth poll at the default 30-second interval) |
 | A gate's latest event is recorded | When `intutic connect` drains the hook-event log: when the log changes, and at least once a minute. Cline and n8n gates keep their own log, which is read when the inventory is collected |
 | Status is decided | On every page load and API read, from the latest report and the current time |
-| A machine is shown as not reporting | 72 hours after its last report, the same threshold device posture uses |
+| A machine is shown as not reporting | 72 hours after its last report, the same threshold device posture uses, unless it ran `intutic disconnect`: then it is shown as disconnected |
 
 ## How status is decided
 
@@ -46,18 +46,20 @@ A **harness** is:
 
 | Status | When |
 |---|---|
-| **Ungoverned** | It has no tool-call hook a gate can attach to; or it was detected but is not one of the machine's `intutic connect` harnesses and no gate file is present; or it is connected and its gate file is missing; or its gate ran with guards disabled in the last 48 hours |
+| **Ungoverned** | It has no tool-call hook a gate can attach to; or it was detected but is not one of the machine's `intutic connect` harnesses and no gate file is present; or it is connected and its gate file is missing; or its gate ran with guards disabled in the last 48 hours; or it, or the whole machine, was disconnected with [`intutic disconnect`](/reference/cli#intutic-disconnect) (reason: disconnected) |
 | **Gate stale** | Its gate file is present, it has been on the machine for more than an hour, and the gate has written no event in the last 48 hours, the same window as the [Gate Stopped Reporting](/guide/settings#notifications) alert |
 | **Unverified** | Its gate was installed less than an hour ago and has not written an event yet; or its gate runs inside the harness's own process, in another harness or in an external service (LangChain, CrewAI, the OpenAI Agents SDK and the other SDK-gated frameworks, Xirp, Agentic Orchestrator) and no event from it has reached the machine |
 | **Governed** | Its gate is installed, guards are on, and it wrote an event in the last 48 hours |
 
 A gate writes an event for every tool call it sees, allowed calls included, so a harness nobody used for two days shows **Gate stale** until it is used again.
 
+Google Antigravity and Gemini CLI share one integration but have a gate each, so each product found on a machine is its own row: `antigravity` and `gemini-cli`, with its own gate file and last event. A machine where neither is found but the harness is connected shows one `antigravity` row.
+
 An **MCP server** is **Ungoverned** when the MCP governance proxy does not front it, and **Governed** when it does.
 
 ## Notifications
 
-The first time a machine reports an ungoverned harness or MCP server, the control plane sends an **Ungoverned AI Tool Found** notification (`inventory.ungoverned.detected`, severity MEDIUM). It is sent once per machine and item: not again when the item disappears and comes back, and not when only the time-based statuses change (a stale gate already raises **Gate Stopped Reporting**). Add the event to a [notification rule](/guide/settings#notifications) to receive it, and [SIEM export](/guide/siem-export) carries it under `governance_alerts`.
+The first time a machine reports an ungoverned harness or MCP server, the control plane sends an **Ungoverned AI Tool Found** notification (`inventory.ungoverned.detected`, severity MEDIUM), unless the harness was disconnected on purpose. It is sent once per machine and item: not again when the item disappears and comes back, and not when only the time-based statuses change (a stale gate already raises **Gate Stopped Reporting**). Add the event to a [notification rule](/guide/settings#notifications) to receive it, and [SIEM export](/guide/siem-export) carries it under `governance_alerts`.
 
 ## Export and API
 

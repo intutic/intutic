@@ -56,6 +56,12 @@ relay), `TRACE_SIGNING_PRIVATE_KEY`, `TRACE_SIGNING_RETIRED_KEYS`,
 `LITELLM_PLATFORM_KEY`. Keep `ENCRYPTION_KEY` with your database backups: stored
 credentials are encrypted under it.
 
+Alerts and approvals go out through the notification hub, which is on with
+every channel: email through `SMTP_URL`, webhooks, Slack and PagerDuty. To turn
+a channel off, set its flag in `controlPlane.env` (`FF_SLACK_ADAPTER: "false"`).
+Webhook and SIEM targets on your private network need their hosts in
+`controlPlane.env.INTUTIC_WEBHOOK_ALLOWED_HOSTS`.
+
 Your own certificate authority, for Postgres or any internal service the control
 plane calls over HTTPS (your mail relay, webhook targets, LiteLLM), goes in a
 Secret of PEM certificates; install with `--set caBundle.secretName=intutic-ca`:

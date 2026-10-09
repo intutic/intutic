@@ -62,6 +62,7 @@ export { gateKindForHarness } from './harness/gateKind.js'
 // Gap 3 fix — Antigravity (Gemini CLI) hook coverage
 export { writeAntigravityHooks, buildGeminiBeforeToolEntry } from './harness/antigravityHooks.js'
 export { writeAntigravityCliHooks, buildAntigravityHookEntry, ANTIGRAVITY_HOOK_NAME } from './harness/antigravityCliHooks.js'
+export { antigravityGateIdentities } from './harness/antigravityProducts.js'
 
 // WS-B — new harness hook coverage (continue, open-webui, n8n)
 export { mergeContinueConfig } from './harness/continueConfigMerger.js'

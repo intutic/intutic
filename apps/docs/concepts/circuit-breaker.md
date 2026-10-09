@@ -161,7 +161,11 @@ their sign-in groups.
 | 5 | The member holds one of `requiredGroups` | `GRANTED` |
 | 6 | Otherwise | `DENIED` |
 
-Tool and group names match exactly, including case. Every gate refuses `DENIED` and
+Tool and group names match exactly, including case, with one widening for MCP tools, which
+go by two names: an entry naming a tool as its MCP server declares it (`run_query`) also
+matches the name a harness gives that tool on any server (`mcp__postgres__run_query`). An
+entry that already names the harness form (`mcp__postgres__run_query`) matches only that
+server's tool. Every gate applies both rules alike. Every gate refuses `DENIED` and
 `REQUIRES_OBO` alike: a tool-call gate acts with the member's own credentials and has no
 on-behalf-of token to present. The refusal names the rule that decided, for example
 `[sso_group.high_risk.Bash]` or `[sso_group.require_obo.production_deploy]`. That id is
@@ -211,8 +215,8 @@ the only gate. It is the same check that withholds a tool on an SOP's `deny_tool
   are refused. A key the control plane refuses (revoked, or its member deactivated) keeps the
   policy last seen for it with the groups unknown.
 - **What is matched.** The tool name the model emitted, which is the name a harness hook sees
-  (`Bash`, `mcp__github__create_issue`). Names match exactly, as at the hook gate; the
-  case-insensitive match `deny_tools` uses does not apply. Gemini's native function-call format
+  (`Bash`, `mcp__github__create_issue`). Names match as at the hook gate, an MCP tool's own
+  name included; the case-insensitive match `deny_tools` uses does not apply. Gemini's native function-call format
   is not read by the response gate, for group rules or `deny_tools`.
 - **What the client sees.** The tool call never reaches the harness. In its place the model's
   turn carries a message naming the tool, the reason and the rule, for example

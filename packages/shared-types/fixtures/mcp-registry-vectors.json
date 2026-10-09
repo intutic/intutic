@@ -1,0 +1,198 @@
+{
+  "_comment": "MCP server registry vectors. Every implementation of the registry decision (evaluateMcpRegistry in shared-types, the MCP proxy, and the policy snapshot's @mcp_registry record through the JavaScript and bash hook gates) runs these cases and must reach the same code, rule id and reason. toolName is the name a harness hook sees; the server is the part before the first '__' after 'mcp__', the tool the rest. Edit the cases, never one implementation's expectations.",
+  "registries": {
+    "unrestricted": {
+      "defaultPolicy": "allow",
+      "approvedServers": [],
+      "blockedServers": [],
+      "heldServers": [],
+      "disabledTools": {}
+    },
+    "allowWithDecisions": {
+      "defaultPolicy": "allow",
+      "approvedServers": [
+        "github"
+      ],
+      "blockedServers": [
+        "pastebin"
+      ],
+      "heldServers": [
+        "drifted"
+      ],
+      "disabledTools": {
+        "github": [
+          "delete_repo"
+        ],
+        "pg-prod": [
+          "drop__all"
+        ]
+      }
+    },
+    "deny": {
+      "defaultPolicy": "deny",
+      "approvedServers": [
+        "github",
+        "pg-prod"
+      ],
+      "blockedServers": [
+        "pastebin"
+      ],
+      "heldServers": [
+        "drifted"
+      ],
+      "disabledTools": {
+        "github": [
+          "delete_repo"
+        ],
+        "pg-prod": [
+          "drop__all"
+        ]
+      }
+    },
+    "denyNothingApproved": {
+      "defaultPolicy": "deny",
+      "approvedServers": [],
+      "blockedServers": [],
+      "heldServers": [],
+      "disabledTools": {}
+    }
+  },
+  "cases": [
+    {
+      "name": "an unrestricted registry refuses nothing",
+      "registry": "unrestricted",
+      "toolName": "mcp__anything__run",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a blocked server is refused under allow",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__pastebin__paste",
+      "code": "SERVER_BLOCKED",
+      "ruleId": "mcp_registry.pastebin",
+      "reason": "MCP server \"pastebin\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
+    },
+    {
+      "name": "a held server is refused under allow",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__drifted__query",
+      "code": "SERVER_HELD",
+      "ruleId": "mcp_registry.drifted",
+      "reason": "MCP server \"drifted\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "an undecided server passes under allow",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__newcomer__query",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "an approved server passes",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__github__create_issue",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a disabled tool is refused on an approved server",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__github__delete_repo",
+      "code": "TOOL_DISABLED",
+      "ruleId": "mcp_registry.github.delete_repo",
+      "reason": "Tool \"delete_repo\" is disabled on MCP server \"github\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
+    },
+    {
+      "name": "a tool disabled on one server is not disabled on another",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__gitlab__delete_repo",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a tool name after the server may carry a double underscore",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__pg-prod__drop__all",
+      "code": "TOOL_DISABLED",
+      "ruleId": "mcp_registry.pg-prod.drop__all",
+      "reason": "Tool \"drop__all\" is disabled on MCP server \"pg-prod\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
+    },
+    {
+      "name": "a disabled tool name is matched whole",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__pg-prod__drop",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "an unapproved server is refused under deny",
+      "registry": "deny",
+      "toolName": "mcp__newcomer__query",
+      "code": "SERVER_NOT_APPROVED",
+      "ruleId": "mcpDefaultPolicy",
+      "reason": "MCP server \"newcomer\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "an approved server passes under deny",
+      "registry": "deny",
+      "toolName": "mcp__github__create_issue",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a blocked server is refused as blocked under deny, not as unapproved",
+      "registry": "deny",
+      "toolName": "mcp__pastebin__paste",
+      "code": "SERVER_BLOCKED",
+      "ruleId": "mcp_registry.pastebin",
+      "reason": "MCP server \"pastebin\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
+    },
+    {
+      "name": "a held server is refused as held under deny",
+      "registry": "deny",
+      "toolName": "mcp__drifted__query",
+      "code": "SERVER_HELD",
+      "ruleId": "mcp_registry.drifted",
+      "reason": "MCP server \"drifted\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "a disabled tool is refused under deny on an approved server",
+      "registry": "deny",
+      "toolName": "mcp__github__delete_repo",
+      "code": "TOOL_DISABLED",
+      "ruleId": "mcp_registry.github.delete_repo",
+      "reason": "Tool \"delete_repo\" is disabled on MCP server \"github\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
+    },
+    {
+      "name": "server names match exactly, not case-insensitively",
+      "registry": "deny",
+      "toolName": "mcp__GitHub__create_issue",
+      "code": "SERVER_NOT_APPROVED",
+      "ruleId": "mcpDefaultPolicy",
+      "reason": "MCP server \"GitHub\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "deny with nothing approved refuses every server",
+      "registry": "denyNothingApproved",
+      "toolName": "mcp__github__create_issue",
+      "code": "SERVER_NOT_APPROVED",
+      "ruleId": "mcpDefaultPolicy",
+      "reason": "MCP server \"github\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "a server name is not a prefix match",
+      "registry": "deny",
+      "toolName": "mcp__github2__create_issue",
+      "code": "SERVER_NOT_APPROVED",
+      "ruleId": "mcpDefaultPolicy",
+      "reason": "MCP server \"github2\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    }
+  ]
+}

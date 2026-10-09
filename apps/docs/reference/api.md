@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 402 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 403 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -725,6 +725,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | GET | `/api/v1/devices` | OWNER/ADMIN | list enrolled devices |
 | DELETE | `/api/v1/devices/:id` | OWNER/ADMIN | retire a device (soft delete) |
 | GET | `/api/v1/devices/:id` | OWNER/ADMIN | one device |
+| POST | `/api/v1/devices/disconnect` | OWNER/ADMIN/EM/DEVELOPER | report that intutic disconnect ran on this device |
 | POST | `/api/v1/devices/report` | OWNER/ADMIN/EM/DEVELOPER | report this device (upserts on workspace and fingerprint) |
 
 ### `domainVerification.ts` <Badge type="tip" text="Cloud" />

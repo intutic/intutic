@@ -95,6 +95,8 @@ export async function reportMachineInventory(opts: {
   apiKey: string
   workspaceRoot: string
   configured: readonly string[]
+  /** Harnesses `intutic disconnect --harness` removed from this machine (config `disconnectedHarnesses`). */
+  disconnected?: readonly string[]
   cliVersion: string
 }): Promise<{ reported: boolean; reason?: string }> {
   try {
@@ -106,6 +108,7 @@ export async function reportMachineInventory(opts: {
       workspaceRoot: opts.workspaceRoot,
       detected,
       configured: opts.configured,
+      disconnected: opts.disconnected,
     })
     const reported = await reportDeviceInventory(opts.controlPlaneUrl, opts.apiKey, device, inventory)
     return reported ? { reported } : { reported, reason: 'the control plane did not accept it' }

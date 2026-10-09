@@ -60,6 +60,8 @@ import {
   ARGUMENTS_SIZE_LIMIT,
   COMMAND_SIZE_LIMIT,
   GATE_DEADLINE_MS,
+  MCP_REGISTRY_JS_SOURCE,
+  MCP_REGISTRY_RECORD_TAG,
   PHRASES_JS_SOURCE,
   SEQUENCE_JS_SOURCE,
 } from '@intutic/shared-types'
@@ -175,8 +177,21 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * started refuses with `GATE_DEADLINE`, ahead of the harnesses that read a
  * hook timeout as an allow. A v12 gate compares the flags column with `i`, so
  * it runs a sequence rule as the regex it also is, case-sensitively.
+ *
+ * v14: the MCP server registry and refusal codes. The snapshot carries the
+ * workspace's registry decisions as an `@mcp_registry` data line (two
+ * columns, inside the digest), and the JS and bash gates refuse an
+ * `mcp__<server>__<tool>` call to a blocked or held server, to a server the
+ * workspace has not approved under `mcpDefaultPolicy: deny`, or to a disabled
+ * tool, with the MCP proxy's codes, rule ids and reasons
+ * (`evaluateMcpRegistry` in `@intutic/shared-types`). An invalid snapshot
+ * keeps the record but not its approvals, as it keeps the SSO-group refusals
+ * but not the member's groups. A JSON decision (Cline, Grok Build,
+ * Antigravity) now carries `code` and `ruleId` ({@link HOOK_REFUSAL_CODES}).
+ * The `.rules` rule format is unchanged; a v13 gate skips the record line as
+ * it skips `@sso_groups`, and enforces no registry.
  */
-export const GATE_VERSION = 13
+export const GATE_VERSION = 14
 
 /**
  * The timeout every writer sets on its gate's hook entry, in seconds, where
@@ -189,6 +204,45 @@ export const GATE_VERSION = 13
  * default and our setting is 5 s, the floor the deadline sits under.
  */
 export const HOOK_TIMEOUT_SECONDS = 10
+
+/**
+ * The refusal codes a hook gate's JSON decision carries, as `code` beside the
+ * deciding `ruleId` (null when no rule decided), for the harnesses that read
+ * a decision from stdout rather than an exit code: Cline (`cancel`), Grok
+ * Build and Antigravity (`decision: deny`). The exit-code harnesses read the
+ * same refusal as text on stderr, the rule id in brackets. Held to
+ * `packages/shared-types/fixtures/refusal-codes.json` (`hook`) by a test.
+ *
+ * - `BUILT_IN_RULE`: a rule compiled into the gate (a governance bypass, a
+ *   write to a protected path or a skill directory, a secret in content);
+ * - `SNAPSHOT`: a block rule from the policy snapshot (an SOP, the
+ *   destructive-command tier, a skill-content rule);
+ * - `SSO_GROUP`: an `sso_group.*` rule, compiled from the workspace's SSO
+ *   group policy for this member;
+ * - `HELD`: a hold rule, with `holdId`;
+ * - `SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`:
+ *   the MCP server registry;
+ * - `SERVER_NOT_ALLOWED`: the workspace's `mcpAllowedServers` list;
+ * - `COMMAND_TOO_LARGE`: the call is over the size a gate evaluates;
+ * - `GATE_DEADLINE`: the gate did not decide within `GATE_DEADLINE_MS`;
+ * - `UNREADABLE_CALL`: the payload held no tool call the gate could read;
+ * - `GATE_CRASHED`: the gate failed while deciding.
+ */
+export const HOOK_REFUSAL_CODES = [
+  'BUILT_IN_RULE',
+  'SNAPSHOT',
+  'SSO_GROUP',
+  'HELD',
+  'SERVER_BLOCKED',
+  'SERVER_HELD',
+  'SERVER_NOT_APPROVED',
+  'TOOL_DISABLED',
+  'SERVER_NOT_ALLOWED',
+  'COMMAND_TOO_LARGE',
+  'GATE_DEADLINE',
+  'UNREADABLE_CALL',
+  'GATE_CRASHED',
+] as const
 
 /**
  * The coarse command → action-token classification the hold tier keys on:
@@ -270,6 +324,41 @@ def intutic_actions(tool, command):
 def intutic_phrase_rule(source, command):
     words = phrase_text(command)
     return any(has_phrase(words, p, True) for p in source.split("|"))
+
+
+def intutic_mcp_registry(record_b64, tool, trust_approvals):
+    # The MCP server registry decision for one mcp__<server>__<tool> call: a
+    # transliteration of evaluateMcpRegistry (@intutic/shared-types
+    # mcpRegistryRecord.ts), held to the same vectors. Returns
+    # "code<TAB>ruleId<TAB>reason", or "" to let the call continue.
+    import base64
+    import json
+    try:
+        r = json.loads(base64.b64decode(record_b64, validate=True).decode("utf-8"))
+    except Exception:
+        return ""
+    if not isinstance(r, dict) or not tool.startswith("mcp__"):
+        return ""
+    rest = tool[len("mcp__"):]
+    sep = rest.find("__")
+    if sep <= 0:
+        return ""
+    server, name = rest[:sep], rest[sep + 2:]
+
+    def strings(v):
+        return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
+
+    approved = strings(r.get("approvedServers")) if trust_approvals else []
+    disabled = r.get("disabledTools") if isinstance(r.get("disabledTools"), dict) else {}
+    if server in strings(r.get("blockedServers")):
+        return "SERVER_BLOCKED\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
+    if server in strings(r.get("heldServers")):
+        return "SERVER_HELD\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    if r.get("defaultPolicy") == "deny" and server not in approved:
+        return "SERVER_NOT_APPROVED\\tmcpDefaultPolicy\\tMCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    if name in strings(disabled.get(server)):
+        return "TOOL_DISABLED\\tmcp_registry." + server + "." + name + "\\tTool \\"" + name + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
+    return ""
 `
 
 /**
@@ -740,6 +829,10 @@ INTUTIC_SNAPSHOT_GENERATED=""
 # empty-list-means-unrestricted holds all the way to the gate.
 INTUTIC_MCP_SEVERITY=""
 INTUTIC_MCP_SERVERS=""
+# The MCP server registry record (base64 JSON, inside the digest), and whether
+# its approvals count: not once the snapshot fails its integrity check.
+INTUTIC_MCP_REGISTRY=""
+INTUTIC_MCP_REGISTRY_APPROVALS=1
 if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   INTUTIC_SNAPSHOT_STATE="ok"
   while IFS= read -r _line || [ -n "$_line" ]; do
@@ -754,6 +847,7 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
         INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%% *}"
         INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#* }"
         ;;
+      '${MCP_REGISTRY_RECORD_TAG}'$'\\t'*) INTUTIC_MCP_REGISTRY="\${_line#*$'\\t'}" ;;
       '#'*|'') : ;;
       *) INTUTIC_DYNAMIC+=("$_line") ;;
     esac
@@ -805,6 +899,9 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
     if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
     INTUTIC_MCP_SEVERITY=""
     INTUTIC_MCP_SERVERS=""
+    # The registry's refusals stay for the same reason; its approvals do not,
+    # so an approval added to this file clears nothing.
+    INTUTIC_MCP_REGISTRY_APPROVALS=0
   fi
 fi
 
@@ -1062,6 +1159,30 @@ if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
   done
 fi
 
+# ── MCP server registry backstop (gate body v14) ─────────────────────────────
+# The workspace's registry decisions from the snapshot's @mcp_registry record,
+# applied to every mcp__<server>__<tool> call: a blocked or held server, a
+# server not approved under mcpDefaultPolicy deny, a disabled tool. The same
+# decision, rule ids and reasons as the MCP proxy, so a server no proxy fronts
+# is refused as one it fronts would be. Evaluated in Python (intutic_mcp_registry
+# in GATE_PY_LIB), which reads the record's JSON; only for MCP-shaped calls.
+if [ -n "$INTUTIC_MCP_REGISTRY" ]; then
+  case "\${TOOL:-}" in
+    mcp__*__*)
+      _intutic_reg="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2], sys.argv[3] == "1"))' "$INTUTIC_MCP_REGISTRY" "\${TOOL:-}" "$INTUTIC_MCP_REGISTRY_APPROVALS" 2>/dev/null || true)"
+      if [ -n "$_intutic_reg" ]; then
+        IFS=$'\\t' read -r _ _intutic_reg_rid _intutic_reg_reason <<< "$_intutic_reg"
+        echo "[Intutic Governance] BLOCKED: \${_intutic_reg_reason} [\${_intutic_reg_rid}]" >&2
+        ${log} "tool_blocked" "\${TOOL:-}" "\${_intutic_reg_reason} [\${_intutic_reg_rid}]"
+        exit 2
+      fi
+      ;;
+  esac
+fi
+
 # ── M3: MCP per-server allowlist backstop ────────────────────────────────────
 # A DEDICATED header field, not a synthetic GuardPattern rule — see
 # policySnapshot.ts's module doc and protectedPaths.ts's assertPortableEre:
@@ -1107,6 +1228,13 @@ export interface JsGateOptions {
   harness: string
   /** How this harness refuses. */
   contract: BlockContract
+  /**
+   * The harness's decision object may carry only the fields it documents
+   * (Google Antigravity), so a refusal names its code in the reason text,
+   * `(refusal code SERVER_BLOCKED)`, rather than in `code` and `ruleId`
+   * fields. The rule id is already in the reason, in brackets.
+   */
+  documentedFieldsOnly?: boolean
   /** See {@link ShellGateOptions.reviewRequestFile}. Writers whose artifact
    *  does not live in `.intutic/hooks/` (cline, opencode) pass it. */
   reviewRequestFile?: string
@@ -1129,7 +1257,7 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   // same "header absent means unrestricted" reading writePolicySnapshot's
   // \`#mcpservers\` header is built on.
   const out = { rules: [], digest: 'none', state: 'absent', workspaceId: '', generatedAt: '', ageDays: 0,
-    mcpServers: [], mcpSeverity: 'block' };
+    mcpServers: [], mcpSeverity: 'block', mcpRegistry: null };
   let text;
   try { text = fs.readFileSync(p, 'utf8'); } catch (e) { return out; }
   out.state = 'ok';
@@ -1149,6 +1277,23 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
         out.mcpSeverity = rest.slice(0, sp).trim();
         out.mcpServers = rest.slice(sp + 1).trim().split(',').filter(Boolean);
       }
+      continue;
+    }
+    if (line.startsWith('${MCP_REGISTRY_RECORD_TAG}\\t')) {
+      // The MCP server registry record: base64 JSON, a data line inside the
+      // digest. Read into the shape evaluateMcpRegistry expects; a damaged
+      // record is no registry.
+      try {
+        const r = JSON.parse(Buffer.from(line.slice(${MCP_REGISTRY_RECORD_TAG.length + 1}), 'base64').toString('utf8'));
+        const strings = function (v) { return Array.isArray(v) ? v.filter(function (x) { return typeof x === 'string'; }) : []; };
+        const disabled = {};
+        if (r.disabledTools && typeof r.disabledTools === 'object') {
+          for (const k of Object.keys(r.disabledTools)) disabled[k] = strings(r.disabledTools[k]);
+        }
+        out.mcpRegistry = { defaultPolicy: r.defaultPolicy === 'deny' ? 'deny' : 'allow',
+          approvedServers: strings(r.approvedServers), blockedServers: strings(r.blockedServers),
+          heldServers: strings(r.heldServers), disabledTools: disabled };
+      } catch (e) { out.mcpRegistry = null; }
       continue;
     }
     if (!line || line.startsWith('#')) continue;
@@ -1205,6 +1350,9 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   if (out.state === 'invalid') {
     out.rules = out.rules.filter(function (r) { return r.id.indexOf('sso_group.') === 0 && r.severity === 'block'; });
     out.mcpServers = [];
+    // The registry's refusals stay for the same reason; its approvals do not,
+    // so an approval added to this file clears nothing.
+    if (out.mcpRegistry) out.mcpRegistry.approvedServers = [];
   }
 
   if (out.state === 'ok' && out.generatedAt) {
@@ -1229,18 +1377,32 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
 export function emitJsGate(opts: JsGateOptions): string {
   const floor = staticFloorPatterns()
 
-  const refuse =
-    opts.contract === 'stdout-cancel'
-      ? `      process.stdout.write(JSON.stringify({ cancel: true, reason: reason }) + '\\n');\n` +
+  /**
+   * The refusal, through this harness's contract, for a `reason` in scope.
+   * `code` and `ruleId` are JavaScript expressions: a JSON decision carries
+   * them ({@link HOOK_REFUSAL_CODES}), and `extra` adds fields such as `holdId`.
+   */
+  const refuseWith = (code: string, ruleId: string, extra = '') => {
+    const fields = `code: ${code}, ruleId: ${ruleId}${extra ? `, ${extra}` : ''}`
+    if (opts.contract === 'stdout-decision-deny' && opts.documentedFieldsOnly) {
+      return (
+        `      process.stdout.write(JSON.stringify({ decision: 'deny', reason: reason + ' (refusal code ' + ${code} + ')' }) + '\\n');\n` +
         `      process.exit(0);`
+      )
+    }
+    return opts.contract === 'stdout-cancel'
+      // Cline shows a cancel's `errorMessage`; it has no `reason` field.
+      ? `      process.stdout.write(JSON.stringify({ cancel: true, errorMessage: reason, ${fields} }) + '\\n');\n` +
+          `      process.exit(0);`
       : opts.contract === 'stdout-decision-deny'
-        ? `      process.stdout.write(JSON.stringify({ decision: 'deny', reason: reason }) + '\\n');\n` +
+        ? `      process.stdout.write(JSON.stringify({ decision: 'deny', reason: reason, ${fields} }) + '\\n');\n` +
           `      process.exit(0);`
         : opts.contract === 'throw'
           // The envelope guard's reason already carries the prefix; a rule's
           // reason does not. One message shape either way.
           ? `      throw new Error(String(reason).indexOf('[Intutic Governance]') === 0 ? String(reason) : '[Intutic Governance] BLOCKED: ' + reason);`
           : `      process.exit(2);`
+  }
 
   return `
 // ── Intutic gate body v${GATE_VERSION} — harness: ${opts.harness} ────────────
@@ -1290,8 +1452,22 @@ function intuticGuardEnvelope(ctx, keys, record) {
     'refusing rather than allowing a call the gate cannot read.';
   try { console.error(reason); } catch (e) {}
   try { record('tool_blocked', 'unknown', reason); } catch (e) {}
-${refuse}
+${refuseWith("'UNREADABLE_CALL'", 'null')}
 }
+
+/**
+ * The refusal code of a matched block rule: SSO_GROUP for the group policy's
+ * rules, BUILT_IN_RULE for this gate's compiled floor, SNAPSHOT for the rest
+ * of the policy snapshot.
+ */
+function intuticRuleCode(rule) {
+  if (rule.id.indexOf('sso_group.') === 0) return 'SSO_GROUP';
+  return INTUTIC_FLOOR.indexOf(rule) !== -1 ? 'BUILT_IN_RULE' : 'SNAPSHOT';
+}
+
+// The MCP server registry decision, emitted from @intutic/shared-types
+// mcpRegistryRecord.ts: the function the MCP proxy runs.
+${MCP_REGISTRY_JS_SOURCE}
 
 /**
  * Evaluates one tool call. Returns normally to allow; refuses via this harness's
@@ -1320,7 +1496,7 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
       : 'the tool arguments are ' + _argumentBytes + ' bytes, over the ${ARGUMENTS_SIZE_LIMIT}-byte limit a gate evaluates; write the content in smaller parts');
     try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
     try { record('tool_blocked', toolName, reason); } catch (e) {}
-${refuse}
+${refuseWith("'COMMAND_TOO_LARGE'", 'null')}
   }
 ${
   opts.contract === 'throw'
@@ -1344,7 +1520,7 @@ ${
     var reason = 'GATE_DEADLINE — the gate did not finish evaluating this call within ${GATE_DEADLINE_MS / 1000} s, and refuses it rather than let the hook timeout allow it';
     try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
     try { record('tool_blocked', toolName, reason); } catch (e) {}
-${refuse}
+${refuseWith("'GATE_DEADLINE'", 'null')}
   }
 }`
 }
@@ -1460,7 +1636,7 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
         const held = intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId);
         if (held.bypassed) continue;
         const reason = '[Intutic Governance] HELD: ' + rule.reason + ' [' + rule.id + '] ' + intuticHoldHint(held.holdId);
-${refuse}
+${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId')}
       }
       if (rule.severity === 'warn') {
         // Advisory tier — allowed, recorded with the rule id and the command's
@@ -1482,7 +1658,23 @@ ${refuse}
       const reason = rule.reason + ' [' + rule.id + ']';
       try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
       try { record('tool_blocked', toolName, reason); } catch (e) {}
-${refuse}
+${refuseWith('intuticRuleCode(rule)', 'rule.id')}
+    }
+  }
+
+  // MCP server registry backstop (gate body v14): the workspace's registry
+  // decisions from the snapshot's @mcp_registry record, applied to every
+  // mcp__<server>__<tool> call — the servers no MCP proxy fronts included —
+  // with the proxy's own decision, codes, rule ids and reasons.
+  if (snap.mcpRegistry && toolName.indexOf('mcp__') === 0) {
+    var _regRest = toolName.slice('mcp__'.length);
+    var _regSep = _regRest.indexOf('__');
+    var _reg = _regSep > 0 ? evaluateMcpRegistry(snap.mcpRegistry, _regRest.slice(0, _regSep), _regRest.slice(_regSep + 2)) : null;
+    if (_reg) {
+      var reason = _reg.reason + ' [' + _reg.ruleId + ']';
+      try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+      try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuseWith('_reg.code', '_reg.ruleId')}
     }
   }
 
@@ -1492,7 +1684,7 @@ ${refuse}
   // "allow only these servers" without negative lookahead). Only fires when
   // \`toolName\` is actually \`mcp__<server>__<tool>\`-shaped AND the header was
   // present (\`snap.mcpServers.length > 0\` — an absent header means
-  // unrestricted). Refuses through the SAME \`record\`/\`\${refuse}\` path as
+  // unrestricted). Refuses through the SAME \`record\`/refusal path as
   // every other block above, not a parallel mechanism.
   if (snap.mcpServers.length > 0 && toolName.indexOf('mcp__') === 0) {
     var _mcpRest = toolName.slice('mcp__'.length);
@@ -1505,13 +1697,13 @@ ${refuse}
       } else {
         try { console.error('[Intutic Governance] BLOCKED: ' + _mcpReason); } catch (e) {}
         try { record('tool_blocked', toolName, _mcpReason); } catch (e) {}
-        // \`reason\` is what \`\${refuse}\` reads. The rule loop's own \`reason\` is
+        // \`reason\` is what the refusal reads. The rule loop's own \`reason\` is
         // block-scoped to that loop, so without this the two stdout contracts
         // and the throw contract would hit a ReferenceError here — a refusal
         // that crashes is still a refusal for exit-code gates, and a
         // ReferenceError for the others.
         var reason = _mcpReason;
-${refuse}
+${refuseWith("'SERVER_NOT_ALLOWED'", "'mcp_allowlist'")}
       }
     }
   }
@@ -1716,14 +1908,16 @@ export function emitJsFailClosedPrelude(opts: JsGateOptions): string {
   const crashBody =
     opts.contract === 'stdout-cancel'
       ? `  try {\n` +
-        `    process.stdout.write(JSON.stringify({ cancel: true, reason:\n` +
-        `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err) }) + '\\n');\n` +
+        `    process.stdout.write(JSON.stringify({ cancel: true, errorMessage:\n` +
+        `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err),\n` +
+        `      code: 'GATE_CRASHED', ruleId: null }) + '\\n');\n` +
         `  } catch (e) { /* stdout gone too — nothing left to refuse through */ }\n` +
         `  process.exit(0);`
       : opts.contract === 'stdout-decision-deny'
         ? `  try {\n` +
           `    process.stdout.write(JSON.stringify({ decision: 'deny', reason:\n` +
-          `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err) }) + '\\n');\n` +
+          `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err)` +
+          (opts.documentedFieldsOnly ? ` + ' (refusal code GATE_CRASHED)' }) + '\\n');\n` : `,\n      code: 'GATE_CRASHED', ruleId: null }) + '\\n');\n`) +
           `  } catch (e) { /* stdout gone too — nothing left to refuse through */ }\n` +
           `  process.exit(0);`
         : `  try {\n` +

@@ -15,7 +15,7 @@
 
 import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
-import { evaluateSsoGroupClearance, holdApprovalHint } from '@intutic/shared-types'
+import { evaluateMcpRegistry, evaluateSsoGroupClearance, holdApprovalHint } from '@intutic/shared-types'
 import { scanToolInput, formatDlpBlockReason, setDynamicPatterns } from './dlp.js'
 import type { DlpFinding } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns } from './injection.js'
@@ -253,27 +253,11 @@ export class ToolCallInterceptor {
       return block('REGISTRY_UNAVAILABLE', 'mcpProxyFailBehavior', reason)
     }
 
-    let refusal: Block | null = null
-    const server = `mcp_registry.${this.serverName}`
-    if (registry.blockedServers.includes(this.serverName)) {
-      refusal = block('SERVER_BLOCKED', server,
-        `MCP server "${this.serverName}" is blocked in this workspace's MCP server registry. ` +
-        `An owner or admin can change that on the MCP Servers page.`)
-    } else if (registry.heldServers.includes(this.serverName)) {
-      refusal = block('SERVER_HELD', server,
-        `MCP server "${this.serverName}" changed its tools in a way scored high risk, and this workspace ` +
-        `holds such a server until it is approved again. It is waiting in the approval queue on the MCP ` +
-        `Servers page for an owner or admin.`)
-    } else if (registry.defaultPolicy === 'deny' && !registry.approvedServers.includes(this.serverName)) {
-      refusal = block('SERVER_NOT_APPROVED', 'mcpDefaultPolicy',
-        `MCP server "${this.serverName}" is not approved in this workspace's MCP server registry, ` +
-        `and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in ` +
-        `the approval queue on the MCP Servers page for an owner or admin.`)
-    } else if ((registry.disabledTools[this.serverName] ?? []).includes(toolName)) {
-      refusal = block('TOOL_DISABLED', `${server}.${toolName}`,
-        `Tool "${toolName}" is disabled on MCP server "${this.serverName}" in this workspace's ` +
-        `MCP server registry. An owner or admin can re-enable it on the MCP Servers page.`)
-    }
+    // The decision every gate makes (`@intutic/shared-types` mcpRegistryRecord.ts):
+    // the harness hook gates apply the same function, from the policy
+    // snapshot, to the servers no proxy fronts.
+    const decision = evaluateMcpRegistry(registry, this.serverName, toolName)
+    const refusal: Block | null = decision ? block(decision.code, decision.ruleId, decision.reason) : null
     if (!refusal) return null
     log.warn({ action: 'registry_block', serverName: this.serverName, toolName }, refusal.reason)
     this.emitter.emit('tool_blocked', toolName, toolInput, refusal.reason)

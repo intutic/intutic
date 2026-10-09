@@ -87,6 +87,13 @@ const PROCESS_SIGNATURES: Array<{
     patterns: [/\bantigravity\b/i],
   },
   {
+    name: 'Gemini CLI',
+    // Anchored on the invoked command name like `grok`: `gemini` is a common
+    // word in arguments and paths. Also the npm package, which a node process
+    // running the CLI shows before the resolved binary name does.
+    patterns: [/(^|[/\\\s])gemini(\s|$)/, /@google\/gemini-cli\b/],
+  },
+  {
     name: 'Muse Code',
     // See services/sync-daemon/src/lib/processPoller.ts's copy of this table
     // for the full reasoning — this codebase's two independent process-list
@@ -215,7 +222,11 @@ function getRawProcessList(): Array<{ pid: number; command: string }> {
  * @returns Array of detected active processes
  */
 export function getActiveAgentProcesses(): ActiveProcess[] {
-  const rawProcesses = getRawProcessList()
+  return matchAgentProcesses(getRawProcessList())
+}
+
+/** The agents in a process list, by signature: the first matching PID per agent. */
+export function matchAgentProcesses(rawProcesses: ReadonlyArray<{ pid: number; command: string }>): ActiveProcess[] {
   const seen = new Set<string>()
   const results: ActiveProcess[] = []
 

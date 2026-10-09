@@ -26,12 +26,21 @@ export type InventoryGateKind = 'hook' | 'sdk' | 'none' | 'delegated' | 'bridge'
 
 /** One harness found on the machine, by detection or because `intutic connect` is configured for it. */
 export interface InventoryHarness {
-  /** A `HarnessType` value. */
+  /**
+   * A `HarnessType` value, or for the harness with two gates the gate id of
+   * the product found (`antigravity`, `gemini-cli`; see `gateIdentity.ts`).
+   */
   type: string
   /** Only where the install records it cheaply, such as a VS Code extension directory name. */
   version?: string
   /** True when it is one of this machine's `intutic connect` harnesses, the ones connect installs a gate for. */
   configured: boolean
+  /**
+   * True when `intutic disconnect --harness` removed Intutic from it on this
+   * machine: ungoverned by the user's choice, so its first appearance as
+   * ungoverned is not announced.
+   */
+  disconnected?: boolean
   gateKind: InventoryGateKind
   /** For a `hook` gate, whether its gate file is on disk; null when the gate is not a file the daemon writes. */
   gateInstalled: boolean | null

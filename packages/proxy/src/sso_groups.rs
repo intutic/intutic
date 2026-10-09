@@ -20,7 +20,10 @@
 //!
 //! Names and groups match exactly — no case folding — unlike the response
 //! gate's `deny_tools` match. A looser match here would refuse calls the hook
-//! gate allows.
+//! gate allows. The one widening every gate shares is MCP's two names for one
+//! tool ([`tool_matches`]): an entry naming the tool as its server declares it
+//! (`run_query`) also matches the name a harness gives it
+//! (`mcp__postgres__run_query`).
 //!
 //! # Where the policy and the groups come from
 //!
@@ -125,9 +128,40 @@ pub fn rule_id(kind: &str, tool_name: &str) -> String {
     crate::refusal::tool_rule_id(&format!("sso_group.{kind}"), tool_name)
 }
 
+/// Whether a call named `name` is the tool a policy entry names: exactly, or,
+/// for an entry that is an MCP tool's own name (not starting with `mcp__`), as
+/// the name a harness gives it on any server, `mcp__<server>__<entry>`.
+pub fn tool_matches(entry: &str, name: &str) -> bool {
+    if name == entry {
+        return true;
+    }
+    if entry.starts_with("mcp__") || !name.starts_with("mcp__") {
+        return false;
+    }
+    let suffix_len = entry.len() + 2;
+    name.len() > "mcp__".len() + suffix_len
+        && name.ends_with(entry)
+        && name[..name.len() - entry.len()].ends_with("__")
+}
+
+/// The first entry of `list` a call matches: an exact match on any of its
+/// names first, then an MCP tool's own name matching a harness name.
+fn matching_entry<'a>(list: &'a [String], tool_names: &[&str]) -> Option<&'a str> {
+    for n in tool_names {
+        if let Some(e) = list.iter().find(|e| e.as_str() == *n) {
+            return Some(e);
+        }
+    }
+    tool_names
+        .iter()
+        .find_map(|n| list.iter().find(|e| tool_matches(e, n)))
+        .map(String::as_str)
+}
+
 /// Decides one tool call. `tool_names` is every name the call goes by; a
-/// policy entry naming any of them applies. `member_groups` `None` means the
-/// gate does not know the member's groups.
+/// policy entry naming any of them applies ([`tool_matches`]), and the rule id
+/// and reason name the entry. `member_groups` `None` means the gate does not
+/// know the member's groups.
 pub fn evaluate(
     policy: Option<&SsoGroupPolicy>,
     tool_names: &[&str],
@@ -137,10 +171,7 @@ pub fn evaluate(
         return SsoGroupDecision::granted();
     };
 
-    if let Some(obo) = tool_names
-        .iter()
-        .find(|n| policy.require_obo_for.iter().any(|t| t == *n))
-    {
+    if let Some(obo) = matching_entry(&policy.require_obo_for, tool_names) {
         return SsoGroupDecision {
             clearance: Clearance::RequiresObo,
             rule_id: Some(rule_id("require_obo", obo)),
@@ -150,10 +181,7 @@ pub fn evaluate(
         };
     }
 
-    let Some(risky) = tool_names
-        .iter()
-        .find(|n| policy.high_risk_tools.iter().any(|t| t == *n))
-    else {
+    let Some(risky) = matching_entry(&policy.high_risk_tools, tool_names) else {
         return SsoGroupDecision::granted();
     };
     if let Some(groups) = member_groups {

@@ -88,7 +88,7 @@ function buildHookScript(proxyUrl: string, workspaceRoot: string, workspaceId: s
  * Proxy: ${proxyUrl}
  * Generated: ${newIso()}
  */
-${emitJsFailClosedPrelude({ harness: 'antigravity', contract: 'stdout-decision-deny' })}
+${emitJsFailClosedPrelude({ harness: 'antigravity', contract: 'stdout-decision-deny', documentedFieldsOnly: true })}
 const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
@@ -106,7 +106,7 @@ try {
   });
 } catch {}
 
-${emitJsGate({ harness: 'antigravity', contract: 'stdout-decision-deny' })}
+${emitJsGate({ harness: 'antigravity', contract: 'stdout-decision-deny', documentedFieldsOnly: true })}
 
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
@@ -171,7 +171,7 @@ process.stdin.on('end', () => {
     const errMsg = String(err);
     process.stderr.write('[Intutic Governance] Hook error (fail-closed): ' + errMsg + '\\n');
     logEvent('tool_blocked', 'unknown', errMsg);
-    process.stdout.write(JSON.stringify({ decision: 'deny', reason: '[Intutic Governance] Hook error (fail-closed): ' + errMsg }) + '\\n');
+    process.stdout.write(JSON.stringify({ decision: 'deny', reason: '[Intutic Governance] Hook error (fail-closed): ' + errMsg + ' (refusal code GATE_CRASHED)' }) + '\\n');
     process.exit(0);
   }
 });

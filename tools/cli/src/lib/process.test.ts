@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseProcessOutput } from './process.js'
+import { matchAgentProcesses, parseProcessOutput } from './process.js'
 
 describe('Process Parser', () => {
   it('correctly parses Unix/macOS ps output format', () => {
@@ -49,5 +49,15 @@ describe('Process Parser', () => {
     const gooseProc = results.find(r => r.pid === 54321)
     expect(gooseProc).toBeDefined()
     expect(gooseProc?.command).toBe('goose.exe')
+  })
+})
+
+describe('agent signatures', () => {
+  it('sees a running Gemini CLI, by its binary or its npm package, and not the word in an argument', () => {
+    const names = (command: string) => matchAgentProcesses([{ pid: 1, command }]).map((p) => p.name)
+    expect(names('node /opt/homebrew/bin/gemini')).toEqual(['Gemini CLI'])
+    expect(names('gemini --model gemini-2.5-pro')).toEqual(['Gemini CLI'])
+    expect(names('node /usr/lib/node_modules/@google/gemini-cli/dist/index.js')).toEqual(['Gemini CLI'])
+    expect(names('vim notes/gemini-ideas.md')).toEqual([])
   })
 })

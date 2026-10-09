@@ -261,6 +261,8 @@ process.stdin.on('end', () => {
     process.stdout.write(JSON.stringify({
       cancel: true,
       errorMessage: '[Intutic Governance] Hook error (fail-closed): ' + String(err),
+      code: 'GATE_CRASHED',
+      ruleId: null,
     }));
     process.exit(0);
   }

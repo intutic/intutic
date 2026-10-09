@@ -629,12 +629,15 @@ describe('intutic disconnect, the command', () => {
     output = []
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { output.push(args.join(' ')) })
     vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { output.push(args.join(' ')) })
+    // A real run reports the disconnect; no control plane answers here.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 503 })))
   })
 
   afterEach(() => {
     process.env.PATH = prevPath
     process.exitCode = undefined
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   async function seedUser(): Promise<void> {
@@ -716,6 +719,46 @@ describe('intutic disconnect, the command', () => {
     expect(saved.harnesses).toEqual(['claude-code'])
     expect(saved.disconnectedHarnesses).toEqual(['cursor'])
     expect(existsSync(credentials)).toBe(true)
+  })
+
+  it('tells the control plane before it removes the credentials, and goes on when it cannot', async () => {
+    const calls: Array<{ url: string; auth: string; body: Record<string, unknown>; credentialsThere: boolean }> = []
+    let answer = 200
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({
+        url,
+        auth: String((init.headers as Record<string, string>).Authorization),
+        body: JSON.parse(String(init.body)),
+        credentialsThere: existsSync(credentials),
+      })
+      return new Response('{}', { status: answer })
+    }))
+    try {
+      await seedUser()
+      await connectAs(['claude-code', 'cursor'])
+      await runDisconnect({ harness: 'cursor', dryRun: true })
+      expect(calls).toEqual([])
+
+      await runDisconnect({ harness: 'cursor' })
+      await runDisconnect({})
+      expect(calls.map((c) => [c.url, c.auth, c.body.scope, c.body.harnesses, c.credentialsThere])).toEqual([
+        ['http://localhost:3001/api/v1/devices/disconnect', 'Bearer test-key', 'harness', ['cursor'], true],
+        ['http://localhost:3001/api/v1/devices/disconnect', 'Bearer test-key', 'machine', ['claude-code'], true],
+      ])
+      expect(calls[0]!.body.fingerprint).toMatch(/^[0-9a-f]{32}$/)
+      expect(existsSync(credentials)).toBe(false)
+      expect(output.join('\n')).toContain('Told the control plane')
+
+      // A control plane that refuses does not stop the disconnect.
+      answer = 503
+      await connectAs(['cursor'])
+      await runDisconnect({})
+      expect(process.exitCode).toBeUndefined()
+      expect(existsSync(credentials)).toBe(false)
+      expect(output.join('\n')).toContain('Could not tell the control plane (the control plane answered 503)')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('refuses while intutic connect is running, before changing anything', async () => {

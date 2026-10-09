@@ -203,6 +203,9 @@ export class GateClient {
       workspaceId: this.workspaceId,
       sessionId: this.sessionId,
       harnessType: this.harness,
+      // No daemon reports an SDK gate, so the control plane expects one from
+      // its own events: one that keeps reporting and stops is a silent gate.
+      gateSource: 'sdk',
       timestamp: new Date().toISOString(),
       // The event's id, made once: if this post is ever repeated, the control
       // plane processes the event once.

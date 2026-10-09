@@ -452,12 +452,24 @@ export {
   SsoGroupPolicySchema,
   parseSsoGroupPolicy,
   evaluateSsoGroupClearance,
+  ssoGroupToolMatches,
   ssoGroupRuleId,
   encodeSsoGroupRecord,
   decodeSsoGroupRecord,
   SSO_GROUP_RECORD_TAG,
 } from './ssoGroupClearance.js'
 export type { SsoGroupDecision, SsoGroupRecord } from './ssoGroupClearance.js'
+export {
+  parseMcpRegistryRecord,
+  encodeMcpRegistryRecord,
+  decodeMcpRegistryRecord,
+  evaluateMcpRegistry,
+  isUnrestrictedMcpRegistry,
+  MCP_REGISTRY_RECORD_TAG,
+  MCP_REGISTRY_JS_SOURCE,
+} from './mcpRegistryRecord.js'
+export type { McpRegistryRecord, McpRegistryRefusal } from './mcpRegistryRecord.js'
+export { GEMINI_CLI_GATE_ID, gateIdentitiesOf, harnessOfGate } from './gateIdentity.js'
 
 // MCP governance: call budgets, tool-change risk, description poisoning
 export {

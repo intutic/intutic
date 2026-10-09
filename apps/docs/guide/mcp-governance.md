@@ -321,8 +321,10 @@ policy (`sso_group_policy` in workspace settings, the one the server-side hook
 gate applies), and the proxy applies it to every MCP tool call: a tool on
 `highRiskTools` needs one of the `requiredGroups`, and a tool on
 `requireOboFor` is refused, since the proxy has no on-behalf-of token to
-present. A tool matches by its MCP name (`run_query`) or by the name the
-harness hooks see (`mcp__postgres__run_query`). With a group policy but no
+present. An entry naming a tool by its MCP name (`run_query`) matches it under
+that name here and under the name the harness hooks see on any server
+(`mcp__postgres__run_query`) at every other gate; an entry naming the harness
+form matches only that server's tool. With a group policy but no
 member resolved for the key, or once the control plane refuses the key (revoked,
 or its member deactivated), the member's groups are unknown and a high-risk
 tool is refused rather than allowed. The decision is the one the hook gate, the
@@ -712,20 +714,37 @@ tool-level granularity: it can refuse one `tools/call` while allowing the
 rest of that same server's tools. That is the PRIMARY enforcement point for
 MCP governance, and it stays that way.
 
-Phase M3 adds a second, deliberately smaller layer: the per-harness
-`PreToolUse` gate scripts every harness writer already generates (the same
-scripts that block a write to `.claude/settings.json` or an `rm -rf /`) now
-also recognise a `mcp__<server>__<tool>`-shaped tool name and can refuse one
-whose **server** is not on the workspace's `mcpAllowedServers` list — the
-same setting the proxy already reads (see [The allowlist](#the-allowlist-mcpallowedservers)
-above), delivered to the gate via the sync daemon's policy snapshot
-(`#mcpservers <severity> <comma-joined-server-names>` in `policy-snapshot.rules`).
+A second, deliberately smaller layer sits in the per-harness `PreToolUse`
+gate scripts every harness writer already generates (the same scripts that
+block a write to `.claude/settings.json` or an `rm -rf /`). They recognise a
+`mcp__<server>__<tool>`-shaped tool name and refuse it on two of the
+workspace's MCP settings, delivered through the sync daemon's policy snapshot:
+
+- **The registry.** A blocked or held server, a server the workspace has not
+  approved under `mcpDefaultPolicy: deny`, and a tool disabled on its server
+  are refused with the proxy's own codes (`SERVER_BLOCKED`, `SERVER_HELD`,
+  `SERVER_NOT_APPROVED`, `TOOL_DISABLED`), rule ids and reasons: the proxy
+  and the gates run one decision. The registry rides in `policy-snapshot.rules`
+  as an `@mcp_registry` record inside the snapshot's digest. A gate that finds
+  the digest broken keeps the registry's refusals and ignores its approvals,
+  so editing the file approves nothing.
+- **The allowlist.** A server not on `mcpAllowedServers` (see
+  [The allowlist](#the-allowlist-mcpallowedservers) above) is refused, from the
+  `#mcpservers <severity> <comma-joined-server-names>` header.
+
+Under `mcpDefaultPolicy: deny` this reaches servers the proxy never sees, the
+harness's own included: Claude Code's IDE tools (`mcp__ide__…`) are refused
+until `ide` is approved. A server a gate refuses as unapproved joins the
+approval queue on the MCP Servers page, as one the proxy meets first does.
+A harness that reads a JSON decision from the gate gets the code in `code`
+([refusal codes](/reference/harness-security-matrix#hook-refusal-codes)).
 
 **This is a backstop, not a second primary control.** It is:
 
-- **Server-level only**, never tool-level — the gate cannot express "allow
-  `github`'s `read_issue` but not its `delete_repo`"; that granularity is the
-  proxy's job and only the proxy's.
+- **Name-level only.** The gate decides from the server and tool names in the
+  call, never from what the server declares or returns: tool pinning, budgets,
+  argument and result scanning, and injection and anomaly detection stay the
+  proxy's job.
 - **A defense-in-depth layer that fires even if a harness bypasses or
   misconfigures the proxy** — a stdio server a developer added directly to a
   harness config during the window before the next sync cycle proxy-wraps it
@@ -838,7 +857,7 @@ Unix socket, caches policy and batches events for proxies in `daemon` mode:
 | `MCP_DAEMON_MAX_CACHE_ENTRIES` | `500` | Workspaces kept in the policy cache. |
 | `MCP_DAEMON_STATUS_REPORT_MS` | `60000` | How often it reports its status and the servers it found. |
 | `CONTROL_PLANE_URL` | `http://localhost:3001` | The control plane, for the daemon itself. |
-| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/policy-snapshot.json` | The sync daemon's snapshot the daemon seeds its cache from at start. It has the SOP rules and the server allowlist but no registry, so the registry follows the fail setting until the first fetch. A proxy that already loaded a policy keeps its allowlists and other settings through a daemon restart and takes only the snapshot's rules. |
+| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/policy-snapshot.json` | The sync daemon's snapshot the daemon seeds its cache from at start. The daemon seeds the SOP rules and the server allowlist from it, not the registry, so the registry follows the fail setting until the first fetch. A proxy that already loaded a policy keeps its allowlists and other settings through a daemon restart and takes only the snapshot's rules. |
 
 The daemon also reads `INTUTIC_API_KEY` and `INTUTIC_WORKSPACE_ID` from its
 environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
@@ -878,7 +897,9 @@ environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
   remote project server whose `url` or `headers` use `${VAR}`, and harnesses
   this page lists as unwrapped reach the harness directly. The registry may still
   list them, from the MCP daemon's report; approving or blocking them changes
-  nothing until a proxy fronts them, apart from the hook-gate backstop below.
+  nothing at a proxy until one fronts them. The [gate backstop](#the-gate-backstop)
+  applies blocks, holds, default-deny and disabled tools to their calls in
+  every harness with a hook gate.
 - **The OS user, session and server on an event are what the proxy
   reported.** The member is resolved from the API key; the rest is a claim by
   the process holding that key.

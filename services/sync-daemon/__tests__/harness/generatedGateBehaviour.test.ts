@@ -936,8 +936,10 @@ for (const g of GATES) {
           .map((l) => { try { return JSON.parse(l) } catch { return null } })
           .find((o) => o && (o.cancel === true || o.decision === 'deny'))
         expect(verdict, `${g.name} printed no verdict object`).toBeTruthy()
-        expect(String(verdict.reason)).toContain('[mcp_allowlist]')
-        expect(String(verdict.reason)).not.toMatch(/crash|ReferenceError/i)
+        // Cline shows a cancel's errorMessage; the deny contracts carry reason.
+        const said = String(verdict.cancel === true ? verdict.errorMessage : verdict.reason)
+        expect(said).toContain('[mcp_allowlist]')
+        expect(said).not.toMatch(/crash|ReferenceError/i)
         expect(auditLogText(g)).toMatch(/tool_blocked.*mcp_allowlist|mcp_allowlist.*tool_blocked/)
 
         const allowed = await runGate(g, {}, { tool: 'mcp__allowed-server__x', snapshot: snap })
