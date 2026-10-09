@@ -1169,3 +1169,19 @@ export const NO_GATE: ReadonlyArray<{
       'apps/docs/integrations/agentcore.md, not encoded here. See TD-430.',
   },
 ]
+
+/**
+ * Runs a gate call, rerunning it up to twice while it refuses with
+ * `GATE_DEADLINE`.
+ *
+ * The gate suites spawn interpreters in parallel across every fixture, and on a
+ * loaded machine start-up alone can take most of the gate's 4 s deadline. The
+ * refusal is right in production but says nothing about the fixture, so a
+ * benign case reads as a false positive. A rerun that decides is the verdict.
+ * Tests about the deadline itself call the gate once.
+ */
+export async function rerunOnDeadline<T>(once: () => Promise<T>, output: (r: T) => string): Promise<T> {
+  let r = await once()
+  for (let i = 0; i < 2 && /GATE_DEADLINE/.test(output(r)); i++) r = await once()
+  return r
+}

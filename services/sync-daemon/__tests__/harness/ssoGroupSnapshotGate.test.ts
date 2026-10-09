@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { decodeSsoGroupRecord, encodeSsoGroupRecord, parseSsoGroupPolicy, SSO_GROUP_RECORD_TAG } from '@intutic/shared-types'
-import { GATES, type GateEntry } from './gateRegistry.js'
+import { GATES, type GateEntry, rerunOnDeadline } from './gateRegistry.js'
 import {
   buildSnapshotRules,
   fetchResolvedPolicy,
@@ -298,7 +298,7 @@ interface RunResult { status: number; stderr: string; signal: NodeJS.Signals | n
 /** Async spawn, never spawnSync: see the note in generatedGateBehaviour.test.ts. */
 function runGate(g: GateEntry, tool: string, snapshot: string): Promise<RunResult> {
   const root = roots.get(g.name)!
-  return new Promise((resolve, reject) => {
+  return rerunOnDeadline(() => new Promise((resolve, reject) => {
     const child = spawn(g.runner, [join(root, g.artifact)], {
       env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -314,7 +314,7 @@ function runGate(g: GateEntry, tool: string, snapshot: string): Promise<RunResul
       resolve({ status: code === null ? -1 : code, stderr, signal })
     })
     child.stdin.end(JSON.stringify({ tool_name: tool, tool_input: {}, session_id: 'sess_sso' }))
-  })
+  }), (r) => r.stderr)
 }
 
 async function mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

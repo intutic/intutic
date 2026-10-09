@@ -32,7 +32,7 @@ import {
   type McpRegistryRecord,
 } from '@intutic/shared-types'
 import { MCP_REGISTRY_PY_SOURCE } from '../../src/lib/mcpRegistryPy.js'
-import { GATES, type GateEntry } from './gateRegistry.js'
+import { GATES, type GateEntry, rerunOnDeadline } from './gateRegistry.js'
 import {
   fetchResolvedPolicy,
   refreshPolicySnapshot,
@@ -238,7 +238,7 @@ interface RunResult { status: number; stderr: string }
 /** Async spawn, never spawnSync: see the note in generatedGateBehaviour.test.ts. */
 function runGate(g: GateEntry, tool: string, snapshot: string): Promise<RunResult> {
   const root = roots.get(g.name)!
-  return new Promise((resolve, reject) => {
+  return rerunOnDeadline(() => new Promise((resolve, reject) => {
     const child = spawn(g.runner, [join(root, g.artifact)], {
       env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -254,7 +254,7 @@ function runGate(g: GateEntry, tool: string, snapshot: string): Promise<RunResul
       resolve({ status: code === null ? -1 : code, stderr })
     })
     child.stdin.end(JSON.stringify({ tool_name: tool, tool_input: {}, session_id: 'sess_reg' }))
-  })
+  }), (r) => r.stderr)
 }
 
 async function mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

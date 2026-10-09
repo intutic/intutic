@@ -32,7 +32,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
-import { GATES, NO_GATE, type GateEntry } from './gateRegistry.js'
+import { GATES, NO_GATE, type GateEntry, rerunOnDeadline } from './gateRegistry.js'
 import {
   ARGUMENTS_SIZE_LIMIT,
   COMMAND_SIZE_LIMIT,
@@ -287,16 +287,7 @@ function gateEnv(g: GateEntry, snapshot?: boolean | string): NodeJS.ProcessEnv {
   }
 }
 
-/**
- * Runs a gate once per call, rerunning a `GATE_DEADLINE` refusal up to twice.
- *
- * The suite fans out four gates at a time across every fixture, and on a loaded
- * machine an interpreter can take most of the 4 s deadline to start. The gate
- * then refuses, which is correct in production but says nothing about the
- * fixture: a benign case reads as a false positive. A rerun that decides is the
- * verdict. `expectDeadline` turns the rerun off for the tests that are about
- * the deadline itself.
- */
+/** `expectDeadline` calls the gate once, for the tests about the deadline itself. */
 async function runGate(
   g: GateEntry,
   toolInput: Record<string, string>,
@@ -313,9 +304,7 @@ async function runGate(
     env: gateEnv(g, opts.snapshot),
     timeoutMs: 20_000,
   })
-  let r = await once()
-  for (let i = 0; i < 2 && !opts.expectDeadline && /GATE_DEADLINE/.test(r.stdout + r.stderr); i++) r = await once()
-  return r
+  return opts.expectDeadline ? once() : rerunOnDeadline(once, (r) => r.stdout + r.stderr)
 }
 
 /**
