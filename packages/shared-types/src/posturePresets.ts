@@ -135,7 +135,7 @@ export const COST_POSTURES: readonly PosturePreset[] = [
     title: 'Quality first',
     description:
       'No routing, no semantic cache: every request is served by the requested ' +
-      'model, fresh, with only byte-identical repeats served from cache.',
+      'model, fresh, with only exact repeats of a whole request served from cache.',
     settings: {},
     featureFlags: {
       ff_bandit_routing: false,

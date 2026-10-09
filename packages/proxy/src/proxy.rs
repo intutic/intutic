@@ -4413,23 +4413,27 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .unwrap_or("unknown")
         .to_string();
 
-    // Check response cache
-    if ff_response_cache_exact || ff_response_cache_semantic {
+    // Check response cache. The keys are derived once, here, and carried to
+    // the write after the upstream answers, so the lookup and the write cannot
+    // disagree about which entry this request owns. `None` when the cache is
+    // off or this request may not use it (see `semantic_cache::cache_keys`).
+    let response_cache_keys = (ff_response_cache_exact || ff_response_cache_semantic)
+        .then(|| {
+            crate::plugins::semantic_cache::cache_keys(&workspace_id, &model, &protocol, &body_json)
+        })
+        .flatten();
+    if let Some(cache_keys) = &response_cache_keys {
         if let Some(cached_resp) = crate::plugins::semantic_cache::check_cache(
             &state.store,
             &state.http_client,
             &workspace_id,
+            cache_keys,
             &body_json,
             ff_response_cache_exact,
             ff_response_cache_semantic,
         )
         .await
         {
-            let mock_body = crate::plugins::semantic_cache::construct_mock_response(
-                &protocol,
-                &cached_resp,
-                &model,
-            );
             let latency_ms = start.elapsed().as_millis() as u32;
             let raw_cost_usd = estimate_model_cost(
                 &model,
@@ -4503,6 +4507,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 }
             });
 
+            // Served in the mode the client asked for: a streaming client
+            // parses `text/event-stream` and cannot read a JSON body.
+            if body_json.get("stream").and_then(|v| v.as_bool()) == Some(true) {
+                let sse = crate::plugins::semantic_cache::construct_mock_stream(
+                    &protocol,
+                    &cached_resp,
+                    &model,
+                );
+                return (
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    sse,
+                )
+                    .into_response();
+            }
+            let mock_body = crate::plugins::semantic_cache::construct_mock_response(
+                &protocol,
+                &cached_resp,
+                &model,
+            );
             return (StatusCode::OK, axum::Json(mock_body)).into_response();
         }
     }
@@ -5506,6 +5530,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let http_client_clone = state.http_client.as_ref().clone();
         let workspace_id_clone = workspace_id.clone();
         let body_json_clone = body_json.clone();
+        let response_cache_keys_clone = response_cache_keys.clone();
         let key_prefix_clone = key_prefix.to_string();
         let session_id_clone = session_id.clone();
         // Per-node graph queue key. Composed here, where identity is in
@@ -5598,6 +5623,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // synthesis block, the terminal event — must be suppressed: bytes
             // after a terminal event are not a stream any client can parse.
             let mut gate_tripped = false;
+            // Set once any line carries output other than assistant text (a
+            // tool call, thinking, a second choice): such a stream is not
+            // cached, because a hit replays text alone.
+            let mut stream_beyond_text = false;
             // The finding an SSO-group refusal adds to this stream's trace, so
             // the deciding rule id reaches the control plane.
             let mut gate_finding: Option<crate::telemetry::FindingWire> = None;
@@ -5916,6 +5945,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 done_received = true;
                                 gate_tripped = true;
                                 break 'upstream;
+                            }
+
+                            // Read on the upstream's own line, before either
+                            // holdback rewrites it and before a cross-provider
+                            // line is translated: the check knows every stream
+                            // shape.
+                            if response_cache_keys_clone.is_some() && !stream_beyond_text {
+                                stream_beyond_text =
+                                    crate::plugins::semantic_cache::sse_line_is_beyond_text(&line);
                             }
 
                             // ── Output DLP holdback ─────────────────────────
@@ -6753,22 +6791,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 (accumulated_content.len() as f64 / 4.0).max(1.0) as u32
             };
 
-            if !accumulated_content.is_empty() {
-                let _ = crate::plugins::semantic_cache::write_cache(
-                    crate::plugins::semantic_cache::ResponseProvenance::Served,
-                    &cache_store_clone,
-                    &http_client_clone,
-                    &workspace_id_clone,
-                    &body_json_clone,
-                    &accumulated_content,
-                    &actual_model_clone,
-                    final_prompt_tokens,
-                    final_completion_tokens,
-                    ff_response_cache_semantic,
-                )
-                .await;
-            }
-
             let prompt_words = prompt_text_clone.split_whitespace().count();
             let completion_words = accumulated_content.split_whitespace().count();
             let estimated_prompt = (prompt_words as f64 / 0.75) as u32;
@@ -6806,6 +6828,34 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // the cheaper arms the bandit exists to explore, and dashboards
             // reading 100% truncation for all cross-provider routing.
             let stream_complete = done_received || !is_same_provider;
+
+            // Cached only when the entry can be replayed as exactly what the
+            // client received: a complete stream, not cut short by the response
+            // gate's refusal, and nothing in it but text (a `CachedResponse`
+            // holds text, so a tool call would replay as a finished answer
+            // without the call). `accumulated_content` is the post-DLP text.
+            if let Some(cache_keys) = &response_cache_keys_clone {
+                if stream_complete
+                    && !gate_tripped
+                    && !stream_beyond_text
+                    && !accumulated_content.is_empty()
+                {
+                    let _ = crate::plugins::semantic_cache::write_cache(
+                        crate::plugins::semantic_cache::ResponseProvenance::Served,
+                        &cache_store_clone,
+                        &http_client_clone,
+                        &workspace_id_clone,
+                        cache_keys,
+                        &body_json_clone,
+                        &accumulated_content,
+                        &actual_model_clone,
+                        final_prompt_tokens,
+                        final_completion_tokens,
+                        ff_response_cache_semantic,
+                    )
+                    .await;
+                }
+            }
 
             // Streaming: the assembled body is not reconstructable here, so
             // termination is the only check available — and it is a real one in
@@ -7405,12 +7455,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Set when output DLP withholds the whole body below, so the response
     // names the refusal to an SDK (`crate::refusal`).
     let mut output_dlp_withheld: Option<crate::refusal::Refusal> = None;
+    // Set when output DLP changed the body at all — redacted or withheld it.
+    let mut output_dlp_redacted = false;
     let final_body = if state.config.intutic_settings.dlp.enabled
         && state.config.intutic_settings.dlp.scan_output
     {
         let resp_str = String::from_utf8_lossy(&final_body_bytes);
         let findings = dlp::scan_with(&resp_str, pii_policy.as_deref());
         if !findings.is_empty() {
+            output_dlp_redacted = true;
             tracing::info!(workspace_id = %workspace_id, findings = findings.len(), "DLP findings in response — redacting");
             let redacted = dlp::redact(&resp_str, &findings);
             // Reparse-or-refuse, matching the request path's guard.
@@ -7480,23 +7533,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     } else {
         (accumulated_content.len() as f64 / 4.0).max(1.0) as u32
     };
-
-    // Write cache
-    if !accumulated_content.is_empty() {
-        let _ = crate::plugins::semantic_cache::write_cache(
-            crate::plugins::semantic_cache::ResponseProvenance::Served,
-            &state.store,
-            &state.http_client,
-            &workspace_id,
-            &body_json,
-            &accumulated_content,
-            &actual_model,
-            final_prompt_tokens,
-            final_completion_tokens,
-            ff_response_cache_semantic,
-        )
-        .await;
-    }
 
     // Tokenization Anomaly Check
     let prompt_words = prompt_text.split_whitespace().count();
@@ -7599,6 +7635,36 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
         None => final_body,
     };
+
+    // Cached only when the entry replays as exactly what the client received.
+    // `accumulated_content` is read from the upstream body before output DLP,
+    // so a redacted (or withheld) response would be cached with the very
+    // credential the client was shielded from; a refused or tool-calling
+    // response is not plain text, and a `CachedResponse` replays text alone.
+    if let Some(cache_keys) = &response_cache_keys {
+        if !output_dlp_redacted
+            && response_denial.is_none()
+            && parsed_response
+                .as_ref()
+                .is_some_and(crate::plugins::semantic_cache::is_text_only_response)
+            && !accumulated_content.is_empty()
+        {
+            let _ = crate::plugins::semantic_cache::write_cache(
+                crate::plugins::semantic_cache::ResponseProvenance::Served,
+                &state.store,
+                &state.http_client,
+                &workspace_id,
+                cache_keys,
+                &body_json,
+                &accumulated_content,
+                &actual_model,
+                final_prompt_tokens,
+                final_completion_tokens,
+                ff_response_cache_semantic,
+            )
+            .await;
+        }
+    }
 
     let reconstruction_quality = if is_same_provider { 100 } else { 95 };
     let (raw_cost_usd, actual_cost_usd) = request_costs(
