@@ -69,6 +69,8 @@ The first time a machine reports an ungoverned harness or MCP server, the contro
 
 The Harnesses and MCP servers views download as CSV with the filters on screen. A cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with `'`, so a spreadsheet opens it as text.
 
+The CLI reads the same views: `intutic inventory summary`, `intutic inventory harnesses` and `intutic inventory mcp-servers` (both with the page's filters, and `--csv` for the same download) and `intutic inventory skills`. See [the CLI reference](/reference/cli#intutic-inventory-summary).
+
 | Endpoint | Returns |
 |---|---|
 | `GET /api/v1/inventory/summary` | Machine, harness, MCP server and skill counts, and the governed percentage |

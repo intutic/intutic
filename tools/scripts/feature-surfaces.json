@@ -15,6 +15,9 @@
       "GET /intutic/instance": "loopback diagnostics of the local proxy",
       "GET /intutic/probes": "loopback diagnostics of the local proxy",
       "POST /intutic/attest-sandbox": "loopback endpoint the sandbox entrypoint calls; part of sandboxed execution, which predates this manifest"
+    },
+    "docsPages": {
+      "reference/workspace-settings.md": "the reference for every workspace settings key, which many features share; services/control-plane/__tests__/unit/settingsKeyParity.test.ts holds it to the settings schema"
     }
   },
   "features": [
@@ -741,7 +744,7 @@
           "guide/policies.md#pii-detectors",
           { "ref": "guide/policies.md#setting-detector-actions-for-a-workspace", "badge": false }
         ],
-        "website": [{ "file": "index.html", "contains": "checksum-validated card numbers, IBANs, US Social Security numbers" }],
+        "website": [{ "file": "index.html", "contains": "payment card numbers, IBANs and US Social Security numbers found by validated PII detectors" }],
         "events": { "none": "a PII match is a DLP finding and is recorded as one" },
         "enforcement": [
           { "file": "packages/shared-types/src/piiDetectors.json" },

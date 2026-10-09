@@ -6,9 +6,9 @@ sha256 digests. Nothing else in Intutic does this — no cosign, no sigstore,
 no admission webhook — so this check is the argument-level enforcement point
 for "deploy only pinned, reviewed images".
 
-Fail-closed on anything it cannot read. That is a deliberate departure from
-Intutic's fail-open default (WASM rules, hook-gate, the MCP proxy all fail
-open). The reasoning: a gate that cannot parse what it is being asked to
+Fail-closed on anything it cannot read. Other tiers follow a
+fail setting when the control plane cannot be reached; this one never does.
+The reasoning: a gate that cannot parse what it is being asked to
 approve does not know what it is approving, and "I could not read it" is not
 evidence of safety. The same argument the proxy's own SHELL_EXTRACT makes for
 itself.

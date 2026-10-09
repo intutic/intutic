@@ -101,8 +101,9 @@ The dashboard surfaces budget utilization in real time:
 - **Cost by Developer** — on the same tab: cost, tokens, calls, active days and models used per member, today or this month. Sort by any column; the top 10 show until you choose **Show all**. A call belongs to the member who owns the virtual key that made it. OWNER, ADMIN and EM see every member, plus an **Unattributed** row for calls with no virtual key. A DEVELOPER or VIEWER sees only their own usage.
 - **Cost by Team** — on the same tab, for OWNER, ADMIN and EM: the same figures per [SCIM group](/guide/scim), including members of nested groups. A member in several groups counts in each one, so team totals can add up to more than the workspace total. Without SCIM groups there are no teams, and cost by developer is the finest breakdown. SCIM comes with the Enterprise and Self-host plans.
 - **Cost by Branch** — on the same tab: cost per repository and branch, or per HEAD commit, with the same role scoping as **Cost by Developer** (see [Cost per branch and commit](#cost-per-branch-and-commit)).
+- **Cost by Pull Request** — on the same tab, next to Cost by Branch: cost, calls and developers per GitHub pull request (see [Cost per pull request](#cost-per-pull-request)).
 
-Cost by Developer, Cost by Team and Cost by Branch are fleet analytics <Badge type="warning" text="Biz Org+" />: they come with the Biz Org, Enterprise and Self-host plans and the trials. On another plan each card says which plans include it.
+Cost by Developer, Cost by Team, Cost by Branch and Cost by Pull Request are fleet analytics <Badge type="warning" text="Biz Org+" />: they come with the Biz Org, Enterprise and Self-host plans and the trials. On another plan each card says which plans include it.
 
 The dashboard has no daily spend trend or per-model spend view. **Token Efficiency by Model** on the same tab shows tokens per model, not cost.
 
@@ -186,6 +187,8 @@ The sync daemon (`intutic connect`) reports the repository, Git branch and HEAD 
 - **Scope:** the figures cover calls that go through a machine's local proxy while `intutic connect` is running. Every agent on that machine is attributed to the repository the daemon runs in, even when the agent works in a different directory. Calls through a shared gateway, calls made while the daemon is not reporting, and calls from a directory with no Git repository are shown as **No git context**.
 - **The clawde SDKs** report their own: with a virtual key, `ClawdeClient` registers a session carrying the repository, branch and commit of the directory it runs in, through a gateway or in CI too. See [Git context and cost attribution](/reference/clawde-sdk#_1a-git-context-and-cost-attribution).
 - **Pull requests:** a branch with a GitHub pull request is also reported per pull request. See [Cost per pull request](#cost-per-pull-request).
+
+From the CLI, `intutic usage branches` and `intutic usage commits` print the same figures (`intutic usage members` and `intutic usage teams` the per-developer and per-team ones); see [the CLI reference](/reference/cli#intutic-usage-branches).
 
 ### Cost per pull request <Badge type="warning" text="Biz Org+" /> {#cost-per-pull-request}
 

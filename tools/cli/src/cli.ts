@@ -1700,7 +1700,7 @@ destinationOptions(
     .command('update <destination_id>')
     .description('Change a SIEM destination; only the fields given change')
     .option('--name <name>', 'Display name')
-    .option('--config <path>', 'JSON file with the new adapter settings; masked secrets keep their stored value')
+    .option('--config <path>', 'JSON file with the new adapter settings; a secret left out or left masked keeps its stored value')
     .option('--enable', 'Turn a deactivated destination back on'),
 ).action(async (destinationId, opts) => {
   const { runSiemUpdate } = await import('./commands/siem.js')

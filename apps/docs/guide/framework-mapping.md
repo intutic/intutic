@@ -50,6 +50,8 @@ A control is never reported as evidenced on records alone: a record shows there 
 - **Dashboard** — **Policies › Compliance Scope** has a **Framework Coverage** panel under the compliance probes. Pick a framework to see its mapped controls with state, evidence and what each does not cover, and download it with **Download report** (Markdown), **Download CSV** or **Download PDF**.
 - **API** — `GET /api/v1/compliance/frameworks/:frameworkId/coverage`, where `frameworkId` is `eu_ai_act`, `iso_42001`, `nist_ai_rmf` or `mitre_atlas`. Any workspace member can read it. `?format=` picks the form: `json` (the default), `markdown`, `csv` or `pdf`; any other value is refused with `400`.
 
+- **CLI** — `intutic compliance coverage <framework_id>` prints the coverage, or writes it in any of the formats below. See [the CLI reference](/reference/cli#intutic-compliance-coverage).
+
 These live reports are never signed, and each download says so with `X-Intutic-Export-Signed: false`. The copies sealed in the evidence pack are the ones that are signed, when the deployment has a signing key.
 
 ### Who downloaded what {#who-downloaded-what}

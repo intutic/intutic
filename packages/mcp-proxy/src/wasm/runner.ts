@@ -104,7 +104,7 @@ type RuleResult =
   | { code: number; reason?: string }
   | { decision: 'allow' | 'deny' | 'hold' | 'reask'; reason?: string; riskTier?: string }
 
-/** A rule that ran and reached no verdict: why, in a phrase ("it ran past its 50 ms deadline"). */
+/** A rule that ran and reached no verdict: why, in a phrase ("it ran past its 1 s deadline"). */
 interface RuleFailure {
   stop: Exclude<RuleStop, 'quarantined'>
   detail: string

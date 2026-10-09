@@ -36,7 +36,7 @@ resource "intutic_workspace_settings" "this" {
 
 ### Required
 
-- `settings` (String) A JSON object of the settings to manage, usually `jsonencode({ ... })`. Keys and value shapes are those of the settings API; an unknown key fails the plan. Write values the way the API stores them (bandit keywords in lower case, for example), or the next plan shows the stored form as a change.
+- `settings` (String) A JSON object of the settings to manage, usually `jsonencode({ ... })`. Keys and value shapes are those of the settings API; an unknown key fails the plan. Write values the way the API stores them (bandit keywords in lower case, for example), or the next plan shows the stored form as a change. Every key, its values and bounds, and the feature flags are listed in [Workspace Settings](https://docs.intutic.ai/reference/workspace-settings).
 
 ### Read-Only
 

@@ -36,7 +36,7 @@ Intutic runs as a high-performance local or self-hosted proxy (written in Rust) 
 flowchart TD
     subgraph DevEnvironment[" 💻 Developer Environment "]
         Agent["🤖 AI Coding Agent<br><i>(Claude Code, Cursor, Aider, LangGraph)</i>"]
-        SOP["📝 Local SOP Rules<br><i>(CLAUDE.md / .cursorrules / SKILL.md)</i>"]
+        SOP["📝 SOP Rules<br><i>(.intutic/sops/ + workspace SOPs)</i>"]
     end
 
     subgraph HotPathProxy[" ⚡ Intutic Hot-Path Proxy (:4000) "]
@@ -143,7 +143,7 @@ Intutic ships **43 harness adapters**: 18 install as native hook gates in the ha
 
 ## 📝 Write Your First SOP
 
-Intutic governance rules are written in standard Markdown files inside your repository root (`CLAUDE.md`, `.cursorrules`, or `.windsurfrules`). Intutic automatically syncs and enforces them in real time:
+Intutic governance rules are written as standard Markdown files under `.intutic/sops/` in your repository, one folder per rule set (for example `.intutic/sops/safety/rules.md`), or as workspace SOPs on a connected control plane. `intutic connect` writes them into the file each harness reads, such as `.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc` or a marked section of `AGENTS.md` (never `CLAUDE.md`), and compiles them into the rules its gates enforce:
 
 ```markdown
 # Standard Operating Procedure (SOP): Safety Guardrails

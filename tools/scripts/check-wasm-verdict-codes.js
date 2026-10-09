@@ -85,7 +85,10 @@ const SURFACES = [
   },
   {
     file: 'apps/docs/external/wasm-rules.md',
-    forbid: [[/\|\s*`?REDACT`?\s*\|/i, 'a REDACT row in the verdict table']],
+    forbid: [
+      [/\|\s*`?REDACT`?\s*\|/i, 'a REDACT row in the verdict table'],
+      [/anything else is \**allowed/i, 'another code allowed — a code that is not a verdict refuses the call (GOVERNANCE_UNAVAILABLE)'],
+    ],
     require: [[/`?REASK`?/i, 'the reask rung (3)']],
   },
   {
@@ -153,8 +156,8 @@ if (failed) {
   console.error(
     '\nThe mapping is in packages/proxy/src/wasm/runner.rs:\n' +
       '    0 allow · 1 block · 3 reask · 2 deprecated, mapped to a block\n' +
-      'Anything else is allowed with a warning, so a rule inventing a rung enforces\n' +
-      'nothing.',
+      'Anything else is not a verdict, and the proxies refuse the call with\n' +
+      'GOVERNANCE_UNAVAILABLE.',
   )
   process.exit(1)
 }

@@ -182,9 +182,12 @@ The guest function returns an integer verdict that dictates how the proxy gates 
 | **`3`** | `REASK` | The attempt is refused with HTTP 409 (`policy_reask`), the agent is told why, and it may retry. The third reask from the same rule in a session is returned as a 403 block. Prefer this over `BLOCK` for any finding that is a pattern match — pattern matches produce false positives, and a block a human has to unpick costs more than a retry. |
 | **`2`** | *deprecated* | Was documented as `REDACT`. The guest never receives the request body, so redaction was never expressible; the proxy maps `2` to a block and logs it. `intutic policy install` still accepts it so already-installed rules keep their meaning, but warns. Return `1` or `3`. |
 
-Anything else is **allowed** with a warning in the proxy log. A rule inventing a
-rung enforces nothing, which is why `intutic policy install` refuses codes
-outside this table.
+Anything else is not a verdict: the rule reached none, and the call is
+**refused** with `GOVERNANCE_UNAVAILABLE`, naming the rule and the cause
+`result`, whatever the proxy's fail setting (see
+[When a rule reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict)).
+`intutic policy install` refuses a rule that returns a code outside this table
+on its validation call, so this is caught before the rule ships.
 
 *Note: If multiple rules are active, the runner evaluates all instances sequentially and returns the **most restrictive** verdict.*
 

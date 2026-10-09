@@ -3,6 +3,8 @@
 <!-- ENTERPRISE_ONLY_START -->
 Manage your workspace, its members, security, routing, billing, notifications and integrations from one page.
 
+The workspace settings behind these tabs can also be read and changed with `intutic settings get` and `intutic settings set`, through `PUT /api/v1/workspace/settings`, or with Terraform; [Workspace settings](/reference/workspace-settings) lists every key.
+
 ## Accessing Settings
 
 Open **Settings** in the sidebar. The Settings area has three pages: **Settings** itself, **Upgrade** (plan choice), and, for Owners and Admins, [Audit Timeline](/guide/audit-timeline). The Settings page is organized into tabs, in this order: General, Team Members, Security, AI Routing & Caching, Billing, Sync Status, Notifications and Integrations. Each tab has a guide link in the page header that opens its section below (Security opens [Security & Identity](/guide/security), Billing opens [Budgets & FinOps](/guide/budgets)).
@@ -68,7 +70,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Data Residency** | Pin the workspace's data to a region, and block requests that violate the pin. Needs the Enterprise or Self-host plan; on another plan the card says so, and a pin set before a downgrade can still be turned off. |
 | **Network Egress Control** | The egress mode and allow list every proxy in the workspace hot-reloads. |
 | **Sandboxed Execution** | Require agents to run in a sandbox; enforced by the CLI on `intutic exec`. See [Sandboxed Execution](/guide/sandboxed-execution). |
-| **PII Detectors** | The action the LLM proxy takes on card numbers, IBANs, Social Security numbers, email addresses and phone numbers in this workspace's traffic. A developer's own proxy config can only make a detector stricter. See [PII detectors](/guide/policies#setting-detector-actions-for-a-workspace). |
+| **PII Detectors** | The action the LLM proxy and the MCP proxy take on card numbers, IBANs, Social Security numbers, email addresses and phone numbers in this workspace's model traffic and MCP tool calls. A developer's own proxy config can only make a detector stricter. See [PII detectors](/guide/policies#setting-detector-actions-for-a-workspace). |
 | **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
 | **Repeat-Finding Enforcement** | Act on a sustained pattern of findings in one session, not only record it. |
 | **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |
@@ -318,7 +320,7 @@ If agents are using stale governance rules, clear the policy cache from this tab
 
 ## Notifications {#notifications}
 
-Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity. Only an owner or admin can create, change or delete a rule or replace its signing secret, as for SIEM destinations; every member can see the rules and the delivery log.
+Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity. Only an owner or admin can create, change or delete a rule or replace its signing secret, as for SIEM destinations; every member can see the rules and the delivery log. From the CLI, `intutic notifications list`, `create`, `update`, `delete` and `rotate-secret` manage the same rules ([CLI reference](/reference/cli#intutic-notifications-list)).
 
 ### Channel Routing
 
@@ -413,6 +415,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `governance.gate.recovered` | Gate Reporting Again |
 | `inventory.ungoverned.detected` | Ungoverned AI Tool Found: a machine's [AI inventory](/guide/ai-inventory) listed an ungoverned harness or MCP server for the first time; once per machine and item |
 | `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature or an altered append-only guard. See [Trace Integrity](/concepts/trace-integrity#alerts) |
+| `decision.pending` | Held Decision Waiting for Review: a call was held for approval and the hold was recorded; MEDIUM. On Slack the message carries **Approve** and **Reject** buttons (see [Slack interactive reviews](/guide/decisions#slack-interactive-reviews)) |
 | `decision.approved` | Held Decision Approved: an owner, admin or engineering manager approved a [held decision](/guide/decisions#slack-interactive-reviews), in Slack or with `intutic decision approve`; MEDIUM, because the held call can now run |
 | `decision.rejected` | Held Decision Rejected: the same, for a rejection; INFO |
 | `auth.login.failed` | Sign-in Refused: a sign-in to the workspace was refused (wrong password, deactivated member, an SSO identity the workspace does not admit, a response that failed verification). Names the member, or the email presented, the method, the reason and the address; repeats for the same identity and address within the cooldown send once |

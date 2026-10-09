@@ -77,7 +77,7 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 403 | `LOOP_RUN_PENDING_REVIEW` | `hold` | The loop run is paused until a reviewer approves or rejects it |
 | 403 | `policy_held` | `hold` | A Rego or WASM rule held the request for approval; the error names the hold id |
 | 409 | `policy_reask` | `reask` | Revise the approach and try again; repeated attempts escalate to `policy_denied` |
-| 403 | `GOVERNANCE_UNAVAILABLE` | `kill` | A custom WASM or Rego rule reached no verdict (its deadline, its instruction budget, an error, or a result that is not a verdict) and the proxy fails closed; the message names the rule |
+| 403 | `GOVERNANCE_UNAVAILABLE` | `kill` | A custom WASM or Rego rule reached no verdict (its deadline, its instruction budget, an error, or a result that is not a verdict). Refused whatever the proxy's fail setting, and refused again if the same request is retried; the message names the rule |
 | 429 | `BUDGET_EXCEEDED` | `kill` | The key's remaining budget does not cover the request |
 | 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The daily spend cap is reached |
 | 402, or 200 | `COST_GATE_EXCEEDED` | `kill` | The request's estimated cost is over the workspace threshold: 402 on a stream, a 200 answer otherwise |
@@ -217,22 +217,22 @@ resolution = cp.resolve_gateway()
 | Identity | `whoami()` |
 | Org signup | `signupOrg()` / `signup_org()` — unauthenticated; a self-hosted control plane always refuses it, and the hosted one only accepts it with `INTUTIC_PUBLIC_ORG_SIGNUP=true`, so prefer org creation below |
 | Org creation | `startDomainVerification`, `checkDomainVerification`, `createOrg` / `start_domain_verification`, `check_domain_verification`, `create_org` — publish the returned TXT record, poll until `status` is `verified`, then create the org with that `verificationId` |
-| Teams & workspaces | `listTeams`, `createTeam`, `listTeamWorkspaces`, `createWorkspace` |
-| Gateways | `registerGateway`, `listGateways`, `getGatewayStatus`, `rotateGatewayToken`, `revokeGateway`, `getGatewayConfig`, `setGatewayConfig`, `assignWorkspaceGateway`, `assignOrgGateway`, `resolveGateway` |
+| Teams & workspaces | `listTeams`, `createTeam`, `listTeamWorkspaces`, `createWorkspace` / `list_teams`, `create_team`, `list_team_workspaces`, `create_workspace` |
+| Gateways | `registerGateway`, `listGateways`, `getGatewayStatus`, `rotateGatewayToken`, `revokeGateway`, `getGatewayConfig`, `setGatewayConfig`, `assignWorkspaceGateway`, `assignOrgGateway`, `resolveGateway` / `register_gateway`, `list_gateways`, `get_gateway_status`, `rotate_gateway_token`, `revoke_gateway`, `get_gateway_config`, `set_gateway_config`, `assign_workspace_gateway`, `assign_org_gateway`, `resolve_gateway` |
 | Workspace settings | `getWorkspaceSettings`, `updateWorkspaceSettings` / `get_workspace_settings`, `update_workspace_settings` |
-| Provider credentials | `listProviderCredentials`, `setProviderCredential`, `unsetProviderCredential` |
+| Provider credentials | `listProviderCredentials`, `setProviderCredential`, `unsetProviderCredential` / `list_provider_credentials`, `set_provider_credential`, `unset_provider_credential` |
 
-`getGatewayStatus` reports `appliedConfigVersion`, the config version the gateway said it runs in its last heartbeat (`null` when it is unreachable or has not reported one), beside `desiredConfigVersion`, the version the latest config change produced. `getGatewayConfig` returns the flags set on the gateway and that version, readable by any member of the gateway's org.
+`getGatewayStatus` (`get_gateway_status`) reports `appliedConfigVersion`, the config version the gateway said it runs in its last heartbeat (`null` when it is unreachable or has not reported one), beside `desiredConfigVersion`, the version the latest config change produced. `getGatewayConfig` (`get_gateway_config`) returns the flags set on the gateway and that version, readable by any member of the gateway's org.
 
-`updateWorkspaceSettings({ key: value })` is the route `intutic settings set` calls: only the keys given change, and the control plane applies the same checks. An unknown key or a bad value is refused with a 400 that names it, a setting the plan does not include (the group policy for high-risk tools below Biz Org) with a 403 `Upgrade required`, and a member below OWNER or ADMIN with a 403. Each refusal throws (raises) `ClawdeConnectionError` with the server's answer in its message. See [Settings](/guide/settings) for the keys.
+`updateWorkspaceSettings({ key: value })` (`update_workspace_settings({...})`) is the route `intutic settings set` calls: only the keys given change, and the control plane applies the same checks. An unknown key or a bad value is refused with a 400 that names it, a setting the plan does not include (the group policy for high-risk tools below Biz Org) with a 403 `Upgrade required`, and a member below OWNER or ADMIN with a 403. Each refusal throws (raises) `ClawdeConnectionError` with the server's answer in its message. See [Workspace settings](/reference/workspace-settings) for every key, its type and what it does.
 
-Not covered, on purpose: session establishment (`intutic login`/`logout` — supply `apiKey` directly instead) and local-environment/terminal-only commands (`init`, `doctor`, `install-daemon`, `integrity`, `rollback`, `connect`, `exec`, `start`, `syncContext`, `skill`) that have no meaning for a library embedded in your own process.
+Not covered, on purpose: session establishment (`intutic login`/`logout` — supply `apiKey` directly instead) and local-environment/terminal-only commands (`init`, `doctor`, `install-daemon`, `integrity`, `rollback`, `connect`, `exec`, `start`, `syncContext`, `skill`) that have no meaning for a library embedded in your own process. The operator commands for the MCP server registry (`intutic mcp`), SIEM destinations (`siem`), notification rules (`notifications`), usage reports (`usage`), the AI inventory (`inventory`), compliance coverage and evidence (`compliance`), guardrails and custom rules (`guardrails`, `rules`, `policy`), approval holds (`decision`), findings (`findings`) and gate health (`gate-liveness`) are in the CLI and the [API](/reference/api) only; neither SDK wraps them.
 
 ---
 
 ## Events
 
-Register callbacks for the refusal verdicts: `kill`, `reask` and `hold`. `chat()` calls them before it throws `ClawdeBlockedError`, with `{ verdict, code, status, message }`, plus `ruleId` when the proxy names the rule that decided.
+Register callbacks for the refusal verdicts: `kill`, `reask` and `hold`. `chat()` calls them before it throws `ClawdeBlockedError`, with `{ verdict, code, status, message }`, plus `ruleId` (`rule_id` in Python) when the proxy names the rule that decided.
 
 `hijack`, `enhance` and `bypass` are still accepted so existing code keeps working, but they never fire: the proxy applies those verdicts inside the response and does not report them to the client. They will be removed in the next major version.
 

@@ -82,7 +82,7 @@ Every request passes through these stages before reaching the LLM:
 
 1. **Virtual key validation** — verifies the `vk_*` workspace key
 2. **Budget gate** — checks session and workspace spend limits against Valkey (`v2:budget:hard_block:{workspace_id}`)
-3. **DLP scanner** — regex-based detection of secrets across ~20 high-precision patterns (AWS keys incl. temporary creds, GitHub classic + fine-grained tokens, Anthropic/OpenAI/GitLab/Slack/Google/Stripe/SendGrid/npm/PyPI/Hugging Face keys, Slack webhooks, DB connection credentials, JWTs, bearer tokens, private keys) plus checksum-validated PII detectors (payment cards, IBANs, SSNs; email and phone when enabled), with `redact` or `block` actions — applied to request bodies and forwarded header values; responses are scanned on the way back too, with streaming output scrubbed per SSE line
+3. **DLP scanner** — regex-based detection of secrets across ~20 high-precision patterns (AWS keys incl. temporary creds, GitHub classic + fine-grained tokens, Anthropic/OpenAI/GitLab/Slack/Google/Stripe/SendGrid/npm/PyPI/Hugging Face keys, Slack webhooks, DB connection credentials, JWTs, bearer tokens, private keys) plus validated PII detectors (payment cards, IBANs, SSNs; email and phone when enabled), with `redact` or `block` actions — applied to request bodies and forwarded header values; responses are scanned on the way back too, with streaming output scrubbed per SSE line
 4. **SnipCompactor** — token compression: text repetition collapse, JSON array truncation, code skeleton extraction via tree-sitter
 5. **WASM plugin evaluation** — custom governance plugins compiled to WebAssembly
 6. **Policy check** — pre-request evaluation against the control plane (3s timeout, configurable fail-open or fail-closed)
@@ -160,7 +160,7 @@ SOPs are written in each harness's native format. [Where rule sets go](/guide/ho
 
 ## Harness adapter interface
 
-Each harness implements a three-method adapter contract:
+Each harness implements an adapter contract:
 
 ```typescript
 // tools/cli/src/harness/types.ts
@@ -169,6 +169,7 @@ interface IHarnessAdapter {
   readonly type: HarnessType
   readonly configFileName: string
   detect(workspaceRoot: string): Promise<boolean>
+  installGate?(workspaceRoot: string, proxyUrl: string): Promise<void>
   writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null>
   readCurrentHash(workspaceRoot: string): Promise<string | null>
 }
@@ -177,15 +178,15 @@ interface IHarnessAdapter {
 | Method | Purpose |
 |---|---|
 | `detect()` | Check if the harness is present (usually `fs.access` on the config file) |
-| `writeConfig()` | Write SOPs to the harness's native config format (atomic write) |
-| `readCurrentHash()` | SHA-256 of current config file (for drift detection) |
+| `installGate()` | Install the harness's tool-call gate and its proxy routing. `intutic connect` runs it for every configured harness, whether or not a rule set targets it |
+| `writeConfig()` | Write the rule sets into the one file the harness reads as standing instructions, and no other; called only when a rule set targets the harness |
+| `readCurrentHash()` | SHA-256 of the rules file (for drift detection) |
 
-The `createMarkdownAdapter()` factory in [base.ts](https://github.com/intutic/intutic/blob/main/tools/cli/src/harness/base.ts) generates adapters for markdown-based harnesses (Cursor, Claude Code, Windsurf). All adapters share the same auto-generated header:
+Which file that is comes from `HARNESS_RULES_FILES` in `@intutic/shared-types`, and the adapters write it through [rulesFiles.ts](https://github.com/intutic/intutic/blob/main/tools/cli/src/harness/rulesFiles.ts): a file of Intutic's own in a directory the harness reads every file of, or a marked section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` of a file you also write (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Either one starts with the same generated header, and carries no sync time, so a sync with nothing new leaves the file as it is:
 
 ```markdown
 # Intutic Governance Rules (auto-generated)
-# DO NOT EDIT — managed by intutic sync daemon
-# Last sync: 2026-07-04T12:15:00Z
+# DO NOT EDIT — managed by intutic sync daemon; put rules of your own in another file
 ```
 
 → Source: [tools/cli/src/harness/](https://github.com/intutic/intutic/tree/main/tools/cli/src/harness)
