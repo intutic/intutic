@@ -48,9 +48,9 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 | Claude Desktop | `claude_desktop_config.json` | Dev override + MCP wrapping |
 | Goose | `.agents/plugins/intutic-governance/hooks/hooks.json` | JSON plugin hook structure |
 | Open WebUI | `.open-webui/intutic-governance-filter.py` | Python inlet() filter hook |
-| OpenClaw | `~/.openclaw/openclaw.json` | OpenClaw configuration file |
+| OpenClaw | `~/.openclaw/openclaw.json`, `~/.intutic/hooks/openclaw/intutic-governance.cjs` | `before_tool_call` plugin, listed in `plugins.load.paths` |
 | Hermes | `~/.hermes/config.yaml` | YAML configuration file |
-| Pi | `~/.pi/hooks.json` | Pi agent hooks config |
+| Pi | `~/.pi/agent/extensions/intutic-governance.js`, `~/.pi/agent/models.json` | `tool_call` extension; `baseUrl` for the Anthropic and OpenAI providers |
 
 Where the rule sets themselves go is a separate question; see [Where rule sets go](#where-rule-sets-go).
 

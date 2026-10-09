@@ -88,6 +88,14 @@ const roots = new Map<string, string>()
  *  exercised at full strength regardless of what ships by default. */
 const snapshotRules = join(home, 'policy-snapshot.rules')
 
+/** A workspace WHERE pattern that backtracks exponentially, in V8 and in
+ *  Python's re, on `'a'.repeat(48) + 'b'`: the call no gate may wait out. */
+const SLOW_WHERE_RULE: GuardPattern = {
+  id: 'sop.slow_where', source: ' (Bash|bash|exec) ', subject: 'tool', severity: 'block',
+  reason: 'Blocked by SOP slow_where', rationale: '', matches: [], notMatches: [],
+  argPattern: '(a+)+$',
+}
+
 /** A snapshot built the way the daemon actually builds one — via
  *  `buildSnapshotRules`, not hand-assembled — so this fixture cannot drift
  *  from what `SKILL_SURFACE_TIER_SEVERITY` actually ships. Carries the
@@ -526,6 +534,15 @@ for (const g of GATES) {
       // runGate to drive. Covered by the "OpenCode plugin gate" block below,
       // which loads the file the way OpenCode does and drives both hook
       // shapes — a separate shape, not a skipped one.
+      it('is covered by its own plugin block, not the tool-call matrix', () => {
+        expect(g.runner).toBe('node')
+      })
+      return
+    }
+    if (g.contract === 'plugin-block') {
+      // In-process like OpenCode, refusing with a returned block result.
+      // Covered by the "Pi and OpenClaw plugin gates" block below, which
+      // loads each file the way its host does.
       it('is covered by its own plugin block, not the tool-call matrix', () => {
         expect(g.runner).toBe('node')
       })
@@ -1671,6 +1688,16 @@ describe('OpenCode plugin gate', () => {
     expect(clean.refused).toBe(false)
   })
 
+  it('refuses at its own deadline, measured from the call: OpenCode awaits the hook with no time limit', async () => {
+    const snap = writeRulesFixture(join(home, 'deadline-opencode-plugin.rules'), [SLOW_WHERE_RULE])
+    const started = Date.now()
+    const r = await runPlugin('server', 'bash', { command: 'a'.repeat(48) + 'b' }, snap)
+    const elapsed = Date.now() - started
+    expect(r.refused, 'a call its rules never decided was allowed').toBe(true)
+    expect(r.stderr).toMatch(/GATE_DEADLINE/)
+    expect(elapsed, `took ${elapsed} ms`).toBeLessThan(GATE_DEADLINE_MS + 2_000)
+  }, 30_000)
+
   it('applies a WHERE clause from the snapshot: kubectl apply unpinned is refused, pinned is allowed', async () => {
     const file = writeRulesFixture(
       join(home, 'opencode-where.rules'),
@@ -1696,6 +1723,206 @@ describe('OpenCode plugin gate', () => {
     // vacuously: at least one of the two outcomes has to be a refusal.
     expect(unpinned.refused || pinned.refused, 'neither call was refused — the WHERE rule never applied').toBe(true)
     expect(pinned.refused, `the pinned apply was refused:\n${pinned.stderr}`).toBe(false)
+  })
+})
+
+describe('Pi and OpenClaw plugin gates', () => {
+  /**
+   * Loads each file the way its host does and drives ONE tool call through
+   * the handler the host would call, with the payload the host builds:
+   *
+   * - Pi (earendil-works/pi 6fb2e78, core/extensions): jiti imports the file
+   *   with `{ default: true }` and calls the default export with the
+   *   ExtensionAPI; `pi.on('tool_call', h)`; the runner awaits
+   *   `h({ type: 'tool_call', toolName, toolCallId, input }, ctx)`, and a
+   *   result with `block: true` refuses, its `reason` going to the model.
+   *   A dynamic `import()` stands in for jiti, which loads natively on Node.
+   * - OpenClaw (openclaw/openclaw 59309cc, src/plugins): a standalone file in
+   *   `plugins.load.paths` exports `{ id, register(api) }`, the id matching
+   *   the basename; `api.on('before_tool_call', h, { timeoutMs })`; the
+   *   runner awaits `h({ toolName, params, toolCallId, runId, derivedPaths? },
+   *   ctx)`, and `{ block: true, blockReason }` refuses.
+   *
+   * Exit 3 is a refusal by block result. Exit 6 is a handler that threw:
+   * both hosts would block on it too, but the reason would not reach the
+   * model, so it fails the test. Exit 4 is a file the host could not load.
+   */
+  async function runPluginGate(
+    g: GateEntry,
+    tool: string,
+    args: unknown,
+    opts: { snapshot?: string; derivedPaths?: string[] } = {},
+  ): Promise<{ refused: boolean; stderr: string; timeoutMs?: number }> {
+    const root = roots.get(g.name)!
+    const driver = join(root, 'plugin-block-drv.mjs')
+    writeFileSync(
+      driver,
+      [
+        "import { pathToFileURL } from 'node:url';",
+        "import { createRequire } from 'node:module';",
+        'const [file, host, tool] = process.argv.slice(2);',
+        "let stdin = ''; for await (const chunk of process.stdin) stdin += chunk;",
+        'const { args, derivedPaths } = JSON.parse(stdin);',
+        'let handler, options, call;',
+        "if (host === 'pi') {",
+        '  const factory = (await import(pathToFileURL(file).href)).default;',
+        "  if (typeof factory !== 'function') { console.error('default export is not a function'); process.exit(4); }",
+        "  await factory({ on(name, fn) { if (name === 'tool_call') handler = fn; } });",
+        "  call = () => handler({ type: 'tool_call', toolName: tool, toolCallId: 'call_1', input: args },",
+        "    { cwd: process.cwd(), hasUI: false, sessionManager: { getSessionId: () => 'sess_test' } });",
+        '} else {',
+        '  const plugin = createRequire(import.meta.url)(file);',
+        "  if (!plugin || typeof plugin.register !== 'function') { console.error('no register()'); process.exit(4); }",
+        "  if (plugin.id + '.cjs' !== file.split('/').pop()) { console.error('id ' + plugin.id + ' is not the basename'); process.exit(4); }",
+        "  plugin.register({ on(name, fn, o) { if (name === 'before_tool_call') { handler = fn; options = o; } } });",
+        "  call = () => handler({ toolName: tool, params: args, toolCallId: 'call_1', runId: 'run_1', ...(derivedPaths.length ? { derivedPaths } : {}) },",
+        "    { agentId: 'main', sessionKey: 'agent:main:main', sessionId: 'sess_test', runId: 'run_1' });",
+        '}',
+        "if (typeof handler !== 'function') { console.error('no tool-call handler registered'); process.exit(4); }",
+        "if (options) console.error('timeoutMs=' + options.timeoutMs);",
+        'let res;',
+        'try { res = await call(); } catch (e) { console.error(String((e && e.message) || e)); process.exit(6); }',
+        "if (res && res.block === true) { console.error(String(res.reason || res.blockReason || '')); process.exit(3); }",
+        'process.exit(0);',
+      ].join('\n'),
+    )
+    const res = await runProcess(
+      'node',
+      [driver, join(root, g.artifact), g.name, tool],
+      {
+        // On stdin: an argument list over the size limit is too large for argv.
+        input: JSON.stringify({ args, derivedPaths: opts.derivedPaths ?? [] }),
+        env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: opts.snapshot ?? join(home, 'no-such.rules') },
+        timeoutMs: 20_000,
+      },
+    )
+    expect(res.status, `${g.name}: the host could not load the file: ${res.stderr}`).not.toBe(4)
+    expect(res.status, `${g.name}: the handler threw instead of returning a block result: ${res.stderr}`).not.toBe(6)
+    expect([0, 3], `${g.name} exited ${res.status} (${res.signal ?? 'no signal'}): ${res.stderr}`).toContain(res.status)
+    const t = /timeoutMs=(\d+)/.exec(res.stderr)
+    return { refused: res.status === 3, stderr: res.stderr, ...(t ? { timeoutMs: Number(t[1]) } : {}) }
+  }
+
+  const plugins = GATES.filter((g) => g.contract === 'plugin-block')
+
+  it('covers exactly the Pi extension and the OpenClaw plugin', () => {
+    expect(plugins.map((g) => g.name).sort()).toEqual(['openclaw', 'pi'])
+  })
+
+  for (const g of plugins) {
+    // The hosts' own tool ids: Pi's bash/write, OpenClaw's exec/write.
+    const shell = g.name === 'pi' ? 'bash' : 'exec'
+
+    describe(g.name, () => {
+      it('allows an ordinary command and an ordinary write', async () => {
+        const r = await runPluginGate(g, shell, { command: 'npm run build' })
+        expect(r.refused, `refused \`npm run build\`:\n${r.stderr}`).toBe(false)
+        const w = await runPluginGate(g, 'write', { path: 'src/index.ts', content: 'export {}' })
+        expect(w.refused, `refused an ordinary write:\n${w.stderr}`).toBe(false)
+      })
+
+      it('refuses a governance-bypass command, naming the rule', async () => {
+        const r = await runPluginGate(g, shell, { command: 'chflags nouchg .intutic/hooks/x' })
+        expect(r.refused, 'a governance-bypass command was allowed').toBe(true)
+        expect(r.stderr).toMatch(/\[Intutic Governance\] BLOCKED/)
+        expect(r.stderr).toMatch(/\[[a-z_.-]+\]/)
+      })
+
+      it('refuses every path in the shared protected constant, as a command and as a write target', async () => {
+        for (const p of UNIVERSAL_PROTECTED_PATHS) {
+          const asCommand = await runPluginGate(g, shell, { command: `cat ${p}` })
+          expect(asCommand.refused, `\`cat ${p}\` was allowed`).toBe(true)
+          const asWrite = await runPluginGate(g, 'write', { path: p, content: 'x' })
+          expect(asWrite.refused, `write to ${p} was allowed`).toBe(true)
+        }
+      }, 180_000)
+
+      it('refuses a destructive command only when the snapshot supplies the rule', async () => {
+        const without = await runPluginGate(g, shell, { command: 'rm -rf /' })
+        expect(without.refused, 'destructive tier fired with no snapshot').toBe(false)
+        const withSnap = await runPluginGate(g, shell, { command: 'rm -rf /' }, { snapshot: snapshotRules })
+        expect(withSnap.refused, 'destructive command allowed with the snapshot present').toBe(true)
+      })
+
+      it('refuses tool arguments over the size limit as COMMAND_TOO_LARGE', async () => {
+        const r = await runPluginGate(g, 'write', { path: 'notes.md', content: 'x'.repeat(ARGUMENTS_SIZE_LIMIT) })
+        expect(r.refused).toBe(true)
+        expect(r.stderr).toMatch(/COMMAND_TOO_LARGE/)
+      })
+
+      it('refuses arguments it cannot read rather than allowing the call', async () => {
+        const r = await runPluginGate(g, shell, null)
+        expect(r.refused, 'a call with null arguments was allowed').toBe(true)
+      })
+
+      it('refuses at its own deadline, measured from the call, rather than hanging the agent', async () => {
+        // Pi awaits the handler with no timeout, and OpenClaw's timeout cannot
+        // interrupt synchronous code: without the gate's own deadline this
+        // WHERE pattern holds the agent for as long as it backtracks.
+        const snap = writeRulesFixture(join(home, `deadline-${g.name}-plugin.rules`), [SLOW_WHERE_RULE])
+        const started = Date.now()
+        const r = await runPluginGate(g, shell, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap })
+        const elapsed = Date.now() - started
+        expect(r.refused, 'a call its rules never decided was allowed').toBe(true)
+        expect(r.stderr).toMatch(/GATE_DEADLINE/)
+        expect(elapsed, `took ${elapsed} ms`).toBeLessThan(GATE_DEADLINE_MS + 2_000)
+      }, 30_000)
+
+      it('records each verdict with its harnessType and session, under an eventId of its own', async () => {
+        await expectEventIds(g, async () => { await runPluginGate(g, shell, { command: 'chflags nouchg .intutic/hooks/x' }) }, 1)
+        const blocked = hookEvents(g).filter((e) => e['event'] === 'tool_blocked' && e['harnessType'] === g.name)
+        expect(blocked.length, `no tool_blocked event with harnessType ${g.name}`).toBeGreaterThan(0)
+        expect(blocked.at(-1)!['sessionId']).toBe('sess_test')
+        await expectEventIds(g, async () => { await runPluginGate(g, shell, { command: 'npm test' }) }, 1)
+        expect(hookEvents(g).some((e) => e['event'] === 'tool_allowed' && e['harnessType'] === g.name)).toBe(true)
+      })
+
+      it('holds a deploy under a local review_before rule and records it at the workspace path', async () => {
+        const file = writeRulesFixture(
+          join(home, `${g.name}-hold.rules`),
+          buildSnapshotRules(
+            { workspaceId: 'ws_test', interventionMode: 'ENFORCE', sopRules: [], mcpAllowedServers: [], sqlDropStrictBlock: false },
+            ['action:deploy'],
+          ),
+          'ws_test',
+        )
+        const holdFile = join(roots.get(g.name)!, REVIEW_REQUESTS_LOG)
+        const before = existsSync(holdFile) ? readFileSync(holdFile, 'utf8') : ''
+        const r = await runPluginGate(g, shell, { command: 'git push origin main' }, { snapshot: file })
+        expect(r.refused, `a held deploy ran. stderr: ${r.stderr.slice(0, 300)}`).toBe(true)
+        expect(r.stderr).toMatch(/HELD/)
+        const added = (existsSync(holdFile) ? readFileSync(holdFile, 'utf8') : '').slice(before.length).trim().split('\n').filter(Boolean)
+        expect(added, `no hold record at ${REVIEW_REQUESTS_LOG}`).toHaveLength(1)
+        expect(JSON.parse(added[0]!)).toMatchObject({ v: 1, reason: 'sop.local.review_before.action:deploy', workspaceId: 'ws_test' })
+      })
+
+      it("applies the MCP server allowlist to the host's MCP tool names", async () => {
+        const snap = writeRulesFixture(join(home, `${g.name}-mcp.rules`), DESTRUCTIVE_COMMAND_PATTERNS, 'ws_test', ['#mcpservers block github'])
+        // Pi names them mcp__<server>__<tool>; OpenClaw <server>__<tool>.
+        const name = (server: string, tool: string) => (g.name === 'pi' ? `mcp__${server}__${tool}` : `${server}__${tool}`)
+        const allowed = await runPluginGate(g, name('github', 'create_issue'), { title: 'x' }, { snapshot: snap })
+        expect(allowed.refused, `an allowlisted server was refused:\n${allowed.stderr}`).toBe(false)
+        const refused = await runPluginGate(g, name('pastebin', 'upload'), { text: 'x' }, { snapshot: snap })
+        expect(refused.refused, 'a server off the allowlist was allowed').toBe(true)
+        expect(refused.stderr).toContain('[mcp_allowlist]')
+      })
+    })
+  }
+
+  it('openclaw: registers its hook with a timeout above the gate deadline', async () => {
+    const g = plugins.find((p) => p.name === 'openclaw')!
+    const r = await runPluginGate(g, 'exec', { command: 'ls' })
+    expect(r.timeoutMs, 'no timeoutMs on the before_tool_call registration').toBeDefined()
+    expect(r.timeoutMs!).toBeGreaterThan(GATE_DEADLINE_MS)
+  })
+
+  it('openclaw: checks every path apply_patch names in derivedPaths', async () => {
+    const g = plugins.find((p) => p.name === 'openclaw')!
+    const patch = { input: '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-a\n+b\n*** End Patch' }
+    const ok = await runPluginGate(g, 'apply_patch', patch, { derivedPaths: ['src/a.ts', 'src/b.ts'] })
+    expect(ok.refused, `refused a patch to ordinary files:\n${ok.stderr}`).toBe(false)
+    const bad = await runPluginGate(g, 'apply_patch', patch, { derivedPaths: ['src/a.ts', '.claude/settings.json'] })
+    expect(bad.refused, 'a patch touching .claude/settings.json was allowed').toBe(true)
   })
 })
 

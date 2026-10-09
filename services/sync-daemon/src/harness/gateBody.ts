@@ -190,8 +190,15 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * Antigravity) now carries `code` and `ruleId` ({@link HOOK_REFUSAL_CODES}).
  * The `.rules` rule format is unchanged; a v13 gate skips the record line as
  * it skips `@sso_groups`, and enforces no registry.
+ *
+ * v15: the in-process gates (the `'throw'` contract: OpenCode's plugin, Pi's
+ * extension, OpenClaw's plugin) run their rules under the same deadline,
+ * measured from the start of the call rather than of the process, which
+ * started long before. Pi and OpenCode await a tool-call handler with no time
+ * limit, and OpenClaw's own hook timeout cannot interrupt synchronous code,
+ * so a v14 in-process gate on a slow ` WHERE ` pattern held the agent.
  */
-export const GATE_VERSION = 14
+export const GATE_VERSION = 15
 
 /**
  * The timeout every writer sets on its gate's hook entry, in seconds, where
@@ -201,7 +208,8 @@ export const GATE_VERSION = 14
  * of them read a hook that outlives it as an allow; the gate refuses at
  * `GATE_DEADLINE_MS` (4 s), so this leaves room for interpreter start-up and
  * keeps a stalled gate from holding the agent for minutes. Grok Build's
- * default and our setting is 5 s, the floor the deadline sits under.
+ * default and our setting is 5 s, the floor the deadline sits under. OpenClaw's
+ * plugin hook takes it in milliseconds (`timeoutMs`).
  */
 export const HOOK_TIMEOUT_SECONDS = 10
 
@@ -388,9 +396,11 @@ export const SNAPSHOT_STALE_AFTER_DAYS = 7
  */
 /**
  * `'throw'` is for a gate that runs INSIDE the harness process (OpenCode's
- * plugin hook): the refusal is a thrown Error carrying the BLOCKED message,
- * which the host turns into the tool-error the model reads. No exit code, no
- * stdout — the same in-process posture the n8n workflow gate takes.
+ * plugin hook, Pi's extension, OpenClaw's plugin): the refusal is a thrown
+ * Error carrying the BLOCKED message. OpenCode turns it into the tool-error
+ * the model reads; the Pi and OpenClaw handlers catch it and return their
+ * host's block result. No exit code, no stdout — the same in-process posture
+ * the n8n workflow gate takes.
  */
 export type BlockContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'throw'
 
@@ -1498,23 +1508,25 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
     try { record('tool_blocked', toolName, reason); } catch (e) {}
 ${refuseWith("'COMMAND_TOO_LARGE'", 'null')}
   }
+  // The rules run under a deadline that interrupts even a regex mid-match,
+  // below the hook timeout of every harness that reads a timeout as an allow
+  // (Grok Build: 5 s). A call still undecided then is refused. Built-in rules
+  // are linear; a workspace's own WHERE pattern need not be.
 ${
   opts.contract === 'throw'
-    ? `  // In-process (the harness awaits this with no time limit), so no deadline.
-  return _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId);
-}`
-    : `  // The rules run under a deadline measured from process start that
-  // interrupts even a regex mid-match, below the hook timeout of every
-  // harness that reads a timeout as an allow (Grok Build: 5 s). A call still
-  // undecided then is refused. Built-in rules are linear; a workspace's own
-  // WHERE pattern need not be.
+    ? `  // In process, the deadline runs from the start of this call: the process
+  // started long before it. Pi and OpenCode await the hook with no time limit,
+  // and OpenClaw's hook timeout cannot interrupt synchronous code, so without
+  // this a slow WHERE pattern holds the agent.
+  var _deadlineMs = ${GATE_DEADLINE_MS};`
+    : `  // A hook process runs one call, so the deadline runs from process start.
+  var _deadlineMs = Math.max(1, ${GATE_DEADLINE_MS} - Math.round(process.uptime() * 1000));`
+}
   globalThis.__intuticGateRules = function () {
     return _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId);
   };
   try {
-    return require('vm').runInThisContext('__intuticGateRules()', {
-      timeout: Math.max(1, ${GATE_DEADLINE_MS} - Math.round(process.uptime() * 1000)),
-    });
+    return require('vm').runInThisContext('__intuticGateRules()', { timeout: _deadlineMs });
   } catch (err) {
     if (!err || err.code !== 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw err;
     var reason = 'GATE_DEADLINE — the gate did not finish evaluating this call within ${GATE_DEADLINE_MS / 1000} s, and refuses it rather than let the hook timeout allow it';
@@ -1522,7 +1534,6 @@ ${
     try { record('tool_blocked', toolName, reason); } catch (e) {}
 ${refuseWith("'GATE_DEADLINE'", 'null')}
   }
-}`
 }
 
 function _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId) {

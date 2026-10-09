@@ -33,6 +33,8 @@ import { writeWindsurfHooks, windsurfSettingsPath } from '../harness/windsurfHoo
 import { writeMuseHooks } from '../harness/museHooks.js'
 import { writeOpenCodeHooks, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE, OPENCODE_PLUGIN_V2_FILE } from '../harness/openCodeHooks.js'
 import { writeGrokHooks } from '../harness/grokHooks.js'
+import { writePiHooks, PI_EXTENSION_FILE } from '../harness/piHooks.js'
+import { writeOpenclawHooks, OPENCLAW_PLUGIN_FILE } from '../harness/openclawHooks.js'
 import { writeDshHooks, resolveDshHome, detectDshCoverageGap } from '../harness/dshHooks.js'
 import { writeAntigravityHooks } from '../harness/antigravityHooks.js'
 import { writeAntigravityCliHooks, antigravityHooksPath, ANTIGRAVITY_HOOK_NAME, ANTIGRAVITY_CLI_GATE } from '../harness/antigravityCliHooks.js'
@@ -93,6 +95,10 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
     // ── OpenCode ─────────────────────────────────────────────────────
     path.join(workspaceRoot, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_FILE),
     path.join(workspaceRoot, OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_V2_FILE),
+    // ── Pi extension; OpenClaw plugin and the config that lists it ────
+    path.join(home, PI_EXTENSION_FILE),
+    path.join(home, OPENCLAW_PLUGIN_FILE),
+    path.join(home, '.openclaw', 'openclaw.json'),
     // ── Grok Build ───────────────────────────────────────────────────
     path.join(home, '.grok', 'hooks', 'intutic-governance.json'),
     path.join(workspaceRoot, '.grok', 'hooks', 'intutic-governance.json'),
@@ -177,7 +183,10 @@ export async function guardSettingsFile(
   skip: ReadonlySet<string> = new Set(),
 ): Promise<boolean> {
   // ── Goose plugin: immutable file tamper → incident, not restore ───
-  if (changedPath.includes('intutic-governance')) {
+  // The plugin directory, not the bare name: the OpenCode, Pi and OpenClaw
+  // gate files are called intutic-governance too, and a name match sent
+  // their tampering here, to the Goose writer.
+  if (changedPath.includes(path.join('.agents', 'plugins', 'intutic-governance'))) {
     if (skip.has('goose')) return false
     if (await isImmutable(changedPath)) {
       log.error(
@@ -343,6 +352,25 @@ export async function guardSettingsFile(
     if (skip.has('opencode')) return false
     return guardMarkedFile(changedPath, 'Intutic gate body', 'opencode', () =>
       writeOpenCodeHooks(workspaceRoot, proxyUrl, ''))
+  }
+
+  // ── Pi extension and OpenClaw plugin: the same marker guard ───────
+  if (changedPath === path.join(home, PI_EXTENSION_FILE)) {
+    if (skip.has('pi')) return false
+    return guardMarkedFile(changedPath, 'Intutic gate body', 'pi', async () =>
+      writePiHooks(workspaceRoot, proxyUrl, await resolveWorkspaceId(workspaceRoot)))
+  }
+  const restoreOpenclaw = async () => writeOpenclawHooks(workspaceRoot, proxyUrl, await resolveWorkspaceId(workspaceRoot))
+  if (changedPath === path.join(home, OPENCLAW_PLUGIN_FILE)) {
+    if (skip.has('openclaw')) return false
+    return guardMarkedFile(changedPath, 'Intutic gate body', 'openclaw', restoreOpenclaw)
+  }
+  // OpenClaw rewrites its own config, and the file exists whether or not
+  // OpenClaw is connected: only while the plugin is installed is a config
+  // that no longer lists it tampered with. Its marker is the listed path.
+  if (changedPath === path.join(home, '.openclaw', 'openclaw.json')) {
+    if (skip.has('openclaw') || !(await fileExists(path.join(home, OPENCLAW_PLUGIN_FILE)))) return false
+    return guardMarkedFile(changedPath, OPENCLAW_PLUGIN_FILE, 'openclaw', restoreOpenclaw)
   }
 
   // ── All other paths: file deleted or corrupted → log drift incident

@@ -2,7 +2,7 @@
  * The generated hook scripts must remain valid shell, with nothing left for the
  * TypeScript template engine to eat.
  *
- * Five harness writers emit shell from TypeScript template literals, so `\$`
+ * Four harness writers emit shell from TypeScript template literals, so `\$`
  * appears throughout — `\$1`, `\${ts}`, `"\$entry"` — to stop the template engine
  * consuming a shell variable at build time. ESLint reports 158 of those as
  * "unnecessary escape", and it is right in the narrow sense: `\$1` and `$1`
@@ -91,11 +91,6 @@ const WRITERS: Array<{
     name: 'antigravity',
     module: '../../src/harness/antigravityHooks.js',
     invoke: (m, root) => m.writeAntigravityHooks(root, PROXY_URL, 'ws_test'),
-  },
-  {
-    name: 'pi',
-    module: '../../src/harness/piHooks.js',
-    invoke: (m, root) => m.writePiHooks(root, PROXY_URL, 'ws_test'),
   },
 ]
 

@@ -152,7 +152,7 @@ SOPs are written in each harness's native format. [Where rule sets go](/guide/ho
 | YAML | Aider (the `read:` entry that loads its rules file) | `.aider.conf.yml` |
 | Env | Codex and the SDK frameworks (proxy URLs) | `.env.intutic` |
 | No instructions file | n8n, Claude Desktop, Open WebUI, Xirp, Agentic Orchestrator, AgentCore, the SDK frameworks | — |
-| Native hooks | Claude Code, Cursor, Windsurf, Cline, Codex, GitHub Copilot (agent mode), Continue CLI, Antigravity, Goose, OpenHands, OpenClaw, Hermes, Pi, Muse Code, Grok Build, OpenCode (plugin), dsh (plugin), n8n (workflow hook) | Harness-specific — see the [coverage matrix](/reference/harness-security-matrix#coverage-matrix) |
+| Native hooks | Claude Code, Cursor, Windsurf, Cline, Codex, GitHub Copilot (agent mode), Antigravity, Goose, OpenHands, OpenClaw (plugin), Hermes, Pi (extension), Muse Code, Grok Build, OpenCode (plugin), dsh (plugin), n8n (workflow hook) | Harness-specific — see the [coverage matrix](/reference/harness-security-matrix#coverage-matrix) |
 
 → Source: [services/sync-daemon/](https://github.com/intutic/intutic/tree/main/services/sync-daemon)
 

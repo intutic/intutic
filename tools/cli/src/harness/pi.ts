@@ -1,8 +1,8 @@
 /**
  * pi.ts — Pi adapter.
  *
- * Detects Pi presence and invokes the sync-daemon hooks compiler
- * to inject Intutic pre-tool use gates.
+ * Detects Pi (its `~/.pi` home, or a project's `.pi` directory) and installs
+ * the gate: an extension in `~/.pi/agent/extensions/` (see piHooks.ts).
  *
  * Pi loads `AGENTS.md` from its agent directory and from every directory
  * between where it runs and the filesystem root, so the rule sets go into the
@@ -24,7 +24,8 @@ import { loadCredentials } from '../config/store.js'
 import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 import { writePiHooks } from '@intutic/sync-daemon'
 
-const DETECT_FILE = '.pi/hooks.json'
+/** A project's Pi configuration directory (settings, extensions, MCP servers). */
+const DETECT_FILE = '.pi'
 
 export const piAdapter: IHarnessAdapter = {
   type: HarnessType.PI,

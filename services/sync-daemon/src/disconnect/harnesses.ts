@@ -40,7 +40,14 @@ import { DECISIONS_FILE_HEADER } from '../lib/decisionsDigest.js'
 import { parseComponentOptions, serializeComponentOptions, type ComponentOptionsFile } from '../harness/jetbrainsXmlConfig.js'
 import { resolveDshHome, listDshProfileDirs } from '../harness/dshHooks.js'
 import { stripOwnHeader as stripAiderHeader, AIDER_DECISIONS_FILE, AIDER_SOPS_FILE, isAiderIntuticEntry } from '../harness/aiderConfigMerger.js'
-import { openclawAgentWorkspace, parseJson5Like } from '../harness/openclawHooks.js'
+import {
+  OPENCLAW_PLUGIN_FILE,
+  OPENCLAW_PLUGIN_ID,
+  OPENCLAW_PLUGIN_MARKER,
+  openclawAgentWorkspace,
+  parseJson5Like,
+} from '../harness/openclawHooks.js'
+import { PI_AGENT_DIR, PI_EXTENSION_FILE, PI_EXTENSION_MARKER } from '../harness/piHooks.js'
 import { unharden } from '../harness/gooseHardener.js'
 import { pruneLedger, readOriginal, sha256 } from './originals.js'
 import { ENV_INTUTIC_WRITERS } from '../configWriter.js'
@@ -799,32 +806,54 @@ const hermes: HarnessReverser = async (plan, ctx) => {
 
 const pi: HarnessReverser = async (plan, ctx) => {
   await agentsMd(plan, ctx)
+  await reverseOwnedFile(plan, join(home(), PI_EXTENSION_FILE), home(), contains(PI_EXTENSION_MARKER))
+  const piModels = (file: string) =>
+    json(plan, file, home(), (doc, c) =>
+      allEdits(
+        restoreKey(doc, ['providers', 'anthropic', 'baseUrl'], c, ctx.isProxyUrl),
+        restoreKey(doc, ['providers', 'openai', 'baseUrl'], c, ctx.isProxyUrl),
+      ),
+    true)
+  await piModels(join(home(), PI_AGENT_DIR, 'models.json'))
+  // Where earlier versions wrote, and Pi never read: a PreToolUse hook in
+  // ~/.pi/hooks.json and the routing in ~/.pi/models.json.
   await gateScripts(plan, home(), ['pi-check.sh'])
   await json(plan, join(home(), '.pi', 'hooks.json'), home(), (doc, c) => removeGateEntries(doc, c, ['PreToolUse'], 'pi-check.sh'), true)
-  await json(plan, join(home(), '.pi', 'models.json'), home(), (doc, c) =>
-    allEdits(
-      restoreKey(doc, ['providers', 'anthropic', 'baseUrl'], c, ctx.isProxyUrl),
-      restoreKey(doc, ['providers', 'openai', 'baseUrl'], c, ctx.isProxyUrl),
-    ),
-  true)
+  await piModels(join(home(), '.pi', 'models.json'))
   await envSnippet(plan, ctx, 'pi.env')
 }
 
 /** OpenClaw's config is JSON5-like; the writer re-serialises it as JSON, and so does this. */
 const json5LikeFormat: StructuredFormat<JsonObject> = { ...jsonFormat, parse: (raw) => (raw.trim() === '' ? {} : parseJson5Like(raw)) }
 
+/** The plugin's `plugins.load.paths` entry, and its id in `plugins.allow` unless the user had listed it before connect. */
+function removeOpenclawPlugin(doc: JsonObject, ctx: ReverseContext): boolean {
+  const originalAllow = ctx.original ? getPath(ctx.original, ['plugins', 'allow']) : undefined
+  const allowedBefore = Array.isArray(originalAllow) && originalAllow.includes(OPENCLAW_PLUGIN_ID)
+  return allEdits(
+    removeFromArray(doc, ['plugins', 'load', 'paths'], (v) => typeof v === 'string' && v.endsWith(OPENCLAW_PLUGIN_FILE), ctx.original),
+    !allowedBefore && removeFromArray(doc, ['plugins', 'allow'], (v) => v === OPENCLAW_PLUGIN_ID, ctx.original),
+  )
+}
+
+/** Where earlier versions registered the gate: an internal hook entry, which never sees a tool call. */
+function removeLegacyOpenclawHook(doc: JsonObject, ctx: ReverseContext): boolean {
+  const path = ['hooks', 'internal', 'entries', 'intutic-governance']
+  const entry = getPath(doc, path)
+  if (!isObject(entry) || !runsGate(entry.command, 'openclaw-check.js')) return false
+  deletePath(doc, path)
+  pruneEmpty(doc, path.slice(0, -1), ctx.original)
+  return true
+}
+
 const openclaw: HarnessReverser = async (plan, ctx) => {
   // The rules section of its agent workspace's AGENTS.md.
   await rulesSection(plan, join(await openclawAgentWorkspace(), 'AGENTS.md'), home())
+  await reverseOwnedFile(plan, join(home(), OPENCLAW_PLUGIN_FILE), home(), contains(OPENCLAW_PLUGIN_MARKER))
   await gateScripts(plan, home(), ['openclaw-check.js'])
-  await reverseStructuredFile(plan, join(home(), '.openclaw', 'openclaw.json'), home(), json5LikeFormat, (doc, c) => {
-    const path = ['hooks', 'internal', 'entries', 'intutic-governance']
-    const entry = getPath(doc, path)
-    if (!isObject(entry) || !runsGate(entry.command, 'openclaw-check.js')) return false
-    deletePath(doc, path)
-    pruneEmpty(doc, path.slice(0, -1), c.original)
-    return true
-  }, { deleteIfEmptyWithoutRecord: true })
+  await reverseStructuredFile(plan, join(home(), '.openclaw', 'openclaw.json'), home(), json5LikeFormat, (doc, c) =>
+    allEdits(removeOpenclawPlugin(doc, c), removeLegacyOpenclawHook(doc, c)),
+  { deleteIfEmptyWithoutRecord: true })
   await envSnippet(plan, ctx, 'openclaw.env')
 }
 
