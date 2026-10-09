@@ -1157,29 +1157,36 @@ mod tests {
         );
     }
 
-    /// The largest input the builder produces evaluates well inside the fuel
-    /// budget, with room left for a policy heavier than the example.
+    /// Every shipped policy evaluates the largest input the builder produces
+    /// well inside the fuel budget, with room left for a heavier policy. Fuel
+    /// is the limit because it is deterministic: this holds on any machine,
+    /// however loaded, where a wall-clock limit would not.
     #[test]
     fn the_rego_budget_covers_the_largest_input() {
         let engine = engine();
-        let (module, rule) = rule(&engine, SHELL);
         // Chained commands, the realistic shape of a long one, and costlier to
         // match than a run of one character.
         let unit = "cd /workspace/app && npm test; ";
         let c = ctx(bash(&unit.repeat((MAX_INPUT_BYTES - 1024) / unit.len())));
         let input = policy_input(&c, c.turn_tool_calls.first());
         assert!(input.len() > MAX_INPUT_BYTES - 1024, "{}", input.len());
-        let (_, fuel) =
-            evaluate_input(&engine, &module, &rule, &input, limits::REGO).expect("within budget");
-        assert!(
-            fuel < limits::REGO.fuel / 2,
-            "{fuel} fuel for a {} byte input leaves too little margin",
-            input.len()
-        );
+        for (name, bytes) in [
+            ("shell", SHELL),
+            ("deploy", DEPLOY),
+            ("paths", PATHS),
+            ("conformance", CONFORMANCE),
+        ] {
+            let (module, rule) = rule(&engine, bytes);
+            let (_, fuel) = evaluate_input(&engine, &module, &rule, &input, limits::REGO)
+                .expect("within budget");
+            assert!(
+                fuel <= limits::REGO.fuel / 4,
+                "{name}: {fuel} fuel for a {} byte input leaves too little margin",
+                input.len()
+            );
+        }
     }
 
-    /// The examples' case files are the ones `intutic rules test` runs in the
-    /// TypeScript host: the same inputs, the same expected decisions here.
     #[test]
     fn every_example_case_gets_its_expected_decision_in_this_host_too() {
         let engine = engine();

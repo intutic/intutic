@@ -10,12 +10,12 @@ The WASM Rules Engine enables developers to write custom, high-performance polic
 
 To guarantee that custom user code cannot degrade proxy performance or compromise host security, each rule is strictly constrained:
 * **Memory Cap**: Limited to **16MB** of linear memory.
-* **CPU Fuel Limit**: Bound to **1,000,000 fuel units** to prevent infinite loops.
-* **Execution Timeout**: **5ms** budget per evaluation. A rule still running at 5ms is terminated. The engine uses `wasmtime` epoch interruption: a ticker advances the engine's epoch every millisecond, and a rule still running at its deadline traps at its next loop or function entry.
+* **CPU Fuel Limit**: Bound to **1,000,000 fuel units**, the limit a rule is held to: deterministic, so a rule within it reaches its verdict however busy the machine is.
+* **Execution Deadline**: **1 s** per evaluation, a backstop for stalls fuel cannot see (a bulk `memory.fill` costs one unit whatever its length). It sits far above the time it takes to use up the fuel on a heavily loaded machine (at most 91 ms measured), because a rule that reaches no verdict refuses the request. The engine uses `wasmtime` epoch interruption: a ticker advances the engine's epoch every 10 ms, and a rule still running at its deadline traps at its next loop or function entry. On a loaded machine the ticker runs late, so the deadline can fire late, never early.
 
 A rule stopped by either bound, one that traps, or one that returns something other than a verdict reaches no verdict, and the request is refused with `403 GOVERNANCE_UNAVAILABLE`, naming the rule and the cause, whatever `intutic_settings.policy.fail_closed` says: that setting is for control-plane outages, and an agent can exhaust a rule's budget by padding its input. See [When a rule reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
 
-A Rego rule runs with 100,000,000 fuel units and a 20 ms deadline instead, in the same 16MB; see [Limits](/guide/rego-policies#limits).
+A Rego rule runs with 100,000,000 fuel units and a 2 s deadline instead, in the same 16MB; see [Limits](/guide/rego-policies#limits).
 
 ---
 

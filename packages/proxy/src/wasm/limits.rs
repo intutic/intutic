@@ -3,11 +3,25 @@
 //! Two bounds apply to every evaluation, native or Rego:
 //!
 //! - **Fuel** counts guest instructions. It is deterministic: the same module on
-//!   the same input always stops at the same point, on any machine.
+//!   the same input always stops at the same point, on any machine. It is the
+//!   limit a rule is written against.
 //! - **A wall-clock deadline**, enforced by wasmtime's epoch interruption. A
 //!   ticker thread advances the engine's epoch every [`TICK`]; a store armed
 //!   with a deadline traps the guest at the first epoch check past it, which
-//!   wasmtime compiles into every loop header and function entry.
+//!   wasmtime compiles into every loop header and function entry. It is a
+//!   backstop for what fuel cannot see: a bulk `memory.fill` costs one
+//!   instruction whatever its length, and a host call costs none.
+//!
+//! A rule that reaches no verdict refuses the call, so the deadline must never
+//! be what stops a rule that is within its fuel on a busy machine. Wall time is
+//! not the guest's own: a loaded machine deschedules the evaluating thread. On
+//! a 14-core machine with 100 busy threads (about the oversubscription of a
+//! 4-vCPU CI runner running every package's tests), an evaluation that takes
+//! 0.8 ms idle took up to 260 ms. Each deadline is therefore set well above the
+//! time it takes to use up the whole fuel budget on that loaded machine, so
+//! fuel stops a runaway rule first, and only a stall fuel cannot see reaches
+//! the deadline. (Both numbers were 5 ms and 20 ms, under which the loaded
+//! machine refused legitimate calls.)
 //!
 //! The deadline used to be a `tokio::time::timeout` around the evaluation. An
 //! evaluation is synchronous guest code with no await point inside it, so the
@@ -21,8 +35,10 @@
 use std::time::Duration;
 use wasmtime::{Config, Engine, Store, Trap};
 
-/// How often the epoch advances. The deadline's resolution.
-const TICK: Duration = Duration::from_millis(1);
+/// How often the epoch advances. The deadline's resolution: fine against
+/// deadlines of a second or two, and a hundred wake-ups a second rather than a
+/// thousand.
+const TICK: Duration = Duration::from_millis(10);
 
 /// Guest linear memory cap for every rule: 16 MB (256 pages).
 pub const MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024;
@@ -34,27 +50,35 @@ pub struct Budget {
     pub deadline: Duration,
 }
 
-/// A native (AssemblyScript) rule: 1,000,000 instructions and 5 ms.
+/// A native (AssemblyScript) rule: 1,000,000 instructions, and a 1 s backstop.
+///
+/// Using up the instructions takes 0.5 ms idle and at most 91 ms on the loaded
+/// machine described above; the deadline is ten times that.
 pub const NATIVE: Budget = Budget {
     fuel: 1_000_000,
-    deadline: Duration::from_millis(5),
+    deadline: Duration::from_millis(1_000),
 };
 
-/// A Rego rule compiled by OPA: 100,000,000 instructions and 20 ms.
+/// A Rego rule compiled by OPA: 100,000,000 instructions, and a 2 s backstop.
 ///
 /// Larger than [`NATIVE`] because OPA does in the sandbox what a native rule
 /// leaves out: it parses its whole `input` (about 45 instructions a byte) and
 /// compiles every regular expression a policy uses, on each evaluation (about
 /// 500,000 instructions a pattern, then about 300 a byte matched). The
-/// destructive-shell example uses 2,000,000 instructions on a typical call and
-/// 21,000,000 on the largest input [`super::opa::policy_input`] builds
-/// ([`super::opa::MAX_INPUT_BYTES`], above 99.97% of 82,401 real coding-agent
-/// tool calls), in 1.3 ms. The budget is about five times that; the deadline,
-/// fifteen times the time, leaves room for a slower or busier machine.
-/// `benches/rego_bench.rs` measures it.
+/// destructive-shell and production-deploy examples use 2,000,000 instructions
+/// on a typical call and 21,000,000 on the largest input
+/// [`super::opa::policy_input`] builds ([`super::opa::MAX_INPUT_BYTES`], above
+/// 99.97% of 82,401 real coding-agent tool calls); the deny-writes and
+/// conformance policies 2,900,000. That takes 0.8 ms idle, and up to 260 ms on
+/// the loaded machine. The budget is about five times the largest, so a
+/// heavier policy still fits.
+///
+/// Using up the whole budget takes 50 ms idle and at most 590 ms loaded; the
+/// deadline is over three times that. `benches/rego_bench.rs` measures the
+/// example.
 pub const REGO: Budget = Budget {
     fuel: 100_000_000,
-    deadline: Duration::from_millis(20),
+    deadline: Duration::from_millis(2_000),
 };
 
 /// The engine every rule is compiled for: fuel metering and epoch interruption
@@ -70,6 +94,10 @@ pub fn engine() -> anyhow::Result<Engine> {
     let weak = engine.weak();
     std::thread::Builder::new()
         .name("wasm-epoch".to_string())
+        // One increment per wake-up. On a loaded machine this thread oversleeps,
+        // so the deadline runs late, never early: catching up to wall time
+        // would advance the epoch past a store armed while the ticker lagged,
+        // and stop that guest before its time — a refusal caused by load.
         .spawn(move || loop {
             std::thread::sleep(TICK);
             match weak.upgrade() {
@@ -83,12 +111,12 @@ pub fn engine() -> anyhow::Result<Engine> {
 impl Budget {
     /// Arm `store` for one evaluation under this budget.
     ///
-    /// One tick more than the deadline divides into, because the tick in
+    /// One tick more than the deadline spans, rounded up, because the tick in
     /// progress when the store is armed is already partly spent: the guest
-    /// always gets at least `deadline`, and at most one [`TICK`] more.
+    /// always gets at least `deadline`, and at most two [`TICK`]s more.
     pub fn arm<T>(&self, store: &mut Store<T>) -> anyhow::Result<()> {
         store.set_fuel(self.fuel)?;
-        let ticks = (self.deadline.as_micros() / TICK.as_micros()) as u64 + 1;
+        let ticks = self.deadline.as_micros().div_ceil(TICK.as_micros()) as u64 + 1;
         store.set_epoch_deadline(ticks);
         Ok(())
     }
@@ -205,9 +233,10 @@ mod tests {
             elapsed >= Duration::from_millis(5),
             "stopped early: {elapsed:?}"
         );
-        // Generous: a loaded CI machine can oversleep the ticker.
+        // The ticker runs late on a loaded machine, never early; fuel alone
+        // would let this run for hours.
         assert!(
-            elapsed < Duration::from_millis(500),
+            elapsed < Duration::from_secs(5),
             "not interrupted: {elapsed:?}"
         );
     }

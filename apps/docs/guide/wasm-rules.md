@@ -39,10 +39,12 @@ Every custom filter runs inside a secure WebAssembly sandbox with strict constra
 | Limit | Value | Purpose |
 |-------|-------|---------|
 | **Memory** | 16 MB | Prevents excessive memory consumption |
-| **CPU Fuel** | 1,000,000 units | Prevents infinite loops and excessive computation |
-| **Timeout** | 5 ms per evaluation | Maintains low proxy latency |
+| **Fuel** | 1,000,000 instructions | The limit a rule is written against: stops infinite loops and excessive computation, the same way on any machine |
+| **Deadline** | 1 s per evaluation | A backstop for stalls fuel cannot see |
 
-A filter that exceeds a limit is stopped at once and reaches no verdict; see [When a rule reaches no verdict](#when-a-rule-reaches-no-verdict) for what the request gets. The timeout interrupts a rule that is still running; it is not checked only after the rule returns. A [Rego rule](/guide/rego-policies#limits) has a larger budget, because OPA parses its input and compiles its regular expressions inside the sandbox. The MCP governance proxy gives a native rule 50 ms, because its deadline includes the round trip to the worker thread rules run in.
+A filter that exceeds a limit is stopped at once and reaches no verdict; see [When a rule reaches no verdict](#when-a-rule-reaches-no-verdict) for what the request gets. A [Rego rule](/guide/rego-policies#limits) has a larger budget, because OPA parses its input and compiles its regular expressions inside the sandbox.
+
+**Fuel is the limit; the deadline is a backstop.** Fuel counts instructions, so a rule within it reaches its verdict however busy the machine is. Wall time is not the rule's own: on a loaded machine the thread evaluating it waits to run, and an evaluation that takes under a millisecond idle measured up to 260 ms on a 14-core machine running 100 busy threads, about the load of a 4-vCPU CI runner running a test suite. Since a rule that reaches no verdict refuses the call, the deadline is set far above the time it takes to use up the whole fuel budget on such a machine (at most 91 ms for a native rule), so it only stops what fuel cannot see: a bulk `memory.fill` costs one instruction whatever its length, and a host call costs none. The deadline interrupts a rule that is still running; it is not checked only after the rule returns. The MCP governance proxy uses the same 1 s, measured to the reply from the worker thread rules run in.
 
 ::: tip How the context arrives
 The host calls your `allocate(len)` export, writes the request context as UTF-8 JSON bytes into the buffer it returns, and calls `evaluate(offset, len)`. Parse those bytes directly. Building a string from them one character at a time allocates once per byte, which can use up the fuel budget on a large context, and the rule then reaches no verdict.
@@ -55,7 +57,7 @@ The context is never cut: a rule receives every tool call and its full arguments
 A rule reaches no verdict when it runs past its deadline, uses up its instruction budget, traps or otherwise fails while running, or returns something that is not a verdict: a code other than `0`, `1`, `2` or `3`, or a Rego result in none of the [documented shapes](/guide/rego-policies#writing-a-policy). The call is then refused with `GOVERNANCE_UNAVAILABLE`, in both proxies: HTTP 403 from the LLM proxy, and a refused call with `ruleId` `wasm:<rule id>` from the MCP proxy. The refusal names the rule and the cause, one of `deadline`, `budget`, `error` or `result`:
 
 ```text
-Custom rule local:50_budget-guard.wasm reached no verdict (deadline): it ran past its 5 ms deadline. Request blocked: a rule that cannot decide never allows.
+Custom rule local:50_budget-guard.wasm reached no verdict (budget): it used up its budget of 1000000 instructions. Request blocked: a rule that cannot decide never allows.
 ```
 
 **The fail setting does not apply.** The LLM proxy's `intutic_settings.policy.fail_closed`, and the MCP proxy's `mcpProxyFailBehavior` and `INTUTIC_MCP_FAIL_OPEN`, decide what happens when the control plane cannot be reached: an outage an agent cannot cause. An agent can make a rule run out of time or budget by padding its input, so a rule that could not decide is refused even on a proxy that fails open. This is what policy engines do when they cannot decide: Envoy's external authorization denies unless `failure_mode_allow` is set, and a Kubernetes admission webhook defaults to `failurePolicy: Fail`.
@@ -227,7 +229,7 @@ rule author ends up not knowing that `forbid_after`, `changes` or
 | `corroborating_detectors` | `i32` | How many *distinct* built-in anomaly detectors fired at Medium+ severity on this request — the same pool the proxy's own corroboration escalation counts, so `ctx.corroborating_detectors >= 2` agrees with the built-in rung by construction, and `>= 3` gives you a stricter bar than the built-in without re-deriving anything. `0` when nothing fired and under break-glass. A rule gating on this stays advisory territory until you have measured what your traffic's agreement rate actually is — replay it first. |
 | `new_tool_calls` | `string[]` | This turn's delta. **Use this, not `tool_sequence`, for a hold** — matching on history re-fires the hold forever. |
 | `tool_contract_changed` | `bool` | A server changed a tool's contract mid-session. |
-| `transition_baseline` | `map` \| `null` | Observed tool-transition frequencies; `null` until the workspace has a fitted model. The SDK deliberately does not parse it: the proxy's own detector acts on it, and walking the map would spend the 5 ms budget re-deriving a statistic. |
+| `transition_baseline` | `map` \| `null` | Observed tool-transition frequencies; `null` until the workspace has a fitted model. The SDK deliberately does not parse it: the proxy's own detector acts on it, and walking the map would spend the fuel budget re-deriving a statistic. |
 
 ### Findings
 

@@ -541,7 +541,7 @@ describe('ToolCallInterceptor', () => {
       code: 'unavailable',
       stop,
       ruleId: 'local:10_slow.wasm',
-      reason: `Custom rule local:10_slow.wasm reached no verdict (${stop}): it ran past its 50 ms deadline.`,
+      reason: `Custom rule local:10_slow.wasm reached no verdict (${stop}): it ran past its 1000 ms deadline.`,
     })
 
     /** Every way the fail setting can say "open" or "closed": local, then the workspace's. */

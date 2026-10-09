@@ -180,6 +180,12 @@ jobs:
       - name: Run Vitest Suite (Sync Daemon, CLI, Packages)
         run: pnpm turbo test
 
+      # Tests that load every core, or leave a stuck rule's worker burning one,
+      # run alone after the package suites rather than beside their timing
+      # (packages/mcp-proxy/vitest.load.config.ts).
+      - name: MCP proxy rule limits under load
+        run: pnpm --filter @intutic/mcp-governance-proxy test:load
+
   changes:
     name: Detect Rust inputs
     runs-on: ubuntu-latest

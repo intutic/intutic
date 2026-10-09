@@ -463,10 +463,11 @@ fn shell_tokens(command: &str) -> Vec<String> {
 ///
 /// # Why the read happens here and not behind a host call
 ///
-/// The runner gives a guest a 5 ms budget. A cold-cache read of a manifest is
-/// tens to hundreds of microseconds and, on a network filesystem, unbounded, so
-/// doing the I/O inside the sandbox would either blow that budget or make it
-/// meaningless. Pre-reading keeps the budget covering exactly what it was
+/// The runner bounds a guest by fuel, which a host call does not spend, and by
+/// a deadline. A cold-cache read of a manifest is tens to hundreds of
+/// microseconds and, on a network filesystem, unbounded, so doing the I/O
+/// inside the sandbox would spend the deadline on the disk rather than the
+/// guest. Pre-reading keeps the guest's limits covering exactly what they were
 /// written to cover — guest execution — and turns the host import into a memcpy
 /// out of a table that was already in memory.
 ///

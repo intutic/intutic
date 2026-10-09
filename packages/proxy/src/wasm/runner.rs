@@ -430,7 +430,8 @@ mod deadline_tests {
 
     /// Loops forever while spending little fuel: each iteration fills a
     /// megabyte of memory for one instruction's worth of fuel, so the 1,000,000
-    /// fuel budget alone would let it run for tens of seconds.
+    /// fuel budget alone would let it run for about a minute. This is the stall
+    /// the deadline is the backstop for.
     const SLOW_LOOP: &str = r#"(module
          (memory (export "memory") 17)
          (func (export "allocate") (param i32) (result i32) i32.const 0)
@@ -459,13 +460,15 @@ mod deadline_tests {
 
         let failure = verdict.expect_err("a runaway rule reaches no verdict");
         assert_eq!(failure.stop, crate::wasm::limits::Stop::Deadline);
-        assert_eq!(failure.reason, "it ran past its 5 ms deadline");
+        assert_eq!(failure.reason, "it ran past its 1000 ms deadline");
         assert!(
             elapsed >= crate::wasm::limits::NATIVE.deadline,
             "{elapsed:?}"
         );
+        // Late on a loaded machine (the ticker oversleeps), but far short of
+        // the minute fuel would allow.
         assert!(
-            elapsed < Duration::from_millis(500),
+            elapsed < Duration::from_secs(10),
             "not interrupted: {elapsed:?}"
         );
     }

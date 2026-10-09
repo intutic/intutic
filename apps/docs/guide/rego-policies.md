@@ -269,13 +269,13 @@ A Rego rule runs in the same sandbox as a native rule, with a larger budget, bec
 | | Native rule | Rego rule, LLM proxy | Rego rule, MCP proxy |
 | :--- | :--- | :--- | :--- |
 | Memory | 16 MB | 16 MB | 16 MB |
-| Instructions (fuel) | 1,000,000 | 100,000,000 | 1,000,000,000 metered |
-| Deadline per evaluation | 5 ms | 20 ms | 100 ms, round trip to its worker included |
+| Instructions (fuel) | 1,000,000 | 100,000,000 | 300,000,000 metered |
+| Deadline per evaluation (a backstop) | 1 s | 2 s | 10 s, round trip to its worker included |
 | Input | the request context | 64 KB | 64 KB |
 
-The MCP proxy meters instructions differently from the LLM proxy (V8 has no fuel counter, so it charges each straight-line run of code in full) and counts seven to eight times as many on an OPA build, which is why its number is larger.
+The MCP proxy meters instructions differently from the LLM proxy (V8 has no fuel counter, so it charges each straight-line run of code in full) and counts about three and a half times as many on an OPA build, which is why its number is larger.
 
-The deadline interrupts a rule that is still running, native or Rego, rather than being checked after it returns.
+Fuel is the limit a policy is held to, and it is deterministic: a policy within it reaches its verdict however busy the machine is. On the largest input, the destructive-shell and production-deploy examples use 21,000,000 instructions in the LLM proxy and 74,000,000 metered in the MCP proxy, and the deny-writes example under 3,000,000 and 9,000,000; each budget is four to five times the largest, so a heavier policy fits. The deadline is only a backstop for stalls fuel cannot see. It is set above the time it takes to use up the whole budget on a heavily loaded machine (a 14-core machine running 100 busy threads: at most 590 ms in the LLM proxy and 4.4 s in the MCP proxy), because a rule that reaches no verdict refuses the call, and a legitimate policy must not be refused because the machine is busy. The deadline interrupts a rule that is still running, rather than being checked after it returns.
 
 Measured cost of the destructive-shell example, per evaluation, in the LLM proxy (fresh sandbox, input parse and policy), at sizes taken from 82,401 real coding-agent tool calls:
 

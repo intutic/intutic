@@ -40,16 +40,20 @@ import {
 export const DEFAULT_FUEL_BUDGET = 1_000_000
 
 /**
- * A Rego rule's budget: ten times the Rust proxy's 100,000,000 (`limits::REGO`).
+ * A Rego rule's budget: three times the Rust proxy's 100,000,000
+ * (`limits::REGO`), because this meter counts differently.
  *
- * Not the same number, because this meter charges each straight-line run in
- * full at its entry, branches skipped or not, and an OPA build is mostly short
- * runs with early exits: on the destructive-shell example it counts seven to
- * eight times what Wasmtime does (147,000,000 against 21,000,000 on a 63 KB
- * command). V8 still runs that in about a millisecond; the deadline bounds the
- * time either way.
+ * It charges each straight-line run in full at its entry, branches skipped or
+ * not, and an OPA build is mostly short runs with early exits: on the largest
+ * input (a 64 KB command) the destructive-shell and production-deploy examples
+ * count 74,000,000 here against 21,000,000 under Wasmtime, and the
+ * deny-writes and conformance policies about 8,000,000. The budget is four
+ * times the largest, so a heavier policy on the largest input still fits, and
+ * a rule that does not fit is stopped deterministically, whatever the load.
+ * Using it all up takes at most 350 ms idle and 4.4 s on a loaded machine;
+ * the deadline (`REGO_EVALUATE_TIMEOUT_MS`) is set above that.
  */
-export const REGO_FUEL_BUDGET = 1_000_000_000
+export const REGO_FUEL_BUDGET = 300_000_000
 
 /** The export the worker reads to tell budget exhaustion from other traps. */
 export const FUEL_EXPORT = '__intutic_fuel'

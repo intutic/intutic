@@ -7,17 +7,15 @@
  * same OPA builds; the shared host's own conformance against `opa eval` is in
  * `packages/shared-types`.
  *
- * Also here: the per-rule deadline actually stopping a rule. The Rust proxy's
- * deadline used to be read only after the guest returned; this host's never
- * was, because it races the worker from the main thread and terminates it.
- * A rule stopped by it, or returning something that is not a decision,
- * reaches no verdict and refuses the call.
+ * A rule returning something that is not a decision reaches no verdict and
+ * refuses the call. The tests that load the machine or wait out a deadline are
+ * in `load/ruleLimits.test.ts`, which runs on its own.
  *
  * @module
  */
 
 import { describe, it, expect, afterEach } from 'vitest'
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -97,12 +95,10 @@ describe('Rego rules in the MCP proxy', () => {
     // Just under the input cap, so nothing is cut, with the match at the end:
     // only the rule matching the whole command can block it.
     const long = `${'cd /workspace/app && npm test; '.repeat(2050)}rm -rf /`
-    // It takes about 3 ms against a 100 ms deadline, but CI runs every
-    // package's suite at once and a starved worker can miss the deadline,
-    // which fail-closed refuses as `unavailable`. One rerun separates that
-    // from a rule too slow for its budget, which misses it every time.
-    let verdict = await r.evaluate(bash(long))
-    if (verdict.code === 'unavailable' && verdict.stop === 'deadline') verdict = await r.evaluate(bash(long))
+    // No rerun: fuel is the limit this has to fit, and it fits the same way
+    // on any machine; the deadline is a backstop far above the time it takes
+    // on a loaded one (load/ruleLimits.test.ts).
+    const verdict = await r.evaluate(bash(long))
     // The pattern matched, not the truncation guard: the reason is the
     // command's own, cut to the 480 characters a reason may have.
     expect(verdict).toMatchObject({ code: 'block', ruleId: 'local:10_shell.wasm' })
@@ -115,8 +111,7 @@ describe('Rego rules in the MCP proxy', () => {
     // `rm -rf /` at the end never reaches the policy. The shipped example
     // refuses a shell command it could not see in full.
     const padded = `${'echo ok; '.repeat(8_000)}rm -rf /`
-    let verdict = await r.evaluate(bash(padded))
-    if (verdict.code === 'unavailable' && verdict.stop === 'deadline') verdict = await r.evaluate(bash(padded))
+    const verdict = await r.evaluate(bash(padded))
     expect(verdict).toMatchObject({ code: 'block', ruleId: 'local:10_shell.wasm' })
     expect(verdict.code === 'block' && verdict.reason).toContain('too long to check in full')
   }, 30_000)
@@ -128,50 +123,5 @@ describe('Rego rules in the MCP proxy', () => {
     const verdict = await r.evaluate(bash('ls'))
     expect(verdict).toMatchObject({ code: 'unavailable', stop: 'result', ruleId: 'local:10_conformance.wasm' })
     expect(verdict.code === 'unavailable' && verdict.reason).toContain('without a known `decision`')
-  }, 30_000)
-})
-
-/** `(module (memory (export "memory") 17) (func (export "allocate") …) (func (export "evaluate") … loop of memory.fill …))`. */
-function slowLoopRule(): Uint8Array {
-  const section = (id: number, body: number[]): number[] => [id, body.length, ...body]
-  const name = (s: string): number[] => [s.length, ...Buffer.from(s)]
-  const allocate = [0x00, 0x41, 0x00, 0x0b]
-  const evaluate = [
-    0x00,
-    0x03, 0x40, // loop
-    0x41, 0x80, 0x80, 0x04, // i32.const 65536
-    0x41, 0x07, // i32.const 7
-    0x41, 0x80, 0x80, 0xc0, 0x00, // i32.const 1048576
-    0xfc, 0x0b, 0x00, // memory.fill
-    0x0c, 0x00, // br 0
-    0x0b, // end loop
-    0x41, 0x01, // i32.const 1
-    0x0b,
-  ]
-  return new Uint8Array([
-    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
-    ...section(1, [2, 0x60, 1, 0x7f, 1, 0x7f, 0x60, 2, 0x7f, 0x7f, 1, 0x7f]),
-    ...section(3, [2, 0, 1]),
-    ...section(5, [1, 0x00, 17]),
-    ...section(7, [3, ...name('memory'), 0x02, 0, ...name('allocate'), 0x00, 0, ...name('evaluate'), 0x00, 1]),
-    ...section(10, [2, allocate.length, ...allocate, evaluate.length, ...evaluate]),
-  ])
-}
-
-describe('the per-rule deadline', () => {
-  it('stops a rule that never returns while spending little fuel, and refuses the call', async () => {
-    dir = mkdtempSync(join(tmpdir(), 'intutic-mcp-deadline-'))
-    writeFileSync(join(dir, '10_slow.wasm'), slowLoopRule())
-    runner = new WasmRunner(dir)
-    await runner.rescan()
-    expect(runner.getLoadedRuleIds()).toEqual(['local:10_slow.wasm'])
-
-    // Each iteration fills a megabyte for one instruction of fuel, so the
-    // 1,000,000-instruction budget alone would let it run for most of a minute.
-    const started = Date.now()
-    const verdict = await runner.evaluate(bash('ls'))
-    expect(Date.now() - started).toBeLessThan(5_000)
-    expect(verdict).toMatchObject({ code: 'unavailable', stop: 'deadline', ruleId: 'local:10_slow.wasm' })
-    expect(verdict.code === 'unavailable' && verdict.reason).toContain('ran past its 50 ms deadline')
   }, 30_000)
 })

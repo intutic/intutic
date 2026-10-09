@@ -11,11 +11,12 @@
  *   way.** V8 has no fuel hook, so `fuel.ts` rewrites each rule at load to
  *   count its own instructions and trap when the budget runs out (TD-440).
  *   A rule that exhausts it reaches no verdict, as under Wasmtime.
- * - **50ms per-rule deadline, not 5ms.** Fuel bounds the guest's own work;
- *   the deadline is the backstop for everything else, and it races a
- *   `postMessage` round trip that pays IPC overhead the in-process Wasmtime
- *   call never did. 50ms, not 5ms, keeps that overhead from
- *   false-positiving a legitimate rule under normal load.
+ * - **The deadline is a backstop, not the limit.** Fuel is the limit: it is
+ *   deterministic, so a rule within budget is never refused because the
+ *   machine is busy. The deadline catches what fuel cannot see — a bulk
+ *   `memory.fill` costs one instruction whatever its length, a host call
+ *   costs none — and it races a `postMessage` round trip that the
+ *   in-process Wasmtime call never pays. See {@link EVALUATE_TIMEOUT_MS}.
  * - **Guest memory ceiling: the same 16MB, enforced a different way.**
  *   `runner.rs` sets a `StoreLimits` cap; V8 has no such hook, but it does
  *   enforce the maximum a module declares, so `worker.ts` rewrites the
@@ -46,18 +47,28 @@ import { prefetch, resolveRoot, ReferencedFiles, type ReferencedFilesTable } fro
 const log = createLogger('mcp-proxy-wasm-runner')
 
 /**
- * Per-rule evaluation deadline. See this module's doc comment for why this
- * is 50ms rather than `runner.rs`'s 5ms.
+ * A native rule's deadline: a backstop for stalls the instruction budget
+ * cannot see, set well above the time any rule within budget takes on a busy
+ * machine, because a rule that reaches no verdict refuses the call.
+ *
+ * Measured on a 14-core machine, idle and with 100 busy threads (about the
+ * oversubscription of a 4-vCPU CI runner running every package's suite): the
+ * 1,000,000-instruction budget runs out in at most 2 ms either way, and a
+ * worker round trip for a 60 KB context takes at most 0.5 ms idle and 3.9 ms
+ * loaded. The Rego round trip below shows the loaded machine also stalls a
+ * thread for hundreds of milliseconds, which is what one second covers.
  */
-const EVALUATE_TIMEOUT_MS = 50
+export const EVALUATE_TIMEOUT_MS = 1_000
 
 /**
- * A Rego rule's deadline. The Rust proxy gives a Rego rule 20 ms against a
- * native rule's 5 ms (`limits::REGO`): OPA parses its input and compiles its
- * regular expressions inside the sandbox on every evaluation. This keeps that
- * headroom over the round trip the 50 ms above already allows for.
+ * A Rego rule's deadline, on the same reasoning with the Rego budget
+ * (`REGO_FUEL_BUDGET`): the destructive-shell example on the largest input
+ * (64 KB) takes at most 6 ms idle and 430 ms loaded, round trip included, and
+ * a loop using up the whole budget takes up to 350 ms idle and 4.4 s loaded.
+ * Ten seconds is over twice that, so on a loaded machine the budget still
+ * stops a runaway rule first, and only a stall fuel cannot see waits this long.
  */
-const REGO_EVALUATE_TIMEOUT_MS = 100
+export const REGO_EVALUATE_TIMEOUT_MS = 10_000
 
 /** Generous — compilation is not guest-controlled per evaluation, but a
  *  pathological file must not hang a rescan forever. */
@@ -144,6 +155,8 @@ export class WasmRunner implements CompileBridge {
   private nextRequestId = 1
   private pending = new Map<number, PendingEntry>()
   private consecutiveRunaways = new Map<string, number>()
+  /** The worker replacing one that missed a deadline, while its rules recompile. */
+  private respawning: Promise<void> | null = null
   private quarantined = new Set<string>()
 
   constructor(dirOverride?: string) {
@@ -234,13 +247,24 @@ export class WasmRunner implements CompileBridge {
    * policy-driven rescan" is this call.
    */
   async rescan(): Promise<void> {
+    await this.respawning
     await this.loader.rescan(this)
     this.quarantined.clear()
     this.consecutiveRunaways.clear()
   }
 
-  /** Terminates the worker and respawns a fresh one, resending every currently-loaded rule's bytes so its module cache is rebuilt. */
-  private async respawnWorker(): Promise<void> {
+  /**
+   * Replaces the worker, resending every currently-loaded rule's bytes so the
+   * new one's module cache is rebuilt, without waiting for the old one to stop.
+   *
+   * `Worker.terminate()` can take seconds: V8 stops a guest only at an
+   * interrupt check, and a loop around a bulk `memory.fill` reaches one
+   * rarely — measured, 1.5 s on an idle machine and 16 s on a loaded one. The
+   * call that missed its deadline is refused at the deadline; the old worker
+   * stops whenever V8 gets to it, and the next evaluation waits only for the
+   * new worker's recompile (`respawning`, about 50 ms for three Rego rules).
+   */
+  private respawnWorker(): void {
     const old = this.worker
     this.worker = null
     if (old) {
@@ -251,12 +275,17 @@ export class WasmRunner implements CompileBridge {
         entry.resolve({ ok: false, error: 'worker terminated' })
         this.pending.delete(id)
       }
-      await old.terminate()
+      old.terminate().catch((err: unknown) => {
+        log.warn({ action: 'wasm_worker_terminate_error', err: (err as Error).message }, 'WASM worker did not terminate cleanly')
+      })
     }
     // Force-reload every currently-known file into the new worker — its
     // module cache started empty. `force: true` mirrors this loader's own
     // "worker cache was lost, nothing on disk moved" case.
-    await this.loader.rescan(this, true)
+    const respawning = this.loader.rescan(this, true).finally(() => {
+      if (this.respawning === respawning) this.respawning = null
+    })
+    this.respawning = respawning
   }
 
   // ── Evaluation ───────────────────────────────────────────────────────
@@ -408,6 +437,9 @@ export class WasmRunner implements CompileBridge {
     timeoutMs: number,
     files?: ReferencedFilesTable,
   ): Promise<RuleResult | RuleFailure> {
+    // A worker replaced after a missed deadline has its rules only once they
+    // recompile; an evaluation sent before then would find none.
+    await this.respawning
     const id = this.allocId()
     const reply = await this.send<{
       ok: boolean
@@ -425,12 +457,10 @@ export class WasmRunner implements CompileBridge {
     )
 
     if (reply === null) {
-      // Timed out: `runner.rs`'s deadline, plus this proxy's quarantine.
-      // terminate + lazily respawn: the NEXT evaluate() call pays the
-      // respawn cost via ensureWorker()/rescan(force); triggered here so a
-      // wedged worker does not keep timing out every rule behind it in this
-      // same evaluate() loop.
-      await this.respawnWorker()
+      // Timed out: `runner.rs`'s deadline, plus this proxy's quarantine. The
+      // worker is replaced so a wedged one does not time out every rule
+      // behind it; this call does not wait for that (see respawnWorker).
+      this.respawnWorker()
       this.countRunaway(ruleId)
       return { stop: 'deadline', detail: `it ran past its ${timeoutMs} ms deadline` }
     }

@@ -27,6 +27,7 @@
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:load": "vitest run --config vitest.load.config.ts",
     "test:watch": "vitest"
   },
   "dependencies": {

@@ -18,18 +18,21 @@ use crate::store::ControlPlaneCache;
 
 /// Wall-clock ceiling on reading every file one request references.
 ///
-/// Separate from — and much larger than — the 5 ms guest budget, because it
-/// buys something different: the guest budget bounds untrusted code, this
-/// bounds the local filesystem. 25 ms is generous for eight cached reads and
-/// tight enough that a stalled NFS mount degrades the request to "no files
-/// readable" instead of holding it open.
+/// Separate from the guest's limits, because it bounds something different:
+/// they bound untrusted code, this bounds the local filesystem. On expiry no
+/// file is readable, and a rule governing a manifest refuses what it cannot
+/// read — so, like the guest deadline, this must not expire because the
+/// machine is busy: eight cached reads take well under a millisecond, but a
+/// blocking-pool thread on a loaded machine can wait hundreds of milliseconds
+/// to run (see `limits`). One second still stops a stalled NFS mount from
+/// holding the request open.
 ///
 /// On expiry the blocking task is abandoned, not cancelled — `spawn_blocking`
 /// work cannot be interrupted. A wedged filesystem therefore leaks one blocking
 /// thread per affected request until it recovers. Accepted: the alternative is
 /// blocking the request path on the same wedge, and a hung filesystem is a host
 /// problem the proxy can report but not fix.
-const PREFETCH_BUDGET: Duration = Duration::from_millis(25);
+const PREFETCH_BUDGET: Duration = Duration::from_millis(1_000);
 
 /// Warn once, not once per request, when a rule wants files and no root is set.
 static NO_ROOT_WARNING: std::sync::Once = std::sync::Once::new();
@@ -446,7 +449,7 @@ impl PluginRegistry {
 
     /// Resolve and read the files this request's tool calls reference.
     ///
-    /// Runs entirely outside the runner's 5 ms guest budget and on the blocking
+    /// Runs entirely outside the runner's guest limits and on the blocking
     /// pool, so that budget keeps meaning what it says — time spent executing
     /// untrusted guest code — rather than quietly absorbing a disk read. The
     /// cost lands on the request instead, bounded by [`PREFETCH_BUDGET`] and by

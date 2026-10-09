@@ -29,7 +29,8 @@ const SLOW_LOOP: &str = r#"(module
        i32.const 1))"#;
 
 /// Loops forever on one instruction per iteration: the 1,000,000-instruction
-/// budget stops it in about a millisecond, well inside the 5 ms deadline.
+/// budget stops it in about a millisecond, and in under 100 ms on a loaded
+/// machine — deterministically first, ten times inside the 1 s deadline.
 const SPIN: &str = r#"(module
      (memory (export "memory") 1)
      (func (export "allocate") (param i32) (result i32) i32.const 8)
@@ -106,15 +107,7 @@ async fn assert_refused(tag: &str, rule: Vec<u8>, cause: &str) {
     let dir = rule_dir(tag, &[("10_rule.wasm", rule)]);
     let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
 
-    let mut verdict = evaluate(&registry).await;
-    // A starved test thread can miss the 5 ms deadline before the budget runs
-    // out; one rerun separates that from a rule stopped for the wrong cause,
-    // which is stopped for it every time.
-    if cause != "deadline"
-        && matches!(&verdict, Verdict::Unavailable { reason, .. } if reason.contains("(deadline)"))
-    {
-        verdict = evaluate(&registry).await;
-    }
+    let verdict = evaluate(&registry).await;
     match verdict {
         Verdict::Unavailable { reason, policy_id } => {
             assert_eq!(policy_id.as_deref(), Some("local:10_rule.wasm"));
