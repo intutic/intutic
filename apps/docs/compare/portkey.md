@@ -5,7 +5,7 @@ description: Portkey is a model gateway with routing, caching and inline guardra
 
 # Intutic vs Portkey
 
-*Last reviewed: 2026-10-08*
+*Last reviewed: 2026-10-09*
 
 Intutic decides agent tool calls before they run, across 43 supported harnesses: native hook gates in 18 of them and in-process SDK gates in 17 allow or block the call, hook gates, SDK gates and the MCP governance proxy can hold it for human approval, and the other eight are governed through the proxies, a bridge or the harness they orchestrate. Around the gates, a policy proxy redacts sensitive data in model traffic, an MCP governance proxy governs MCP tools, an egress firewall and sandboxed execution stop the agent routing around governance, and execution traces are sealed into a signed audit trail you can verify. Portkey is an AI gateway between applications and model providers, with routing, fallbacks, caching, budgets and guardrails that can reject a request inline. Palo Alto Networks completed its acquisition of Portkey on 2026-05-29 and makes it the AI gateway of Prisma AIRS. Portkey governs the model call; Intutic governs the action the agent takes with the answer.
 
@@ -18,7 +18,8 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Coding agents** | **43** supported harnesses: native hook gates in 18, in-process SDK gates in 17, and the proxies, a bridge or the orchestrated harness for the other eight | Any client that can point its base URL at the gateway |
 | **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Allow or deny on guardrail results |
 | **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | MCP Gateway |
-| **Routing** | Thompson-sampling routing that learns cost and quality per workspace | Fallbacks, load balancing and conditional routing |
+| **Routing** | Thompson-sampling routing that learns cost and quality per workspace | Load balancing and conditional routing |
+| **Retries and fallbacks** | Retries on by default (429, 5xx, 529 and dropped connections, honouring `retry-after`, within a time budget), then ordered fallback targets per model; never once a stream has started | Retries of up to 5 attempts and fallback targets, set per config; fallbacks can trigger on any non-2xx status |
 | **Caching** | Exact and semantic cache | Simple cache on every plan; semantic cache on select Enterprise plans |
 | **Budgets** | Daily spend caps enforced before a request leaves; a loop run that exceeds its budget is stopped | Budget and rate limits on paid plans |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, verifiable in the browser or CLI | Request and response logs |
@@ -27,7 +28,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 
 ## Where Portkey is stronger
 
-- **Provider breadth and routing controls.** A mature gateway with fallbacks, load balancing and conditional routing across many providers.
+- **Provider breadth and routing controls.** A mature gateway with load balancing, conditional routing and nested fallback strategies across many providers. Intutic's fallbacks only go to a target that accepts the request in its original wire format.
 - **Gateway-level guardrails for any application.** Inline checks on every model call, whether or not the caller is an agent.
 - **Platform backing.** As part of Prisma AIRS, it sits inside Palo Alto Networks' AI security portfolio.
 
@@ -41,7 +42,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 ## When to choose Portkey
 
 - You need one gateway for model traffic across many applications and providers.
-- Routing, fallbacks, caching and per-key budgets are the main requirements.
+- Load balancing, conditional routing, caching and per-key budgets are the main requirements.
 - You are standardising on Palo Alto Networks' Prisma AIRS.
 
 ## Use them together

@@ -207,6 +207,7 @@ Workspaces are the top-level organizational unit. Each workspace has:
 | `allowedModels` | string[] | Approved-models allowlist. Absent or empty means unrestricted. Enforced by the proxy at request time — a request naming a model outside this list is rejected before it reaches a provider. See [Settings → Security → Approved Models](/guide/settings#approved-models) |
 | `allowedModels` (standalone) | string[] | The same allowlist for a proxy with no control plane, read from `~/.intutic/config.json` (`allowed_models` accepted as an alias) on a 60-second cache. Same absent-or-empty-means-unrestricted rule. See [Settings → Standalone allowlist](/guide/settings#standalone-allowedmodels-in-intutic-config-json) |
 | `maxDailyBudgetUsd` (standalone) | number | The proxy's [local daily cap](/guide/budgets#local-daily-cap), read from the same file on the same cache. Defaults to `10` |
+| `upstreamRetry` | object | The workspace's [retries and fallbacks](/guide/intelligent-routing#retries-and-fallbacks): `enabled`, `maxAttempts`, `initialBackoffMs`, `maxBackoffMs`, `budgetMs`, `onStatus` and `fallbacks`, each overriding the proxy's `routing.retry` / `routing.fallbacks` value. Absent fields keep the proxy's value; `null` clears it |
 
 
 <!-- ENTERPRISE_ONLY_START -->
@@ -350,6 +351,25 @@ Contextual bandit routing picks a model per request via Thompson sampling over a
 
 **Precedence:** when a control plane manages the workspace, the Valkey `ff_bandit_routing` feature flag is authoritative. `routing.enabled` applies only to standalone deployments where no control plane manages the workspace.
 
+### Retries (`intutic_settings.routing.retry`)
+
+How the proxy retries a provider call that failed before any response reached the client. On by default. See [Retries and fallbacks](/guide/intelligent-routing#retries-and-fallbacks) for the rules.
+
+| Setting | Type | Default | Description |
+| :--- | :---: | :---: | :--- |
+| `enabled` | boolean | `true` | `false` makes one call per model. Fallbacks need retries enabled |
+| `max_attempts` | number | `3` | Calls per model, the first included. At most `5` |
+| `initial_backoff_ms` | number | `500` | Upper bound of the first wait. Each wait is random between zero and a bound that doubles per attempt |
+| `max_backoff_ms` | number | `8000` | Cap on that bound. At most `60000` |
+| `budget_ms` | number | `30000` | Time for the whole request: every call, wait and fallback. A retry or fallback that cannot start inside it is not made. At most `120000` |
+| `on_status` | number[] | `[429, 500, 502, 503, 504, 529]` | Statuses retried. Timeouts and failed connections are always retried |
+
+### Fallbacks (`intutic_settings.routing.fallbacks`)
+
+Ordered targets per model, tried when that model's retries run out on a retryable failure. Empty by default. Each key is the model that was sent upstream; each target has a `model`, a `provider` (`anthropic`, `openai`, `gemini`, `mistral`, `openrouter`, `deepseek`), or both. Up to five targets per model.
+
+A workspace's `upstreamRetry` setting overrides any of these fields; the fields it leaves out keep the values here.
+
 ### Reward Loop (`intutic_settings.routing.reward`)
 
 Rewards are computed only from signals the proxy already observes — upstream success, latency versus SLO, token anomaly, and cost ratio. No LLM judge is involved.
@@ -377,4 +397,12 @@ intutic_settings:
       latency_penalty: 0.3
       token_anomaly_penalty: 0.2
       cost_penalty: 0.2
+    retry:
+      max_attempts: 3
+      budget_ms: 30000
+    fallbacks:
+      claude-opus-4-1:
+        - model: claude-sonnet-4-5
+        - model: deepseek-chat
+          provider: deepseek
 ```

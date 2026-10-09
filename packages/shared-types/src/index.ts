@@ -71,6 +71,8 @@ export type {
   TraceStep,
   TraceFindingSummary,
   ChangeManifestEntry,
+  UpstreamAttempt,
+  UpstreamFallback,
 } from './finops.js'
 
 
@@ -679,6 +681,18 @@ export {
   secretPatternAlternation,
   type SecretValuePattern,
 } from './secretPatterns.js'
+
+export {
+  DEFAULT_UPSTREAM_RETRY,
+  DEFAULT_UPSTREAM_RETRY_STATUSES,
+  UPSTREAM_PROVIDERS,
+  UPSTREAM_RETRY_LIMITS,
+  UpstreamFallbackTargetSchema,
+  UpstreamRetrySettingsSchema,
+  type UpstreamFallbackTarget,
+  type UpstreamProvider,
+  type UpstreamRetrySettings,
+} from './upstreamRetry.js'
 
 export {
   PII_ACTIONS,

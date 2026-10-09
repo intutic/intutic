@@ -22,6 +22,12 @@ resource "intutic_workspace_settings" "this" {
       "pii.card"  = "block"
       "pii.email" = "redact"
     }
+    upstreamRetry = {
+      maxAttempts = 4
+      fallbacks = {
+        "claude-opus-4-1" = [{ model = "claude-sonnet-4-5" }]
+      }
+    }
     featureFlags = {
       ff_shadow_enforcement = true
     }

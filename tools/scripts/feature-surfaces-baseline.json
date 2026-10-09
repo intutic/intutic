@@ -481,7 +481,6 @@
     "guide/how-it-works.md",
     "guide/inline-streams.md",
     "guide/intelligence.md",
-    "guide/intelligent-routing.md",
     "guide/loops.md",
     "guide/managed-cells.md",
     "guide/metaclaw.md",
@@ -554,7 +553,6 @@
     "reference/api.md",
     "reference/clawde-sdk.md",
     "reference/cli-doctor.md",
-    "reference/configuration.md",
     "reference/model-catalog.md",
     "reference/sop-format.md",
     "security.md"
@@ -607,7 +605,6 @@
     "session.ended",
     "siem:detector_findings",
     "siem:enforcement_devices",
-    "siem:execution_traces",
     "siem:governance_incidents",
     "siem:stored_plans",
     "skill.malware.detected",

@@ -214,6 +214,115 @@ old number was never real.
 
 ---
 
+## Retries and fallbacks <Badge type="tip" text="Open-Core" />
+
+When a provider is overloaded or rate limited, the proxy retries the call itself, before anything
+reaches your agent. When a model's retries run out, it can send the request to fallback targets
+you list, in order. Both run in the proxy, locally and deterministically, on every plan. Retries
+are on by default; fallbacks are off until you list a target.
+
+### What is retried
+
+- **Statuses** `429`, `500`, `502`, `503`, `504` and `529` (Anthropic's overloaded), plus
+  timeouts and failed or reset connections. Other `4xx` answers describe the request itself and
+  are passed straight back.
+- **Only before a response has started.** The proxy forwards nothing until the provider's
+  response head arrives, so a failure before it is retried and a `2xx` head commits the request.
+  A stream that breaks after it started, or an `error` event inside a `200` stream, is never
+  retried: your agent may already hold part of the answer.
+- **Only inference calls**: `POST` to `/v1/messages`, `/v1/chat/completions`, `/v1/responses` and
+  Gemini's `generateContent`. These create nothing you can address later, so sending one twice
+  costs tokens and changes no state. Anything else the proxy passes through (batches, files,
+  cached contents) is sent once.
+- **Not a spent quota.** A `429` that reports an exhausted spend limit or quota
+  (`enforced_spend_limit_reached`, `insufficient_quota` and similar) does not clear by waiting,
+  so it is returned at once and starts no fallback.
+- **The provider's verdict wins.** `x-should-retry: false` stops a retry; `true` asks for one.
+
+### How long it waits
+
+Each wait is random between zero and a bound that starts at `initial_backoff_ms` and doubles per
+attempt up to `max_backoff_ms` ("full jitter"), so many clients failing together do not retry
+together. When the provider says how long to wait — `retry-after-ms`, `retry-after` (seconds or
+an HTTP date), or OpenAI's `x-ratelimit-reset-requests` / `-tokens` for the limit that is spent —
+the proxy waits exactly that long instead.
+
+`budget_ms` bounds the whole request: every call, wait and fallback. A wait that would outlast it
+is not made, and a provider that asks for longer than the budget allows gets its answer, its
+`retry-after` included, passed straight back so your agent's own client can wait. A call already
+in progress is never cut short by the budget.
+
+### Fallbacks
+
+`routing.fallbacks` lists ordered targets per model. Each key is the model that was sent
+upstream, after routing; each target names a `model`, a `provider`, or both:
+
+```yaml
+intutic_settings:
+  routing:
+    fallbacks:
+      claude-opus-4-1:
+        - model: claude-sonnet-4-5
+        - model: deepseek-chat
+          provider: deepseek
+```
+
+A fallback runs only after the model's retries are spent on a retryable failure, and each target
+gets the same retry policy within the same budget. A target is skipped, and the skip recorded,
+when it:
+
+- cannot take your request as it is: another wire format (a Claude target for a Chat Completions
+  request), or the Gemini route, which names the model in its URL;
+- is not allowed by the workspace's [approved models](/guide/settings#approved-models) or the
+  key's own model list;
+- has no credential for its provider. A request made with your own provider key is sent on with
+  that key to the same provider only.
+
+If every target fails, your agent gets the routed model's own error.
+
+### Session lock and prompt cache
+
+A fallback never moves the [session lock](#session-lock-and-kv-cache-affinity). The next turn
+goes back to the locked model and whatever prompt cache it holds, so a short overload costs one
+turn on the fallback rather than the rest of the session. The fallback's answer is not written
+to the response cache, and its cache usage is not recorded for the session, for the same reason.
+When the routed model's prefix was warm and the fallback is a different model family, the trace
+says so (`cache_affinity_broken`): that turn paid full price for a prefix the routed model had
+cached.
+
+A fallback never answers for the routed model in the bandit either. The routed arm takes the
+failure (a `5xx` or a dropped connection; a `429` is the account's limit, not the model's), and
+the fallback's response earns it nothing.
+
+### What you see
+
+- **Response headers**: `x-intutic-upstream-attempts` when the answer took more than one call, and
+  `x-intutic-upstream-fallback-from` naming the model whose retries ran out when a fallback
+  answered. `x-intutic-routed-to` then names the fallback.
+- **The trace**: `upstream_attempts` lists every call — model, provider, outcome, latency, the
+  wait before the next call and why it stopped — and `upstream_fallback` names the target that
+  answered. Both show in the dashboard's trace detail. They are absent on the ordinary request
+  that took one call.
+- **Metrics**: `upstream_retries` (by provider and the failure that prompted it) and
+  `upstream_fallbacks` (served or exhausted). See [OpenTelemetry](/guide/opentelemetry#metrics).
+
+### Per-workspace settings
+
+The workspace setting `upstreamRetry` overrides any of the proxy's values, field by field:
+
+```bash
+intutic settings set upstreamRetry '{"maxAttempts": 4, "budgetMs": 45000}'
+intutic settings set upstreamRetry --file retry.json   # with fallbacks
+intutic settings set upstreamRetry null                # back to each proxy's config
+```
+
+The same setting is under **Settings › AI Routing & Caching › Retries & Fallbacks** in the dashboard and in
+Terraform's `intutic_workspace_settings`. The proxy picks a change up on the key's next request.
+See [configuration](/reference/configuration#retries-intutic-settings-routing-retry) for every key
+and its limit.
+
+---
+
 ## Setup & Activation
 
 <!-- ENTERPRISE_ONLY_START -->

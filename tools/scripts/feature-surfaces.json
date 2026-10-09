@@ -723,7 +723,7 @@
         "api": [
           { "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" },
           { "file": "services/control-plane/src/routes/workspace.ts", "contains": "piiDetectors: PiiDetectorSettingsSchema" },
-          { "file": "services/control-plane/src/routes/auth.ts", "contains": "piiDetectors: await keyPiiDetectors(c, auth)" },
+          { "file": "services/control-plane/src/routes/auth.ts", "contains": "piiDetectors: settings === undefined ? null : piiDetectorsField(settings?.piiDetectors, auth.workspaceId)" },
           { "file": "services/control-plane/src/routes/sops.ts", "contains": "piiDetectors: curation.piiDetectors" },
           { "file": "services/control-plane/src/routes/evaluate.ts", "contains": "piiDetectors: curation.piiDetectors" }
         ],
@@ -862,6 +862,48 @@
         "website": { "none": "detail below the level the site describes" },
         "events": { "none": "a refused call is a 403, not an event" },
         "enforcement": [{ "file": "services/control-plane/__tests__/unit/routeRoleGuards.test.ts" }]
+      }
+    },
+    {
+      "id": "upstream-retries",
+      "title": "Upstream retries and fallbacks",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" },
+          { "file": "services/control-plane/src/routes/workspace.ts", "contains": "upstreamRetry: UpstreamRetrySettingsSchema" },
+          { "file": "services/control-plane/src/routes/auth.ts", "contains": "upstreamRetry: settings === undefined ? null" },
+          { "file": "services/control-plane/src/services/traceQueryService.ts", "contains": "upstreamAttempts: executionTraces.upstreamAttempts" }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/settings/UpstreamRetryPanel.tsx", "contains": "upstreamRetry" },
+          { "file": "apps/dashboard/src/components/traces/TraceDetailDrawer.tsx", "contains": "Upstream calls" }
+        ],
+        "cli": [
+          { "ref": "settings set", "badge": false },
+          { "file": "tools/cli/src/commands/settings.ts", "contains": "UpstreamRetrySettingsSchema" }
+        ],
+        "gateSdk": { "none": "gates decide tool calls; retries are on the model call, in the proxy" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/upstream.ts", "contains": "x-intutic-upstream-attempts" },
+          { "file": "packages/intutic-clawde/intutic_clawde/upstream.py", "contains": "x-intutic-upstream-attempts" }
+        ],
+        "mcpTools": { "none": "model calls, not MCP calls" },
+        "kitkat": { "none": "nothing for an agent to act on; retries finish before the answer reaches it" },
+        "terraform": ["workspace_settings.upstreamRetry"],
+        "docs": [
+          "guide/intelligent-routing.md#retries-and-fallbacks",
+          { "ref": "reference/configuration.md#retries-intutic-settings-routing-retry", "badge": false },
+          { "ref": "guide/settings.md#retries-fallbacks", "badge": false }
+        ],
+        "website": [{ "file": "index.html", "contains": "Retries overloaded and rate-limited provider calls" }],
+        "events": ["siem:execution_traces"],
+        "enforcement": [
+          { "file": "packages/proxy/src/routing/retry.rs", "contains": "pub async fn send_with_retry" },
+          { "file": "packages/proxy/src/proxy.rs", "contains": "async fn try_fallbacks(" },
+          { "file": "packages/shared-types/fixtures/upstream-retry-vectors.json" },
+          { "file": "packages/proxy/tests/upstream_retry_test.rs" }
+        ]
       }
     }
   ]

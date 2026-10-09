@@ -270,6 +270,16 @@ The router figures are:
 - **Routing decisions** — the number of routing observations.
 - **Active Intelligent Routing Configurations** — a table of each configuration's ID, model, security level, task type, requests handled and performance score.
 
+### Retries & Fallbacks
+
+How the proxy handles an overloaded or rate-limited provider for this workspace: the workspace setting `upstreamRetry`, laid over each proxy's own `config.yaml` field by field.
+
+*   **Retry failed provider calls** — on by default; takes effect at once. Off makes one call per model.
+*   **Calls per model** and **Time budget (ms)** — blank keeps each proxy's value (3 calls, 30,000 ms by default).
+*   **Fallback targets** — JSON mapping a model to up to five targets, tried in order once its retries run out. A target names a `model`, a `provider`, or both.
+
+**Save retry settings** writes the fields; **Use each proxy's config** clears the setting. See [Retries and fallbacks](/guide/intelligent-routing#retries-and-fallbacks).
+
 ### Contracted Model Rates
 
 Your negotiated per-token prices, in USD per 1,000 tokens. The shadow routing savings report prices a listed model at these rates instead of list price, on both sides of the comparison; models not listed stay at list.

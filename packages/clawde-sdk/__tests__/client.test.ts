@@ -187,6 +187,31 @@ describe('ClawdeClient', () => {
     expect(received).toHaveLength(3)
   })
 
+  it('reports the proxy\'s upstream retries and the fallback that answered', async () => {
+    replies = [{
+      status: 200,
+      body: completion,
+      headers: { 'x-intutic-upstream-attempts': '4', 'x-intutic-upstream-fallback-from': 'claude-opus-4-1' },
+    }]
+
+    const response = await ask(client())
+
+    expect(response.upstream).toEqual({ attempts: 4, fallbackFrom: 'claude-opus-4-1' })
+  })
+
+  it('leaves upstream unset on the ordinary single-call response', async () => {
+    replies = [{ status: 200, body: completion }]
+
+    expect((await ask(client())).upstream).toBeUndefined()
+  })
+
+  it('does not retry a 5xx the proxy already retried upstream', async () => {
+    replies = [{ status: 529, body: { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, headers: { 'x-intutic-upstream-attempts': '3' } }]
+
+    await expect(ask(client({ retries: 2 }))).rejects.toThrow(/already made 3 upstream calls/)
+    expect(received).toHaveLength(1)
+  })
+
   it('throws ClawdeConnectionError once every attempt has failed with a 5xx', async () => {
     replies = [{ status: 500, body: proxyError('build_error', 'boom') }]
 
