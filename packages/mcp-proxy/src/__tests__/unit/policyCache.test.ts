@@ -63,6 +63,9 @@ describe('policyCache Unit Tests', () => {
       if (latestWorkspaceId === 'ws_pii_set_test') {
         body['piiDetectors'] = { 'pii.email': 'redact' }
       }
+      if (latestWorkspaceId === 'ws_wasm_rules_test') {
+        body['wasmRules'] = [{ ruleId: 'wasm_1', name: 'no-prod', sha256: 'a'.repeat(64), priority: 10, mode: 'ENFORCE' }]
+      }
       res.end(JSON.stringify(body))
     })
 
@@ -132,6 +135,14 @@ describe('policyCache Unit Tests', () => {
     expect((await resolvePolicy('ws_pii_unreadable_test'))?.piiDetectors).toBeNull()
     expect((await resolvePolicy('ws_pii_set_test'))?.piiDetectors).toEqual({ 'pii.email': 'redact' })
     expect((await resolvePolicy('ws_test_cache_miss'))?.piiDetectors, 'absent stays absent').toBeUndefined()
+  })
+
+  it("carries the workspace's custom rule descriptors as sent, for PolicyClient to read", async () => {
+    invalidatePolicy('ws_wasm_rules_test')
+    expect((await resolvePolicy('ws_wasm_rules_test'))?.wasmRules).toEqual([
+      { ruleId: 'wasm_1', name: 'no-prod', sha256: 'a'.repeat(64), priority: 10, mode: 'ENFORCE' },
+    ])
+    expect((await resolvePolicy('ws_test_cache_miss'))?.wasmRules, 'absent stays absent').toBeUndefined()
   })
 
   it('tracks cache entries stats correctly', () => {

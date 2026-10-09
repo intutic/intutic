@@ -529,6 +529,8 @@ describe('ToolCallInterceptor', () => {
           if (verdict instanceof Error) throw verdict
           return verdict
         },
+        syncCloudRules: async () => {},
+        cloudRulesLoaded: () => true,
       }
       return stub as unknown as WasmRunner
     }
@@ -574,6 +576,64 @@ describe('ToolCallInterceptor', () => {
       expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'wasm' })
       expect((decision as { reason: string }).reason).toContain('worker gone')
     })
+  })
+
+  describe("the workspace's control-plane rules", () => {
+    const DESCRIPTORS = [{ ruleId: 'wasm_1', name: 'no-prod', sha256: 'a'.repeat(64), priority: 10, mode: 'ENFORCE' as const }]
+
+    /** A runner whose control-plane rules are loaded or not, recording what it was asked to sync. */
+    function runner(loaded: boolean, synced: unknown[]): WasmRunner {
+      const stub = {
+        evaluate: async () => ({ code: 'allow' }),
+        syncCloudRules: async (descriptors: unknown) => {
+          synced.push(descriptors)
+        },
+        cloudRulesLoaded: () => loaded,
+      }
+      return stub as unknown as WasmRunner
+    }
+
+    class RulesPolicy extends StubPolicyClient {
+      override getWasmRules() {
+        return DESCRIPTORS
+      }
+    }
+
+    it("syncs the runner to the policy's descriptors before evaluating", async () => {
+      const synced: unknown[] = []
+      const interceptor = new ToolCallInterceptor(new RulesPolicy(), emitter, false, 'shell', 'warn', undefined, 'off', {}, runner(true, synced), 'test-ws')
+      expect((await interceptor.decide('Bash', { command: 'ls' })).action).toBe('allow')
+      expect(synced).toEqual([DESCRIPTORS])
+    })
+
+    it.each([
+      ['locally closed', false, undefined],
+      ['closed by the workspace', true, false],
+    ] as Array<[string, boolean, boolean | undefined]>)(
+      'refuses while they have never loaded, %s',
+      async (_name, localFailOpen, workspaceFailOpen) => {
+        const policy = new StubPolicyClient()
+        policy.failOpen = workspaceFailOpen
+        const interceptor = new ToolCallInterceptor(policy, emitter, localFailOpen, 'shell', 'warn', undefined, 'off', {}, runner(false, []), 'test-ws')
+        const decision = await interceptor.decide('Bash', { command: 'ls' })
+        expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'mcpProxyFailBehavior' })
+        expect((decision as { reason: string }).reason).toContain("custom rules have not loaded")
+        expect(emitter.emitted.map((e) => e.kind)).toEqual(['tool_blocked'])
+      },
+    )
+
+    it.each([
+      ['locally open', true, undefined],
+      ['open by the workspace', false, true],
+    ] as Array<[string, boolean, boolean | undefined]>)(
+      'judges the call by the rules that did load while they have not, %s',
+      async (_name, localFailOpen, workspaceFailOpen) => {
+        const policy = new StubPolicyClient()
+        policy.failOpen = workspaceFailOpen
+        const interceptor = new ToolCallInterceptor(policy, emitter, localFailOpen, 'shell', 'warn', undefined, 'off', {}, runner(false, []), 'test-ws')
+        expect((await interceptor.decide('Bash', { command: 'ls' })).action).toBe('allow')
+      },
+    )
   })
 
   describe('anomaly detection (Phase 2)', () => {
