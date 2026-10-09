@@ -11,6 +11,8 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest'
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   ACTION_CLASSIFIER,
   emitJsActionClassifier,
@@ -18,72 +20,28 @@ import {
 } from '../../src/harness/gateBody.js'
 import { NORMALISE_CONTRACT, assertPortableEre } from '../../src/harness/protectedPaths.js'
 
-/** Commands a hold must catch, with the tokens they classify to. */
-const HELD: ReadonlyArray<readonly [string, string]> = [
-  // The plain spellings, still held.
-  ['git push origin main', 'action:deploy'],
-  ['psql -c "DROP TABLE users"', 'action:db_write'],
-  // db_write: what the database reads as a word break.
-  ['psql -c "DROP\tTABLE users"', 'action:db_write'],
-  ['psql -c "DROP  TABLE users"', 'action:db_write'],
-  ['psql -c "DROP\nTABLE users"', 'action:db_write'],
-  ['psql -c "DROP/**/TABLE users"', 'action:db_write'],
-  ['psql -c "DROP /* why */ TABLE users"', 'action:db_write'],
-  ['psql -c "DROP -- why\nTABLE users"', 'action:db_write'],
-  ["printf 'DROP\\nTABLE users' | psql", 'action:db_write'],
-  ['psql -c "DROP \\\nTABLE users"', 'action:db_write'],
-  ['psql -c "INSERT/**/INTO t VALUES (1)"', 'action:db_write'],
-  ['psql -c "DELETE\tFROM t"', 'action:db_write'],
-  ['psql -c "ALTER/**/TABLE t ADD c int"', 'action:db_write'],
-  ['psql -c "UPDATE\tusers SET a = 1"', 'action:db_write'],
-  ['psql -c "TRUNCATE/**/events"', 'action:db_write'],
-  // deploy / publish / release: what the shell reads as a word break.
-  ['kubectl\tapply -f deploy.yaml', 'action:deploy'],
-  ['git  push origin main', 'action:deploy'],
-  ['git \\\npush origin main', 'action:deploy'],
-  ['GIT\tPUSH origin main', 'action:deploy'],
-  ['terraform\tapply -auto-approve', 'action:deploy'],
-  ['helm  upgrade web ./chart', 'action:deploy'],
-  ['gcloud run\tdeploy web', 'action:deploy'],
-  ['docker\tpush registry/web:1', 'action:deploy'],
-  // A long option between the words is still the same command.
-  ['git --no-pager push origin main', 'action:deploy'],
-  ['kubectl --context prod apply -f deploy.yaml', 'action:deploy'],
-  ['npm\tpublish --access public', 'action:publish'],
-  ['docker manifest  push registry/web:1', 'action:publish'],
-  ['gh release\tcreate v1.0.0', 'action:release'],
-  ['git\ttag v1.0.0', 'action:release'],
-  // Two actions in one command are both reported, in needle order.
-  ['psql -c "DROP/**/TABLE t" && git\tpush', 'action:deploy action:db_write'],
-]
-
 /**
- * Near-misses that must stay unheld. Every one of them names a needle's word
- * without the needle: the classifier is about commands, and a hold on a
- * command nobody is running teaches people to disable the hook.
+ * The vectors every command classifier shares — the proxy's actions.rs,
+ * `@intutic/gate`, intutic-clawde and this one — so all of them hold the same
+ * spellings. The hold classifier knows four tokens; a vector that classifies
+ * only to others (`npm\ttest` is a test run) must classify to none here.
  *
- * What the classifier deliberately does NOT avoid, because the rule's intent
- * does not allow it: a needle quoted inside some other command
- * (`echo "drop table"`) is held, as it is at the proxy — a text classifier
- * cannot tell quoting from the shell carrying a statement to a client.
+ * Among the near-misses (`notHeld`), each names a needle's word without the
+ * needle: a hold on a command nobody is running teaches people to disable the
+ * hook. What no classifier avoids, because the rule's intent does not allow
+ * it: a needle quoted inside another command (`echo "drop table"`) is held —
+ * a text classifier cannot tell quoting from the shell carrying a statement to
+ * a client.
  */
-const NOT_HELD: readonly string[] = [
-  'git status',
-  'git log --oneline -5',
-  'gitpush',
-  'git-push origin',
-  'npm run publish-docs',
-  'apt-get update',
-  'npm update',
-  'kubectl get pods',
-  'helm list',
-  'docker pull nginx',
-  'terraform plan',
-  'select * from users',
-  'echo dropped tables',
-  'cat insert_into.sql',
-  'git --version; echo push',
-]
+const VECTORS = JSON.parse(
+  readFileSync(join(__dirname, '../../../../packages/proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8'),
+) as { held: Array<[string, string[]]>; notHeld: string[] }
+const HOLD_TOKENS = new Set(ACTION_CLASSIFIER.map(([a]) => a))
+const forHold = (tokens: string[]) => tokens.filter((t) => HOLD_TOKENS.has(t)).join(' ')
+const HELD: ReadonlyArray<readonly [string, string]> = VECTORS.held
+  .map(([c, t]) => [c, forHold(t)] as const)
+  .filter(([, t]) => t !== '')
+const NOT_HELD: readonly string[] = [...VECTORS.notHeld, ...VECTORS.held.filter(([, t]) => forHold(t) === '').map(([c]) => c)]
 
 /** Runs every command through the emitted bash classifier in one process. */
 function bashActions(commands: readonly string[]): Promise<string[]> {
@@ -124,6 +82,11 @@ beforeAll(async () => {
 })
 
 describe('the hold classifier', () => {
+  it('reads the shared vectors', () => {
+    expect(HELD.length).toBeGreaterThan(20)
+    expect(NOT_HELD.length).toBeGreaterThan(10)
+  })
+
   it('ships patterns every gate dialect reads alike', () => {
     expect(ACTION_CLASSIFIER.map(([a]) => a)).toEqual(['action:deploy', 'action:publish', 'action:release', 'action:db_write'])
     for (const [action, source] of ACTION_CLASSIFIER) {

@@ -97,8 +97,7 @@ HTTP_POST_PATTERNS = [
     "http post",
 ]
 
-# Commands that write to a database. Matched with SQL_GAP standing for each
-# space, not as plain substrings — see matches_sql_any.
+# Commands that write to a database.
 DB_WRITE_PATTERNS = [
     "insert into",
     "update ",
@@ -108,16 +107,27 @@ DB_WRITE_PATTERNS = [
     "alter table",
 ]
 
-# What may separate two SQL keywords: whitespace, a two-character escaped
-# newline, tab or carriage return, a /* ... */ comment, or a -- comment that
-# runs to a newline. Byte-identical to SQL_GAP in actions.rs (the test
-# compares them); see the comment there for why the gap is matched rather
-# than stripped from the text.
-SQL_GAP = r"(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+"
+# What may separate two words of a command or SQL statement: whitespace, a
+# two-character escaped newline, tab or carriage return, a backslash before
+# whitespace (a line continuation), a /* ... */ comment, a -- comment that runs
+# to a newline, or a run of -- long options. Every phrase in the pattern lists
+# above is matched with it standing for each space. Byte-identical to SQL_GAP
+# in actions.rs (the test compares them); see the comment there for why the
+# gap is matched rather than stripped from the text.
+SQL_GAP = r"(?:(?:\s|\\[ntr\s]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+(?:--[^;&|\n]*\s)?|--[^;&|\n]*\s)"
 
-_DB_WRITE_PHRASES = [
-    re.compile(SQL_GAP.join(re.escape(w) for w in p.split(" "))) for p in DB_WRITE_PATTERNS
-]
+
+def _phrases(patterns: list[str]) -> list[re.Pattern[str]]:
+    """A pattern list's phrases as regexes, each space standing for SQL_GAP."""
+    return [re.compile(SQL_GAP.join(re.escape(w) for w in p.split(" "))) for p in patterns]
+
+
+_TEST_PHRASES = _phrases(TEST_PATTERNS)
+_DEPLOY_PHRASES = _phrases(DEPLOY_PATTERNS)
+_PUBLISH_PHRASES = _phrases(PUBLISH_PATTERNS)
+_RELEASE_PHRASES = _phrases(RELEASE_PATTERNS)
+_HTTP_POST_PHRASES = _phrases(HTTP_POST_PATTERNS)
+_DB_WRITE_PHRASES = _phrases(DB_WRITE_PATTERNS)
 
 # Path fragments that indicate credential material.
 #
@@ -204,9 +214,9 @@ def matches_any(haystack: str, patterns: list[str]) -> bool:
     return any(p in haystack for p in patterns)
 
 
-def matches_sql_any(haystack: str) -> bool:
-    """matches_any for DB_WRITE_PATTERNS, tolerant of what separates the keywords."""
-    return any(r.search(haystack) for r in _DB_WRITE_PHRASES)
+def matches_phrase(haystack: str, phrases: list[re.Pattern[str]]) -> bool:
+    """matches_any for a phrase list, whatever separates each phrase's words."""
+    return any(r.search(haystack) for r in phrases)
 
 
 def tool_is(name: str, group: list[str]) -> bool:
@@ -230,13 +240,13 @@ def classify(tool_name: str, tool_input) -> list[str]:
     if tool_is(tool_name, SHELL_TOOLS):
         # Tests first: `make test && git push` is both, and the ordering rule
         # needs the test to be seen as having happened before the deploy.
-        if matches_any(args, TEST_PATTERNS):
+        if matches_phrase(args, _TEST_PHRASES):
             actions.append("run_tests")
-        if matches_any(args, DEPLOY_PATTERNS):
+        if matches_phrase(args, _DEPLOY_PHRASES):
             actions.append("deploy")
-        if matches_any(args, PUBLISH_PATTERNS):
+        if matches_phrase(args, _PUBLISH_PHRASES):
             actions.append("publish")
-        if matches_any(args, RELEASE_PATTERNS):
+        if matches_phrase(args, _RELEASE_PHRASES):
             actions.append("release")
         # Source before sink, so that (secret_read -> http_post) can still fire
         # on a single command that does both.
@@ -244,9 +254,9 @@ def classify(tool_name: str, tool_input) -> list[str]:
             actions.append("secret_read")
         if matches_any(args, PII_PATH_FRAGMENTS):
             actions.append("pii_export")
-        if matches_any(args, HTTP_POST_PATTERNS):
+        if matches_phrase(args, _HTTP_POST_PHRASES):
             actions.append("http_post")
-        if matches_sql_any(args):
+        if matches_phrase(args, _DB_WRITE_PHRASES):
             actions.append("db_write")
 
     return [ACTION_PREFIX + a for a in actions]

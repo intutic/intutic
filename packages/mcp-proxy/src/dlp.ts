@@ -29,14 +29,15 @@ export interface DlpScanResult {
 
 /**
  * What may separate two SQL keywords: whitespace, a two-character escaped
- * newline, tab or carriage return, a block comment, or a `--` comment that runs
- * to a newline. `DROP\s+TABLE` let through either kind of comment between the
- * words, and, matched against the JSON-encoded arguments, a newline too (it is
- * the two characters `\n` there). Byte-identical to `SQL_GAP` in the proxy's
+ * newline, tab or carriage return, a backslash before whitespace (a shell line
+ * continuation), a block comment, a `--` comment that runs to a newline, or a
+ * run of `--` options. `DROP\s+TABLE` let through either kind of comment
+ * between the words, and, matched against the JSON-encoded arguments, a newline
+ * too (it is the two characters `\n` there). Byte-identical to `SQL_GAP` in the proxy's
  * `actions.rs` (a test compares them), where the comment explains why the gap
  * is matched rather than stripped from the text.
  */
-const SQL_GAP = String.raw`(?:\s|\\[ntr]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+`
+const SQL_GAP = String.raw`(?:(?:\s|\\[ntr\s]|/\*(?:[^*]|\*+[^*/])*\*+/|--(?:[^\n\\]|\\[^n\n])*(?:\n|\\n))+(?:--[^;&|\n]*\s)?|--[^;&|\n]*\s)`
 
 const sqlStatement = (...keywords: string[]): RegExp => new RegExp(keywords.join(SQL_GAP), 'i')
 

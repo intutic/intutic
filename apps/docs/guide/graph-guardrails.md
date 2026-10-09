@@ -530,12 +530,13 @@ manifest inline, ranked by risk rather than by when they were held.
 Entries can be action tokens (`action:deploy`, `action:publish`,
 `action:release`, `action:db_write`) or raw tool names (`Write`, `Bash`).
 
-A hook gate reads an action token off the shell command's words, whatever
-separates them: spaces, tabs, a line continuation, a `--` long option, a SQL
-comment or an escaped `\n`. `git push` with a tab between the words,
-`kubectl --context prod apply` and `DROP/**/TABLE users` are held like their
-plain spellings. It does not undo shell quoting, variables or aliases, and a
-statement quoted inside another command (`echo "drop table"`) counts.
+A hook gate, and the proxy after it, reads an action token off the shell
+command's words, whatever separates them: spaces, tabs, a line continuation, a
+`--` long option, a SQL comment or an escaped `\n`. `git push` with a tab
+between the words, `kubectl --context prod apply` and `DROP/**/TABLE users`
+are held like their plain spellings. Neither undoes shell quoting, variables
+or aliases, and a statement quoted inside another command (`echo "drop
+table"`) counts.
 
 **Nothing is ever held unless you declare it.** There is no heuristic here and
 no threshold — a run stops only because an SOP said this action needs a person.
