@@ -254,8 +254,16 @@ One choice that sets several settings at once, in two groups, **Security** and *
 
 **Saved Response Cache**
 
-*   **Exact Query Match Caching** — serves cached answers for identical queries.
-*   **Semantic Match Caching** — serves cached answers for conceptually equivalent queries.
+*   **Exact Query Match Caching** — serves the cached answer to an identical request.
+*   **Semantic Match Caching** — serves the cached answer to a reworded question asked in the same context.
+
+An exact match compares the whole request: the model, every message (assistant turns, tool calls and tool results included), the system prompt, the tools and tool choice, the response format, and every sampling parameter (`temperature`, `top_p`, `top_k`, `max_tokens`, stop sequences, `seed`). Only fields that cannot change the answer are ignored: `stream`, `stream_options`, `metadata`, `user`, `store`, `safety_identifier` and `prompt_cache_key`. A streamed request and the same request unstreamed share an entry, and a hit is served in the mode and wire format the client asked for.
+
+A semantic match is narrower. It applies only to a single plain-text exchange with no tools declared: system or developer messages and the user's question, nothing else. Only the question is compared by similarity; the model, the system prompt and the parameters must match exactly. A conversation with assistant turns, tool calls, tool results, images or other non-text content is matched exactly or not at all.
+
+Some responses are never stored, because a hit replays plain text and these would lose what the client acts on: a response that called a tool or carried anything besides text (thinking, reasoning items, more than one choice), a response output DLP redacted or withheld, and a stream that ended early or was refused by policy. Two kinds of request skip the cache entirely: requests for more than one choice (`n` above 1), and Responses API requests without `"store": false`, which the provider keeps so the client can continue them with `previous_response_id` — a replayed answer would carry an id the provider never issued.
+
+Entries are per workspace and expire after 24 hours.
 
 The cache figures are **Cached answers**, **Cache hit rate** (exact and similar hits) and **Saved (USD)**.
 

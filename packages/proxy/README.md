@@ -25,7 +25,7 @@ The proxy processes every request through an ordered plugin chain:
 | Budget Gate | Enforce per-ticket and per-team token budgets |
 | DLP Gate | Block or redact sensitive data (secrets, PII, credentials) |
 | PCAS Gate | Prior Consent and Autonomy Scope enforcement |
-| Semantic Cache | Deduplicate semantically similar prompts via Valkey |
+| Response Cache | Replay the answer to an identical request (exact match, Valkey), or to a reworded plain-text question in the same context (semantic match, TurboVec) |
 | SOP Prompt Injector | Inject workspace governance SOPs into system prompts |
 
 ### Model Selection
