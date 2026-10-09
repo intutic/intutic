@@ -42,7 +42,7 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness cl
 ## Example `claude_desktop_config.json`
 
 ### 1. Standalone Governance Server Mode
-Exposes Intutic governance tools (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`) directly to Claude Desktop:
+Exposes Intutic governance tools (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`, `intutic_hold_status`, `intutic_mcp_registry_status`, `intutic_mcp_budget_remaining`) directly to Claude Desktop:
 
 ```json
 {

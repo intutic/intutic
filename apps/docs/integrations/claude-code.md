@@ -140,7 +140,7 @@ Since Claude Code's CLI natively intercepts prompts starting with `/` at the she
 To configure the same entries by hand, add them to `~/.claude.json`:
 
 ### 1. Standalone Governance Server Mode
-Exposes Intutic governance status and SOP tools (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`) to Claude Code CLI:
+Exposes Intutic governance tools (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`, `intutic_hold_status`, `intutic_mcp_registry_status`, `intutic_mcp_budget_remaining`) to Claude Code CLI:
 
 ```json
 {

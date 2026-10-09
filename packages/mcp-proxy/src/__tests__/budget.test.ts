@@ -17,6 +17,7 @@ import { ToolCallInterceptor } from '../interceptor.js'
 import { PolicyClient, UNRESTRICTED_REGISTRY, type McpPrincipal, type McpRegistryPolicy, type SopRule } from '../policy.js'
 import { GovernanceEmitter, type DetectionFinding, type EventKind } from '../emitter.js'
 import { fallbackBudgetCaller } from '../proxy.js'
+import { budgetRemaining } from '../agentTools.js'
 
 const VALKEY_URL = process.env['VALKEY_URL'] ?? process.env['REDIS_URL'] ?? 'redis://127.0.0.1:6379'
 
@@ -118,6 +119,32 @@ describe('MCP call budgets against Valkey', () => {
     }
     return { ws, a: make(), b: make() }
   }
+
+  // The `intutic` MCP server reports what the proxies counted, reading the
+  // same counters without counting anything itself.
+  it('reports what is left of each budget from the counters the proxies wrote', async ({ skip }) => {
+    if (!available) skip()
+    const clock = new Clock(T0)
+    const { ws, a } = twoProxies(clock, 'key:vk_test')
+    const perDev: McpBudget = { id: 'per-dev', scope: 'member', period: 'day', limit: 5 }
+    const someoneElse: McpBudget = { id: 'just-mem-2', scope: 'member', memberId: 'mem_2', period: 'day', limit: 1 }
+    const policy = policyOf(serverBudget, perDev, someoneElse)
+    await a.check(policy, 'list_issues', null)
+    await a.check(policy, 'list_issues', null)
+
+    const valkey = new GuardedValkey(VALKEY_URL, { timeoutMs: 1000 })
+    connections.push(valkey)
+    const store = new ValkeyBudgetStore(valkey)
+    const read = (keys: string[]) => store.used(keys)
+    const report = await budgetRemaining(policy, ws, { memberId: null, fallback: 'key:vk_test' }, read, clock.ms)
+
+    expect(report).toEqual([
+      { budgetId: 'gh-hourly', counts: 'calls to github: 3 per hour', period: 'hour', limit: 3, used: 2, remaining: 1, resetAt: '2026-10-08T15:00:00.000Z' },
+      { budgetId: 'per-dev', counts: 'MCP calls by each member: 5 per day', period: 'day', limit: 5, used: 2, remaining: 3, resetAt: '2026-10-09T00:00:00.000Z' },
+    ])
+    // Reading counted nothing.
+    expect((await budgetRemaining(policy, ws, { memberId: null, fallback: 'key:vk_test' }, read, clock.ms))[0]!.used).toBe(2)
+  })
 
   it('shares one counter between two proxies and refuses the call over the limit', async ({ skip }) => {
     if (!available) skip()
