@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 393 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 398 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -816,6 +816,14 @@ Every route the control plane serves: 393 routes, grouped by the source file tha
 | GET | `/api/v1/gateways/:id/status` | Authenticated |  |
 | PATCH | `/api/v1/workspace/gateway` | OWNER/ADMIN |  |
 | GET | `/api/v1/workspace/gateway-resolution` | Authenticated |  |
+
+### `githubWebhooks.ts` <Badge type="warning" text="Biz Org+" />
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/integrations/github/webhook` | OWNER/ADMIN | The webhook's payload URL and when its secret was made |
+| POST | `/api/v1/integrations/github/webhook/secret` | OWNER/ADMIN | Make the webhook, or replace its secret; the secret is returned once |
+| POST | `/api/v1/webhooks/github/:hookId` | GitHub signature (`X-Hub-Signature-256`) | Receives GitHub pull_request events, signed with the workspace's secret |
 
 ### `governanceCards.ts` <Badge type="tip" text="Cloud" />
 
@@ -1298,19 +1306,21 @@ Every route the control plane serves: 393 routes, grouped by the source file tha
 | GET | `/api/v1/trust-scores` | Authenticated | All trust scores for a workspace |
 | GET | `/api/v1/trust-scores/:userId` | Authenticated | Single user trust score |
 
-### `usage.ts` <Badge type="tip" text="Cloud" />
+### `usage.ts` <Badge type="warning" text="Biz Org+" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/usage/branches` | Authenticated | <Badge type="warning" text="Biz Org+" /> Usage per repository and branch |
-| POST | `/api/v1/usage/classify` | Authenticated | Classify tokens as USEFUL or WASTED |
-| GET | `/api/v1/usage/commits` | Authenticated | <Badge type="warning" text="Biz Org+" /> Usage per HEAD commit |
-| GET | `/api/v1/usage/events` | Authenticated | Paginated raw execution trace events |
-| GET | `/api/v1/usage/members` | Authenticated | <Badge type="warning" text="Biz Org+" /> Per-developer usage (own row only below EM) |
-| GET | `/api/v1/usage/models` | Authenticated | Per-model cost breakdown |
-| GET | `/api/v1/usage/summary` | Authenticated | Aggregated usage summary by period |
-| GET | `/api/v1/usage/teams` | OWNER/ADMIN/EM | <Badge type="warning" text="Biz Org+" /> Per-team usage by SCIM group |
-| GET | `/api/v1/usage/virtual-keys` | Authenticated | Per-virtual-key cost breakdown (Wave 9) |
+| GET | `/api/v1/usage/branches` | Authenticated | Usage per repository and branch |
+| POST | `/api/v1/usage/classify` | Authenticated | <Badge type="tip" text="Cloud" /> Classify tokens as USEFUL or WASTED |
+| GET | `/api/v1/usage/commits` | Authenticated | Usage per HEAD commit |
+| GET | `/api/v1/usage/events` | Authenticated | <Badge type="tip" text="Cloud" /> Paginated raw execution trace events |
+| GET | `/api/v1/usage/members` | Authenticated | Per-developer usage (own row only below EM) |
+| GET | `/api/v1/usage/models` | Authenticated | <Badge type="tip" text="Cloud" /> Per-model cost breakdown |
+| GET | `/api/v1/usage/pull-requests` | Authenticated | Usage per GitHub pull request |
+| POST | `/api/v1/usage/pull-requests/refresh` | OWNER/ADMIN/EM | Look up the branches' pull requests on GitHub now |
+| GET | `/api/v1/usage/summary` | Authenticated | <Badge type="tip" text="Cloud" /> Aggregated usage summary by period |
+| GET | `/api/v1/usage/teams` | OWNER/ADMIN/EM | Per-team usage by SCIM group |
+| GET | `/api/v1/usage/virtual-keys` | Authenticated | <Badge type="tip" text="Cloud" /> Per-virtual-key cost breakdown (Wave 9) |
 
 ### `users.ts` <Badge type="tip" text="Cloud" />
 

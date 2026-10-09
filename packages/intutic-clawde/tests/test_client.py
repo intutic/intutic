@@ -229,6 +229,56 @@ def test_chat_treats_a_200_the_proxy_names_as_a_refusal_as_one(mock_post):
     assert events == [{"verdict": "kill", "code": "COST_GATE_EXCEEDED", "status": 200, "message": explanation}]
 
 
+@pytest.mark.parametrize("code,rule_id", [
+    ("TOOL_DENIED", "deny_tools.Bash"),
+    ("SSO_GROUP", "sso_group.high_risk.Bash"),
+    ("SQL_GUARD", "sql_guard.sql_allow_dsns"),
+    ("RESPONSE_UNPARSEABLE", "response_gate.fail_closed"),
+    ("OUTPUT_DLP", "dlp.aws_access_key"),
+])
+@patch("requests.post")
+def test_chat_raises_a_withheld_answer_with_its_rule_id(mock_post, code, rule_id):
+    # The proxy's response gate withholds a tool call the model made and puts
+    # the reason in its place. That 200 used to come back as allow.
+    reason = f"[Intutic] Blocked: {code}"
+    mock_post.return_value = _reply(
+        200,
+        {"choices": [{"message": {"role": "assistant", "content": reason}}]},
+        {"x-intutic-refusal": code, "x-intutic-refusal-rule": rule_id},
+    )
+    client = ClawdeClient(api_key="test-key")
+    events = []
+    client.on("kill", events.append)
+
+    with pytest.raises(ClawdeBlockedError) as exc:
+        client.chat("gpt-4o", [{"role": "user", "content": "hello"}])
+
+    assert (exc.value.verdict, exc.value.code, exc.value.status, exc.value.rule_id) == ("kill", code, 200, rule_id)
+    assert str(exc.value) == reason
+    assert events == [{"verdict": "kill", "code": code, "status": 200, "message": reason, "rule_id": rule_id}]
+
+
+@patch("requests.post")
+def test_chat_raises_a_refusal_a_stream_names_not_a_connection_error(mock_post):
+    reason = "[Intutic] Blocked tool call: Bash."
+    stream = (
+        'data: {"choices":[{"index":0,"delta":{"content":"Let me look."}}]}\n\n'
+        + ": intutic-refusal " + json.dumps({"code": "TOOL_DENIED", "rule": "deny_tools.Bash", "message": reason})
+        + "\n\ndata: [DONE]\n\n"
+    )
+    res = _reply(200, None, {"content-type": "text/event-stream"})
+    res.text = stream
+    res.json.side_effect = ValueError("not JSON")
+    mock_post.return_value = res
+    client = ClawdeClient(api_key="test-key")
+
+    with pytest.raises(ClawdeBlockedError) as exc:
+        client.chat("gpt-4o", [{"role": "user", "content": "hello"}], stream=True)
+
+    assert (exc.value.code, exc.value.status, exc.value.rule_id) == ("TOOL_DENIED", 200, "deny_tools.Bash")
+    assert str(exc.value) == reason
+
+
 @patch("time.sleep")
 @patch("requests.post")
 def test_chat_retries_a_5xx(mock_post, _sleep):

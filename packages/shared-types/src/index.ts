@@ -394,6 +394,13 @@ export type {
   BranchUsageResponse,
   CommitUsage,
   CommitUsageResponse,
+  PullRequestState,
+  PullRequestUsage,
+  PullRequestSources,
+  PullRequestUsageResponse,
+  PullRequestRefreshResult,
+  GitHubWebhookInfo,
+  GitHubWebhookSecret,
 } from './usage.js'
 export { normalizeGitRemote } from './gitRemote.js'
 

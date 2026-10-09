@@ -24,11 +24,13 @@ contract, records a hold for **Findings › Review Queue › Held Changes**, and
 same call through once it is approved (`intutic decision approve <holdId>` or
 Slack) while the workspace's review-hold bypass is on (short TTL); otherwise the
 approval records the decision. The n8n workflow hook and the Open WebUI prompt filter
-refuse a hold outright — neither runs in a workspace that could record one.
+refuse a hold outright — neither runs in a workspace that could record one. The in-process
+SDK gates (`@intutic/gate`, `intutic_clawde.gate`) hold the call the same way, recording it
+through the decisions API themselves; see [Holds](/reference/gate-sdk#holds).
 
 ### Vector D — Response Gate {#vector-d--response-gate}
 
-The response gate (`response_gate.rs`, open-core, default-on) is the product's only harness-agnostic **pre-execution** tool gate: because every response byte passes through the proxy before the client sees it, a denied tool call is refused before it ever reaches the harness's tool runner — no per-harness hook, no harness cooperation. It understands the Anthropic (`tool_use` blocks), OpenAI chat-completions (`tool_calls[]`), and OpenAI Responses (`function_call` output items) wire shapes, on both streaming and non-streaming paths. When a call is withheld, the agent receives an explicit in-band message that the call never ran, so it does not blindly retry.
+The response gate (`response_gate.rs`, open-core, default-on) is the product's only harness-agnostic **pre-execution** tool gate: because every response byte passes through the proxy before the client sees it, a denied tool call is refused before it ever reaches the harness's tool runner — no per-harness hook, no harness cooperation. It understands the Anthropic (`tool_use` blocks), OpenAI chat-completions (`tool_calls[]`), and OpenAI Responses (`function_call` output items) wire shapes, on both streaming and non-streaming paths. When a call is withheld, the agent receives an explicit in-band message that the call never ran, so it does not blindly retry, and an SDK reads the refusal's code and rule from the `x-intutic-refusal` headers or, on a stream, a `: intutic-refusal` comment line (see [clawde SDK](/reference/clawde-sdk#_5-verdicts-and-errors)).
 
 It is fail-closed within a deliberate scope: the gate is inert unless the active role has a non-empty tool deny list; within that scope, a non-streaming body that will not parse as JSON is refused rather than forwarded (`fail_closed`, default `true`).
 

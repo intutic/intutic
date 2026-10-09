@@ -9,7 +9,8 @@
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
 import * as node_fs from 'node:fs/promises'
-import { DisconnectPlan } from './plan.js'
+import { DisconnectPlan, reverseOwnedFile } from './plan.js'
+import { BUNDLED_SKILLS } from '../skillWriter.js'
 import { HARNESS_REVERSERS, type DisconnectContext } from './harnesses.js'
 import { forgetOriginal, forgetProxyUrls, knownProxyUrls, pruneLedger, recordedFiles } from './originals.js'
 import { proxyUrlMatcher, proxyUrlsInWorkspace } from './recognise.js'
@@ -53,6 +54,15 @@ export async function planDisconnect(options: DisconnectOptions): Promise<Discon
   }
 
   if (full) {
+    // The agent skills connect wrote into each workspace. Only a copy the
+    // ledger says connect created is removed, and only while unedited: a
+    // skill the user downloaded, or one an earlier connect wrote without a
+    // record, is theirs to keep.
+    for (const root of roots) {
+      for (const skill of BUNDLED_SKILLS) {
+        await reverseOwnedFile(plan, node_path.join(root, skill.path), root, () => false)
+      }
+    }
     const hooks = node_path.join(home, '.intutic', 'hooks')
     for (const name of GATE_CACHES) {
       const file = node_path.join(hooks, name)

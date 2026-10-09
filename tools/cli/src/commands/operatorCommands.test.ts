@@ -1,6 +1,6 @@
 /**
  * The operator commands (`settings`, `mcp`, `notifications`, `siem`,
- * `compliance coverage`, `usage`, `inventory`, `gate-liveness`) against a
+ * `compliance coverage`, `usage`, `github webhook`, `inventory`, `gate-liveness`) against a
  * mocked control plane: each sends the request its route expects, prints the
  * response as JSON with `--json`, and on an error response prints the
  * server's message and exits 1.
@@ -38,7 +38,8 @@ import {
   runSiemRotateSecret,
 } from './siem.js'
 import { runComplianceCoverage } from './compliance.js'
-import { runUsageMembers, runUsageTeams, runUsageBranches, runUsageCommits } from './usage.js'
+import { runUsageMembers, runUsageTeams, runUsageBranches, runUsageCommits, runUsagePullRequests } from './usage.js'
+import { runGithubWebhookShow, runGithubWebhookRotateSecret } from './github.js'
 import { runInventorySummary, runInventoryHarnesses, runInventoryMcpServers } from './inventory.js'
 import { runGateLiveness } from './gateLiveness.js'
 
@@ -440,6 +441,70 @@ describe('intutic usage', () => {
   it('prints the server\'s plan refusal', async () => {
     fetchMock.mockReturnValue(reply(403, UPGRADE))
     await expectFailure(() => runUsageMembers({ period: 'monthly' }), 'Upgrade required')
+  })
+})
+
+describe('intutic usage pull-requests', () => {
+  const TOTALS = { totalCostUsd: 4.25, totalRawCostUsd: 5, totalInputTokens: 1000, totalOutputTokens: 200, traceCount: 12 }
+  const github = { connector: true, webhook: false, apiHost: 'github.com', noAccessRepos: [] as string[], mappedPullRequests: 1, lastCheckedAt: null }
+  const pr = {
+    repo: 'github.com/acme/app', number: 7, title: 'Retry checkout', author: 'priya', state: 'merged', headBranch: 'feat/retry', baseBranch: 'main',
+    url: 'https://github.com/acme/app/pull/7', openedAt: 'x', mergedAt: 'y', closedAt: 'y', memberCount: 2, firstCallAt: 'x', lastCallAt: 'y', ...TOTALS,
+  }
+
+  it('prints each pull request with its cost', async () => {
+    fetchMock.mockReturnValue(reply(200, { scope: 'workspace', github, pullRequests: [pr] }))
+    await runUsagePullRequests({ period: 'daily' })
+    expect(sent().url).toBe(`${BASE}/api/v1/usage/pull-requests?period=daily`)
+    expect(printed()).toContain('github.com/acme/app#7 Retry checkout [merged]')
+    expect(printed()).toContain('$4.2500')
+    expect(printed()).toContain('2 developers')
+  })
+
+  it('--refresh looks the branches up first, then reads; --json prints the usage response only', async () => {
+    const body = { scope: 'workspace', github, pullRequests: [pr] }
+    fetchMock
+      .mockReturnValueOnce(reply(200, { checked: 3, notModified: 2, pullRequests: 1, noAccess: 0, rateLimited: false }))
+      .mockReturnValueOnce(reply(200, body))
+    await runUsagePullRequests({ period: 'monthly', refresh: true, json: true })
+    expect(sent(0)).toMatchObject({ url: `${BASE}/api/v1/usage/pull-requests/refresh`, method: 'POST' })
+    expect(sent(1).url).toBe(`${BASE}/api/v1/usage/pull-requests?period=monthly`)
+    expect(JSON.parse(String(logSpy.mock.calls[0]![0]))).toEqual(body)
+  })
+
+  it('says what is missing when there is nothing to show', async () => {
+    fetchMock.mockReturnValueOnce(reply(200, { scope: 'workspace', github: { ...github, connector: false }, pullRequests: [] }))
+    await runUsagePullRequests({ period: 'monthly' })
+    expect(printed()).toContain('No GitHub connection')
+
+    fetchMock.mockReturnValueOnce(reply(200, { scope: 'workspace', github: { ...github, mappedPullRequests: 0, noAccessRepos: ['github.com/acme/private'] }, pullRequests: [] }))
+    await runUsagePullRequests({ period: 'monthly' })
+    expect(printedError() + printed()).toContain('Pull requests: Read')
+  })
+})
+
+describe('intutic github webhook', () => {
+  it('show prints the payload URL, or how to set it up', async () => {
+    fetchMock.mockReturnValueOnce(reply(200, { configured: false, url: null, createdAt: null, secretRotatedAt: null, lastDeliveryAt: null }))
+    await runGithubWebhookShow({})
+    expect(sent().url).toBe(`${BASE}/api/v1/integrations/github/webhook`)
+    expect(printed()).toContain('rotate-secret')
+
+    fetchMock.mockReturnValueOnce(reply(200, { configured: true, url: 'https://api.test.invalid/api/v1/webhooks/github/ghh_1', createdAt: 'x', secretRotatedAt: 'x', lastDeliveryAt: null }))
+    await runGithubWebhookShow({})
+    expect(printed()).toContain('https://api.test.invalid/api/v1/webhooks/github/ghh_1')
+  })
+
+  it('rotate-secret prints the secret once, with the URL', async () => {
+    fetchMock.mockReturnValue(reply(201, { url: 'https://api.test.invalid/api/v1/webhooks/github/ghh_1', secret: 'abc123' }))
+    await runGithubWebhookRotateSecret({})
+    expect(sent()).toMatchObject({ url: `${BASE}/api/v1/integrations/github/webhook/secret`, method: 'POST' })
+    expect(printed()).toContain('abc123')
+  })
+
+  it('prints the server\'s role refusal', async () => {
+    fetchMock.mockReturnValue(reply(403, { error: 'Forbidden' }))
+    await expectFailure(() => runGithubWebhookRotateSecret({}), 'Forbidden')
   })
 })
 

@@ -371,7 +371,9 @@ that login.
 1. Starts Valkey if none is running (connected mode needs it), and spawns a managed proxy if
    nothing is listening on the proxy port (the port of `INTUTIC_PROXY_URL`, else `4000`).
 2. Seeds the policy snapshot (`~/.intutic/hooks/policy-snapshot.rules`) so the harness gates
-   enforce workspace policy from the first tool call.
+   enforce workspace policy from the first tool call, and writes the
+   [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) agent skills into
+   `.agents/skills/` when they are missing.
 3. Every `--interval`, and whenever the control plane pushes a change, fetches the workspace
    config and writes each detected harness's config file from the workspace SOPs plus the local
    SOP folders under `.intutic/sops/`, then refreshes the policy snapshot.
@@ -489,6 +491,7 @@ intutic disconnect [options]
 - **Proxy routing**: base URLs and proxy settings connect pointed at the proxy (Codex `openai_base_url`, Continue `apiBase`, Goose `provider.host`, Grok `base_url`, Pi and OpenHands base URLs, Aider `openai-api-base`, Windsurf `http.proxy`, the JetBrains IDE proxy for the Windsurf plugin, dsh's `llm-deepseek` route) go back to the values they had.
 - **MCP servers**: each server connect wrapped gets its original entry back, every key included; the `intutic` server connect added is removed; and the copies of approved `.mcp.json` servers connect added to `~/.claude.json` are removed.
 - **What connect replaced or removed** comes back: the Claude Code `permissions.deny` rules connect replaced, and Aider's `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint`.
+- **Agent skills** (without `--harness`): the [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) skills connect wrote into `.agents/skills/`, unless you have edited them. A copy that was there before connect, or that an earlier version of connect wrote, stays.
 
 Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted in the macOS login keychain, the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
 
@@ -3363,6 +3366,68 @@ intutic usage commits [--period <period>] [options]
 
 **What it does:**
 Groups calls by the commit checked out when each was made: the work that led to the next commit. Scoped like `intutic usage members`.
+
+---
+
+## `intutic usage pull-requests` <Badge type="warning" text="Biz Org+" />
+
+LLM usage per GitHub pull request.
+
+```bash
+intutic usage pull-requests [--period <period>] [--refresh] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--period <period>` | `daily` or `monthly`; default `monthly` |
+| `--refresh` | Look the branches up on GitHub first, instead of waiting for the next scheduled lookup (OWNER, ADMIN or EM) |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints each pull request's cost, calls, tokens and developers: the calls on its branch from the previous pull request on that branch (or the branch's first call) until it was merged or closed. Pull requests come from a GitHub source's token or the pull-request webhook. When there is nothing to show, the output says what is missing: a GitHub connection, the token's permission to read pull requests, or any pull request yet. Scoped like `intutic usage members`. See [Cost per pull request](/guide/budgets#cost-per-pull-request).
+
+---
+
+## `intutic github webhook show` <Badge type="warning" text="Biz Org+" />
+
+The workspace's GitHub pull-request webhook.
+
+```bash
+intutic github webhook show [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints the payload URL to paste into GitHub, when the secret was made and when the last delivery arrived, or that the webhook is not set up. The secret itself is never shown here. You need the OWNER or ADMIN role.
+
+---
+
+## `intutic github webhook rotate-secret` <Badge type="warning" text="Biz Org+" />
+
+Make the pull-request webhook, or replace its secret.
+
+```bash
+intutic github webhook rotate-secret [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints the payload URL and a new signing secret, once. The URL stays the same when the secret is replaced; deliveries signed with the old secret are refused from then on, so paste the new one into the webhook on GitHub straight away. You need the OWNER or ADMIN role.
 
 ---
 

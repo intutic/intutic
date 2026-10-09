@@ -46,7 +46,7 @@ class FakeGate extends Gate {
   }
   override async guard(toolName: string, toolInput: Record<string, unknown>): Promise<void> {
     this.calls.push({ toolName, toolInput })
-    if (this.refuse) throw new IntuticGateRefusal('nope', 'TEST')
+    if (this.refuse) throw new IntuticGateRefusal('nope', 'SNAPSHOT')
   }
 }
 
@@ -96,7 +96,7 @@ describe('intuticHooks: refusal path', () => {
     expect(result!.output).toMatchObject({
       error: true,
       message: expect.stringContaining('[Intutic Governance] BLOCKED:'),
-      code: 'TEST',
+      code: 'SNAPSHOT',
     })
   })
 

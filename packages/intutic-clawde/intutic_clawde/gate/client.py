@@ -5,10 +5,12 @@ Endpoints used:
   POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?}
   POST /api/v1/hook-events     batched telemetry       -> creates governance_incidents rows
   POST /api/v1/judge/finalize  LLM judge verdict       -> {verdict, triggered, ...}
-  POST /api/v1/decisions       review queue (advisory) -> renders on /decisions
+  POST /api/v1/decisions       record a hold           -> joins the review queue (hold.py)
+  GET  /api/v1/decisions/approved-bypasses             -> approvals that let a held call through
 
-Uses `requests`, like the rest of this package, through a small injectable
-`transport` so tests can stub the wire without a server.
+Uses `requests`, like the rest of this package, through small injectable
+`transport` (POST) and `get_transport` (GET) functions so tests can stub the
+wire without a server.
 
 Two behaviours that must not be "improved":
 
@@ -44,22 +46,34 @@ VALID_EVENTS = {
     "tool_blocked", "tool_allowed", "tool_flagged", "tool_would_block",
     "config_tamper", "network_bypass", "guards_disabled",
     "snapshot_absent", "snapshot_stale", "snapshot_invalid", "snapshot_empty",
+    "tool_held", "hold_approved_bypass_used",
 }
 
 REASON_MAX = 512   # control plane truncates at 512; do it here so logs match
 
 # transport(url, body, headers, timeout) -> (status_code, parsed_json_or_{})
 Transport = Callable[[str, Dict[str, Any], Dict[str, str], float], Tuple[int, Dict[str, Any]]]
+# get_transport(url, headers, timeout) -> (status_code, parsed_json_or_{})
+GetTransport = Callable[[str, Dict[str, str], float], Tuple[int, Dict[str, Any]]]
+
+
+def _parsed(res: requests.Response) -> Dict[str, Any]:
+    try:
+        return res.json() if res.text else {}
+    except ValueError:
+        return {}
 
 
 def _requests_transport(url: str, body: Dict[str, Any],
                         headers: Dict[str, str], timeout: float) -> Tuple[int, Dict[str, Any]]:
     res = requests.post(url, json=body, headers=headers, timeout=timeout)
-    try:
-        parsed = res.json() if res.text else {}
-    except ValueError:
-        parsed = {}
-    return res.status_code, parsed
+    return res.status_code, _parsed(res)
+
+
+def _requests_get_transport(url: str, headers: Dict[str, str],
+                            timeout: float) -> Tuple[int, Dict[str, Any]]:
+    res = requests.get(url, headers=headers, timeout=timeout)
+    return res.status_code, _parsed(res)
 
 
 @dataclass
@@ -82,7 +96,8 @@ class GateClient:
                  workspace_id: str = "", session_id: str = "",
                  harness: str = "langgraph", fail_closed: bool = True,
                  timeout: float = DEFAULT_TIMEOUT,
-                 transport: Optional[Transport] = None):
+                 transport: Optional[Transport] = None,
+                 get_transport: Optional[GetTransport] = None):
         self.base_url = (base_url or os.environ.get("INTUTIC_CONTROL_PLANE_URL")
                          or "https://api.intutic.ai").rstrip("/")
         self.api_key = api_key
@@ -92,6 +107,7 @@ class GateClient:
         self.fail_closed = fail_closed
         self.timeout = timeout
         self.transport = transport or _requests_transport
+        self.get_transport = get_transport or _requests_get_transport
 
     def _post(self, path: str, body: Dict[str, Any], timeout: float) -> Dict[str, Any]:
         headers = {
@@ -100,6 +116,16 @@ class GateClient:
             "X-Workspace-Id": self.workspace_id,
         }
         status, parsed = self.transport(self.base_url + path, body, headers, timeout)
+        if not 200 <= status < 300:
+            raise requests.HTTPError(f"HTTP {status} from {path}")
+        return parsed
+
+    def _get(self, path: str, timeout: float) -> Dict[str, Any]:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "X-Workspace-Id": self.workspace_id,
+        }
+        status, parsed = self.get_transport(self.base_url + path, headers, timeout)
         if not 200 <= status < 300:
             raise requests.HTTPError(f"HTTP {status} from {path}")
         return parsed
@@ -258,26 +284,28 @@ class GateClient:
 
     # ----------------------------------------------------------- decisions
 
-    def hold_for_review(self, hold_id: str, tool_name: str, reason: str) -> bool:
-        """Add an entry to the Review Queue at /findings/review.
-
-        Observe-only: routes/decisions.ts is explicit that this blocks nothing.
-        It is a display surface for a block that already happened elsewhere.
-        `reason` is the one free-form field (1-512 chars) we control.
-        """
+    def record_hold(self, hold: Dict[str, Any]) -> bool:
+        """Record one hold in the review queue (`POST /api/v1/decisions`), the
+        way the hook gates' records reach it. Never raises; False when the
+        control plane did not accept it, so the refusal can say there is
+        nothing to approve yet."""
         try:
-            self._post("/api/v1/decisions", {"holds": [{
-                "v": 1,
-                "holdId": hold_id,
-                "tool": tool_name,
-                "reason": (reason or "")[:REASON_MAX],
-                "sessionId": self.session_id,
-                "workspaceId": self.workspace_id,
-                "at": datetime.now(timezone.utc).isoformat(),
-            }]}, self.timeout)
-            return True
+            d = self._post("/api/v1/decisions", {"holds": [hold]}, self.timeout)
+            return d.get("accepted") == 1
         except Exception:
             return False
+
+    def approved_bypasses(self) -> Optional[list]:
+        """The workspace's approved bypasses
+        (`GET /api/v1/decisions/approved-bypasses`), or None when they cannot
+        be read. Never raises: a hold that cannot be checked for an approval
+        stays held."""
+        try:
+            d = self._get("/api/v1/decisions/approved-bypasses", self.timeout)
+        except Exception:
+            return None
+        bypasses = d.get("bypasses")
+        return bypasses if isinstance(bypasses, list) else None
 
     # ------------------------------------------------------------- factory
 

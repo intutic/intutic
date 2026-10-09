@@ -90,7 +90,7 @@ class FakeGate extends Gate {
   }
   override async guard(toolName: string, toolInput: Record<string, unknown>): Promise<void> {
     this.calls.push({ toolName, toolInput })
-    if (this.mode === 'refuse') throw new IntuticGateRefusal('nope', 'TEST')
+    if (this.mode === 'refuse') throw new IntuticGateRefusal('nope', 'SNAPSHOT')
     if (this.mode === 'crash') throw new TypeError('boom')
   }
 }
@@ -286,7 +286,7 @@ describe('intuticToolGuardrail: refusal path', () => {
     })
     const message = '[Intutic Governance] BLOCKED: nope'
     expect(output.behavior).toEqual({ type: 'rejectContent', message })
-    expect(output.outputInfo).toEqual({ code: 'TEST', incidentId: undefined })
+    expect(output.outputInfo).toEqual({ code: 'SNAPSHOT', incidentId: undefined })
     // Same shape the SDK's own factory produces — the runner treats both
     // identically.
     expect(output.behavior).toEqual(ToolGuardrailFunctionOutputFactory.rejectContent(message).behavior)

@@ -75,7 +75,7 @@ class FakeGate extends Gate {
   }
   override async guard(toolName: string, toolInput: Record<string, unknown>): Promise<void> {
     this.calls.push({ toolName, toolInput })
-    if (this.mode === 'refuse') throw new IntuticGateRefusal('nope', 'TEST')
+    if (this.mode === 'refuse') throw new IntuticGateRefusal('nope', 'SNAPSHOT')
     if (this.mode === 'crash') throw new TypeError('boom')
   }
 }
@@ -235,7 +235,7 @@ describe('intuticApprovalResponder: deny path', () => {
   it('evaluates each request independently — one denial does not poison the rest', async () => {
     class SelectiveGate extends Gate {
       override async guard(toolName: string): Promise<void> {
-        if (toolName === 'bad') throw new IntuticGateRefusal('nope', 'TEST')
+        if (toolName === 'bad') throw new IntuticGateRefusal('nope', 'SNAPSHOT')
       }
     }
     const respond = intuticApprovalResponder({ gate: new SelectiveGate({ enforce: true }) })
@@ -423,7 +423,7 @@ describe('TD-415: a builtin bash approval pause, answered by intuticApprovalResp
     override async guard(toolName: string, toolInput: Record<string, unknown>): Promise<void> {
       this.calls.push({ toolName, toolInput })
       if (String(toolInput['command'] ?? '').includes('rm -rf')) {
-        throw new IntuticGateRefusal('recursive delete', 'TEST')
+        throw new IntuticGateRefusal('recursive delete', 'SNAPSHOT')
       }
     }
   }
@@ -926,6 +926,35 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
         expect(exitCode, `generated script exit code for ${p.id} / ${JSON.stringify(fixture)} (notMatches)`).toBe(0)
       }
     })
+  })
+})
+
+describe('intuticSandboxBootstrap: generated hook script and hold rules', () => {
+  // The sandbox has no route to the control plane, so a hold cannot be
+  // recorded or approved there. It used to fall through to an exit 0, letting
+  // the call a workspace asked to review run unreviewed.
+  it('refuses a call a hold rule matches, and lets others through', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'intutic-sandbox-gate-hold-'))
+    try {
+      writeFileSync(
+        join(dir, 'policy-snapshot.rules'),
+        ['sop.local.review_before.Deploy', 'hold', 'i', 'tool', 'Held for human review: Deploy', ' (Deploy) '].join('\t') + '\n',
+        'utf-8',
+      )
+      const scriptPath = join(dir, 'claude-code-check.js')
+      writeFileSync(scriptPath, _internal.renderSandboxGateScript('policy-snapshot.rules'), 'utf-8')
+      const run = (toolName: string) =>
+        spawnSync(process.execPath, [scriptPath], {
+          input: JSON.stringify({ tool_name: toolName, tool_input: {} }),
+          encoding: 'utf-8',
+        })
+      const held = run('Deploy')
+      expect(held.status).toBe(2)
+      expect(held.stderr).toContain('HELD for approval: Held for human review: Deploy [sop.local.review_before.Deploy]')
+      expect(run('Read').status).toBe(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

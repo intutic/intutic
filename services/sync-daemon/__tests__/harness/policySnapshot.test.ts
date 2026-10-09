@@ -41,7 +41,7 @@ import {
   DESTRUCTIVE_COMMAND_PATTERNS,
 } from '../../src/harness/protectedPaths.js'
 import { toRulesLine } from '../../src/harness/gateBody.js'
-import { RULE_AUTHOR_SKILL } from '../../src/skillWriter.js'
+import { KITKAT_SKILL, RULE_AUTHOR_SKILL } from '../../src/skillWriter.js'
 import { SKILL_CONTENT_BLOCK_PATTERN_IDS, SKILL_SCAN_PATTERNS } from '@intutic/shared-types'
 import { execFile } from 'node:child_process'
 
@@ -513,8 +513,9 @@ describe('skill-content tier (TD-358 benign-corpus measurement)', () => {
     expect(fires({ path: '/w/.claude/skills', pattern: '<system>' })).toEqual([])
   })
 
-  it('stays silent on RULE_AUTHOR_SKILL and on every file of the benign corpus written as a skill', () => {
+  it('stays silent on the bundled skills and on every file of the benign corpus written as a skill', () => {
     expect(fires({ file_path: SKILL_PATH, content: RULE_AUTHOR_SKILL })).toEqual([])
+    expect(fires({ file_path: SKILL_PATH, content: KITKAT_SKILL })).toEqual([])
     const files = readFileSync(join(SKILL_CORPUS, 'MANIFEST.tsv'), 'utf8')
       .split('\n')
       .map((l) => l.split('\t')[0]!)

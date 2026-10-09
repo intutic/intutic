@@ -828,12 +828,18 @@ process.stdin.on('end', () => {
     const command = String(toolInput.command || toolInput.cmd || toolInput.script || '');
     const rules = loadRules();
     const decision = evaluate(toolName, target, command, rules);
-    if (decision && decision.severity === 'block') {
-      console.error('[Intutic Guardrail] BLOCKED: ' + decision.reason);
-      process.exit(2);
-    }
     if (decision && (decision.severity === 'warn' || decision.severity === 'shadow')) {
       console.error('[Intutic Guardrail] FLAGGED (' + decision.severity + '): ' + decision.reason);
+    } else if (decision && decision.severity === 'hold') {
+      // A hold asks a person first, and this script cannot reach the control
+      // plane to ask: it refuses, as every gate does with a hold it cannot record.
+      console.error('[Intutic Guardrail] HELD for approval: ' + decision.reason +
+        ' — approval cannot be requested from inside this sandbox, so the call is refused.');
+      process.exit(2);
+    } else if (decision) {
+      // block, or a severity this script does not know: never an allow.
+      console.error('[Intutic Guardrail] BLOCKED: ' + decision.reason);
+      process.exit(2);
     }
     process.exit(0);
   } catch (err) {

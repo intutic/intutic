@@ -117,6 +117,16 @@ export class ValkeyBudgetStore implements BudgetStore {
     }
     return { allowed: true, used, warnClaimed }
   }
+
+  /**
+   * The current counts of the given counters, without counting anything:
+   * what the `intutic` MCP server reports as used. A counter never written
+   * this period reads 0. `undefined` when Valkey cannot answer.
+   */
+  async used(keys: readonly string[]): Promise<number[] | undefined> {
+    const reply = await this.valkey.run((client) => client.mget(...keys.map((k) => `${k}:count`)), { awaitConnect: true })
+    return reply?.map((v) => Number(v ?? 0))
+  }
 }
 
 /** A budget at a moment in its period: which allowance, how much of it is used, and when it resets. */

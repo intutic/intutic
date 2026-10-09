@@ -102,7 +102,7 @@
 // bundled into workflow VM code (see module doc, section 3). `gate.ts` is
 // type-only; the installed gate comes from the Node-free registry.
 import type { Gate, ToolInput } from './gate.js'
-import { IntuticGateRefusal } from './errors.js'
+import { IntuticGateHold, IntuticGateRefusal, type GateRefusalCode } from './errors.js'
 import { active as activeGate } from './registry.js'
 import { wrapTools, type AnyFn, type ExecutableTool } from './wrapTools.js'
 
@@ -121,14 +121,18 @@ import { wrapTools, type AnyFn, type ExecutableTool } from './wrapTools.js'
  */
 export class IntuticWorkflowRefusal extends IntuticGateRefusal {
   public readonly fatal = true as const
-  constructor(reason: string, code: string, incidentId?: string) {
+  /** The hold's id when the refusal was a hold (`code` `HELD`); see `IntuticGateHold`. */
+  public readonly holdId: string | undefined
+  constructor(reason: string, code: GateRefusalCode, incidentId?: string, holdId?: string) {
     super(reason, code, incidentId)
     this.name = 'FatalError'
+    this.holdId = holdId
   }
 
   /** Rewrap a core refusal so the durable runtime treats it as fatal. */
   static from(refusal: IntuticGateRefusal): IntuticWorkflowRefusal {
-    return new IntuticWorkflowRefusal(refusal.reason, refusal.code, refusal.incidentId)
+    const holdId = refusal instanceof IntuticGateHold ? refusal.holdId : undefined
+    return new IntuticWorkflowRefusal(refusal.reason, refusal.code, refusal.incidentId, holdId)
   }
 
   /**

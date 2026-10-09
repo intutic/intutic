@@ -1,9 +1,10 @@
 /**
  * skillWriter Unit Tests
  *
- * Validates write-if-missing semantics for bundled agent skills and that the
- * embedded skill constant stays identical to the canonical repo file at
- * .agents/skills/intutic-rule-author/SKILL.md.
+ * Validates write-if-missing semantics for bundled agent skills, that each is
+ * recorded as a file Intutic created (so disconnect can take it back), and
+ * that the embedded skill constants stay identical to the canonical repo
+ * files under .agents/skills/.
  *
  * @module
  */
@@ -14,9 +15,13 @@ import * as node_path from 'node:path'
 import { scanSkillContent } from '@intutic/shared-types'
 import {
   writeBundledSkills,
+  BUNDLED_SKILLS,
+  KITKAT_SKILL,
+  KITKAT_SKILL_PATH,
   RULE_AUTHOR_SKILL,
   RULE_AUTHOR_SKILL_PATH,
 } from '../src/skillWriter.js'
+import { readOriginal } from '../src/disconnect/originals.js'
 
 describe('skillWriter', () => {
   const testWorkspaceRoot = node_path.join(__dirname, 'mock_skill_workspace')
@@ -30,14 +35,19 @@ describe('skillWriter', () => {
     await node_fs.rm(testWorkspaceRoot, { recursive: true, force: true })
   })
 
-  it('writes the rule-author skill when absent', async () => {
+  it('writes the rule-author and Kitkat skills when absent, each recorded as Intutic\'s', async () => {
     const written = await writeBundledSkills(testWorkspaceRoot)
-    const dest = node_path.join(testWorkspaceRoot, RULE_AUTHOR_SKILL_PATH)
-    expect(written).toEqual([dest])
+    const ruleAuthor = node_path.join(testWorkspaceRoot, RULE_AUTHOR_SKILL_PATH)
+    const kitkat = node_path.join(testWorkspaceRoot, KITKAT_SKILL_PATH)
+    expect(written).toEqual([ruleAuthor, kitkat])
 
-    const content = await node_fs.readFile(dest, 'utf-8')
-    expect(content).toBe(RULE_AUTHOR_SKILL)
-    expect(content).toContain('name: intutic-rule-author')
+    expect(await node_fs.readFile(ruleAuthor, 'utf-8')).toBe(RULE_AUTHOR_SKILL)
+    expect(await node_fs.readFile(kitkat, 'utf-8')).toBe(KITKAT_SKILL)
+    expect(KITKAT_SKILL).toContain('name: intutic-governance-kitkat')
+    // Disconnect deletes what this record says connect created.
+    const record = await readOriginal(kitkat, testWorkspaceRoot)
+    expect(record).toMatchObject({ existed: false, writtenSha256: expect.any(String) })
+    expect(record?.createdDirs).toContain(node_path.join(testWorkspaceRoot, '.agents', 'skills', 'intutic-governance-kitkat'))
   })
 
   it('never overwrites an existing (possibly user-edited) skill file', async () => {
@@ -52,20 +62,28 @@ describe('skillWriter', () => {
     expect(await node_fs.readFile(dest, 'utf-8')).toBe(userEdited)
   })
 
-  it('embedded constant matches the canonical repo SKILL.md', async () => {
+  it('leaves a skill the user already had alone, and keeps no record of it', async () => {
+    const dest = node_path.join(testWorkspaceRoot, KITKAT_SKILL_PATH)
+    await node_fs.mkdir(node_path.dirname(dest), { recursive: true })
+    await node_fs.writeFile(dest, '# downloaded\n', 'utf-8')
+    expect(await writeBundledSkills(testWorkspaceRoot)).toEqual([node_path.join(testWorkspaceRoot, RULE_AUTHOR_SKILL_PATH)])
+    expect(await node_fs.readFile(dest, 'utf-8')).toBe('# downloaded\n')
+    expect(await readOriginal(dest, testWorkspaceRoot)).toBeNull()
+  })
+
+  it('embedded constants match the canonical repo SKILL.md files', async () => {
     // Guards the intentional duplication (the daemon runs outside the repo).
-    const canonical = node_path.join(
-      __dirname,
-      '../../../.agents/skills/intutic-rule-author/SKILL.md',
-    )
-    let repoContent: string
-    try {
-      repoContent = await node_fs.readFile(canonical, 'utf-8')
-    } catch {
-      console.log('skipping: canonical SKILL.md not present (running outside the monorepo)')
-      return
+    for (const skill of BUNDLED_SKILLS) {
+      const canonical = node_path.join(__dirname, '../../..', skill.path)
+      let repoContent: string
+      try {
+        repoContent = await node_fs.readFile(canonical, 'utf-8')
+      } catch {
+        console.log(`skipping: canonical ${skill.path} not present (running outside the monorepo)`)
+        return
+      }
+      expect(skill.content, skill.path).toBe(repoContent)
     }
-    expect(RULE_AUTHOR_SKILL).toBe(repoContent)
   })
 
   // The single most load-bearing fixture for `packages/shared-types/src/skillScan.ts`'s
@@ -78,9 +96,11 @@ describe('skillWriter', () => {
   // leaf package `sync-daemon` depends on — importing sync-daemon's source
   // from shared-types would invert that dependency. This is the one point
   // in the dependency graph where both pieces are available together.
-  it('scanSkillContent reports RULE_AUTHOR_SKILL as clean (zero findings)', () => {
-    const result = scanSkillContent(RULE_AUTHOR_SKILL)
-    expect(result.findings, `unexpected findings: ${JSON.stringify(result.findings)}`).toEqual([])
-    expect(result.clean).toBe(true)
+  it('scanSkillContent reports both bundled skills as clean (zero findings)', () => {
+    for (const skill of BUNDLED_SKILLS) {
+      const result = scanSkillContent(skill.content)
+      expect(result.findings, `unexpected findings in ${skill.path}: ${JSON.stringify(result.findings)}`).toEqual([])
+      expect(result.clean).toBe(true)
+    }
   })
 })

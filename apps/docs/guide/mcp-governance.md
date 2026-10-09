@@ -264,7 +264,8 @@ do, through the same decisions API:
    sends the `decision.pending` notification — including the Slack card with
    Approve and Reject buttons.
 2. The agent gets a JSON-RPC error naming the hold, with the id also in
-   `error.data` (`{"status": "pending_approval", "holdId": "…"}`):
+   `error.data` (`{"code": "HELD", "ruleId": "…", "status": "pending_approval", "holdId": "…"}`;
+   see [refusal codes](/integrations/mcp-proxy#refusal-codes)):
 
    ```
    [Intutic Governance] Tool call HELD for approval: Deploys need review
@@ -290,8 +291,9 @@ key order does not matter and any other value does. An approval never covers
 a different call.
 
 A hold needs the control plane both to find an approval and to ask for one.
-While it is unreachable the call stays held, whatever the fail setting, and
-the message says the hold could not be recorded.
+While it is unreachable the call stays held, whatever the fail setting, the
+message says the hold could not be recorded, and `holdId` is empty because
+there is nothing to approve yet.
 
 ## Who made the call <Badge type="tip" text="Cloud" /> {#caller-identity}
 
@@ -790,10 +792,16 @@ proxy by hand.
 | `--remote-transport sse\|http` | The remote transport; `http` by default. |
 
 With neither `--` nor `--remote-url` the proxy is the standalone `intutic` MCP
-server: three tools, `intutic_governance_status`, `intutic_list_sops` and
+server: `intutic_governance_status`, `intutic_list_sops` and
 `intutic_list_incidents`, the two list tools taking a `limit` from 1 to 50
-(10 by default). The control plane lists incidents only for the OWNER, ADMIN
-or EM role, and the tool says so to anyone else. It needs `INTUTIC_API_KEY`,
+(10 by default), and three tools an agent uses after a refusal:
+`intutic_hold_status` (has this hold been decided, and will the retry pass),
+`intutic_mcp_registry_status` (what the registry says about a server) and
+`intutic_mcp_budget_remaining` (what is left of each call budget, read from
+the Valkey the proxies count in). See [the MCP proxy
+reference](/integrations/mcp-proxy#execution-modes-standalone-vs-governed-proxy).
+The control plane lists incidents only for the OWNER, ADMIN or EM role, and
+the tool says so to anyone else. It needs `INTUTIC_API_KEY`,
 the control plane's address and a workspace id; with no address configured it
 talks to `http://localhost:3001`.
 

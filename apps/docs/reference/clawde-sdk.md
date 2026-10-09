@@ -59,7 +59,7 @@ The TypeScript client sends the agent-graph headers the proxy uses for [graph gu
 `provider: 'anthropic'` converts the OpenAI-style `chat()` parameters to an Anthropic Messages body, sends it to the proxy's `/v1/messages` route with the key in `x-api-key`, and converts the reply back to the OpenAI shape. `normalizeRequest()` and `normalizeResponse()` are exported for direct use.
 
 ### 5. Verdicts and Errors
-A response that comes back carries `verdict: 'allow'`: the proxy let the request through. The proxy refuses a request with an HTTP error and a JSON body, `{"error": {"type": "<code>", "message": "<reason>"}}`. `chat()` recognises a refusal by its status and code, fires the matching [event](#events), and throws `ClawdeBlockedError` without retrying:
+A response that comes back carries `verdict: 'allow'`: the proxy let the request through. Every governance refusal the proxy can give has a stable code. `chat()` recognises each one, fires the matching [event](#events), and throws `ClawdeBlockedError` without retrying:
 
 | Status | Code | `verdict` | Meaning |
 |---|---|---|---|
@@ -70,14 +70,26 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 409 | `policy_reask` | `reask` | Revise the approach and try again; repeated attempts escalate to `policy_denied` |
 | 429 | `BUDGET_EXCEEDED` | `kill` | The key's remaining budget does not cover the request |
 | 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The daily spend cap is reached |
-| 402, or 200 | `COST_GATE_EXCEEDED` | `kill` | The request's estimated cost is over the workspace threshold (see below) |
+| 402, or 200 | `COST_GATE_EXCEEDED` | `kill` | The request's estimated cost is over the workspace threshold: 402 on a stream, a 200 answer otherwise |
 | 400 | `dlp_policy_violation` | `kill` | The request contains content the DLP policy blocks |
+| 200 | `TOOL_DENIED` | `kill` | The model called a tool an SOP denies to this agent role; the call was withheld |
+| 200 | `SSO_GROUP` | `kill` | The model called a tool the workspace's SSO group policy does not clear for this member; the call was withheld |
+| 200 | `SQL_GUARD` | `kill` | The model called a shell tool to run destructive SQL against a database the SQL allowlist does not admit; the call was withheld |
+| 200 | `RESPONSE_UNPARSEABLE` | `kill` | The model's response did not parse while a tool policy was in force, so it was withheld; retrying may succeed |
+| 200 | `OUTPUT_DLP` | `kill` | The model's response held sensitive content that could not be redacted safely, so it was withheld |
 
-`ClawdeBlockedError` extends `ClawdeVerdictError` and carries `verdict`, `code` (the proxy's code), `status` and the proxy's reason as its message. The circuit breaker's budget check throws a plain `ClawdeVerdictError`.
+`ClawdeBlockedError` extends `ClawdeVerdictError` and carries `verdict`, `code`, `status`, `ruleId` (`rule_id`) and the proxy's reason as its message. The circuit breaker's budget check throws a plain `ClawdeVerdictError`.
+
+**Refusals sent as an error.** A status other than 200 comes with a JSON body, `{"error": {"type": "<code>", "message": "<reason>"}}`. `chat()` matches the status and the code together, so a provider's own 429 or a 403 for a key used against the wrong workspace is not mistaken for a refusal. These carry no `ruleId`.
+
+**Refusals sent as an answer.** The rows with status 200 happen after the model ran: the proxy found something in its reply it will not deliver, such as a tool call an SOP denies, and replaces the reply with an assistant turn that says why. A chat client shows that turn, and an agent reads it as its own previous turn and does not retry the call. Each of these names itself so an SDK does not take it for the model's answer:
+
+- Non-streaming, in two response headers: `x-intutic-refusal: <code>` and `x-intutic-refusal-rule: <rule id>`, for example `TOOL_DENIED` and `deny_tools.Bash`, or `SSO_GROUP` and `sso_group.high_risk.Bash`.
+- Streaming, in an SSE comment line just before the refusal text, because the headers went out before the refusal happened: `: intutic-refusal {"code": "TOOL_DENIED", "rule": "deny_tools.Bash", "message": "…"}`. Every SSE parser skips comment lines, so clients that do not look for it are unaffected.
+
+`chat()` reads both. It does not stream, so for a stream you read yourself, pass each line (or the whole body) to `streamRefusal()` (`stream_refusal()`), which returns the refusal or `null` (`None`). `PROXY_REFUSALS`, `REFUSAL_HEADER`, `REFUSAL_RULE_HEADER` and `STREAM_REFUSAL_MARKER` are exported alongside it.
 
 Every other failure throws `ClawdeConnectionError` with the status and response body in its message: an unreachable proxy, a timeout, a 5xx after the retries run out, or a 4xx that is not a refusal, such as a key the proxy does not accept.
-
-A non-streaming request over the cost-prediction threshold is answered with HTTP 200 and an assistant message explaining the estimate, so a chat client shows the reason. The response names the refusal in its `x-intutic-refusal: COST_GATE_EXCEEDED` header, and `chat()` treats it as one: it fires `kill` and throws `ClawdeBlockedError` with `status` 200 and the explanation as its message.
 
 `budgetRemainingUsd` and `budgetPctUsed` are deprecated and never set; the proxy does not report budget on responses. Use `checkBudget()` instead.
 
@@ -205,7 +217,7 @@ Not covered, on purpose: session establishment (`intutic login`/`logout` — sup
 
 ## Events
 
-Register callbacks for the refusal verdicts: `kill`, `reask` and `hold`. `chat()` calls them before it throws `ClawdeBlockedError`, with `{ verdict, code, status, message }`.
+Register callbacks for the refusal verdicts: `kill`, `reask` and `hold`. `chat()` calls them before it throws `ClawdeBlockedError`, with `{ verdict, code, status, message }`, plus `ruleId` when the proxy names the rule that decided.
 
 `hijack`, `enhance` and `bypass` are still accepted so existing code keeps working, but they never fire: the proxy applies those verdicts inside the response and does not report them to the client. They will be removed in the next major version.
 
