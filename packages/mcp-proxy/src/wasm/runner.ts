@@ -1,9 +1,17 @@
 /**
  * wasm/runner.ts — WasmRunner: owns the one dedicated `worker_threads`
- * Worker (worker.ts), the local-rules loader (loader.ts), and the
- * evaluate-all-rules union logic ported from
- * `packages/proxy/src/wasm/registry.rs`'s `evaluate_inner` (most-restrictive-
- * wins, short-circuit on a block, carry the first reask through).
+ * Worker (worker.ts), the local-rules loader (loader.ts), the workspace's
+ * control-plane rules (cloudRules.ts), and the evaluate-all-rules union logic
+ * ported from `packages/proxy/src/wasm/registry.rs`'s `evaluate_inner`
+ * (most-restrictive-wins, short-circuit on a block, carry the first reask
+ * through).
+ *
+ * Both sources run as one list in priority order, lower first; on a tie a
+ * control-plane rule runs before a local one, as in `registry.rs`. Local rules
+ * are `local:<file name>`; a control-plane rule keeps the control plane's id,
+ * the one the LLM proxy and the dashboard name it by. A control-plane rule in
+ * `SHADOW` mode is evaluated like any other and logged, and never decides the
+ * call — not even when it reaches no verdict.
  *
  * ## Divergences from the Rust runner (all recorded as TD entries)
  *
@@ -40,7 +48,9 @@ import { Worker } from 'node:worker_threads'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createStderrLogger as createLogger } from '../stderrLog.js'
-import { WasmLoader, resolveWasmDir, type CompileBridge, type CompileOutcome } from './loader.js'
+import type { WasmRuleDescriptor } from '@intutic/shared-types'
+import { WasmLoader, resolveWasmDir, type CompileOutcome } from './loader.js'
+import type { CloudRuleBridge, CloudRuleSet } from './cloudRules.js'
 import { buildRegoInput, buildWasmContext, type WasmContextInput } from './context.js'
 import { prefetch, resolveRoot, ReferencedFiles, type ReferencedFilesTable } from './referencedFiles.js'
 
@@ -110,6 +120,16 @@ interface RuleFailure {
   detail: string
 }
 
+/** One rule as evaluation sees it, whichever source it came from. */
+interface ActiveRule {
+  ruleId: string
+  priority: number
+  rego: boolean
+  readsReferencedFiles: boolean
+  /** A control-plane rule in `SHADOW` mode: evaluated and logged, never deciding. */
+  shadow: boolean
+}
+
 interface PendingEntry {
   resolve: (value: unknown) => void
   timer: NodeJS.Timeout
@@ -149,7 +169,7 @@ function workerScriptSpec(): { url: URL; execArgv: string[] } {
   return { url, execArgv: isSource ? ['--import', 'tsx/esm'] : [] }
 }
 
-export class WasmRunner implements CompileBridge {
+export class WasmRunner implements CloudRuleBridge {
   private readonly loader: WasmLoader
   private worker: Worker | null = null
   private nextRequestId = 1
@@ -159,7 +179,15 @@ export class WasmRunner implements CompileBridge {
   private respawning: Promise<void> | null = null
   private quarantined = new Set<string>()
 
-  constructor(dirOverride?: string) {
+  /**
+   * @param dirOverride - the local rules directory (see `resolveWasmDir`).
+   * @param cloud - the workspace's control-plane rules; absent where there is
+   *   no control plane to fetch them from (tests, local-only use).
+   */
+  constructor(
+    dirOverride?: string,
+    private readonly cloud?: CloudRuleSet,
+  ) {
     this.loader = new WasmLoader(resolveWasmDir(dirOverride))
   }
 
@@ -168,9 +196,53 @@ export class WasmRunner implements CompileBridge {
     return this.loader.getDir()
   }
 
-  /** Currently loaded rule ids (`local:<file name>`), priority order — observability for callers/tests. */
+  /** Currently loaded rule ids, in evaluation order — observability for callers/tests. */
   getLoadedRuleIds(): string[] {
-    return this.loader.getRules().map((r) => r.ruleId)
+    return this.activeRules().map((r) => r.ruleId)
+  }
+
+  /**
+   * Every loaded rule in evaluation order: by priority, and on a tie the
+   * control-plane rules first (a stable sort over cloud-then-local, as
+   * `registry.rs` sorts).
+   */
+  private activeRules(): ActiveRule[] {
+    const cloud: ActiveRule[] = (this.cloud?.getRules() ?? []).map((r) => ({
+      ruleId: r.ruleId,
+      priority: r.priority,
+      rego: r.rego,
+      readsReferencedFiles: r.readsReferencedFiles,
+      shadow: r.mode === 'SHADOW',
+    }))
+    const local: ActiveRule[] = this.loader.getRules().map((r) => ({
+      ruleId: r.ruleId,
+      priority: r.priority,
+      rego: r.rego,
+      readsReferencedFiles: r.readsReferencedFiles,
+      shadow: false,
+    }))
+    return [...cloud, ...local].sort((a, b) => a.priority - b.priority)
+  }
+
+  /**
+   * Brings the control-plane rules in line with the descriptors the policy
+   * carries. `undefined` — no policy from the control plane yet — leaves them
+   * as they are. See `CloudRuleSet.sync` for when this waits.
+   */
+  async syncCloudRules(descriptors: readonly WasmRuleDescriptor[] | undefined): Promise<void> {
+    if (!this.cloud || !descriptors) return
+    await this.respawning
+    await this.cloud.sync(descriptors, this)
+  }
+
+  /**
+   * Whether the workspace's control-plane rules are known: a descriptor list
+   * has been applied (or this runner has no control plane to ask). Until then,
+   * a call is judged without them, which the interceptor allows only under
+   * the fail-open setting.
+   */
+  cloudRulesLoaded(): boolean {
+    return !this.cloud || this.cloud.isLoaded()
   }
 
   private ensureWorker(): Worker {
@@ -235,6 +307,11 @@ export class WasmRunner implements CompileBridge {
 
   remove(ruleId: string): void {
     this.ensureWorker().postMessage({ type: 'remove', ruleId })
+    this.replaced(ruleId)
+  }
+
+  /** A control-plane rule's version changed: the old version's runaways do not count against the new one. */
+  replaced(ruleId: string): void {
     this.consecutiveRunaways.delete(ruleId)
     this.quarantined.delete(ruleId)
   }
@@ -281,10 +358,13 @@ export class WasmRunner implements CompileBridge {
     }
     // Force-reload every currently-known file into the new worker — its
     // module cache started empty. `force: true` mirrors this loader's own
-    // "worker cache was lost, nothing on disk moved" case.
-    const respawning = this.loader.rescan(this, true).finally(() => {
-      if (this.respawning === respawning) this.respawning = null
-    })
+    // "worker cache was lost, nothing on disk moved" case. The control-plane
+    // rules recompile from the bytes they were fetched with.
+    const respawning = Promise.all([this.loader.rescan(this, true), this.cloud?.reload(this)])
+      .then(() => undefined)
+      .finally(() => {
+        if (this.respawning === respawning) this.respawning = null
+      })
     this.respawning = respawning
   }
 
@@ -308,10 +388,15 @@ export class WasmRunner implements CompileBridge {
    *
    * A quarantined rule (see {@link countRunaway}) refuses at once, without
    * anything being evaluated, until the next rescan.
+   *
+   * A `SHADOW` rule is evaluated in its place and its verdict logged, and it
+   * decides nothing: what it would have done, a refusal for reaching no
+   * verdict included, leaves the call as the other rules decide it. A
+   * quarantined one is skipped.
    */
   async evaluate(input: WasmContextInput): Promise<WasmVerdict> {
-    const rules = this.loader.getRules()
-    const held = rules.find((r) => this.quarantined.has(r.ruleId))
+    const rules = this.activeRules()
+    const held = rules.find((r) => !r.shadow && this.quarantined.has(r.ruleId))
     if (held) {
       return {
         code: 'unavailable',
@@ -342,6 +427,7 @@ export class WasmRunner implements CompileBridge {
     const files = rules.some((r) => r.readsReferencedFiles) ? await this.prefetchReferencedFiles(input) : undefined
 
     for (const rule of rules) {
+      if (rule.shadow && this.quarantined.has(rule.ruleId)) continue
       const outcome = await this.evaluateOne(
         rule.ruleId,
         bytesFor(rule.rego),
@@ -349,6 +435,10 @@ export class WasmRunner implements CompileBridge {
         rule.readsReferencedFiles ? files : undefined,
       )
       const failure = 'stop' in outcome ? outcome : undefinedVerdict(outcome)
+      if (rule.shadow) {
+        logShadow(rule.ruleId, failure ? `no verdict (${failure.stop}): ${failure.detail}` : describeResult(outcome as RuleResult))
+        continue
+      }
       if (failure) {
         const quarantinedNow = this.quarantined.has(rule.ruleId)
         const detail = quarantinedNow
@@ -521,6 +611,26 @@ export class WasmRunner implements CompileBridge {
     }
     if (worker) await worker.terminate()
   }
+}
+
+/** What a rule's answer would do to the call, for the shadow log; `undefined` when it allows. */
+function describeResult(result: RuleResult): string | undefined {
+  if ('decision' in result) return result.decision === 'allow' ? undefined : result.decision
+  if (result.code === 0) return undefined
+  return result.code === 3 ? 'reask' : 'block'
+}
+
+/**
+ * A shadowed rule's outcome, logged when it would have acted. The Rust proxy
+ * also records every shadow evaluation on the request's trace, as promotion
+ * evidence; this proxy has no trace to carry it.
+ */
+function logShadow(ruleId: string, wouldDo: string | undefined): void {
+  if (wouldDo === undefined) return
+  log.info(
+    { action: 'wasm_shadow_would_act', ruleId, shadowed: true, verdict: wouldDo },
+    'WASM rule would have acted; shadow mode, call unchanged',
+  )
 }
 
 /** A native code that is not a verdict: the rule reached none. */

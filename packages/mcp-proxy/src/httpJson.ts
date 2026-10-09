@@ -57,6 +57,44 @@ export function httpRequest(
   })
 }
 
+/**
+ * GETs a binary body, refusing one larger than `maxBytes` as soon as it is:
+ * the custom-rule binaries (`wasm/cloudRules.ts`) are the one non-JSON body
+ * this package reads, and their size is the control plane's to promise, not
+ * this process's to trust.
+ */
+export function getBytes(url: string, apiKey: string, maxBytes: number, timeoutMs = 5000): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const lib = new URL(url).protocol === 'https:' ? node_https : node_http
+    const headers = { Authorization: `Bearer ${apiKey}`, Accept: 'application/wasm' }
+    const req = lib.request(url, { method: 'GET', headers, timeout: timeoutMs }, (res) => {
+      const status = res.statusCode ?? 0
+      const chunks: Buffer[] = []
+      let size = 0
+      res.on('data', (c: Buffer) => {
+        size += c.length
+        if (size > maxBytes) {
+          req.destroy()
+          reject(new Error(`HTTP GET ${url} returned more than ${maxBytes} bytes`))
+          return
+        }
+        chunks.push(c)
+      })
+      res.on('end', () => {
+        const body = Buffer.concat(chunks)
+        if (status >= 400) reject(new HttpStatusError(status, `HTTP GET ${url} returned ${status}: ${body.toString('utf-8').slice(0, 200)}`))
+        else resolve(body)
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => {
+      req.destroy()
+      reject(new Error(`HTTP GET ${url} timed out`))
+    })
+    req.end()
+  })
+}
+
 export async function getJson(url: string, apiKey: string, timeoutMs?: number): Promise<unknown> {
   return JSON.parse(await httpRequest('GET', url, apiKey, undefined, timeoutMs)) as unknown
 }

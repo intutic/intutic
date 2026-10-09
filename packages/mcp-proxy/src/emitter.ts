@@ -75,6 +75,26 @@ export type EventKind =
    * refusal; every refusal also sends its own `tool_blocked`.
    */
   | 'mcp_budget_exceeded'
+  /**
+   * A version of one of the workspace's control-plane rules was refused
+   * (wasm/cloudRules.ts): its binary is missing, does not hash to what its
+   * descriptor names, or cannot load. Sent once per hash and reason, with
+   * `toolName` carrying the rule id and `wasmRule` the detail; the control
+   * plane files one incident per version, as for the LLM proxy's refusals.
+   */
+  | 'wasm_rule_refused'
+
+/** Which rule version a `wasm_rule_refused` event is about, and why it was refused. */
+export interface WasmRuleRefusalDetail {
+  ruleId: string
+  name: string
+  sha256: string
+  refusal: 'missing' | 'hash_mismatch' | 'unloadable'
+  /** What the binary hashed to, on a hash mismatch. */
+  actualSha256?: string
+  /** Whether an earlier version of the rule stays in force on this proxy. */
+  previousInForce: boolean
+}
 
 /**
  * What a detection-style event found, so the control plane can file it as a
@@ -134,6 +154,8 @@ export interface GovernanceEvent {
    * budget refused: which budget, its limit, the calls made, when it resets.
    */
   budget?: BudgetEventDetail
+  /** Set on `wasm_rule_refused`. */
+  wasmRule?: WasmRuleRefusalDetail
   timestamp: string
 }
 
@@ -154,6 +176,7 @@ export class GovernanceEmitter {
     reason?: string,
     finding?: DetectionFinding,
     budget?: BudgetEventDetail,
+    wasmRule?: WasmRuleRefusalDetail,
   ): void {
     const event: GovernanceEvent = {
       incidentId: node_crypto.randomUUID(),
@@ -168,6 +191,7 @@ export class GovernanceEmitter {
       finding,
       principal: this.identity,
       budget,
+      wasmRule,
       timestamp: new Date().toISOString(),
     }
 
@@ -189,6 +213,7 @@ export class GovernanceEmitter {
         toolInput,
         principal: event.principal,
         budget,
+        wasmRule,
       }
       callDaemonSocket('telemetry.enqueue', eventPayload).then(() => {
         log.debug({ action: 'telemetry_enqueued' }, 'Telemetry successfully enqueued to daemon')
@@ -231,6 +256,7 @@ export class GovernanceEmitter {
           finding: event.finding,
           principal: event.principal,
           budget: event.budget,
+          wasmRule: event.wasmRule,
           timestamp: event.timestamp,
         },
       ],
