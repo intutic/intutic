@@ -359,6 +359,10 @@ recomputed from the groups that remain, as described in
 
 ---
 
+## Change notifications {#change-notifications}
+
+Every write your identity provider makes through SCIM that succeeds is announced once: `scim.user.changed` for a user provisioned, changed or deprovisioned (a `PATCH` or `PUT` that sets `active: false` counts as a deprovisioning), and `scim.group.changed` for a group created, changed or deleted. Add either to a [notification rule](/guide/settings#rule-filters); a deprovisioning or a deleted group is MEDIUM severity, the rest INFO. Both stream to [SIEM export](/guide/siem-export#what-gets-streamed) as `scim_changes`, with the resource, the action, the PATCH operations by `op` and `path` (never their values) and the SCIM token that made the change. A refused write announces nothing.
+
 ## Offboarding Cascade
 
 When a user is deprovisioned (via `DELETE /scim/v2/Users/:id` or `PATCH` with `active: false`), Intutic executes a **7-step offboarding cascade** to ensure complete security cleanup:

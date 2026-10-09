@@ -199,7 +199,11 @@ waiting in the approval queue on the MCP Servers page for an owner or admin.
 ```
 
 Every decision is recorded with the member who made it and appears in
-**Settings › Audit Timeline**. Decisions reach the proxies through the policy
+**Settings › Audit Timeline**. Each one also sends a notification event —
+`mcp.server.decided` for approve, block and reset, `mcp.server.tool_toggled`
+for a tool switched on or off — and streams to
+[SIEM export](/guide/siem-export#what-gets-streamed) as `mcp_server_changes`.
+Decisions reach the proxies through the policy
 they already poll — `mcpRegistry` on `GET /api/v1/sop/rules` and
 `GET /api/v1/policy/resolve` — so a per-session proxy applies one within a
 minute. Proxies in `daemon` mode get it from the MCP daemon, which serves its
@@ -312,7 +316,10 @@ The control plane adds the workspace member the API key belongs to — the one
 part the proxy cannot claim for itself — and stores both: incidents filed from
 proxy events show them as **Caller** in the incident drawer, and holds show
 them as **Requested by** in the Review Queue. The OS user, session and server
-are what the proxy reported, recorded as such.
+are what the proxy reported, recorded as such. [SIEM export](/guide/siem-export#the-actor)
+carries the same caller on every gate decision and on those incidents, as the
+OCSF `actor` object: the member under `actor.user` with their email, name and
+groups, and the reported key prefix, session and OS user beside it.
 
 The member also carries into policy. The same policy responses that carry the
 registry carry the member's role and SSO groups (their SCIM groups while SCIM
@@ -504,7 +511,9 @@ server's **Tools** drawer lists every reason. **Settings › Audit Timeline**
 shows each change.
 
 A **high** score sends `mcp.server.tool_change_risk` to your notification
-rules. What else happens is the **High-risk tool changes** setting
+rules. Every score, low and medium included, streams to
+[SIEM export](/guide/siem-export#what-gets-streamed) as `mcp_server_changes`
+with the reasons and the tools that changed. What else happens is the **High-risk tool changes** setting
 (`mcpHighRiskToolChange`):
 
 | Setting | What a high-risk change does |

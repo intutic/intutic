@@ -52,6 +52,10 @@ A control is never reported as evidenced on records alone: a record shows there 
 
 These live reports are never signed, and each download says so with `X-Intutic-Export-Signed: false`. The copies sealed in the evidence pack are the ones that are signed, when the deployment has a signing key.
 
+### Who downloaded what {#who-downloaded-what}
+
+Every download of evidence is recorded with the member who took it: a coverage report as Markdown, CSV or PDF (the JSON the dashboard reads is a view, not a download), the human-oversight export, and the SOC 2 evidence archive, collected or downloaded. Each one appears on the [audit timeline](/guide/audit-timeline#what-it-shows) as an **Evidence export**, streams to [SIEM export](/guide/siem-export#what-gets-streamed) as `evidence_exports`, and sends the `evidence.exported` [notification](/guide/settings#rule-filters). The record names the kind, framework, format, period and whether it was signed. The records are append-only.
+
 ### Export formats
 
 Every format carries the same content: each control's coverage and state, its evidence and what that evidence shows, what it does not cover, and the mapping version and generation time. For ATLAS, each mitigation also lists the techniques it mitigates.

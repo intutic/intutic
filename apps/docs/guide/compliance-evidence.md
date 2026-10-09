@@ -42,6 +42,8 @@ An evidence run maps a **fresh probe run** onto the five SOC 2 trust categories 
 - `GET /api/v1/compliance/soc2-status` (any member) — latest probe results rolled up by trust category.
 - `GET /api/v1/compliance/soc2-export/:runId` (OWNER/ADMIN) — download the stored archive as JSON. The `X-Intutic-Export-Signed` header is `true` or `false`.
 
+Collecting a run through the API and downloading one are each recorded with who did it ([Who downloaded what](/guide/framework-mapping#who-downloaded-what)); the daily collection, which no one downloads, is not.
+
 The **Active Compliance Probes** panel on **Policies › Compliance Scope** has a **Collect & export evidence** button that does the collect-then-download in one step, then says whether the downloaded archive is signed and, if it is not, what to configure. When `SOC2_EVIDENCE_BUCKET` is configured on the control plane, each archive is also uploaded to that GCS bucket and the run records its `artifactUrl`.
 
 ### What's in the archive

@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 403 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 404 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -901,6 +901,7 @@ Every route the control plane serves: 403 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/inventory/devices` | OWNER/ADMIN/EM; DEVELOPER (own machines) | One row per machine with its counts, last report and guard-probe result |
+| GET | `/api/v1/inventory/disconnects` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Machines that ran intutic disconnect, newest first: hostname, scope, harnesses, who and when |
 | GET | `/api/v1/inventory/harnesses` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Harnesses by machine with gate state and status; filter by status, harness, device and q, or download with format=csv |
 | GET | `/api/v1/inventory/mcp-servers` | OWNER/ADMIN/EM; DEVELOPER (own machines) | MCP servers by machine, wrapped by the MCP proxy or not; the same filters and CSV download |
 | GET | `/api/v1/inventory/skills` | OWNER/ADMIN/EM; DEVELOPER (own machines) | Skill bundles by machine, by name, source and hash; filter by device and q |

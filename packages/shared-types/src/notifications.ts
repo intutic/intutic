@@ -28,6 +28,10 @@ export type NotificationEventType =
   | 'session.ended'
   | 'adapter.write_back.failed'
   | 'decision.pending'
+  /** An OWNER, ADMIN or EM approved a held decision, in Slack or through the API and CLI. Carries `entryId`, `reviewerId` and `via`. */
+  | 'decision.approved'
+  /** An OWNER, ADMIN or EM rejected a held decision, in Slack or through the API and CLI. */
+  | 'decision.rejected'
   | 'ssl.enforcement.violation'
   | 'context_gap.auto_injected'
   | 'trajectory.alert'
@@ -54,6 +58,10 @@ export type NotificationEventType =
   | 'mcp.server.candidate'
   /** A server the registry knew declared a different tool set, and the change scored high risk (`mcpToolRisk.ts`). */
   | 'mcp.server.tool_change_risk'
+  /** An OWNER or ADMIN approved, blocked or reset (returned to the approval queue) an MCP server. Carries `action`, `previousStatus` and `actorId`. */
+  | 'mcp.server.decided'
+  /** An OWNER or ADMIN switched one tool of an MCP server on or off. Carries `toolName`, `enabled` and `actorId`. */
+  | 'mcp.server.tool_toggled'
   /** An MCP call budget reached its warning threshold for the period (sent once per budget per period). */
   | 'mcp.budget.threshold'
   /** An MCP call budget ran out and the proxy refused a call (sent once per budget per period). */
@@ -76,6 +84,16 @@ export type NotificationEventType =
   | 'plan.deviation.detected'
   // ── Identity & compliance ──
   | 'identity.offboarding.completed'
+  /** A sign-in to the workspace was refused (wrong password, deactivated member, an SSO identity the workspace does not admit, a response that failed verification). The `login_events` row. */
+  | 'auth.login.failed'
+  /** The identity provider provisioned, changed or deprovisioned a user through SCIM. Carries `action` and the SCIM user id. */
+  | 'scim.user.changed'
+  /** The identity provider created, changed (members, name, mapped role) or deleted a group through SCIM. */
+  | 'scim.group.changed'
+  /** An OWNER or ADMIN replaced the signing secret of a notification webhook, a SIEM webhook destination or the GitHub pull-request webhook. Carries `target` and `targetId`, never the secret. */
+  | 'webhook.secret.rotated'
+  /** A member downloaded compliance evidence: a SOC 2 archive, a framework coverage report file or the human-oversight export. The `evidence_exports` row. */
+  | 'evidence.exported'
   // ── Workspace context ──
   | 'workspace.context.updated'
   // ── Self-hosted gateway (LLD #66) ──

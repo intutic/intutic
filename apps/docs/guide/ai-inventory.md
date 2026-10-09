@@ -57,6 +57,10 @@ Google Antigravity and Gemini CLI share one integration but have a gate each, so
 
 An **MCP server** is **Ungoverned** when the MCP governance proxy does not front it, and **Governed** when it does.
 
+## Disconnected machines {#disconnected-machines}
+
+A machine that ran [`intutic disconnect`](/reference/cli#intutic-disconnect) is marked **Disconnected** in the **Machines** view until its next report, and its harnesses are ungoverned with the reason disconnected. The **Disconnects** view lists every disconnect the machines reported, newest first: the machine, what was disconnected (every harness and the login, or the harnesses named with `--harness`), the member whose credentials reported it, and when. It follows the same roles as the rest of the page: owners, admins and engineering managers see every machine's disconnects, a developer sees the ones their own credentials reported. Each disconnect also streams to [SIEM export](/guide/siem-export) as `device_disconnects`.
+
 ## Notifications
 
 The first time a machine reports an ungoverned harness or MCP server, the control plane sends an **Ungoverned AI Tool Found** notification (`inventory.ungoverned.detected`, severity MEDIUM), unless the harness was disconnected on purpose. It is sent once per machine and item: not again when the item disappears and comes back, and not when only the time-based statuses change (a stale gate already raises **Gate Stopped Reporting**). Add the event to a [notification rule](/guide/settings#notifications) to receive it, and [SIEM export](/guide/siem-export) carries it under `governance_alerts`.
@@ -72,6 +76,7 @@ The Harnesses and MCP servers views download as CSV with the filters on screen. 
 | `GET /api/v1/inventory/harnesses` | Harnesses by machine, filtered by `status`, `harness`, `device` and `q`; `format=csv` for a download |
 | `GET /api/v1/inventory/mcp-servers` | MCP servers by machine, with the same filters and CSV |
 | `GET /api/v1/inventory/skills` | Skill bundles by machine, filtered by `device` and `q` |
+| `GET /api/v1/inventory/disconnects` | The disconnects machines reported, newest first; `limit` (default 100, at most 500) |
 
 ## Limits
 

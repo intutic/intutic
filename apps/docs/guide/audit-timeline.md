@@ -8,12 +8,14 @@ One list per day (UTC), newest first. Each event carries a type badge, a title, 
 
 | Type | Title and detail |
 |------|------------------|
-| **Login** | The member who signed in, the sign-in method (password, SSO, magic link, GitHub or Google; signing up counts as the new owner's first sign-in) and, when recorded, the IP address. Refused sign-ins are not listed here; they stream to [SIEM export](/guide/siem-export) |
+| **Login** | The member who signed in, the sign-in method (password, SSO, magic link, GitHub or Google; signing up counts as the new owner's first sign-in) and, when recorded, the IP address. Refused sign-ins are not listed here; they stream to [SIEM export](/guide/siem-export), and a notification rule on `auth.login.failed` [announces them](/guide/settings#rule-filters) |
 | **Enforcement** | The tool and the verdict, with the reason |
 | **Decision** | A resolved decision's summary, with its outcome and status |
 | **Incident** | A resolved incident's anomaly type and severity, with its description, attributed to whoever resolved it |
 | **Settings change** | "Workspace settings changed", with the setting keys that changed, attributed to the person or, for an automated change, to the system |
 | **Adjudication** | A detector finding's ruling (true or false positive), with the anomaly kind, attributed to whoever ruled |
+| **MCP server** | An [MCP server registry](/guide/mcp-governance#the-registry) decision (approved, blocked, returned to the approval queue, a tool switched on or off) or a scored change to a server's tools, attributed to the owner or admin who decided, or to the risk scorer |
+| **Evidence export** | A compliance evidence download: the SOC 2 evidence archive, a framework coverage report (with its framework) or the human-oversight export, the format, the period and whether it was signed, attributed to whoever downloaded it |
 
 Events with no timestamp, such as a decision that has not been decided yet, are left out. A person is named only when the record links to a workspace member. Most proxy traffic carries no authenticated member, so an enforcement row often has no "by" line.
 
@@ -33,7 +35,7 @@ The page reads one endpoint:
 GET /api/v1/audit/timeline?workspaceId=<id>&date=YYYY-MM-DD
 ```
 
-`date` is a UTC calendar day. You can instead pass `from` and `to` as ISO-8601 datetimes (inclusive), which take precedence over `date`; with neither, the range is today (UTC). The response holds separate arrays for logins, enforcement, decisions, incidents, settings changes and detector adjudications.
+`date` is a UTC calendar day. You can instead pass `from` and `to` as ISO-8601 datetimes (inclusive), which take precedence over `date`; with neither, the range is today (UTC). The response holds separate arrays for logins, enforcement, decisions, incidents, settings changes, detector adjudications, MCP server changes (`mcpServerChanges`) and evidence exports (`evidenceExports`).
 
 ## Related
 

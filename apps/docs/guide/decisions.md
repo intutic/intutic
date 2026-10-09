@@ -88,6 +88,7 @@ When Slack OAuth is configured and `FF_NOTIFICATION_HUB=true` is enabled, pendin
 * **Interactive Actions**: Workspace owners, admins and engineering managers can click **Approve** or **Reject** directly from the Slack message card without having to open the dashboard UI. A Slack approval is the same review as `intutic decision approve`: it records the decision, and lets the identical retry pass only while the workspace's review-hold bypass is on.
 * **Linked accounts only**: The click counts only from a Slack account linked to an active member of the workspace (**Settings › Notifications › Link your Slack account**, then `/intutic link <code>` in Slack), and is recorded against that member. An unlinked account, or a member without one of those roles, is refused, and Slack tells the person why.
 * **Review Mapping**: Clicking these buttons sends an interactive payload to `/api/v1/adapters/slack/interactions`, which reviews the decision in the workspace the Slack app is installed for.
+* **Announced either way**: every review, from Slack or from `intutic decision approve|reject`, sends `decision.approved` or `decision.rejected` to your [notification rules](/guide/settings#rule-filters) and streams to [SIEM export](/guide/siem-export#what-gets-streamed) as `decision_reviews`, naming the reviewer and where they decided.
 
 ## Related
 

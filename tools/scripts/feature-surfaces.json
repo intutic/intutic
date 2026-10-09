@@ -43,11 +43,7 @@
         "terraform": ["intutic_mcp_server_decision", "workspace_settings.mcpDefaultPolicy"],
         "docs": ["guide/mcp-governance.md#the-registry", { "ref": "guide/mcp-governance.md#the-gate-backstop", "badge": false }],
         "website": [{ "file": "index.html", "contains": "How does Intutic govern MCP servers?" }],
-        "events": {
-          "gap": "approve, block, reset and tool switches reach the audit timeline but no notification event or SIEM source",
-          "want": [{ "file": "services/control-plane/src/services/siem/eventSourceRegistry.ts", "contains": "mcp_server_changes" }],
-          "have": ["mcp.server.candidate"]
-        },
+        "events": ["mcp.server.candidate", "mcp.server.decided", "mcp.server.tool_toggled", "siem:mcp_server_changes"],
         "enforcement": [
           "mcp:SERVER_BLOCKED",
           "mcp:SERVER_NOT_APPROVED",
@@ -113,10 +109,11 @@
         "terraform": { "none": "not configuration" },
         "docs": ["guide/mcp-governance.md#caller-identity"],
         "website": { "none": "detail below the level the site describes" },
-        "events": {
-          "gap": "the gate_decisions and incident payloads streamed to a SIEM drop the resolved caller",
-          "want": [{ "file": "services/control-plane/src/services/siem/adapters.ts", "contains": "callerIdentity" }]
-        },
+        "events": [
+          { "ref": "siem:gate_decisions", "badge": false },
+          { "file": "services/control-plane/src/services/siem/actor.ts", "contains": "email_addr" },
+          { "file": "apps/docs/guide/siem-export.md", "contains": "### Who: the `actor` object" }
+        ],
         "enforcement": [{ "file": "packages/mcp-proxy/src/identity.ts" }]
       }
     },
@@ -154,11 +151,7 @@
         "terraform": ["workspace_settings.mcpHighRiskToolChange"],
         "docs": ["guide/mcp-governance.md#tool-change-risk"],
         "website": [{ "file": "index.html", "contains": "rule-based risk score" }],
-        "events": {
-          "gap": "only a high score notifies; no SIEM source carries any score",
-          "want": [{ "file": "services/control-plane/src/services/siem/eventSourceRegistry.ts", "contains": "mcp_server_changes" }],
-          "have": ["mcp.server.tool_change_risk"]
-        },
+        "events": ["mcp.server.tool_change_risk", { "ref": "siem:mcp_server_changes", "badge": false }],
         "enforcement": ["mcp:SERVER_HELD", "hook:SERVER_HELD", "gate:SERVER_HELD", { "file": "packages/shared-types/src/mcpToolRisk.ts" }]
       }
     },
@@ -207,10 +200,7 @@
           { "file": "index.html", "contains": "SSO and SCIM groups" },
           { "file": "saas/pricing-section.html", "contains": "SCIM provisioning, with cost per team" }
         ],
-        "events": {
-          "gap": "SCIM user and group changes reach no notification event or SIEM source",
-          "want": [{ "file": "services/control-plane/src/services/siem/eventSourceRegistry.ts", "contains": "scim" }]
-        },
+        "events": ["scim.user.changed", "scim.group.changed", "siem:scim_changes"],
         "enforcement": [{ "file": "services/control-plane/src/services/memberGroupsService.ts", "contains": "resolveMemberSsoGroups" }]
       }
     },
@@ -292,11 +282,10 @@
           { "ref": "POST /api/v1/siem/destinations", "auth": "OWNER/ADMIN" },
           { "ref": "PUT /api/v1/siem/destinations/:id", "auth": "OWNER/ADMIN" }
         ],
-        "dashboard": {
-          "gap": "the dashboard cannot change an existing destination's sources",
-          "want": [{ "file": "apps/dashboard/src/components/settings/SiemDestinationsPanel.tsx", "contains": "useUpdateSiemDestination" }],
-          "have": [{ "file": "apps/dashboard/src/components/settings/AddSiemDestinationModal.tsx", "contains": "gate_decisions" }]
-        },
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/settings/AddSiemDestinationModal.tsx", "contains": "gate_decisions" },
+          { "file": "apps/dashboard/src/components/settings/EditSiemSourcesModal.tsx", "contains": "useUpdateSiemDestination" }
+        ],
         "cli": ["siem list", "siem show", "siem sources", "siem create", "siem update", "siem delete"],
         "gateSdk": { "none": "operator configuration" },
         "clawdeSdk": { "none": "operator configuration" },
@@ -353,10 +342,7 @@
         },
         "docs": ["guide/settings.md#verifying-webhook-signatures", { "ref": "guide/siem-export.md#verifying-webhook-signatures", "badge": false }],
         "website": [{ "file": "index.html", "contains": "is signed with an HMAC-SHA256" }],
-        "events": {
-          "gap": "a secret rotation emits no notification event or SIEM record",
-          "want": []
-        },
+        "events": ["webhook.secret.rotated", "siem:secret_rotations"],
         "enforcement": [{ "file": "services/control-plane/src/lib/webhookSignature.ts" }]
       }
     },
@@ -375,11 +361,7 @@
         "terraform": { "none": "not configuration" },
         "docs": ["guide/audit-timeline.md#what-it-shows"],
         "website": [{ "file": "index.html", "contains": "sign-ins" }],
-        "events": {
-          "gap": "failed sign-ins reach SIEM only; the notification hub has no sign-in event",
-          "want": [{ "file": "packages/shared-types/src/notifications.ts", "contains": "'auth.login.failed'" }],
-          "have": [{ "ref": "siem:login_events", "badge": false }]
-        },
+        "events": ["auth.login.failed", { "ref": "siem:login_events", "badge": false }],
         "enforcement": [{ "file": "services/control-plane/src/services/loginEventService.ts" }]
       }
     },
@@ -411,13 +393,11 @@
           "guide/framework-mapping.md#mitre-atlas",
           "guide/framework-mapping.md#export-formats",
           "guide/framework-mapping.md#human-oversight-export-eu-ai-act-article-14",
-          "guide/compliance-evidence.md#verifying-an-archive"
+          "guide/compliance-evidence.md#verifying-an-archive",
+          "guide/framework-mapping.md#who-downloaded-what"
         ],
         "website": [{ "file": "index.html", "contains": "MITRE ATLAS, with coverage reports as JSON, Markdown, CSV or PDF" }],
-        "events": {
-          "gap": "no audit or SIEM record of who exported evidence",
-          "want": []
-        },
+        "events": ["evidence.exported", "siem:evidence_exports"],
         "enforcement": [
           { "file": "services/control-plane/src/lib/rootSigner.ts", "contains": "X-Intutic-Export-Signed" },
           { "file": "services/control-plane/src/lib/atlasCatalog.ts" }
@@ -428,18 +408,18 @@
       "id": "disconnect",
       "title": "intutic disconnect",
       "surfaces": {
-        "api": [{ "ref": "POST /api/v1/devices/disconnect", "auth": "OWNER/ADMIN/EM/DEVELOPER" }],
-        "dashboard": {
-          "gap": "the control plane records a disconnect, but no dashboard view shows which machines ran it",
-          "want": []
-        },
+        "api": [
+          { "ref": "POST /api/v1/devices/disconnect", "auth": "OWNER/ADMIN/EM/DEVELOPER" },
+          { "ref": "GET /api/v1/inventory/disconnects", "auth": "OWNER/ADMIN/EM; DEVELOPER (own machines)" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/routes/InventoryPage.tsx", "contains": "useInventoryDisconnects" }],
         "cli": ["disconnect --harness --dry-run --keep-login"],
         "gateSdk": { "none": "SDK gates install nothing to undo" },
         "clawdeSdk": { "none": "the SDKs install nothing to undo" },
         "mcpTools": { "none": "a local command" },
         "kitkat": ["intutic disconnect"],
         "terraform": { "none": "a machine-local command" },
-        "docs": ["guide/getting-started.md#disconnecting", "integrations/antigravity.md#disconnecting"],
+        "docs": ["guide/getting-started.md#disconnecting", "integrations/antigravity.md#disconnecting", "guide/ai-inventory.md#disconnected-machines"],
         "website": [{ "file": "index.html", "contains": "<code>intutic disconnect</code> undoes it" }],
         "events": [{ "ref": "siem:device_disconnects", "badge": false }],
         "enforcement": [
@@ -597,10 +577,7 @@
         "terraform": { "none": "approver roles are fixed in code" },
         "docs": ["guide/decisions.md#role-requirements", "guide/decisions.md#slack-interactive-reviews"],
         "website": [{ "file": "index.html", "contains": "an owner, admin or engineering manager approves in Slack or the CLI" }],
-        "events": {
-          "gap": "an approval or rejection emits no notification event",
-          "want": [{ "file": "packages/shared-types/src/notifications.ts", "contains": "'decision.approved'" }]
-        },
+        "events": ["decision.approved", "decision.rejected", "siem:decision_reviews"],
         "enforcement": [{ "file": "services/control-plane/src/routes/slackInteractions.ts", "contains": "reviewDecision" }]
       }
     },

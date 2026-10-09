@@ -397,6 +397,8 @@ The **Event Type** list offers only the events the control plane sends:
 | `guardrail.stale` | Policy Guardrail Citation Went Stale |
 | `mcp.server.candidate` | New MCP Server Awaiting Approval |
 | `mcp.server.tool_change_risk` | MCP Server Tool Change Scored High Risk |
+| `mcp.server.decided` | MCP Server Approved, Blocked or Reset: an owner or admin's decision in the [MCP server registry](/guide/mcp-governance#the-registry); MEDIUM for a block, INFO otherwise |
+| `mcp.server.tool_toggled` | MCP Server Tool Switched On or Off: MEDIUM when a tool is switched off, INFO when on |
 | `mcp.budget.threshold` | MCP Call Budget Threshold Reached: once per budget per period |
 | `mcp.budget.exceeded` | MCP Call Budget Exceeded: once per budget per period, on the first refused call |
 | `finops.budget.threshold` | Budget Threshold Reached |
@@ -410,6 +412,13 @@ The **Event Type** list offers only the events the control plane sends:
 | `governance.gate.recovered` | Gate Reporting Again |
 | `inventory.ungoverned.detected` | Ungoverned AI Tool Found: a machine's [AI inventory](/guide/ai-inventory) listed an ungoverned harness or MCP server for the first time; once per machine and item |
 | `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature or an altered append-only guard. See [Trace Integrity](/concepts/trace-integrity#alerts) |
+| `decision.approved` | Held Decision Approved: an owner, admin or engineering manager approved a [held decision](/guide/decisions#slack-interactive-reviews), in Slack or with `intutic decision approve`; MEDIUM, because the held call can now run |
+| `decision.rejected` | Held Decision Rejected: the same, for a rejection; INFO |
+| `auth.login.failed` | Sign-in Refused: a sign-in to the workspace was refused (wrong password, deactivated member, an SSO identity the workspace does not admit, a response that failed verification). Names the member, or the email presented, the method, the reason and the address; repeats for the same identity and address within the cooldown send once |
+| `scim.user.changed` | User Changed via SCIM: your identity provider provisioned, changed or deprovisioned a user; MEDIUM for a deprovisioning, INFO otherwise |
+| `scim.group.changed` | Group Changed via SCIM: your identity provider created, changed or deleted a group; MEDIUM for a deletion, INFO otherwise |
+| `webhook.secret.rotated` | Webhook Signing Secret Replaced: an owner or admin replaced the signing secret of a notification webhook, a SIEM webhook destination or the GitHub pull-request webhook. Says whose and who, never the secret |
+| `evidence.exported` | Compliance Evidence Downloaded: a member downloaded the SOC 2 evidence archive, a framework coverage report as a file, or the human-oversight export; INFO. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
 
@@ -417,7 +426,7 @@ Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leav
 
 Prevent alert noise by setting a cooldown period (in minutes) for each rule. Consecutive identical alerts inside the cooldown window are suppressed.
 
-The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule. **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
+The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule; the same goes for the other events that can be INFO (registry approvals, SCIM changes, rejections, evidence downloads). **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
 
 **Show Delivery Log** lists each time a rule sent, failed or was filtered, with the event and channel.
 
@@ -431,7 +440,7 @@ Task trackers, memory providers, file scanning, the GitHub pull-request webhook 
 - **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. Owners and admins add, test and remove providers; every member sees the list. See [Prompt Commands](/guide/agent-commands).
 - **VirusTotal Skill Scanning** — opt in to checking the sha256 hash of skill-bundled scripts against VirusTotal; file content is never uploaded. See [VirusTotal Integration](/guide/virustotal-scanning).
 - **GitHub Pull Request Webhook** — the payload URL and signing secret for GitHub's pull request events, which map branches to pull requests for cost per pull request without a GitHub token. **Create webhook** makes it; **Replace secret** makes a new secret and keeps the URL. The secret is shown once. Owners and admins, Biz Org and above. See [Cost per pull request](/guide/budgets#cost-per-pull-request).
-- **SIEM Export** — stream governance events to Splunk, Datadog, a webhook, syslog/CEF, S3 or GCS; **Add Destination** creates one. Biz Org and above: on another plan the card says so, and destinations kept from before a downgrade show as **Paused**. See [SIEM Export](/guide/siem-export#plans).
+- **SIEM Export** — stream governance events to Splunk, Datadog, a webhook, syslog/CEF, S3 or GCS; **Add Destination** creates one, and **Sources** on a destination's row changes which events it receives. Biz Org and above: on another plan the card says so, and destinations kept from before a downgrade show as **Paused**. See [SIEM Export](/guide/siem-export#plans).
 
 ---
 
