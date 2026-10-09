@@ -32,7 +32,7 @@ export function evaluate(offset: i32, len: i32): i32 {
 }
 `
 
-let wasm: Uint8Array
+let wasm: WebAssembly.Module
 let outDir: string
 
 /** Async, never `spawnSync`: see dropInRules.test.ts for why. */
@@ -54,7 +54,7 @@ beforeAll(async () => {
   const out = join(outDir, 'rule.wasm')
   const res = await asc([join('.gen-test-reffile', 'rule.ts'), '-o', out, '--optimize', '--exportRuntime'])
   if (res.status !== 0) throw new Error(`asc failed:\n${res.output}`)
-  wasm = readFileSync(out)
+  wasm = new WebAssembly.Module(readFileSync(out))
 }, 240_000)
 
 afterAll(() => {
@@ -81,7 +81,7 @@ function evaluate(answer: number | string): number {
       return bytes.length
     },
   }
-  const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm), { env })
+  const instance = new WebAssembly.Instance(wasm, { env })
   memory = instance.exports['memory'] as WebAssembly.Memory
   const verdict = (instance.exports['evaluate'] as (o: number, l: number) => number)(0, 0)
   expect(asked.every((p) => p === 'k8s/prod.yaml')).toBe(true)
@@ -90,7 +90,7 @@ function evaluate(answer: number | string): number {
 
 describe('readReferencedFile', () => {
   it('imports the host reader only in a rule that uses it', () => {
-    const imports = WebAssembly.Module.imports(new WebAssembly.Module(wasm)).map((i) => `${i.module}.${i.name}`)
+    const imports = WebAssembly.Module.imports(wasm).map((i) => `${i.module}.${i.name}`)
     expect(imports).toContain('env.read_referenced_file')
   })
 

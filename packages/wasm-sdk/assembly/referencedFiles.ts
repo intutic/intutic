@@ -10,6 +10,8 @@
  * The codes are the proxies' (`referenced_files.rs`, `referencedFiles.ts`).
  */
 
+import { read_referenced_file } from "./env";
+
 /** Malformed call: pointers outside memory, a bad length, a non-UTF-8 path. */
 export const ERR_BAD_ARGS: i32 = -1;
 /** The call never named this path, or it failed a path guard; or no root is set. */
@@ -30,8 +32,6 @@ export const ERR_BUDGET: i32 = -6;
  */
 export const ERR_NOT_READ: i32 = -7;
 
-@external("env", "read_referenced_file")
-declare function read_referenced_file(pathPtr: usize, pathLen: usize, outPtr: usize, outCap: usize): i32;
 
 /** One referenced file: its bytes, or why there are none. */
 export class ReferencedFile {
