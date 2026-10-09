@@ -87,6 +87,7 @@ describe('rollback restore', () => {
       events.some((e) => e.event === 'tool_reverted'),
       'an unlogged undo is indistinguishable from tampering',
     ).toBe(true)
+    expect(events.find((e) => e.event === 'tool_reverted')!.eventId, 'the id the control plane processes each event once by').toMatch(/^[0-9a-f]{32}$/)
   })
 
   it('captures the current contents before replacing them, so the undo is undoable', async () => {

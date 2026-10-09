@@ -33,6 +33,8 @@ export interface ProbeResult {
     workspaceId: string
     timestamp: string
     incidentId: string
+    /** This detection's id, made once: a resend of it is processed once. */
+    eventId: string
   }
 }
 
@@ -89,6 +91,7 @@ export function checkHostContainment(hostname: string, workspaceId: string, port
             workspaceId,
             timestamp: ts,
             incidentId,
+            eventId: crypto.randomBytes(16).toString('hex'),
           },
         })
       }

@@ -70,6 +70,11 @@ describe('identity on the wire', () => {
       for (let i = 0; i < 100 && !bodies.some((b) => b.url === '/api/v1/hook-events'); i++) await new Promise((r) => setTimeout(r, 10))
       const posted = bodies.find((b) => b.url === '/api/v1/hook-events')!.body as { events: Array<Record<string, unknown>> }
       expect(posted.events[0]).toMatchObject({ event: 'tool_blocked', toolName: 'delete_repo', principal: identity })
+      // One event, two deliveries: the same eventId on both, so the control
+      // plane processes it once.
+      const fileId = (JSON.parse(line) as Record<string, unknown>)['eventId']
+      expect(fileId).toMatch(/^[0-9a-f-]{36}$/)
+      expect(posted.events[0]!['eventId']).toBe(fileId)
     } finally {
       await node_fs.rm(dir, { recursive: true, force: true })
     }

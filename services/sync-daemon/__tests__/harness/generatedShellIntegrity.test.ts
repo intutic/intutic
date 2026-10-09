@@ -288,8 +288,10 @@ describe('generated hook scripts', () => {
             // file carefully.
             expect(parsed!.toolName).toBe('Wr"ite')
             expect(Object.keys(parsed!).sort()).toEqual(
-              ['event', 'harnessType', 'incidentId', 'reason', 'timestamp', 'toolName', 'workspaceId'].sort(),
+              ['event', 'eventId', 'harnessType', 'incidentId', 'reason', 'timestamp', 'toolName', 'workspaceId'].sort(),
             )
+            // The id the control plane processes the event once by.
+            expect(parsed!.eventId).toMatch(/^[0-9a-f]{32}$/)
             expect(String(parsed!.reason)).toContain('bad\\path')
             expect(String(parsed!.reason)).toContain('"quote"')
           }

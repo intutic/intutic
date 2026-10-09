@@ -106,6 +106,13 @@ export function detectionFinding(
 
 export interface GovernanceEvent {
   incidentId: string
+  /**
+   * This event's id, made once in {@link GovernanceEmitter.emit} and carried
+   * on every path it is delivered by — the daemon socket, the direct post and
+   * the event file — so the control plane processes it once however many of
+   * them, and their retries, arrive.
+   */
+  eventId: string
   kind: EventKind
   toolName: string
   toolInput: unknown
@@ -150,6 +157,7 @@ export class GovernanceEmitter {
   ): void {
     const event: GovernanceEvent = {
       incidentId: node_crypto.randomUUID(),
+      eventId: node_crypto.randomUUID(),
       kind,
       toolName,
       toolInput,
@@ -173,6 +181,7 @@ export class GovernanceEmitter {
         workspaceId: this.workspaceId,
         harnessType: 'mcp-governance-proxy',
         incidentId: event.incidentId,
+        eventId: event.eventId,
         timestamp: event.timestamp,
         reason,
         severity: event.severity,
@@ -216,6 +225,7 @@ export class GovernanceEmitter {
           workspaceId: event.workspaceId,
           harnessType: event.harnessType,
           incidentId: event.incidentId,
+          eventId: event.eventId,
           reason: event.reason,
           severity: event.severity,
           finding: event.finding,

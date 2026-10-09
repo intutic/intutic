@@ -43,15 +43,19 @@ function createMockServer(): {
   /** Status the next responses carry. Mutable so a test can make the control
    *  plane reject, which is the condition the retry logic turns on. */
   status: number
+  /** Runs when a request arrives, before the response is sent: what a gate
+   *  does while the batch is in flight. */
+  onRequest: (() => Promise<void>) | null
 } {
   const captured: CapturedRequest[] = []
 
-  const state = { status: 200 }
+  const state: { status: number; onRequest: (() => Promise<void>) | null } = { status: 200, onRequest: null }
 
   const server = node_http.createServer((req, res) => {
     let body = ''
     req.on('data', (chunk: Buffer) => { body += chunk.toString() })
-    req.on('end', () => {
+    req.on('end', async () => {
+      if (state.onRequest) await state.onRequest()
       captured.push({
         method: req.method ?? 'GET',
         url: req.url ?? '/',
@@ -74,6 +78,8 @@ function createMockServer(): {
     url: '',
     get status() { return state.status },
     set status(v: number) { state.status = v },
+    get onRequest() { return state.onRequest },
+    set onRequest(v: (() => Promise<void>) | null) { state.onRequest = v },
     close: () => new Promise((resolve) => server.close(() => resolve())),
   }
 }
@@ -272,5 +278,73 @@ describe('drainHookEvents', () => {
       await readEventsLog(eventsLog.replace(/\.jsonl$/, '.rejected.jsonl')),
       'a 5xx must not quarantine — it is retryable',
     ).toBe('')
+  })
+  // ── Appends during delivery ───────────────────────────────────────
+  //
+  // The gates keep writing while a batch is in flight. The drain used to read
+  // the log, post it, then truncate the file — so every event appended during
+  // the post was deleted without ever being sent.
+
+  it('keeps an event a gate appends while the batch is in flight, and sends it next', async () => {
+    await writeEventsLog(eventsLog, [{ event: 'tool_allowed', toolName: 'Read', workspaceId: 'ws_1', eventId: 'a'.repeat(32) }])
+    mockCtx.onRequest = async () => {
+      mockCtx.onRequest = null
+      await node_fs.appendFile(eventsLog, JSON.stringify({ event: 'tool_blocked', toolName: 'Bash', workspaceId: 'ws_1', eventId: 'b'.repeat(32) }) + '\n')
+    }
+
+    expect(await drainHookEvents(tmpRoot, controlPlaneUrl, 'k')).toBe(1)
+    expect(await readEventsLog(eventsLog), 'the event appended during the post was truncated away').toContain('b'.repeat(32))
+    expect(await readEventsLog(eventsLog), 'the delivered event was left behind').not.toContain('a'.repeat(32))
+    await expect(node_fs.stat(`${eventsLog}.draining`)).rejects.toThrow()
+
+    expect(await drainHookEvents(tmpRoot, controlPlaneUrl, 'k')).toBe(1)
+    expect(mockCtx.captured[1]?.body).toContain('b'.repeat(32))
+    expect(mockCtx.captured[1]?.body).not.toContain('a'.repeat(32))
+  })
+
+  it('keeps an event appended while a rejected batch is being quarantined', async () => {
+    mockCtx.status = 400
+    await writeEventsLog(eventsLog, [{ event: 'tool_flagged', toolName: 'Bash', workspaceId: 'ws_1', eventId: 'c'.repeat(32) }])
+    mockCtx.onRequest = async () => {
+      mockCtx.onRequest = null
+      await node_fs.appendFile(eventsLog, JSON.stringify({ event: 'tool_blocked', toolName: 'Bash', workspaceId: 'ws_1', eventId: 'd'.repeat(32) }) + '\n')
+    }
+    await drainHookEvents(tmpRoot, controlPlaneUrl, 'k')
+    const live = await readEventsLog(eventsLog)
+    expect(live).toContain('d'.repeat(32))
+    expect(live).not.toContain('c'.repeat(32))
+  })
+
+  it('two drains at once send each event once and lose none', async () => {
+    await writeEventsLog(eventsLog, [{ event: 'tool_allowed', toolName: 'Read', workspaceId: 'ws_1', eventId: 'e'.repeat(32) }])
+    let appended = false
+    mockCtx.onRequest = async () => {
+      if (appended) return
+      appended = true
+      await node_fs.appendFile(eventsLog, JSON.stringify({ event: 'tool_allowed', toolName: 'Edit', workspaceId: 'ws_1', eventId: 'f'.repeat(32) }) + '\n')
+    }
+    const [a, b] = await Promise.all([
+      drainHookEvents(tmpRoot, controlPlaneUrl, 'k'),
+      drainHookEvents(tmpRoot, controlPlaneUrl, 'k'),
+    ])
+    expect(a + b).toBe(2)
+    const sent = mockCtx.captured.map((c) => c.body).join('\n')
+    expect(sent.split('e'.repeat(32)).length - 1).toBe(1)
+    expect(sent.split('f'.repeat(32)).length - 1).toBe(1)
+    expect((await readEventsLog(eventsLog)).trim()).toBe('')
+  })
+
+  it('sends again what a drain that died mid-removal left set aside', async () => {
+    // The daemon renames the log before removing what it delivered; if it
+    // dies in between, the renamed file holds events. They are resent, which
+    // the control plane absorbs by eventId.
+    await node_fs.mkdir(node_path.dirname(eventsLog), { recursive: true })
+    await node_fs.writeFile(`${eventsLog}.draining`, JSON.stringify({ event: 'tool_blocked', toolName: 'Bash', workspaceId: 'ws_1', eventId: '1'.repeat(32) }) + '\n')
+    await writeEventsLog(eventsLog, [{ event: 'tool_allowed', toolName: 'Read', workspaceId: 'ws_1', eventId: '2'.repeat(32) }])
+
+    expect(await drainHookEvents(tmpRoot, controlPlaneUrl, 'k')).toBe(2)
+    expect(mockCtx.captured[0]?.body).toContain('1'.repeat(32))
+    expect(mockCtx.captured[0]?.body).toContain('2'.repeat(32))
+    await expect(node_fs.stat(`${eventsLog}.draining`)).rejects.toThrow()
   })
 })

@@ -231,6 +231,8 @@ To prevent data loss and bypasses during command executions, Intutic hooks imple
 
 The `sync-daemon` monitors this log file in real time using FSEvents/inotify (`chokidar`). As soon as a modification is detected, the daemon drains the log file and sends the events to the control plane, ensuring that even if Path A fails due to network isolation, all governance audits are preserved.
 
+Most events therefore arrive more than once: over both paths, and again whenever the daemon resends a batch whose response it did not get. Each event carries an `eventId`, generated when it is recorded and kept in the line that is resent, and the control plane processes each id once per workspace. A resend files no second incident, finding or plan deviation and exports no second gate decision. Events from gates and SDKs older than the `eventId` field are processed every time they arrive.
+
 ---
 
 ## Egress Enforcement & Runtime Isolation (opt-in)

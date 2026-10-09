@@ -388,6 +388,9 @@ function logEvent(verdict, toolName, reason, sessionId) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
       // Passed through, not collapsed to two values: the advisory tier emits
       // 'tool_flagged', and a ternary here silently recorded it as an allow.
@@ -398,6 +401,7 @@ function logEvent(verdict, toolName, reason, sessionId) {
       harnessType: ${JSON.stringify(harnessType)},
       timestamp: ts,
       incidentId,
+      eventId,
       // TD-209: Claude Code's PreToolUse contract puts session_id on stdin;
       // it was parsed and dropped, so trust decay and enforcement logging fell
       // back to the synthetic per-workspace session and could never attribute
@@ -615,8 +619,8 @@ function mergePreToolUse(existing: unknown, intutic: unknown[]): unknown[] {
  * Drains the local hook-events log file and POSTs all accumulated governance
  * events to the control plane in a single batch request.
  *
- * Called by `intutic connect` when the log changes and on a 60-second timer. On success, the log file is truncated to prevent
- * unbounded growth. On network failure, events remain in the log and will be
+ * Called by `intutic connect` when the log changes and on a 60-second timer. On success, the delivered lines are removed
+ * from the log, and only those (see `dropDelivered`). On network failure, events remain in the log and will be
  * retried on the next cycle.
  *
  * @param workspaceRoot    - Workspace root (log file is at workspaceRoot/.intutic/events/hook-events.jsonl)
@@ -634,9 +638,71 @@ function mergePreToolUse(existing: unknown, intutic: unknown[]): unknown[] {
  * behind it was lost, silently. A second hand-written copy of this logic is a
  * second chance to get that wrong.
  *
+ * The gates keep appending while a batch is in flight, so a delivered batch is
+ * removed by {@link dropDelivered}, which keeps every byte written after the
+ * read — truncating the file lost them. Calls for one log are serialised.
+ *
  * @returns the number of records delivered; 0 on any failure.
  */
-async function drainJsonlLog(opts: {
+function drainJsonlLog(opts: DrainOptions): Promise<number> {
+  const prior = drainsInFlight.get(opts.logPath) ?? Promise.resolve(0)
+  const next = prior.catch(() => 0).then(() => drainOnce(opts))
+  drainsInFlight.set(opts.logPath, next)
+  return next.finally(() => {
+    if (drainsInFlight.get(opts.logPath) === next) drainsInFlight.delete(opts.logPath)
+  })
+}
+
+/**
+ * The drain of each log path in progress in this process. Two drains of one
+ * log at once (the file watcher and the timer firing together) would both
+ * remove the same delivered bytes, and the second would remove events the
+ * first had not read.
+ */
+const drainsInFlight = new Map<string, Promise<number>>()
+
+/**
+ * Removes the first `delivered` bytes of a log — the bytes a drain read and
+ * then delivered or set aside — and keeps whatever the gates appended since.
+ *
+ * The log is renamed first, so an append from here on starts a fresh file, and
+ * the bytes past `delivered` in the renamed one (appended while the batch was
+ * in flight) are appended back. Those few lines can land after a line a gate
+ * wrote in the instant between the two steps; the control plane orders by
+ * nothing finer than arrival, and a gate's event carries its own timestamp.
+ * What this cannot see is a gate that opened the file before the rename and
+ * writes after the renamed file was read — a window of one `write` call.
+ *
+ * A daemon that dies between the rename and the unlink leaves the renamed file
+ * behind; {@link recoverAside} puts it back at the start of the next drain.
+ */
+async function dropDelivered(logPath: string, delivered: number): Promise<void> {
+  const aside = `${logPath}.draining`
+  await node_fs.rename(logPath, aside)
+  const all = await node_fs.readFile(aside)
+  // Appended even when empty: the log stays in place for whatever watches it.
+  await node_fs.appendFile(logPath, all.subarray(delivered))
+  await node_fs.unlink(aside)
+}
+
+/**
+ * Returns a renamed log a previous drain died holding to the live log. Its
+ * delivered part, if any, is sent again: every event carries an `eventId`,
+ * and the control plane processes each once.
+ */
+async function recoverAside(logPath: string): Promise<void> {
+  const aside = `${logPath}.draining`
+  let left: Buffer
+  try {
+    left = await node_fs.readFile(aside)
+  } catch {
+    return
+  }
+  if (left.length > 0) await node_fs.appendFile(logPath, left)
+  await node_fs.unlink(aside)
+}
+
+interface DrainOptions {
   logPath: string
   endpoint: string
   apiKey: string
@@ -646,13 +712,17 @@ async function drainJsonlLog(opts: {
   label: string
   /** Sees every parsed batch before delivery, whether or not delivery then succeeds. */
   onRead?: (records: unknown[]) => Promise<void>
-}): Promise<number> {
-  let raw: string
+}
+
+async function drainOnce(opts: DrainOptions): Promise<number> {
+  await recoverAside(opts.logPath)
+  let bytes: Buffer
   try {
-    raw = await node_fs.readFile(opts.logPath, 'utf-8')
+    bytes = await node_fs.readFile(opts.logPath)
   } catch {
     return 0 // File doesn't exist yet — nothing to drain
   }
+  const raw = bytes.toString('utf-8')
 
   const lines = raw.trim().split('\n').filter(Boolean)
   if (lines.length === 0) return 0
@@ -667,7 +737,7 @@ async function drainJsonlLog(opts: {
   }
 
   if (records.length === 0) {
-    await node_fs.writeFile(opts.logPath, '', 'utf-8')
+    await dropDelivered(opts.logPath, bytes.length)
     return 0
   }
 
@@ -686,8 +756,8 @@ async function drainJsonlLog(opts: {
     })
 
     if (response.ok) {
-      // Truncate the log — records successfully delivered
-      await node_fs.writeFile(opts.logPath, '', 'utf-8')
+      // Remove what was delivered, and only that.
+      await dropDelivered(opts.logPath, bytes.length)
       log.info({ count: records.length, label: opts.label }, 'Drained to control plane')
       return records.length
     }
@@ -716,7 +786,7 @@ async function drainJsonlLog(opts: {
       }
       try {
         await node_fs.appendFile(rejectedPath, lines.join('\n') + '\n', 'utf-8')
-        await node_fs.writeFile(opts.logPath, '', 'utf-8')
+        await dropDelivered(opts.logPath, bytes.length)
       } catch (err) {
         // If we cannot set it aside, retaining is better than losing it.
         log.error(
@@ -754,8 +824,8 @@ async function drainJsonlLog(opts: {
  * Drains the local hook-events log file and POSTs all accumulated governance
  * events to the control plane in a single batch request.
  *
- * Called by `intutic connect` when the log changes and on a 60-second timer. On success, the log file is truncated to prevent
- * unbounded growth. On network failure, events remain in the log and will be
+ * Called by `intutic connect` when the log changes and on a 60-second timer. On success, the delivered lines are removed
+ * from the log, and only those (see `dropDelivered`). On network failure, events remain in the log and will be
  * retried on the next cycle.
  */
 export async function drainHookEvents(

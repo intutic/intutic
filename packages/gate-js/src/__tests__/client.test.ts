@@ -69,6 +69,18 @@ describe('GateClient.hookGate', () => {
     await expect(client.emit('tool_blocked', 'shell', 'x')).resolves.toBe(false)
   })
 
+  it('emit stamps each event with an id of its own, the key the control plane processes it once by', async () => {
+    respond = () => ({ status: 200, body: { ok: true } })
+    const client = new GateClient({ baseUrl, workspaceId: 'ws_1', sessionId: 's_1' })
+    const ids: unknown[] = []
+    for (const event of ['tool_allowed', 'tool_allowed']) {
+      await expect(client.emit(event, 'shell')).resolves.toBe(true)
+      ids.push((lastBody!['events'] as Array<Record<string, unknown>>)[0]!['eventId'])
+    }
+    expect(ids[0]).toMatch(/^[0-9a-f]{32}$/)
+    expect(ids[1]).not.toBe(ids[0])
+  })
+
   it('emit rejects an event name outside the documented schema', async () => {
     const client = new GateClient({ baseUrl, workspaceId: 'ws_1' })
     await expect(client.emit('not_a_real_event', 'shell')).resolves.toBe(false)

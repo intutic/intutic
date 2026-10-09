@@ -86,6 +86,9 @@ function logEvent(verdict, toolName, reason) {
     const ts = new Date().toISOString();
     // incidentId = sha1(timestamp + toolName + workspaceId).slice(0,16)
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
       // Passed through, not collapsed to two values: the advisory tier emits
       // 'tool_flagged', and a ternary here silently recorded it as an allow.
@@ -96,6 +99,7 @@ function logEvent(verdict, toolName, reason) {
       harnessType: 'openclaw',
       timestamp: ts,
       incidentId,
+      eventId,
       ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
     // Path B: reliable file append (sync-daemon drains on FSEvents change)
