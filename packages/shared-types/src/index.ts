@@ -681,10 +681,15 @@ export {
 } from './secretPatterns.js'
 
 export {
+  PII_ACTIONS,
   PII_DEFINITION,
+  PII_DETECTOR_IDS,
+  PiiDetectorSettingsSchema,
   type PiiAction,
   type PiiDefinition,
   type PiiDetectorDefinition,
+  type PiiDetectorId,
+  type PiiDetectorSettings,
 } from './piiDetectors.js'
 
 export {

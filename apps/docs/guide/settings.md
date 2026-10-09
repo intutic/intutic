@@ -68,6 +68,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Data Residency** | Pin the workspace's data to a region, and block requests that violate the pin. Needs the Enterprise or Self-host plan; on another plan the card says so, and a pin set before a downgrade can still be turned off. |
 | **Network Egress Control** | The egress mode and allow list every proxy in the workspace hot-reloads. |
 | **Sandboxed Execution** | Require agents to run in a sandbox; enforced by the CLI on `intutic exec`. See [Sandboxed Execution](/guide/sandboxed-execution). |
+| **PII Detectors** | The action the LLM proxy takes on card numbers, IBANs, Social Security numbers, email addresses and phone numbers in this workspace's traffic. A developer's own proxy config can only make a detector stricter. See [PII detectors](/guide/policies#setting-detector-actions-for-a-workspace). |
 | **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
 | **Repeat-Finding Enforcement** | Act on a sustained pattern of findings in one session, not only record it. |
 | **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |

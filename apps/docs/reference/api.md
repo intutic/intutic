@@ -801,7 +801,7 @@ Every route the control plane serves: 403 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/gateways/:id/config` | Gateway token (`gwk_…`) |  |
+| GET | `/api/v1/gateways/:id/config` | Gateway token (`gwk_…`, its own gateway); Authenticated (a member of its org) | The gateway's config and its version |
 | POST | `/api/v1/gateways/:id/heartbeat` | Gateway token (`gwk_…`) |  |
 
 ### `gateways.ts` <Badge type="tip" text="Cloud" />
@@ -811,7 +811,7 @@ Every route the control plane serves: 403 routes, grouped by the source file tha
 | GET | `/api/v1/gateways` | Authenticated |  |
 | POST | `/api/v1/gateways` | OWNER/ADMIN | <Badge type="danger" text="Enterprise" /> |
 | DELETE | `/api/v1/gateways/:id` | OWNER/ADMIN |  |
-| PATCH | `/api/v1/gateways/:id/config` | OWNER/ADMIN |  |
+| PATCH | `/api/v1/gateways/:id/config` | OWNER/ADMIN | <Badge type="danger" text="Enterprise" /> |
 | POST | `/api/v1/gateways/:id/rotate` | OWNER/ADMIN |  |
 | POST | `/api/v1/gateways/:id/self-rotate` | Gateway token (`gwk_…`) |  |
 | GET | `/api/v1/gateways/:id/status` | Authenticated |  |

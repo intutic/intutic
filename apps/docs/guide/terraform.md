@@ -1,6 +1,6 @@
 ---
 title: Manage Intutic with Terraform
-description: Manage SOPs, enforcement policies, policy guardrails, workspace settings, virtual keys, gateways, notification rules and MCP server decisions with the Intutic Terraform provider.
+description: Manage SOPs, enforcement policies, policy guardrails, workspace settings, virtual keys, gateways, notification rules, SIEM export destinations, custom filters and MCP server decisions with the Intutic Terraform provider.
 ---
 
 # Manage Intutic with Terraform <Badge type="tip" text="Cloud" />
@@ -17,6 +17,8 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | [`intutic_gateway`](/reference/terraform/resources/gateway) | Self-hosted gateway registrations and their live config | `/api/v1/gateways` |
 | [`intutic_notification_rule`](/reference/terraform/resources/notification_rule) | Slack, email, webhook and PagerDuty notification rules | `/api/v1/notifications/rules` |
 | [`intutic_mcp_server_decision`](/reference/terraform/resources/mcp_server_decision) | Approve or block an MCP server, and switch its tools off | `/api/v1/mcp/servers` |
+| [`intutic_siem_destination`](/reference/terraform/resources/siem_destination) | [SIEM export](/guide/siem-export) destinations: syslog, webhook, Splunk, Datadog, GCS and S3 (Biz Org and above) | `/api/v1/siem/destinations` |
+| [`intutic_wasm_rule`](/reference/terraform/resources/wasm_rule) | [Custom filters](/guide/wasm-rules): native WASM rules and Rego policies, uploaded to the workspace (Biz Org and above) | `/api/v1/wasm-rules` |
 
 Two data sources read the [workspace](/reference/terraform/data-sources/workspace) the key belongs to and its [members](/reference/terraform/data-sources/members). Every resource supports `terraform import`.
 
@@ -130,9 +132,51 @@ resource "intutic_notification_rule" "incidents" {
 
 **MCP review holds are respected.** When a high-risk change to a server's tool set returns it to review, Terraform does not approve it again over the hold: the apply stops and names the change. Review it in the MCP registry and approve it there, and the next plan is clean. Blocking a held server works. An MCP server must have been reported by a proxy before it can be decided on; to allow one in advance, list it in the `mcpAllowedServers` setting.
 
-**Secrets.** A virtual key, a gateway token and a webhook signing secret are returned once, when created, and kept in state as sensitive values for you to pass on, for example into a CI secret or a Kubernetes secret. Keep the state in an encrypted backend. An imported key, token or secret is null, since the API cannot return it again.
+**Secrets.** A virtual key, a gateway token and a webhook signing secret are returned once, when created, and kept in state as sensitive values for you to pass on, for example into a CI secret or a Kubernetes secret. Keep the state in an encrypted backend. An imported key, token or secret is null, since the API cannot return it again. Credentials you supply (a PagerDuty routing key, a SIEM destination's `secret_config`) read back masked; the plan compares them through the mask, so it stays empty until one is changed outside Terraform.
 
-**Destroy.** Destroying a SOP or a policy soft-deletes it, keeping its version history. Destroying a guardrail retires it, undoing what it wrote if it was an enforcing allowed-models or egress guardrail, and keeps its history. Destroying a virtual key or a gateway revokes it. Destroying an MCP server decision returns the server to the approval queue and switches its tools back on.
+**Destroy.** Destroying a SOP or a policy soft-deletes it, keeping its version history. Destroying a guardrail retires it, undoing what it wrote if it was an enforcing allowed-models or egress guardrail, and keeps its history. Destroying a virtual key or a gateway revokes it. Destroying an MCP server decision returns the server to the approval queue and switches its tools back on. Destroying a SIEM destination deactivates it: the API keeps every destination, so it stays listed, switched off. Destroying a custom filter deletes it.
+
+## Rotating a webhook signing secret
+
+Webhook notification rules and `webhook_https` SIEM destinations sign every delivery with a secret the API generates; Terraform cannot set one. To replace it, give the resource `secret_rotation_triggers`, a map of any values: when a value changes, the next apply replaces the secret in place (the resource keeps its id) and stores the new one in `signing_secret`. Tie the map to a [`time_rotating`](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/rotating) resource to rotate on a schedule:
+
+```hcl
+resource "time_rotating" "webhook" {
+  rotation_days = 30
+}
+
+resource "intutic_notification_rule" "incidents_to_webhook" {
+  event_type  = "incident.created"
+  channel     = "webhook"
+  webhook_url = "https://hooks.example.com/intutic"
+
+  secret_rotation_triggers = {
+    rotated = time_rotating.webhook.id
+  }
+}
+
+output "incident_webhook_signing_secret" {
+  value     = intutic_notification_rule.incidents_to_webhook.signing_secret
+  sensitive = true
+}
+```
+
+Deliveries switch to the new secret as soon as it is issued, so update the receiver in the same apply, for example by writing `signing_secret` into the secret store it reads. Creating a resource does not rotate: the create already issued a secret. A rule or destination that is not a webhook has no signing secret, and setting the triggers on one fails the plan.
+
+## Uploading a custom filter
+
+`intutic_wasm_rule` uploads a [custom filter](/guide/wasm-rules): a native rule built with the Rules SDK, or a Rego policy built with `intutic rules build --rego`. The plan reads the file and computes its SHA-256 as `bundle_sha256`. Set `sha256` to pin the build you reviewed; a file that does not match fails the plan.
+
+```hcl
+resource "intutic_wasm_rule" "no_prod_deploys" {
+  name        = "Hold production deploys"
+  description = "Holds kubectl and helm against the production context for review."
+  source      = "${path.module}/rules/hold_prod_deploys.wasm"
+  sha256      = "3f5a0c9e7b1d24e8a6c0f9b2d47e15a83c6b9d0e2f714a58c3e6b1d9a07f42c1"
+}
+```
+
+The API cannot change an uploaded rule's bytes, so a rebuilt file replaces the rule, and so does a rule whose stored hash no longer matches the file. Name, description and `enabled` change in place. After each upload the provider checks that the API stored the hash of the bytes it sent, the hash the proxies verify the rule against, and fails the apply if it did not.
 
 ## Limits
 

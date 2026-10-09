@@ -16,8 +16,8 @@
  *   CLI and the IDE), a project `.agents/hooks.json`, or `antigravity` on PATH.
  * - Gemini CLI: `gemini` on PATH, a project `.gemini` directory, or a
  *   `~/.gemini/settings.json` holding a setting of its own. Intutic writes
- *   only `hooks` into that file, so a file with nothing else in it is Intutic's
- *   and says nothing about Gemini CLI.
+ *   `hooks` and its own `intutic` MCP server into that file, so a file with
+ *   nothing else in it is Intutic's and says nothing about Gemini CLI.
  *
  * @module
  */
@@ -59,11 +59,21 @@ async function onPath(bin: string, pathEnv: string): Promise<boolean> {
   return false
 }
 
-/** Whether `~/.gemini/settings.json` holds any setting besides the hooks Intutic writes. */
+/** Whether a setting is only what Intutic writes: the hooks, or an `mcpServers` holding no server but `intutic`. */
+function intuticsOwn(key: string, value: unknown): boolean {
+  if (key === 'hooks') return true
+  return key === 'mcpServers' && typeof value === 'object' && value !== null && Object.keys(value).every((name) => name === 'intutic')
+}
+
+/** Whether `~/.gemini/settings.json` holds any setting besides what Intutic writes. */
 async function geminiSettingsInUse(home: string): Promise<boolean> {
   try {
     const parsed: unknown = JSON.parse(await node_fs.readFile(node_path.join(home, '.gemini', 'settings.json'), 'utf-8'))
-    return typeof parsed === 'object' && parsed !== null && Object.keys(parsed).some((k) => k !== 'hooks')
+    return (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      Object.entries(parsed).some(([key, value]) => !intuticsOwn(key, value))
+    )
   } catch {
     return false
   }

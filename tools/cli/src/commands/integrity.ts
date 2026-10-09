@@ -420,7 +420,7 @@ const JWKS_PATH = '/.well-known/intutic-trace-signing.json'
  * key is not an external auditor, and this command must exercise the same path
  * one of them would.
  */
-async function fetchSigningKeys(controlPlaneUrl: string): Promise<SigningJwks | null> {
+export async function fetchSigningKeys(controlPlaneUrl: string): Promise<SigningJwks | null> {
   try {
     const res = await fetch(`${controlPlaneUrl}${JWKS_PATH}`)
     if (!res.ok) return null

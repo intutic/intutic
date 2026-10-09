@@ -1315,6 +1315,16 @@ const gatewayConfigCmd = gatewayCmd
   .description('Manage a gateway\'s remote config (requireVk, requireProvisionedKey)')
 
 gatewayConfigCmd
+  .command('get <gateway_id>')
+  .description('Show the config values set on a gateway and their version')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (gatewayId, opts) => {
+    const { runGatewayConfigGet } = await import('./commands/gateway.js')
+    await runGatewayConfigGet(gatewayId, opts)
+  })
+
+gatewayConfigCmd
   .command('set <gateway_id>')
   .description('Update one or both config flags on a gateway')
   .option('--require-vk <true|false>', 'Refuse non-vk_ bearer tokens at this gateway')
@@ -1717,9 +1727,11 @@ siemCmd
     await runSiemRotateSecret(destinationId, opts)
   })
 
-program
+const complianceCmd = program
   .command('compliance')
-  .description('Compliance framework reports')
+  .description('Compliance framework reports and the evidence archive')
+
+complianceCmd
   .command('coverage <framework_id>')
   .description('Coverage of eu_ai_act, iso_42001, nist_ai_rmf or mitre_atlas from the latest probe results')
   .option('--format <format>', 'Download the report: json, md, csv or pdf')
@@ -1729,6 +1741,40 @@ program
   .action(async (frameworkId, opts) => {
     const { runComplianceCoverage } = await import('./commands/compliance.js')
     await runComplianceCoverage(frameworkId, opts)
+  })
+
+complianceCmd
+  .command('collect')
+  .description('Run a fresh evidence collection and seal it into an archive (OWNER, ADMIN)')
+  .option('--from <date>', 'Start of the evidence period, ISO 8601 (default: 90 days before --to)')
+  .option('--to <date>', 'End of the evidence period, ISO 8601 (default: now)')
+  .option('--out <path>', 'Also write the archive to this file')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runComplianceCollect } = await import('./commands/compliance.js')
+    await runComplianceCollect(opts)
+  })
+
+complianceCmd
+  .command('download <run_id>')
+  .description('Download a stored evidence archive (OWNER, ADMIN)')
+  .option('--out <path>', 'Write the archive to this file instead of stdout')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (runId, opts) => {
+    const { runComplianceDownload } = await import('./commands/compliance.js')
+    await runComplianceDownload(runId, opts)
+  })
+
+complianceCmd
+  .command('verify <file>')
+  .description('Check an evidence archive\'s hashes and signature offline')
+  .option('--jwks <path>', 'The published signing keys, saved from /.well-known/intutic-trace-signing.json (default: fetch them)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (file, opts) => {
+    const { runComplianceVerify } = await import('./commands/compliance.js')
+    await runComplianceVerify(file, opts)
   })
 
 const usageCmd = program
@@ -1793,7 +1839,7 @@ githubWebhookCmd
 
 const inventoryCmd = program
   .command('inventory')
-  .description('AI harnesses and MCP servers on connected developer machines, governed or not')
+  .description('AI harnesses, MCP servers and skills on connected developer machines, governed or not')
 
 inventoryCmd
   .command('summary')
@@ -1825,6 +1871,18 @@ for (const [view, handler, desc] of [
       await inventory[handler](opts)
     })
 }
+
+inventoryCmd
+  .command('skills')
+  .description('Skill bundles by machine, with their content scan result')
+  .option('--device <device_id>', 'Only rows from this machine')
+  .option('--search <text>', 'Only rows whose name or hostname contains this text')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runInventorySkills } = await import('./commands/inventory.js')
+    await runInventorySkills(opts)
+  })
 
 program
   .command('gate-liveness')

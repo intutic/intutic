@@ -187,12 +187,58 @@ describe('ControlPlaneClient', () => {
     expect(res[0].gatewayId).toBe('gw_1')
   })
 
-  it('getGatewayStatus() calls GET /api/v1/gateways/:id/status', async () => {
-    respondWithBody = { status: 'online', proxyVersion: '1.0', uptimeSeconds: 100, activeWorkspaces: 3, litellmReachable: true, lastError: null, reportedAt: '2026-01-01' }
+  it('getGatewayStatus() calls GET /api/v1/gateways/:id/status, with the applied and desired config versions', async () => {
+    respondWithBody = {
+      status: 'online', proxyVersion: '1.0', uptimeSeconds: 100, activeWorkspaces: 3, litellmReachable: true, lastError: null, reportedAt: '2026-01-01',
+      appliedConfigVersion: 2, desiredConfigVersion: 3,
+    }
     const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
     const res = await client.getGatewayStatus('gw_1')
     expect(receivedPath).toBe('/api/v1/gateways/gw_1/status')
     expect(res.status).toBe('online')
+    expect(res.appliedConfigVersion).toBe(2)
+    expect(res.desiredConfigVersion).toBe(3)
+  })
+
+  it('getGatewayConfig() calls GET /api/v1/gateways/:id/config with the member key', async () => {
+    respondWithBody = { config: { requireVk: true }, configVersion: 3 }
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const res = await client.getGatewayConfig('gw 1')
+    expect(receivedMethod).toBe('GET')
+    expect(receivedPath).toBe('/api/v1/gateways/gw%201/config')
+    expect(receivedHeaders['authorization']).toBe('Bearer vk_test')
+    expect(res).toEqual({ config: { requireVk: true }, configVersion: 3 })
+  })
+
+  it('getWorkspaceSettings() calls GET /api/v1/workspace/settings', async () => {
+    respondWithBody = { workspaceId: 'ws_1', settings: { mcpDefaultPolicy: 'allow' } }
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const res = await client.getWorkspaceSettings()
+    expect(receivedMethod).toBe('GET')
+    expect(receivedPath).toBe('/api/v1/workspace/settings')
+    expect(res.settings.mcpDefaultPolicy).toBe('allow')
+  })
+
+  it('updateWorkspaceSettings() PUTs only the keys given, as `intutic settings set` does', async () => {
+    respondWithBody = { updated: true, workspaceId: 'ws_1', settings: { mcpDefaultPolicy: 'deny', configBodyUpload: false } }
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const res = await client.updateWorkspaceSettings({ mcpDefaultPolicy: 'deny' })
+    expect(receivedMethod).toBe('PUT')
+    expect(receivedPath).toBe('/api/v1/workspace/settings')
+    expect(receivedBody).toEqual({ mcpDefaultPolicy: 'deny' })
+    expect(res.updated).toBe(true)
+  })
+
+  it.each([
+    [400, { error: 'Validation failed', details: { _errors: ["Unrecognized key(s) in object: 'pcas_strict_mode'"] } }, 'pcas_strict_mode'],
+    [403, { error: 'Upgrade required — the group policy for high-risk tools requires a Biz Org plan or higher' }, 'Upgrade required'],
+  ])('updateWorkspaceSettings() throws the server\'s %i with its reason', async (status, body, reason) => {
+    respondWithStatus = status
+    respondWithBody = body
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const call = client.updateWorkspaceSettings({ pcas_strict_mode: true })
+    await expect(call).rejects.toThrow(ClawdeConnectionError)
+    await expect(call).rejects.toThrow(reason)
   })
 
   it('rotateGatewayToken() posts an empty body to /api/v1/gateways/:id/rotate', async () => {

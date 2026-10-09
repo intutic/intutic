@@ -43,7 +43,7 @@ DLP is configured in `config.yaml` under `intutic_settings.dlp`:
 | `patterns` | none | Your own patterns, added to the built-in set (below) |
 | `detectors` | see below | The action for each PII detector: `off`, `redact` or `block` |
 
-### PII detectors
+### PII detectors <Badge type="tip" text="Open-Core" />
 
 Each detector finds a candidate with a pattern and then validates it, so a
 number that only looks like a card is not redacted as one. These are pattern
@@ -88,11 +88,47 @@ category, so redactions read `[REDACTED_PII]` and SOP `pii()` taint rules see
 them. The [MCP governance proxy](/guide/mcp-governance#configuration-reference) runs the
 same detectors with the same defaults, set by `INTUTIC_MCP_DLP_DETECTORS`.
 
+#### Setting detector actions for a workspace <Badge type="tip" text="Cloud" />
+
+A connected workspace can set the actions centrally, so every developer's proxy
+handles PII the same way. The workspace setting `piiDetectors` gives an action
+to each detector it names; an owner or admin sets it on **Settings › Security ›
+PII Detectors**, with `intutic settings set`, or with Terraform:
+
+```bash
+intutic settings set piiDetectors '{"pii.card":"block","pii.email":"redact"}'
+intutic settings set piiDetectors null   # stop governing the detectors centrally
+```
+
+The LLM proxy reads the setting with each virtual key it serves and applies it
+to that key's requests and responses. The workspace's action is the baseline,
+and a machine's own `dlp.detectors` may make it stricter (`off` → `redact` →
+`block`) but never looser:
+
+| Workspace | Machine's `dlp.detectors` | Action |
+|---|---|---|
+| `pii.card: redact` | not set | `redact` |
+| `pii.card: redact` | `pii.card: block` | `block` |
+| `pii.card: block` | `pii.card: off` | `block` |
+| `pii.email: off` | `pii.email: redact` | `redact` |
+| not set | `pii.phone: redact` | `redact` |
+| not set | not set | the detector's default |
+
+A detector the workspace leaves out is governed by each machine's config, as it
+is on a proxy with no workspace. A change reaches every proxy within 30 seconds.
+If the proxy cannot read the setting, it follows its
+[fail mode](/concepts/circuit-breaker#proxy-side-fail-mode): with
+`fail_closed: true`, the default, it refuses the request; with
+`fail_closed: false`, or under a global break-glass override, it scans with the
+machine's config alone. The setting is
+available on every plan. It applies to the LLM proxy; the MCP governance proxy
+keeps reading `INTUTIC_MCP_DLP_DETECTORS`.
+
 #### What each surface does with a match
 
 The detectors and their defaults are one definition, shared by the two proxies, and both run
-on your machines with no control plane involved. What a match does depends on what the surface
-can change:
+on your machines; a workspace setting, when there is one, only changes the LLM proxy's actions.
+What a match does depends on what the surface can change:
 
 | Surface | What it scans | An enabled detector's match |
 |---|---|---|

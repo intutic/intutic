@@ -20,6 +20,7 @@ import {
   runGatewayRotate,
   runGatewayRevoke,
   runGatewayConfigSet,
+  runGatewayConfigGet,
   runGatewayAssign,
   runGatewayResolve,
   describeConfigVersion,
@@ -174,6 +175,33 @@ describe('intutic gateway', () => {
     expect(url).toBe('https://api.test.invalid/api/v1/gateways/gw_abc')
     expect(init.method).toBe('DELETE')
     expect(JSON.parse(init.body)).toEqual({ reason: 'decommissioned' })
+  })
+
+  it('config get reads GET /api/v1/gateways/:id/config with the member key, and says which flags are unset', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ config: { requireVk: true }, configVersion: 3 }),
+    })
+
+    await runGatewayConfigGet('gw_abc', {})
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.test.invalid/api/v1/gateways/gw_abc/config')
+    expect(init.method).toBe('GET')
+    expect(init.headers.Authorization).toBe('Bearer vk_test_key')
+    const printed = logSpy.mock.calls.map((c: unknown[]) => c.map(String).join(' ')).join('\n')
+    expect(printed).toMatch(/Require vk_ keys.*true/)
+    expect(printed).toMatch(/Require provisioned key.*not set here/)
+    expect(printed).toMatch(/Config version.*3/)
+  })
+
+  it('config get --json prints the route\'s answer as is', async () => {
+    const body = { config: { requireProvisionedKey: false }, configVersion: 1 }
+    fetchMock.mockResolvedValue({ ok: true, json: async () => body })
+
+    await runGatewayConfigGet('gw_abc', { json: true })
+
+    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual(body)
   })
 
   it('config set hits PATCH /api/v1/gateways/:id/config with only the provided booleans', async () => {

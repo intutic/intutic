@@ -37,10 +37,10 @@ import {
   runSiemDelete,
   runSiemRotateSecret,
 } from './siem.js'
-import { runComplianceCoverage } from './compliance.js'
+import { runComplianceCoverage, runComplianceCollect, runComplianceDownload } from './compliance.js'
 import { runUsageMembers, runUsageTeams, runUsageBranches, runUsageCommits, runUsagePullRequests } from './usage.js'
 import { runGithubWebhookShow, runGithubWebhookRotateSecret } from './github.js'
-import { runInventorySummary, runInventoryHarnesses, runInventoryMcpServers } from './inventory.js'
+import { runInventorySummary, runInventoryHarnesses, runInventoryMcpServers, runInventorySkills } from './inventory.js'
 import { runGateLiveness } from './gateLiveness.js'
 
 const BASE = 'https://api.test.invalid'
@@ -143,6 +143,16 @@ describe('intutic settings', () => {
     writeFileSync(file, JSON.stringify({ budgets: [{ id: 'gh', scope: 'tool', server: 'github', period: 'day', limit: 5 }] }))
     await expectFailure(() => runSettingsSet('mcpBudgets', undefined, { file }), 'mcpBudgets.budgets.0.tool')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('sends PII detector actions, and refuses an unknown action naming the detector, before any request', async () => {
+    await expectFailure(() => runSettingsSet('piiDetectors', '{"pii.card":"warn"}', {}), 'piiDetectors.pii.card')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const actions = { 'pii.card': 'block', 'pii.email': 'redact' }
+    fetchMock.mockReturnValue(reply(200, { updated: true, workspaceId: 'ws_test', settings: { piiDetectors: actions } }))
+    await runSettingsSet('piiDetectors', JSON.stringify(actions), {})
+    expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { piiDetectors: actions } })
   })
 
   it('refuses a value given both ways', async () => {
@@ -352,6 +362,46 @@ describe('intutic siem', () => {
   })
 })
 
+describe('intutic compliance collect and download', () => {
+  const ARCHIVE = { runId: 's2r_1', periodStart: '2026-07-01T00:00:00.000Z', periodEnd: '2026-10-01T00:00:00.000Z', overallScore: 80, manifest: { archiveSha256: 'ab' }, signature: null }
+  const UNSIGNED = { runId: 's2r_1', archive: ARCHIVE, artifactUrl: null, signed: false, unsignedReason: 'Unsigned: this deployment has no signing key.' }
+
+  it('collect posts the period and says when the archive is unsigned', async () => {
+    fetchMock.mockReturnValue(reply(200, UNSIGNED))
+    await runComplianceCollect({ from: '2026-07-01', to: '2026-10-01' })
+    expect(sent()).toEqual({ url: `${BASE}/api/v1/compliance/soc2-collect`, method: 'POST', body: { periodStart: '2026-07-01', periodEnd: '2026-10-01' } })
+    expect(printed()).toContain('s2r_1')
+    expect(logSpy.mock.calls.flat().map(String).join('\n')).toContain('Unsigned: this deployment has no signing key.')
+  })
+
+  it('collect --out writes the archive, also with --json', async () => {
+    const out = join(scratch(), 'evidence.json')
+    fetchMock.mockReturnValue(reply(200, UNSIGNED))
+    await runComplianceCollect({ out, json: true })
+    expect(sent().body).toEqual({})
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toEqual(ARCHIVE)
+    expect(JSON.parse(printed())).toEqual(UNSIGNED)
+  })
+
+  it('collect refuses a period it cannot read before any request', async () => {
+    await expectFailure(() => runComplianceCollect({ from: 'last quarter' }), '--from must be an ISO 8601 date')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('download writes the stored archive to --out', async () => {
+    const out = join(scratch(), 'run.json')
+    fetchMock.mockReturnValue(reply(200, ARCHIVE))
+    await runComplianceDownload('s2r_1', { out })
+    expect(sent().url).toBe(`${BASE}/api/v1/compliance/soc2-export/s2r_1`)
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toEqual(ARCHIVE)
+  })
+
+  it('prints the server\'s role refusal', async () => {
+    fetchMock.mockReturnValue(reply(403, { error: 'Forbidden', detail: 'Requires the OWNER or ADMIN role' }))
+    await expectFailure(() => runComplianceDownload('s2r_1', {}), 'OWNER or ADMIN')
+  })
+})
+
 describe('intutic compliance coverage', () => {
   const COVERAGE = {
     frameworkId: 'eu_ai_act', name: 'EU AI Act', mappingVersion: '2026-09', generatedAt: '2026-10-08T00:00:00Z',
@@ -533,6 +583,26 @@ describe('intutic inventory', () => {
     await runInventoryMcpServers({ csv: true, out, device: 'dev_1' })
     expect(sent().url).toBe(`${BASE}/api/v1/inventory/mcp-servers?device=dev_1&format=csv`)
     expect(readFileSync(out, 'utf8')).toBe('Machine,MCP server\nana-mbp,github\n')
+  })
+
+  it('skills passes the machine and text filters, and prints each bundle\'s scan', async () => {
+    const skill = { hostname: 'ana-mbp', name: 'deploy', source: '.claude/skills', sha256: null, deviceStale: false, scriptCount: 2 }
+    fetchMock.mockReturnValue(reply(200, { data: [
+      { ...skill, scanned: true, clean: false, findingsCount: 1 },
+      { ...skill, name: 'release', scanned: false, clean: false, findingsCount: 0 },
+    ] }))
+    await runInventorySkills({ device: 'dev_1', search: 'ana' })
+    expect(sent().url).toBe(`${BASE}/api/v1/inventory/skills?device=dev_1&q=ana`)
+    expect(printed()).toMatch(/ana-mbp {2}deploy \(\.claude\/skills\).*1 finding\b/)
+    expect(printed()).toMatch(/release.*not readable/)
+  })
+
+  it('skills --json prints the response', async () => {
+    const res = { data: [] }
+    fetchMock.mockReturnValue(reply(200, res))
+    await runInventorySkills({ json: true })
+    expect(sent().url).toBe(`${BASE}/api/v1/inventory/skills`)
+    expect(JSON.parse(printed())).toEqual(res)
   })
 
   it('prints the server\'s refusal', async () => {

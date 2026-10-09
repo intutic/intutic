@@ -125,7 +125,7 @@ re-confirms or retires it, and enforcement never changes on its own in either
 direction. The product also never writes an edit back to a page while a live
 guardrail cites it.
 
-## Authoring guardrails directly
+## Authoring guardrails directly <Badge type="tip" text="Cloud" />
 
 Not every rule has a sentence behind it. An owner or admin can write a
 guardrail directly, as code, in the same closed grammar a model is held to.
@@ -187,6 +187,12 @@ it. Its review actions are unchanged.
 but retired, undoes what an enforcing settings-class guardrail wrote, and
 retires a WASM guardrail's rule candidate. Its
 history stays readable.
+
+Authoring needs no paid plan. Extraction is the one step a plan gates,
+because it is the only one that spends model budget; writing a guardrail, and
+approving, promoting, rejecting or retiring it, work on every plan through the
+CLI, Terraform and the API. The dashboard's form is on the Policy Guardrails
+page, which every plan but Free includes.
 
 Four ways in, one API:
 
@@ -271,9 +277,11 @@ Four ways in, one API:
   proxy that reads `.intutic/sops`; the two planes never merge.
 - **DLP rules are not generated.** A sentence about redacting or blocking
   credentials, card numbers or personal data is answered as "no enforceable
-  rule". Data-loss patterns live only in the proxy's own configuration file —
-  there is no workspace setting to write them to — and a generated regular
-  expression would need a ReDoS check nothing here performs.
+  rule". Credential and custom data-loss patterns live only in the proxy's own
+  configuration file, and a generated regular expression would need a ReDoS
+  check nothing here performs. The PII detectors' actions are the
+  [`piiDetectors`](/guide/policies#setting-detector-actions-for-a-workspace)
+  workspace setting, which an owner or admin sets directly.
 
 ## From the terminal
 

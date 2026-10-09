@@ -1,0 +1,79 @@
+{
+  "formatVersion": 3,
+  "workspaceId": "ws_fixture",
+  "runId": "s2r_fixture",
+  "periodStart": "2026-07-11T00:00:00.000Z",
+  "periodEnd": "2026-10-09T00:00:00.000Z",
+  "collectedAt": "2026-10-09T00:00:00.000Z",
+  "overallScore": 87.5,
+  "categories": [
+    {
+      "category": "security",
+      "score": 87.5,
+      "probes": [],
+      "counts": {
+        "governance_incidents.severity.high": 2
+      },
+      "sampleIds": {
+        "governance_incidents": [
+          "inc_b",
+          "inc_a"
+        ]
+      },
+      "gaps": []
+    },
+    {
+      "category": "availability",
+      "score": null,
+      "probes": [],
+      "counts": {},
+      "sampleIds": {},
+      "gaps": [
+        "No provider incident in the period"
+      ]
+    }
+  ],
+  "probeHistoryDigest": [
+    {
+      "probeType": "policy_check",
+      "rows": 3,
+      "firstAt": "2026-10-01T00:00:00.000Z",
+      "lastAt": "2026-10-08T00:00:00.000Z",
+      "statusCounts": {
+        "pass": 3
+      }
+    }
+  ],
+  "frameworks": [
+    {
+      "coverage": {
+        "frameworkId": "eu_ai_act",
+        "name": "EU AI Act",
+        "mappingVersion": "2026-09",
+        "generatedAt": "2026-10-09T00:00:00.000Z",
+        "controls": []
+      },
+      "report": "# EU AI Act coverage\n",
+      "csv": "Control,State\nArticle 9,evidenced\n",
+      "pdf": "JVBERi0xLjcKJSBmaXh0dXJlCg=="
+    }
+  ],
+  "manifest": {
+    "algorithm": "sha256",
+    "sections": {
+      "security": "d8032b155ce7ea29be197815a6213acac69e61b4e60f6cf1f16e4830003bf517",
+      "availability": "93c95d3fad81b8715156179db1b3b0c7f540be91d9da81367ca8a67ded335fb6",
+      "framework:eu_ai_act": "e95492905c508b9db5529347b534932bc7b945b78c4480855866543409f44313",
+      "framework:eu_ai_act:csv": "3971ef611906f8bd89ace2fb0f5dda1e54319b6bb7c9cea2c347a18c962f7d55",
+      "framework:eu_ai_act:pdf": "f8dd54dad5f232951313f7ca5c1018e79cc1354f2160a03bc4687dc68cda65c6"
+    },
+    "archiveSha256": "2940b96fe4ff116865906fbdbeaf4e08221ead5ce0b7c626bd468dcd6552db02",
+    "signed": true
+  },
+  "signature": {
+    "algorithm": "Ed25519",
+    "keyId": "SCwJIicEfi8nsPiklBh18GY1qyVt8x8_-0UoanJ6a6A",
+    "preimageDomain": "intutic-soc2-evidence-v1",
+    "value": "dwDRoNFHBIpidAdw6w0xgUSklnBHZASMhez0N0fnp7rArkHSyAFwXV5aZhS90YdgOwigbfP4OwSkw+DvmypIAA=="
+  }
+}

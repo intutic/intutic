@@ -235,10 +235,10 @@
           { "ref": "settings set", "badge": false }
         ],
         "gateSdk": { "none": "the SDK gates read the stored policy; they do not set it" },
-        "clawdeSdk": {
-          "gap": "the clawde ControlPlaneClient has no method to write workspace settings",
-          "want": [{ "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "updateWorkspaceSettings" }]
-        },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "updateWorkspaceSettings" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "update_workspace_settings" }
+        ],
         "mcpTools": { "none": "an operator setting" },
         "kitkat": { "none": "an operator setting" },
         "terraform": ["workspace_settings.sso_group_policy"],
@@ -311,10 +311,7 @@
         "clawdeSdk": { "none": "operator configuration" },
         "mcpTools": { "none": "operator configuration" },
         "kitkat": { "none": "operator configuration" },
-        "terraform": {
-          "gap": "no Terraform resource for a SIEM destination",
-          "want": ["intutic_siem_destination"]
-        },
+        "terraform": ["intutic_siem_destination"],
         "docs": ["guide/siem-export.md#choosing-sources"],
         "website": [
           { "file": "index.html", "contains": "SIEM export streams traces, incidents, sign-ins, settings changes" },
@@ -355,11 +352,11 @@
         "clawdeSdk": { "none": "receivers verify; the docs give Node and Python snippets" },
         "mcpTools": { "none": "operator configuration" },
         "kitkat": { "none": "operator configuration" },
-        "terraform": {
-          "gap": "the notification rule exposes its signing secret, but no SIEM destination resource exists and no resource rotates a secret",
-          "want": ["intutic_siem_destination"],
-          "have": [{ "file": "packages/terraform-provider-intutic/internal/provider/notification_rule_resource.go", "contains": "signing_secret" }]
-        },
+        "terraform": [
+          "intutic_siem_destination",
+          { "file": "packages/terraform-provider-intutic/internal/provider/notification_rule_resource.go", "contains": "secret_rotation_triggers" },
+          { "file": "packages/terraform-provider-intutic/internal/provider/siem_destination_resource.go", "contains": "secret_rotation_triggers" }
+        ],
         "docs": ["guide/settings.md#verifying-webhook-signatures", { "ref": "guide/siem-export.md#verifying-webhook-signatures", "badge": false }],
         "website": [{ "file": "index.html", "contains": "is signed with an HMAC-SHA256" }],
         "events": {
@@ -406,11 +403,7 @@
           { "file": "apps/dashboard/src/components/dashboard/FrameworkCoveragePanel.tsx", "contains": "MITRE ATLAS" },
           { "file": "apps/dashboard/src/components/dashboard/ExportSigningNote.tsx" }
         ],
-        "cli": {
-          "gap": "the CLI reads coverage but cannot collect, download or verify an evidence archive",
-          "want": ["compliance collect"],
-          "have": ["compliance coverage"]
-        },
+        "cli": ["compliance coverage", "compliance collect --from --to", "compliance download", "compliance verify --jwks"],
         "gateSdk": { "none": "auditor reporting" },
         "clawdeSdk": { "none": "auditor reporting" },
         "mcpTools": { "none": "auditor reporting" },
@@ -461,31 +454,26 @@
       "id": "gateway-live-config",
       "title": "Live gateway config, bare metal, applied/desired version",
       "plan": "Enterprise",
-      "badgeGaps": {
-        "PATCH /api/v1/gateways/:id/config": "the route catalog shows gateways.ts's Cloud badge; only POST /api/v1/gateways checks the Enterprise plan",
-        "GET /api/v1/gateways/:id/status": "the route catalog shows gateways.ts's Cloud badge; only POST /api/v1/gateways checks the Enterprise plan"
-      },
       "surfaces": {
         "api": [
           { "ref": "PATCH /api/v1/gateways/:id/config", "auth": "OWNER/ADMIN" },
-          "GET /api/v1/gateways/:id/status"
+          { "ref": "GET /api/v1/gateways/:id/config", "badge": false, "auth": "Gateway token (`gwk_…`, its own gateway); Authenticated (a member of its org)" },
+          { "ref": "GET /api/v1/gateways/:id/status", "badge": false }
         ],
         "dashboard": [{ "file": "apps/dashboard/src/components/settings/GatewaysPanel.tsx", "contains": "bare_metal" }],
-        "cli": {
-          "gap": "a gateway's current config values cannot be read: no `gateway config get`, and the config read route takes only the gateway's own token",
-          "want": ["gateway config get"],
-          "have": [
-            "gateway register --target",
-            "gateway config set --require-vk --require-provisioned-key",
-            "gateway status"
-          ]
-        },
+        "cli": [
+          "gateway register --target",
+          "gateway config get",
+          "gateway config set --require-vk --require-provisioned-key",
+          "gateway status"
+        ],
         "gateSdk": { "none": "gateway administration" },
-        "clawdeSdk": {
-          "gap": "the SDK's GatewayStatus type has no applied or desired config version",
-          "want": [{ "file": "packages/clawde-sdk/src/types.ts", "contains": "appliedConfigVersion" }],
-          "have": [{ "file": "packages/clawde-sdk/src/types.ts", "contains": "bare_metal" }]
-        },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/types.ts", "contains": "bare_metal" },
+          { "file": "packages/clawde-sdk/src/types.ts", "contains": "appliedConfigVersion" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getGatewayConfig" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_gateway_config" }
+        ],
         "mcpTools": { "none": "gateway administration" },
         "kitkat": { "none": "gateway administration" },
         "terraform": ["intutic_gateway"],
@@ -540,10 +528,13 @@
         ],
         "cli": ["usage members", "usage teams", "usage branches", "usage commits"],
         "gateSdk": { "none": "attribution comes from the daemon's session report" },
-        "clawdeSdk": {
-          "gap": "the clawde SDKs resolve a git branch but never send it, so SDK traffic lands under \"No git context\"",
-          "want": [{ "file": "packages/clawde-sdk/src/client.ts", "contains": "gitBranch" }]
-        },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/client.ts", "contains": "x-session-id" },
+          { "file": "packages/clawde-sdk/src/git-context.ts", "contains": "branchName" },
+          { "file": "packages/intutic-clawde/intutic_clawde/client.py", "contains": "x-session-id" },
+          { "file": "packages/intutic-clawde/intutic_clawde/git_context.py", "contains": "branchName" },
+          { "file": "apps/docs/reference/clawde-sdk.md", "contains": "Git context and cost attribution" }
+        ],
         "mcpTools": { "none": "reporting" },
         "kitkat": { "none": "reporting" },
         "terraform": { "none": "reporting" },
@@ -654,18 +645,15 @@
         "mcpTools": { "none": "the intutic MCP server's tools are the same for every harness" },
         "kitkat": { "none": "the skill is harness-neutral" },
         "terraform": { "none": "local gates" },
-        "docs": ["integrations/antigravity.md#gemini-cli", "integrations/antigravity.md#google-antigravity"],
+        "docs": ["integrations/antigravity.md#gemini-cli", "integrations/antigravity.md#google-antigravity", "integrations/antigravity.md#mcp-servers"],
         "website": [{ "file": "index.html", "contains": "Gemini CLI" }],
         "events": [{ "file": "packages/shared-types/src/gateIdentity.ts" }],
-        "enforcement": {
-          "gap": "the MCP governance proxy is not wired into Gemini CLI's or Antigravity's MCP servers",
-          "want": [{ "file": "services/sync-daemon/src/harness/mcpAutoWrite.ts", "contains": "antigravity" }],
-          "have": [
-            { "file": "services/sync-daemon/src/harness/protectedPaths.ts", "contains": ".gemini/config/hooks.json" },
-            { "file": "services/sync-daemon/src/harness/antigravityCliHooks.ts" },
-            { "file": "services/sync-daemon/src/harness/antigravityHooks.ts" }
-          ]
-        }
+        "enforcement": [
+          { "file": "services/sync-daemon/src/harness/mcpAutoWrite.ts", "contains": "['antigravity', injectAntigravity]" },
+          { "file": "services/sync-daemon/src/harness/protectedPaths.ts", "contains": ".gemini/config/hooks.json" },
+          { "file": "services/sync-daemon/src/harness/antigravityCliHooks.ts" },
+          { "file": "services/sync-daemon/src/harness/antigravityHooks.ts" }
+        ]
       }
     },
     {
@@ -734,11 +722,7 @@
           { "ref": "POST /api/v1/agents/report", "badge": false }
         ],
         "dashboard": [{ "file": "apps/dashboard/src/routes/InventoryPage.tsx" }],
-        "cli": {
-          "gap": "the CLI lists harnesses and MCP servers but not skills",
-          "want": ["inventory skills"],
-          "have": ["inventory summary", "inventory harnesses", "inventory mcp-servers"]
-        },
+        "cli": ["inventory summary", "inventory harnesses", "inventory mcp-servers", "inventory skills --device --search"],
         "gateSdk": { "none": "the daemon collects the inventory; SDK gates report only their own events" },
         "clawdeSdk": { "none": "the daemon collects the inventory" },
         "mcpTools": { "none": "an operator report" },
@@ -758,37 +742,33 @@
       "id": "pii-detectors",
       "title": "Checksum-validated PII detectors",
       "plan": "Open-Core",
-      "badgeGaps": {
-        "guide/policies.md#pii-detectors": "the detectors run in the open-core proxies, but their section sits on the Cloud-badged Policies page"
-      },
       "surfaces": {
-        "api": {
-          "gap": "detector actions are local proxy configuration; no workspace setting carries them (a product decision)",
-          "want": []
-        },
-        "dashboard": {
-          "gap": "no workspace setting for detector actions, so the dashboard cannot show or set them",
-          "want": []
-        },
-        "cli": {
-          "gap": "no workspace setting for detector actions, so `settings set` cannot set them",
-          "want": []
-        },
+        "api": [
+          { "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" },
+          { "file": "services/control-plane/src/routes/workspace.ts", "contains": "piiDetectors: PiiDetectorSettingsSchema" },
+          { "file": "services/control-plane/src/routes/auth.ts", "contains": "piiDetectors: await keyPiiDetectors(c, auth)" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/PiiDetectorsPanel.tsx", "contains": "piiDetectors" }],
+        "cli": [
+          { "ref": "settings set", "badge": false },
+          { "file": "tools/cli/src/commands/settings.ts", "contains": "PiiDetectorSettingsSchema" }
+        ],
         "gateSdk": { "none": "gates do not scan for PII by design (guide/policies.md, \"What each surface does with a match\")" },
         "clawdeSdk": ["dlp_policy_violation"],
         "mcpTools": { "none": "enforced on MCP calls, not exposed as a tool" },
         "kitkat": ["PII value"],
-        "terraform": {
-          "gap": "no workspace setting for detector actions, so Terraform cannot set them",
-          "want": []
-        },
-        "docs": ["guide/policies.md#pii-detectors"],
-        "website": [{ "file": "index.html", "contains": "checksum-validated card numbers, IBANs and US Social Security numbers" }],
+        "terraform": ["workspace_settings.piiDetectors"],
+        "docs": [
+          "guide/policies.md#pii-detectors",
+          { "ref": "guide/policies.md#setting-detector-actions-for-a-workspace", "badge": false }
+        ],
+        "website": [{ "file": "index.html", "contains": "checksum-validated card numbers, IBANs, US Social Security numbers" }],
         "events": { "none": "a PII match is a DLP finding and is recorded as one" },
         "enforcement": [
           { "file": "packages/shared-types/src/piiDetectors.json" },
           { "file": "packages/shared-types/fixtures/pii-detector-vectors.json" },
           { "file": "packages/proxy/src/dlp/pii.rs" },
+          { "file": "packages/proxy/src/dlp/workspace.rs" },
           { "file": "packages/mcp-proxy/src/dlp.ts", "contains": "INTUTIC_MCP_DLP_DETECTORS" }
         ]
       }
@@ -805,10 +785,7 @@
         "clawdeSdk": [{ "ref": "policy_held", "badge": false }],
         "mcpTools": { "none": "a rule's decision arrives as the MCP proxy's refusal" },
         "kitkat": ["a Rego or WASM rule held the request"],
-        "terraform": {
-          "gap": "no Terraform resource uploads a custom filter (a WASM or Rego module)",
-          "want": []
-        },
+        "terraform": ["intutic_wasm_rule"],
         "docs": ["guide/rego-policies.md#building", "guide/rego-policies.md#testing", "guide/rego-policies.md#deploying"],
         "website": [{ "file": "index.html", "contains": "Rules can also be written in Rego" }],
         "events": [{ "file": "services/control-plane/src/routes/decisions.ts", "contains": "'decision.pending'" }],
@@ -823,12 +800,6 @@
       "id": "authored-guardrails",
       "title": "Guardrails as code (authored guardrails)",
       "plan": "Cloud",
-      "badgeGaps": {
-        "guide/policy-guardrails.md#authoring-guardrails-directly": "the page's Self-serve+ badge is extraction's plan; authoring needs no plan check (routes/policyGuardrails.ts)",
-        "guardrails create": "the section's Self-serve+ badge is extraction's plan; authoring needs no plan check",
-        "guardrails update": "the section's Self-serve+ badge is extraction's plan; authoring needs no plan check",
-        "guardrails delete": "the section's Self-serve+ badge is extraction's plan; authoring needs no plan check"
-      },
       "surfaces": {
         "api": [
           { "ref": "POST /api/v1/policy-guardrails/guardrails", "auth": "OWNER/ADMIN" },

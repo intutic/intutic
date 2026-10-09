@@ -29,6 +29,7 @@
     "mcpProxyFailBehavior",
     "mcpProxyMode",
     "mcpToolDescriptionOverrides",
+    "piiDetectors",
     "reviewHoldBypassEnabled",
     "reviewHoldBypassTtlMinutes",
     "sandboxRequirement",

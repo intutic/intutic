@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -82,15 +84,49 @@ func (c *Client) Delete(ctx context.Context, path string, out any) error {
 	return c.do(ctx, http.MethodDelete, path, nil, out)
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
-	var payload []byte
-	if body != nil {
-		var err error
-		if payload, err = json.Marshal(body); err != nil {
-			return fmt.Errorf("encode %s %s body: %w", method, path, err)
+// PostMultipart sends fields and one file as multipart/form-data, the shape
+// an upload route parses with parseBody, and decodes a 2xx response into out.
+// The body is built once, so a retry resends the same bytes.
+func (c *Client) PostMultipart(ctx context.Context, path string, fields map[string]string, fileField, fileName string, file []byte, out any) error {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	names := make([]string, 0, len(fields))
+	for k := range fields {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		if err := w.WriteField(k, fields[k]); err != nil {
+			return fmt.Errorf("encode POST %s body: %w", path, err)
 		}
 	}
+	part, err := w.CreateFormFile(fileField, fileName)
+	if err == nil {
+		_, err = part.Write(file)
+	}
+	if err == nil {
+		err = w.Close()
+	}
+	if err != nil {
+		return fmt.Errorf("encode POST %s body: %w", path, err)
+	}
+	return c.send(ctx, http.MethodPost, path, buf.Bytes(), w.FormDataContentType(), out)
+}
 
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	if body == nil {
+		return c.send(ctx, method, path, nil, "", out)
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encode %s %s body: %w", method, path, err)
+	}
+	return c.send(ctx, method, path, payload, "application/json", out)
+}
+
+// send makes the request, retrying what cannot have been applied, and decodes
+// a 2xx response into out. contentType is empty when there is no body.
+func (c *Client) send(ctx context.Context, method, path string, payload []byte, contentType string, out any) error {
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(payload))
 		if err != nil {
@@ -99,8 +135,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("User-Agent", c.userAgent)
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
 		}
 
 		resp, err := c.httpClient.Do(req)

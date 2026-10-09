@@ -42,6 +42,8 @@ An evidence run maps a **fresh probe run** onto the five SOC 2 trust categories 
 - `GET /api/v1/compliance/soc2-status` (any member) — latest probe results rolled up by trust category.
 - `GET /api/v1/compliance/soc2-export/:runId` (OWNER/ADMIN) — download the stored archive as JSON. The `X-Intutic-Export-Signed` header is `true` or `false`.
 
+From the CLI, `intutic compliance collect --out evidence.json` collects a run and writes its archive, and `intutic compliance download <run_id>` fetches a stored one (see the [CLI reference](/reference/cli#intutic-compliance-collect)).
+
 The **Active Compliance Probes** panel on **Policies › Compliance Scope** has a **Collect & export evidence** button that does the collect-then-download in one step, then says whether the downloaded archive is signed and, if it is not, what to configure. When `SOC2_EVIDENCE_BUCKET` is configured on the control plane, each archive is also uploaded to that GCS bucket and the run records its `artifactUrl`.
 
 ### What's in the archive
@@ -63,6 +65,8 @@ Every archive is self-verifying:
 
 1. **Recompute the hash.** Remove the `manifest` and `signature` fields from the archive, serialize the remainder as *canonical JSON* (object keys sorted recursively, arrays in order), and take the sha256. It must equal `manifest.archiveSha256` (and the `archive_sha256` on the run). Per-category hashes in `manifest.sections` are the canonical JSON of each category object, and `framework:<id>` the canonical JSON of each framework entry. `framework:<id>:csv` and `framework:<id>:pdf` are the sha256 of the export files themselves: the CSV's UTF-8 bytes and the PDF decoded from base64.
 2. **Verify the signature** (when present). The signed preimage is the two-line string `intutic-soc2-evidence-v1\n<archiveSha256>`. Verify the Ed25519 signature in `signature.value` (base64) against the public key whose `kid` matches `signature.keyId` in the JWKS published at `/.well-known/intutic-trace-signing.json` — the same key set that signs trace Merkle roots.
+
+`intutic compliance verify <file>` runs both steps with nothing but the archive and the published keys (`--jwks <file>` for a saved copy, so it needs no network). It exits 0 only when the hashes match and the signature verifies, 1 when either does not match, and 2 when the hashes match but the archive is unsigned or its key could not be found; see the [CLI reference](/reference/cli#intutic-compliance-verify).
 
 **Archives are signed only when the control plane has a signing key.** A run with `signature: null` was collected on a deployment without `TRACE_SIGNING_PRIVATE_KEY` (an Ed25519 private key, PEM). That is a supported state, and every surface says so: the collect response, the download header, the dashboard and, from `formatVersion` 3, the archive's own manifest (`manifest.signed: false`, with `manifest.unsignedReason`). Setting the key signs archives collected from then on; it does not sign earlier ones. The same holds for the human-oversight export and the SLA evidence archive.
 

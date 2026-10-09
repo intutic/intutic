@@ -30,20 +30,15 @@
 //! `GET /api/v1/auth/key-context`, the per-key route the proxy already calls
 //! to validate a virtual key, carries an `ssoGroups` object: the workspace's
 //! policy and the groups of the member the key belongs to. [`resolve`] fetches
-//! it per key and caches it for [`CACHE_TTL`]. A standalone proxy has no
-//! control plane and therefore no group policy, so nothing here runs.
+//! it per key through `crate::key_context`, which caches the answer for
+//! [`crate::key_context::CACHE_TTL`]. A standalone proxy has no control plane
+//! and therefore no group policy, so nothing here runs.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-
-/// How long one key's policy and groups are reused before the proxy asks the
-/// control plane again. The same 30 seconds as the proxy's workspace SOP cache
-/// (`sops::CACHE_TTL`) and the sync daemon's default refresh, so the response
-/// gate is no staler than the harness gates fed by that daemon.
-pub const CACHE_TTL: Duration = Duration::from_secs(30);
 
 /// A workspace's `sso_group_policy`, as `parseSsoGroupPolicy` reads it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -262,28 +257,26 @@ pub fn parse_key_context(body: &Value) -> Result<Option<SsoGroupGate>, String> {
     }))
 }
 
-struct Cached {
+/// The answer last parsed for each key, kept for one use only: when the
+/// control plane later refuses the key, the policy last seen for it is applied
+/// with the groups unknown. Bounds the map to the keys active in [`RETAIN`].
+struct LastSeen {
     gate: Option<SsoGroupGate>,
     read_at: Instant,
-    /// The workspace's config version when this was fetched; `None` when no
-    /// version was readable, and then only the TTL applies.
-    version: Option<u64>,
 }
 
-/// How long an answer is kept after its TTL, for one use only: when the
-/// control plane later refuses the key, the policy last seen for it is applied
-/// with the groups unknown. Bounds the map to the keys active in this window.
+/// How long an answer is kept for that one use.
 const RETAIN: Duration = Duration::from_secs(3600);
 
 /// Keyed by the SHA-256 of the virtual key, never the key itself.
-fn cache() -> &'static Mutex<HashMap<String, Cached>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Cached>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn last_seen() -> &'static Mutex<HashMap<String, LastSeen>> {
+    static LAST_SEEN: OnceLock<Mutex<HashMap<String, LastSeen>>> = OnceLock::new();
+    LAST_SEEN.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The group gate for one virtual key: from the cache within [`CACHE_TTL`]
-/// while the workspace's config version has not moved, else from
-/// `/api/v1/auth/key-context`.
+/// The group gate for one virtual key, from the key's
+/// `/api/v1/auth/key-context` answer (`crate::key_context`, which caches it
+/// for [`crate::key_context::CACHE_TTL`] and refetches early when `policy_version` moves).
 ///
 /// `policy_version` is `v2:sync:config_version:{ws}`, read by the caller
 /// before this runs. The control plane bumps it on every change that moves a
@@ -306,65 +299,43 @@ pub async fn resolve(
     timeout: Duration,
     policy_version: Option<u64>,
 ) -> Result<Option<SsoGroupGate>, String> {
+    let answer = crate::key_context::fetch(
+        client,
+        control_plane_url,
+        virtual_key,
+        timeout,
+        policy_version,
+    )
+    .await
+    .map_err(|e| format!("SSO group policy fetch failed: {e}"))?;
     let key = crate::store::valkey::sha256_hex(virtual_key.as_str());
-    // `Some(gate)` when an earlier answer exists for this key, fresh or not.
-    let previous: Option<Option<SsoGroupGate>> = {
-        let guard = cache().lock().unwrap_or_else(|p| p.into_inner());
-        match guard.get(&key) {
-            Some(c) => {
-                let version_moved =
-                    matches!((policy_version, c.version), (Some(now), Some(then)) if now != then);
-                if c.read_at.elapsed() < CACHE_TTL && !version_moved {
-                    return Ok(c.gate.clone());
-                }
-                Some(c.gate.clone())
-            }
-            None => None,
-        }
-    };
-
-    let resp = virtual_key
-        .authorize(client.get(format!("{control_plane_url}/api/v1/auth/key-context")))
-        .timeout(timeout)
-        .send()
-        .await
-        .map_err(|e| format!("SSO group policy fetch failed: {e}"))?;
-    let status = resp.status();
-    let gate = if status == reqwest::StatusCode::UNAUTHORIZED
-        || status == reqwest::StatusCode::FORBIDDEN
-    {
-        match previous {
-            Some(gate) => gate.map(|g| SsoGroupGate {
-                member_groups: None,
-                ..g
-            }),
-            None => {
-                return Err(format!(
+    match answer {
+        crate::key_context::Answer::Refused(status) => {
+            let guard = last_seen().lock().unwrap_or_else(|p| p.into_inner());
+            match guard.get(&key) {
+                Some(seen) => Ok(seen.gate.clone().map(|g| SsoGroupGate {
+                    member_groups: None,
+                    ..g
+                })),
+                None => Err(format!(
                     "the control plane refused the key ({status}) before its SSO group policy was known"
-                ))
+                )),
             }
         }
-    } else if !status.is_success() {
-        return Err(format!("SSO group policy fetch returned {status}"));
-    } else {
-        let body: Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("SSO group policy response did not parse: {e}"))?;
-        parse_key_context(&body)?
-    };
-
-    let mut guard = cache().lock().unwrap_or_else(|p| p.into_inner());
-    guard.retain(|_, c| c.read_at.elapsed() < RETAIN);
-    guard.insert(
-        key,
-        Cached {
-            gate: gate.clone(),
-            read_at: Instant::now(),
-            version: policy_version,
-        },
-    );
-    Ok(gate)
+        crate::key_context::Answer::Body(body) => {
+            let gate = parse_key_context(&body)?;
+            let mut guard = last_seen().lock().unwrap_or_else(|p| p.into_inner());
+            guard.retain(|_, s| s.read_at.elapsed() < RETAIN);
+            guard.insert(
+                key,
+                LastSeen {
+                    gate: gate.clone(),
+                    read_at: Instant::now(),
+                },
+            );
+            Ok(gate)
+        }
+    }
 }
 
 #[cfg(test)]

@@ -6,8 +6,15 @@ from typing import List, Dict, Any, Callable, NoReturn, Optional
 from .errors import ClawdeBlockedError, ClawdeConnectionError
 from .refusals import REFUSAL_HEADER, REFUSAL_RULE_HEADER, ProxyRefusal, header_refusal, parse_refusal, stream_refusal
 from .context_resolver import resolve_context
+from .git_context import resolve_git_context
 from .budget_checker import BudgetChecker
 from .circuit_breaker import CircuitBreaker
+
+#: The harness a session this SDK registers is recorded under.
+SDK_HARNESS = "clawde_sdk"
+
+_UNRESOLVED = object()
+
 
 class ClawdeClient:
     def __init__(
@@ -38,6 +45,9 @@ class ClawdeClient:
 
         self.budget_checker = BudgetChecker(self.control_plane_url, self.api_key)
         self.circuit_breaker_wrapper = CircuitBreaker(self)
+        # The session this client's requests are filed under, resolved once,
+        # on the first chat().
+        self._session: Any = _UNRESOLVED
         # kill/reask/hold fire on a proxy refusal. hijack/enhance/bypass are
         # deprecated and never fire: the proxy applies them inside the response
         # without telling the client. Kept so existing registrations still work.
@@ -104,11 +114,17 @@ class ClawdeClient:
             "messages": messages,
             **kwargs
         }
+        if self._session is _UNRESOLVED:
+            self._session = self._open_session()
         url = f"{self.base_url}/v1/chat/completions"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
+        if self._session:
+            # The proxy files the trace under this session, and the control
+            # plane copies the session's repository, branch and commit onto it.
+            headers["x-session-id"] = self._session
 
         max_attempts = self.retries + 1
         last_error = ""
@@ -161,6 +177,54 @@ class ClawdeClient:
                 raise ClawdeConnectionError(last_error)
 
         raise ClawdeConnectionError(f"Request failed after {max_attempts} attempts. Last error: {last_error}")
+
+    def _open_session(self) -> Optional[str]:
+        """The session to send as ``x-session-id``, or None to send none.
+
+        A session id from the environment (``INTUTIC_SESSION_ID``, or the sync
+        daemon's config) is the session that started this process, and its
+        owner reports its context, so it is used as is. Otherwise, when the
+        working directory is a git repository, this registers a session
+        carrying its repository, branch and commit (``POST /api/v1/sessions``,
+        as the sync daemon does), so cost per branch, commit and pull request
+        includes this client's calls. Only with an Intutic virtual key: any
+        other key is a provider's, and it is never sent to the control plane.
+        ``auto_context=False`` turns this off. Best effort: a control plane
+        that cannot be reached or refuses costs the attribution, never the call.
+        """
+        if not self.auto_context:
+            return None
+        context = resolve_context()
+        if context.get("sessionId"):
+            return context["sessionId"]
+        if not self.api_key.startswith("vk_"):
+            return None
+        git = resolve_git_context(context.get("workingDirectory") or os.getcwd(), context.get("gitBranch"))
+        if not git:
+            return None
+        try:
+            # whoami first: the repository goes only to a control plane that accepted the key.
+            workspace_id = context.get("workspaceId") or self._control_plane("GET", "/api/v1/auth/me")["workspaceId"]
+            session = self._control_plane(
+                "POST", "/api/v1/sessions", {"workspaceId": workspace_id, "harnessType": SDK_HARNESS, **git}
+            )
+            return session.get("sessionId")
+        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+            if os.environ.get("INTUTIC_DEBUG") == "true":
+                print(f"[Clawde SDK] No session registered; calls carry no git context: {e}")
+            return None
+
+    def _control_plane(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Any:
+        res = requests.request(
+            method,
+            f"{self.control_plane_url}{path}",
+            json=body,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+            timeout=5.0,
+        )
+        if not res.ok:
+            raise ValueError(f"{method} {path} answered {res.status_code}")
+        return res.json()
 
     def _refuse(self, refusal: ProxyRefusal, status: int) -> NoReturn:
         """Fires the refusal's event, then raises it."""
