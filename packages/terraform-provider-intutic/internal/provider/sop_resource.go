@@ -67,7 +67,7 @@ func (r *sopResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"Promotion through review, shadow and `VALIDATED` stays in the SOP review workflow, because each step " +
 			"is gated on evidence (the Gödel score, shadow results). Editing a SOP that is not a draft forks a new " +
 			"`DRAFT` version with a new id and retires the old one, exactly as an edit in the dashboard does; the " +
-			"plan shows `lifecycle_state` returning to `DRAFT` when that will happen.",
+			"plan shows `lifecycle_state` returning to `DRAFT` when that will happen. Needs an OWNER or ADMIN key.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,

@@ -578,7 +578,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/integrations/agentcore/gateway-check` | Authenticated |  |
+| POST | `/api/v1/integrations/agentcore/gateway-check` | OWNER/ADMIN/EM/DEVELOPER |  |
 
 ### `agents.ts` <Badge type="tip" text="Cloud" />
 
@@ -586,9 +586,9 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | GET | `/api/v1/agents` | Authenticated | list agents in the workspace |
 | GET | `/api/v1/agents/:id` | Authenticated | one agent, its facets, posture, live sessions |
-| POST | `/api/v1/agents/:id/judge-score` | Authenticated |  |
+| POST | `/api/v1/agents/:id/judge-score` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/agents/graph` | Authenticated | nodes + edges + posture for the viz |
-| POST | `/api/v1/agents/report` | Authenticated | daemon upserts an agent + facets (rescored), or reports its machine's AI inventory |
+| POST | `/api/v1/agents/report` | OWNER/ADMIN/EM/DEVELOPER | daemon upserts an agent + facets (rescored), or reports its machine's AI inventory |
 
 ### `anomaly.ts` <Badge type="tip" text="Cloud" />
 
@@ -596,17 +596,17 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | GET | `/api/v1/anomalies` | OWNER/ADMIN/EM | Paginated anomaly list |
 | GET | `/api/v1/capability-misses` | OWNER/ADMIN/EM | Capability miss events |
-| POST | `/api/v1/capability-misses` | Authenticated |  |
+| POST | `/api/v1/capability-misses` | OWNER/ADMIN/EM/DEVELOPER |  |
 | POST | `/api/v1/capability-misses/:missId/review` | OWNER/ADMIN/EM |  |
 
 ### `attenuate.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/attenuate` | Authenticated | <Badge type="warning" text="Biz Org+" /> Attenuate a parent key into a narrower child key |
+| POST | `/api/v1/attenuate` | OWNER/ADMIN/EM/DEVELOPER | <Badge type="warning" text="Biz Org+" /> Attenuate a parent key into a narrower child key |
 | GET | `/api/v1/attenuate/chain/:chainId` | OWNER/ADMIN | Resolve a delegation chain's lineage |
 | GET | `/api/v1/attenuate/chains` | OWNER/ADMIN | List recent delegation chains for the workspace |
-| POST | `/api/v1/auth/obo-token` | Authenticated | <Badge type="warning" text="Self-serve+" /> Issue an on-behalf-of (OBO) ephemeral session token |
+| POST | `/api/v1/auth/obo-token` | OWNER/ADMIN/EM/DEVELOPER | <Badge type="warning" text="Self-serve+" /> Issue an on-behalf-of (OBO) ephemeral session token |
 
 ### `audit.ts` <Badge type="tip" text="Cloud" />
 
@@ -638,9 +638,9 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | POST | `/api/v1/billing/checkout` | OWNER/ADMIN | Buy a plan: a Stripe Checkout session, or the change to an existing subscription |
 | GET | `/api/v1/billing/invoices` | Authenticated |  |
-| POST | `/api/v1/billing/marketplace/aws/register` | Authenticated |  |
+| POST | `/api/v1/billing/marketplace/aws/register` | OWNER/ADMIN |  |
 | POST | `/api/v1/billing/marketplace/aws/webhook` | AWS SNS message signature | AWS Marketplace subscription events |
-| POST | `/api/v1/billing/marketplace/gcp/register` | Authenticated |  |
+| POST | `/api/v1/billing/marketplace/gcp/register` | OWNER/ADMIN |  |
 | POST | `/api/v1/billing/marketplace/gcp/webhook` | Google-signed OIDC token | Google Cloud Marketplace entitlement events |
 | POST | `/api/v1/billing/portal` | OWNER/ADMIN | One-time link to the Stripe billing portal; 404 when the workspace is not billed through Stripe |
 | GET | `/api/v1/billing/usage-rate` | Authenticated | This workspace's rate per 1,000 Governed Requests |
@@ -651,7 +651,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/api/v1/break-glass/approve` | OWNER/ADMIN/EM |  |
-| POST | `/api/v1/break-glass/request` | Authenticated |  |
+| POST | `/api/v1/break-glass/request` | OWNER/ADMIN/EM/DEVELOPER |  |
 | GET | `/api/v1/break-glass/requests` | Authenticated |  |
 
 ### `budget.ts` <Badge type="tip" text="Cloud" />
@@ -659,9 +659,9 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/budget` | Authenticated | Current budget status |
-| PUT | `/api/v1/budget` | Authenticated | Update budget settings |
+| PUT | `/api/v1/budget` | OWNER/ADMIN | Update budget settings |
 | GET | `/api/v1/budget/alerts` | Authenticated | Budget alert history |
-| POST | `/api/v1/budget/alerts/:alertId/acknowledge` | Authenticated | Acknowledge an alert |
+| POST | `/api/v1/budget/alerts/:alertId/acknowledge` | OWNER/ADMIN/EM | Acknowledge an alert |
 
 ### `compliance.ts` <Badge type="tip" text="Cloud" />
 
@@ -697,15 +697,15 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/decisions` | Authenticated | List decisions (paginated) |
-| POST | `/api/v1/decisions` | Authenticated | Ingest review holds from the daemon |
+| POST | `/api/v1/decisions` | OWNER/ADMIN/EM/DEVELOPER | Ingest review holds from the daemon |
 | GET | `/api/v1/decisions/:entryId` | Authenticated | Get decision detail |
 | POST | `/api/v1/decisions/:entryId/review` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/decisions/analysis` | Authenticated | Aggregated pattern analysis |
 | GET | `/api/v1/decisions/approved-bypasses` | Authenticated |  |
-| POST | `/api/v1/decisions/substitutions` | Authenticated | Ingest tool calls the proxy rewrote |
-| POST | `/api/v1/rule-candidates/:candidateId/bundle` | Authenticated |  |
-| POST | `/api/v1/rule-candidates/:candidateId/mocks` | Authenticated |  |
-| POST | `/api/v1/rule-candidates/:candidateId/promote` | Authenticated |  |
+| POST | `/api/v1/decisions/substitutions` | OWNER/ADMIN/EM/DEVELOPER | Ingest tool calls the proxy rewrote |
+| POST | `/api/v1/rule-candidates/:candidateId/bundle` | OWNER/ADMIN |  |
+| POST | `/api/v1/rule-candidates/:candidateId/mocks` | OWNER/ADMIN |  |
+| POST | `/api/v1/rule-candidates/:candidateId/promote` | OWNER/ADMIN |  |
 | GET | `/api/v1/rule-candidates/:candidateId/source` | Authenticated | The candidate's AssemblyScript source of record and its sha256 |
 | GET | `/api/v1/workspaces/:workspaceId/hold-candidates` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/rule-candidates` | Authenticated |  |
@@ -725,7 +725,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | GET | `/api/v1/devices` | OWNER/ADMIN | list enrolled devices |
 | DELETE | `/api/v1/devices/:id` | OWNER/ADMIN | retire a device (soft delete) |
 | GET | `/api/v1/devices/:id` | OWNER/ADMIN | one device |
-| POST | `/api/v1/devices/report` | Authenticated | report this device (upserts on workspace and fingerprint) |
+| POST | `/api/v1/devices/report` | OWNER/ADMIN/EM/DEVELOPER | report this device (upserts on workspace and fingerprint) |
 
 ### `domainVerification.ts` <Badge type="tip" text="Cloud" />
 
@@ -777,7 +777,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/findings` | Authenticated | Detector findings; outcome notes on `response_injection:*` findings are shown to OWNER/ADMIN only |
-| POST | `/api/v1/findings/:findingId/adjudicate` | Authenticated (OWNER/ADMIN for `response_injection:*` findings) | Rule a finding a true or false positive |
+| POST | `/api/v1/findings/:findingId/adjudicate` | OWNER/ADMIN/EM (OWNER/ADMIN for `response_injection:*` findings) | Rule a finding a true or false positive |
 | GET | `/api/v1/findings/:findingId/snippet` | OWNER/ADMIN |  |
 | GET | `/api/v1/findings/adjudicated` | Authenticated | Adjudicated findings; outcome notes on `response_injection:*` findings are shown to OWNER/ADMIN only |
 | GET | `/api/v1/findings/promotion-status` | Authenticated | Progress of shadow-only detectors toward promotion: adjudications and false-positive rate |
@@ -788,7 +788,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/fix/enhance` | Authenticated |  |
+| POST | `/api/v1/fix/enhance` | OWNER/ADMIN/EM/DEVELOPER |  |
 
 ### `gateLiveness.ts` <Badge type="tip" text="Cloud" />
 
@@ -831,7 +831,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | GET | `/api/v1/governance/cards` | Authenticated | Corrective-card labels, newest first (`filter=unlabeled` for the queue) |
 | GET | `/api/v1/governance/cards/:cardId` | Authenticated | One card's label state |
-| POST | `/api/v1/governance/cards/:cardId/label` | Authenticated | Record a person's ruling on a card; overrides an automatic label |
+| POST | `/api/v1/governance/cards/:cardId/label` | OWNER/ADMIN/EM | Record a person's ruling on a card; overrides an automatic label |
 
 ### `governanceCoverage.ts` <Badge type="tip" text="Cloud" />
 
@@ -839,30 +839,30 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | GET | `/api/v1/governance-coverage` | Authenticated |  |
 | GET | `/api/v1/governance-coverage/:harnessType` | Authenticated |  |
-| POST | `/api/v1/governance-coverage/snapshot` | Authenticated |  |
+| POST | `/api/v1/governance-coverage/snapshot` | OWNER/ADMIN/EM/DEVELOPER |  |
 
 ### `harnessConfig.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/config/capture` | Authenticated | Capture config snapshot |
-| POST | `/api/v1/skillopt/:suggestionId/apply` | Authenticated |  |
-| POST | `/api/v1/skillopt/:suggestionId/apply-result` | Authenticated | Sync daemon's ack of an apply attempt |
-| POST | `/api/v1/skillopt/:suggestionId/dismiss` | Authenticated |  |
-| POST | `/api/v1/skillopt/:suggestionId/revert` | Authenticated | Revert an applied suggestion |
+| POST | `/api/v1/config/capture` | OWNER/ADMIN/EM/DEVELOPER | Capture config snapshot |
+| POST | `/api/v1/skillopt/:suggestionId/apply` | OWNER/ADMIN |  |
+| POST | `/api/v1/skillopt/:suggestionId/apply-result` | OWNER/ADMIN/EM/DEVELOPER | Sync daemon's ack of an apply attempt |
+| POST | `/api/v1/skillopt/:suggestionId/dismiss` | OWNER/ADMIN/EM |  |
+| POST | `/api/v1/skillopt/:suggestionId/revert` | OWNER/ADMIN | Revert an applied suggestion |
 | GET | `/api/v1/workspaces/:workspaceId/config-snapshots` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/config-snapshots/:snapshotId/diff` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/workspaces/:workspaceId/skillopt-suggestions` | Authenticated |  |
-| POST | `/api/v1/workspaces/:workspaceId/skillopt/generate` | Authenticated |  |
+| POST | `/api/v1/workspaces/:workspaceId/skillopt/generate` | OWNER/ADMIN |  |
 | GET | `/api/v1/workspaces/:workspaceId/skills/report` | Authenticated |  |
-| POST | `/api/v1/workspaces/:workspaceId/skills/report` | Authenticated |  |
+| POST | `/api/v1/workspaces/:workspaceId/skills/report` | OWNER/ADMIN/EM/DEVELOPER |  |
 
 ### `hookEvents.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/hook-events` | Authenticated |  |
-| POST | `/api/v1/hook-gate` | Authenticated |  |
+| POST | `/api/v1/hook-events` | OWNER/ADMIN/EM/DEVELOPER |  |
+| POST | `/api/v1/hook-gate` | OWNER/ADMIN/EM/DEVELOPER |  |
 
 ### `incidents.ts` <Badge type="tip" text="Cloud" />
 
@@ -888,9 +888,9 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/predict-cost` | Authenticated | Cost prediction |
-| POST | `/api/v1/recommendations/:recommendationId/apply` | Authenticated |  |
-| POST | `/api/v1/recommendations/:recommendationId/dismiss` | Authenticated |  |
+| POST | `/api/v1/predict-cost` | OWNER/ADMIN/EM/DEVELOPER | Cost prediction |
+| POST | `/api/v1/recommendations/:recommendationId/apply` | OWNER/ADMIN/EM |  |
+| POST | `/api/v1/recommendations/:recommendationId/dismiss` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/traces/:traceId/token-breakdown` | Authenticated | Per-tool token breakdown |
 | GET | `/api/v1/workspaces/:workspaceId/optimization-recommendations` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/waste-patterns` | Authenticated |  |
@@ -934,20 +934,20 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | GET | `/api/v1/loops` | Authenticated |  |
 | GET | `/api/v1/loops/:loopRunId` | Authenticated |  |
-| POST | `/api/v1/loops/:loopRunId/complete` | Authenticated |  |
+| POST | `/api/v1/loops/:loopRunId/complete` | OWNER/ADMIN/EM; DEVELOPER (own run) |  |
 | GET | `/api/v1/loops/:loopRunId/duplicates` | Authenticated |  |
-| POST | `/api/v1/loops/:loopRunId/kill` | Authenticated |  |
+| POST | `/api/v1/loops/:loopRunId/kill` | OWNER/ADMIN/EM; DEVELOPER (own run) |  |
 | POST | `/api/v1/loops/:loopRunId/review` | OWNER/ADMIN/EM |  |
-| POST | `/api/v1/loops/:loopRunId/verify` | Authenticated |  |
+| POST | `/api/v1/loops/:loopRunId/verify` | OWNER/ADMIN/EM; DEVELOPER (own run) |  |
 | GET | `/api/v1/loops/reviews` | OWNER/ADMIN/EM |  |
-| POST | `/api/v1/loops/start` | Authenticated |  |
+| POST | `/api/v1/loops/start` | OWNER/ADMIN/EM/DEVELOPER |  |
 
 ### `mcpDaemon.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/mcp-daemon/policy-invalidate` | Authenticated | make every connected daemon re-pull policy now. |
-| POST | `/api/v1/mcp-daemon/report` | Authenticated | upload one status snapshot from the MCP daemon, with the workspace API key. A daemon that stops reporting reads as running: false after three missed intervals. |
+| POST | `/api/v1/mcp-daemon/policy-invalidate` | OWNER/ADMIN/EM/DEVELOPER | make every connected daemon re-pull policy now. |
+| POST | `/api/v1/mcp-daemon/report` | OWNER/ADMIN/EM/DEVELOPER | upload one status snapshot from the MCP daemon, with the workspace API key. A daemon that stops reporting reads as running: false after three missed intervals. |
 | GET | `/api/v1/mcp-daemon/status` | Authenticated | the last snapshot; with none, a not-running daemon with empty counters. |
 
 ### `mcpServers.ts` <Badge type="tip" text="Cloud" />
@@ -957,7 +957,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | GET | `/api/v1/mcp/servers` | Authenticated | Every MCP server seen, with its status, the tools a proxy last saw it declare and which are disabled, the latest scored change to its tool set, plus the workspace's default policy, its high-risk tool-change setting and its MCP call budgets. |
 | POST | `/api/v1/mcp/servers/:serverId/status` | OWNER/ADMIN | Approve, block, or return a server to the approval queue. |
 | POST | `/api/v1/mcp/servers/:serverId/tools` | OWNER/ADMIN | Switch one tool within a server on or off. |
-| POST | `/api/v1/mcp/servers/observe` | Authenticated | An MCP proxy reports the server it fronts, its tool names and their definitions; a first sighting creates a candidate and sends mcp.server.candidate, and changed definitions are scored for risk and recorded. |
+| POST | `/api/v1/mcp/servers/observe` | OWNER/ADMIN/EM/DEVELOPER | An MCP proxy reports the server it fronts, its tool names and their definitions; a first sighting creates a candidate and sends mcp.server.candidate, and changed definitions are scored for risk and recorded. |
 
 ### `members.ts` <Badge type="tip" text="Cloud" />
 
@@ -977,7 +977,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | GET | `/api/v1/metaclaw/proposals` | Authenticated |  |
 | GET | `/api/v1/metaclaw/runs` | Authenticated |  |
 | GET | `/api/v1/metaclaw/runs/:id` | Authenticated |  |
-| POST | `/api/v1/metaclaw/trigger` | Authenticated | <Badge type="warning" text="Biz Org+" /> |
+| POST | `/api/v1/metaclaw/trigger` | OWNER/ADMIN | <Badge type="warning" text="Biz Org+" /> |
 
 ### `notifications.ts` <Badge type="tip" text="Cloud" />
 
@@ -1004,7 +1004,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/integrations/openai-agents/traces/ingest` | Authenticated | Ingest the OpenAI Agents SDK's trace export; generation spans become usage records, DLP-scanned first |
+| POST | `/api/v1/integrations/openai-agents/traces/ingest` | OWNER/ADMIN/EM/DEVELOPER | Ingest the OpenAI Agents SDK's trace export; generation spans become usage records, DLP-scanned first |
 
 ### `orgs.ts` <Badge type="tip" text="Cloud" />
 
@@ -1033,10 +1033,10 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | POST | `/api/v1/plans/:planId/close` | OWNER/ADMIN/EM | Close plan with a final outcome (OWNER/ADMIN/EM) |
 | GET | `/api/v1/plans/:planId/deviation` | Authenticated | Get deviation log |
 | POST | `/api/v1/plans/:planId/reject` | OWNER/ADMIN/EM | Reject plan before it executes (OWNER/ADMIN/EM) |
-| POST | `/api/v1/plans/capture` | Authenticated | Capture a plan artifact |
+| POST | `/api/v1/plans/capture` | OWNER/ADMIN/EM/DEVELOPER | Capture a plan artifact |
 | GET | `/api/v1/plans/session/:sessionId` | Authenticated |  |
 | GET | `/api/v1/sops/:sopId/proof-tree` | Authenticated | Get latest proof tree |
-| POST | `/api/v1/sops/:sopId/proof-tree` | Authenticated | Create/update proof tree |
+| POST | `/api/v1/sops/:sopId/proof-tree` | OWNER/ADMIN | Create/update proof tree |
 | GET | `/api/v1/sops/:sopId/proof-tree/diff` | Authenticated | Diff proof tree versions |
 
 ### `policies.ts` <Badge type="tip" text="Cloud" />
@@ -1151,10 +1151,10 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/sessions` | Authenticated |  |
+| POST | `/api/v1/sessions` | OWNER/ADMIN/EM/DEVELOPER |  |
 | GET | `/api/v1/sessions/:sessionId` | Authenticated |  |
-| PATCH | `/api/v1/sessions/:sessionId/attest-sandbox` | Authenticated |  |
-| PATCH | `/api/v1/sessions/:sessionId/end` | Authenticated |  |
+| PATCH | `/api/v1/sessions/:sessionId/attest-sandbox` | OWNER/ADMIN/EM/DEVELOPER |  |
+| PATCH | `/api/v1/sessions/:sessionId/end` | OWNER/ADMIN/EM/DEVELOPER |  |
 
 ### `siem.ts` <Badge type="tip" text="Cloud" />
 
@@ -1192,11 +1192,11 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| DELETE | `/api/v1/adapters/slack` | Authenticated | Remove installation |
+| DELETE | `/api/v1/adapters/slack` | OWNER/ADMIN | Remove installation |
 | POST | `/api/v1/adapters/slack/link-code` | Authenticated | Issue an account-link code |
-| GET | `/api/v1/adapters/slack/oauth/authorize` | Authenticated | Start OAuth (redirect) |
+| GET | `/api/v1/adapters/slack/oauth/authorize` | OWNER/ADMIN | Start OAuth (redirect) |
 | GET | `/api/v1/adapters/slack/oauth/callback` | None (OAuth state) | OAuth callback |
-| GET | `/api/v1/adapters/slack/oauth/url` | Authenticated |  |
+| GET | `/api/v1/adapters/slack/oauth/url` | OWNER/ADMIN |  |
 | GET | `/api/v1/adapters/slack/status` | Authenticated | Installation status |
 
 ### `slashCommand.ts` <Badge type="tip" text="Cloud" />
@@ -1212,25 +1212,25 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | GET | `/api/v1/sop/dependency-graph` | Authenticated |  |
 | GET | `/api/v1/sop/rules` | Authenticated |  |
 | GET | `/api/v1/sops` | Authenticated | List SOPs (paginated) |
-| POST | `/api/v1/sops` | Authenticated | Create SOP |
-| DELETE | `/api/v1/sops/:sopId` | Authenticated | Soft-delete SOP |
+| POST | `/api/v1/sops` | OWNER/ADMIN | Create SOP |
+| DELETE | `/api/v1/sops/:sopId` | OWNER/ADMIN | Soft-delete SOP |
 | GET | `/api/v1/sops/:sopId` | Authenticated | Get SOP detail |
-| PUT | `/api/v1/sops/:sopId` | Authenticated | Update SOP |
+| PUT | `/api/v1/sops/:sopId` | OWNER/ADMIN | Update SOP |
 | GET | `/api/v1/sops/:sopId/dependencies` | Authenticated | Get dependency graph |
 | GET | `/api/v1/sops/:sopId/duplicates` | Authenticated | Similarity scores against the workspace's other SOPs |
-| POST | `/api/v1/sops/:sopId/godel-probe` | Authenticated |  |
+| POST | `/api/v1/sops/:sopId/godel-probe` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/sops/:sopId/health` | Authenticated | Get health metrics |
-| POST | `/api/v1/sops/:sopId/holds` | Authenticated |  |
-| POST | `/api/v1/sops/:sopId/invalidate` | Authenticated | Cascade invalidation |
-| POST | `/api/v1/sops/:sopId/transition` | Authenticated | Lifecycle transition |
+| POST | `/api/v1/sops/:sopId/holds` | OWNER/ADMIN/EM |  |
+| POST | `/api/v1/sops/:sopId/invalidate` | OWNER/ADMIN | Cascade invalidation |
+| POST | `/api/v1/sops/:sopId/transition` | OWNER/ADMIN | Lifecycle transition |
 | GET | `/api/v1/sops/:sopId/versions` | Authenticated |  |
-| POST | `/api/v1/sops/git-drift-report` | Authenticated | Record sops status drift results |
+| POST | `/api/v1/sops/git-drift-report` | OWNER/ADMIN/EM/DEVELOPER | Record sops status drift results |
 
 ### `sslCompliance.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/sessions/:sessionId/ssl-audit` | Authenticated |  |
+| POST | `/api/v1/sessions/:sessionId/ssl-audit` | OWNER/ADMIN/EM/DEVELOPER |  |
 | GET | `/api/v1/sessions/:sessionId/ssl-state` | Authenticated |  |
 | GET | `/api/v1/workspaces/:workspaceId/ssl-compliance` | Authenticated |  |
 
@@ -1248,10 +1248,10 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/sync/config` | Authenticated | Push workspace config to daemon |
+| POST | `/api/v1/sync/config` | OWNER/ADMIN/EM/DEVELOPER | Push workspace config to daemon |
 | GET | `/api/v1/sync/report` | Authenticated |  |
-| POST | `/api/v1/sync/sop-hash` | Authenticated | Receive SOP hash integrity report |
-| POST | `/api/v1/sync/status` | Authenticated | Record daemon heartbeat |
+| POST | `/api/v1/sync/sop-hash` | OWNER/ADMIN/EM/DEVELOPER | Receive SOP hash integrity report |
+| POST | `/api/v1/sync/status` | OWNER/ADMIN/EM/DEVELOPER | Record daemon heartbeat |
 | GET | `/api/v1/sync/ws` | API key (`?token=vk_…`) |  |
 
 ### `taskManagement.ts` <Badge type="tip" text="Cloud" />
@@ -1259,9 +1259,9 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/task-management/connections` | Authenticated | List task connections |
-| POST | `/api/v1/task-management/connections` | Authenticated | Create task connection |
-| DELETE | `/api/v1/task-management/connections/:connectionId` | Authenticated |  |
-| POST | `/api/v1/task-management/connections/:connectionId/test` | Authenticated |  |
+| POST | `/api/v1/task-management/connections` | OWNER/ADMIN | Create task connection |
+| DELETE | `/api/v1/task-management/connections/:connectionId` | OWNER/ADMIN |  |
+| POST | `/api/v1/task-management/connections/:connectionId/test` | OWNER/ADMIN |  |
 
 ### `teams.ts` <Badge type="tip" text="Cloud" />
 
@@ -1285,7 +1285,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | GET | `/api/v1/traces` | Authenticated | List traces with filtering and pagination |
 | GET | `/api/v1/traces/:id` | Authenticated | Get a single trace by ID |
 | GET | `/api/v1/traces/:id/dag` | Authenticated |  |
-| POST | `/api/v1/traces/sync-back` | Authenticated |  |
+| POST | `/api/v1/traces/sync-back` | OWNER/ADMIN/EM/DEVELOPER |  |
 
 ### `trajectory.ts` <Badge type="tip" text="Cloud" />
 
@@ -1293,7 +1293,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 |--------|------|------|-------------|
 | GET | `/api/v1/trajectory/alerts` | OWNER/ADMIN/EM | List trajectory alerts for workspace |
 | GET | `/api/v1/trajectory/alerts/:alertId` | OWNER/ADMIN/EM |  |
-| POST | `/api/v1/trajectory/analyze` | Authenticated | Submit trajectory summary for analysis |
+| POST | `/api/v1/trajectory/analyze` | OWNER/ADMIN/EM/DEVELOPER | Submit trajectory summary for analysis |
 | GET | `/api/v1/trajectory/status/:sessionId` | OWNER/ADMIN/EM |  |
 
 ### `trial.ts` <Badge type="tip" text="Cloud" />
@@ -1315,7 +1315,7 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/usage/branches` | Authenticated | Usage per repository and branch |
-| POST | `/api/v1/usage/classify` | Authenticated | <Badge type="tip" text="Cloud" /> Classify tokens as USEFUL or WASTED |
+| POST | `/api/v1/usage/classify` | OWNER/ADMIN/EM | <Badge type="tip" text="Cloud" /> Classify tokens as USEFUL or WASTED |
 | GET | `/api/v1/usage/commits` | Authenticated | Usage per HEAD commit |
 | GET | `/api/v1/usage/events` | Authenticated | <Badge type="tip" text="Cloud" /> Paginated raw execution trace events |
 | GET | `/api/v1/usage/members` | Authenticated | Per-developer usage (own row only below EM) |
@@ -1338,23 +1338,23 @@ Every route the control plane serves: 402 routes, grouped by the source file tha
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/wasm-rules` | Authenticated |  |
-| POST | `/api/v1/wasm-rules` | Authenticated |  |
-| DELETE | `/api/v1/wasm-rules/:ruleId` | Authenticated |  |
+| POST | `/api/v1/wasm-rules` | OWNER/ADMIN |  |
+| DELETE | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN |  |
 | GET | `/api/v1/wasm-rules/:ruleId` | Authenticated |  |
-| PUT | `/api/v1/wasm-rules/:ruleId` | Authenticated |  |
-| POST | `/api/v1/wasm-rules/:ruleId/replay` | Authenticated |  |
+| PUT | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN |  |
+| POST | `/api/v1/wasm-rules/:ruleId/replay` | OWNER/ADMIN/EM |  |
 
 ### `workspace.ts` <Badge type="tip" text="Cloud" />
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/workspace/byoc/test` | Authenticated |  |
+| POST | `/api/v1/workspace/byoc/test` | OWNER/ADMIN |  |
 | GET | `/api/v1/workspace/dashboard` | Authenticated | Aggregated dashboard summary |
 | GET | `/api/v1/workspace/decisions-digest` | Authenticated |  |
 | GET | `/api/v1/workspace/egress-policy` | Authenticated |  |
 | GET | `/api/v1/workspace/leaderboard` | Authenticated |  |
 | GET | `/api/v1/workspace/onboarding-status` | Authenticated |  |
-| POST | `/api/v1/workspace/onboarding/complete` | Authenticated |  |
+| POST | `/api/v1/workspace/onboarding/complete` | OWNER/ADMIN/EM/DEVELOPER |  |
 | GET | `/api/v1/workspace/posture` | Authenticated |  |
 | POST | `/api/v1/workspace/posture` | OWNER/ADMIN |  |
 | GET | `/api/v1/workspace/region` | OWNER/ADMIN | Workspace region and residency enforcement |

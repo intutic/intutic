@@ -23,6 +23,12 @@ npx @intutic/proxy
 `intutic trace` is an alias of `intutic traces`, and `intutic install-daemon` /
 `intutic uninstall-daemon` are shortcuts for `intutic daemon install` / `intutic daemon uninstall`.
 
+A command that changes the workspace needs a role that may make the change, the same as in the
+dashboard ([what each role can change](/guide/security#what-each-role-can-change)). When yours
+cannot, the command fails with the roles it needs, for example
+`API PUT /api/v1/budget refused (403): Requires the OWNER or ADMIN role`. A Viewer can run the
+read-only commands and manage their own login and keys.
+
 ## Plan badges
 
 Commands without a badge run on your machine with no account. A badge on a command means it calls
@@ -717,7 +723,7 @@ intutic findings adjudicate <findingId> (--true-positive | --false-positive) [op
 Exactly one of `--true-positive` and `--false-positive` is required; passing neither or both exits `1` before anything is sent.
 
 **What it does:**
-Records the outcome, the note, and you as the adjudicator. The adjudicator is always the logged-in member, never a flag. Ruling on a finding again replaces the earlier ruling. Any workspace member can rule on most findings; `response_injection:*` findings need the OWNER or ADMIN role, the same roles that can see their response excerpt. These rulings are what `intutic findings stats` and `intutic findings echo-report` compute false-positive rates from.
+Records the outcome, the note, and you as the adjudicator. The adjudicator is always the logged-in member, never a flag. Ruling on a finding again replaces the earlier ruling. Ruling on a finding needs the OWNER, ADMIN or EM role; `response_injection:*` findings need the OWNER or ADMIN role, the same roles that can see their response excerpt. These rulings are what `intutic findings stats` and `intutic findings echo-report` compute false-positive rates from.
 
 **Example:**
 
@@ -1205,6 +1211,8 @@ Mark a running loop as successfully completed.
 intutic loop complete <loop_run_id> [options]
 ```
 
+A Developer can complete a run they started; completing anyone's run needs the OWNER, ADMIN or EM role.
+
 **Options:**
 
 | Option | Description |
@@ -1220,6 +1228,8 @@ Kill an active loop and prevent subsequent API requests.
 ```bash
 intutic loop kill <loop_run_id> [options]
 ```
+
+A Developer can kill a run they started; killing anyone's run needs the OWNER, ADMIN or EM role.
 
 **Options:**
 
@@ -1446,7 +1456,7 @@ intutic doctor
 
 ## `intutic policy replay <ruleId>` <Badge type="tip" text="Cloud" />
 
-Run a WASM rule against this workspace's own recent traffic and report what it would have done, without touching enforcement.
+Run a WASM rule against this workspace's own recent traffic and report what it would have done, without touching enforcement. Needs the OWNER, ADMIN or EM role.
 
 ```bash
 intutic policy replay <ruleId> [options]
@@ -1520,7 +1530,7 @@ Shells out to `npx --no-install asc <src> -o <out> --optimize --exportRuntime`, 
 | Option | Description |
 |--------|-------------|
 | `--candidate <id>` | Fetch the candidate's source of record from the control plane, verify its hash, write it to `generated/candidates/<id>.ts` and compile it to `build/<id>.wasm` (unless `--out` is given). Cannot be combined with `--src`. |
-| `--upload` | After compiling, upload the bundle to `POST /api/v1/rule-candidates/<id>/bundle` together with the source hash, and print the gate results. Requires `--candidate`. |
+| `--upload` | After compiling, upload the bundle to `POST /api/v1/rule-candidates/<id>/bundle` together with the source hash, and print the gate results. Requires `--candidate` and the OWNER or ADMIN role. |
 | `--dev` | Use the local control plane (`http://localhost:3001`). |
 
 Run it from a rule project that has `assembly/index.ts` (the SDK layout): the generated source imports the SDK from two directories up. See [Rules from policy documents](/guide/wasm-rules#rules-from-policy-documents).
@@ -2252,7 +2262,7 @@ intutic sops push <name> [options]
 | `--org` | Push as an org-wide floor instead of a workspace SOP |
 
 **What it does:**
-For every `.md` file in `.intutic/sops/<name>/`, parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier) and creates one workspace SOP per file, front matter stripped from the uploaded body. Fails if the folder is missing or contains no markdown. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
+For every `.md` file in `.intutic/sops/<name>/`, parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier) and creates one workspace SOP per file, front matter stripped from the uploaded body. Fails if the folder is missing or contains no markdown. Creating workspace SOPs needs the OWNER or ADMIN role; `--org` needs that role on a workspace in the org. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
 
 ---
 
