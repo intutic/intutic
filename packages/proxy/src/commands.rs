@@ -86,7 +86,7 @@ pub struct GraphContext {
 }
 
 /// How a harness's tool calls get gated — the Rust-side twin of
-/// `services/sync-daemon/src/harness/gateKind.ts`'s `GateKind`. That module's
+/// `packages/shared-types/src/gateKind.ts`'s `GateKind`. That module's
 /// own doc comment explains why this classification exists at all: `hook_gate`
 /// used to be reported unconditionally `true` everywhere on the theory that
 /// "the proxy is on the path, so the gate is always present" — false for any

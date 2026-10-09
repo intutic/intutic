@@ -40,7 +40,14 @@ import {
 import { runComplianceCoverage, runComplianceCollect, runComplianceDownload } from './compliance.js'
 import { runUsageMembers, runUsageTeams, runUsageBranches, runUsageCommits, runUsagePullRequests } from './usage.js'
 import { runGithubWebhookShow, runGithubWebhookRotateSecret } from './github.js'
-import { runInventorySummary, runInventoryHarnesses, runInventoryMcpServers, runInventorySkills } from './inventory.js'
+import {
+  runInventorySummary,
+  runInventoryHarnesses,
+  runInventoryMcpServers,
+  runInventorySkills,
+  runInventoryDevices,
+  runInventoryDisconnects,
+} from './inventory.js'
 import { runGateLiveness } from './gateLiveness.js'
 
 const BASE = 'https://api.test.invalid'
@@ -251,6 +258,15 @@ describe('intutic notifications', () => {
 
   it('create refuses an unknown channel before any request', async () => {
     await expectFailure(() => runNotificationsCreate({ event: 'incident.created', channel: 'sms' }), '--channel must be one of')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('create and update refuse an unknown event type before any request, naming the near ones', async () => {
+    await expectFailure(
+      () => runNotificationsCreate({ event: 'decision.pend', channel: 'slack', slackChannel: 'C1' }),
+      'Did you mean decision.pending, decision.approved, decision.rejected?',
+    )
+    await expectFailure(() => runNotificationsUpdate('nr_1', { event: 'policy.violation' }), 'Valid types: anomaly.detected,')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -553,8 +569,8 @@ describe('intutic github webhook', () => {
   })
 
   it('prints the server\'s role refusal', async () => {
-    fetchMock.mockReturnValue(reply(403, { error: 'Forbidden' }))
-    await expectFailure(() => runGithubWebhookRotateSecret({}), 'Forbidden')
+    fetchMock.mockReturnValue(reply(403, { error: 'Forbidden', code: 'E_FORBIDDEN', detail: 'Requires the OWNER or ADMIN role' }))
+    await expectFailure(() => runGithubWebhookRotateSecret({}), 'Requires the OWNER or ADMIN role')
   })
 })
 
@@ -605,9 +621,37 @@ describe('intutic inventory', () => {
     expect(JSON.parse(printed())).toEqual(res)
   })
 
+  it('devices prints each machine\'s id, for --device', async () => {
+    fetchMock.mockReturnValue(reply(200, { data: [{
+      deviceId: 'dev_a1', hostname: 'jane-mbp', platform: 'darwin', cliVersion: '2.3.0', reportedBy: 'jane@corp.test',
+      workspace: null, guardProbes: null, firstSeenAt: '2026-10-01T00:00:00Z', lastSeenAt: '2026-10-09T00:00:00Z',
+      stale: false, disconnectedAt: null, harnesses: 3, ungovernedHarnesses: 1, staleGates: 0,
+    }] }))
+    await runInventoryDevices({})
+    expect(sent().url).toBe(`${BASE}/api/v1/inventory/devices`)
+    expect(printed()).toContain('dev_a1  jane-mbp')
+    expect(printed()).toContain('3 harnesses, 1 ungoverned')
+  })
+
+  it('disconnects sends --limit and prints what each machine disconnected', async () => {
+    fetchMock.mockReturnValue(reply(200, { data: [
+      { disconnectId: 'dd_1', hostname: 'jane-mbp', fingerprint: 'f', scope: 'harness', harnesses: ['cursor', 'cline'], memberId: 'mem_1', reportedBy: 'jane@corp.test', createdAt: '2026-10-09T01:00:00Z' },
+      { disconnectId: 'dd_2', hostname: 'ci-runner', fingerprint: 'g', scope: 'machine', harnesses: [], memberId: null, reportedBy: null, createdAt: '2026-10-08T01:00:00Z' },
+    ] }))
+    await runInventoryDisconnects({ limit: '20' })
+    expect(sent().url).toBe(`${BASE}/api/v1/inventory/disconnects?limit=20`)
+    expect(printed()).toContain('jane-mbp  cursor, cline')
+    expect(printed()).toContain('ci-runner  every harness')
+  })
+
+  it('disconnects refuses a --limit that is not a positive whole number, before any request', async () => {
+    await expectFailure(() => runInventoryDisconnects({ limit: '0' }), '--limit must be a positive whole number')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('prints the server\'s refusal', async () => {
-    fetchMock.mockReturnValue(reply(403, { error: 'Forbidden: requires one of OWNER, ADMIN, EM, DEVELOPER' }))
-    await expectFailure(() => runInventorySummary({}), 'Forbidden')
+    fetchMock.mockReturnValue(reply(403, { error: 'Forbidden', code: 'E_FORBIDDEN', detail: 'Requires the OWNER, ADMIN, EM or DEVELOPER role' }))
+    await expectFailure(() => runInventorySummary({}), 'Requires the OWNER, ADMIN, EM or DEVELOPER role')
   })
 })
 
@@ -632,7 +676,7 @@ describe('intutic gate-liveness', () => {
   })
 
   it('prints the server\'s refusal', async () => {
-    fetchMock.mockReturnValue(reply(403, { error: 'Forbidden: requires one of OWNER, ADMIN, EM' }))
-    await expectFailure(() => runGateLiveness({}), 'Forbidden')
+    fetchMock.mockReturnValue(reply(403, { error: 'Forbidden', code: 'E_FORBIDDEN', detail: 'Requires the OWNER, ADMIN or EM role' }))
+    await expectFailure(() => runGateLiveness({}), 'Requires the OWNER, ADMIN or EM role')
   })
 })

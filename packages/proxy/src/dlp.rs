@@ -245,6 +245,7 @@ static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
     patterns
 });
 
+#[derive(Clone)]
 struct DlpPattern {
     name: String,
     category: String,
@@ -395,6 +396,12 @@ fn effective_pii_actions(
 /// `scrub_stream_text` and `StreamScrubber::with_pii`.
 pub struct PiiPolicy {
     patterns: Vec<DlpPattern>,
+    /// The detectors the workspace's setting names: its baseline.
+    baseline: std::collections::BTreeSet<String>,
+    /// Scan with these PII detectors alone, without this machine's secret
+    /// and operator patterns: the baseline of a direction this machine's
+    /// DLP switches leave off (`direction_scan`).
+    baseline_only: bool,
 }
 
 impl PiiPolicy {
@@ -410,6 +417,43 @@ impl PiiPolicy {
     pub fn actions(&self) -> Vec<(String, String)> {
         action_table(&self.patterns)
     }
+
+    /// The detectors the workspace names, at their actions here, and nothing
+    /// else; `None` when it switches none on, so there is nothing to enforce.
+    fn baseline(&self) -> Option<PiiPolicy> {
+        let patterns: Vec<DlpPattern> = self
+            .patterns
+            .iter()
+            .filter(|p| self.baseline.contains(&p.name))
+            .cloned()
+            .collect();
+        (!patterns.is_empty()).then(|| PiiPolicy {
+            patterns,
+            baseline: self.baseline.clone(),
+            baseline_only: true,
+        })
+    }
+}
+
+/// What one direction of a request (its body and headers, or its response)
+/// is scanned with: `None` when nothing scans it, else the PII policy to pass
+/// to `scan_with`, `scrub_stream_text` and `StreamScrubber::with_pii`, `None`
+/// inside for this machine's own actions.
+///
+/// This machine's DLP switches (`dlp.enabled`, `scan_input`, `scan_output`)
+/// turn its own patterns on and off. They cannot turn off the workspace's
+/// baseline: local config may only tighten what the workspace sets, so with
+/// a switch off the detectors the workspace names still run, in that
+/// direction, at their actions here.
+pub fn direction_scan(
+    local_on: bool,
+    pii: Option<&std::sync::Arc<PiiPolicy>>,
+) -> Option<Option<std::sync::Arc<PiiPolicy>>> {
+    if local_on {
+        return Some(pii.cloned());
+    }
+    pii.and_then(|policy| policy.baseline())
+        .map(|baseline| Some(std::sync::Arc::new(baseline)))
 }
 
 /// The policy for a workspace whose setting is `workspace`, against the
@@ -421,6 +465,8 @@ pub fn workspace_pii_policy(
     let effective = effective_pii_actions(&local, workspace)?;
     Ok(PiiPolicy {
         patterns: build_pii_patterns(&effective)?,
+        baseline: workspace.keys().cloned().collect(),
+        baseline_only: false,
     })
 }
 
@@ -484,16 +530,23 @@ pub fn install_custom_patterns(defs: &[crate::config::CustomDlpPattern]) -> Resu
 }
 
 /// Built-ins first, then the enabled PII detectors — the workspace's when
-/// `pii` is given, else this machine's — then operator patterns.
+/// `pii` is given, else this machine's — then operator patterns. A baseline
+/// alone (`direction_scan`) is its PII detectors and nothing else.
 fn all_patterns(pii: Option<&PiiPolicy>) -> impl Iterator<Item = &DlpPattern> {
-    let pii = match pii {
-        Some(policy) => policy.patterns.as_slice(),
-        None => pii_patterns(),
+    let (builtins, pii, custom): (&[DlpPattern], &[DlpPattern], &[DlpPattern]) = match pii {
+        Some(policy) if policy.baseline_only => (&[], &policy.patterns, &[]),
+        Some(policy) => (
+            &PATTERNS,
+            &policy.patterns,
+            CUSTOM.get().map(Vec::as_slice).unwrap_or(&[]),
+        ),
+        None => (
+            &PATTERNS,
+            pii_patterns(),
+            CUSTOM.get().map(Vec::as_slice).unwrap_or(&[]),
+        ),
     };
-    PATTERNS
-        .iter()
-        .chain(pii.iter())
-        .chain(CUSTOM.get().map(Vec::as_slice).unwrap_or(&[]).iter())
+    builtins.iter().chain(pii.iter()).chain(custom.iter())
 }
 
 /// Scan text for DLP matches.
@@ -2211,6 +2264,52 @@ mod holdback_tests {
             err.contains("piiDetectors") && err.contains("warn"),
             "{err}"
         );
+    }
+
+    /// A direction this machine's switches leave off is still scanned with
+    /// the detectors the workspace names, at their actions here, and with
+    /// nothing else; one they leave on is scanned in full.
+    #[test]
+    fn a_local_switch_cannot_turn_the_workspace_baseline_off() {
+        let policy = std::sync::Arc::new(
+            workspace_pii_policy(&actions(&[("pii.email", "redact"), ("pii.card", "block")]))
+                .unwrap(),
+        );
+        let text = format!(
+            "mail jane.doe@{} card {} key AKIA{}",
+            "corp.io",
+            visa_test_pan(),
+            "IOSFODNN7EXAMPLE"
+        );
+        let found = |scan: &Option<std::sync::Arc<PiiPolicy>>| -> Vec<(String, String)> {
+            scan_with(&text, scan.as_deref())
+                .into_iter()
+                .map(|f| (f.pattern_name, f.action))
+                .collect()
+        };
+
+        let off = direction_scan(false, Some(&policy)).expect("the baseline still scans");
+        let mut baseline = found(&off);
+        baseline.sort();
+        assert_eq!(
+            baseline,
+            [("pii.card", "block"), ("pii.email", "redact")]
+                .map(|(a, b)| (a.to_string(), b.to_string())),
+            "only the workspace's detectors run with the local switch off"
+        );
+
+        let on = direction_scan(true, Some(&policy)).expect("a switch on scans");
+        let names: Vec<String> = found(&on).into_iter().map(|(n, _)| n).collect();
+        assert!(names.contains(&"aws_access_key".to_string()), "{names:?}");
+        assert!(names.contains(&"pii.email".to_string()), "{names:?}");
+
+        // Nothing to enforce: no workspace setting, or one that switches every
+        // detector it names off.
+        assert!(direction_scan(false, None).is_none());
+        let all_off =
+            std::sync::Arc::new(workspace_pii_policy(&actions(&[("pii.card", "off")])).unwrap());
+        assert!(direction_scan(false, Some(&all_off)).is_none());
+        assert!(matches!(direction_scan(true, None), Some(None)));
     }
 
     /// A workspace policy changes what the PII detectors do and nothing else:

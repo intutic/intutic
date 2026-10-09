@@ -57,7 +57,7 @@ export { guardPolicySnapshot, guardSettingsFile, isGuardedPath, warnIfDshCoverag
 export { readJsonObjectForMerge } from './harness/jsonMergeTarget.js'
 export { writeRulesSection, retireRulesFile, rulesSectionOf, RULES_SECTION_START, RULES_SECTION_END, RULES_MARKERS, DECISIONS_MARKERS } from './harness/rulesSection.js'
 export type { SectionMarkers } from './harness/rulesSection.js'
-export { gateKindForHarness } from './harness/gateKind.js'
+export { gateKindForHarness } from '@intutic/shared-types'
 
 // Gap 3 fix — Antigravity (Gemini CLI) hook coverage
 export { writeAntigravityHooks, buildGeminiBeforeToolEntry } from './harness/antigravityHooks.js'

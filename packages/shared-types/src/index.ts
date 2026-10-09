@@ -788,3 +788,20 @@ export {
   gateDeadlineMs,
 } from './gateLimits.js'
 export type { HookGateHarness, HookGateTimeout, HookTimeoutSetBy } from './gateLimits.js'
+export {
+  BRIDGE_GATED_HARNESSES,
+  DELEGATED_GATE_HARNESSES,
+  NO_GATE_HARNESSES,
+  SDK_GATED_HARNESSES,
+  gateKindForHarness,
+  type GateKind,
+} from './gateKind.js'
+export { DEFAULT_FUEL_BUDGET, FUEL_EXPORT, REGO_FUEL_BUDGET, meterFuel } from './wasmFuel.js'
+export { WASM_PAGE_BYTES, capDeclaredMemory } from './wasmMemoryCap.js'
+export {
+  RULE_LOAD_FAILURE_REASONS,
+  RULE_LOAD_FAILURE_TEXT,
+  isRuleLoadFailureReason,
+  type RuleLoadFailureReason,
+} from './ruleLoadFailures.js'
+export { GATE_DECISION_VERDICTS, type GateDecisionVerdict } from './gateDecisions.js'

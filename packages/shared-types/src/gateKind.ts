@@ -1,6 +1,8 @@
 /**
- * gateKind.ts — classifies each harness by HOW its tool calls get governed,
- * for `agentReporter.ts`'s `guardrails` facet.
+ * gateKind.ts — classifies each harness by HOW its tool calls get governed:
+ * for the sync daemon's agent report (`agentReporter.ts`'s `guardrails`
+ * facet) and AI inventory, and for the control plane's silent-gate check,
+ * which expects a gate only from a harness that has one of its own.
  *
  * # Why this exists
  *
@@ -31,7 +33,7 @@
  * completeness registry exercised by `generatedGateBehaviour.test.ts`) is the
  * authoritative decision per harness, but it is a test-only module (it
  * dynamically imports every writer's compiled `.js` from a temp build dir)
- * and must not be imported from daemon runtime code. `gateKind.test.ts`
+ * and must not be imported from daemon runtime code. `services/sync-daemon/__tests__/harness/gateKind.test.ts`
  * cross-checks the two lists so this file cannot silently drift from that
  * registry's own NO_GATE rows: `file: null` harnesses split between 'sdk'
  * (LangGraph + the Python frameworks — the gate ships in intutic-clawde),
@@ -44,7 +46,7 @@
  * @module
  */
 
-import { HarnessType, type HarnessType as HarnessTypeT } from '@intutic/shared-types'
+import { HarnessType, type HarnessType as HarnessTypeT } from './enums.js'
 
 /**
  * `'hook'`      — the daemon writes an on-disk hook/config file this harness
@@ -68,8 +70,8 @@ import { HarnessType, type HarnessType as HarnessTypeT } from '@intutic/shared-t
  *                 precedent sets for future orchestrator/host-shaped
  *                 harnesses).
  *                 Every wrapped backend of the two orchestrators has a gate of
- *                 its own (Agentic Orchestrator's `opencode` backend since
- *                 TD-397 closed with `openCodeHooks.ts`), so `'delegated'`
+ *                 its own (Agentic Orchestrator's `opencode` backend through
+ *                 `openCodeHooks.ts`), so `'delegated'`
  *                 claims exactly what happens. Distinct from
  *                 `'none'`: `'none'` means no enforcement point exists
  *                 ANYWHERE for this harness's tool calls; `'delegated'`

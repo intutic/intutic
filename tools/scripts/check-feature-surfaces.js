@@ -43,7 +43,7 @@
  *              "workspace_settings.k"  a settings key `intutic_workspace_settings`
  *                                      manages
  *   events     "a.b.c"                 a notification event type: in the
- *                                      NotificationEventType union and in
+ *                                      NOTIFICATION_EVENT_TYPES list and in
  *                                      guide/settings.md
  *              "siem:source"           a SIEM source: in guide/siem-export.md and
  *                                      the control plane's source registry
@@ -230,11 +230,11 @@ function refusalCodes() {
   )
 }
 
-/** The NotificationEventType union's members. */
+/** The members of NOTIFICATION_EVENT_TYPES, which NotificationEventType is derived from. */
 function notificationEventTypes() {
   const src = text('packages/shared-types/src/notifications.ts') ?? ''
-  const body = /export type NotificationEventType =([\s\S]*?)\n\n/.exec(src)?.[1] ?? ''
-  return [...body.matchAll(/^\s*\|\s*'([^']+)'/gm)].map((m) => m[1])
+  const body = /export const NOTIFICATION_EVENT_TYPES = \[([\s\S]*?)\n\] as const/.exec(src)?.[1] ?? ''
+  return [...body.matchAll(/^\s*'([^']+)',/gm)].map((m) => m[1])
 }
 
 /**
@@ -366,7 +366,7 @@ export function resolveEvidence(iface, ev) {
           ? { ok: true }
           : { ok: false, why: `the SIEM source registry has no ${source}` }
       }
-      if (!lazy.events().has(ev)) return { ok: false, why: `NotificationEventType has no ${ev}` }
+      if (!lazy.events().has(ev)) return { ok: false, why: `NOTIFICATION_EVENT_TYPES has no ${ev}` }
       return (text('apps/docs/guide/settings.md') ?? '').includes(`\`${ev}\``)
         ? { ok: true }
         : { ok: false, why: `guide/settings.md does not list the event ${ev}` }

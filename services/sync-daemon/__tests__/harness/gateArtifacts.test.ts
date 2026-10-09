@@ -9,9 +9,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { GATE_ARTIFACTS, DSH_PROFILE_GATE_FILE, findGateFile } from '../../src/harness/gateArtifacts.js'
-import { gateKindForHarness } from '../../src/harness/gateKind.js'
 import { GATES } from './gateRegistry.js'
-import type { HarnessType } from '@intutic/shared-types'
+import { gateKindForHarness, type HarnessType } from '@intutic/shared-types'
 
 /** Registry row names that are not simply the kebab-cased harness type. */
 const ROW_HARNESS: Record<string, string> = {

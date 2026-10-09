@@ -104,23 +104,63 @@ pub fn parse_priority(file_name: &str) -> (u32, String) {
     (DEFAULT_PRIORITY, stem.to_string())
 }
 
-/// Refuse a module the host cannot run, and resolve a Rego rule's entrypoint
-/// and builtins: `Some` for an OPA build, `None` for a native rule.
-///
-/// The one check both rule sources run, so a rule refused from the local
-/// directory is refused from the control plane too.
-pub fn check_loadable(
-    engine: &Engine,
-    module: &Module,
-    bytes: &[u8],
-) -> anyhow::Result<Option<Arc<super::opa::OpaRule>>> {
-    match super::opa::load(engine, module, bytes)? {
-        Some(rule) => Ok(Some(Arc::new(rule))),
-        None => {
-            super::host::check_imports_resolvable(module)?;
-            Ok(None)
+/// Why a rule binary cannot run on this host. [`LoadFailure::reason`] is the
+/// name the control plane files the incident under, shared with the MCP proxy's
+/// logs (`RULE_LOAD_FAILURE_REASONS` in shared-types).
+#[derive(Debug)]
+pub enum LoadFailure {
+    /// Not a module the engine compiles.
+    Compile(String),
+    /// A native rule importing what the host does not provide.
+    UnsupportedImport(String),
+    /// Compiles, but the host cannot run it: an OPA build whose ABI,
+    /// builtins or entrypoint the Rego host does not support.
+    Unrunnable(String),
+}
+
+impl LoadFailure {
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Self::Compile(_) => "compile_error",
+            Self::UnsupportedImport(_) => "unsupported_import",
+            Self::Unrunnable(_) => "load_error",
         }
     }
+}
+
+impl std::fmt::Display for LoadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Compile(e) | Self::UnsupportedImport(e) | Self::Unrunnable(e) => f.write_str(e),
+        }
+    }
+}
+
+impl std::error::Error for LoadFailure {}
+
+/// Compile a rule binary and refuse one the host cannot run, resolving a Rego
+/// rule's entrypoint and builtins: `Some` for an OPA build, `None` for a
+/// native rule.
+///
+/// The one check both rule sources run, so a rule refused from the local
+/// directory is refused from the control plane too, for the same reason.
+pub fn compile_checked(
+    engine: &Engine,
+    bytes: &[u8],
+) -> Result<(Module, Option<Arc<super::opa::OpaRule>>), LoadFailure> {
+    let module =
+        Module::from_binary(engine, bytes).map_err(|e| LoadFailure::Compile(e.to_string()))?;
+    let rego = match super::opa::load(engine, &module, bytes)
+        .map_err(|e| LoadFailure::Unrunnable(e.to_string()))?
+    {
+        Some(rule) => Some(Arc::new(rule)),
+        None => {
+            super::host::check_imports_resolvable(&module)
+                .map_err(|e| LoadFailure::UnsupportedImport(e.to_string()))?;
+            None
+        }
+    };
+    Ok((module, rego))
 }
 
 /// Compile every rule file in the given signature set (from
@@ -151,11 +191,11 @@ pub fn load_local_modules(
         }
 
         let compiled = std::fs::read(path)
-            .map_err(anyhow::Error::from)
+            .map_err(|e| ("read_error", e.to_string()))
             .and_then(|bytes| {
                 let sha256 = hex::encode(Sha256::digest(&bytes));
-                let module = Module::from_binary(engine, &bytes)?;
-                let rego = check_loadable(engine, &module, &bytes)?;
+                let (module, rego) =
+                    compile_checked(engine, &bytes).map_err(|e| (e.reason(), e.to_string()))?;
                 Ok((sha256, module, rego))
             });
 
@@ -179,11 +219,12 @@ pub fn load_local_modules(
                     module,
                 });
             }
-            Err(e) => {
+            Err((reason, e)) => {
                 // Fail-open: keep the previous good module for this file, if any.
                 if let Some(prev) = previous.iter().find(|m| m.rule_id == rule_id) {
                     tracing::warn!(
                         file = %path.display(),
+                        reason,
                         error = %e,
                         "local WASM rule failed to load — retaining previous version"
                     );
@@ -191,6 +232,7 @@ pub fn load_local_modules(
                 } else {
                     tracing::warn!(
                         file = %path.display(),
+                        reason,
                         error = %e,
                         "local WASM rule failed to load — skipped"
                     );

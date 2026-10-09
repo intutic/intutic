@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -23,6 +25,24 @@ import (
 // Notification-rule routes: routes/notifications.ts (createRuleSchema,
 // updateRuleSchema, requireChannelConfigKey).
 var notificationChannels = []string{"slack", "email", "webhook", "pagerduty"}
+
+// The event types a rule can name: shared-types' NOTIFICATION_EVENT_TYPES,
+// which the API validates against. Checked here so a typo fails at plan time
+// rather than as a 400 mid-apply; shared-types' test suite asserts this file
+// matches the list.
+//
+//go:embed notification_event_types.json
+var notificationEventTypesJSON []byte
+
+var notificationEventTypes = func() []string {
+	var f struct {
+		EventTypes []string `json:"eventTypes"`
+	}
+	if err := json.Unmarshal(notificationEventTypesJSON, &f); err != nil {
+		panic(err)
+	}
+	return f.EventTypes
+}()
 
 const rulesPath = "/api/v1/notifications/rules"
 
@@ -106,6 +126,7 @@ func (r *notificationRuleResource) Schema(_ context.Context, _ resource.SchemaRe
 			"event_type": schema.StringAttribute{
 				Required:    true,
 				Description: "The event that triggers the rule, for example `incident.created`.",
+				Validators:  []validator.String{stringvalidator.OneOf(notificationEventTypes...)},
 			},
 			"channel": schema.StringAttribute{
 				Required:    true,

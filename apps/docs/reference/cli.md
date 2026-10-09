@@ -3664,7 +3664,7 @@ intutic compliance verify <file> [--jwks <path>] [options]
 **What it does:**
 Recomputes the archive hash and every section hash in the manifest, then checks the Ed25519 signature against the published key its `keyId` names, the steps under [Verifying an archive](/guide/compliance-evidence#verifying-an-archive). Without `--jwks` it fetches the keys from the control plane, without credentials, as an auditor would; an unsigned archive needs no keys. Needs no login.
 
-Exits 0 when the hashes match and a published key accepts the signature. Exits 1 when a hash or the signature does not match: the archive was changed. Exits 2 when the hashes match but the archive is **unsigned** (collected on a deployment without a signing key) or its signature could not be checked (no published key with its id, or the keys could not be fetched); the output says which. Exits 1 too, before checking anything, when the file or the `--jwks` file cannot be read, is not JSON, or is not an evidence archive or a key set; the error names the file.
+Exits 0 when the hashes match and a published key accepts the signature. Exits 1 when a hash or the signature does not match: the archive was changed. Exits 2 when the hashes match but the archive is **unsigned** (collected on a deployment without a signing key) or its signature could not be checked (no published key with its id, or the keys could not be fetched); the output says which. Exits 3 when the file cannot be read or is not an evidence archive, or the `--jwks` file is not a key set, so a wrong path is never read as a changed archive.
 
 **Example:**
 
@@ -3841,6 +3841,26 @@ Prints how many machines report (and how many are stale), how many harnesses are
 
 ---
 
+## `intutic inventory devices` <Badge type="tip" text="Cloud" />
+
+Every machine that reports, with its id.
+
+```bash
+intutic inventory devices [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints one line per machine: its device id (the value `--device` takes on the other inventory commands), hostname, platform and CLI version, whether it is stale or disconnected, how many harnesses it runs and how many of those are ungoverned or have a stale gate, and its last report. `--json` adds the guard-probe result. Visibility is as for `intutic inventory summary`.
+
+---
+
 ## `intutic inventory harnesses` <Badge type="tip" text="Cloud" />
 
 AI harnesses by machine, with gate state and status.
@@ -3918,6 +3938,27 @@ intutic inventory skills [--device <device_id>] [--search <text>] [options]
 
 **What it does:**
 Prints one line per skill bundle per machine: its name, the folder it was found in, whether the [content scan](/guide/skill-scanning) found anything (or could not read it), and how many files are bundled with it. `--json` adds each bundle's `SKILL.md` SHA-256. Visibility is as for `intutic inventory summary`.
+
+---
+
+## `intutic inventory disconnects` <Badge type="tip" text="Cloud" />
+
+Machines that ran `intutic disconnect`, newest first.
+
+```bash
+intutic inventory disconnects [--limit <n>] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--limit <n>` | At most this many (default 100, at most 500) |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints one line per reported [disconnect](#intutic-disconnect): when, the machine's hostname, which harnesses it disconnected (or every harness, for a whole-machine disconnect), and the member whose credentials reported it. Visibility is as for `intutic inventory summary`: a DEVELOPER sees only the disconnects their own credentials reported.
 
 ---
 

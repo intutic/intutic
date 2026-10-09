@@ -268,6 +268,20 @@ pub enum JudgeScope {
     Loop,
 }
 
+/// A control-plane rule version a proxy refused to load, as the control plane
+/// files it: an incident whose reason is one of `RULE_LOAD_FAILURE_REASONS`
+/// in shared-types (`missing`, `hash_mismatch`, `compile_error`,
+/// `unsupported_import`, `load_error`).
+#[derive(Debug, Clone, Copy)]
+pub struct RuleRefusalReport<'a> {
+    pub rule_id: &'a str,
+    pub rule_name: &'a str,
+    pub sha256: &'a str,
+    pub reason: &'a str,
+    /// The incident's text: what was refused, why, and what still enforces.
+    pub description: &'a str,
+}
+
 /// A break-glass override token validated for a SPECIFIC workspace.
 ///
 /// Carrying `request_id` is the point of returning this instead of a bare
@@ -1090,13 +1104,14 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// split never reaches the half that needed real work.
     async fn wasm_binary(&self, sha256: &str) -> anyhow::Result<Option<Vec<u8>>>;
 
-    /// Raise an infrastructure anomaly on `intutic:system_anomalies`, the
-    /// channel `LocalStore::publish_system_anomaly` writes and the control
-    /// plane turns into an incident. Here as well for the rule registry, which
-    /// reads rules through this trait and holds no `LocalStore`. The default
-    /// does nothing: standalone has no control plane to raise it with, and no
+    /// Raise a control-plane rule version this proxy refused to load on
+    /// `intutic:system_anomalies`, the channel `LocalStore::publish_system_anomaly`
+    /// writes and the control plane turns into an incident, with the reason
+    /// it files the incident under. Here for the rule registry, which reads
+    /// rules through this trait and holds no `LocalStore`. The default does
+    /// nothing: standalone has no control plane to raise it with, and no
     /// control-plane rules to raise it about.
-    async fn publish_system_anomaly(&self, _workspace_id: &str, _description: &str) {}
+    async fn publish_rule_refusal(&self, _workspace_id: &str, _refusal: &RuleRefusalReport<'_>) {}
 
     // ── Token intelligence ───────────────────────────────────────────
 

@@ -12,6 +12,7 @@ SDK's ``git-context.ts``.
 import os
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Optional
 from urllib.parse import urlsplit
 
@@ -83,9 +84,12 @@ def resolve_git_context(cwd: str, fallback_branch: Optional[str] = None) -> Dict
     ``gitBranch``). Values the control plane's session route would refuse are
     left out rather than failing the registration.
     """
-    remote = _git(cwd, "remote", "get-url", "origin")
-    head = _git(cwd, "rev-parse", "--abbrev-ref", "HEAD")
-    commit = _git(cwd, "rev-parse", "HEAD")
+    # Concurrently, as the TypeScript SDK does: this runs before the first call.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        remote, head, commit = pool.map(
+            lambda args: _git(cwd, *args),
+            [("remote", "get-url", "origin"), ("rev-parse", "--abbrev-ref", "HEAD"), ("rev-parse", "HEAD")],
+        )
 
     repo_url = normalize_git_remote(remote) if remote else None
     branch = (head if head != "HEAD" else None) or os.environ.get("GITHUB_HEAD_REF") or fallback_branch

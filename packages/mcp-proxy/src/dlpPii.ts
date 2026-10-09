@@ -1,5 +1,5 @@
 /**
- * dlpPii.ts — checksum-validated PII detectors.
+ * dlpPii.ts — validated PII detectors (card and IBAN checksums, SSN issued ranges).
  *
  * The TypeScript twin of the Rust proxy's `packages/proxy/src/dlp/pii.rs`.
  * Both read the same definition (`PII_DEFINITION` from

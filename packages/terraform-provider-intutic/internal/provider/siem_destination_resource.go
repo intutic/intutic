@@ -167,7 +167,7 @@ func (r *siemDestinationResource) Schema(_ context.Context, _ resource.SchemaReq
 				Description: "The adapter's credentials, which the API only ever returns masked: `webhook_https` " +
 					"`authHeaderValue` (optional); `splunk_hec` `token`; `datadog_logs` `apiKey`; `gcs` " +
 					"`credentials` (a base64-encoded service-account key); `s3` `secretAccessKey`. A value changed " +
-					"outside Terraform shows as a difference.",
+					"outside Terraform shows as a difference. Removing an optional credential clears it.",
 			},
 			"source_tables": schema.SetAttribute{
 				ElementType: types.StringType,
@@ -461,7 +461,16 @@ func (m *siemDestinationModel) updateBody(ctx context.Context, state *siemDestin
 		sameConfig = eq
 	}
 	if !sameConfig || !m.SecretConfig.Equal(state.SecretConfig) {
-		body["config"] = m.apiConfig(ctx, diags)
+		config := m.apiConfig(ctx, diags)
+		// The API keeps a stored credential the config leaves out; an empty
+		// string is what clears one, so a credential removed from
+		// secret_config is sent as "".
+		for k := range state.SecretConfig.Elements() {
+			if _, kept := config[k]; !kept {
+				config[k] = ""
+			}
+		}
+		body["config"] = config
 	}
 	if len(body) == 0 {
 		return nil
@@ -471,9 +480,11 @@ func (m *siemDestinationModel) updateBody(ctx context.Context, state *siemDestin
 
 // readSecretConfig is the secret_config to keep after a read. The API returns
 // each credential masked; a configured value whose mask matches is kept, so
-// the plan stays empty, and anything else (a credential changed or removed
-// outside Terraform, or an import) reads as the mask. A change that keeps the
-// length above 8 and the last four characters cannot be seen through the mask.
+// the plan stays empty, and anything else (a credential changed outside
+// Terraform, or an import) reads as the mask. A change that keeps the length
+// above 8 and the last four characters cannot be seen through the mask. A
+// cleared credential reads back empty and is absent here, unless the
+// configuration names it as "".
 func readSecretConfig(adapter string, apiConfig map[string]json.RawMessage, prior types.Map) types.Map {
 	priorValues := map[string]string{}
 	if !prior.IsNull() && !prior.IsUnknown() {
@@ -489,7 +500,14 @@ func readSecretConfig(adapter string, apiConfig map[string]json.RawMessage, prio
 		if json.Unmarshal(apiConfig[field], &masked) != nil {
 			continue
 		}
-		if p, ok := priorValues[field]; ok && siemMask(p) == masked {
+		p, configured := priorValues[field]
+		if masked == "" {
+			if configured && p == "" {
+				elems[field] = types.StringValue("")
+			}
+			continue
+		}
+		if configured && siemMask(p) == masked {
 			elems[field] = types.StringValue(p)
 		} else {
 			elems[field] = types.StringValue(masked)

@@ -224,6 +224,17 @@ def test_get_gateway_status_carries_applied_and_desired_config_versions(mock_req
     assert (res["appliedConfigVersion"], res["desiredConfigVersion"]) == (2, 3)
 
 
+def test_gateway_status_type_names_the_typescript_sdks_fields():
+    import re
+    from pathlib import Path
+    from intutic_clawde import GatewayStatus
+
+    ts = (Path(__file__).resolve().parents[2] / "clawde-sdk" / "src" / "types.ts").read_text()
+    body = re.search(r"export interface GatewayStatus \{(.*?)\n\}", ts, re.S).group(1)
+    fields = set(re.findall(r"^\s+(\w+)\??:", body, re.M))
+    assert fields and set(GatewayStatus.__annotations__) == fields
+
+
 @patch("requests.request")
 def test_get_gateway_config(mock_request):
     mock_request.return_value = _mock_response(json_body={"config": {"requireVk": True}, "configVersion": 3})

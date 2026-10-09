@@ -405,6 +405,82 @@ def test_chat_registers_one_session_with_the_git_context_and_sends_it(mock_post,
 
 
 @patch("requests.post")
+def test_chat_confirms_the_key_even_when_the_context_names_a_workspace(mock_post, git_repo):
+    repo, _ = git_repo
+    mock_post.return_value = _reply(200, COMPLETION)
+    calls, answer = _control_plane()
+    client = ClawdeClient(api_key="vk_test", base_url="http://proxy", control_plane_url="http://cp")
+    with patch("intutic_clawde.client.resolve_context", return_value={"workingDirectory": str(repo), "workspaceId": "ws_ctx"}), \
+            patch("requests.request", side_effect=answer):
+        client.chat("gpt-4o", [{"role": "user", "content": "hi"}])
+    assert [c["url"] for c in calls] == ["http://cp/api/v1/auth/me", "http://cp/api/v1/sessions"]
+    # The session route takes only the key's own workspace.
+    assert calls[1]["json"]["workspaceId"] == "ws_1"
+
+
+@pytest.mark.parametrize("me, session", [
+    (None, {"sessionId": "ses_sdk"}),
+    ([], {"sessionId": "ses_sdk"}),
+    ({"workspaceId": "ws_1"}, None),
+    ({"workspaceId": "ws_1"}, ["ses_sdk"]),
+    ({"workspaceId": "ws_1"}, {"sessionId": 42}),
+])
+@patch("requests.post")
+def test_chat_still_runs_when_the_control_plane_answers_the_wrong_shape(mock_post, git_repo, me, session):
+    repo, _ = git_repo
+    mock_post.return_value = _reply(200, COMPLETION)
+
+    def answer(method, url, json=None, headers=None, timeout=None):
+        return _reply(200, me) if url.endswith("/api/v1/auth/me") else _reply(201, session)
+
+    client = ClawdeClient(api_key="vk_test", base_url="http://proxy", control_plane_url="http://cp")
+    with patch("intutic_clawde.client.resolve_context", return_value={"workingDirectory": str(repo)}), \
+            patch("requests.request", side_effect=answer):
+        assert client.chat("gpt-4o", [{"role": "user", "content": "hi"}])["verdict"] == "allow"
+    assert "x-session-id" not in mock_post.call_args.kwargs["headers"]
+
+
+@patch("requests.post")
+def test_chat_still_runs_when_resolving_the_context_raises(mock_post):
+    mock_post.return_value = _reply(200, COMPLETION)
+    client = ClawdeClient(api_key="vk_test", base_url="http://proxy", control_plane_url="http://cp")
+    with patch("intutic_clawde.client.resolve_context", side_effect=RuntimeError("unreadable config")):
+        assert client.chat("gpt-4o", [{"role": "user", "content": "hi"}])["verdict"] == "allow"
+    assert "x-session-id" not in mock_post.call_args.kwargs["headers"]
+
+
+@patch("requests.post")
+def test_concurrent_first_calls_register_one_session(mock_post, git_repo):
+    import threading
+    repo, _ = git_repo
+    mock_post.return_value = _reply(200, COMPLETION)
+    calls, answer = _control_plane()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_answer(*args, **kwargs):
+        entered.set()
+        release.wait(5)
+        return answer(*args, **kwargs)
+
+    client = ClawdeClient(api_key="vk_test", base_url="http://proxy", control_plane_url="http://cp")
+    with patch("intutic_clawde.client.resolve_context", return_value={"workingDirectory": str(repo)}), \
+            patch("requests.request", side_effect=slow_answer):
+        threads = [
+            threading.Thread(target=client.chat, args=("gpt-4o", [{"role": "user", "content": "hi"}]))
+            for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        assert entered.wait(5)
+        release.set()
+        for t in threads:
+            t.join(5)
+    assert [c["url"] for c in calls] == ["http://cp/api/v1/auth/me", "http://cp/api/v1/sessions"]
+    assert [c.kwargs["headers"]["x-session-id"] for c in mock_post.call_args_list] == ["ses_sdk"] * 4
+
+
+@patch("requests.post")
 def test_chat_sends_the_session_it_was_started_in_and_registers_nothing(mock_post, git_repo):
     repo, _ = git_repo
     mock_post.return_value = _reply(200, COMPLETION)

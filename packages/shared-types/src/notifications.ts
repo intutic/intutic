@@ -6,9 +6,14 @@
 
 export type NotificationChannel = 'slack' | 'email' | 'webhook' | 'pagerduty'
 
-export type NotificationEventType =
+/**
+ * Every event a notification rule can subscribe to. The API refuses a rule
+ * naming anything else, and the CLI and the Terraform provider check
+ * against this list before they send one.
+ */
+export const NOTIFICATION_EVENT_TYPES = [
   // ── Core governance events (already wired) ──
-  | 'anomaly.detected'
+  'anomaly.detected',
   /**
    * One attributed detector finding from the proxy, allowed or blocked.
    *
@@ -21,83 +26,83 @@ export type NotificationEventType =
    * Carries `detectorId`, so a rule can target one detector rather than a whole
    * taxonomy kind that sixteen of twenty-two detectors share.
    */
-  | 'anomaly.finding'
-  | 'incident.created'
-  | 'incident.escalated'
-  | 'sop.status_changed'
-  | 'session.ended'
-  | 'adapter.write_back.failed'
-  | 'decision.pending'
+  'anomaly.finding',
+  'incident.created',
+  'incident.escalated',
+  'sop.status_changed',
+  'session.ended',
+  'adapter.write_back.failed',
+  'decision.pending',
   /** An OWNER, ADMIN or EM approved a held decision, in Slack or through the API and CLI. Carries `entryId`, `reviewerId` and `via`. */
-  | 'decision.approved'
+  'decision.approved',
   /** An OWNER, ADMIN or EM rejected a held decision, in Slack or through the API and CLI. */
-  | 'decision.rejected'
-  | 'ssl.enforcement.violation'
-  | 'context_gap.auto_injected'
-  | 'trajectory.alert'
+  'decision.rejected',
+  'ssl.enforcement.violation',
+  'context_gap.auto_injected',
+  'trajectory.alert',
   // ── Calibration & drift (Q10 orphan audit) ──
-  | 'calibration.threshold_breach'
-  | 'anomaly.drift.detected'
-  | 'anomaly.capability_miss'
-  | 'anomaly.trust.updated'
+  'calibration.threshold_breach',
+  'anomaly.drift.detected',
+  'anomaly.capability_miss',
+  'anomaly.trust.updated',
   // ── SOP lifecycle & integrity ──
-  | 'sop.stale.detected'
-  | 'sop.cascade.alert'
-  | 'sop.cascade.invalidated'
-  | 'sop.integrity.drift'
-  | 'sop.lifecycle.transitioned'
+  'sop.stale.detected',
+  'sop.cascade.alert',
+  'sop.cascade.invalidated',
+  'sop.integrity.drift',
+  'sop.lifecycle.transitioned',
   /** A source-connector sync found an enforced SOP's upstream document changed and created a DRAFT successor awaiting review (TD-474 item 7). */
-  | 'sop.upstream.changed'
+  'sop.upstream.changed',
   // ── Policy guardrails (LLD #71) ──
   /** A SHADOW guardrail crossed the promotion thresholds; a named member decides. */
-  | 'guardrail.ready'
+  'guardrail.ready',
   /** The passage a guardrail cites changed upstream; promotion is refused until re-confirmed. */
-  | 'guardrail.stale'
+  'guardrail.stale',
   // ── MCP server registry ──
   /** An MCP proxy reported a server this workspace's registry had never seen; it waits as a candidate for an OWNER or ADMIN to approve or block. */
-  | 'mcp.server.candidate'
+  'mcp.server.candidate',
   /** A server the registry knew declared a different tool set, and the change scored high risk (`mcpToolRisk.ts`). */
-  | 'mcp.server.tool_change_risk'
+  'mcp.server.tool_change_risk',
   /** An OWNER or ADMIN approved, blocked or reset (returned to the approval queue) an MCP server. Carries `action`, `previousStatus` and `actorId`. */
-  | 'mcp.server.decided'
+  'mcp.server.decided',
   /** An OWNER or ADMIN switched one tool of an MCP server on or off. Carries `toolName`, `enabled` and `actorId`. */
-  | 'mcp.server.tool_toggled'
+  'mcp.server.tool_toggled',
   /** An MCP call budget reached its warning threshold for the period (sent once per budget per period). */
-  | 'mcp.budget.threshold'
+  'mcp.budget.threshold',
   /** An MCP call budget ran out and the proxy refused a call (sent once per budget per period). */
-  | 'mcp.budget.exceeded'
+  'mcp.budget.exceeded',
   // ── Governance judge ──
   /** A judged response is waiting for a person in the judge review queue: the typed judge was unsure, or it is a spot check of one it cleared (LLD #72). */
-  | 'judge.review.queued'
+  'judge.review.queued',
   // ── FinOps & budget ──
-  | 'finops.budget.exceeded'
-  | 'finops.budget.threshold'
-  | 'finops.tokens.classified'
+  'finops.budget.exceeded',
+  'finops.budget.threshold',
+  'finops.tokens.classified',
   // ── Enterprise & trial ──
-  | 'trial.started'
-  | 'trial.expired_downgraded'
-  | 'trial.day7_report_sent'
-  | 'trial.day13_report_sent'
+  'trial.started',
+  'trial.expired_downgraded',
+  'trial.day7_report_sent',
+  'trial.day13_report_sent',
   // ── Plans ──
-  | 'plan.captured'
-  | 'plan.approved'
-  | 'plan.deviation.detected'
+  'plan.captured',
+  'plan.approved',
+  'plan.deviation.detected',
   // ── Identity & compliance ──
-  | 'identity.offboarding.completed'
+  'identity.offboarding.completed',
   /** A sign-in to the workspace was refused (wrong password, deactivated member, an SSO identity the workspace does not admit, a response that failed verification). The `login_events` row. */
-  | 'auth.login.failed'
+  'auth.login.failed',
   /** The identity provider provisioned, changed or deprovisioned a user through SCIM. Carries `action` and the SCIM user id. */
-  | 'scim.user.changed'
+  'scim.user.changed',
   /** The identity provider created, changed (members, name, mapped role) or deleted a group through SCIM. */
-  | 'scim.group.changed'
+  'scim.group.changed',
   /** An OWNER or ADMIN replaced the signing secret of a notification webhook, a SIEM webhook destination or the GitHub pull-request webhook. Carries `target` and `targetId`, never the secret. */
-  | 'webhook.secret.rotated'
+  'webhook.secret.rotated',
   /** A member downloaded compliance evidence: a SOC 2 archive, a framework coverage report file or the human-oversight export. The `evidence_exports` row. */
-  | 'evidence.exported'
+  'evidence.exported',
   /** An API key, gateway token or SCIM token was created, rotated or revoked, or a provider credential was provisioned, replaced or removed. The `credential_changes` row: `credential_type`, `credential_id`, `action` and who; never the value. */
-  | 'credential.changed'
+  'credential.changed',
   // ── Workspace context ──
-  | 'workspace.context.updated'
+  'workspace.context.updated',
   // ── Self-hosted gateway (LLD #66) ──
   /**
    * A registered, non-revoked self-hosted gateway has gone past
@@ -105,7 +110,7 @@ export type NotificationEventType =
    * workspace of the gateway's org (gateways are org-scoped; notification
    * rules are workspace-scoped), not once per gateway.
    */
-  | 'gateway.stale.detected'
+  'gateway.stale.detected',
   /**
    * A managed cell (`deployment_target='managed_cell'`) has sat `pending`
    * (registered, never heartbeated) past `CELL_STUCK_PENDING_THRESHOLD_MS`
@@ -116,7 +121,7 @@ export type NotificationEventType =
    * severity map before this union entry existed -- this only adds the type
    * contract those call sites were relying on via an `as` cast.
    */
-  | 'gateway.cell.stuck_pending'
+  'gateway.cell.stuck_pending',
   /**
    * The control plane's CP→region Valkey sync heartbeat
    * (`intutic:cp:last-sync`) is missing or stale in a remote region --
@@ -125,7 +130,7 @@ export type NotificationEventType =
    * workspace of every org with a live cell in the affected region. Same
    * pre-existing-dispatch note as `gateway.cell.stuck_pending` above.
    */
-  | 'region.sync.stale'
+  'region.sync.stale',
   // ── Managed gateway cell deprovisioning (LLD #71 Phase C2) ──
   /**
    * A managed cell was marked for removal because its org's plan tier no
@@ -136,7 +141,7 @@ export type NotificationEventType =
    * (`deprovision_notified_at` is the idempotence gate). Carries
    * `deprovision_at` -- the grace-period deadline -- and `reason`.
    */
-  | 'org.cells.deprovision_scheduled'
+  'org.cells.deprovision_scheduled',
   /**
    * A previously-scheduled cell removal was cancelled because the org's
    * cell count is no longer over its plan-tier capacity -- typically a
@@ -145,7 +150,7 @@ export type NotificationEventType =
    * half of the same bidirectional-reconcile-marks design. MEDIUM, not
    * HIGH: this is good news for the org, not an incident.
    */
-  | 'org.cells.deprovision_canceled'
+  'org.cells.deprovision_canceled',
   /**
    * A managed cell's deprovision grace period actually expired and the cell
    * was revoked -- fired by `sweepCellCapacity`'s deadline pass
@@ -153,7 +158,7 @@ export type NotificationEventType =
    * `DELETE /api/v1/gateways/:id`. HIGH: an org's traffic capacity for that
    * region just changed, same tier as `gateway.stale.detected`.
    */
-  | 'org.cells.deprovisioned'
+  'org.cells.deprovisioned',
   // ── Enforcement device visibility (post-strip gap #2, LLD #63 hardening) ──
   /**
    * A device's reported enforcement posture (firewall/CA-trust/system-hooks)
@@ -161,12 +166,12 @@ export type NotificationEventType =
    * deviceHealthCron.ts. Most staleness is a closed laptop, not a
    * compromise -- MEDIUM, unlike gateway.stale.detected's HIGH.
    */
-  | 'device.enforcement.stale'
+  'device.enforcement.stale',
   /**
    * A device's firewall went from active:true to active:false on a live
    * report -- an active bypass just occurred, not merely unreported.
    */
-  | 'device.enforcement.disabled'
+  'device.enforcement.disabled',
   // ── Gate liveness ──
   /**
    * A harness installed in the workspace has sent no hook event of any kind,
@@ -174,12 +179,12 @@ export type NotificationEventType =
    * running. Fired once when the gate goes silent, not on every hourly sweep.
    * Carries `harnessType` and `incidentId`.
    */
-  | 'governance.gate.silent'
+  'governance.gate.silent',
   /**
    * A harness with an open `governance.gate.silent` alert is reporting again.
    * Same `incidentId` as the alert it closes; PagerDuty resolves that incident.
    */
-  | 'governance.gate.recovered'
+  'governance.gate.recovered',
   // ── Trace integrity ──
   /**
    * The hourly audit-log integrity check found a failure of one kind
@@ -187,14 +192,14 @@ export type NotificationEventType =
    * `root_mismatch` or `guard_tampered`). Fired once per kind while it keeps
    * failing; a recurrence after it clears fires again.
    */
-  | 'governance.integrity.failed'
+  'governance.integrity.failed',
   // ── AI inventory of developer machines ──
   /**
    * A machine's AI inventory listed an ungoverned harness or MCP server for
    * the first time: a harness with no gate installed or none possible, or an
    * MCP server the MCP proxy does not front. Once per machine and item.
    */
-  | 'inventory.ungoverned.detected'
+  'inventory.ungoverned.detected',
   // ── Provider outage tracking (Phase 8b) ──
   /**
    * A NEW provider_incidents window opened for a provider (Anthropic,
@@ -205,7 +210,7 @@ export type NotificationEventType =
    * "every workspace routing through this provider" fan-out exists the way
    * gateway.stale.detected's org-membership join provides for gateways.
    */
-  | 'provider.outage.detected'
+  'provider.outage.detected',
   // ── Billing (LLD #71 Phase C2's fix to customer.subscription.updated) ──
   /**
    * A Stripe subscription reported `status: 'past_due'` or `'unpaid'` via
@@ -214,7 +219,7 @@ export type NotificationEventType =
    * `invoice.payment_failed`'s own 3rd-attempt downgrade). MEDIUM: worth a
    * support/ops look, not yet the incident a full cancellation is.
    */
-  | 'billing.subscription.past_due'
+  'billing.subscription.past_due',
   // ── Skill-bundled-script malware detection (Phase S4, opt-in VirusTotal hash lookup) ──
   /**
    * An opt-in `GET /api/v3/files/{sha256}` VirusTotal lookup on a
@@ -225,7 +230,7 @@ export type NotificationEventType =
    * `provider.outage.detected` and `device.enforcement.disabled` above, not
    * a usage-pattern signal to review later.
    */
-  | 'skill.malware.detected'
+  'skill.malware.detected',
   // ── Semantic skill analysis (Phase S5, TD-357) ──
   /**
    * The opt-in LLM judge (`semanticSkillAnalysisEnabled`) called a skill's
@@ -240,7 +245,10 @@ export type NotificationEventType =
    * dynamic: HIGH for `'malicious'`, MEDIUM for `'suspicious'` — see
    * `mapSeverity` in `notificationRouterService.ts`.
    */
-  | 'skill.semantic.flagged'
+  'skill.semantic.flagged',
+] as const
+
+export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number]
 
 export type NotificationStatus = 'sent' | 'failed' | 'deduplicated' | 'filtered'
 
@@ -276,7 +284,7 @@ export interface ChannelConfig {
   webhookSecretEnc?: string
   /** PagerDuty Events API v2 integration/routing key. A credential — see
    *  `notificationHubService.ts`'s `getChannelTarget` for why it is masked
-   *  (`pd:${key.slice(0,6)}…`) before ever reaching `notification_log`,
+   *  (`${key.slice(0,6)}…`) before ever reaching `notification_log`,
    *  which is append-only and so unredactable forever once written. */
   pagerdutyRoutingKey?: string
 }

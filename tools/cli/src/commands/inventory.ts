@@ -4,10 +4,12 @@
  *
  * Subcommands:
  *   - `intutic inventory summary [--json]`
+ *   - `intutic inventory devices [--json]`
  *   - `intutic inventory harnesses|mcp-servers [filters] [--csv] [--out <file>] [--json]`
  *   - `intutic inventory skills [--device <id>] [--search <text>] [--json]`
+ *   - `intutic inventory disconnects [--limit <n>] [--json]`
  *
- * Server side: `GET /api/v1/inventory/{summary,harnesses,mcp-servers,skills}`
+ * Server side: `GET /api/v1/inventory/{summary,devices,harnesses,mcp-servers,skills,disconnects}`
  * (services/control-plane/src/routes/inventory.ts); the harness and MCP
  * server lists filter on the server and serve the same CSV the dashboard
  * downloads (`format=csv`). The skills list filters by machine and text only
@@ -19,7 +21,7 @@
 
 import pc from 'picocolors'
 import { log } from '../lib/logger.js'
-import { runApiCommand, writeOutput, type ApiCommandOpts } from './apiCommand.js'
+import { positiveInt, runApiCommand, writeOutput, type ApiCommandOpts } from './apiCommand.js'
 
 interface InventorySummary {
   devices: number
@@ -33,6 +35,28 @@ interface InventorySummary {
   mcpServers: number
   ungovernedMcpServers: number
   skills: number
+}
+
+interface DeviceRow {
+  deviceId: string
+  hostname: string
+  platform: string
+  cliVersion: string | null
+  reportedBy: string | null
+  lastSeenAt: string
+  stale: boolean
+  disconnectedAt: string | null
+  harnesses: number
+  ungovernedHarnesses: number
+  staleGates: number
+}
+
+interface DisconnectRow {
+  hostname: string
+  scope: 'machine' | 'harness'
+  harnesses: string[]
+  reportedBy: string | null
+  createdAt: string
 }
 
 interface HarnessRow {
@@ -181,6 +205,51 @@ export async function runInventorySkills(opts: Pick<InventoryListOpts, 'device' 
       for (const r of res.data) {
         const files = `${r.scriptCount} bundled file${r.scriptCount === 1 ? '' : 's'}`
         console.log(`  ${r.hostname}${r.deviceStale ? pc.dim(' (stale)') : ''}  ${r.name} (${r.source})  ${skillScanLabel(r)}  ${pc.dim(files)}`)
+      }
+    },
+  )
+}
+
+/** `intutic inventory devices`: one line per machine, its id first, for `--device`. */
+export async function runInventoryDevices(opts: ApiCommandOpts): Promise<void> {
+  await runApiCommand(
+    opts,
+    'Failed to list machines',
+    (client) => client.get<{ data: DeviceRow[] }>('/api/v1/inventory/devices'),
+    (res) => {
+      log.header('Intutic — Machines')
+      if (res.data.length === 0) {
+        log.dim('  Nothing reported.')
+        return
+      }
+      for (const d of res.data) {
+        const state = d.disconnectedAt ? pc.dim(` (disconnected ${d.disconnectedAt})`) : d.stale ? pc.dim(' (stale)') : ''
+        console.log(`  ${d.deviceId}  ${d.hostname}${state}  ${d.platform}${d.cliVersion ? `, CLI ${d.cliVersion}` : ''}`)
+        log.dim(
+          `    ${d.harnesses} harness${d.harnesses === 1 ? '' : 'es'}, ${d.ungovernedHarnesses} ungoverned, ` +
+            `${d.staleGates} with a stale gate; last report ${d.lastSeenAt}${d.reportedBy ? ` by ${d.reportedBy}` : ''}`,
+        )
+      }
+    },
+  )
+}
+
+/** `intutic inventory disconnects`: machines that ran `intutic disconnect`, newest first. */
+export async function runInventoryDisconnects(opts: ApiCommandOpts & { limit?: string }): Promise<void> {
+  const query = opts.limit === undefined ? '' : `?limit=${positiveInt(opts.limit, '--limit')}`
+  await runApiCommand(
+    opts,
+    'Failed to list disconnects',
+    (client) => client.get<{ data: DisconnectRow[] }>(`/api/v1/inventory/disconnects${query}`),
+    (res) => {
+      log.header('Intutic — Disconnects')
+      if (res.data.length === 0) {
+        log.dim('  No machine has disconnected.')
+        return
+      }
+      for (const r of res.data) {
+        const what = r.scope === 'machine' ? 'every harness' : r.harnesses.join(', ')
+        console.log(`  ${r.createdAt}  ${r.hostname}  ${what}${r.reportedBy ? pc.dim(`  by ${r.reportedBy}`) : ''}`)
       }
     },
   )

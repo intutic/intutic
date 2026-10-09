@@ -57,6 +57,15 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/**
+ * What the server said went wrong: `detail` when it gives one (a 403 from
+ * the role check says only `error: 'Forbidden'` and names the roles that may
+ * in `detail`), else `error`.
+ */
+function said(body: { error?: string; detail?: string }): string | undefined {
+  return body.detail ?? body.error
+}
+
 async function getClient(dev?: boolean) {
   const creds = await loadCredentials()
   if (!creds) {
@@ -182,7 +191,8 @@ export async function runGuardrailsSourcesAdd(
 export async function runGuardrailsSourcesSync(connectorId: string, opts: CommonOpts): Promise<void> {
   const client = await getClient(opts.dev)
   try {
-    const res = await client.post<{ processedCount?: number; updatedSopIds?: string[]; successorSopIds?: string[]; upstreamDeleted?: string[]; changedDocIds?: string[]; staleGuardrailIds?: string[] }>(
+    // What POST /api/v1/connectors/:connectorId/sync answers (routes/connectors.ts).
+    const res = await client.post<{ processed_docs: number; updated_sops: string[]; successor_sops: string[] }>(
       `/api/v1/connectors/${enc(connectorId)}/sync`,
       {},
     )
@@ -191,12 +201,11 @@ export async function runGuardrailsSourcesSync(connectorId: string, opts: Common
       return
     }
     log.success(`Synced ${connectorId}.`)
-    log.field('Documents processed', String(res.processedCount ?? 0))
-    log.field('Documents changed', String(res.changedDocIds?.length ?? 0))
-    log.field('SOPs written', String(res.updatedSopIds?.length ?? 0))
-    if (res.successorSopIds?.length) log.field('Upstream successors', String(res.successorSopIds.length))
-    if (res.upstreamDeleted?.length) log.field('Upstream deleted', res.upstreamDeleted.join(', '))
-    if (res.staleGuardrailIds?.length) log.warn(`${res.staleGuardrailIds.length} guardrail citation(s) went stale: ${res.staleGuardrailIds.join(', ')}`)
+    log.field('Documents processed', String(res.processed_docs))
+    log.field('SOPs written', String(res.updated_sops.length))
+    if (res.successor_sops.length > 0) {
+      log.field('Upstream successors', `${res.successor_sops.length} draft(s) for review: ${res.successor_sops.join(', ')}`)
+    }
   } catch (err) {
     log.error(`Failed to sync source: ${errMessage(err)}`)
     process.exit(1)
@@ -234,13 +243,13 @@ export async function runGuardrailsDocsList(opts: CommonOpts): Promise<void> {
 
 export async function runGuardrailsDocsShow(docId: string, opts: CommonOpts): Promise<void> {
   const client = await getClient(opts.dev)
-  const { status, body } = await client.getWithStatus<{ document?: PolicyDocumentDetail; error?: string }>(`${BASE}/documents/${enc(docId)}`)
+  const { status, body } = await client.getWithStatus<{ document?: PolicyDocumentDetail; error?: string; detail?: string }>(`${BASE}/documents/${enc(docId)}`)
   if (status === 404) {
     log.error(`Document "${docId}" not found in this workspace.`)
     process.exit(1)
   }
   if (status !== 200 || !body.document) {
-    log.error(`Failed to load document (${status}): ${body.error ?? 'unknown error'}`)
+    log.error(`Failed to load document (${status}): ${said(body) ?? 'unknown error'}`)
     process.exit(1)
   }
   const d = body.document
@@ -267,13 +276,13 @@ export async function runGuardrailsDocsShow(docId: string, opts: CommonOpts): Pr
 
 export async function runGuardrailsDocsExtract(docId: string, opts: CommonOpts & { noLlm?: boolean }): Promise<void> {
   const client = await getClient(opts.dev)
-  const { status, body } = await client.postWithStatus<{ result?: ExtractDocumentResult; error?: string; cap?: { count: number; cap: number } }>(`${BASE}/documents/${enc(docId)}/extract`, { llm: !opts.noLlm })
+  const { status, body } = await client.postWithStatus<{ result?: ExtractDocumentResult; error?: string; detail?: string; cap?: { count: number; cap: number } }>(`${BASE}/documents/${enc(docId)}/extract`, { llm: !opts.noLlm })
   if (status === 404) {
     log.error(`Document "${docId}" not found in this workspace.`)
     process.exit(1)
   }
   if (status === 403) {
-    log.error(body.error ?? 'Extraction needs a paid plan or an active trial.')
+    log.error(said(body) ?? 'Extraction needs a paid plan or an active trial.')
     process.exit(1)
   }
   if (status === 429) {
@@ -281,7 +290,7 @@ export async function runGuardrailsDocsExtract(docId: string, opts: CommonOpts &
     process.exit(1)
   }
   if (status !== 200 || !body.result) {
-    log.error(`Extraction failed (${status}): ${body.error ?? 'unknown error'}`)
+    log.error(`Extraction failed (${status}): ${said(body) ?? 'unknown error'}`)
     process.exit(1)
   }
   const r = body.result
@@ -514,13 +523,13 @@ function printReadiness(r: GuardrailReadiness): void {
 
 export async function runGuardrailsShow(guardrailId: string, opts: CommonOpts): Promise<void> {
   const client = await getClient(opts.dev)
-  const { status, body } = await client.getWithStatus<{ guardrail?: GuardrailDetail; error?: string }>(`${BASE}/guardrails/${enc(guardrailId)}`)
+  const { status, body } = await client.getWithStatus<{ guardrail?: GuardrailDetail; error?: string; detail?: string }>(`${BASE}/guardrails/${enc(guardrailId)}`)
   if (status === 404) {
     log.error(`Guardrail "${guardrailId}" not found in this workspace.`)
     process.exit(1)
   }
   if (status !== 200 || !body.guardrail) {
-    log.error(`Failed to load guardrail (${status}): ${body.error ?? 'unknown error'}`)
+    log.error(`Failed to load guardrail (${status}): ${said(body) ?? 'unknown error'}`)
     process.exit(1)
   }
   const g = body.guardrail
@@ -583,7 +592,7 @@ async function transition(
   done: string,
 ): Promise<void> {
   const client = await getClient(opts.dev)
-  const { status, body: res } = await client.postWithStatus<{ ok?: boolean; guardrail?: GuardrailDetail; readiness?: GuardrailReadiness; error?: string; code?: string }>(
+  const { status, body: res } = await client.postWithStatus<{ ok?: boolean; guardrail?: GuardrailDetail; readiness?: GuardrailReadiness; error?: string; detail?: string; code?: string }>(
     `${BASE}/guardrails/${enc(guardrailId)}/${action}`,
     body,
   )
@@ -592,16 +601,16 @@ async function transition(
     process.exit(1)
   }
   if (status === 403) {
-    log.error(res.error ?? 'Refused: a guardrail transition needs a signed-in member of the workspace.')
+    log.error(said(res) ?? 'Refused: a guardrail transition needs a signed-in member of the workspace.')
     process.exit(1)
   }
   if (status === 409) {
-    log.error(res.error ?? `Refused (${res.code ?? 'conflict'}).`)
+    log.error(said(res) ?? `Refused (${res.code ?? 'conflict'}).`)
     if (res.readiness) printReadiness(res.readiness)
     process.exit(1)
   }
   if (status !== 200 || !res.guardrail) {
-    log.error(`${action} failed (${status}): ${res.error ?? 'unknown error'}`)
+    log.error(`${action} failed (${status}): ${said(res) ?? 'unknown error'}`)
     process.exit(1)
   }
   if (opts.json) {
@@ -767,16 +776,16 @@ function printChecks(checks: GuardrailCheckResult[]): void {
 }
 
 /** The answers an authored write shares: 400 with the refusing check, 403, 404, 409 with a code. */
-function reportWriteFailure(status: number, body: { error?: string; code?: string; validation?: GuardrailCheckResult[] }, guardrailId: string | null, action: string): never {
+function reportWriteFailure(status: number, body: { error?: string; detail?: string; code?: string; validation?: GuardrailCheckResult[] }, guardrailId: string | null, action: string): never {
   if (status === 400) {
-    log.error(body.error ?? `${action} refused (400).`)
+    log.error(said(body) ?? `${action} refused (400).`)
     if (body.validation) printChecks(body.validation)
     process.exit(1)
   }
   if (status === 404 && guardrailId) fail(`Guardrail "${guardrailId}" not found in this workspace.`)
-  if (status === 403) fail(body.error ?? 'Refused: authoring guardrails needs an OWNER or ADMIN member of the workspace.')
-  if (status === 409) fail(body.error ?? `Refused (${body.code ?? 'conflict'}).`)
-  fail(`${action} failed (${status}): ${body.error ?? 'unknown error'}`)
+  if (status === 403) fail(said(body) ?? 'Refused: authoring guardrails needs an OWNER or ADMIN member of the workspace.')
+  if (status === 409) fail(said(body) ?? `Refused (${body.code ?? 'conflict'}).`)
+  fail(`${action} failed (${status}): ${said(body) ?? 'unknown error'}`)
 }
 
 export async function runGuardrailsCreate(opts: AuthorOpts): Promise<void> {
@@ -785,7 +794,7 @@ export async function runGuardrailsCreate(opts: AuthorOpts): Promise<void> {
   const parsed = AuthoredGuardrailCreateSchema.safeParse(body)
   if (!parsed.success) fail(`Not a guardrail the server would accept: ${zodMessage(parsed.error)}`)
   const client = await getClient(opts.dev)
-  const { status, body: res } = await client.postWithStatus<Partial<AuthoredGuardrailWriteResult> & { error?: string; code?: string; validation?: GuardrailCheckResult[] }>(`${BASE}/guardrails`, parsed.data)
+  const { status, body: res } = await client.postWithStatus<Partial<AuthoredGuardrailWriteResult> & { error?: string; detail?: string; code?: string; validation?: GuardrailCheckResult[] }>(`${BASE}/guardrails`, parsed.data)
   if (status !== 201 || !res.guardrail) reportWriteFailure(status, res, null, 'Create')
   const g = res.guardrail
   if (opts.json) {
@@ -802,7 +811,7 @@ export async function runGuardrailsUpdate(guardrailId: string, opts: AuthorOpts)
   const parsed = AuthoredGuardrailUpdateSchema.safeParse(body)
   if (!parsed.success) fail(`Not an update the server would accept: ${zodMessage(parsed.error)}`)
   const client = await getClient(opts.dev)
-  const { status, body: res } = await client.putWithStatus<Partial<AuthoredGuardrailWriteResult> & { error?: string; code?: string; validation?: GuardrailCheckResult[] }>(`${BASE}/guardrails/${enc(guardrailId)}`, parsed.data)
+  const { status, body: res } = await client.putWithStatus<Partial<AuthoredGuardrailWriteResult> & { error?: string; detail?: string; code?: string; validation?: GuardrailCheckResult[] }>(`${BASE}/guardrails/${enc(guardrailId)}`, parsed.data)
   if (status !== 200 || !res.guardrail) reportWriteFailure(status, res, guardrailId, 'Update')
   const g = res.guardrail
   if (opts.json) {
@@ -819,7 +828,7 @@ export async function runGuardrailsUpdate(guardrailId: string, opts: AuthorOpts)
 
 export async function runGuardrailsDelete(guardrailId: string, opts: CommonOpts): Promise<void> {
   const client = await getClient(opts.dev)
-  const { status, body: res } = await client.delWithStatus<{ ok?: boolean; guardrail?: GuardrailDetail; error?: string; code?: string }>(`${BASE}/guardrails/${enc(guardrailId)}`)
+  const { status, body: res } = await client.delWithStatus<{ ok?: boolean; guardrail?: GuardrailDetail; error?: string; detail?: string; code?: string }>(`${BASE}/guardrails/${enc(guardrailId)}`)
   if (status !== 200 || !res.guardrail) reportWriteFailure(status, res, guardrailId, 'Delete')
   if (opts.json) {
     emitJson(res)
@@ -837,13 +846,13 @@ const REPLAY_SOURCE_LABEL: Record<GuardrailReplay['source'], string> = {
 
 export async function runGuardrailsReplay(guardrailId: string, opts: CommonOpts): Promise<void> {
   const client = await getClient(opts.dev)
-  const { status, body } = await client.postWithStatus<{ replay?: GuardrailReplay; error?: string }>(`${BASE}/guardrails/${enc(guardrailId)}/replay`, {})
+  const { status, body } = await client.postWithStatus<{ replay?: GuardrailReplay; error?: string; detail?: string }>(`${BASE}/guardrails/${enc(guardrailId)}/replay`, {})
   if (status === 404) {
     log.error(`Guardrail "${guardrailId}" not found in this workspace, or it has no replay (WASM candidates replay through \`intutic policy replay\`).`)
     process.exit(1)
   }
   if (status !== 200 || !body.replay) {
-    log.error(`Replay failed (${status}): ${body.error ?? 'unknown error'}`)
+    log.error(`Replay failed (${status}): ${said(body) ?? 'unknown error'}`)
     process.exit(1)
   }
   const r = body.replay

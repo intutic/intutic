@@ -212,8 +212,10 @@ export class ClawdeClient {
     const git = await resolveGitContext(context.workingDirectory ?? process.cwd(), context.gitBranch)
     if (Object.keys(git).length === 0) return null
     try {
-      // whoami first: the repository goes only to a control plane that accepted the key.
-      const workspaceId = context.workspaceId ?? (await this.controlPlane<{ workspaceId: string }>('GET', '/api/v1/auth/me')).workspaceId
+      // whoami first, always: the repository goes only to a control plane
+      // that accepted the key. A workspace id from the environment proves
+      // nothing about the key, and the session route only takes the key's own.
+      const { workspaceId } = await this.controlPlane<{ workspaceId: string }>('GET', '/api/v1/auth/me')
       const session = await this.controlPlane<{ sessionId?: string }>('POST', '/api/v1/sessions', {
         workspaceId,
         harnessType: SDK_HARNESS,
