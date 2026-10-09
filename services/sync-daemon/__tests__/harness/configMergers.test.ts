@@ -21,7 +21,8 @@ import { setContinueApiBase } from '../../src/harness/continueConfigMerger.js'
 import { mergeAiderYaml, mergeAiderConfig, AIDER_SOPS_FILE } from '../../src/harness/aiderConfigMerger.js'
 import { writeAntigravityHooks } from '../../src/harness/antigravityHooks.js'
 import { writeCodexHooks } from '../../src/harness/codexHooks.js'
-import { mergePiModels } from '../../src/harness/piHooks.js'
+import { mergePiModels, writePiHooks } from '../../src/harness/piHooks.js'
+import { mergeOpenclawConfig, writeOpenclawHooks } from '../../src/harness/openclawHooks.js'
 import { mergeHermesYaml } from '../../src/harness/hermesHooks.js'
 import { mergeOpenHandsToml, mergeOpenHandsBaseUrl } from '../../src/harness/openhandsHooks.js'
 import { mergeGooseConfigYaml } from '../../src/harness/gooseHooks.js'
@@ -245,7 +246,92 @@ describe('Antigravity (Gemini CLI) ~/.gemini/settings.json', () => {
   })
 })
 
-describe('Pi ~/.pi/models.json', () => {
+describe('Pi ~/.pi/agent', () => {
+  let root: string
+  const prevHome = process.env.HOME
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-pi-'))
+    process.env.HOME = root
+  })
+
+  afterEach(async () => {
+    process.env.HOME = prevHome
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  it('writes the extension where Pi discovers it and routes models.json there, not under ~/.pi', async () => {
+    await writePiHooks(root, 'http://127.0.0.1:4000', 'ws_test')
+    const extension = await fs.readFile(path.join(root, '.pi', 'agent', 'extensions', 'intutic-governance.js'), 'utf-8')
+    expect(extension).toContain('export default function intuticGovernance(pi)')
+    expect(extension).toContain("pi.on('tool_call', toolCall)")
+    const models = JSON.parse(await fs.readFile(path.join(root, '.pi', 'agent', 'models.json'), 'utf-8'))
+    expect(models.providers.anthropic.baseUrl).toBe('http://127.0.0.1:4000')
+    for (const unread of ['hooks.json', 'models.json']) {
+      await expect(fs.access(path.join(root, '.pi', unread)), unread).rejects.toThrow()
+    }
+  })
+
+  it('leaves a models.json that is not plain JSON untouched', async () => {
+    const models = path.join(root, '.pi', 'agent', 'models.json')
+    await fs.mkdir(path.dirname(models), { recursive: true })
+    await fs.writeFile(models, '{ "providers": { // mine\n } }\n')
+    await writePiHooks(root, 'http://127.0.0.1:4000', 'ws_test')
+    expect(await fs.readFile(models, 'utf-8')).toBe('{ "providers": { // mine\n } }\n')
+  })
+})
+
+describe('OpenClaw ~/.openclaw/openclaw.json', () => {
+  const PLUGIN = '/home/u/.intutic/hooks/openclaw/intutic-governance.cjs'
+  let root: string
+  const prevHome = process.env.HOME
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-openclaw-'))
+    process.env.HOME = root
+  })
+
+  afterEach(async () => {
+    process.env.HOME = prevHome
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  it('lists the plugin in plugins.load.paths, keeping every other key, and does not stack', () => {
+    const user = { agents: { defaults: { workspace: '~/a' } }, plugins: { load: { paths: ['~/mine.ts'] }, entries: { mine: { enabled: true } } } }
+    const merged = mergeOpenclawConfig(user, PLUGIN)
+    expect(merged).toEqual({
+      agents: { defaults: { workspace: '~/a' } },
+      plugins: { load: { paths: ['~/mine.ts', PLUGIN] }, entries: { mine: { enabled: true } } },
+    })
+    expect(mergeOpenclawConfig(merged, PLUGIN)).toEqual(merged)
+  })
+
+  it('adds the plugin id to a restrictive allowlist, and leaves an empty or absent one alone', () => {
+    expect((mergeOpenclawConfig({ plugins: { allow: ['mine'] } }, PLUGIN).plugins as { allow: string[] }).allow).toEqual(['mine', 'intutic-governance'])
+    expect((mergeOpenclawConfig({ plugins: { allow: [] } }, PLUGIN).plugins as { allow: string[] }).allow).toEqual([])
+    expect((mergeOpenclawConfig({}, PLUGIN).plugins as Record<string, unknown>).allow).toBeUndefined()
+  })
+
+  it('writes the plugin and a JSON5 config with comments as JSON, the user keys kept', async () => {
+    const config = path.join(root, '.openclaw', 'openclaw.json')
+    await fs.mkdir(path.dirname(config), { recursive: true })
+    await fs.writeFile(config, '{\n  // mine\n  "gateway": { "port": 18789 },\n}\n')
+    await writeOpenclawHooks(root, 'http://127.0.0.1:4000', 'ws_test')
+    const plugin = path.join(root, '.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')
+    expect(await fs.readFile(plugin, 'utf-8')).toContain("api.on('before_tool_call', beforeToolCall, { timeoutMs: 10000 })")
+    expect(JSON.parse(await fs.readFile(config, 'utf-8'))).toEqual({ gateway: { port: 18789 }, plugins: { load: { paths: [plugin] } } })
+  })
+
+  it('leaves a config that does not parse untouched', async () => {
+    const config = path.join(root, '.openclaw', 'openclaw.json')
+    await fs.mkdir(path.dirname(config), { recursive: true })
+    await fs.writeFile(config, '{ gateway: { port: 18789 } }\n')
+    await writeOpenclawHooks(root, 'http://127.0.0.1:4000', 'ws_test')
+    expect(await fs.readFile(config, 'utf-8')).toBe('{ gateway: { port: 18789 } }\n')
+  })
+})
+
+describe('Pi ~/.pi/agent/models.json', () => {
   it('gives each provider the base URL its SDK expects, leaves Google and other keys alone', () => {
     const merged = mergePiModels({
       providers: {

@@ -1,21 +1,48 @@
 /**
- * openclawHooks.ts — Openclaw governance hook injection.
+ * openclawHooks.ts — OpenClaw plugin gate.
  *
- * Openclaw uses `~/.openclaw/openclaw.json` (JSON5 format — may have comments
- * and trailing commas). The hook entry is registered under
- * `hooks.internal.entries["intutic-governance"]`. This module:
+ * OpenClaw has two hook systems, and only one of them can stop a tool call.
+ * Its *internal* hooks (`hooks.internal.entries` in `~/.openclaw/openclaw.json`,
+ * `HOOK.md` handlers) react to command, session and Gateway events; the
+ * dispatcher catches a handler's error and carries on, and tool calls are not
+ * among their events at all. Earlier versions of this writer registered the
+ * gate there, as `{ event: 'PreToolUse', command }`, a shape OpenClaw keeps
+ * (hook entries are open-ended) and never runs. Tool calls are intercepted by
+ * a *plugin* hook, `before_tool_call`, registered with `api.on(...)`:
+ * https://github.com/openclaw/openclaw/blob/59309cc7777e07d52ca1be94bf8c25fd685919bc/docs/automation/hooks.md
+ * ("Choose the right surface": intercepting tools is a plugin hook).
  *
- * 1. JSON5-safe-merges `~/.openclaw/openclaw.json` with the hook entry.
- * 2. Writes `~/.intutic/hooks/openclaw-check.js` — dual-path Node.js hook.
- * 3. Writes `.intutic/env/openclaw.env` — env snippet.
- * 4. Optionally validates with `openclaw hooks check` (non-fatal).
+ * ## The plugin
  *
- * Hook protocol: stdin JSON `{tool_name, tool_input, transcript_path}`,
- * exit 0 = allow, exit 2 = block (stderr shown to agent).
+ * A standalone plugin file needs no manifest when it is listed in
+ * `plugins.load.paths`; its id is the file's basename, so the file is
+ * `intutic-governance.cjs` and exports `{ id: 'intutic-governance', register }`
+ * (`docs/plugins/hooks/tool-policy.md` "Sender-aware policy in one file";
+ * `src/plugins/discovery.ts` `discoverFromPath`; the loader test "loads
+ * multiple manifestless standalone files"). `.cjs`, so the module format does
+ * not depend on any `package.json` above it. A plugin from a configured path
+ * is enabled by default unless a non-empty `plugins.allow` leaves it out
+ * (`src/plugins/config-activation-shared.ts`), so the id is added to an
+ * existing allowlist and nothing is written when there is none.
  *
- * WS-C2 — Openclaw harness (Phase 3 cross-harness defence)
- * LLD #14 — Phase 3 cross-harness defence (Gap 3)
- * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
+ * `before_tool_call` receives `{ toolName, params, toolCallId?, runId?,
+ * derivedPaths? }` and `ctx.sessionId`, and refuses with `{ block: true,
+ * blockReason }`, which is terminal (`docs/plugins/hooks/tool-policy.md`,
+ * `src/plugins/hook-types.ts`). The global hook runner runs it fail-closed: a
+ * handler that throws or outlives its timeout blocks the call
+ * (`src/plugins/hook-runner-global.ts`: `before_tool_call: "fail-closed"`;
+ * default 15 s, `docs/plugins/hooks/reference.md`). That timeout cannot stop
+ * synchronous code, so the gate runs under its own `GATE_DEADLINE_MS` and the
+ * hook registers `timeoutMs: HOOK_TIMEOUT_SECONDS * 1000` above it.
+ *
+ * The plugin embeds the shared `emitJsGate` body (`'throw'` contract) and
+ * returns OpenClaw's block result for the refusal it throws. Any other fault
+ * is a block too. MCP tools reach the hook as `<server>__<tool>`
+ * (`src/agents/agent-bundle-mcp-names.ts`, `TOOL_NAME_SEPARATOR`), which the
+ * plugin composes into `mcp__<server>__<tool>` for the allowlist.
+ *
+ * The file lives under `~/.intutic/hooks/`, a governance-protected path, so an
+ * agent cannot edit it under any gated harness.
  *
  * @module
  */
@@ -23,45 +50,54 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
-import { exec } from 'node:child_process'
-import { promisify } from 'node:util'
 import { createLogger } from '@intutic/logger'
-import { keepOriginal } from '../disconnect/originals.js'
+import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { emitJsGate, HOOK_TIMEOUT_SECONDS, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 
 const log = createLogger('sync-openclaw-hooks')
-const execAsync = promisify(exec)
 
-/** Path to the Openclaw global config file. */
-const OPENCLAW_CONFIG = path.join(os.homedir(), '.openclaw', 'openclaw.json')
+/** The plugin id, which OpenClaw takes from the standalone file's basename. */
+export const OPENCLAW_PLUGIN_ID = 'intutic-governance'
 
-/** Governance-sensitive paths that the hook gate protects. */
+/** The plugin file, relative to the home directory. */
+export const OPENCLAW_PLUGIN_FILE = path.join('.intutic', 'hooks', 'openclaw', `${OPENCLAW_PLUGIN_ID}.cjs`)
 
-// ─── Node.js hook script template ────────────────────────────────────────────
+/** The first line of the plugin's header, which disconnect recognises it by. */
+export const OPENCLAW_PLUGIN_MARKER = 'Intutic OpenClaw governance plugin.'
 
-function buildOpenclawCheckScript(
-  hookEventsLog: string,
-  workspaceId: string,
-  proxyUrl: string,
-): string {
-  return `#!/usr/bin/env node
-/**
- * Intutic Openclaw PreToolUse execution gate.
+function openclawConfigPath(): string {
+  return path.join(os.homedir(), '.openclaw', 'openclaw.json')
+}
+
+/** The absolute path of the plugin file for the current home directory. */
+export function openclawPluginPath(): string {
+  return path.join(os.homedir(), OPENCLAW_PLUGIN_FILE)
+}
+
+// ─── The plugin ──────────────────────────────────────────────────────────────
+
+export function buildOpenclawPlugin(proxyUrl: string, workspaceRoot: string, workspaceId: string): string {
+  const hookEventsLog = path.join(workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
+  return `/**
+ * ${OPENCLAW_PLUGIN_MARKER}
  * Auto-generated by intutic sync-daemon. DO NOT EDIT.
  * Proxy: ${proxyUrl}
  * Generated: ${newIso()}
- * Workspace: ${workspaceId}
+ *
+ * A before_tool_call plugin hook, loaded through plugins.load.paths in
+ * ~/.openclaw/openclaw.json. Refuses a tool call by returning
+ * { block: true, blockReason }. See
+ * services/sync-daemon/src/harness/openclawHooks.ts.
  */
 'use strict';
-${emitJsFailClosedPrelude({ harness: 'openclaw', contract: 'exit2' })}
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
 
-// ── Runtime credentials (sourced from ~/.intutic/env/runtime.env at invocation time) ──
+// Runtime credentials, read when OpenClaw loads the plugin.
 const _runtimeEnvPath = path.join(os.homedir(), '.intutic', 'env', 'runtime.env');
 let _intuticHost = 'https://api.intutic.ai', _intuticKey = '', _intuticWsId = ${JSON.stringify(workspaceId)};
 try {
@@ -72,29 +108,21 @@ try {
     if (k === 'INTUTIC_API_KEY' && v) _intuticKey = v;
     if (k === 'INTUTIC_WORKSPACE_ID' && v) _intuticWsId = v;
   });
-} catch { /* runtime.env not yet written — use defaults */ }
+} catch {}
 
-${emitJsGate({ harness: 'openclaw', contract: 'exit2' })}
+${emitJsGate({ harness: 'openclaw', contract: 'throw', reviewRequestFile: path.join(workspaceRoot, '.intutic', 'events', REVIEW_REQUESTS_BASENAME) })}
 
-/**
- * Appends a governance event to the local hook-events log (Path B)
- * and fires a non-blocking HTTP POST to the control plane (Path A).
- */
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
-    // incidentId = sha1(timestamp + toolName + workspaceId).slice(0,16)
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
     // The event's id: random, made once here, and resent with the line it is
     // written into, so the control plane processes the event once.
     const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
-      // Passed through, not collapsed to two values: the advisory tier emits
-      // 'tool_flagged', and a ternary here silently recorded it as an allow.
       event: verdict,
-      toolName,
-      reason: reason || '',
+      toolName, reason: reason || '',
       workspaceId: _intuticWsId,
       harnessType: 'openclaw',
       timestamp: ts,
@@ -102,71 +130,77 @@ function logEvent(verdict, toolName, reason) {
       eventId,
       ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
-    // Path B: reliable file append (sync-daemon drains on FSEvents change)
-    fs.appendFileSync(${JSON.stringify(hookEventsLog)}, entry, { flag: 'a' });
-    // Path A: fire-and-forget HTTP POST (near-real-time dashboard, non-blocking)
+    const logPath = ${JSON.stringify(hookEventsLog)};
+    try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); } catch {}
+    fs.appendFileSync(logPath, entry, { flag: 'a' });
     if (_intuticKey) {
       try {
         const body = JSON.stringify({ events: [JSON.parse(entry)] });
         const urlObj = new URL('/api/v1/hook-events', _intuticHost);
         const isHttps = urlObj.protocol === 'https:';
         const mod = isHttps ? https : require('http');
-        const req = mod.request({
-          hostname: urlObj.hostname,
-          port: urlObj.port || (isHttps ? 443 : 80),
-          path: urlObj.pathname,
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(body),
-            'Authorization': 'Bearer ' + _intuticKey,
-          },
-        });
-        req.on('error', () => { /* fire-and-forget — ignore errors */ });
-        req.write(body);
-        req.end();
+        const req = mod.request({ hostname: urlObj.hostname, port: urlObj.port || (isHttps ? 443 : 80), path: urlObj.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), 'Authorization': 'Bearer ' + _intuticKey } });
+        req.on('error', () => { /* fire-and-forget */ });
+        req.write(body); req.end();
       } catch { /* never crash the hook */ }
     }
   } catch { /* never crash the hook */ }
 }
 
-// Read stdin containing Openclaw's tool context
-let inputData = '';
-process.stdin.on('data', (chunk) => { inputData += chunk; });
-process.stdin.on('end', () => {
-  try {
-    const ctx = JSON.parse(inputData);
-    _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
-    // An envelope carrying none of the tool fields extracts to empty strings,
-    // which match no rule — an allow. Refused instead; see the guard itself.
-    intuticGuardEnvelope(ctx, ['tool_name', 'toolName', 'tool_input', 'toolInput'], logEvent);
-    const toolName = (ctx.tool_name || ctx.toolName || '').toLowerCase()
-    // Case preserved for the gate. A BLOCK: SOP compiles to a tool-name
-    // pattern the operator wrote as they see it (Bash, Write) and this
-    // harness lowercases the tool for its own matching. Handing the gate the
-    // lowercased form means every SOP tool rule silently matches nothing here
-    // while appearing active everywhere else.
-    const rawToolName = ctx.tool_name || ctx.toolName || '';
-    const toolInput = ctx.tool_input || ctx.toolInput || {};
-
-    const targetPath = toolInput.path || toolInput.file_path || toolInput.filePath ||
-      toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
-    const command = toolInput.command || toolInput.cmd || toolInput.script || '';
-    intuticGate(rawToolName, targetPath, command, logEvent, _intuticWsId, toolInput);
-
-    logEvent('tool_allowed', toolName, '');
-    process.exit(0);
-  } catch (err) {
-    // Fail CLOSED — any hook execution error blocks the tool call.
-    console.error('[Intutic Governance] Hook error (blocking for safety):', err);
-    logEvent('tool_blocked', 'unknown', String(err));
-    process.exit(2);
+/**
+ * One tool call. Returns to allow; throws '[Intutic Governance] …' to refuse.
+ * Params that are not an object are refused outright: the gate reads paths
+ * and commands out of them, and a shape it cannot read is not one it can
+ * allow. apply_patch names its files in derivedPaths, and each is checked.
+ */
+function intuticEvaluate(event, ctx) {
+  _intuticSessionId = String((ctx && (ctx.sessionId || ctx.sessionKey)) || '');
+  let tool = String((event && event.toolName) || 'tool');
+  // OpenClaw names an MCP tool <server>__<tool>; the allowlist reads
+  // mcp__<server>__<tool>. No built-in tool id has a double underscore.
+  if (tool.indexOf('__') > 0 && tool.indexOf('mcp__') !== 0) tool = 'mcp__' + tool;
+  const params = event && event.params;
+  if (!params || typeof params !== 'object' || Array.isArray(params)) {
+    const reason = '[Intutic Governance] BLOCKED: tool "' + tool + '" was called with parameters the gate cannot read (' +
+      (params === null ? 'null' : typeof params) + '); refusing rather than allowing a call it cannot evaluate.';
+    try { logEvent('tool_blocked', tool, reason); } catch (e) {}
+    throw new Error(reason);
   }
-});
+  const command = params.command || params.cmd || params.script || '';
+  const direct = params.path || params.file_path || params.filePath || params.target || '';
+  const derived = event && Array.isArray(event.derivedPaths) ? event.derivedPaths.filter((p) => typeof p === 'string' && p) : [];
+  const targets = derived.length > 0 ? (direct ? [direct].concat(derived) : derived) : [direct];
+  for (const target of targets) intuticGate(tool, target, command, logEvent, _intuticWsId, params, _intuticSessionId);
+  logEvent('tool_allowed', tool, '');
+}
+
+/** Fail closed: a fault inside the gate is a refusal, never an allow. */
+function beforeToolCall(event, ctx) {
+  try {
+    intuticEvaluate(event, ctx);
+    return undefined;
+  } catch (err) {
+    let reason = String((err && err.message) || err);
+    if (reason.indexOf('[Intutic Governance]') !== 0) {
+      reason = '[Intutic Governance] BLOCKED: gate fault (failing closed): ' + reason;
+      try { logEvent('tool_blocked', String((event && event.toolName) || 'unknown'), reason); } catch (e) {}
+    }
+    return { block: true, blockReason: reason };
+  }
+}
+
+module.exports = {
+  id: ${JSON.stringify(OPENCLAW_PLUGIN_ID)},
+  name: 'Intutic governance',
+  description: 'Refuses tool calls that break the workspace policy before they run.',
+  register(api) {
+    api.on('before_tool_call', beforeToolCall, { timeoutMs: ${HOOK_TIMEOUT_SECONDS * 1000} });
+  },
+};
 `
 }
 
-// ─── JSON5 merge helpers ──────────────────────────────────────────────────────
+// ─── ~/.openclaw/openclaw.json ───────────────────────────────────────────────
 
 /**
  * Attempt to parse a JSON5-like string by progressively stripping
@@ -193,48 +227,50 @@ export function parseJson5Like(raw: string): Record<string, unknown> {
   return JSON.parse(stripped) as Record<string, unknown>
 }
 
-/**
- * Deep-merge `hooks.internal.entries["intutic-governance"]` into the parsed
- * openclaw config object and return the merged result.
- */
-function mergeOpenclawConfig(
-  existing: Record<string, unknown>,
-  hookScriptPath: string,
-): Record<string, unknown> {
-  const hooks = (existing.hooks as Record<string, unknown> | undefined) ?? {}
-  const internal = (hooks.internal as Record<string, unknown> | undefined) ?? {}
-  const entries = (internal.entries as Record<string, unknown> | undefined) ?? {}
+const asObject = (v: unknown): Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 
+/**
+ * Adds the plugin to `plugins.load.paths`, and its id to `plugins.allow` when
+ * that list is non-empty (an empty or absent one allows every plugin).
+ * Everything else is kept, and a second run adds nothing.
+ */
+export function mergeOpenclawConfig(existing: Record<string, unknown>, pluginPath: string): Record<string, unknown> {
+  const plugins = asObject(existing.plugins)
+  const load = asObject(plugins.load)
+  const paths = Array.isArray(load.paths) ? load.paths : []
+  const allow = Array.isArray(plugins.allow) ? plugins.allow : undefined
   return {
     ...existing,
-    hooks: {
-      ...hooks,
-      internal: {
-        ...internal,
-        entries: {
-          ...entries,
-          'intutic-governance': {
-            enabled: true,
-            event: 'PreToolUse',
-            command: hookScriptPath,
-          },
-        },
-      },
+    plugins: {
+      ...plugins,
+      ...(allow && allow.length > 0 && !allow.includes(OPENCLAW_PLUGIN_ID) ? { allow: [...allow, OPENCLAW_PLUGIN_ID] } : {}),
+      load: { ...load, paths: paths.includes(pluginPath) ? paths : [...paths, pluginPath] },
     },
   }
+}
+
+/** Why the plugin will not load even once it is listed, when the config says so. */
+function configBlocksPlugin(config: Record<string, unknown>): string | null {
+  const plugins = asObject(config.plugins)
+  if (plugins.enabled === false) return 'plugins.enabled is false'
+  if (Array.isArray(plugins.deny) && plugins.deny.includes(OPENCLAW_PLUGIN_ID)) return `plugins.deny lists ${OPENCLAW_PLUGIN_ID}`
+  if (asObject(asObject(plugins.entries)[OPENCLAW_PLUGIN_ID]).enabled === false) return `plugins.entries.${OPENCLAW_PLUGIN_ID}.enabled is false`
+  return null
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
- * Write the Openclaw governance hook script and merge hook configuration
- * into `~/.openclaw/openclaw.json`.
+ * Write the OpenClaw governance plugin and list it in
+ * `~/.openclaw/openclaw.json`.
  *
- * Safe to call repeatedly — uses atomic rename so partial writes never
- * leave a corrupt state.
+ * Safe to call repeatedly: the plugin is replaced by atomic rename and the
+ * config merge is idempotent. A config file that does not parse is left as
+ * it is, and reported.
  *
  * @param workspaceRoot - Absolute workspace root path.
- * @param proxyUrl      - Intutic proxy URL written into hook headers.
+ * @param proxyUrl      - Intutic proxy URL written into the plugin header.
  * @param workspaceId   - Workspace ID embedded in every hook event payload.
  */
 export async function writeOpenclawHooks(
@@ -242,85 +278,46 @@ export async function writeOpenclawHooks(
   proxyUrl: string,
   workspaceId = '',
 ): Promise<void> {
-  // ── 1. Ensure directories ──────────────────────────────────────────────────
+  await fs.mkdir(path.join(workspaceRoot, '.intutic', 'events'), { recursive: true })
 
-  const globalHookDir = path.join(os.homedir(), '.intutic', 'hooks')
-  const hookEventsDir = path.join(workspaceRoot, '.intutic', 'events')
-  const envDir = path.join(workspaceRoot, '.intutic', 'env')
-  const openclawDir = path.join(os.homedir(), '.openclaw')
+  const pluginPath = openclawPluginPath()
+  await writeOwnedFile(pluginPath, workspaceRoot, buildOpenclawPlugin(proxyUrl, workspaceRoot, workspaceId))
+  log.info({ action: 'openclaw_plugin_written', path: pluginPath }, 'OpenClaw governance plugin written')
 
-  await keepOriginal(OPENCLAW_CONFIG, workspaceRoot)
-  await Promise.all([
-    fs.mkdir(globalHookDir, { recursive: true }),
-    fs.mkdir(hookEventsDir, { recursive: true }),
-    fs.mkdir(envDir, { recursive: true }),
-    fs.mkdir(openclawDir, { recursive: true }),
-  ])
-
-  // ── 2. Write Node.js hook script ──────────────────────────────────────────
-
-  const hookScriptPath = path.join(globalHookDir, 'openclaw-check.js')
-  const hookEventsLog = path.join(hookEventsDir, 'hook-events.jsonl')
-
-  const tmpScript = hookScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, buildOpenclawCheckScript(hookEventsLog, workspaceId, proxyUrl), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
-
-  log.info({ action: 'openclaw_hook_script_written', path: hookScriptPath }, 'Openclaw hook script written')
-
-  // ── 3. JSON5-safe merge into ~/.openclaw/openclaw.json ────────────────────
-
-  let existingConfig: Record<string, unknown> = {}
+  const configPath = openclawConfigPath()
+  let raw: string | null = null
   try {
-    const raw = await fs.readFile(OPENCLAW_CONFIG, 'utf-8')
-    existingConfig = parseJson5Like(raw)
-  } catch {
-    // File doesn't exist or is unparseable — start fresh
-  }
-
-  const mergedConfig = mergeOpenclawConfig(existingConfig, hookScriptPath)
-
-  const tmpConfig = OPENCLAW_CONFIG + '.intutic-tmp'
-  await fs.writeFile(tmpConfig, JSON.stringify(mergedConfig, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmpConfig, OPENCLAW_CONFIG)
-
-  log.info(
-    { action: 'openclaw_config_merged', path: OPENCLAW_CONFIG },
-    'Merged Intutic hook into ~/.openclaw/openclaw.json',
-  )
-
-  // ── 4. Write env snippet ───────────────────────────────────────────────────
-
-  const envSnippet = [
-    `# Intutic openclaw governance env`,
-    `INTUTIC_OPENCLAW_HOOK=~/.intutic/hooks/openclaw-check.js`,
-    `INTUTIC_OPENCLAW_CONFIG=~/.openclaw/openclaw.json`,
-    `# Validate: openclaw hooks check`,
-  ].join('\n') + '\n'
-
-  const envFilePath = path.join(envDir, 'openclaw.env')
-  const tmpEnv = envFilePath + '.intutic-tmp'
-  await fs.writeFile(tmpEnv, envSnippet, 'utf-8')
-  await fs.rename(tmpEnv, envFilePath)
-
-  log.info(
-    { action: 'openclaw_env_written', path: envFilePath },
-    'Openclaw env snippet written',
-  )
-
-  // ── 5. Optional validation (non-fatal) ────────────────────────────────────
-
-  try {
-    const { stdout, stderr } = await execAsync('openclaw hooks check', { timeout: 5000 })
-    log.info(
-      { action: 'openclaw_hooks_check', stdout: stdout.trim(), stderr: stderr.trim() },
-      'openclaw hooks check passed',
-    )
+    raw = await fs.readFile(configPath, 'utf-8')
   } catch (err) {
-    // Not installed or check failed — non-fatal
-    log.debug({ action: 'openclaw_hooks_check_skipped', err }, 'openclaw hooks check skipped (binary not in PATH or check failed)')
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      log.warn({ action: 'config_merge_skipped', path: configPath, error: String(err) }, `Could not read ${configPath} — left untouched`)
+      return
+    }
   }
+  let existing: Record<string, unknown> = {}
+  if (raw !== null && raw.trim() !== '') {
+    try {
+      existing = asObject(parseJson5Like(raw))
+    } catch {
+      log.warn(
+        { action: 'config_merge_skipped', path: configPath },
+        `${configPath} does not parse — left untouched; fix it and the next sync will list the Intutic plugin`,
+      )
+      return
+    }
+  }
+
+  const blocked = configBlocksPlugin(existing)
+  if (blocked) {
+    log.warn({ action: 'openclaw_plugin_disabled', path: configPath, reason: blocked }, `OpenClaw will not load the Intutic plugin: ${blocked}`)
+  }
+
+  await keepOriginal(configPath, workspaceRoot)
+  await fs.mkdir(path.dirname(configPath), { recursive: true })
+  const tmp = configPath + '.intutic-tmp'
+  await fs.writeFile(tmp, JSON.stringify(mergeOpenclawConfig(existing, pluginPath), null, 2) + '\n', 'utf-8')
+  await fs.rename(tmp, configPath)
+  log.info({ action: 'openclaw_config_merged', path: configPath }, 'Listed the Intutic plugin in ~/.openclaw/openclaw.json')
 }
 
 /**

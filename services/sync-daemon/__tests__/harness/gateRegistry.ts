@@ -76,8 +76,15 @@ export type HarnessModule = Record<string, (...args: unknown[]) => Promise<void>
  * `'js-throw'`, whose unit is a whole n8n WORKFLOW: the suites below look
  * rows up by contract, and one value for both would let the workflow block
  * silently claim the per-call gate.
+ *
+ * `'plugin-block'` — the same in-process shape, refusing by RETURNING the
+ * host's block result instead: Pi's `tool_call` handler returns
+ * `{ block: true, reason }`, OpenClaw's `before_tool_call` hook
+ * `{ block: true, blockReason }`. Both hosts also block on a throw, but the
+ * returned reason is what the model reads, so a throw here is a defect the
+ * suite reports rather than a refusal it accepts.
  */
-export type GateContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'python-raise' | 'js-throw' | 'waterfall-reject' | 'plugin-throw'
+export type GateContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'python-raise' | 'js-throw' | 'waterfall-reject' | 'plugin-throw' | 'plugin-block'
 
 /** What runs the emitted artifact. */
 export type GateRunner = 'bash' | 'node' | 'python3'
@@ -203,17 +210,6 @@ export const GATES: readonly GateEntry[] = [
     mcpCalls: 'reachable',
     mcpNote: 'Matcher "*" runs the gate for every tool call. Antigravity\'s own MCP tool-naming convention is not documented and was not verified.',
   },
-  {
-    name: 'pi',
-    module: '../../src/harness/piHooks.js',
-    invoke: (m, root) => m.writePiHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/pi-check.sh',
-    runner: 'bash',
-    contract: 'exit2',
-    migrated: true,
-    mcpCalls: 'reachable',
-    mcpNote: 'bash-family (also carries its own ‘.*’ hooks.json matcher, belt-and-suspenders). Pi’s own MCP tool-naming convention was not independently verified during M3.',
-  },
 
   // ── JavaScript, exit-code contract ──────────────────────────────────────
   {
@@ -272,18 +268,6 @@ export const GATES: readonly GateEntry[] = [
       'reads `agent_action_name`/`tool_info.*` first, with the old Cursor-shaped fields kept only ' +
       'as a lower-priority fallback. See windsurfHooks.ts\'s module doc comment for the full ' +
       'correction record and windsurfHooks.test.ts for coverage against the confirmed real shape.',
-  },
-  {
-    name: 'openclaw',
-    module: '../../src/harness/openclawHooks.js',
-    invoke: (m, root) => m.writeOpenclawHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/openclaw-check.js',
-    runner: 'node',
-    contract: 'exit2',
-    migrated: true,
-    note: 'its writer shells out to an installed `openclaw` binary if present',
-    mcpCalls: 'reachable',
-    mcpNote: 'Its PreToolUse registration carries no matcher (runs for every tool call). Openclaw’s own MCP tool-naming convention was not independently verified during M3.',
   },
   {
     name: 'codex',
@@ -452,7 +436,6 @@ export const GATES: readonly GateEntry[] = [
       'specifically) — hence reachable, not yes.',
   },
 
-  // ── refuses by throwing, at workflow granularity ────────────────────────
   // ── OpenCode — a plugin OpenCode loads into its own process (TD-397) ─────
   {
     name: 'opencode',
@@ -476,6 +459,46 @@ export const GATES: readonly GateEntry[] = [
       'openCodeHooks.test.ts. 2.x MCP ids are not verified; a 2.x id that is not ' +
       '<server>_<tool>-shaped passes through unchanged.',
   },
+  // ── Pi and OpenClaw — in-process hooks that return a block result ───────
+  {
+    name: 'pi',
+    module: '../../src/harness/piHooks.js',
+    invoke: (m, root) => m.writePiHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.pi/agent/extensions/intutic-governance.js',
+    runner: 'node',
+    contract: 'plugin-block',
+    migrated: true,
+    note:
+      'per-tool-call, in-process: Pi loads the file from ~/.pi/agent/extensions and awaits its ' +
+      'tool_call handler, with no timeout, before every tool call; { block: true, reason } refuses. ' +
+      'Driven by the "Pi and OpenClaw plugin gates" block. Earlier versions wrote ~/.pi/hooks.json, ' +
+      'which Pi never reads.',
+    mcpCalls: 'yes',
+    mcpNote:
+      'Pi registers each MCP tool as mcp__<server>__<tool> (docs/mcp.md at earendil-works/pi ' +
+      '6fb2e78) and runs tool_call handlers for every tool, nested ctx.executeTool() calls ' +
+      'included, so the allowlist reads the name as it arrives.',
+  },
+  {
+    name: 'openclaw',
+    module: '../../src/harness/openclawHooks.js',
+    invoke: (m, root) => m.writeOpenclawHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/openclaw/intutic-governance.cjs',
+    runner: 'node',
+    contract: 'plugin-block',
+    migrated: true,
+    note:
+      'per-tool-call, in-process: a standalone plugin listed in plugins.load.paths whose ' +
+      'before_tool_call hook returns { block: true, blockReason }; OpenClaw runs the hook ' +
+      'fail-closed. Driven by the "Pi and OpenClaw plugin gates" block. Earlier versions ' +
+      'registered an internal hook, which never sees a tool call.',
+    mcpCalls: 'yes',
+    mcpNote:
+      'OpenClaw names an MCP tool <server>__<tool> (src/agents/agent-bundle-mcp-names.ts, ' +
+      'TOOL_NAME_SEPARATOR, at openclaw/openclaw 59309cc); the plugin composes ' +
+      'mcp__<server>__<tool> for the allowlist. Pinned by the block\'s allowlist case.',
+  },
+  // ── refuses by throwing, at workflow granularity ────────────────────────
   {
     name: 'n8n',
     module: '../../src/harness/n8nHooks.js',

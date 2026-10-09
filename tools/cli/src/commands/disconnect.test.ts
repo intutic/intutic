@@ -420,13 +420,82 @@ const CASES: Case[] = [
   },
   {
     harness: 'pi',
-    seed: () => put(join(home, '.pi', 'models.json'), { providers: { anthropic: { apiKeyEnv: 'ANTHROPIC_API_KEY' }, google: { baseUrl: 'https://g.example' } } }),
-    edit: () => editJson(join(home, '.pi', 'models.json'), (d) => { d.providers.mistral = { apiKeyEnv: 'M' } }),
+    seed: async () => {
+      await put(join(home, '.pi', 'agent', 'models.json'), { providers: { anthropic: { apiKeyEnv: 'ANTHROPIC_API_KEY' }, google: { baseUrl: 'https://g.example' } } })
+      await put(join(home, '.pi', 'agent', 'extensions', 'mine.ts'), 'export default function (pi) {}\n')
+    },
+    edit: () => editJson(join(home, '.pi', 'agent', 'models.json'), (d) => { d.providers.mistral = { apiKeyEnv: 'M' } }),
+    connected: async () => {
+      expect(await fs.readFile(join(home, '.pi', 'agent', 'extensions', 'intutic-governance.js'), 'utf-8')).toContain("pi.on('tool_call', toolCall)")
+      expect(JSON.parse(await fs.readFile(join(home, '.pi', 'agent', 'models.json'), 'utf-8')).providers.anthropic.baseUrl).toBe(PROXY)
+    },
+  },
+  {
+    harness: 'pi',
+    name: 'pi, with no Pi config at all',
+    seed: () => put(join(ws, 'README.md'), '# project\n'),
+    edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+  },
+  {
+    // Earlier versions registered a PreToolUse hook in ~/.pi/hooks.json and
+    // routed ~/.pi/models.json, neither of which Pi reads.
+    harness: 'pi',
+    name: 'pi, with the hooks.json, models.json and gate script an earlier version wrote',
+    seed: async () => {
+      await put(join(home, '.pi', 'hooks.json'), { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: './mine.sh' }] }] } })
+      await put(join(home, '.pi', 'models.json'), { providers: { google: { baseUrl: 'https://g.example' } } })
+    },
+    connect: async () => {
+      const gate = join(home, '.intutic', 'hooks', 'pi-check.sh')
+      const hooks = join(home, '.pi', 'hooks.json')
+      const models = join(home, '.pi', 'models.json')
+      await keepOriginal(hooks, ws)
+      await keepOriginal(models, ws)
+      await put(gate, '#!/usr/bin/env bash\n# Intutic Pi (earendil-works/pi) PreToolUse governance gate.\nexit 0\n')
+      await editJson(hooks, (d) => { d.hooks.PreToolUse.push({ matcher: '.*', hooks: [{ type: 'command', command: gate }] }) })
+      await editJson(models, (d) => { d.providers.anthropic = { baseUrl: PROXY } })
+      await connectHarness('pi')
+    },
+    edit: () => editJson(join(home, '.pi', 'hooks.json'), (d) => { d.theme = 'dark' }),
   },
   {
     harness: 'openclaw',
     seed: () => put(join(home, '.openclaw', 'openclaw.json'), { agents: { default: 'x' } }),
     edit: () => editJson(join(home, '.openclaw', 'openclaw.json'), (d) => { d.agents.second = 'y' }),
+    connected: async () => {
+      const config = JSON.parse(await fs.readFile(join(home, '.openclaw', 'openclaw.json'), 'utf-8'))
+      expect(config.plugins.load.paths).toEqual([join(home, '.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')])
+    },
+  },
+  {
+    harness: 'openclaw',
+    name: 'openclaw, with plugins of the user\'s own and a restrictive allowlist',
+    seed: () =>
+      put(join(home, '.openclaw', 'openclaw.json'), {
+        plugins: { allow: ['mine'], load: { paths: ['~/plugins/mine.ts'] }, entries: { mine: { enabled: true } } },
+      }),
+    edit: () => editJson(join(home, '.openclaw', 'openclaw.json'), (d) => { d.plugins.allow.push('theirs') }),
+    connected: async () => {
+      const config = JSON.parse(await fs.readFile(join(home, '.openclaw', 'openclaw.json'), 'utf-8'))
+      expect(config.plugins.allow).toEqual(['mine', 'intutic-governance'])
+      expect(config.plugins.load.paths).toEqual(['~/plugins/mine.ts', join(home, '.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')])
+    },
+  },
+  {
+    // Earlier versions registered an internal hook entry, which never sees a
+    // tool call, and wrote openclaw-check.js.
+    harness: 'openclaw',
+    name: 'openclaw, with the internal hook entry and gate script an earlier version wrote',
+    seed: () => put(join(home, '.openclaw', 'openclaw.json'), { hooks: { internal: { entries: { 'session-memory': { enabled: true } } } } }),
+    connect: async () => {
+      const gate = join(home, '.intutic', 'hooks', 'openclaw-check.js')
+      const config = join(home, '.openclaw', 'openclaw.json')
+      await keepOriginal(config, ws)
+      await put(gate, '#!/usr/bin/env node\n// Intutic Openclaw PreToolUse execution gate.\n')
+      await editJson(config, (d) => { d.hooks.internal.entries['intutic-governance'] = { enabled: true, event: 'PreToolUse', command: gate } })
+      await connectHarness('openclaw')
+    },
+    edit: () => editJson(join(home, '.openclaw', 'openclaw.json'), (d) => { d.gateway = { port: 18789 } }),
   },
   {
     harness: 'n8n',
@@ -537,11 +606,6 @@ const CASES: Case[] = [
     seed: async () => {
       await put(join(home, '.openclaw', 'openclaw.json'), { agents: { defaults: { workspace: '~/assistant' } } })
       await put(join(home, 'assistant', 'AGENTS.md'), '# How I work\n\nAsk first.\n')
-    },
-    // The rules only: the gate writer runs `openclaw hooks check`, which an
-    // installed OpenClaw answers slowly for a configured workspace.
-    connect: async () => {
-      await getAdapter('openclaw')!.writeConfig(ws, SOPS, PROXY)
     },
     edit: () => editText(join(home, 'assistant', 'AGENTS.md'), 'Ask first.', 'Ask twice.'),
     connected: async () => {

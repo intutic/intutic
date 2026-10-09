@@ -167,7 +167,7 @@ const payload = { tool_name: 'Bash', tool_input: { command: COMMAND }, session_i
 describe('review hold registry coverage', () => {
   it('fans out over every migrated tool-call gate', () => {
     expect(DRIVABLE.map((g) => g.name)).toEqual(
-      GATES.filter((g) => g.migrated && !['python-raise', 'js-throw', 'plugin-throw', 'waterfall-reject'].includes(g.contract)).map((g) => g.name),
+      GATES.filter((g) => g.migrated && !['python-raise', 'js-throw', 'plugin-throw', 'plugin-block', 'waterfall-reject'].includes(g.contract)).map((g) => g.name),
     )
     expect(DRIVABLE.length).toBeGreaterThan(10)
   })

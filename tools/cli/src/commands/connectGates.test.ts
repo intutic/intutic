@@ -54,10 +54,10 @@ const GATE_REGISTRATION: Record<string, [file: string, marker: string]> = {
   'muse-code': [join(ws, '.muse', 'hooks.json'), 'muse-check.js'],
   n8n: [join(home, '.intutic', 'hooks', 'n8n-governance-hook.js'), 'Intutic'],
   'open-webui': [join(home, '.open-webui', 'intutic-governance-filter.py'), 'Intutic'],
-  openclaw: [join(home, '.openclaw', 'openclaw.json'), 'openclaw-check.js'],
+  openclaw: [join(home, '.openclaw', 'openclaw.json'), join('.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')],
   opencode: [join(ws, '.opencode', 'plugins', 'intutic-governance.js'), 'Intutic gate body'],
   openhands: [join(ws, '.openhands', 'hooks.json'), 'openhands-check.sh'],
-  pi: [join(home, '.pi', 'hooks.json'), 'pi-check.sh'],
+  pi: [join(home, '.pi', 'agent', 'extensions', 'intutic-governance.js'), 'Intutic gate body'],
   windsurf: [join(home, '.codeium', 'windsurf', 'hooks.json'), 'windsurf-check.js'],
 }
 

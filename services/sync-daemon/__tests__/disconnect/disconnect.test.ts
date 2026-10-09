@@ -247,8 +247,12 @@ describe('files with no record', () => {
 
   it('learns the proxy URL from a generated file when connect predates the recorded list', async () => {
     await put(join(ws, '.env.intutic'), '# Intutic Governance Rules (auto-generated)\nexport INTUTIC_PROXY_URL="http://localhost:4100"\n')
-    await put(join(home, '.pi', 'models.json'), { providers: { openai: { baseUrl: 'http://localhost:4100/v1' }, google: { baseUrl: 'https://g' } } })
+    // Where Pi reads it, and where earlier versions wrote it.
+    for (const file of [join(home, '.pi', 'agent', 'models.json'), join(home, '.pi', 'models.json')]) {
+      await put(file, { providers: { openai: { baseUrl: 'http://localhost:4100/v1' }, google: { baseUrl: 'https://g' } } })
+    }
     await disconnect()
+    expect(await readJson(join(home, '.pi', 'agent', 'models.json'))).toEqual({ providers: { google: { baseUrl: 'https://g' } } })
     expect(await readJson(join(home, '.pi', 'models.json'))).toEqual({ providers: { google: { baseUrl: 'https://g' } } })
   })
 
