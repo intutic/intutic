@@ -80,7 +80,7 @@ The **Policy Compliance and Action System** evaluates every request against your
 The circuit breaker is the runtime enforcement mechanism. It evaluates each request against:
 
 1. **SOP rules** — Does this request comply with active SOPs?
-2. **Budget limits** — Is the user/workspace within budget tier limits?
+2. **Budget limits** — Is the workspace within its daily spend cap?
 3. **Anomaly scores** — Has the ARE flagged this session?
 4. **Trust scores** — What's the trust level of this agent session?
 
@@ -141,14 +141,7 @@ Every execution trace records:
 - Enforcement action applied
 - Token utility classification (`USEFUL` or `WASTED`)
 
-Budget tiers control spending limits per developer level:
-
-| Tier | Role |
-|------|------|
-| `JUNIOR` | Junior developers — lowest budget ceiling |
-| `SENIOR` | Senior developers |
-| `STAFF` | Staff engineers |
-| `PRINCIPAL` | Principal engineers — highest budget ceiling |
+Spend is capped per workspace: the proxy enforces the daily cap on every request, and the monthly cap raises alerts. See [Budgets](/guide/budgets#per-workspace-budgets).
 
 ## Sync Daemon
 

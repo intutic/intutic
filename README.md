@@ -22,7 +22,7 @@
 
 ## 💡 Why Intutic?
 
-Observability tools and LLM gateways (like LangSmith or Portkey) work on model traffic: they trace each call, and their gateways and guardrails can cap spend, redact or reject a request inline. What they do not see is the agent's tool call — the shell command that deletes files, the write that leaks a secret, the loop that keeps calling an API.
+Observability tools and LLM gateways (like LangSmith or Portkey) work on model traffic: they trace each call, and their gateways and guardrails can cap spend, redact or reject a request inline. What they do not control is the agent's local tool execution — the shell command that deletes files, the write that leaks a secret, the loop that keeps calling an API. A gateway can stop an MCP call only when the call is routed through its own MCP gateway, as Portkey's now can.
 
 **Intutic is an active circuit breaker at the tool call.** In 36 of the 43 supported harnesses, each tool call passes through a policy gate before it runs — a rule decision, not a model call — that blocks dangerous commands and steers agentic loops in real time. The proxies cover the rest, and the model traffic as well.
 
