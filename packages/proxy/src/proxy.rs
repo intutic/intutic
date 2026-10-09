@@ -2923,6 +2923,48 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // Check for break-glass override token in request headers.
+    //
+    // `has_break_glass` is the trace flag: true for any valid token, scoped
+    // or not, so a request that ran under an override is always attributable.
+    // `break_glass_scope` is what the token may skip — `Global` skips the
+    // anomaly detectors, the WASM rules and the control-plane pre-check
+    // wholesale (every token before scoping existed); `WasmRule` / `Detector`
+    // skip one named thing and leave everything else in force.
+    let mut has_break_glass = false;
+    let mut break_glass_request_id: Option<String> = None;
+    let mut break_glass_scope: Option<crate::store::BreakGlassScope> = None;
+    if let Some(bg_token) = headers
+        .get("x-intutic-break-glass")
+        .and_then(|v| v.to_str().ok())
+    {
+        match state
+            .control_plane
+            .break_glass_grant(bg_token, &workspace_id)
+            .await
+        {
+            Some(grant) => {
+                let scope = grant.scope();
+                tracing::info!(workspace_id = %workspace_id, request_id = %grant.request_id, scope = ?scope, "Active break-glass override token detected");
+                has_break_glass = true;
+                break_glass_request_id = Some(grant.request_id);
+                break_glass_scope = Some(scope);
+            }
+            None => {
+                // Never the raw token in the log — a truncated hash prefix
+                // instead, so a leaked log line cannot be replayed as a live
+                // credential the way the raw value could.
+                let token_hash = &crate::store::valkey::sha256_hex(bg_token)[..8];
+                tracing::warn!(workspace_id = %workspace_id, token_hash = %token_hash, "Expired, invalid, unscoped, or unreachable break-glass token header provided");
+            }
+        }
+    }
+
+    let bypass_everything = matches!(
+        break_glass_scope,
+        Some(crate::store::BreakGlassScope::Global)
+    );
+
     // ── Step 4: DLP scan — input ─────────────────────────────────────
     //
     // The workspace's PII detector actions first: its `piiDetectors` setting,
@@ -2935,6 +2977,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     //
     // A failed read follows the policy check's fail mode: closed refuses the
     // request before any model spend; open scans with the machine's config.
+    // A global break-glass skips the refusal, as it skips the policy check,
+    // and the request is then scanned with the machine's config: break-glass
+    // never switches DLP itself off.
     let pii_policy: Option<Arc<dlp::PiiPolicy>> = {
         let dlp_cfg = &state.config.intutic_settings.dlp;
         let policy_cfg = &state.config.intutic_settings.policy;
@@ -2957,7 +3002,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 .await
                 {
                     Ok(policy) => policy,
-                    Err(reason) if policy_cfg.fail_closed => {
+                    Err(reason) if policy_cfg.fail_closed && !bypass_everything => {
                         tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Workspace PII detector actions unavailable — blocking (fail-closed)");
                         return json_error(
                             StatusCode::FORBIDDEN,
@@ -3084,48 +3129,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             );
         }
     }
-
-    // Check for break-glass override token in request headers.
-    //
-    // `has_break_glass` is the trace flag: true for any valid token, scoped
-    // or not, so a request that ran under an override is always attributable.
-    // `break_glass_scope` is what the token may skip — `Global` skips the
-    // anomaly detectors, the WASM rules and the control-plane pre-check
-    // wholesale (every token before scoping existed); `WasmRule` / `Detector`
-    // skip one named thing and leave everything else in force.
-    let mut has_break_glass = false;
-    let mut break_glass_request_id: Option<String> = None;
-    let mut break_glass_scope: Option<crate::store::BreakGlassScope> = None;
-    if let Some(bg_token) = headers
-        .get("x-intutic-break-glass")
-        .and_then(|v| v.to_str().ok())
-    {
-        match state
-            .control_plane
-            .break_glass_grant(bg_token, &workspace_id)
-            .await
-        {
-            Some(grant) => {
-                let scope = grant.scope();
-                tracing::info!(workspace_id = %workspace_id, request_id = %grant.request_id, scope = ?scope, "Active break-glass override token detected");
-                has_break_glass = true;
-                break_glass_request_id = Some(grant.request_id);
-                break_glass_scope = Some(scope);
-            }
-            None => {
-                // Never the raw token in the log — a truncated hash prefix
-                // instead, so a leaked log line cannot be replayed as a live
-                // credential the way the raw value could.
-                let token_hash = &crate::store::valkey::sha256_hex(bg_token)[..8];
-                tracing::warn!(workspace_id = %workspace_id, token_hash = %token_hash, "Expired, invalid, unscoped, or unreachable break-glass token header provided");
-            }
-        }
-    }
-
-    let bypass_everything = matches!(
-        break_glass_scope,
-        Some(crate::store::BreakGlassScope::Global)
-    );
 
     // ── Step 4b: WASM custom rules ───────────────────────────────────
     let session_id = headers

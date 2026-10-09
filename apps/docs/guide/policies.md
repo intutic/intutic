@@ -119,7 +119,8 @@ is on a proxy with no workspace. A change reaches every proxy within 30 seconds.
 If the proxy cannot read the setting, it follows its
 [fail mode](/concepts/circuit-breaker#proxy-side-fail-mode): with
 `fail_closed: true`, the default, it refuses the request; with
-`fail_closed: false` it scans with the machine's config alone. The setting is
+`fail_closed: false`, or under a global break-glass override, it scans with the
+machine's config alone. The setting is
 available on every plan. It applies to the LLM proxy; the MCP governance proxy
 keeps reading `INTUTIC_MCP_DLP_DETECTORS`.
 
