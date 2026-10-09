@@ -114,7 +114,7 @@ The sync daemon keeps harness config files in sync with SOPs from the control pl
 3. **Compare configVersion** — if remote > local, write each recorded harness's files (see [What writes harness files](/integrations/#what-writes-harness-files)) and update the Claude Code hooks
 4. **Proxy-wrap MCP servers** — on every cycle, so a server added to a harness config after `connect` started is wrapped on the next one
 5. **Apply SkillOpt edits** — config edits the control plane queued for the workspace are written into the rules files and each outcome is acknowledged; when step 3 rewrote the files, every edit is applied again
-6. **Refresh the decisions log** — only when the workspace turned it on
+6. **Refresh the decisions log** — only when the workspace turned it on, into each harness's instructions file (see [Governed Decisions Log](/guide/decisions-log)); a decisions section an earlier version put in `CLAUDE.md` is taken out on every sync
 7. **Compute SHA-256 hashes** — hash each harness's config file
 8. **Report hashes** — `POST /api/v1/sync/sop-hash` for drift detection
 9. **Update integrity store** — `.intutic/integrity.json` in the workspace

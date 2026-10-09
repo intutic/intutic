@@ -16,7 +16,7 @@
 import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { HarnessType } from '@intutic/shared-types'
+import { HarnessType, rulesFrontMatterOf } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { writeCursorHooks } from '@intutic/sync-daemon/harness/cursorHooks'
@@ -24,7 +24,6 @@ import { ownRulesFileHash, retireLegacyRulesFile, writeOwnRulesFile } from './ru
 
 const CONFIG_FILE = '.cursor/rules/intutic-governance.mdc'
 const LEGACY_FILE = '.cursorrules'
-const FRONT_MATTER = 'description: Intutic governance rules\nalwaysApply: true'
 
 export const cursorAdapter: IHarnessAdapter = {
   type: HarnessType.CURSOR,
@@ -47,7 +46,7 @@ export const cursorAdapter: IHarnessAdapter = {
 
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
     await retireLegacyRulesFile(workspaceRoot, LEGACY_FILE)
-    return writeOwnRulesFile(workspaceRoot, CONFIG_FILE, sops, proxyUrl, FRONT_MATTER)
+    return writeOwnRulesFile(workspaceRoot, CONFIG_FILE, sops, proxyUrl, rulesFrontMatterOf(HarnessType.CURSOR, 'Intutic governance rules'))
   },
 
   readCurrentHash(workspaceRoot: string): Promise<string | null> {

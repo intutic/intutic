@@ -566,7 +566,7 @@ No options.
 1. Uses the credentials from `intutic login`. If you are not logged in, it does nothing.
 2. Reads the workspace's `decisionsLogEnabled` setting (off by default). If it is off, nothing is written.
 3. Fetches the workspace's recent governance decisions from the control plane and writes them to `.intutic/DECISIONS.md` in the current directory.
-4. If `CLAUDE.md` exists in the current directory, replaces the section between `<!-- INTUTIC:DECISIONS_LOG:START -->` and `<!-- INTUTIC:DECISIONS_LOG:END -->` with the 10 newest entries, adding the section if it is not there. A missing `CLAUDE.md` is not created.
+4. Writes the 10 newest entries where each harness in `~/.intutic/config.json` reads its standing instructions: a file of its own such as `.claude/rules/intutic-decisions.md`, or the section between `<!-- INTUTIC:DECISIONS_LOG:START -->` and `<!-- INTUTIC:DECISIONS_LOG:END -->` in a file such as `AGENTS.md`. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go). `CLAUDE.md` is never written; a decisions section an earlier version put there is taken out.
 
 It always exits with status `0`. When nothing was refreshed it prints the reason (not authenticated, `decisionsLogEnabled` is off, or the fetch failed).
 

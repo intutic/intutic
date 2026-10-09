@@ -164,61 +164,63 @@ The daemon supports 42 of Intutic's 43 harness adapters and handles each one's c
 
 ## Where rule sets go
 
-`intutic connect` writes the rule sets aimed at a harness into the file that product reads as standing instructions, and nowhere else. Three shapes:
+`intutic connect` writes the rule sets aimed at a harness, and the [Governed Decisions Log](/guide/decisions-log) when the workspace turned it on, into the file that product reads as standing instructions, and nowhere else. Three shapes:
 
-- **A file of Intutic's own** in a directory whose every file the product reads, such as `.cursor/rules/`. You keep your own rules in other files there.
-- **A marked section** of a file you also write, such as `AGENTS.md`. The rule sets sit between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->`; the rest of the file is yours, and connect never touches it. You can move the section within the file.
-- **No instructions file.** The product reads no file of standing instructions, so the rule-set text cannot reach the model. A harness with a gate still enforces the rules compiled from your rule sets. The dashboard's Compliance Scope card for such a harness says so.
+- **A file of Intutic's own** in a directory whose every file the product reads, such as `.cursor/rules/`. The decisions log gets a second file there. You keep your own rules in other files there.
+- **A marked section** of a file you also write, such as `AGENTS.md`. The rule sets sit between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->`, and the decisions log in a section of its own between `<!-- INTUTIC:DECISIONS_LOG:START -->` and `<!-- INTUTIC:DECISIONS_LOG:END -->`; the rest of the file is yours, and connect never touches it. You can move the sections within the file.
+- **No instructions file.** The product reads no file of standing instructions, so neither the rule-set text nor the decisions log can reach the model. A harness with a gate still enforces the rules compiled from your rule sets. The dashboard's Compliance Scope card for such a harness says so.
+
+Connect never creates or writes `CLAUDE.md`. Claude Code gets everything from `.claude/rules/`, which it loads at launch with or without a `CLAUDE.md`. When Claude Code also reads the workspace's `AGENTS.md` (by default, when no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` is in its working directory or above; always, if you chose `claude-md-and-agents-md` for **Project instructions** in your own `/config`), what `AGENTS.md` carries for the other harnesses is left out of `.claude/rules/`, so Claude Code reads each rule set and the decisions log once. See [Claude Code](/integrations/claude-code#rules-and-the-decisions-log).
 
 `AGENTS.md` is shared: every harness below that reads it gets one section holding every rule set aimed at any of them that is configured in the workspace. A rule set aimed at Codex is therefore also read by OpenCode in the same workspace. Muse Code, OpenCode, Pi and Hermes read `AGENTS.md` in place of a `CLAUDE.md` once both exist, so connect creating `AGENTS.md` in a workspace that only had `CLAUDE.md` changes what those harnesses read.
 
 `intutic disconnect` takes the section out, or puts back the file the rules file replaced, byte for byte when you have not edited it since. Earlier versions overwrote `CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `.roorules` and `AGENTS.md` whole; the first sync with this version gives you your own copy of each back.
 
-| Harness | Id | Rule sets go to | Notes |
-|---------|----|-----------------|-------|
-| Claude Code | `claude-code` | `.claude/rules/intutic-governance.md` | Loaded at launch. Not `CLAUDE.md`: by default a project `CLAUDE.md` stops Claude Code reading `AGENTS.md`. |
-| Cursor | `cursor` | `.cursor/rules/intutic-governance.mdc` | `alwaysApply: true`. |
-| Windsurf | `windsurf` | `.windsurf/rules/intutic-governance.md` | `trigger: always_on`; 12,000 characters per rule file. |
-| Antigravity and Gemini CLI | `antigravity` | `GEMINI.md` (section) | Gemini CLI reads it only in a trusted folder. |
-| Aider | `aider` | `.intutic/aider-sops.md` | Listed under `read:` in `.aider.conf.yml` by absolute path, so Aider finds it from any subdirectory. |
-| OpenHands | `openhands` | `.openhands/microagents/intutic-governance.md` | A microagent with no triggers is always active. |
-| Codex | `codex` | `AGENTS.md` (section) | Codex reads at most 32 KiB of `AGENTS.md` files in total. |
-| Muse Code | `muse-code` | `AGENTS.md` (section) | Read once the workspace is trusted. |
-| Grok Build | `grok` | `AGENTS.md` (section) | Read once the folder is trusted. |
-| OpenCode | `opencode` | `AGENTS.md` (section) | |
-| Pi | `pi` | `AGENTS.md` (section) | |
-| Hermes | `hermes` | `AGENTS.md` (section) | A `.hermes.md` or `HERMES.md` between the working directory and the git root takes the place of `AGENTS.md`; keep your Hermes instructions in `AGENTS.md`. |
-| Roo Code | `roo-code` | `AGENTS.md` (section) | Read unless `roo-cline.useAgentRules` is off. Not `.roo/rules/`, whose first file hides your `.roorules` and `.clinerules`. |
-| dsh | `dsh` | `AGENTS.md` (section) | Read by the default profile's agent-instructions plugin. |
-| GitHub Copilot | `github-copilot` | `.github/copilot-instructions.md` (section) | |
-| Cline | `cline` | `.clinerules/intutic-governance.md` | |
-| Continue | `continue` | `.continue/rules/intutic-governance.md` | `alwaysApply: true`. The `cn` CLI reads the `.continue/rules/` of the directory it runs in. |
-| Goose | `goose` | `.goosehints` (section) | |
-| OpenClaw | `openclaw` | `~/.openclaw/workspace/AGENTS.md` (section) | OpenClaw reads instructions only from its agent workspace, never from a project: connect writes to the one `agents.defaults.workspace` names, or `OPENCLAW_WORKSPACE_DIR`. 20,000 characters per file. |
-| n8n | `n8n` | No instructions file | An AI Agent node's system message is part of the workflow. The workflow gate still applies. |
-| Claude Desktop | `claude-desktop` | No instructions file | Instructions live in the app's projects. |
-| Open WebUI | `open-webui` | No instructions file | System prompts live in Open WebUI's settings. |
-| Xirp | `xirp` | No instructions file | The harnesses it runs read their own files. |
-| Agentic Orchestrator | `agentic-orchestrator` | No instructions file | The harnesses it runs read their own files. |
-| AWS Bedrock AgentCore | `agentcore-runtime` | No instructions file | Your framework's SDK gate applies. |
-| TrueForge server | `trueforge-server` | No instructions file | Governed by the TrueForge bridge. |
-| LangGraph | `langgraph` | No instructions file | SDK framework: the instructions are your code; the SDK gate applies. |
-| LangChain | `langchain` | No instructions file | SDK framework. |
-| CrewAI | `crewai` | No instructions file | SDK framework. |
-| AutoGen | `autogen` | No instructions file | SDK framework. |
-| AG2 | `ag2` | No instructions file | SDK framework. |
-| Google ADK | `google-adk` | No instructions file | SDK framework. |
-| OpenAI Agents SDK | `openai-agents` | No instructions file | SDK framework. |
-| Pydantic AI | `pydantic-ai` | No instructions file | SDK framework. |
-| smolagents | `smolagents` | No instructions file | SDK framework. |
-| Strands Agents | `strands` | No instructions file | SDK framework. |
-| Microsoft Agent Framework | `agent-framework` | No instructions file | SDK framework. |
-| Mastra | `mastra` | No instructions file | SDK framework. |
-| Vercel AI SDK | `vercel-ai-sdk` | No instructions file | SDK framework. |
-| eve | `eve` | No instructions file | SDK framework. |
-| TrueForge | `trueforge` | No instructions file | SDK framework. |
-| AI SDK Harness | `ai-sdk-harness` | No instructions file | SDK framework. |
-| AI SDK Workflow | `ai-sdk-workflow` | No instructions file | SDK framework. |
+| Harness | Id | Rule sets go to | Decisions log goes to | Notes |
+|---------|----|-----------------|-----------------------|-------|
+| Claude Code | `claude-code` | `.claude/rules/intutic-governance.md` | `.claude/rules/intutic-decisions.md` | Loaded at launch, with or without a `CLAUDE.md`. Not `CLAUDE.md`: by default a project `CLAUDE.md` stops Claude Code reading `AGENTS.md`. What also reaches it through `AGENTS.md` is left out. |
+| Cursor | `cursor` | `.cursor/rules/intutic-governance.mdc` | `.cursor/rules/intutic-decisions.mdc` | `alwaysApply: true`. |
+| Windsurf | `windsurf` | `.windsurf/rules/intutic-governance.md` | `.windsurf/rules/intutic-decisions.md` | `trigger: always_on`; 12,000 characters per rule file. |
+| Antigravity and Gemini CLI | `antigravity` | `GEMINI.md` (section) | Its own section of the same file | Gemini CLI reads it only in a trusted folder. |
+| Aider | `aider` | `.intutic/aider-sops.md` | `.intutic/aider-decisions.md` | Listed under `read:` in `.aider.conf.yml` by absolute path, so Aider finds it from any subdirectory. |
+| OpenHands | `openhands` | `.openhands/microagents/intutic-governance.md` | `.openhands/microagents/intutic-decisions.md` | A microagent with no triggers is always active. |
+| Codex | `codex` | `AGENTS.md` (section) | Its own section of the same file | Codex reads at most 32 KiB of `AGENTS.md` files in total. |
+| Muse Code | `muse-code` | `AGENTS.md` (section) | Its own section of the same file | Read once the workspace is trusted. |
+| Grok Build | `grok` | `AGENTS.md` (section) | Its own section of the same file | Read once the folder is trusted. |
+| OpenCode | `opencode` | `AGENTS.md` (section) | Its own section of the same file | |
+| Pi | `pi` | `AGENTS.md` (section) | Its own section of the same file | |
+| Hermes | `hermes` | `AGENTS.md` (section) | Its own section of the same file | A `.hermes.md` or `HERMES.md` between the working directory and the git root takes the place of `AGENTS.md`; keep your Hermes instructions in `AGENTS.md`. |
+| Roo Code | `roo-code` | `AGENTS.md` (section) | Its own section of the same file | Read unless `roo-cline.useAgentRules` is off. Not `.roo/rules/`, whose first file hides your `.roorules` and `.clinerules`. |
+| dsh | `dsh` | `AGENTS.md` (section) | Its own section of the same file | Read by the default profile's agent-instructions plugin. |
+| GitHub Copilot | `github-copilot` | `.github/copilot-instructions.md` (section) | Its own section of the same file | |
+| Cline | `cline` | `.clinerules/intutic-governance.md` | `.clinerules/intutic-decisions.md` | |
+| Continue | `continue` | `.continue/rules/intutic-governance.md` | `.continue/rules/intutic-decisions.md` | `alwaysApply: true`. The `cn` CLI reads the `.continue/rules/` of the directory it runs in. |
+| Goose | `goose` | `.goosehints` (section) | Its own section of the same file | |
+| OpenClaw | `openclaw` | `~/.openclaw/workspace/AGENTS.md` (section) | Its own section of the same file | OpenClaw reads instructions only from its agent workspace, never from a project: connect writes to the one `agents.defaults.workspace` names, or `OPENCLAW_WORKSPACE_DIR`. 20,000 characters per file. |
+| n8n | `n8n` | No instructions file | Does not reach it | An AI Agent node's system message is part of the workflow. The workflow gate still applies. |
+| Claude Desktop | `claude-desktop` | No instructions file | Does not reach it | Instructions live in the app's projects. |
+| Open WebUI | `open-webui` | No instructions file | Does not reach it | System prompts live in Open WebUI's settings. |
+| Xirp | `xirp` | No instructions file | Does not reach it | The harnesses it runs read their own files. |
+| Agentic Orchestrator | `agentic-orchestrator` | No instructions file | Does not reach it | The harnesses it runs read their own files. |
+| AWS Bedrock AgentCore | `agentcore-runtime` | No instructions file | Does not reach it | Your framework's SDK gate applies. |
+| TrueForge server | `trueforge-server` | No instructions file | Does not reach it | Governed by the TrueForge bridge. |
+| LangGraph | `langgraph` | No instructions file | Does not reach it | SDK framework: the instructions are your code; the SDK gate applies. |
+| LangChain | `langchain` | No instructions file | Does not reach it | SDK framework. |
+| CrewAI | `crewai` | No instructions file | Does not reach it | SDK framework. |
+| AutoGen | `autogen` | No instructions file | Does not reach it | SDK framework. |
+| AG2 | `ag2` | No instructions file | Does not reach it | SDK framework. |
+| Google ADK | `google-adk` | No instructions file | Does not reach it | SDK framework. |
+| OpenAI Agents SDK | `openai-agents` | No instructions file | Does not reach it | SDK framework. |
+| Pydantic AI | `pydantic-ai` | No instructions file | Does not reach it | SDK framework. |
+| smolagents | `smolagents` | No instructions file | Does not reach it | SDK framework. |
+| Strands Agents | `strands` | No instructions file | Does not reach it | SDK framework. |
+| Microsoft Agent Framework | `agent-framework` | No instructions file | Does not reach it | SDK framework. |
+| Mastra | `mastra` | No instructions file | Does not reach it | SDK framework. |
+| Vercel AI SDK | `vercel-ai-sdk` | No instructions file | Does not reach it | SDK framework. |
+| eve | `eve` | No instructions file | Does not reach it | SDK framework. |
+| TrueForge | `trueforge` | No instructions file | Does not reach it | SDK framework. |
+| AI SDK Harness | `ai-sdk-harness` | No instructions file | Does not reach it | SDK framework. |
+| AI SDK Workflow | `ai-sdk-workflow` | No instructions file | Does not reach it | SDK framework. |
 
 ---
 

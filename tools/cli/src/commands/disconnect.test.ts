@@ -29,7 +29,7 @@ import * as fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import * as os from 'node:os'
 import { join, dirname, relative, extname } from 'node:path'
-import type { SyncSopEntry } from '@intutic/shared-types'
+import type { HarnessType, SyncSopEntry } from '@intutic/shared-types'
 import {
   injectMcpServer,
   keepOriginal,
@@ -38,11 +38,13 @@ import {
   planDisconnect,
   updatePreToolUseHooks,
   writeBundledSkills,
+  writeDecisionsTargets,
 } from '@intutic/sync-daemon'
 import { getAdapter } from '../harness/detector.js'
 import { runDisconnect } from './disconnect.js'
 
 const PROXY = 'http://localhost:4000'
+const LEGACY_DECISIONS = '<!-- INTUTIC:DECISIONS_LOG:START -->\n## Recent Governed Decisions\n\n- old entry\n<!-- INTUTIC:DECISIONS_LOG:END -->'
 const SOPS: SyncSopEntry[] = [
   { sopId: 'sop_1', title: 'No secrets', content: 'Never print a secret.', contentHash: '', harnessTargets: [] },
 ]
@@ -484,6 +486,51 @@ const CASES: Case[] = [
       },
     }
   }),
+  ...(['claude-code', 'codex', 'cursor', 'aider', 'goose', 'continue'] as const).map((harness): Case => {
+    // The decisions log next to the rules: its own file, or its own section.
+    const seeds: Record<typeof harness, () => Promise<void>> = {
+      'claude-code': () => put(join(ws, 'CLAUDE.md'), '# Project rules\n\nUse tabs.\n'),
+      codex: () => put(join(ws, 'AGENTS.md'), '# Team\n\nRun the tests.\n'),
+      cursor: () => put(join(ws, '.cursor', 'rules', 'style.mdc'), '---\nalwaysApply: true\n---\nTabs.\n'),
+      aider: () => put(join(ws, '.aider.conf.yml'), 'model: gpt-4o\nread:\n  - CONVENTIONS.md\n'),
+      goose: () => put(join(ws, '.goosehints'), 'Prefer small diffs.\n'),
+      continue: () => put(join(ws, 'README.md'), '# project\n'),
+    }
+    return {
+      harness,
+      name: `${harness}, with the decisions log`,
+      seed: seeds[harness],
+      connect: async () => {
+        await connectHarness(harness)
+        await writeDecisionsTargets(ws, [harness as HarnessType], '## Recent Governed Decisions\n\n- 2026-10-09 — Decision: rollout approved')
+      },
+      edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+      connected: async () => {
+        // No harness's decisions log goes to CLAUDE.md.
+        if (harness === 'claude-code') expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toBe('# Project rules\n\nUse tabs.\n')
+        else expect(existsSync(join(ws, 'CLAUDE.md'))).toBe(false)
+      },
+    }
+  }),
+  {
+    // Earlier versions appended the decisions log to the team's CLAUDE.md.
+    harness: 'claude-code',
+    name: 'claude-code, the decisions section an earlier version appended to CLAUDE.md',
+    seed: () => put(join(ws, 'CLAUDE.md'), '# Project rules\n\nUse tabs.\n'),
+    connect: () => editText(join(ws, 'CLAUDE.md'), 'Use tabs.\n', `Use tabs.\n\n${LEGACY_DECISIONS}\n`),
+    edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+  },
+  {
+    // ... and to the CLAUDE.md they had created whole for the rules.
+    harness: 'claude-code',
+    name: 'claude-code, a CLAUDE.md an earlier version created, with the decisions section',
+    seed: () => put(join(ws, 'README.md'), '# project\n'),
+    connect: async () => {
+      await writeOwnedFile(join(ws, 'CLAUDE.md'), ws, '# Intutic Governance Rules (auto-generated)\n# DO NOT EDIT — managed by intutic sync daemon\n\n## Old rule\n')
+      await fs.appendFile(join(ws, 'CLAUDE.md'), `\n${LEGACY_DECISIONS}\n`)
+    },
+    edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+  },
   {
     harness: 'openclaw',
     name: 'openclaw, with an AGENTS.md of the user\'s own in a configured agent workspace',

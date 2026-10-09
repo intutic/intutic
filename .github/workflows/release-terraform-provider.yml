@@ -1,0 +1,119 @@
+# ─────────────────────────────────────────────────────────────
+# release-terraform-provider.yml — signed Terraform provider release
+# ─────────────────────────────────────────────────────────────
+#
+# Triggered by a tag `terraform-provider-vX.Y.Z` (never `v*`, which is the
+# product release in publish.yml).
+#
+# The Terraform Registry only publishes from a repository named
+# terraform-provider-<name>, from its own vX.Y.Z GitHub releases and the docs/
+# at that tag. So this workflow:
+#   1. splits packages/terraform-provider-intutic out of this repository and
+#      pushes it to intutic/terraform-provider-intutic's main, tagged vX.Y.Z;
+#   2. builds that tag with GoReleaser: one zip per platform, SHA256SUMS, its
+#      detached GPG signature and the registry manifest, released there.
+# The Registry picks the release up through the webhook it installs when the
+# provider is first published. See packages/terraform-provider-intutic/README.md.
+#
+# Secrets:
+#   TERRAFORM_PROVIDER_REPO_TOKEN  fine-grained token, contents: write on
+#                                  intutic/terraform-provider-intutic only
+#   TERRAFORM_PROVIDER_GPG_KEY     ASCII-armoured private key (RSA; the Registry
+#                                  does not accept ECC), whose public half is
+#                                  registered with the Registry
+#   TERRAFORM_PROVIDER_GPG_PASSPHRASE
+# ─────────────────────────────────────────────────────────────
+
+name: Release Terraform Provider
+
+on:
+  push:
+    tags:
+      - "terraform-provider-v*"
+
+concurrency:
+  group: release-terraform-provider
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PROVIDER_DIR: packages/terraform-provider-intutic
+  PROVIDER_REPO: intutic/terraform-provider-intutic
+
+jobs:
+  release:
+    name: Build, sign and release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the version from the tag
+        id: version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#terraform-provider-v}"
+          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag $GITHUB_REF_NAME is not terraform-provider-vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ env.PROVIDER_DIR }}/go.mod
+          cache-dependency-path: ${{ env.PROVIDER_DIR }}/go.sum
+
+      # The tag must not ship a provider that fails its own checks, or docs that
+      # no longer match its schema.
+      - name: Test and check generated docs
+        working-directory: ${{ env.PROVIDER_DIR }}
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test ./...
+          go generate ./...
+          git diff --exit-code -- . ../../apps/docs/reference/terraform
+
+      - name: Push the provider tree to its repository
+        env:
+          TOKEN: ${{ secrets.TERRAFORM_PROVIDER_REPO_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git subtree split --prefix="$PROVIDER_DIR" -b provider-split
+          remote="https://x-access-token:${TOKEN}@github.com/${PROVIDER_REPO}.git"
+          # A plain push: if someone committed to the provider repository
+          # directly, this refuses rather than overwriting their work.
+          git push "$remote" provider-split:refs/heads/main
+          git tag "v${VERSION}" provider-split
+          git push "$remote" "refs/tags/v${VERSION}"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PROVIDER_REPO }}
+          ref: v${{ steps.version.outputs.version }}
+          token: ${{ secrets.TERRAFORM_PROVIDER_REPO_TOKEN }}
+          path: provider
+          fetch-depth: 0
+
+      - name: Import the signing key
+        id: gpg
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.TERRAFORM_PROVIDER_GPG_KEY }}
+          passphrase: ${{ secrets.TERRAFORM_PROVIDER_GPG_PASSPHRASE }}
+
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.18.2
+          workdir: provider
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.TERRAFORM_PROVIDER_REPO_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.gpg.outputs.fingerprint }}

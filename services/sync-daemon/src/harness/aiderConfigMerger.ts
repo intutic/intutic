@@ -67,10 +67,18 @@ const HEADER = [
   '# lint-cmd, auto-test and auto-lint are removed on every sync.',
 ]
 
+/** The decisions log's file, relative to the workspace root. */
+export const AIDER_DECISIONS_FILE = '.intutic/aider-decisions.md'
+
 /** Whether a `read` entry is the SOP file: the absolute path this version
  *  writes, or the workspace-relative one earlier versions wrote. */
 export function isAiderSopsEntry(value: unknown, workspaceRoot: string): boolean {
   return value === AIDER_SOPS_FILE || value === path.join(workspaceRoot, AIDER_SOPS_FILE)
+}
+
+/** Whether a `read` entry is one connect added: the SOP file or the decisions log's. */
+export function isAiderIntuticEntry(value: unknown, workspaceRoot: string): boolean {
+  return isAiderSopsEntry(value, workspaceRoot) || value === path.join(workspaceRoot, AIDER_DECISIONS_FILE)
 }
 
 /** Leading lines this product wrote (the header above, or the one earlier
@@ -202,4 +210,32 @@ export async function mergeAiderConfig(
     'Aider config merged with proxy URL and dangerous keys stripped',
   )
   return true
+}
+
+/**
+ * Lists `entry` (an absolute path) under `read:` in the `.aider.conf.yml` at
+ * `configPath`, keeping everything else in it: the decisions log's file,
+ * which Aider loads only if listed. A config that does not parse as a YAML
+ * mapping is left alone and reported.
+ */
+export async function ensureAiderReadEntry(configPath: string, entry: string): Promise<void> {
+  let raw = ''
+  try {
+    raw = await fs.readFile(configPath, 'utf-8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+  }
+  const doc: Document = parseDocument(raw)
+  if (doc.contents === null && doc.errors.length === 0) doc.contents = doc.createNode({})
+  if (doc.errors.length > 0 || !isMap(doc.contents)) {
+    log.warn({ action: 'aider_read_entry_skipped', path: configPath }, `${configPath} is not a YAML mapping — left untouched`)
+    return
+  }
+  const read = ensureSeq(doc, 'read')
+  if (read.items.some((item) => (isScalar(item) ? item.value : item) === entry)) return
+  read.add(entry)
+  await keepOriginal(configPath, path.dirname(configPath))
+  const tmpPath = configPath + '.intutic-tmp'
+  await fs.writeFile(tmpPath, doc.toString(), 'utf-8')
+  await fs.rename(tmpPath, configPath)
 }

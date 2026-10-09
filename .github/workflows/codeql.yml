@@ -25,8 +25,9 @@ jobs:
   # A PR is analysed only in the languages it can change. The Rust analysis
   # takes ~20 minutes and most PRs touch no Rust, so it runs when a Rust input
   # changed (any .rs file, the proxy crate, Cargo files, the toolchain, this
-  # workflow). The JavaScript/TypeScript analysis runs unless the PR changes
-  # nothing but .md/.txt files. A PR that changes only docs runs neither.
+  # workflow). The Go analysis (the Terraform provider) runs when a .go file or
+  # a go.mod/go.sum changed. The JavaScript/TypeScript analysis runs unless the
+  # PR changes nothing but .md/.txt files. A PR that changes only docs runs none.
   # The weekly schedule and manual runs analyse both; when the diff cannot be
   # computed, both run (fail open to analysing).
   languages:
@@ -46,12 +47,14 @@ jobs:
         run: |
           js='{"language":"javascript-typescript","build-mode":"none"}'
           rust='{"language":"rust","build-mode":"none"}'
+          go='{"language":"go","build-mode":"manual"}'
           langs=()
           if [ "$EVENT" != "pull_request" ] || ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
-            langs=("$js" "$rust")
+            langs=("$js" "$rust" "$go")
           else
             if printf '%s\n' "$changed" | grep -qvE '\.(md|txt)$'; then langs+=("$js"); fi
             if printf '%s\n' "$changed" | grep -vE '\.(md|txt)$' | grep -qE '\.rs$|^packages/proxy/|(^|/)Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain|^\.github/workflows/codeql\.yml$'; then langs+=("$rust"); fi
+            if printf '%s\n' "$changed" | grep -qE '\.go$|(^|/)go\.(mod|sum)$|^\.github/workflows/codeql\.yml$'; then langs+=("$go"); fi
           fi
           matrix="{\"include\":[$(IFS=,; echo "${langs[*]}")]}"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
@@ -89,11 +92,25 @@ jobs:
         run: |
           cargo check --workspace --all-targets --all-features
 
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: packages/terraform-provider-intutic/go.mod
+          cache-dependency-path: packages/terraform-provider-intutic/go.sum
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+
+      # Manual build mode: the module is not at the repository root, where
+      # autobuild looks for it.
+      - name: Build the Go module for CodeQL extraction
+        if: matrix.language == 'go'
+        working-directory: packages/terraform-provider-intutic
+        run: go build ./...
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2

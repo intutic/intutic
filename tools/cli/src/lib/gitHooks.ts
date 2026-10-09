@@ -42,8 +42,8 @@ fi
 
 /**
  * Optional post-merge hook: refreshes the governed decisions log
- * (`.intutic/DECISIONS.md` + the bounded section in the `claude-code`
- * harness config) right after a merge, rather than leaving a developer
+ * (`.intutic/DECISIONS.md` and the recent entries in each governed
+ * harness's instructions file) right after a merge, rather than leaving a developer
  * waiting for the daemon's next ~30s poll. `decisions-log-refresh` itself
  * no-ops (and never errors the shell) when `decisionsLogEnabled` is off or
  * the developer isn't authenticated — see `decisionsLogRefresh.ts`.
