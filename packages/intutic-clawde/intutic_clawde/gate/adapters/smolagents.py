@@ -202,12 +202,16 @@ def intutic_step_callback(step: Any, agent: Any = None) -> None:
 
     Recognises a block by the `[Intutic Governance] BLOCKED:` prefix
     `IntuticPythonExecutor` raises (wrapped by smolagents into
-    `step.error`, an `AgentError`) — not by re-evaluating the gate.
+    `step.error`, an `AgentError`), and a hold by `[Intutic Governance]
+    HELD:` — not by re-evaluating the gate.
     """
     if ActionStep is None or not isinstance(step, ActionStep):
         return
     if step.error is not None and "[Intutic Governance] BLOCKED:" in str(step.error):
         _log.warning("tool_blocked step=%s tool=%s: %s",
+                     getattr(step, "step_number", "?"), CODE_EXEC_TOOL_NAME, step.error)
+    elif step.error is not None and "[Intutic Governance] HELD:" in str(step.error):
+        _log.warning("tool_held step=%s tool=%s: %s",
                      getattr(step, "step_number", "?"), CODE_EXEC_TOOL_NAME, step.error)
     elif getattr(step, "code_action", None) is not None:
         _log.debug("tool_allowed step=%s tool=%s",

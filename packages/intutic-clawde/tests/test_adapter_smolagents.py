@@ -164,3 +164,22 @@ class TestCodeAgentEndToEnd:
         messages = [r.message for r in caplog.records]
         assert any("tool_blocked" in m for m in messages)
         assert any("tool_allowed" in m for m in messages)
+
+    def test_intutic_step_callback_logs_a_held_step_as_held(self, tmp_path, monkeypatch, caplog):
+        import logging
+        g = make_gate(tmp_path, monkeypatch, rules=[{**_CODE_BLOCK_RULE, "action": "require_approval"}])
+        executor = IntuticPythonExecutor(
+            LocalPythonExecutor(additional_authorized_imports=["os"]), gate=g
+        )
+        model = _FixedCodeModel([
+            'import os\nos.system("kubectl apply -f k8s/x.yaml")',
+            'final_answer("done")',
+        ])
+        agent = CodeAgent(tools=[], model=model, executor=executor,
+                          step_callbacks=[intutic_step_callback], max_steps=3)
+        with caplog.at_level(logging.DEBUG, logger="intutic_clawde.gate.adapters.smolagents"):
+            agent.run("do the thing")
+
+        messages = [r.message for r in caplog.records]
+        assert any("tool_held" in m and "[Intutic Governance] HELD:" in m for m in messages)
+        assert not any("tool_blocked" in m for m in messages)
