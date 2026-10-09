@@ -80,6 +80,11 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.intutic/hooks',
   '.intutic/integrity.json',
   '.intutic/events',
+  // `runtime.env` holds the API key and the workspace id every gate reads.
+  // A gate whose workspace id differs from the policy snapshot's treats the
+  // snapshot as invalid and drops every SOP rule in it, so rewriting that one
+  // line turns the workspace's own rules off under every harness.
+  '.intutic/env',
 
   // Claude Code / Claude Desktop. `settings.local.json` loads at higher
   // precedence than `settings.json`, so protecting only the latter leaves the
@@ -91,7 +96,15 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   // are not the one generating the script: the threat is an agent under
   // harness A disabling harness B.
   '.cursor/hooks.json',
-  '.cline/hooks',
+  // Cursor's machine-wide registration (`systemHooksDirFor`), written by
+  // `intutic enterprise install`.
+  '/etc/cursor/hooks.json',
+  'Application Support/Cursor/hooks.json',
+  // Cline runs the executable `PreToolUse` in this directory; the gate is
+  // that file. Cline runs the hooks it finds in its other hook directories as
+  // well and refuses a call when any of them does, so a hook added there
+  // cannot undo this one.
+  '.clinerules/hooks',
   '.codeium/windsurf/hooks.json',
   // The Windsurf JetBrains plugin's SEPARATE user-level hooks.json path (no
   // `windsurf` subdirectory — confirmed against docs.devin.ai/desktop/
@@ -160,6 +173,24 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   // to false, unloads the gate. The plugin file is under `.intutic/hooks`.
   '.pi/agent/extensions',
   '.openclaw/openclaw.json',
+  // Pi also loads a trusted project's `.pi/extensions` into the same process,
+  // where a second extension can reach the gate's: the OpenCode reasoning.
+  '.pi/extensions',
+
+  // Codex — the gate's registration at both levels, and the config whose
+  // `[features] hooks = false` turns every hook off.
+  '.codex/hooks.json',
+  '.codex/config.toml',
+  // GitHub Copilot — the hook file at workspace and user level. Copilot runs
+  // every hook file it finds and a deny wins, so only ours needs holding.
+  '.github/hooks/intutic-governance.json',
+  '.copilot/hooks/intutic-governance.json',
+  // Hermes — `hooks.pre_tool_call` in its config registers the gate.
+  '.hermes/config.yaml',
+  // Goose — `hooks.pre_tool_use` in its config names the gate script too.
+  '.config/goose/config.yaml',
+  // Open WebUI — the filter an administrator pastes into Open WebUI.
+  '.open-webui/intutic-governance-filter.py',
 ]
 
 // ───────────────────────────────────────────────────────────────────────────

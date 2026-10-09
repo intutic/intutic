@@ -48,6 +48,7 @@ import { SyncWsClient,
   injectMcpServer,
   noteProxyUrl,
   guardSettingsFile,
+  isGuardedPath,
   warnIfDshCoverageGap,
   writeRuntimeEnv,
   refreshPolicySnapshot,
@@ -164,20 +165,6 @@ export async function writeHarnessConfigs(
     if (file !== null) writtenFiles.add(file)
   }
   return written
-}
-
-/**
- * Is this a path the tamper guard should inspect?
- *
- * Deliberately broad: `guardSettingsFile` already branches per harness, so the only
- * job here is to stop filtering out paths it knows how to handle.
- */
-function isGovernedConfigPath(changedPath: string, filename: string): boolean {
-  if (filename === 'settings.json' || filename === 'settings.local.json') return true
-  if (filename === 'hooks.json') return true
-  // Goose's immutable governance plugin.
-  if (changedPath.includes('intutic-governance')) return true
-  return false
 }
 
 /**
@@ -1308,17 +1295,12 @@ export async function runConnect(opts: {
 
     // B. Tamper detection for every governed config, not just Claude Code's.
     //
-    // This used to filter on `filename === 'settings.json'`, which silently disabled
-    // five of the six branches inside guardSettingsFile: the Cursor, Windsurf, Cline
-    // and OpenHands restores all key off `hooks.json`, and the Goose
-    // governance-plugin override incident keys off a path containing
-    // `intutic-governance`. None of those basenames could ever reach the guard, so a
-    // tampered hooks file on any harness but Claude Code was a no-op — and a tampered
-    // Windsurf/VS Code/Gemini settings file passed the basename test only to fall
-    // through and log `settings_intact`.
-    //
-    // Route anything on the governed list to the guard and let it decide.
-    if (isGovernedConfigPath(changedPath, filename)) {
+    // Routed on the guard's own watch list. A filter on file names here, first
+    // `settings.json` and later `settings.json`/`hooks.json`/`intutic-governance`,
+    // kept the guard from ever seeing the paths it restores under other names:
+    // a gate script, Cline's PreToolUse, OpenClaw's openclaw.json, Muse's
+    // managed-hooks file and every dsh profile patch.
+    if (isGuardedPath(changedPath, safeConfig.workspaceRoot)) {
       try {
         const sops = lastCachedConfig?.sops ?? []
         // The proxy URL too: the restored gate scripts carry it, and an empty

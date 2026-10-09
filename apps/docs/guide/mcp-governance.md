@@ -858,6 +858,8 @@ Settings are read from the environment first, then from
 | `INTUTIC_WASM_LOCAL_DIR` | `~/.intutic/wasm` | Where the proxy loads custom WASM rules from. Read from runtime.env; `INTUTIC_WASM_DIR` in the environment takes precedence. |
 | `INTUTIC_DISABLE_REGO_RULES` | unset | `1` refuses [Rego rules](/guide/rego-policies) at load; native WASM rules still run. |
 
+An agent cannot change these settings in runtime.env: every Intutic hook gate refuses a tool call that names `.intutic/env`, reading it included. The hook gates read the workspace id from the same file and drop the policy snapshot's rules when it does not match the snapshot's.
+
 The MCP daemon (`intutic-mcp-daemon`) is not an MCP server. It listens on a
 Unix socket, caches policy and batches events for proxies in `daemon` mode:
 
