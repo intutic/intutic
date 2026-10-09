@@ -181,6 +181,22 @@ def test_chat_reports_allow_and_sends_only_headers_the_proxy_reads(mock_post):
     }
 
 
+@patch("requests.post")
+def test_a_rate_limit_carries_retry_after_for_the_caller_to_wait_on(mock_post):
+    mock_post.return_value = _reply(
+        429, _proxy_error("RATE_LIMITED", "This API key is limited to 60 requests per minute"), {"retry-after": "17"}
+    )
+    client = ClawdeClient(api_key="test-key")
+    events = []
+    client.on("kill", events.append)
+    with pytest.raises(ClawdeBlockedError) as raised:
+        client.chat("gpt-4o", [{"role": "user", "content": "hello"}])
+    assert raised.value.code == "RATE_LIMITED"
+    assert raised.value.retry_after_seconds == 17
+    assert events[0]["retry_after_seconds"] == 17
+    assert mock_post.call_count == 1
+
+
 @pytest.mark.parametrize("status,code,verdict", [
     (403, "policy_denied", "kill"),
     (403, "model_not_allowed", "kill"),
@@ -190,6 +206,7 @@ def test_chat_reports_allow_and_sends_only_headers_the_proxy_reads(mock_post):
     (403, "GOVERNANCE_UNAVAILABLE", "kill"),
     (429, "BUDGET_EXCEEDED", "kill"),
     (429, "OVERAGE_HARD_CAP_EXCEEDED", "kill"),
+    (429, "RATE_LIMITED", "kill"),
     (402, "COST_GATE_EXCEEDED", "kill"),
     (400, "dlp_policy_violation", "kill"),
 ])

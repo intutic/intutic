@@ -319,6 +319,7 @@ export {
   InviteMemberInputSchema,
   UpdateRoleInputSchema,
   CreateApiKeyInputSchema,
+  UpdateApiKeyInputSchema,
   SignupInputSchema,
   OrgSignupInputSchema,
   VerifyEmailInputSchema,
@@ -338,6 +339,7 @@ export type {
   WorkspaceMemberInfo,
   InviteMemberInput,
   CreateApiKeyInput,
+  UpdateApiKeyInput,
   CreateApiKeyResult,
   ApiKeyInfo,
   DashboardSummary,
@@ -507,6 +509,28 @@ export type {
   McpBudgetCall,
   McpBudgetCharge,
 } from './mcpBudgets.js'
+// LLM spend budgets (workspace, virtual key, member) and key rate limits
+export {
+  SpendBudgetSchema,
+  SpendBudgetListSchema,
+  KeyRateLimitSchema,
+  spendBudgetWindow,
+  describeSpendBudget,
+  SPEND_BUDGET_PERIODS,
+  SPEND_BUDGET_SCOPES,
+  MAX_SPEND_BUDGET_USD,
+  MAX_KEY_RPM,
+  MAX_KEY_TPM,
+  MEMBER_BUDGET_DEFAULT,
+} from './spendBudgets.js'
+export type {
+  SpendBudget,
+  SpendBudgetPeriod,
+  SpendBudgetEnforcement,
+  SpendBudgetScope,
+  KeyRateLimit,
+  HardBudgetWire,
+} from './spendBudgets.js'
 export {
   scoreToolSetChange,
   normalizeToolDefinition,

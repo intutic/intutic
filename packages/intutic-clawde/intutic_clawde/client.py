@@ -168,7 +168,7 @@ class ClawdeClient:
 
             refusal = parse_refusal(res.status_code, res.text)
             if refusal is not None:
-                self._refuse(refusal, res.status_code)
+                self._refuse(refusal, res.status_code, res.headers.get("retry-after"))
 
             last_error = f"HTTP error {res.status_code}: {res.text}"
             # A 4xx that is not a refusal (bad key, malformed body) fails the
@@ -226,11 +226,15 @@ class ClawdeClient:
             raise ValueError(f"{method} {path} answered {res.status_code}")
         return res.json()
 
-    def _refuse(self, refusal: ProxyRefusal, status: int) -> NoReturn:
+    def _refuse(self, refusal: ProxyRefusal, status: int, retry_after: Optional[str] = None) -> NoReturn:
         """Fires the refusal's event, then raises it."""
-        self.emit(refusal["verdict"], {**refusal, "status": status})
+        seconds = int(retry_after.strip()) if retry_after and retry_after.strip().isdigit() else None
+        event: Dict[str, Any] = {**refusal, "status": status}
+        if seconds is not None:
+            event["retry_after_seconds"] = seconds
+        self.emit(refusal["verdict"], event)
         raise ClawdeBlockedError(
-            refusal["verdict"], refusal["code"], status, refusal["message"], refusal.get("rule_id")
+            refusal["verdict"], refusal["code"], status, refusal["message"], refusal.get("rule_id"), seconds
         )
 
 

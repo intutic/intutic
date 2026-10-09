@@ -20,7 +20,8 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | Hosted MCP Gateway (generally available January 2026) for remote HTTP servers: sign-in through your identity provider or OAuth, OAuth 2.1 and credential injection to upstream servers, per-tool enable and disable, per-tool rate limits, full call logs, and MCP guardrails (deterministic checks and webhooks) since 2026-09-01. Local stdio servers must first be exposed over HTTP |
 | **Routing** | Thompson-sampling model routing per workspace that learns from cost, latency and upstream failures. Its quality signal catches broken, cut-off or empty answers only, not worse ones | Fallbacks, load balancing and conditional routing |
 | **Caching** | Exact and semantic cache, both off until a workspace turns them on; the semantic cache also needs an embedding service and TurboVec | Simple cache on every plan; semantic cache on select Enterprise plans per its docs, though its pricing page lists it under Production |
-| **Budgets** | Daily spend caps enforced before a request leaves; a loop run that exceeds its budget is stopped | Budget and rate limits on paid plans |
+| **Budgets** | USD spend budgets per workspace, per virtual key and (Biz Org and up) per member, per UTC day and month, each either refusing requests before they leave or alerting only; alerts at a threshold and at the limit. A loop run that exceeds its budget is stopped | Per-API-key budgets in USD or tokens, with no reset or a weekly or monthly reset, and an alert threshold by email; on Enterprise and select Pro customers |
+| **Rate limits** | Requests and tokens per minute per virtual key, shared across proxy replicas, with `Retry-After` | Requests or tokens per minute, hour or day per API key, on the same plans |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, verifiable in the browser or CLI | Request and response logs, kept 3 days on Developer and 30 days on Production; admin audit logs on Enterprise. No cryptographic sealing documented |
 | **Stored provider keys** | Envelope encryption (AES-256-GCM, a data key per value) under a key derived from your deployment's `ENCRYPTION_KEY`, rotatable; every change to a provider key or virtual key is recorded and streamed to SIEM. A cloud KMS key is not supported yet | Envelope encryption under your own AWS KMS key on Enterprise |
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | Hosted, or hybrid with the data plane in your VPC and the control plane hosted by Portkey (or in Palo Alto Networks Strata Cloud Manager). Fully air-gapped deployment is no longer offered to new customers. The open-source gateway still self-hosts |
@@ -48,7 +49,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 ## When to choose Portkey
 
 - You need one gateway for model traffic across many applications and providers.
-- Routing, fallbacks, caching and per-key budgets are the main requirements.
+- Routing, fallbacks and caching are the main requirements, or you want budgets counted in tokens or reset weekly.
 - You are standardising on Palo Alto Networks' Prisma AIRS.
 
 ## Use them together

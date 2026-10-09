@@ -47,9 +47,23 @@ pub struct VirtualKeyRecord {
     /// only under `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=paid`, where `None`
     /// (an entry written before the field existed) counts as required.
     pub byok_required: Option<bool>,
+    /// The key's `api_keys.key_id`, which names its spend and rate counters.
+    /// `None` on an entry written before the control plane carried it.
+    pub key_id: Option<String>,
+    /// Every hard spend budget covering this key's calls (`hardBudgets`).
+    /// `None` on an entry written before the control plane carried budgets —
+    /// the caller then enforces the workspace daily cap through `max_budget`
+    /// and `spend`, as it did before. See `crate::key_limits`.
+    pub hard_budgets: Option<Vec<crate::key_limits::HardBudget>>,
+    /// Requests and tokens per minute (`rateLimit`); `None` when unlimited.
+    pub rate_limit: Option<crate::key_limits::RateLimit>,
 }
 
-/// Check if the estimated cost fits within the remaining budget (with 20% safety margin)
+/// Check if the estimated cost fits within the remaining budget (with 20% safety margin).
+///
+/// The workspace daily cap for a key record without `hard_budgets` — one
+/// cached by a control plane older than that field. Every newer record is
+/// checked by `crate::key_limits::first_uncovered` instead.
 pub fn check_budget(key: &VirtualKeyRecord, estimated_cost: f64) -> Result<(), MeteringError> {
     if let Some(max_budget) = key.max_budget {
         let remaining = max_budget - key.spend;

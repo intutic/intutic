@@ -524,10 +524,9 @@ async fn parse_key_context(
         return Err(());
     };
 
-    // Budget fields are intentionally left unset: this path establishes identity
-    // only. The hard-cap gate immediately below in `handle_proxy` reads spend and
-    // limits from the cache itself, so budgets stay enforced by their own gate
-    // rather than by a value guessed here.
+    // `max_budget`/`spend` stay unset: they are the legacy workspace-cap pair,
+    // which `handle_proxy` fills from the cache for a control plane that does
+    // not send `hardBudgets`. The hard budgets themselves come from this answer.
     Ok(Some(VirtualKeyRecord {
         token: token.to_string(),
         key_name: None,
@@ -550,6 +549,14 @@ async fn parse_key_context(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         byok_required: body.get("byokRequired").and_then(|v| v.as_bool()),
+        // The same budget and limit fields as the cached entry, so a request
+        // that took this fallback is held to the same budgets and limits.
+        key_id: body
+            .get("keyId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        hard_budgets: crate::key_limits::parse_hard_budgets(body.get("hardBudgets")),
+        rate_limit: crate::key_limits::parse_rate_limit(body.get("rateLimit")),
     }))
 }
 
@@ -713,6 +720,82 @@ fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
         }
     });
     (status, axum::Json(body)).into_response()
+}
+
+/// The hard spend budgets gate: refuses with 429 `BUDGET_EXCEEDED` when one of
+/// `budgets` does not cover the request's estimate, and with 503
+/// `BUDGET_UNVERIFIABLE` when their spend cannot be read — a hard budget is a
+/// financial control, so unverifiable spend is not admitted (the same posture
+/// as `HardCapStatus::Unverifiable`).
+async fn check_hard_budgets(
+    control_plane: &dyn crate::store::ControlPlaneCache,
+    budgets: &[crate::key_limits::HardBudget],
+    workspace_id: &str,
+    key: &VirtualKeyRecord,
+    estimated_cost: f64,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<Response> {
+    use crate::key_limits::{first_uncovered, spend_counter_key, BudgetScope};
+    if budgets.is_empty() {
+        return None;
+    }
+    // A key or member budget needs the id that names its counter; an entry
+    // carrying budgets always carries both, so a missing one is a malformed
+    // entry and the budget cannot be checked.
+    let key_id = key.key_id.as_deref().unwrap_or("");
+    let member_id = key.user_id.as_deref().unwrap_or("");
+    let unnamed = budgets.iter().any(|b| {
+        (b.scope == BudgetScope::Key && key_id.is_empty())
+            || (b.scope == BudgetScope::Member && member_id.is_empty())
+    });
+    let counters: Vec<String> = budgets
+        .iter()
+        .map(|b| spend_counter_key(b, workspace_id, key_id, member_id, now))
+        .collect();
+    let spent = if unnamed {
+        None
+    } else {
+        control_plane.spend_counters(&counters).await
+    };
+    let Some(spent) = spent.filter(|v| v.len() == budgets.len()) else {
+        tracing::error!(workspace_id = %workspace_id, "Spend budgets could not be checked — rejecting request");
+        return Some(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "BUDGET_UNVERIFIABLE",
+            "Spend could not be verified against this key's budgets, so this request was not admitted. Retry shortly.",
+        ));
+    };
+    let refusal = first_uncovered(budgets, &spent, estimated_cost, now)?;
+    tracing::warn!(
+        workspace_id = %workspace_id,
+        scope = ?refusal.budget.scope,
+        period = ?refusal.budget.period,
+        limit_usd = refusal.budget.limit_usd,
+        spent_usd = refusal.spent_usd,
+        "Spend budget does not cover the request — rejecting"
+    );
+    crate::metrics::record_policy_refusal("spend_budget", "kill");
+    let body = serde_json::json!({
+        "error": {
+            "type": "BUDGET_EXCEEDED",
+            "message": refusal.message(),
+            "budget": refusal.detail(),
+        }
+    });
+    let mut response = (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response();
+    if let Ok(v) = axum::http::HeaderValue::from_str(&refusal.retry_after_secs(now).to_string()) {
+        response.headers_mut().insert("retry-after", v);
+    }
+    Some(response)
+}
+
+/// 429 `RATE_LIMITED`, with `Retry-After` at the start of the next minute.
+fn rate_limited_response(message: &str, retry_after_secs: u64) -> Response {
+    let mut response = json_error(StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED", message);
+    if let Ok(v) = axum::http::HeaderValue::from_str(&retry_after_secs.to_string()) {
+        response.headers_mut().insert("retry-after", v);
+    }
+    response
 }
 
 /// The cost-prediction gate's answer to a non-streaming request: the reason as
@@ -1736,9 +1819,25 @@ async fn accrue_spend(
     graph_id: &str,
     has_graph: bool,
     workflow_run_id: Option<&str>,
+    tpm_key_id: Option<&str>,
     trace: &crate::telemetry::ExecutionTrace,
 ) {
     crate::local_spend::add_local_spend(actual_cost_usd);
+
+    // The tokens this call used, against its key's tokens-per-minute limit —
+    // counted when the call completes, because that is when they are known.
+    if let Some(key_id) = tpm_key_id {
+        let tokens = u64::from(trace.raw_input_tokens) + u64::from(trace.output_tokens);
+        if tokens > 0 {
+            store
+                .add_rate_tokens(
+                    key_id,
+                    tokens,
+                    crate::key_limits::minute_of(chrono::Utc::now()),
+                )
+                .await;
+        }
+    }
 
     // Accumulate against the graph as well as the machine, so fan-out is
     // visible: eight workers each inside their own budget can still put the
@@ -2554,18 +2653,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     match validate_key_via_control_plane(&state.http_client, url, virtual_key).await
                     {
                         Ok(Some(mut record)) => {
-                            // Identity came from the control plane; budgets still
-                            // come from the cache, so this path enforces the same
+                            // A control plane that predates `hardBudgets` sent
+                            // identity only: fill the legacy workspace-cap pair
+                            // from the cache, so this path enforces the same
                             // pre-flight check as the cached one. Without it
                             // `max_budget` stays None and `check_budget` is a no-op
                             // — silently exempting exactly the requests that took
                             // the fallback.
-                            if let Some(ws) = record.team_id.as_deref() {
-                                if let Some((spend, limit)) =
-                                    state.control_plane.daily_budget(ws).await
-                                {
-                                    record.spend = spend;
-                                    record.max_budget = limit.or(Some(100.0));
+                            if record.hard_budgets.is_none() {
+                                if let Some(ws) = record.team_id.as_deref() {
+                                    if let Some((spend, limit)) =
+                                        state.control_plane.daily_budget(ws).await
+                                    {
+                                        record.spend = spend;
+                                        record.max_budget = limit.or(Some(100.0));
+                                    }
                                 }
                             }
                             tracing::debug!(
@@ -2789,15 +2891,69 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .unwrap_or(4096) as u32;
         let estimated_cost = pricing::estimate_cost(&model, prompt_tokens, max_tokens);
 
-        if let Err(e) = check_budget(key, estimated_cost) {
-            tracing::warn!(workspace_id = %workspace_id, "Budget check failed: {}", e);
-            return json_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "BUDGET_EXCEEDED",
-                "Remaining budget is insufficient for this request's safety margin.",
-            );
+        match key.hard_budgets.as_deref() {
+            // Every hard budget covering this key: the workspace's caps, the
+            // key's own and its member's. See `crate::key_limits`.
+            Some(budgets) => {
+                if let Some(refused) = check_hard_budgets(
+                    state.control_plane.as_ref(),
+                    budgets,
+                    &workspace_id,
+                    key,
+                    estimated_cost,
+                    chrono::Utc::now(),
+                )
+                .await
+                {
+                    return refused;
+                }
+            }
+            // An entry from a control plane that predates `hardBudgets`: the
+            // workspace daily cap, as before.
+            None => {
+                if let Err(e) = check_budget(key, estimated_cost) {
+                    tracing::warn!(workspace_id = %workspace_id, "Budget check failed: {}", e);
+                    return json_error(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "BUDGET_EXCEEDED",
+                        "Remaining budget is insufficient for this request's safety margin.",
+                    );
+                }
+            }
+        }
+
+        // ── Step 2.5b: the key's per-minute limits (Valkey, shared by replicas) ──
+        if let (Some(limit), Some(key_id)) = (key.rate_limit, key.key_id.as_deref()) {
+            let now = chrono::Utc::now();
+            match state
+                .store
+                .admit_rate(key_id, limit, crate::key_limits::minute_of(now))
+                .await
+            {
+                crate::key_limits::RateDecision::Admitted => {}
+                crate::key_limits::RateDecision::Unavailable => {
+                    crate::metrics::record_policy_refusal("key_rate_limit_unchecked", "allow");
+                }
+                crate::key_limits::RateDecision::Limited { kind, limit, used } => {
+                    let retry_after = crate::key_limits::secs_to_next_minute(now);
+                    tracing::warn!(workspace_id = %workspace_id, key_id, ?kind, limit, used, "Key rate limit reached");
+                    crate::metrics::record_policy_refusal("key_rate_limit", "kill");
+                    return rate_limited_response(
+                        &crate::key_limits::rate_limited_message(kind, limit, used, retry_after),
+                        retry_after,
+                    );
+                }
+            }
         }
     }
+
+    // The key whose tokens-per-minute counter this call's tokens go to when
+    // it completes; `None` unless the key has a TPM limit, so a key without
+    // one costs no write.
+    let tpm_key_id: Option<String> = key_record
+        .as_ref()
+        .filter(|k| k.rate_limit.is_some_and(|r| r.tpm.is_some()))
+        .and_then(|k| k.key_id.clone());
 
     // ── Step 2b: Approved-models allowlist (Valkey, workspace ∩ key) ────
     //
@@ -5536,6 +5692,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // Per-node graph queue key. Composed here, where identity is in
         // scope, because the streaming closures below only receive clones.
         let graph_key_clone = graph_key.clone();
+        let tpm_key_id_clone = tpm_key_id.clone();
         let requested_model_clone = model.clone();
         let actual_model_clone = actual_model.clone();
         // The counterfactual the shadow mode exists to record. `shadow_selection`
@@ -7016,6 +7173,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 &node_for_trace.graph_id,
                 graph_key_clone.is_some(),
                 trace.loop_run_id.as_deref(),
+                tpm_key_id_clone.as_deref(),
                 &trace,
             )
             .await;
@@ -7981,6 +8139,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         &wasm_ctx.node.graph_id,
         graph_key.is_some(),
         trace.loop_run_id.as_deref(),
+        tpm_key_id.as_deref(),
         &trace,
     )
     .await;

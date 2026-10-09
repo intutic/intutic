@@ -141,7 +141,7 @@ Every execution trace records:
 - Enforcement action applied
 - Token utility classification (`USEFUL` or `WASTED`)
 
-Spend is capped per workspace: the proxy enforces the daily cap on every request, and the monthly cap raises alerts. See [Budgets](/guide/budgets#per-workspace-budgets).
+Spend is limited by the workspace's daily and monthly caps and by budgets on virtual keys and members, each one refusing requests or alerting only; the proxy checks the ones that refuse on every request. See [Budgets](/guide/budgets#setting-up-budget-limits).
 
 ## Sync Daemon
 

@@ -93,6 +93,8 @@ func (p *intuticProvider) Resources(_ context.Context) []func() resource.Resourc
 		newGuardrailResource,
 		newWorkspaceSettingsResource,
 		newVirtualKeyResource,
+		newMemberBudgetResource,
+		newWorkspaceBudgetResource,
 		newGatewayResource,
 		newNotificationRuleResource,
 		newMcpServerDecisionResource,

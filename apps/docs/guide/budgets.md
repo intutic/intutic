@@ -10,24 +10,83 @@ Agentic coding workflows can trigger thousands of parallel LLM calls, quickly ge
 
 ## Setting Up Budget Limits
 
-### Per-Workspace Budgets
+Spend budgets work at three levels. Every call through the LLM proxy counts against all of the ones that cover it, and each budget is either **hard** or **soft**:
 
-Set the workspace's daily and monthly caps and its alert threshold on **Settings › Billing › Budget Limits**, or with `PUT /api/v1/budget`:
+- **Hard:** the proxy refuses a request that the rest of the budget does not cover, before the request leaves, with `429 BUDGET_EXCEEDED`.
+- **Soft:** nothing is refused; the budget raises [budget alerts](#budget-alerts) only.
+
+| Budget | Covers | Periods | Default | Plans |
+|---|---|---|---|---|
+| [Workspace caps](#workspace-caps) | Every call in the workspace | Day and month | Daily cap hard, monthly cap soft | Every plan |
+| [Key budgets](#key-budgets) | The calls one virtual key makes | Day and/or month | Hard | Every plan |
+| [Member budgets](#member-budgets) | The calls made with the virtual keys one member owns | Day and/or month | Hard | Biz Org, Enterprise, Self-host and the trials <Badge type="warning" text="Biz Org+" /> |
+
+A day is a UTC calendar day and a month a UTC calendar month: every budget starts again from zero at 00:00 UTC, and on the 1st of the month. Virtual keys can also have [rate limits](#key-rate-limits).
+
+### Workspace caps
+
+Set the workspace's daily and monthly caps, the alert threshold, and whether each cap is hard on **Settings › Billing › Budget Limits**, with [`intutic budget set`](/reference/cli#intutic-budget-set), with Terraform's [`intutic_workspace_budget`](/reference/terraform/resources/workspace_budget), or with `PUT /api/v1/budget` (OWNER or ADMIN):
 
 ```json
-{ "daily_budget_usd": 50, "monthly_budget_usd": 1000, "alert_threshold_pct": 80 }
+{
+  "daily_budget_usd": 50,
+  "monthly_budget_usd": 1000,
+  "alert_threshold_pct": 80,
+  "daily_enforcement": "hard",
+  "monthly_enforcement": "hard"
+}
 ```
 
-What each cap does:
+- **The daily cap is hard** unless you set `daily_enforcement` to `soft`.
+- **The monthly cap is soft** unless you set `monthly_enforcement` to `hard`. Then a request the rest of the month's cap does not cover is refused like one over the daily cap.
+- A cap of `0` is no cap.
+- A workspace that has never saved its caps is held to $100 a day. Settings › Billing shows such a workspace a daily cap of a thirtieth of its monthly cap; that figure raises alerts, and saving the caps makes the daily cap you see the one that is enforced.
 
-- **The daily cap is enforced.** Before forwarding a request, the proxy estimates its cost and refuses it with `429 BUDGET_EXCEEDED` when the estimate plus a 20% margin is more than what is left of the day's cap. The cap belongs to the workspace: every member and every virtual key in it draws on the same amount.
-- **The monthly cap raises alerts.** Reaching its alert threshold or the cap itself raises the [budget alerts](#budget-alerts) below; requests are not refused.
+The caps belong to the workspace: every member and every virtual key in it draws on the same amount. A change applies from each key's next request.
 
-There are no per-developer or per-virtual-key budgets. To see who spends what, use **Cost by Developer** and **Cost by Virtual Key** (see [Dashboard Widgets](#dashboard-widgets)) or `intutic usage members`.
+### Key budgets
 
-::: tip
-Start with a conservative daily cap and raise it as you learn your team's usage. Cost by Developer shows where the spend goes.
-:::
+Give one virtual key its own day budget, month budget or both, each hard or soft. Only an OWNER or ADMIN can set them, for any key in the workspace: on **Settings › Billing › Key budgets and rate limits** (**Edit** on the key's row), with [`intutic budget key`](/reference/cli#intutic-budget-key-keyid), with the `daily_budget_usd` and `monthly_budget_usd` attributes of Terraform's [`intutic_virtual_key`](/reference/terraform/resources/virtual_key), or with `PATCH /api/v1/keys/:id`:
+
+```json
+{
+  "budgets": [
+    { "period": "day", "limitUsd": 5 },
+    { "period": "month", "limitUsd": 100, "enforcement": "soft" }
+  ],
+  "rateLimit": { "rpm": 60 }
+}
+```
+
+`budgets` replaces the key's budgets: send `[]` to remove them. `enforcement` is `hard` when you leave it out. A key is created without budgets; any member creates their own keys, and an owner or admin then limits them. Every change is recorded as an `updated` change to the key on the [audit timeline](/guide/audit-timeline).
+
+One key per kind of traffic (CI, a service, a developer's machine) gives each its own budget.
+
+### Member budgets <Badge type="warning" text="Biz Org+" /> {#member-budgets}
+
+A member budget limits what one member spends across all the virtual keys they own: a call belongs to the member who owns the key that made it, as it does in **Cost by Developer**. A service-account key belongs to the member who created it.
+
+- **The default member budget** applies to every member without a budget of their own for that period.
+- **A member's own budget** for a period replaces the default's for that period. A member with only their own month budget still has the default day budget.
+
+Set them on **Settings › Billing › Member budgets**, with [`intutic budget member`](/reference/cli#intutic-budget-member-memberid) (`default` for the default), with Terraform's [`intutic_member_budget`](/reference/terraform/resources/member_budget), or with `PUT /api/v1/budget/members/:memberId` and `DELETE /api/v1/budget/members/:memberId` (`default` for the default). OWNER or ADMIN.
+
+Member budgets come with the Biz Org, Enterprise and Self-host plans and the trials. On another plan the routes answer `403` with `Upgrade required — member budgets require a Biz Org plan or higher`. A workspace that moves to a plan without them keeps them stored, but they are neither enforced nor alerted on until it moves back.
+
+### Key rate limits {#key-rate-limits}
+
+A virtual key can have a limit on **requests per minute** (`rpm`) and on **tokens per minute** (`tpm`), set with the key's budgets above. Every plan has them.
+
+- A minute is a UTC calendar minute. The count is kept in Valkey, so every proxy replica on one Valkey shares it.
+- **Requests per minute** is exact: the check and the count are one atomic step, so two replicas cannot both take the minute's last request. A refused request is not counted.
+- **Tokens per minute** counts the tokens each call actually used, input plus output, as the call completes. A request's tokens are not known before it is sent, so the proxy refuses a request once the minute's tokens have reached the limit: the call that crosses the limit is allowed, and the ones after it in that minute are not.
+- Over either limit the proxy answers `429 RATE_LIMITED`, with `Retry-After` set to the seconds left in the minute.
+- If Valkey cannot be read, the request is admitted uncounted: a rate limit is a throttle, not a spend control.
+- Proxies on different Valkeys (one per region, for example) count separately.
+
+### Plan daily cap
+
+Each plan comes with a daily spend cap of its own, the monitored LLM volume on [Plans & pricing](/guide/plans). It can block too: turn on **Block at the plan's daily cap** under **Budget Limits**, or set both workspace settings `enforcement_mode` to `hard` and `workspace_hard_cap_enabled` to `true` (see [Workspace Settings](/reference/workspace-settings#routing-and-cost)). The control plane then checks the day's spend every five minutes and, once it is over the plan's cap, the proxy refuses every request with `429 OVERAGE_HARD_CAP_EXCEEDED` until midnight UTC.
 
 ### Local Daily Cap
 
@@ -37,41 +96,50 @@ A standalone proxy (one with no control plane) also keeps a daily cap of its own
 { "maxDailyBudgetUsd": 25 }
 ```
 
-It defaults to `$10.00` when unset, and an edit takes effect within 60 seconds without a restart. `INTUTIC_LOCAL_BUDGET_ENFORCE=0` stops the proxy refusing requests over the cap while it keeps counting the spend. There are no environment variables for the cap itself. A proxy connected to a control plane does not apply it: its spend is capped per workspace by the caps above.
+It defaults to `$10.00` when unset, and an edit takes effect within 60 seconds without a restart. `INTUTIC_LOCAL_BUDGET_ENFORCE=0` stops the proxy refusing requests over the cap while it keeps counting the spend. There are no environment variables for the cap itself. A proxy connected to a control plane does not apply it: its spend is capped by the budgets above.
 
 ---
 
 ## How Enforcement Works
 
-Each API request flowing through the proxy is checked against budget limits:
+Before forwarding a request, the proxy:
 
-1. **Cost estimation** — The proxy estimates the cost from the model's price, the prompt's length and the request's `max_tokens`
-2. **Budget check** — The estimate plus a 20% margin is compared with what is left of the workspace's daily cap, or of the machine's local daily cap on a standalone proxy
-3. **Decision** — If the request would exceed it, it is blocked with a `KILL` enforcement action and a `429`
+1. **Estimates its cost** from the model's price, the prompt's length and the request's `max_tokens`.
+2. **Checks every hard budget that covers the call** — the workspace's, the key's and its member's — against the spend recorded so far in that budget's day or month. If the estimate plus a 20% margin is more than what is left of any of them, the request is refused with `429 BUDGET_EXCEEDED`. The error names the budget and its window, and `Retry-After` is the seconds until it resets:
+
+   ```json
+   {
+     "error": {
+       "type": "BUDGET_EXCEEDED",
+       "message": "This API key's daily spend budget of $5.00 does not cover this request: ...",
+       "budget": { "scope": "key", "period": "day", "limitUsd": 5, "spentUsd": 4.98, "resetsAt": "2026-10-10T00:00:00+00:00" }
+     }
+   }
+   ```
+
+3. **Checks the key's rate limits**, and answers `429 RATE_LIMITED` over either.
+
+The spend a budget is checked against is what the control plane records as each call completes, so a request's own cost counts from the request after it. Requests in flight together can each fit what is left and together go past a budget by up to their own cost; the next request is refused. The [clawde SDKs](/reference/clawde-sdk) raise both refusals as `ClawdeBlockedError`, with `retryAfterSeconds` (`retry_after_seconds`) from `Retry-After`.
 
 ### Enforcement Modes & Connectivity
 
-Intutic's budget enforcer operates in two distinct modes depending on connection status:
-
-<!-- ENTERPRISE_ONLY_START -->
 #### 1. Connected Mode
-*   **Centralized Caps:** The daily cap is set centrally and enforced on every request; the monthly cap raises alerts only.
-*   **Valkey Cache Validation:** The control plane writes the workspace's daily cap and its running daily spend to Valkey, and the proxy reads both with the virtual key on every request.
-*   **Heartbeat Sync:** Actual query costs update Valkey counters and PostgreSQL in real time upon successful completions.
-<!-- ENTERPRISE_ONLY_END -->
+*   **Budgets travel with the key.** The control plane puts every hard budget covering a key, and the key's rate limits, on the key's cached entry in Valkey. A change to a budget drops the entries it affects, so it applies from each key's next request.
+*   **Spend counters:** the control plane adds each completed call's cost to the workspace's, the key's and the member's counters for the day and the month, and the proxy reads them all in one Valkey round trip per request.
 
 #### 2. Local Daily Cap (Every Proxy)
-*   **Local Budget Definition:** The proxy reads its daily cap (`maxDailyBudgetUsd`, default `$10.00`) from `~/.intutic/config.json`. It is the only cost control in standalone mode; a connected proxy uses the workspace caps instead.
+*   **Local Budget Definition:** The proxy reads its daily cap (`maxDailyBudgetUsd`, default `$10.00`) from `~/.intutic/config.json`. It is the only cost control in standalone mode; a connected proxy uses the budgets above instead.
 *   **Offline Spend Ledger:** Day-accumulated spend is saved in sharded daily files (`~/.intutic/logs/local-spend-YYYY-MM-DD.jsonl`).
 *   **Pre-flight Cost Interception:** Before reaching the LLM provider, a native budget gate plugin estimates query cost based on prompt length and static ratios. If this would exceed the remaining budget, the proxy blocks the request with `HTTP 429 Too Many Requests` (`OVERAGE_HARD_CAP_EXCEEDED` error code).
 *   **Offline Telemetry Ingestion:** Successful completion costs are calculated, appended to the daily spend ledger, and queued in sharded files `~/.intutic/logs/traces-YYYY-MM-DD.jsonl` for sync-back.
 
 #### Valkey Failure Behavior (Fail-Closed)
 
-A connected proxy that cannot read Valkey (the in-memory cache that holds virtual keys and budget counters) cannot verify the caller's key or the workspace's spend, so it **refuses** the request rather than admit spend it cannot check:
+A connected proxy that cannot read Valkey (the in-memory cache that holds virtual keys and budget counters) cannot verify the caller's key or the spend against a hard budget, so it **refuses** the request rather than admit spend it cannot check:
 
 *   **Retryable refusals:** the proxy answers `503` with `AUTH_UNVERIFIABLE` (the key could not be checked) or `BUDGET_UNVERIFIABLE` (the spend could not be checked). The key may well be valid, so clients should retry rather than treat it as an authentication failure.
 *   **Automatic recovery:** once Valkey is reachable again, requests are admitted and checked as usual.
+*   **Rate limits fail open:** a key's per-minute limits are not checked while Valkey cannot be read.
 
 ::: warning
 A Valkey outage stops a connected workspace's model traffic. Monitor Valkey's health and alert on the proxy's `AUTH_UNVERIFIABLE` and `BUDGET_UNVERIFIABLE` refusals. A standalone proxy is unaffected: its local cap is kept in files.
@@ -96,7 +164,9 @@ When a budget limit is exceeded, Intutic raises one of three anomaly types:
 The dashboard surfaces budget utilization in real time:
 
 - **Budget used** — on Overview, above every tab: spend against the workspace budget, as a percentage and in dollars.
-- **Budget Limits** — on **Settings › Billing**: meters for **Spent this month** and **Spent today** against their caps (amber from 75%, red from 90%), the caps and alert threshold themselves, and the budget alerts raised so far.
+- **Budget Limits** — on **Settings › Billing**: meters for **Spent this month** and **Spent today** against their caps (amber from 75%, red from 90%), the caps, whether each is hard, the alert threshold, and the budget alerts raised so far.
+- **Key budgets and rate limits** — on the same tab: each virtual key's spend today and this month against its own budgets, and its rate limit.
+- **Member budgets** <Badge type="warning" text="Biz Org+" /> — on the same tab: the default member budget, and each member's spend against the budgets that apply to them.
 - **Cost by Virtual Key** — on Overview's **Cost & Token Efficiency** tab: cost per virtual key, today or this month (see below).
 - **Cost by Developer** — on the same tab: cost, tokens, calls, active days and models used per member, today or this month. Sort by any column; the top 10 show until you choose **Show all**. A call belongs to the member who owns the virtual key that made it. OWNER, ADMIN and EM see every member, plus an **Unattributed** row for calls with no virtual key. A DEVELOPER or VIEWER sees only their own usage.
 - **Cost by Team** — on the same tab, for OWNER, ADMIN and EM: the same figures per [SCIM group](/guide/scim), including members of nested groups. A member in several groups counts in each one, so team totals can add up to more than the workspace total. Without SCIM groups there are no teams, and cost by developer is the finest breakdown. SCIM comes with the Enterprise and Self-host plans.
@@ -122,27 +192,27 @@ This classification feeds into the FinOps ledger and helps optimize model routin
 
 ## Budget Alerts
 
-An hourly check compares each workspace's spend with its daily and monthly caps, and raises:
+Every budget, hard or soft, raises two alerts per period:
 
-- **A threshold warning** when spend reaches the alert threshold (**Alert at (% of cap)** under **Budget Limits**, 80% unless you change it).
-- **A cap-exceeded alert** when spend reaches 100% of the cap.
+- **A threshold warning** when spend reaches the workspace's alert threshold (**Alert at (% of cap)** under **Budget Limits**, 80% unless you change it). The one threshold applies to the workspace caps and to every key and member budget.
+- **A budget-exceeded alert** when spend reaches 100% of the budget.
 
-Each is raised at most once per budget period: once for the day's spend and once for the month's. If one check finds spend already past the cap, it raises only the cap-exceeded alert. The periods follow the workspace's spend counters, which start with the first spend after the previous period ends and run 24 hours (daily) or 30 days (monthly).
+Each is raised at most once per budget per day or month. The workspace caps are checked hourly; if one check finds spend already past a cap, it raises only the exceeded alert. Key and member budgets are checked as each call's cost is recorded, so their alerts go out within moments.
 
-Every alert is listed under **Budget alerts** on **Settings › Billing**, where it can be acknowledged. It also goes out through any notification rule on **Budget Threshold Reached** (`finops.budget.threshold`) or **Budget Exceeded** (`finops.budget.exceeded`), to that rule's Slack channel, email recipients, webhook or PagerDuty service. See [Notifications](/guide/settings#notifications). Without such a rule, alerts appear only on the Billing page.
+Every alert is listed under **Budget alerts** on **Settings › Billing**, naming whose budget it is (the workspace's cap, a key or a member), and can be acknowledged there; `GET /api/v1/budget/alerts` returns them with `scope` and `subjectId`. Each also goes out through any notification rule on **Budget Threshold Reached** (`finops.budget.threshold`) or **Budget Exceeded** (`finops.budget.exceeded`), to that rule's Slack channel, email recipients, webhook or PagerDuty service; the event carries `scope` (`workspace`, `key` or `member`), the key's or member's id, and `enforcement`. See [Notifications](/guide/settings#notifications). With [SIEM export](/guide/siem-export) they stream as the `budget_alerts` source.
 
 ## CLI Budget Management
 
-You can inspect your remaining budget limits and active task loops directly from your terminal:
-
 ```bash
-intutic budget
+intutic budget                 # the workspace's spend against its caps, the local cap, and running loops
+intutic budget set --monthly 1000 --monthly-enforcement hard
+intutic budget keys            # every key's budgets, rate limit and spend
+intutic budget key key_abc123 --daily 5 --rpm 60
+intutic budget members         # Biz Org and up
+intutic budget member default --daily 20
 ```
 
-This returns a clear breakdown containing:
-* **Cloud Budget Status**: Remaining daily/monthly spend and limits from the control plane.
-* **Local Spending Cap**: Your global daily limit configured in `~/.intutic/config.json`.
-* **Active Task Loops**: Running loops, names, accumulated costs, and localized budget limits.
+See [`intutic budget`](/reference/cli#intutic-budget) and the subcommands after it.
 
 ---
 

@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 404 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 409 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -662,6 +662,10 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 | PUT | `/api/v1/budget` | OWNER/ADMIN | Update budget settings |
 | GET | `/api/v1/budget/alerts` | Authenticated | Budget alert history |
 | POST | `/api/v1/budget/alerts/:alertId/acknowledge` | OWNER/ADMIN/EM | Acknowledge an alert |
+| GET | `/api/v1/budget/keys` | OWNER/ADMIN/EM; anyone else (own keys) | Each virtual key's budgets, rate limit and spend |
+| GET | `/api/v1/budget/members` | OWNER/ADMIN/EM; anyone else (themselves) | <Badge type="warning" text="Biz Org+" /> Each member's budgets and spend, and the default member budget |
+| DELETE | `/api/v1/budget/members/:memberId` | OWNER/ADMIN | <Badge type="warning" text="Biz Org+" /> Remove a member's budgets, or the default member budget |
+| PUT | `/api/v1/budget/members/:memberId` | OWNER/ADMIN | <Badge type="warning" text="Biz Org+" /> Set a member's budgets, or the default member budget |
 
 ### `compliance.ts` <Badge type="tip" text="Cloud" />
 
@@ -929,6 +933,7 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 | GET | `/api/v1/keys` | Authenticated | List API keys for the workspace |
 | POST | `/api/v1/keys` | Authenticated | Create a new API key |
 | DELETE | `/api/v1/keys/:id` | Authenticated | Revoke an API key |
+| PATCH | `/api/v1/keys/:id` | OWNER/ADMIN | Set a key's spend budgets and rate limit |
 
 ### `loops.ts` <Badge type="tip" text="Cloud" />
 

@@ -39,6 +39,8 @@ func api(t *testing.T, method, path string, body any) {
 		err = c.Post(context.Background(), path, body, nil)
 	case "PUT":
 		err = c.Put(context.Background(), path, body, nil)
+	case "PATCH":
+		err = c.Patch(context.Background(), path, body, nil)
 	default:
 		t.Fatalf("unsupported method %s", method)
 	}
@@ -328,6 +330,103 @@ resource "intutic_virtual_key" "ci" {
 		clean(cfg),
 		// The key value and the requested lifetime are not readable after creation.
 		imported("intutic_virtual_key.ci", "key", "expires_in_days"),
+	)
+}
+
+func TestAccVirtualKeyLimits(t *testing.T) {
+	limited := `
+resource "intutic_virtual_key" "budgeted" {
+  label                      = "tf-acc budgeted"
+  daily_budget_usd           = 5
+  monthly_budget_usd         = 100
+  monthly_budget_enforcement = "soft"
+  rate_limit_rpm             = 60
+}`
+	changed := `
+resource "intutic_virtual_key" "budgeted" {
+  label              = "tf-acc budgeted"
+  monthly_budget_usd = 250
+  rate_limit_tpm     = 100000
+}`
+	var id string
+	accTest(t,
+		resource.TestStep{
+			Config: limited,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrWith("intutic_virtual_key.budgeted", "id", captured(&id)),
+				resource.TestCheckResourceAttr("intutic_virtual_key.budgeted", "daily_budget_enforcement", "hard"),
+				resource.TestCheckResourceAttr("intutic_virtual_key.budgeted", "monthly_budget_enforcement", "soft"),
+				resource.TestCheckResourceAttr("intutic_virtual_key.budgeted", "rate_limit_rpm", "60"),
+			),
+		},
+		clean(limited),
+		// Budgets and limits change in place: the same key, not a new one.
+		resource.TestStep{
+			Config: changed,
+			ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("intutic_virtual_key.budgeted", plancheck.ResourceActionUpdate)},
+			},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrWith("intutic_virtual_key.budgeted", "id", same(&id, "key id")),
+				resource.TestCheckNoResourceAttr("intutic_virtual_key.budgeted", "daily_budget_usd"),
+				resource.TestCheckResourceAttr("intutic_virtual_key.budgeted", "monthly_budget_usd", "250"),
+				resource.TestCheckResourceAttr("intutic_virtual_key.budgeted", "monthly_budget_enforcement", "hard"),
+				resource.TestCheckNoResourceAttr("intutic_virtual_key.budgeted", "rate_limit_rpm"),
+				resource.TestCheckResourceAttr("intutic_virtual_key.budgeted", "rate_limit_tpm", "100000"),
+			),
+		},
+		clean(changed),
+		// A budget changed outside Terraform shows as a difference.
+		drifted(changed, func() { api(t, "PATCH", "/api/v1/keys/"+id, map[string]any{"rateLimit": map[string]any{"tpm": nil}}) }),
+		// …which the next apply puts back.
+		resource.TestStep{Config: changed},
+		imported("intutic_virtual_key.budgeted", "key", "expires_in_days"),
+	)
+}
+
+func TestAccMemberBudget(t *testing.T) {
+	cfg := `
+resource "intutic_member_budget" "default" {
+  member_id                  = "default"
+  daily_budget_usd           = 20
+  monthly_budget_usd         = 300
+  monthly_budget_enforcement = "soft"
+}`
+	accTest(t,
+		resource.TestStep{
+			Config: cfg,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("intutic_member_budget.default", "id", "default"),
+				resource.TestCheckResourceAttr("intutic_member_budget.default", "daily_budget_enforcement", "hard"),
+			),
+		},
+		clean(cfg),
+		drifted(cfg, func() {
+			api(t, "PUT", "/api/v1/budget/members/default", map[string]any{"budgets": []map[string]any{{"period": "day", "limitUsd": 30}}})
+		}),
+		resource.TestStep{Config: cfg},
+		imported("intutic_member_budget.default"),
+	)
+}
+
+func TestAccWorkspaceBudget(t *testing.T) {
+	cfg := `
+resource "intutic_workspace_budget" "this" {
+  daily_budget_usd    = 50
+  monthly_budget_usd  = 1000
+  monthly_enforcement = "hard"
+}`
+	accTest(t,
+		resource.TestStep{
+			Config: cfg,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("intutic_workspace_budget.this", "alert_threshold_pct", "80"),
+				resource.TestCheckResourceAttr("intutic_workspace_budget.this", "daily_enforcement", "hard"),
+				resource.TestCheckResourceAttr("intutic_workspace_budget.this", "monthly_enforcement", "hard"),
+			),
+		},
+		clean(cfg),
+		imported("intutic_workspace_budget.this"),
 	)
 }
 

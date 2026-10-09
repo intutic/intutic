@@ -78,6 +78,22 @@ resource "intutic_workspace_settings" "this" {
 resource "intutic_workspace_settings" "this" {
   settings = jsonencode({ featureFlags = { ff_nope = true } })
 }`, `featureFlags.ff_nope`},
+		{"a budget enforcement the API does not know", `
+resource "intutic_virtual_key" "k" {
+  label                    = "x"
+  daily_budget_usd         = 5
+  daily_budget_enforcement = "warn"
+}`, `value must be one of`},
+		{"a zero budget", `
+resource "intutic_member_budget" "m" {
+  member_id        = "default"
+  daily_budget_usd = 0
+}`, `between`},
+		{"a rate limit of zero", `
+resource "intutic_virtual_key" "k" {
+  label          = "x"
+  rate_limit_rpm = 0
+}`, `between 1 and 100000`},
 		{"settings must be an object", `
 resource "intutic_workspace_settings" "this" {
   settings = jsonencode(["egressMode"])

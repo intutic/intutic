@@ -13,7 +13,9 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | [`intutic_policy`](/reference/terraform/resources/policy) | Enforcement policies: what the proxy does when an agent calls a matching tool | `/api/v1/policies` |
 | [`intutic_guardrail`](/reference/terraform/resources/guardrail) | Policy guardrails you author: a rule in the Guardrail IR, held to the same checks as one extracted from a policy document | `/api/v1/policy-guardrails/guardrails` |
 | [`intutic_workspace_settings`](/reference/terraform/resources/workspace_settings) | Workspace settings, only the keys you set | `/api/v1/workspace/settings` |
-| [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`) | `/api/v1/keys` |
+| [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`), with their spend budgets and rate limits | `/api/v1/keys` |
+| [`intutic_workspace_budget`](/reference/terraform/resources/workspace_budget) | The workspace's daily and monthly spend caps, and whether each refuses requests | `/api/v1/budget` |
+| [`intutic_member_budget`](/reference/terraform/resources/member_budget) | A member's spend budgets, or the default member budget (Biz Org and above) | `/api/v1/budget/members` |
 | [`intutic_gateway`](/reference/terraform/resources/gateway) | Self-hosted gateway registrations and their live config | `/api/v1/gateways` |
 | [`intutic_notification_rule`](/reference/terraform/resources/notification_rule) | Slack, email, webhook and PagerDuty notification rules | `/api/v1/notifications/rules` |
 | [`intutic_mcp_server_decision`](/reference/terraform/resources/mcp_server_decision) | Approve or block an MCP server, and switch its tools off | `/api/v1/mcp/servers` |

@@ -9,6 +9,7 @@ pub mod graph;
 pub mod injection;
 /// The per-key `/auth/key-context` answer the workspace policy rides on
 pub mod key_context;
+pub mod key_limits;
 pub mod manifest;
 pub mod memory;
 pub mod metering;

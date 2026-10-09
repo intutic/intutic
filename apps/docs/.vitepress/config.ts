@@ -231,7 +231,7 @@ const sidebarReference = [
           collapsed: true,
           items: [
             { text: 'Provider', link: '/reference/terraform/' },
-            ...['sop', 'policy', 'guardrail', 'workspace_settings', 'virtual_key', 'gateway', 'notification_rule', 'mcp_server_decision', 'siem_destination', 'wasm_rule']
+            ...['sop', 'policy', 'guardrail', 'workspace_settings', 'virtual_key', 'workspace_budget', 'member_budget', 'gateway', 'notification_rule', 'mcp_server_decision', 'siem_destination', 'wasm_rule']
               .map((r) => ({ text: `intutic_${r}`, link: `/reference/terraform/resources/${r}` })),
             ...['workspace', 'members']
               .map((d) => ({ text: `intutic_${d} (data)`, link: `/reference/terraform/data-sources/${d}` })),

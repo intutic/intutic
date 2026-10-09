@@ -13,6 +13,7 @@
     "egressAllow",
     "egressMode",
     "enableLocalSkillAuditDelete",
+    "enforcement_mode",
     "featureFlags",
     "governanceCardLabelingEnabled",
     "imageProvenance",
@@ -38,7 +39,8 @@
     "ssoKeyMaxIdleDays",
     "sso_group_policy",
     "trajectory_monitor_mode",
-    "virusTotalSkillLookupEnabled"
+    "virusTotalSkillLookupEnabled",
+    "workspace_hard_cap_enabled"
   ],
   "featureFlags": [
     "ff_bandit_routing",
