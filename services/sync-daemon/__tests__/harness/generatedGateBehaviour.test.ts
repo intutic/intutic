@@ -1998,7 +1998,9 @@ describe('Pi and OpenClaw plugin gates', () => {
           const asCommand = await runPluginGate(g, shell, { command: `sed -i 's/intutic-governance//' ${p}` })
           expect(asCommand.refused, `editing ${p} from the shell was allowed`).toBe(true)
         }
-      })
+        // Two plugin runs per path, a process each: the same budget as the
+        // protected-paths case above, which a loaded machine needs.
+      }, 180_000)
 
       it('refuses a destructive command only when the snapshot supplies the rule', async () => {
         const without = await runPluginGate(g, shell, { command: 'rm -rf /' })

@@ -46,10 +46,10 @@ export const HOOK_TIMEOUT_SECONDS = 10
  * own once its interpreter is running (Node's `process.uptime()`, the bash
  * gate's watchdog), and once its deadline fires it still has to stop its
  * children, write the refusal and the audit line, and exit, and the harness
- * has to read the exit. On a 14-core machine running 100 busy threads on top
- * of its own work (load average near 200), a gate's refusal at the deadline
- * reached the harness at most 210 ms after the deadline, Node and bash alike.
- * One second is nearly five times that.
+ * has to read the exit. On a 14-core machine running every package's test
+ * suite beside 100 busy threads (load average near 190), a gate's refusal
+ * reached the harness at most 260 ms after its deadline, Node and bash alike.
+ * One second is nearly four times that.
  */
 export const GATE_DEADLINE_MARGIN_MS = 1000
 
@@ -109,10 +109,10 @@ export type HookGateHarness = keyof typeof HOOK_GATE_TIMEOUTS
  * refuses with `GATE_DEADLINE`: {@link GATE_DEADLINE_MARGIN_MS} under the
  * harness's timeout, and never longer than {@link HOOK_TIMEOUT_SECONDS} minus
  * that margin, so a gate the harness waits on for 30 s or without limit still
- * answers as promptly as one connect set a timeout for. A legitimate call
- * decides in well under a second even at the size limits on a heavily
- * loaded machine; only a workspace's own pathological WHERE pattern runs
- * this long.
+ * answers as promptly as one connect set a timeout for. On the loaded machine
+ * above, a call at the size limits took the bash gates at most 4.6 s and the
+ * JavaScript gates at most 1.2 s; every 4 s deadline is a JavaScript gate's.
+ * Only a workspace's own pathological WHERE pattern runs this long.
  */
 export function gateDeadlineMs(harness: HookGateHarness): number {
   const timeoutMs: number | null = HOOK_GATE_TIMEOUTS[harness].timeoutMs

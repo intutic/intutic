@@ -136,8 +136,8 @@ async function readConfigVersion(workspaceId: string): Promise<number | undefine
   // and rejects it after `maxRetriesPerRequest` reconnect attempts — hundreds
   // of milliseconds on every cache hit, on the tool-call path. Unknown version
   // means "serve the cached entry", which is what the cache did before the
-  // version existed. The miss path below still connects lazily, so a reachable
-  // Valkey reaches `ready` on the first fetch.
+  // version existed. The miss path below starts the connection, so a reachable
+  // Valkey is ready from the next call on.
   if (valkey.status !== 'ready') return undefined
   try {
     const raw = await valkey.get(configVersionKey(workspaceId))
@@ -147,6 +147,20 @@ async function readConfigVersion(workspaceId: string): Promise<number | undefine
   } catch {
     return undefined
   }
+}
+
+/**
+ * Whether Valkey can answer a command now, starting the connection on first
+ * use. With Valkey down, ioredis queues a command and rejects it only after
+ * `maxRetriesPerRequest` reconnect attempts, whose delays grow with the outage
+ * to two seconds each: a policy miss waited out a GET and then a SET before it
+ * returned, seconds on the tool-call path for every miss for as long as
+ * Valkey was down. A Valkey that is not ready is skipped, as an empty one
+ * would be, and the control plane answers.
+ */
+function valkeyReady(): boolean {
+  if (valkey.status === 'wait') valkey.connect().catch(() => {})
+  return valkey.status === 'ready'
 }
 
 // Simple LRU map (insertion-order eviction)
@@ -517,9 +531,9 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
     return cached
   }
 
-  // Cache miss in LRU — check Valkey
+  // Cache miss in LRU — check Valkey, when it can answer now
   try {
-    const valkeyCached = await valkey.get(`mcp_daemon:policy:${workspaceId}`)
+    const valkeyCached = valkeyReady() ? await valkey.get(`mcp_daemon:policy:${workspaceId}`) : null
     if (valkeyCached) {
       // Cast, not validated — this is our own prior write, not a network
       // boundary. But an entry written before this field existed is still a
@@ -553,13 +567,12 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
   if (fresh) {
     evictIfFull()
     lru.set(workspaceId, fresh)
-    try {
-      await valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs())
-    } catch {
-      // Valkey unreachable. Write-through to the shared tier is an
-      // optimisation, not a correctness step: `fresh` is already in the LRU
-      // and is returned below. Failing the caller's policy resolution because
-      // a cache write failed would take the daemon down with Valkey.
+    // Write-through to the shared tier is an optimisation, not a correctness
+    // step: `fresh` is already in the LRU and is returned now, without waiting
+    // on the write. A failed write is dropped; failing or holding the caller's
+    // policy resolution on it would take the daemon down with Valkey.
+    if (valkey.status === 'ready') {
+      valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs()).catch(() => {})
     }
   }
   return fresh

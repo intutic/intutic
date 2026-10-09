@@ -86,7 +86,10 @@ describe('gate rule vectors', () => {
       expect(decide(v, calls[4]), `${v.id} adversarial "${c.name}"`).toBe(c.held)
       expectLinearTime(`${v.id} adversarial "${c.name}"`, (scale) => decide(v, calls[scale]))
     }
-  })
+    // Each adversarial case is decided at 256 KiB, and again at both scales for
+    // the linear-time check: well inside a second here, but past the default
+    // 5 s on a machine running every suite at once under load.
+  }, 60_000)
 
   it('use the shared limits', () => {
     expect({

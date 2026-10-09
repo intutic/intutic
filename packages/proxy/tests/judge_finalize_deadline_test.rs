@@ -39,6 +39,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+/// How long the control plane's finalize call takes to answer: far longer
+/// than the deadline, and than the judged stream takes on a loaded machine.
+const FINALIZE_DELAY: Duration = Duration::from_secs(30);
+
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -110,13 +114,13 @@ async fn a_slow_finalize_releases_the_stream_at_the_deadline_but_keeps_running()
         })))
         .mount(&cp)
         .await;
-    // Deliberately slower than the 500ms deadline below, but the test still
-    // waits it out afterward to prove the call actually completes.
+    // Far slower than the 500ms deadline below: a stream that waited for it
+    // could not close before it, however loaded the machine running the test.
     Mock::given(method("POST"))
         .and(path("/api/v1/judge/finalize"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_delay(Duration::from_secs(3))
+                .set_delay(FINALIZE_DELAY)
                 .set_body_json(serde_json::json!({
                     "verdict": "PASS", "triggered": false, "personalTriggered": false,
                     "correctionSummary": "Never seen by the client — the deadline fires first.",
@@ -183,15 +187,15 @@ async fn a_slow_finalize_releases_the_stream_at_the_deadline_but_keeps_running()
     let elapsed = started.elapsed();
     assert!(status.is_success(), "proxy returned {status}: {body}");
 
-    // The load-bearing timing assertion: released well before the 3s
-    // finalize delay would otherwise force it to wait. 2.5s is a generous
-    // margin above the 500ms deadline (network + task scheduling on a
-    // loaded CI runner — this repo's own CI took over 10 minutes on this
-    // job the run this test's threshold was tuned against), while staying
-    // comfortably under the 3s the old unbounded behavior would have taken.
+    // The timing assertion: the stream closed without waiting out the
+    // finalize delay. The bound is the delay itself, not the 500ms deadline
+    // plus a guessed margin: on a heavily loaded machine the whole judged
+    // stream took close to 7s, so a 2.5s bound failed there while the
+    // deadline did its job. The UNAVAILABLE note checked below is what shows
+    // the deadline, not the finalize answer, released it.
     assert!(
-        elapsed < Duration::from_millis(2500),
-        "stream took {elapsed:?} to close — the deadline should have released it well under 2.5s, not waited out the 3s finalize delay"
+        elapsed < FINALIZE_DELAY,
+        "stream took {elapsed:?} to close — the deadline should have released it, not waited out the {FINALIZE_DELAY:?} finalize delay"
     );
 
     // The client got the model's text…
@@ -212,20 +216,26 @@ async fn a_slow_finalize_releases_the_stream_at_the_deadline_but_keeps_running()
         "the real synthesis leaked into the released stream — the deadline did not actually cut it off:\n{body}"
     );
 
-    // The detached-task proof: wait out the finalize mock's 3s delay (from
-    // whenever the background task actually issued the request, which was
-    // at or before the point the deadline fired above) and confirm the
-    // call still landed. A naive `timeout(...).await` that dropped the
-    // underlying future instead of only the JoinHandle would silently
-    // never make this call at all.
-    tokio::time::sleep(Duration::from_millis(3500)).await;
-    let reqs = cp.received_requests().await.expect("wiremock recording on");
-    let finalize_calls: Vec<_> = reqs
-        .iter()
-        .filter(|r| r.url.path() == "/api/v1/judge/finalize")
-        .collect();
+    // The detached-task proof: the finalize call still lands at the control
+    // plane after the deadline released the client. A naive
+    // `timeout(...).await` that dropped the underlying future instead of
+    // only the JoinHandle would silently never make this call at all. Waits
+    // for it, up to the finalize delay, rather than for a fixed time.
+    let cp_ref = &cp;
+    let finalize_calls = || async move {
+        cp_ref.received_requests()
+            .await
+            .expect("wiremock recording on")
+            .iter()
+            .filter(|r| r.url.path() == "/api/v1/judge/finalize")
+            .count()
+    };
+    let waiting = std::time::Instant::now();
+    while finalize_calls().await == 0 && waiting.elapsed() < FINALIZE_DELAY {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     assert_eq!(
-        finalize_calls.len(),
+        finalize_calls().await,
         1,
         "the finalize call should still have completed in the background after the deadline released the client — it must not be cancelled, only stopped waiting on"
     );

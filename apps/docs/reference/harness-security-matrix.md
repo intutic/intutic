@@ -154,8 +154,8 @@ is no gate, and every gate bounds itself:
   with `GATE_DEADLINE` in its reason. Each gate's deadline is one second under
   the hook timeout its harness applies, and at most 9 seconds, the table below.
   The second covers starting the interpreter and getting the refusal read: on a
-  14-core machine running 100 busy threads, a refusal reached the harness at
-  most 210 ms after the deadline. The bash gates run a detached watchdog that
+  14-core machine running every package's test suite beside 100 busy threads,
+  a refusal reached the harness at most 260 ms after the deadline. The bash gates run a detached watchdog that
   stops the gate's `grep` or `python3` and signals it; the JavaScript gates
   run their rules under a `vm` timeout that interrupts even a regular
   expression mid-match. The in-process gates (the OpenCode plugin, the Pi
@@ -172,10 +172,10 @@ is no gate, and every gate bounds itself:
   time. Only a workspace's own ` WHERE ` pattern can be slow, and the deadline
   covers it.
 
-A legitimate call never comes near its deadline, even on a busy machine: on the
-same loaded machine, the slowest gates (the bash gates, which start `python3`)
-decided a call at the size limits in under a second, and the JavaScript gates
-in under half that.
+A legitimate call stays well inside its deadline, even on a busy machine: on the
+same loaded machine, a call at the size limits took the bash gates (which start
+`python3`) at most 4.6 seconds against their 9, and the JavaScript gates at most
+1.2 seconds; the 4-second deadlines are all JavaScript gates'.
 
 Where a harness has a setting to refuse on a failed or timed-out hook, connect
 sets it; where it has a key for the hook's timeout, connect sets 10 seconds.
