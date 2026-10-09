@@ -1,6 +1,7 @@
 export { ClawdeClient } from './client'
 export { ControlPlaneClient } from './control-plane'
 export { verifyEvidenceArchive } from './evidence'
+export { verifyIntegrityRoot } from './integrity'
 export * from './types'
 export * from './errors'
 export {

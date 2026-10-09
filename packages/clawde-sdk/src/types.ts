@@ -1185,9 +1185,38 @@ export interface IntegrityRootList extends ListEnvelope {
   leafSchemaVersion: number
 }
 
+/**
+ * The fields of a sealed root its signature covers, as
+ * `GET /api/v1/integrity/roots/:rootId` serves them: what
+ * `verifyIntegrityRoot` reads.
+ */
+export interface SignedIntegrityRoot {
+  workspace_id: string
+  loop_run_id: string | null
+  leaf_schema_version: number
+  merkle_root: string
+  signature_alg: string | null
+  signature: string | null
+  signing_key_id: string | null
+  /** The chain link; in the signed bytes from preimage version 2 on. */
+  previous_root?: string | null
+  /** The preimage the signature covers; absent from a control plane older than the column, which means 1. */
+  signing_preimage_version?: number
+}
+
+/**
+ * What `verifyIntegrityRoot` established: `valid` a published key accepted
+ * the signature, `invalid` the key the root names rejected it, `unsigned` no
+ * key was configured when it was sealed, `unverifiable` the key is not
+ * published or the root names an algorithm or preimage version this build
+ * cannot check, `keys_unavailable` no key set was given. Only `invalid` says
+ * the root changed.
+ */
+export type IntegrityRootSignatureState = 'valid' | 'invalid' | 'unsigned' | 'unverifiable' | 'keys_unavailable'
+
 export interface IntegrityRootDetail {
   ok: boolean
-  root: SealedRoot & {
+  root: SealedRoot & SignedIntegrityRoot & {
     workspace_id: string
     signature: string | null
     previous_root: string | null

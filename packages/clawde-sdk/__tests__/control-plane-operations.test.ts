@@ -12,6 +12,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ControlPlaneClient } from '../src/control-plane'
 import { ClawdeConnectionError } from '../src/errors'
+import * as sdk from '../src/index'
 
 interface Vector {
   ts: string
@@ -44,7 +45,11 @@ interface ErrorVector {
 
 const FIXTURE = JSON.parse(
   readFileSync(join(__dirname, '../../shared-types/fixtures/control-plane-operations.json'), 'utf-8'),
-) as { operations: Vector[]; errors: ErrorVector[] }
+) as {
+  operations: Vector[]
+  errors: ErrorVector[]
+  offline: Array<{ ts: string; py: string; cli: string; keys: string; vectors: string }>
+}
 
 /** `{ "$bytes": text }` in the fixture is a bytes argument. */
 function decodeArg(arg: unknown): unknown {
@@ -102,6 +107,16 @@ describe('ControlPlaneClient operations (shared with the Python SDK)', () => {
     const declared = [...source.matchAll(/public async (\w+)\(/g)].map((m) => m[1]).sort()
     expect(declared).toEqual(FIXTURE.operations.map((v) => v.ts).sort())
     for (const v of FIXTURE.operations) expect(v.py).toBe(snake(v.ts))
+  })
+
+  it('exports exactly the offline checks the shared list names, each with its key fetch and its CLI fixture', () => {
+    const exported = Object.keys(sdk).filter((name) => /^verify[A-Z]/.test(name)).sort()
+    expect(exported).toEqual(FIXTURE.offline.map((o) => o.ts).sort())
+    for (const o of FIXTURE.offline) {
+      expect(o.py).toBe(snake(o.ts))
+      expect(FIXTURE.operations.some((v) => v.ts === o.keys)).toBe(true)
+      expect(() => readFileSync(join(__dirname, '../../..', o.vectors))).not.toThrow()
+    }
   })
 
   for (const v of FIXTURE.operations) {

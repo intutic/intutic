@@ -256,6 +256,15 @@ class EvidenceVerification(TypedDict):
     verified: bool
 
 
+#: What ``verify_integrity_root`` established: "valid" a published key accepted
+#: the signature, "invalid" the key the root names rejected it, "unsigned" no
+#: key was configured when it was sealed, "unverifiable" the key is not
+#: published or the root names an algorithm or preimage version this build
+#: cannot check, "keys_unavailable" no key set was given. Only "invalid" says
+#: the root changed.
+IntegrityRootSignatureState = Literal["valid", "invalid", "unsigned", "unverifiable", "keys_unavailable"]
+
+
 class GateStatus(TypedDict):
     harnessType: str
     status: Literal["reporting", "silent", "new"]

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import intutic_clawde
 from intutic_clawde import ClawdeConnectionError, ControlPlaneClient
 
 FIXTURE = json.loads(
@@ -68,6 +69,17 @@ def test_method_set_is_the_shared_list_and_its_names_are_the_typescript_ones_in_
     assert declared == sorted(v["py"] for v in FIXTURE["operations"])
     for v in FIXTURE["operations"]:
         assert v["py"] == _snake(v["ts"])
+
+
+def test_exports_exactly_the_offline_checks_the_shared_list_names():
+    exported = sorted(name for name in intutic_clawde.__all__ if name.startswith("verify_"))
+    assert exported == sorted(o["py"] for o in FIXTURE["offline"])
+    repo = Path(__file__).resolve().parents[3]
+    for o in FIXTURE["offline"]:
+        assert o["py"] == _snake(o["ts"])
+        assert callable(getattr(intutic_clawde, o["py"]))
+        assert any(v["ts"] == o["keys"] for v in FIXTURE["operations"])
+        assert (repo / o["vectors"]).is_file()
 
 
 @pytest.mark.parametrize("vector", FIXTURE["operations"], ids=[v["py"] for v in FIXTURE["operations"]])

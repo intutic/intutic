@@ -1,5 +1,5 @@
 {
-  "$comment": "Every ControlPlaneClient method of both SDKs (packages/clawde-sdk, camelCase `ts`; packages/intutic-clawde, snake_case `py`), the CLI command it matches (`cli`, null for none), and one call: the arguments (`args` positional for both SDKs; `options` the TypeScript trailing options object, the same names in snake_case as Python keyword arguments; `tsArgs`, `pyArgs`, `pyKwargs` where the two SDKs' signatures predate this file and differ), the request it must make (`body` absent means none; `auth: false` means no Authorization header; `multipart` a form upload) and what it returns for `response` (`returns`, or `returnsText` for a download's bytes; {\"$bytes\": text} is a bytes argument). Both SDKs' tests assert their method set equals this list and run every entry, and `errors` holds what a failure raises. `excluded` names the CLI commands that act on the machine they run on, with the reason. A method added to one SDK without the other, or a call that drifts, fails both suites.",
+  "$comment": "Every ControlPlaneClient method of both SDKs (packages/clawde-sdk, camelCase `ts`; packages/intutic-clawde, snake_case `py`), the CLI command it matches (`cli`, null for none), and one call: the arguments (`args` positional for both SDKs; `options` the TypeScript trailing options object, the same names in snake_case as Python keyword arguments; `tsArgs`, `pyArgs`, `pyKwargs` where the two SDKs' signatures predate this file and differ), the request it must make (`body` absent means none; `auth: false` means no Authorization header; `multipart` a form upload) and what it returns for `response` (`returns`, or `returnsText` for a download's bytes; {\"$bytes\": text} is a bytes argument). Both SDKs' tests assert their method set equals this list and run every entry, and `errors` holds what a failure raises. `offline` lists the checks both SDKs export that run without the control plane (the CLI's signature verification, against the key set `keys` fetches), each held to the CLI's own fixture `vectors` by both suites. `excluded` names the CLI commands that act on the machine they run on, with the reason. A method added to one SDK without the other, or a call that drifts, fails both suites.",
   "operations": [
     {
       "ts": "whoami",
@@ -5520,6 +5520,22 @@
         "minimumRequired": 30,
         "reason": "not enough judged pairs"
       }
+    }
+  ],
+  "offline": [
+    {
+      "ts": "verifyEvidenceArchive",
+      "py": "verify_evidence_archive",
+      "cli": "compliance verify",
+      "keys": "getSigningKeys",
+      "vectors": "tools/cli/src/commands/__fixtures__/evidence-archive.json"
+    },
+    {
+      "ts": "verifyIntegrityRoot",
+      "py": "verify_integrity_root",
+      "cli": "integrity verify",
+      "keys": "getSigningKeys",
+      "vectors": "tools/cli/src/commands/__fixtures__/integrity-roots.json"
     }
   ],
   "errors": [

@@ -228,7 +228,19 @@ Answers are the route's JSON, typed: TypeScript interfaces, Python `TypedDict`s,
 
 A call that fails throws (raises) `ClawdeConnectionError` with the method, path, status and the control plane's answer in its message. A 403 that names the roles allowed reads as that sentence, as the CLI prints it: `Control plane POST /api/v1/mcp/servers/mcp_1/status refused (403): Requires the OWNER or ADMIN role`. The integrity chain walks (`getIntegrityChain`, `getIntegrityConfigChain`) return the walk whether or not it found a break.
 
-`verifyEvidenceArchive(archive, jwks)` (`verify_evidence_archive`) checks an evidence archive offline, as `intutic compliance verify` does: the manifest's section hashes, the whole-archive hash, then the Ed25519 signature against the published key its `keyId` names. `verified` is true only when the hashes match and a published key accepts the signature; an unsigned archive, or one whose key is not published, is reported but not verified. Pass `null` (`None`) for `jwks` when the keys cannot be had. In Python the signature check needs the `cryptography` package: `pip install 'intutic-clawde[compliance]'`.
+`verifyEvidenceArchive(archive, jwks)` (`verify_evidence_archive`) checks an evidence archive offline, as `intutic compliance verify` does: the manifest's section hashes, the whole-archive hash, then the Ed25519 signature against the published key its `keyId` names. `verified` is true only when the hashes match and a published key accepts the signature; an unsigned archive, or one whose key is not published, is reported but not verified. Pass `null` (`None`) for `jwks` when the keys cannot be had.
+
+`verifyIntegrityRoot(root, jwks)` (`verify_integrity_root`) checks a sealed trace root's signature offline, as `intutic integrity verify` does: it rebuilds the bytes the control plane signed from the root's own fields, under the preimage version the root records, and checks the Ed25519 signature against the published key its `signing_key_id` names. Pass the `root` of `getIntegrityRoot()`. It answers `valid`, or `invalid` when that key rejects the signature, which is the only answer that says the root changed. `unsigned` means no signing key was configured when the root was sealed; `unverifiable` means the key is not published, or the root names an algorithm or preimage version this SDK cannot check; `keys_unavailable` means `jwks` was `null` (`None`). `recomputeIntegrityRoot()` checks the other half, whether the stored traces still hash to the root.
+
+```typescript
+import { verifyIntegrityRoot } from '@intutic/clawde';
+
+const { root } = await cp.getIntegrityRoot(rootId);
+const signature = verifyIntegrityRoot(root, await cp.getSigningKeys()); // 'valid' | 'invalid' | …
+const { verdict } = await cp.recomputeIntegrityRoot(rootId);            // 'match' | 'mismatch' | 'missing_traces'
+```
+
+In Python both signature checks need the `cryptography` package: `pip install 'intutic-clawde[compliance]'`.
 
 ### What's covered
 
@@ -295,6 +307,7 @@ A call that fails throws (raises) `ClawdeConnectionError` with the method, path,
 |  | `collectEvidence` | `collect_evidence` | `POST /api/v1/compliance/soc2-collect` | `intutic compliance collect --from --to` |
 |  | `downloadEvidence` | `download_evidence` | `GET /api/v1/compliance/soc2-export/:runId` | `intutic compliance download` |
 |  | `getSigningKeys` | `get_signing_keys` | `GET /.well-known/intutic-trace-signing.json` | `intutic compliance verify` |
+|  | `verifyEvidenceArchive` | `verify_evidence_archive` | none, offline | `intutic compliance verify` |
 | Gate liveness, GitHub webhook | `getGateLiveness` | `get_gate_liveness` | `GET /api/v1/governance/gate-liveness` | `intutic gate-liveness` |
 |  | `getGithubWebhook` | `get_github_webhook` | `GET /api/v1/integrations/github/webhook` | `intutic github webhook show` |
 |  | `rotateGithubWebhookSecret` | `rotate_github_webhook_secret` | `POST /api/v1/integrations/github/webhook/secret` | `intutic github webhook rotate-secret` |
@@ -341,6 +354,7 @@ A call that fails throws (raises) `ClawdeConnectionError` with the method, path,
 |  | `recomputeIntegrityRoot` | `recompute_integrity_root` | `POST /api/v1/integrity/roots/:rootId/recompute` | `intutic integrity verify` |
 |  | `getIntegrityChain` | `get_integrity_chain` | `GET /api/v1/integrity/chain` | `intutic integrity chain` |
 |  | `getIntegrityConfigChain` | `get_integrity_config_chain` | `GET /api/v1/integrity/config-chain` | `intutic integrity config-chain` |
+|  | `verifyIntegrityRoot` | `verify_integrity_root` | none, offline | `intutic integrity verify` |
 | Compliance policies, WASM rules | `listPolicies` | `list_policies` | `GET /api/v1/policies` | `intutic policy export` |
 |  | `enablePolicy` | `enable_policy` | `POST /api/v1/policies/:policyId/enable` | `intutic policy enable` |
 |  | `disablePolicy` | `disable_policy` | `POST /api/v1/policies/:policyId/disable` | `intutic policy disable` |

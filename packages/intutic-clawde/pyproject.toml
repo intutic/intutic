@@ -64,7 +64,8 @@ strands-agents = {version = ">=1.57.2", optional = true}
 # this adapter).
 agent-framework-core = {version = ">=1.20.0", optional = true}
 # Checks the Ed25519 signature on a compliance evidence archive
-# (intutic_clawde/evidence.py); the archive's hashes need nothing beyond the
+# (intutic_clawde/evidence.py) and on a sealed trace root
+# (intutic_clawde/integrity.py); the archive's hashes need nothing beyond the
 # standard library. Optional so the SDK keeps its two-package footprint for
 # everyone who never verifies an archive.
 cryptography = {version = ">=44.0.1", optional = true}

@@ -285,7 +285,9 @@
           { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getGateLiveness" },
           { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_gate_liveness" },
           { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getIntegrityChain" },
-          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_integrity_chain" }
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_integrity_chain" },
+          { "file": "packages/clawde-sdk/src/integrity.ts", "contains": "verifyIntegrityRoot" },
+          { "file": "packages/intutic-clawde/intutic_clawde/integrity.py", "contains": "verify_integrity_root" }
         ],
         "mcpTools": { "none": "alerts are for operators" },
         "kitkat": { "none": "alerts are for operators" },
