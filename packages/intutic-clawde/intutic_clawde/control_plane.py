@@ -9,7 +9,7 @@ management calls onto ClawdeClient would silently need a second base URL
 on a class whose whole contract today is "one client, one proxy."
 
 Every endpoint here is mirrored 1:1 from tools/cli/src/commands/{org,team,
-gateway,credentials,whoami}.ts -- the CLI's own already-tested contracts,
+gateway,credentials,settings,whoami}.ts -- the CLI's own already-tested contracts,
 not re-derived. Endpoints deliberately NOT included: session establishment
 (login/logout -- an SDK caller supplies api_key directly, matching
 ClawdeClient's own existing constructor contract), and local-environment/
@@ -178,6 +178,14 @@ class ControlPlaneClient:
         """DELETE /api/v1/gateways/:id"""
         self._request("DELETE", f"/api/v1/gateways/{_quote(gateway_id)}", {"reason": reason})
 
+    def get_gateway_config(self, gateway_id: str) -> Dict[str, Any]:
+        """GET /api/v1/gateways/:id/config -- the flags set on the gateway
+        (``requireVk``, ``requireProvisionedKey``) and ``configVersion``, as the
+        gateway pulls them. A flag never set is absent: the gateway runs its
+        deployment's own value.
+        """
+        return self._request("GET", f"/api/v1/gateways/{_quote(gateway_id)}/config")
+
     def set_gateway_config(
         self,
         gateway_id: str,
@@ -205,6 +213,24 @@ class ControlPlaneClient:
     def resolve_gateway(self) -> Dict[str, Any]:
         """GET /api/v1/workspace/gateway-resolution"""
         return self._request("GET", "/api/v1/workspace/gateway-resolution")
+
+    def get_workspace_settings(self) -> Dict[str, Any]:
+        """GET /api/v1/workspace/settings -- every setting, resolved with its default."""
+        return self._request("GET", "/api/v1/workspace/settings")
+
+    def update_workspace_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """PUT /api/v1/workspace/settings -- the route ``intutic settings set`` calls.
+
+        Only the keys given change; the rest are kept (``featureFlags`` merges
+        one level deeper, so one flag does not switch the others off). The
+        control plane is the authority on which keys exist and what each
+        accepts: an unknown key or a bad value is refused with a 400 naming
+        it, a setting the workspace's plan does not include (the group policy
+        below Biz Org) with a 403 "Upgrade required", and a member below
+        OWNER or ADMIN with a 403. Each refusal raises ClawdeConnectionError
+        carrying the server's answer.
+        """
+        return self._request("PUT", "/api/v1/workspace/settings", settings)
 
     def list_provider_credentials(self) -> List[Dict[str, Any]]:
         """GET /api/v1/workspace/provider-credentials"""

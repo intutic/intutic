@@ -1,0 +1,28 @@
+{
+  "_comment": "A git remote reduced to host/path, with no scheme, credentials, port, query, fragment or .git suffix; null for anything that is not a network remote. shared-types' normalizeGitRemote (the sync daemon and the control plane), the clawde SDK's git-context.ts and intutic_clawde's git_context.py are each held to these. Userinfo here is deliberately not credential-shaped.",
+  "vectors": [
+    { "remote": "https://github.com/acme/widgets.git", "normalized": "github.com/acme/widgets" },
+    { "remote": "https://github.com/acme/widgets", "normalized": "github.com/acme/widgets" },
+    { "remote": "https://GitHub.com/acme/widgets/", "normalized": "github.com/acme/widgets" },
+    { "remote": "git@github.com:acme/widgets.git", "normalized": "github.com/acme/widgets" },
+    { "remote": "ssh://git@gitlab.example.com:2222/group/sub/widgets.git", "normalized": "gitlab.example.com/group/sub/widgets" },
+    { "remote": "git+ssh://git@github.com/acme/widgets.git", "normalized": "github.com/acme/widgets" },
+    { "remote": "git://example.com/acme/widgets", "normalized": "example.com/acme/widgets" },
+    { "remote": "  https://github.com/acme/widgets.git\n", "normalized": "github.com/acme/widgets" },
+    { "remote": "https://alice:not-a-secret@github.com/acme/widgets.git", "normalized": "github.com/acme/widgets" },
+    { "remote": "https://x-access-token:not-a-secret@github.com/acme/widgets", "normalized": "github.com/acme/widgets" },
+    { "remote": "deploy:not-a-secret@git.example.com:acme/widgets.git", "normalized": "git.example.com/acme/widgets" },
+    { "remote": "https://example.com/acme/widgets.git?access_token=not-a-secret#main", "normalized": "example.com/acme/widgets" },
+    { "remote": "ssh://git@github.com:22/acme/widgets.git", "normalized": "github.com/acme/widgets" },
+    { "remote": "", "normalized": null },
+    { "remote": "   ", "normalized": null },
+    { "remote": "/home/dev/widgets", "normalized": null },
+    { "remote": "../widgets", "normalized": null },
+    { "remote": "file:///home/dev/widgets.git", "normalized": null },
+    { "remote": "C:\\src\\widgets", "normalized": null },
+    { "remote": "C:/src/widgets", "normalized": null },
+    { "remote": "https://github.com", "normalized": null },
+    { "remote": "https://github.com/", "normalized": null },
+    { "remote": "not a url", "normalized": null }
+  ]
+}

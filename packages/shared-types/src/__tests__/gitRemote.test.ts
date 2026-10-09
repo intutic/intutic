@@ -1,5 +1,12 @@
+import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
 import { normalizeGitRemote } from '../gitRemote.js'
+
+/** The vectors the clawde SDKs' own copies are held to as well. */
+const VECTORS = JSON.parse(readFileSync(new URL('../../fixtures/git-remote-vectors.json', import.meta.url), 'utf8')).vectors as Array<{
+  remote: string
+  normalized: string | null
+}>
 
 // Credential-shaped values are assembled at runtime so no contiguous token
 // literal sits in source for a secret scanner to trip on.
@@ -57,5 +64,9 @@ describe('normalizeGitRemote', () => {
     ['not a url'],
   ])('%j is not a hosted repository: null', (remote) => {
     expect(normalizeGitRemote(remote)).toBeNull()
+  })
+
+  it.each(VECTORS)('shared vector %j', ({ remote, normalized }) => {
+    expect(normalizeGitRemote(remote)).toBe(normalized)
   })
 })

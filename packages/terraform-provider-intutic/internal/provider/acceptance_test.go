@@ -9,10 +9,14 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -67,6 +71,33 @@ func apiStatus(t *testing.T, method, path string, body any) int {
 		t.Fatal(err)
 	}
 	return 200
+}
+
+// captured records an attribute's value for a later step to compare with.
+func captured(into *string) func(string) error {
+	return func(v string) error { *into = v; return nil }
+}
+
+// changedFrom checks an attribute no longer has the value *prev holds, then
+// records the new one.
+func changedFrom(prev *string, what string) func(string) error {
+	return func(v string) error {
+		if v == "" || v == *prev {
+			return fmt.Errorf("%s did not change", what)
+		}
+		*prev = v
+		return nil
+	}
+}
+
+// same checks an attribute still has the value *want holds.
+func same(want *string, what string) func(string) error {
+	return func(v string) error {
+		if v != *want {
+			return fmt.Errorf("%s changed from %s to %s", what, *want, v)
+		}
+		return nil
+	}
 }
 
 // drifted plans the same config and expects a change.
@@ -341,12 +372,34 @@ resource "intutic_notification_rule" "page" {
   channel               = "pagerduty"
   pagerduty_routing_key = "R0UT1NGKEY0123456789"
 }`
+	rotated := func(v string) string {
+		return strings.Replace(webhook, "cooldown_minutes = 30", fmt.Sprintf("cooldown_minutes = 30\n  secret_rotation_triggers = { rotated = %q }", v), 1)
+	}
+	const hook = "intutic_notification_rule.hook"
+	var hookID, secret string
+	rotation := func(v string) resource.TestStep {
+		return resource.TestStep{
+			Config: rotated(v) + pagerduty,
+			ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(hook, plancheck.ResourceActionUpdate),
+					plancheck.ExpectUnknownValue(hook, tfjsonpath.New("signing_secret")),
+					plancheck.ExpectResourceAction("intutic_notification_rule.page", plancheck.ResourceActionNoop),
+				},
+			},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrWith(hook, "signing_secret", changedFrom(&secret, "signing_secret")),
+				resource.TestCheckResourceAttrWith(hook, "id", same(&hookID, "id")),
+			),
+		}
+	}
 	accTest(t,
 		resource.TestStep{
 			Config: webhook + pagerduty,
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestMatchResourceAttr("intutic_notification_rule.hook", "id", regexp.MustCompile(`^nr_`)),
-				resource.TestCheckResourceAttrSet("intutic_notification_rule.hook", "signing_secret"),
+				resource.TestCheckResourceAttrWith(hook, "id", captured(&hookID)),
+				resource.TestCheckResourceAttrWith(hook, "signing_secret", captured(&secret)),
 				resource.TestCheckResourceAttr("intutic_notification_rule.page", "enabled", "true"),
 				resource.TestCheckResourceAttr("intutic_notification_rule.page", "cooldown_minutes", "15"),
 			),
@@ -356,6 +409,202 @@ resource "intutic_notification_rule" "page" {
 		// Neither secret is ever returned after creation.
 		imported("intutic_notification_rule.hook", "signing_secret"),
 		imported("intutic_notification_rule.page", "pagerduty_routing_key"),
+		// Adding the triggers rotates the secret in place, and so does each
+		// change to them; an unchanged value plans nothing.
+		rotation("1"),
+		clean(rotated("1")+pagerduty),
+		rotation("2"),
+		clean(rotated("2")+pagerduty),
+	)
+}
+
+func TestAccSiemDestination(t *testing.T) {
+	webhook := func(triggers string) string {
+		return fmt.Sprintf(`
+resource "intutic_siem_destination" "hook" {
+  name          = "tf-acc webhook"
+  adapter_type  = "webhook_https"
+  config        = jsonencode({ webhookUrl = "https://hooks.example.com/intutic-siem" })
+  secret_config = { authHeaderValue = "Bearer tf-acc-0123456789" }
+  source_tables = ["governance_incidents", "gate_decisions"]
+  %s
+}`, triggers)
+	}
+	splunkCfg := `jsonencode({ hecUrl = "https://splunk.example.com:8088/services/collector", sourcetype = "intutic" })`
+	splunk := `
+resource "intutic_siem_destination" "splunk" {
+  name          = "tf-acc splunk"
+  adapter_type  = "splunk_hec"
+  config        = ` + splunkCfg + `
+  secret_config = { token = "tf-acc-hec-token-0123456789" }
+  batch_size    = 50
+}`
+	const hook, spl = "intutic_siem_destination.hook", "intutic_siem_destination.splunk"
+	v1 := webhook("") + splunk
+	rotated := func(v string) string {
+		return webhook(fmt.Sprintf("secret_rotation_triggers = { rotated = %q }", v)) + splunk
+	}
+	var hookID, splunkID, secret string
+	rotation := func(v string) resource.TestStep {
+		return resource.TestStep{
+			Config: rotated(v),
+			ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(hook, plancheck.ResourceActionUpdate),
+					plancheck.ExpectUnknownValue(hook, tfjsonpath.New("signing_secret")),
+					plancheck.ExpectResourceAction(spl, plancheck.ResourceActionNoop),
+				},
+			},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrWith(hook, "signing_secret", changedFrom(&secret, "signing_secret")),
+				resource.TestCheckResourceAttrWith(hook, "id", same(&hookID, "id")),
+			),
+		}
+	}
+	accTest(t,
+		resource.TestStep{
+			Config: v1,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestMatchResourceAttr(hook, "id", regexp.MustCompile(`^siemdest_`)),
+				resource.TestCheckResourceAttrWith(hook, "id", captured(&hookID)),
+				resource.TestCheckResourceAttrWith(spl, "id", captured(&splunkID)),
+				resource.TestCheckResourceAttrWith(hook, "signing_secret", captured(&secret)),
+				resource.TestCheckResourceAttrSet(hook, "signing_secret"),
+				resource.TestCheckResourceAttr(hook, "enabled", "true"),
+				resource.TestCheckResourceAttr(hook, "source_tables.#", "2"),
+				resource.TestCheckNoResourceAttr(hook, "paused_reason"),
+				resource.TestCheckNoResourceAttr(spl, "signing_secret"),
+				resource.TestCheckResourceAttr(spl, "batch_size", "50"),
+				resource.TestCheckResourceAttr(spl, "flush_interval_ms", "60000"),
+				resource.TestCheckResourceAttr(spl, "source_tables.#", "0"),
+			),
+		},
+		// Both credentials read back masked; the plan must still be empty.
+		clean(v1),
+		// No secret is ever returned unmasked after creation.
+		imported(hook, "signing_secret", "secret_config"),
+		imported(spl, "secret_config"),
+		rotation("1"),
+		clean(rotated("1")),
+		rotation("2"),
+		clean(rotated("2")),
+		// A token changed outside Terraform shows through its mask.
+		drifted(rotated("2"), func() {
+			api(t, "PUT", siemPath+"/"+splunkID, map[string]any{"config": map[string]string{
+				"hecUrl": "https://splunk.example.com:8088/services/collector", "sourcetype": "intutic", "token": "changed-in-the-dashboard-9999",
+			}})
+		}),
+		resource.TestStep{Config: rotated("2")},
+		clean(rotated("2")),
+		// Switching a destination off is an update, not a delete.
+		resource.TestStep{
+			Config: strings.Replace(rotated("2"), "batch_size    = 50", "batch_size    = 50\n  enabled       = false", 1),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(spl, "enabled", "false"),
+				resource.TestCheckResourceAttrWith(spl, "id", same(&splunkID, "id")),
+			),
+		},
+		// The plan checks source names against the API's list.
+		resource.TestStep{
+			Config:      strings.Replace(rotated("2"), `"gate_decisions"`, `"gate_decision"`, 1),
+			PlanOnly:    true,
+			ExpectError: regexp.MustCompile(`"gate_decision" is not a source`),
+		},
+	)
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func TestAccWasmRule(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, tag string) (string, string) {
+		p := filepath.Join(dir, name)
+		data := testWasmModule(tag)
+		if err := os.WriteFile(p, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p, sha256Hex(data)
+	}
+	v1, sum1 := write("v1.wasm", "v1")
+	moved, _ := write("moved.wasm", "v1")
+	v2, sum2 := write("v2.wasm", "v2")
+	cfg := func(source, extra string) string {
+		return fmt.Sprintf(`
+resource "intutic_wasm_rule" "filter" {
+  name   = "tf-acc custom filter"
+  source = %q
+  %s
+}`, source, extra)
+	}
+	// The pin is case-insensitive, as the proxy's check is.
+	pinned := cfg(v1, fmt.Sprintf("sha256 = %q", strings.ToUpper(sum1)))
+	relabelled := cfg(v1, `description = "Blocks nothing; proves the upload."
+  enabled     = false`)
+	const name = "intutic_wasm_rule.filter"
+	var ruleID string
+	accTest(t,
+		resource.TestStep{
+			Config: pinned,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestMatchResourceAttr(name, "id", regexp.MustCompile(`^wasm_`)),
+				resource.TestCheckResourceAttrWith(name, "id", captured(&ruleID)),
+				resource.TestCheckResourceAttr(name, "bundle_sha256", sum1),
+				resource.TestCheckResourceAttr(name, "enabled", "true"),
+				resource.TestCheckResourceAttr(name, "description", ""),
+			),
+		},
+		clean(pinned),
+		// The file and its pin live in Terraform alone.
+		imported(name, "source", "sha256"),
+		// Name, description and enabled change in place.
+		resource.TestStep{
+			Config: relabelled,
+			ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(name, plancheck.ResourceActionUpdate)},
+			},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrWith(name, "id", same(&ruleID, "id")),
+				resource.TestCheckResourceAttr(name, "enabled", "false"),
+			),
+		},
+		clean(relabelled),
+		// The same bytes at another path upload nothing.
+		resource.TestStep{
+			Config: cfg(moved, ""),
+			ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(name, plancheck.ResourceActionUpdate),
+					plancheck.ExpectKnownValue(name, tfjsonpath.New("bundle_sha256"), knownvalue.StringExact(sum1)),
+				},
+			},
+			Check: resource.TestCheckResourceAttrWith(name, "id", same(&ruleID, "id")),
+		},
+		// Different bytes replace the rule: the API cannot change them.
+		resource.TestStep{
+			Config: cfg(v2, ""),
+			ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(name, plancheck.ResourceActionReplace),
+					plancheck.ExpectKnownValue(name, tfjsonpath.New("bundle_sha256"), knownvalue.StringExact(sum2)),
+				},
+			},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrWith(name, "id", changedFrom(&ruleID, "id")),
+				resource.TestCheckResourceAttr(name, "bundle_sha256", sum2),
+			),
+		},
+		clean(cfg(v2, "")),
+		// Deleted outside Terraform: the plan uploads it again.
+		drifted(cfg(v2, ""), func() {
+			if got := apiStatus(t, "DELETE", wasmRulesPath+"/"+ruleID, nil); got != 200 {
+				t.Fatalf("delete: HTTP %d", got)
+			}
+		}),
+		resource.TestStep{Config: cfg(v2, "")},
+		clean(cfg(v2, "")),
 	)
 }
 

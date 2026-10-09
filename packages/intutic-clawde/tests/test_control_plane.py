@@ -215,6 +215,66 @@ def test_get_gateway_status(mock_request):
 
 
 @patch("requests.request")
+def test_get_gateway_status_carries_applied_and_desired_config_versions(mock_request):
+    mock_request.return_value = _mock_response(
+        json_body={"status": "online", "appliedConfigVersion": 2, "desiredConfigVersion": 3}
+    )
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    res = client.get_gateway_status("gw_1")
+    assert (res["appliedConfigVersion"], res["desiredConfigVersion"]) == (2, 3)
+
+
+@patch("requests.request")
+def test_get_gateway_config(mock_request):
+    mock_request.return_value = _mock_response(json_body={"config": {"requireVk": True}, "configVersion": 3})
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    res = client.get_gateway_config("gw 1")
+
+    args, kwargs = mock_request.call_args
+    assert args[0] == "GET"
+    assert args[1] == "https://cp.example.com/api/v1/gateways/gw%201/config"
+    assert kwargs["headers"]["Authorization"] == "Bearer vk_test"
+    assert res == {"config": {"requireVk": True}, "configVersion": 3}
+
+
+@patch("requests.request")
+def test_get_workspace_settings(mock_request):
+    mock_request.return_value = _mock_response(json_body={"workspaceId": "ws_1", "settings": {"mcpDefaultPolicy": "allow"}})
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    res = client.get_workspace_settings()
+
+    args, _ = mock_request.call_args
+    assert args[:2] == ("GET", "https://cp.example.com/api/v1/workspace/settings")
+    assert res["settings"]["mcpDefaultPolicy"] == "allow"
+
+
+@patch("requests.request")
+def test_update_workspace_settings_puts_only_the_keys_given(mock_request):
+    mock_request.return_value = _mock_response(
+        json_body={"updated": True, "workspaceId": "ws_1", "settings": {"mcpDefaultPolicy": "deny"}}
+    )
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    res = client.update_workspace_settings({"mcpDefaultPolicy": "deny"})
+
+    args, kwargs = mock_request.call_args
+    assert args[:2] == ("PUT", "https://cp.example.com/api/v1/workspace/settings")
+    assert kwargs["json"] == {"mcpDefaultPolicy": "deny"}
+    assert res["updated"] is True
+
+
+@pytest.mark.parametrize("status,text,reason", [
+    (400, '{"error":"Validation failed","details":{"_errors":["Unrecognized key(s) in object: \'pcas_strict_mode\'"]}}', "pcas_strict_mode"),
+    (403, '{"error":"Upgrade required \u2014 the group policy for high-risk tools requires a Biz Org plan or higher"}', "Upgrade required"),
+])
+@patch("requests.request")
+def test_update_workspace_settings_raises_the_servers_refusal(mock_request, status, text, reason):
+    mock_request.return_value = _mock_response(status_code=status, text=text)
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    with pytest.raises(ClawdeConnectionError, match=reason):
+        client.update_workspace_settings({"pcas_strict_mode": True})
+
+
+@patch("requests.request")
 def test_rotate_gateway_token(mock_request):
     mock_request.return_value = _mock_response(json_body={"gatewayId": "gw_1", "token": "gwk_new"})
     client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")

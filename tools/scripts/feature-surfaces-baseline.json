@@ -76,7 +76,6 @@
     "GET /api/v1/findings/response-echo/report",
     "GET /api/v1/findings/stats",
     "GET /api/v1/gateways",
-    "GET /api/v1/gateways/:id/config",
     "GET /api/v1/governance-coverage",
     "GET /api/v1/governance-coverage/:harnessType",
     "GET /api/v1/governance/cards",

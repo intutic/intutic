@@ -1,12 +1,12 @@
 ---
 page_title: "Intutic Provider"
 description: |-
-  Manage an Intutic workspace's SOPs, enforcement policies, policy guardrails, settings, virtual keys, self-hosted gateways, notification rules and MCP server decisions as code.
+  Manage an Intutic workspace's SOPs, enforcement policies, policy guardrails, settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters and MCP server decisions as code.
 ---
 
 # Intutic Provider
 
-The Intutic provider manages one Intutic workspace through the control plane's REST API: SOPs, enforcement policies, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules and MCP server decisions.
+The Intutic provider manages one Intutic workspace through the control plane's REST API: SOPs, enforcement policies, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters (WASM and Rego rules) and MCP server decisions.
 
 ## Authentication
 
@@ -14,7 +14,7 @@ The provider authenticates with a workspace API key (`vk_…`). Create one under
 
 Pass the key as `api_key`, or set `INTUTIC_API_KEY`. For a self-hosted control plane, set `endpoint` or `INTUTIC_CONTROL_PLANE_URL`.
 
-Virtual keys and gateway tokens created by the provider are returned once and stored in Terraform state as sensitive values. Keep the state in an encrypted backend.
+Virtual keys, gateway tokens and webhook signing secrets created by the provider are returned once and stored in Terraform state as sensitive values. Keep the state in an encrypted backend.
 
 ## Example Usage
 

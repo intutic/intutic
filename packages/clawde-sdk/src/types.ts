@@ -257,6 +257,10 @@ export interface GatewayStatus {
   litellmReachable: boolean | null
   lastError: string | null
   reportedAt: string | null
+  /** The config version the gateway reported running in its last heartbeat; null when unreachable or not reported. */
+  appliedConfigVersion: number | null
+  /** The version the latest config change produced; 0 before any. The gateway pulls it on its next heartbeat. */
+  desiredConfigVersion: number
 }
 
 export interface GatewayConfigUpdate {
@@ -265,8 +269,19 @@ export interface GatewayConfigUpdate {
 }
 
 export interface GatewayConfigResult {
+  /** The flags set on the gateway (`requireVk`, `requireProvisionedKey`). One never set is absent: the gateway runs its deployment's own value. */
   config: Record<string, unknown>
   configVersion: number
+}
+
+export interface WorkspaceSettings {
+  workspaceId: string
+  /** Every setting, resolved with its default. */
+  settings: Record<string, unknown>
+}
+
+export interface WorkspaceSettingsUpdateResult extends WorkspaceSettings {
+  updated: true
 }
 
 export interface GatewayResolution {
