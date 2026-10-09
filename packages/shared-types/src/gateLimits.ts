@@ -59,7 +59,7 @@ export type HookTimeoutSetBy =
   | 'connect'
   /** The harness's own value, which no setting changes. */
   | 'harness'
-  /** The harness documents none, so the gate assumes the shortest of any harness that runs a call whose hook timed out: Grok Build's 5 s. */
+  /** The harness documents none, so the gate assumes the shortest default of any documented harness that runs a call whose hook timed out: Grok Build's 5 s. */
   | 'undocumented'
   /** The gate runs in the harness's process, which waits for it without a limit. */
   | 'none'
@@ -74,7 +74,8 @@ export interface HookGateTimeout {
 }
 
 const CONNECT_MS = HOOK_TIMEOUT_SECONDS * 1000
-const GROK_BUILD_MS = 5000
+/** Grok Build's default hook timeout, the shortest any documented harness uses; assumed where a harness documents none. */
+const UNDOCUMENTED_ASSUMED_MS = 5000
 
 /**
  * The hook timeout each harness applies to its gate, keyed by the harness id
@@ -85,12 +86,12 @@ const GROK_BUILD_MS = 5000
 export const HOOK_GATE_TIMEOUTS = {
   'claude-code': { timeoutMs: CONNECT_MS, setBy: 'connect', source: '`timeout` (seconds) on the hook entry in .claude/settings.json; default 600 s, a call whose hook times out runs (code.claude.com/docs/en/hooks)' },
   cursor: { timeoutMs: CONNECT_MS, setBy: 'connect', source: '`timeout` (seconds) on the hooks.json entry, beside `failClosed: true`; default not stated (cursor.com/docs/agent/hooks)' },
-  windsurf: { timeoutMs: GROK_BUILD_MS, setBy: 'undocumented', source: 'hooks.json entries have no timeout key and Windsurf documents no timeout; any exit but 2 runs the call (docs.devin.ai/desktop/cascade/hooks)' },
+  windsurf: { timeoutMs: UNDOCUMENTED_ASSUMED_MS, setBy: 'undocumented', source: 'hooks.json entries have no timeout key and Windsurf documents no timeout; any exit but 2 runs the call (docs.devin.ai/desktop/cascade/hooks)' },
   codex: { timeoutMs: CONNECT_MS, setBy: 'connect', source: '`timeout` (seconds) on the hooks.json entry; default 600 s (Codex hooks documentation)' },
-  'muse-code': { timeoutMs: GROK_BUILD_MS, setBy: 'undocumented', source: 'Muse Code documents no hook timeout and no key for one (dev.meta.ai/docs/muse-code)' },
+  'muse-code': { timeoutMs: UNDOCUMENTED_ASSUMED_MS, setBy: 'undocumented', source: 'Muse Code documents no hook timeout and no key for one (dev.meta.ai/docs/muse-code)' },
   'github-copilot': { timeoutMs: CONNECT_MS, setBy: 'connect', source: '`timeout` (seconds) on the hook entry, the Copilot CLI\'s alias for `timeoutSec` and VS Code\'s key; default 30 s, a call whose hook times out runs (docs.github.com/en/copilot/reference/hooks-configuration)' },
   cline: { timeoutMs: 30_000, setBy: 'harness', source: 'HOOK_EXECUTION_TIMEOUT_MS = 30000 in Cline\'s hook-factory.ts, not configurable; a call whose hook times out runs' },
-  grok: { timeoutMs: GROK_BUILD_MS, setBy: 'connect', source: '`timeout` (seconds) on the hook entry, Grok Build\'s 5 s default written out; a call whose hook times out runs (docs.x.ai/build/features/hooks)' },
+  grok: { timeoutMs: CONNECT_MS, setBy: 'connect', source: '`timeout` (seconds) on the hook entry; default 5 s, no stated maximum, a call whose hook times out runs (docs.x.ai/build/features/hooks)' },
   antigravity: { timeoutMs: CONNECT_MS, setBy: 'connect', source: '`timeout` (seconds) on the PreToolUse handler in ~/.gemini/config/hooks.json; default 30 s (antigravity.google/docs/hooks)' },
   'gemini-cli': { timeoutMs: CONNECT_MS, setBy: 'connect', source: '`timeout` (milliseconds) on the BeforeTool hook in ~/.gemini/settings.json; default 60 000 (geminicli.com/docs/hooks/reference)' },
   goose: { timeoutMs: CONNECT_MS, setBy: 'connect', source: '`timeout` (seconds) beside `on_failure: "block"` in the plugin\'s hooks.json; default 30 s (goose hooks guide)' },

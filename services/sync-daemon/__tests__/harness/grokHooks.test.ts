@@ -38,6 +38,7 @@ import { createHash } from 'node:crypto'
 import { parse as parseToml } from 'smol-toml'
 import { DESTRUCTIVE_COMMAND_PATTERNS } from '../../src/harness/protectedPaths.js'
 import { toRulesLine } from '../../src/harness/gateBody.js'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 
 function writeRulesFixture(target: string): string {
   const lines = DESTRUCTIVE_COMMAND_PATTERNS.map(toRulesLine)
@@ -131,7 +132,8 @@ describe('Grok Build hooks writer', () => {
       const handler = groups[0].hooks[0]
       expect(handler.type).toBe('command')
       expect(handler.command).toContain('grok-check.js')
-      expect(handler.timeout).toBe(5)
+      // connect writes the shared hook timeout; Grok Build's default is 5 s.
+      expect(handler.timeout).toBe(HOOK_TIMEOUT_SECONDS)
     }
   })
 

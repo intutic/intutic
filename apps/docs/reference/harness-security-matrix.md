@@ -193,7 +193,7 @@ sets it; where it has a key for the hook's timeout, connect sets 10 seconds.
 | Goose | 30 s | runs the call; refuses with `on_failure: "block"` | `on_failure: "block"`, `timeout: 10` | 9 s |
 | OpenHands | 60 s | runs the call | `timeout: 10` | 9 s |
 | Hermes (shell hooks) | 60 s | runs the call; refuses with `fail_closed: true` | `fail_closed: true`, `timeout: 10` | 9 s |
-| Grok Build | 5 s | runs the call | `timeout: 5` | 4 s |
+| Grok Build | 5 s | runs the call | `timeout: 10` | 9 s |
 | Muse Code | not documented | not documented | nothing to set | 4 s |
 | OpenClaw (plugin hook) | 15 s | refuses (the hook runner fails closed) | `timeoutMs: 10000` on the hook registration | 9 s |
 | Pi (extension) | none (in process) | waits | nothing to set | 9 s |
@@ -201,7 +201,8 @@ sets it; where it has a key for the hook's timeout, connect sets 10 seconds.
 | n8n, Open WebUI, dsh | none (in process) | waits | nothing to set | none |
 
 Windsurf and Muse Code document no hook timeout, so their gates assume the
-shortest of any harness that runs a timed-out call, Grok Build's 5 seconds.
+shortest default of any harness that runs a timed-out call, Grok Build's 5
+seconds.
 
 ## Per-Harness Onboarding Guide
 

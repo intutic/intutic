@@ -154,9 +154,9 @@ describe('hook entries', () => {
     for (const e of entries) for (const h of e.hooks) expect(h.timeout).toBe(HOOK_TIMEOUT_SECONDS * 1000)
   })
 
-  it('Grok Build keeps its 5 s default', () => {
+  it('Grok Build sets an explicit timeout above its 5 s default', () => {
     const hooks = json('.grok/hooks/intutic-governance.json').hooks.PreToolUse[0].hooks
-    expect(hooks[0].timeout).toBe(5)
+    expect(hooks[0].timeout).toBe(HOOK_TIMEOUT_SECONDS)
   })
 
   it('Cursor fails closed, with an explicit timeout', () => {

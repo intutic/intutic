@@ -232,7 +232,7 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * v18: each gate's deadline is its own harness's: a second under the hook
  * timeout that harness applies (`HOOK_GATE_TIMEOUTS` and `gateDeadlineMs` in
  * `@intutic/shared-types`), at most 9 s. One 4 s deadline for every gate,
- * sized for Grok Build's 5 s, refused legitimate calls on a busy machine in
+ * sized for Grok Build's 5 s default (connect now writes 10 s), refused legitimate calls on a busy machine in
  * harnesses that wait 10 s or more. The bash gates also screen each subject
  * with one `grep` holding every rule's pattern before testing rule by rule,
  * and take the whitespace-collapsed fields from the extractor as they are:
