@@ -2,21 +2,29 @@
 sealed and signed (tools/cli/src/commands/__fixtures__/evidence-archive.json,
 with the key set it published), the same cases the CLI's
 complianceVerify.test.ts and the TypeScript SDK's evidence.test.ts run, so all
-three answer alike."""
+three answer alike.
+
+The signature checks need the ``compliance`` extra (cryptography) and are
+skipped without it; the hash checks need nothing and always run."""
 
 import base64
 import builtins
+import importlib.util
 import json
 from pathlib import Path
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from intutic_clawde import verify_evidence_archive
 from intutic_clawde.evidence import EVIDENCE_SIGNING_DOMAIN, canonical_json
 
 FIXTURES = Path(__file__).resolve().parents[3] / "tools" / "cli" / "src" / "commands" / "__fixtures__"
 JWKS = json.loads((FIXTURES / "evidence-jwks.json").read_text(encoding="utf-8"))
+
+
+needs_cryptography = pytest.mark.skipif(
+    importlib.util.find_spec("cryptography") is None, reason="needs the compliance extra (cryptography)"
+)
 
 
 def archive():
@@ -54,6 +62,7 @@ def test_canonical_json_orders_keys_by_utf16_code_unit_as_javascript_sorts():
     assert canonical_json({"～": 1, "\U0001f600": 2}) == '{"\U0001f600":2,"～":1}'
 
 
+@needs_cryptography
 def test_verifies_an_archive_the_control_plane_sealed_and_signed():
     v = verify_evidence_archive(archive(), JWKS)
     assert v["archiveHashMatches"] is True
@@ -67,7 +76,7 @@ def test_verifies_an_archive_the_control_plane_sealed_and_signed():
 def test_fails_an_archive_whose_content_changed():
     a = archive()
     a["categories"][0]["counts"]["governance_incidents.severity.high"] = 0
-    v = verify_evidence_archive(a, JWKS)
+    v = verify_evidence_archive(a, None)
     assert v["archiveHashMatches"] is False
     assert v["sectionMismatches"] == ["security"]
     assert v["verified"] is False
@@ -77,7 +86,7 @@ def test_checks_the_csv_and_the_pdf_as_the_files_they_are_and_as_part_of_their_f
     a = archive()
     a["frameworks"][0]["csv"] += "Article 10,failing\n"
     a["frameworks"][0]["pdf"] = base64.b64encode(b"%PDF-1.7\n% edited\n").decode()
-    assert verify_evidence_archive(a, JWKS)["sectionMismatches"] == [
+    assert verify_evidence_archive(a, None)["sectionMismatches"] == [
         "framework:eu_ai_act",
         "framework:eu_ai_act:csv",
         "framework:eu_ai_act:pdf",
@@ -87,7 +96,7 @@ def test_checks_the_csv_and_the_pdf_as_the_files_they_are_and_as_part_of_their_f
 def test_fails_a_manifest_entry_that_names_nothing_in_the_archive():
     a = archive()
     a["manifest"]["sections"]["framework:sox"] = "0" * 64
-    assert verify_evidence_archive(a, JWKS)["sectionMismatches"] == ["framework:sox"]
+    assert verify_evidence_archive(a, None)["sectionMismatches"] == ["framework:sox"]
 
 
 def test_says_unsigned_and_does_not_verify_an_archive_collected_without_a_signing_key():
@@ -102,7 +111,10 @@ def test_says_unsigned_and_does_not_verify_an_archive_collected_without_a_signin
     assert v["verified"] is False
 
 
+@needs_cryptography
 def test_fails_a_signature_another_key_made_under_the_published_key_id():
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
     a = archive()
     other = Ed25519PrivateKey.generate()
     preimage = f"{EVIDENCE_SIGNING_DOMAIN}\n{a['manifest']['archiveSha256']}".encode()
