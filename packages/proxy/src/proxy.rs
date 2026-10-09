@@ -1815,7 +1815,6 @@ fn machine_budget_applies_with(control_plane_url: Option<&str>) -> bool {
 async fn accrue_spend(
     store: &Arc<dyn LocalStore>,
     actual_cost_usd: f64,
-    workspace_id: &str,
     graph_id: &str,
     has_graph: bool,
     workflow_run_id: Option<&str>,
@@ -1849,7 +1848,7 @@ async fn accrue_spend(
     if has_graph && actual_cost_usd > 0.0 {
         store
             .add_graph_spend(
-                workspace_id,
+                &trace.workspace_id,
                 graph_id,
                 actual_cost_usd,
                 crate::plugins::anomaly::broadcast::NODE_TTL_SECS,
@@ -7169,7 +7168,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             accrue_spend(
                 &cache_store_clone,
                 actual_cost_usd,
-                &trace.workspace_id,
                 &node_for_trace.graph_id,
                 graph_key_clone.is_some(),
                 trace.loop_run_id.as_deref(),
@@ -8135,7 +8133,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     accrue_spend(
         &state.store,
         actual_cost_usd,
-        &trace.workspace_id,
         &wasm_ctx.node.graph_id,
         graph_key.is_some(),
         trace.loop_run_id.as_deref(),

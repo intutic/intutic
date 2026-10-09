@@ -97,10 +97,16 @@ async fn tokens_recorded_in_a_minute_refuse_the_next_request_until_it_ends() {
         };
         let minute = 29_000_100;
         let (a, b) = (&stores[0], stores.last().unwrap());
-        assert_eq!(a.admit_rate(&key_id, limit, minute).await, RateDecision::Admitted);
+        assert_eq!(
+            a.admit_rate(&key_id, limit, minute).await,
+            RateDecision::Admitted
+        );
         // A completed call's tokens, recorded by another replica.
         b.add_rate_tokens(&key_id, 600, minute).await;
-        assert_eq!(a.admit_rate(&key_id, limit, minute).await, RateDecision::Admitted);
+        assert_eq!(
+            a.admit_rate(&key_id, limit, minute).await,
+            RateDecision::Admitted
+        );
         b.add_rate_tokens(&key_id, 600, minute).await;
         assert_eq!(
             a.admit_rate(&key_id, limit, minute).await,

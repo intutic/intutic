@@ -123,7 +123,10 @@ pub fn window(period: BudgetPeriod, now: DateTime<Utc>) -> (String, DateTime<Utc
                 .with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0)
                 .single()
                 .unwrap_or(now);
-            (start.format("%Y-%m-%d").to_string(), start + Duration::days(1))
+            (
+                start.format("%Y-%m-%d").to_string(),
+                start + Duration::days(1),
+            )
         }
         BudgetPeriod::Month => {
             let (y, m) = if now.month() == 12 {
@@ -299,7 +302,12 @@ pub fn rate_counter_keys(key_id: &str, minute: i64) -> (String, String) {
 pub const RATE_COUNTER_TTL_SECS: u64 = 120;
 
 /// The refusal an agent reads when a per-minute limit is reached.
-pub fn rate_limited_message(kind: RateLimitKind, limit: u64, used: u64, retry_after: u64) -> String {
+pub fn rate_limited_message(
+    kind: RateLimitKind,
+    limit: u64,
+    used: u64,
+    retry_after: u64,
+) -> String {
     match kind {
         RateLimitKind::Requests => format!(
             "This API key is limited to {limit} requests per minute and has sent {used} this minute. Retry in {retry_after}s."
@@ -421,7 +429,9 @@ mod tests {
         assert_eq!(r.remaining_usd(), 0.5);
         assert_eq!(r.resets_at, at("2026-10-10T00:00:00Z"));
         assert_eq!(r.retry_after_secs(now), 12 * 3600);
-        assert!(r.message().contains("This API key's daily spend budget of $5.00"));
+        assert!(r
+            .message()
+            .contains("This API key's daily spend budget of $5.00"));
         assert_eq!(r.detail()["scope"], "key");
         assert_eq!(r.detail()["period"], "day");
         // Everything covered.

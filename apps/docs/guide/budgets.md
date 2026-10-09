@@ -46,7 +46,7 @@ The caps belong to the workspace: every member and every virtual key in it draws
 
 ### Key budgets
 
-Give one virtual key its own day budget, month budget or both, each hard or soft. Only an OWNER or ADMIN can set them, for any key in the workspace: on **Settings › Billing › Key budgets and rate limits** (**Edit** on the key's row), with [`intutic budget key`](/reference/cli#intutic-budget-key-keyid), with the `daily_budget_usd` and `monthly_budget_usd` attributes of Terraform's [`intutic_virtual_key`](/reference/terraform/resources/virtual_key), or with `PATCH /api/v1/keys/:id`:
+Give one virtual key its own day budget, month budget or both, each hard or soft. Only an OWNER or ADMIN can set them, for any key in the workspace: on **Settings › Billing › Key budgets and rate limits** (**Edit** on the key's row), with [`intutic budget key`](/reference/cli#intutic-budget-key), with the `daily_budget_usd` and `monthly_budget_usd` attributes of Terraform's [`intutic_virtual_key`](/reference/terraform/resources/virtual_key), or with `PATCH /api/v1/keys/:id`:
 
 ```json
 {
@@ -69,7 +69,7 @@ A member budget limits what one member spends across all the virtual keys they o
 - **The default member budget** applies to every member without a budget of their own for that period.
 - **A member's own budget** for a period replaces the default's for that period. A member with only their own month budget still has the default day budget.
 
-Set them on **Settings › Billing › Member budgets**, with [`intutic budget member`](/reference/cli#intutic-budget-member-memberid) (`default` for the default), with Terraform's [`intutic_member_budget`](/reference/terraform/resources/member_budget), or with `PUT /api/v1/budget/members/:memberId` and `DELETE /api/v1/budget/members/:memberId` (`default` for the default). OWNER or ADMIN.
+Set them on **Settings › Billing › Member budgets**, with [`intutic budget member`](/reference/cli#intutic-budget-member) (`default` for the default), with Terraform's [`intutic_member_budget`](/reference/terraform/resources/member_budget), or with `PUT /api/v1/budget/members/:memberId` and `DELETE /api/v1/budget/members/:memberId` (`default` for the default). OWNER or ADMIN.
 
 Member budgets come with the Biz Org, Enterprise and Self-host plans and the trials. On another plan the routes answer `403` with `Upgrade required — member budgets require a Biz Org plan or higher`. A workspace that moves to a plan without them keeps them stored, but they are neither enforced nor alerted on until it moves back.
 

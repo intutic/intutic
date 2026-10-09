@@ -251,9 +251,18 @@ async fn hard_budgets_and_rate_limits_refuse_before_the_request_leaves() {
     // Within every budget: forwarded, and both counters were asked for in one read.
     let (status, _, body) = send(budgeted.clone()).await;
     assert!(status.is_success(), "{status}: {body}");
-    let asked = keys.asked.lock().unwrap().last().cloned().expect("counters read");
+    let asked = keys
+        .asked
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .expect("counters read");
     assert_eq!(asked.len(), 2);
-    assert!(asked[0].starts_with("v2:budget:ws_kb_budget:monthly"), "{asked:?}");
+    assert!(
+        asked[0].starts_with("v2:budget:ws_kb_budget:monthly"),
+        "{asked:?}"
+    );
     assert!(
         asked[1].starts_with("v2:budget:ws_kb_budget:key:key_ws_kb_budget:day:"),
         "{asked:?}"
@@ -274,7 +283,11 @@ async fn hard_budgets_and_rate_limits_refuse_before_the_request_leaves() {
         .as_str()
         .unwrap()
         .contains("This API key's daily spend budget of $5.00"));
-    assert_eq!(forwarded().await, before, "a refused request reached the model");
+    assert_eq!(
+        forwarded().await,
+        before,
+        "a refused request reached the model"
+    );
 
     // Spend that cannot be read is not admitted against a hard budget.
     *keys.spent.lock().unwrap() = None;
