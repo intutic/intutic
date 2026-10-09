@@ -117,7 +117,7 @@ variants:
 2. **Server allowlist** (`mcpAllowedServers`) — refuses the whole server if it's not on an explicit, non-empty allowlist.
 3. **Tool allowlist** (`mcpAllowedTools`) — refuses the individual tool the same way.
 4. **SSO group policy** — the workspace's `sso_group_policy`, applied to the member the proxy's API key belongs to. See [Who made the call](/guide/mcp-governance#caller-identity).
-5. **DLP scan** — blocks a request whose arguments contain a credential-shaped value or a destructive command pattern (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `TRUNCATE TABLE`). Command patterns are matched against each argument string as the tool receives it, object keys included, and the SQL keywords may be separated by any whitespace, a line continuation, a block or `--` comment, or an escaped `\n` / `\t`: `DROP/**/TABLE` and `DROP` and `TABLE` on separate lines are blocked. The scan reads text, not SQL, so a quoted mention such as `SELECT 'drop table'` is blocked too — a quoted string is also how a shell command carries the real statement.
+5. **DLP scan** — blocks a request whose arguments contain a credential-shaped value or a destructive command pattern (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`). Command patterns are matched against each argument string as the tool receives it, object keys included, and the SQL keywords may be separated by any whitespace, a line continuation, a block or `--` comment, or an escaped `\n` / `\t`: `DROP/**/TABLE` and `DROP` and `TABLE` on separate lines are blocked. The scan reads text, not SQL, so a quoted mention such as `SELECT 'drop table'` is blocked too — a quoted string is also how a shell command carries the real statement.
 6. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` holds the call for a person's approval (`hold` above).
 7. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
 8. **Anomaly detectors** and **WASM rules** — see the session-scope note below.
@@ -125,7 +125,9 @@ variants:
 
 The DLP scan also runs the enabled [PII detectors](/guide/policies#pii-detectors):
 card numbers, IBANs and SSNs by default. Arguments are never rewritten, so a
-match blocks the call even when its detector is set to `redact`.
+match blocks the call even when its detector is set to `redact`. The LLM proxy
+and the hook gates treat the same value differently; see
+[What each surface does with a match](/guide/policies#what-each-surface-does-with-a-match).
 
 ### Refusal codes
 

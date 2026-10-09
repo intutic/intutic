@@ -33,14 +33,6 @@ export const DOCUMENT_PROVIDERS = [...SOURCE_PROVIDERS, 'upload'] as const
 
 export type DocumentProvider = (typeof DOCUMENT_PROVIDERS)[number]
 
-/**
- * Source providers only a workspace OWNER or ADMIN may connect, reschedule,
- * sync or remove. A Google service-account key reads every document it has
- * been shared, so the member-level connector route must not create one — the
- * same reasoning that keeps VirusTotal off the generic provider enum.
- */
-export const PRIVILEGED_SOURCE_PROVIDERS: ReadonlySet<string> = new Set(['gdrive'])
-
 /** Type guard for a string arriving off the wire or from a config row. */
 export function isSourceProvider(value: unknown): value is SourceProvider {
   return typeof value === 'string' && (SOURCE_PROVIDERS as readonly string[]).includes(value)

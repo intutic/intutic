@@ -33,7 +33,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { GATES, NO_GATE, type GateEntry } from './gateRegistry.js'
-import { HarnessType } from '@intutic/shared-types'
+import { HarnessType, holdApprovalHint } from '@intutic/shared-types'
 import {
   UNIVERSAL_PROTECTED_PATHS,
   GOVERNANCE_BYPASS_PATTERNS,
@@ -818,6 +818,10 @@ for (const g of GATES) {
       expect(record).toMatchObject({ v: 1, reason: 'sop.local.review_before.action:deploy', workspaceId: 'ws_test' })
       expect(record.holdId).toMatch(/^hold_/)
       expect(held.stderr).toContain(record.holdId)
+      // The whole hint, with the real id in both places: who can approve (a
+      // DEVELOPER whose call was held cannot), and that the retry passes only
+      // under the review-hold bypass, which is off by default.
+      expect(held.stderr.replace(/\s+/g, ' ')).toContain(holdApprovalHint(record.holdId))
       expect(record.toolNameNormalized).toBe(NORMALISE_CONTRACT.js('Bash'))
       expect(record.targetHash, 'the bypass key').toMatch(/^[0-9a-f]{64}$/)
       expect(() => new Date(record.at).toISOString()).not.toThrow()

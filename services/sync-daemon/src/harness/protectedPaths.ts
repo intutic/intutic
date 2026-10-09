@@ -91,6 +91,12 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.windsurf/hooks.json',
   '.openhands/hooks.json',
   '.gemini/settings.json',
+  // Antigravity's PreToolUse gate (antigravityCliHooks.ts): registered in the
+  // user-level file, and Antigravity also runs hooks from the project-level
+  // one. An agent rewriting either can remove its own gate or add a hook that
+  // runs first.
+  '.gemini/config/hooks.json',
+  '.agents/hooks.json',
   '.agents/plugins/intutic-governance',
 
   // Muse Code — project-level hooks, user settings (managed_hooks_path lives
@@ -1061,7 +1067,8 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
       'The statement may follow any non-word character, not only a space, so ' +
       '`psql -c "DROP TABLE x"` (quoted) counts — the space-only version missed ' +
       'it. The keywords may be split by any separator the phrase matcher knows ' +
-      '(a comment, an escaped newline, a line continuation). A text rule: ' +
+      '(a comment, an escaped newline, a line continuation). Held to the other ' +
+      'text rules by fixtures/destructive-sql-vectors.json in shared-types. A text rule: ' +
       'a quoted mention (`SELECT \'drop table\'`) also matches, because quoting ' +
       'is how a shell command carries the real statement.',
     matches: [
@@ -1078,6 +1085,8 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
       ' DROP--why\nTABLE users ',
       ' dRoP tAbLe users ',
       ' printf "DROP\\nTABLE users" | psql ',
+      ' printf "select 1;\\nDROP TABLE users" | psql ',
+      ' DROP SCHEMA analytics CASCADE ',
     ],
     notMatches: [
       ' SELECT * FROM users ',

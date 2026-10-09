@@ -387,7 +387,7 @@ def has_phrase(t, needle, bounded=False):
     return bool(ok)
 
 
-_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","truncate ","alter table"]]]
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
 _INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
 
 
@@ -621,6 +621,8 @@ INTUTIC_FLOOR=(
   'path.windsurf_hooks_json	block	-	any	Shell command references the governance-protected path .windsurf/hooks.json	\\.windsurf/hooks\\.json'
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
+  'path.gemini_config_hooks_json	block	-	any	Shell command references the governance-protected path .gemini/config/hooks.json	\\.gemini/config/hooks\\.json'
+  'path.agents_hooks_json	block	-	any	Shell command references the governance-protected path .agents/hooks.json	\\.agents/hooks\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
   'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
   'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
@@ -813,7 +815,7 @@ intutic_bypass() {
 # Returns 0 when an approved bypass lets the call through (the caller
 # continues), 2 when the call is held (the caller refuses).
 intutic_hold() {
-  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth
+  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth hint
   tn="$(intutic_normalise "\${TOOL:-}")"
   th="$( { printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
   if entry="$(intutic_bypass "$rid" "$tn" "$th")"; then
@@ -836,7 +838,10 @@ intutic_hold() {
       "$(intutic_json_escape "\${INTUTIC_WORKSPACE_ID:-}")" "$at" "$(intutic_json_escape "$tn")" "$targeth" >> "$file" 2>/dev/null; }; then
     echo "[Intutic Guardrail] could not record the hold at \${file}" >&2
   fi
-  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] Approve with: intutic decision approve \${hold_id} (or: intutic decision reject \${hold_id})" >&2
+  # Who may approve, and when the retry passes (holdMessages.ts in shared-types).
+  hint='An Owner, Admin or EM can approve it with: intutic decision approve {holdId} (or reject it: intutic decision reject {holdId}). Retrying this exact call passes after approval only if the workspace has turned on the review-hold bypass; otherwise it is held again.'
+  hint="\${hint//\\{holdId\\}/$hold_id}"
+  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] \${hint}" >&2
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
@@ -1413,7 +1418,7 @@ def has_phrase(t, needle, bounded=False):
     return bool(ok)
 
 
-_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","truncate ","alter table"]]]
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
 _INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
 
 
@@ -1649,6 +1654,8 @@ INTUTIC_FLOOR=(
   'path.windsurf_hooks_json	block	-	any	Shell command references the governance-protected path .windsurf/hooks.json	\\.windsurf/hooks\\.json'
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
+  'path.gemini_config_hooks_json	block	-	any	Shell command references the governance-protected path .gemini/config/hooks.json	\\.gemini/config/hooks\\.json'
+  'path.agents_hooks_json	block	-	any	Shell command references the governance-protected path .agents/hooks.json	\\.agents/hooks\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
   'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
   'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
@@ -1841,7 +1848,7 @@ intutic_bypass() {
 # Returns 0 when an approved bypass lets the call through (the caller
 # continues), 2 when the call is held (the caller refuses).
 intutic_hold() {
-  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth
+  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth hint
   tn="$(intutic_normalise "\${TOOL:-}")"
   th="$( { printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
   if entry="$(intutic_bypass "$rid" "$tn" "$th")"; then
@@ -1864,7 +1871,10 @@ intutic_hold() {
       "$(intutic_json_escape "\${INTUTIC_WORKSPACE_ID:-}")" "$at" "$(intutic_json_escape "$tn")" "$targeth" >> "$file" 2>/dev/null; }; then
     echo "[Intutic Guardrail] could not record the hold at \${file}" >&2
   fi
-  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] Approve with: intutic decision approve \${hold_id} (or: intutic decision reject \${hold_id})" >&2
+  # Who may approve, and when the retry passes (holdMessages.ts in shared-types).
+  hint='An Owner, Admin or EM can approve it with: intutic decision approve {holdId} (or reject it: intutic decision reject {holdId}). Retrying this exact call passes after approval only if the workspace has turned on the review-hold bypass; otherwise it is held again.'
+  hint="\${hint//\\{holdId\\}/$hold_id}"
+  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] \${hint}" >&2
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
@@ -2452,7 +2462,7 @@ def has_phrase(t, needle, bounded=False):
     return bool(ok)
 
 
-_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","truncate ","alter table"]]]
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
 _INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
 
 
@@ -2678,6 +2688,8 @@ INTUTIC_FLOOR=(
   'path.windsurf_hooks_json	block	-	any	Shell command references the governance-protected path .windsurf/hooks.json	\\.windsurf/hooks\\.json'
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
+  'path.gemini_config_hooks_json	block	-	any	Shell command references the governance-protected path .gemini/config/hooks.json	\\.gemini/config/hooks\\.json'
+  'path.agents_hooks_json	block	-	any	Shell command references the governance-protected path .agents/hooks.json	\\.agents/hooks\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
   'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
   'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
@@ -2870,7 +2882,7 @@ intutic_bypass() {
 # Returns 0 when an approved bypass lets the call through (the caller
 # continues), 2 when the call is held (the caller refuses).
 intutic_hold() {
-  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth
+  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth hint
   tn="$(intutic_normalise "\${TOOL:-}")"
   th="$( { printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
   if entry="$(intutic_bypass "$rid" "$tn" "$th")"; then
@@ -2893,7 +2905,10 @@ intutic_hold() {
       "$(intutic_json_escape "\${INTUTIC_WORKSPACE_ID:-}")" "$at" "$(intutic_json_escape "$tn")" "$targeth" >> "$file" 2>/dev/null; }; then
     echo "[Intutic Guardrail] could not record the hold at \${file}" >&2
   fi
-  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] Approve with: intutic decision approve \${hold_id} (or: intutic decision reject \${hold_id})" >&2
+  # Who may approve, and when the retry passes (holdMessages.ts in shared-types).
+  hint='An Owner, Admin or EM can approve it with: intutic decision approve {holdId} (or reject it: intutic decision reject {holdId}). Retrying this exact call passes after approval only if the workspace has turned on the review-hold bypass; otherwise it is held again.'
+  hint="\${hint//\\{holdId\\}/$hold_id}"
+  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] \${hint}" >&2
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
@@ -3469,7 +3484,7 @@ def has_phrase(t, needle, bounded=False):
     return bool(ok)
 
 
-_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","truncate ","alter table"]]]
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
 _INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
 
 
@@ -3705,6 +3720,8 @@ INTUTIC_FLOOR=(
   'path.windsurf_hooks_json	block	-	any	Shell command references the governance-protected path .windsurf/hooks.json	\\.windsurf/hooks\\.json'
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
+  'path.gemini_config_hooks_json	block	-	any	Shell command references the governance-protected path .gemini/config/hooks.json	\\.gemini/config/hooks\\.json'
+  'path.agents_hooks_json	block	-	any	Shell command references the governance-protected path .agents/hooks.json	\\.agents/hooks\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
   'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
   'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
@@ -3897,7 +3914,7 @@ intutic_bypass() {
 # Returns 0 when an approved bypass lets the call through (the caller
 # continues), 2 when the call is held (the caller refuses).
 intutic_hold() {
-  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth
+  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth hint
   tn="$(intutic_normalise "\${TOOL:-}")"
   th="$( { printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
   if entry="$(intutic_bypass "$rid" "$tn" "$th")"; then
@@ -3920,7 +3937,10 @@ intutic_hold() {
       "$(intutic_json_escape "\${INTUTIC_WORKSPACE_ID:-}")" "$at" "$(intutic_json_escape "$tn")" "$targeth" >> "$file" 2>/dev/null; }; then
     echo "[Intutic Guardrail] could not record the hold at \${file}" >&2
   fi
-  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] Approve with: intutic decision approve \${hold_id} (or: intutic decision reject \${hold_id})" >&2
+  # Who may approve, and when the retry passes (holdMessages.ts in shared-types).
+  hint='An Owner, Admin or EM can approve it with: intutic decision approve {holdId} (or reject it: intutic decision reject {holdId}). Retrying this exact call passes after approval only if the workspace has turned on the review-hold bypass; otherwise it is held again.'
+  hint="\${hint//\\{holdId\\}/$hold_id}"
+  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] \${hint}" >&2
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
@@ -4507,7 +4527,7 @@ def has_phrase(t, needle, bounded=False):
     return bool(ok)
 
 
-_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","truncate ","alter table"]]]
+_INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
 _INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
 
 
@@ -4737,6 +4757,8 @@ INTUTIC_FLOOR=(
   'path.windsurf_hooks_json	block	-	any	Shell command references the governance-protected path .windsurf/hooks.json	\\.windsurf/hooks\\.json'
   'path.openhands_hooks_json	block	-	any	Shell command references the governance-protected path .openhands/hooks.json	\\.openhands/hooks\\.json'
   'path.gemini_settings_json	block	-	any	Shell command references the governance-protected path .gemini/settings.json	\\.gemini/settings\\.json'
+  'path.gemini_config_hooks_json	block	-	any	Shell command references the governance-protected path .gemini/config/hooks.json	\\.gemini/config/hooks\\.json'
+  'path.agents_hooks_json	block	-	any	Shell command references the governance-protected path .agents/hooks.json	\\.agents/hooks\\.json'
   'path.agents_plugins_intutic_governance	block	-	any	Shell command references the governance-protected path .agents/plugins/intutic-governance	\\.agents/plugins/intutic-governance'
   'path.muse_hooks_json	block	-	any	Shell command references the governance-protected path .muse/hooks.json	\\.muse/hooks\\.json'
   'path.config_muse_settings_json	block	-	any	Shell command references the governance-protected path .config/muse/settings.json	\\.config/muse/settings\\.json'
@@ -4929,7 +4951,7 @@ intutic_bypass() {
 # Returns 0 when an approved bypass lets the call through (the caller
 # continues), 2 when the call is held (the caller refuses).
 intutic_hold() {
-  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth
+  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth hint
   tn="$(intutic_normalise "\${TOOL:-}")"
   th="$( { printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
   if entry="$(intutic_bypass "$rid" "$tn" "$th")"; then
@@ -4952,7 +4974,10 @@ intutic_hold() {
       "$(intutic_json_escape "\${INTUTIC_WORKSPACE_ID:-}")" "$at" "$(intutic_json_escape "$tn")" "$targeth" >> "$file" 2>/dev/null; }; then
     echo "[Intutic Guardrail] could not record the hold at \${file}" >&2
   fi
-  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] Approve with: intutic decision approve \${hold_id} (or: intutic decision reject \${hold_id})" >&2
+  # Who may approve, and when the retry passes (holdMessages.ts in shared-types).
+  hint='An Owner, Admin or EM can approve it with: intutic decision approve {holdId} (or reject it: intutic decision reject {holdId}). Retrying this exact call passes after approval only if the workspace has turned on the review-hold bypass; otherwise it is held again.'
+  hint="\${hint//\\{holdId\\}/$hold_id}"
+  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] \${hint}" >&2
   log_event "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }

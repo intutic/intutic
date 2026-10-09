@@ -269,9 +269,11 @@ do, through the same decisions API:
 
    ```
    [Intutic Governance] Tool call HELD for approval: Deploys need review
-   [sop_deploy]. Hold id: hold_m1x2y3_0a1b2c3d. An approver can run:
-   intutic decision approve hold_m1x2y3_0a1b2c3d (or reject it). Retry this
-   exact call after it is approved.
+   [sop_deploy]. Hold id: hold_m1x2y3_0a1b2c3d. An Owner, Admin or EM can
+   approve it with: intutic decision approve hold_m1x2y3_0a1b2c3d (or reject
+   it: intutic decision reject hold_m1x2y3_0a1b2c3d). Retrying this exact call
+   passes after approval only if the workspace has turned on the review-hold
+   bypass; otherwise it is held again.
    ```
 
 3. An owner, admin or engineering manager approves it:

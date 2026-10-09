@@ -125,6 +125,8 @@ const DB_WRITE_PATTERNS: &[&str] = &[
     "update ",
     "delete from",
     "drop table",
+    "drop database",
+    "drop schema",
     "truncate ",
     "alter table",
 ];
@@ -454,33 +456,31 @@ mod tests {
         assert_eq!(actions, vec!["action:run_tests", "action:deploy"]);
     }
 
+    /// The shared destructive-SQL vectors
+    /// (`packages/shared-types/fixtures/destructive-sql-vectors.json`): the
+    /// answers every classifier and text rule is tested against, the gate SDKs'
+    /// classifiers included. Each `text` is a command as the tool receives it,
+    /// JSON-decoded, and `dbWrite` says whether it is `action:db_write`.
     #[test]
-    fn a_db_write_is_recognised_whatever_separates_its_keywords() {
-        // Each of these runs as a DROP TABLE; a plain "drop table" substring
-        // classified none of them.
-        for cmd in [
-            "psql -c 'DROP\nTABLE users'",
-            "psql -c 'DROP\tTABLE users'",
-            "psql -c 'DROP  TABLE users'",
-            "psql -c 'DROP/**/TABLE users'",
-            "psql -c 'DROP /* why */ TABLE users'",
-            "psql -c 'DROP -- why\nTABLE users'",
-            "psql -c 'dRoP tAbLe users'",
-            r"printf 'DROP\nTABLE users' | psql",
-            r"printf 'DROP -- why\nTABLE users' | psql",
-            "psql --command 'insert\tinto t values (1)'",
-        ] {
-            assert_eq!(
-                classify("Bash", &json!({ "command": cmd })),
-                vec!["action:db_write"],
-                "{cmd:?}"
-            );
+    fn db_write_matches_the_shared_vectors() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../shared-types/fixtures/destructive-sql-vectors.json");
+        let body =
+            std::fs::read_to_string(&path).expect("destructive-sql-vectors.json is readable");
+        let doc: serde_json::Value = serde_json::from_str(&body).expect("the vectors parse");
+        let cases = doc["cases"].as_array().expect("cases");
+        assert!(cases.len() >= 40, "the vector file lost its cases");
+        let mut wrong = Vec::new();
+        for case in cases {
+            let text = case["text"].as_str().expect("text");
+            let want = case["dbWrite"].as_bool().expect("dbWrite");
+            let got = classify("Bash", &json!({ "command": text }))
+                .contains(&"action:db_write".to_string());
+            if got != want {
+                wrong.push(format!("{text:?}: got {got}, vector says {want}"));
+            }
         }
-        // Arguments arrive JSON-decoded: an escaped newline in the request
-        // body is a real newline by the time it is classified.
-        let decoded: serde_json::Value =
-            serde_json::from_str(r#"{"command":"psql -c 'DROP\nTABLE users'"}"#).unwrap();
-        assert_eq!(classify("Bash", &decoded), vec!["action:db_write"]);
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
 
     /// The behaviour every classifier shares: this one, `@intutic/gate`'s,
@@ -512,24 +512,6 @@ mod tests {
             let cmd = v.as_str().expect("command");
             assert!(
                 classify("Bash", &json!({ "command": cmd })).is_empty(),
-                "{cmd:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_keyword_alone_is_not_a_db_write() {
-        // The gap joins two keywords; it does not make either one optional,
-        // and a long shell flag is not a comment that ends the phrase.
-        for cmd in [
-            "git stash drop",
-            "psql --table-only",
-            "drop_table_helper.sh",
-            "dropdb --help",
-        ] {
-            assert!(
-                !classify("Bash", &json!({ "command": cmd }))
-                    .contains(&"action:db_write".to_string()),
                 "{cmd:?}"
             );
         }

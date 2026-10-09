@@ -108,7 +108,9 @@ class TestEvaluation:
             line("proto.paths", "block", "-", "target", "governance-protected path", r"\.intutic/"),
             line("advise.curl", "warn", "-", "command", "Network egress", r"curl "),
             line("shadow.helm", "shadow", "-", "command", "Helm use", r"helm "),
-            line("tool.fetch", "block", "-", "tool", "Tool not permitted", r"^webfetch$"),
+            # The shape the snapshot writer ships a tool rule in (`toGuardPattern`
+            # in policySnapshot.ts strips ^/$ and pads), as gate-js's suite has it.
+            line("tool.fetch", "block", "-", "tool", "Tool not permitted", r" (webfetch) "),
         ]))
 
     def test_allows_benign(self, s):

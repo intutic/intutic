@@ -523,14 +523,17 @@ review_before: action:deploy, action:publish
 ```
 
 The run moves to `PENDING_REVIEW`, every subsequent request is refused with
-`LOOP_RUN_PENDING_REVIEW`, and it stays that way until someone resolves it:
+`LOOP_RUN_PENDING_REVIEW`, and it stays that way until an owner, admin or
+engineering manager resolves it:
 
 ```bash
 intutic loop review <loop-run-id> --approve
 ```
 
 Or from **Findings › Review Queue › Held Changes**, which lists held runs with the change
-manifest inline, ranked by risk rather than by when they were held.
+manifest inline, ranked by risk rather than by when they were held. The member who started
+the run can resolve it too, unless the workspace requires a different approver
+(`loop_review.requireDistinctApprover`; see [`intutic loop review`](/reference/cli#intutic-loop-review)).
 
 Entries can be action tokens (`action:deploy`, `action:publish`,
 `action:release`, `action:db_write`) or raw tool names (`Write`, `Bash`).
@@ -552,14 +555,15 @@ Two gates enforce this, and they are not equivalent.
 **The harness hook** (every hook gate the daemon writes — Claude Code, Cursor,
 Goose, Cline and the rest of the [matrix](/reference/harness-security-matrix))
 blocks the tool call *before it runs*. The `git push` does not happen. The
-gate prints the hold id and how to resolve it:
+gate prints the hold id, who can resolve it and when a retry passes:
 
 ```
-[Intutic Guardrail] HELD: Held for human review: action:deploy — declared in review_before: [sop.local.review_before.action:deploy] Approve with: intutic decision approve hold_… (or: intutic decision reject hold_…)
+[Intutic Guardrail] HELD: Held for human review: action:deploy — declared in review_before: [sop.local.review_before.action:deploy] An Owner, Admin or EM can approve it with: intutic decision approve hold_… (or reject it: intutic decision reject hold_…). Retrying this exact call passes after approval only if the workspace has turned on the review-hold bypass; otherwise it is held again.
 ```
 
 Approving the hold — `intutic decision approve <holdId>`, the review API or
-the Slack card, which all take the same path — lets that exact call (same
+the Slack card, which all take the same path and need the OWNER, ADMIN or EM
+role — lets that exact call (same
 tool, same command, same target) through once, for a short window, and only
 while the workspace has opted in with the `reviewHoldBypassEnabled` workspace setting
 (`PUT /api/v1/workspace/settings`; there is no dashboard toggle); a different command

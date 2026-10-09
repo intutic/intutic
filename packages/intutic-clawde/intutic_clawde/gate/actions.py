@@ -103,6 +103,8 @@ DB_WRITE_PATTERNS = [
     "update ",
     "delete from",
     "drop table",
+    "drop database",
+    "drop schema",
     "truncate ",
     "alter table",
 ]

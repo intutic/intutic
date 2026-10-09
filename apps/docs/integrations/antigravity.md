@@ -111,6 +111,8 @@ Every file is read first and merged; all other settings and hooks are preserved.
 
 ## Tamper protection
 
+Every Intutic gate refuses an agent tool call that names `.gemini/settings.json`, `.gemini/config/hooks.json` or `.agents/hooks.json`, by a file write or in a shell command, so an agent cannot remove its own gate or register a hook that runs ahead of it.
+
 `intutic connect` watches `~/.gemini/settings.json` and `~/.gemini/config/hooks.json`. If a gate registration is removed or disabled, or the file is deleted, it is put back and the change is reported to the control plane. Like every gate file, it is restored under every hand-edit setting, Record only included: see [Settings](/guide/settings).
 
 ## Fleet deployment

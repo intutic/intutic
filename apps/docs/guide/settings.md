@@ -209,6 +209,9 @@ next sync and applies from its next capture, within a few minutes. Changing it n
 Admin role, and the change is recorded in the settings history like any other. The API key is
 `configBodyUpload` in `PUT /api/v1/workspace/settings`.
 
+Only owners, admins and engineering managers can open a diff, because it shows the file's text.
+Every member can see the history itself: paths, hashes, sizes and how many lines changed.
+
 ---
 
 ## AI Routing & Caching {#routing-proxy}
@@ -314,7 +317,7 @@ If agents are using stale governance rules, clear the policy cache from this tab
 
 ## Notifications {#notifications}
 
-Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity.
+Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity. Only an owner or admin can create, change or delete a rule or replace its signing secret, as for SIEM destinations; every member can see the rules and the delivery log.
 
 ### Channel Routing
 
@@ -425,7 +428,7 @@ The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Report
 Task trackers, memory providers, file scanning, the GitHub pull-request webhook and SIEM export.
 
 - **Task Management & Alerting** — connect Jira Cloud, PagerDuty, Linear, GitHub Issues or Asana to sync tickets and route governance alerts. **Add Connection** takes the provider, its base URL, an API token or auth secret, and a project key or routing key.
-- **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. See [Prompt Commands](/guide/agent-commands).
+- **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. Owners and admins add, test and remove providers; every member sees the list. See [Prompt Commands](/guide/agent-commands).
 - **VirusTotal Skill Scanning** — opt in to checking the sha256 hash of skill-bundled scripts against VirusTotal; file content is never uploaded. See [VirusTotal Integration](/guide/virustotal-scanning).
 - **GitHub Pull Request Webhook** — the payload URL and signing secret for GitHub's pull request events, which map branches to pull requests for cost per pull request without a GitHub token. **Create webhook** makes it; **Replace secret** makes a new secret and keeps the URL. The secret is shown once. Owners and admins, Biz Org and above. See [Cost per pull request](/guide/budgets#cost-per-pull-request).
 - **SIEM Export** — stream governance events to Splunk, Datadog, a webhook, syslog/CEF, S3 or GCS; **Add Destination** creates one. Biz Org and above: on another plan the card says so, and destinations kept from before a downgrade show as **Paused**. See [SIEM Export](/guide/siem-export#plans).

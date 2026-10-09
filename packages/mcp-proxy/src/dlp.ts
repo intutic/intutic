@@ -13,7 +13,7 @@
  * @module
  */
 
-import { hasPhrase, phraseText, type PhraseText } from '@intutic/shared-types'
+import { DESTRUCTIVE_SQL_STATEMENTS, hasPhrase, phraseText, type PhraseText } from '@intutic/shared-types'
 import { PII_DETECTORS, findPii, resolvePiiActions } from './dlpPii.js'
 import type { PiiDetector } from './dlpPii.js'
 import { createStderrLogger } from './stderrLog.js'
@@ -67,13 +67,15 @@ const DLP_PATTERNS: DlpPattern[] = [
   // High-entropy strings that look like secrets (≥40 chars of hex or base64)
   { regex: /[0-9a-f]{40,}/, description: 'High-entropy hex string (possible secret)', redactable: true },
   // Destructive commands — input-only, and matched against each decoded
-  // argument string (see scanToolInput). A text rule: it does not parse SQL,
-  // so a quoted mention (`SELECT 'drop table'`) is blocked too, because quoting
-  // is also how a shell command carries the real thing (`psql -c 'DROP TABLE x'`).
+  // argument string (see scanToolInput). The SQL statements are the shared
+  // text rule (destructiveSql.ts in shared-types), the one the control plane's
+  // DLP reads too: it does not parse SQL, so a quoted mention
+  // (`SELECT 'drop table'`) is blocked as well, because quoting is also how a
+  // shell command carries the real thing (`psql -c 'DROP TABLE x'`).
   { regex: /rm\s+-rf?\s+\//, description: 'Destructive rm -rf / command', redactable: false },
-  { phrase: 'drop table', description: 'SQL DROP TABLE statement', redactable: false },
-  { phrase: 'drop database', description: 'SQL DROP DATABASE statement', redactable: false },
-  { phrase: 'truncate table', description: 'SQL TRUNCATE TABLE statement', redactable: false },
+  // The destructive SQL statements are shared with the control plane's DLP
+  // (destructiveSql.ts in shared-types), matched bounded at both ends.
+  ...DESTRUCTIVE_SQL_STATEMENTS.map(({ phrase, description }) => ({ phrase, description, redactable: false })),
   // Private key material
   { regex: /-----BEGIN\s+(RSA\s+)?PRIVATE KEY-----/, description: 'PEM private key material', redactable: true },
   { regex: /-----BEGIN\s+EC\s+PRIVATE KEY-----/, description: 'EC private key material', redactable: true },
@@ -209,7 +211,7 @@ export function scanToolInput(toolInput: unknown): DlpScanResult {
     let hit: boolean
     if ('phrase' in p) {
       words ??= strings.map((s) => phraseText(s))
-      hit = words.some((w) => hasPhrase(w, p.phrase))
+      hit = words.some((w) => hasPhrase(w, p.phrase, true))
     } else {
       hit = p.redactable ? p.regex.test(serialized) : strings.some((s) => p.regex.test(s))
     }

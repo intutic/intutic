@@ -134,7 +134,7 @@ export type {
   SopProvenanceSource,
 } from './sop.js'
 
-export { SOURCE_PROVIDERS, DOCUMENT_PROVIDERS, PRIVILEGED_SOURCE_PROVIDERS, isSourceProvider, isDocumentProvider } from './sourceProviders.js'
+export { SOURCE_PROVIDERS, DOCUMENT_PROVIDERS, isSourceProvider, isDocumentProvider } from './sourceProviders.js'
 export type { SourceProvider, DocumentProvider } from './sourceProviders.js'
 
 export {
@@ -626,6 +626,18 @@ export {
   type PostureKind,
   type PreImageEntry,
 } from './posturePresets.js'
+
+export {
+  DESTRUCTIVE_SQL_STATEMENTS,
+  findDestructiveSql,
+  type DestructiveSqlStatement,
+} from './destructiveSql.js'
+
+export {
+  HOLD_APPROVAL_HINT_TEMPLATE,
+  HOLD_ID_PLACEHOLDER,
+  holdApprovalHint,
+} from './holdMessages.js'
 
 export {
   SECRET_VALUE_PATTERNS,

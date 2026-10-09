@@ -16,6 +16,7 @@
     "featureFlags",
     "governanceCardLabelingEnabled",
     "imageProvenance",
+    "loop_review",
     "mcpAllowedServers",
     "mcpAllowedTools",
     "mcpAnomalyMode",

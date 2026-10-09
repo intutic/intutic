@@ -117,35 +117,8 @@ def test_adversarial_input_classifies_in_linear_time(unit, times):
     assert best < 0.2
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "psql -c 'DROP\nTABLE users'",
-        "psql -c 'DROP\tTABLE users'",
-        "psql -c 'DROP/**/TABLE users'",
-        "psql -c 'DROP /* why */ TABLE users'",
-        "psql -c 'DROP -- why\nTABLE users'",
-        "psql -c 'dRoP tAbLe users'",
-        r"printf 'DROP\nTABLE users' | psql",
-        r"printf 'DROP -- why\nTABLE users' | psql",
-    ],
-)
-def test_db_write_whatever_separates_the_keywords(command):
-    """A plain "drop table" substring missed every one of these."""
-    assert actions.classify("shell", {"command": command}) == ["action:db_write"]
-
-
-def test_db_write_from_json_escaped_arguments():
-    import json
-    decoded = json.loads(r'{"command": "psql -c \"DROP\nTABLE users\""}')
-    assert actions.classify("shell", decoded) == ["action:db_write"]
-
-
-@pytest.mark.parametrize(
-    "command", ["git stash drop", "psql --table-only", "drop_table_helper.sh", "dropdb --help"]
-)
-def test_a_keyword_alone_is_not_a_db_write(command):
-    assert "action:db_write" not in actions.classify("shell", {"command": command})
+# The commands and answers are the shared destructive-SQL vectors, run by every
+# classifier and text rule; test_destructive_sql_vectors.py runs them here.
 
 
 def test_trailing_spaces_preserved():

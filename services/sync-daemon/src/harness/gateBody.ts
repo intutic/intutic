@@ -48,6 +48,7 @@
  *
  * @module
  */
+import { HOLD_APPROVAL_HINT_TEMPLATE, HOLD_ID_PLACEHOLDER } from '@intutic/shared-types'
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
   NORMALISE_CONTRACT,
@@ -173,7 +174,7 @@ export const ACTION_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]>
   ['action:deploy', ['git push', 'kubectl apply', 'kubectl rollout', 'helm upgrade', 'helm install', 'terraform apply', 'docker push', 'serverless deploy', 'fly deploy', 'vercel deploy', 'gcloud run deploy', 'aws deploy', 'aws s3 sync', 'eb deploy']],
   ['action:publish', ['npm publish', 'pnpm publish', 'yarn publish', 'cargo publish', 'twine upload', 'poetry publish', 'gem push', 'docker manifest push']],
   ['action:release', ['gh release create', 'git tag', 'npm version', 'cargo release', 'goreleaser release', 'semantic-release']],
-  ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'truncate ', 'alter table']],
+  ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'drop database', 'drop schema', 'truncate ', 'alter table']],
 ]
 
 /**
@@ -487,6 +488,12 @@ function jsHoldHelpers(reviewRequestFile: string | undefined): string {
   return `${emitJsActionClassifier()}
 const INTUTIC_REVIEW_REQUEST_FILE = ${JSON.stringify(reviewRequestFile ?? null)};
 
+// Who may approve a hold, and when the retry passes: the sentence every gate
+// and the MCP proxy print (holdMessages.ts in shared-types).
+function intuticHoldHint(holdId) {
+  return ${JSON.stringify(HOLD_APPROVAL_HINT_TEMPLATE)}.split(${JSON.stringify(HOLD_ID_PLACEHOLDER)}).join(holdId);
+}
+
 function intuticReviewRequestFile() {
   var path = require('path');
   if (process.env.INTUTIC_REVIEW_REQUESTS) return process.env.INTUTIC_REVIEW_REQUESTS;
@@ -582,7 +589,7 @@ function intuticHold(rule, toolName, command, target, toolInput, record, workspa
     try { console.error('[Intutic Guardrail] could not record the hold: ' + (e && e.message ? e.message : e)); } catch (e2) {}
   }
   var reason = rule.reason + ' [' + rule.id + ']';
-  try { console.error('[Intutic Guardrail] HELD: ' + reason + ' Approve with: intutic decision approve ' + holdId + ' (or: intutic decision reject ' + holdId + ')'); } catch (e) {}
+  try { console.error('[Intutic Guardrail] HELD: ' + reason + ' ' + intuticHoldHint(holdId)); } catch (e) {}
   try { record('tool_held', toolName, reason); } catch (e) {}
   return { holdId: holdId };
 }`
@@ -806,7 +813,7 @@ intutic_bypass() {
 # Returns 0 when an approved bypass lets the call through (the caller
 # continues), 2 when the call is held (the caller refuses).
 intutic_hold() {
-  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth
+  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth hint
   tn="$(intutic_normalise "\${TOOL:-}")"
   th="$( { printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
   if entry="$(intutic_bypass "$rid" "$tn" "$th")"; then
@@ -829,7 +836,10 @@ intutic_hold() {
       "$(intutic_json_escape "\${INTUTIC_WORKSPACE_ID:-}")" "$at" "$(intutic_json_escape "$tn")" "$targeth" >> "$file" 2>/dev/null; }; then
     echo "[Intutic Guardrail] could not record the hold at \${file}" >&2
   fi
-  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] Approve with: intutic decision approve \${hold_id} (or: intutic decision reject \${hold_id})" >&2
+  # Who may approve, and when the retry passes (holdMessages.ts in shared-types).
+  hint=${shq(HOLD_APPROVAL_HINT_TEMPLATE)}
+  hint="\${hint//\\{holdId\\}/$hold_id}"
+  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] \${hint}" >&2
   ${log} "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
@@ -1325,7 +1335,7 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
         // otherwise the hold is recorded for review and the call refused.
         const held = intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId);
         if (held.bypassed) continue;
-        const reason = '[Intutic Governance] HELD: ' + rule.reason + ' [' + rule.id + '] — approve with: intutic decision approve ' + held.holdId;
+        const reason = '[Intutic Governance] HELD: ' + rule.reason + ' [' + rule.id + '] ' + intuticHoldHint(held.holdId);
 ${refuse}
       }
       if (rule.severity === 'warn') {
