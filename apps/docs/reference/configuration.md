@@ -72,7 +72,7 @@ Models named `bedrock/…`, `vertex/…` and `azure/…` go to AWS Bedrock, Goog
 
 #### Egress control
 
-The proxy decides what to do with each `CONNECT` it receives when clients use it as their HTTPS proxy: AI provider hosts are decrypted and governed; other hosts follow the egress policy.
+The proxy decides what to do with each `CONNECT` it receives when clients use it as their HTTPS proxy: AI provider hosts are decrypted and governed; other hosts follow the egress policy. Cloud model endpoints (AWS Bedrock, Vertex AI, Azure OpenAI) are not intercepted, because a Bedrock request's signature covers its body; agents reach them governed through the proxy's own routes with a [`bedrock/`, `vertex/` or `azure/` model name](#cloud-providers), and a direct connection to them follows the egress policy like any other host.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |

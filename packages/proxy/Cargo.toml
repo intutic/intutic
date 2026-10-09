@@ -92,6 +92,10 @@ sha2 = "0.10"
 # lockfile transitively, so this adds no new crate to the tree.
 sha1 = "0.10"
 hex = "0.4"
+# AES-256-GCM and HKDF for the stored provider credentials
+# (src/credential_crypto.rs). Already in the lockfile through rustls, so this
+# adds no new crate to the tree.
+ring = "0.17"
 anyhow = "1"
 # Storage trait (src/store) — dyn-compatible async methods. Native AFIT is
 # available but is not dyn-compatible, and the alternative is a generic
@@ -114,11 +118,9 @@ rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
 
-# Cloud upstreams (src/cloud): SigV4 HMAC and Google's RS256 service-account
-# assertion use ring, which rustls already links; crc32fast checks AWS
-# event-stream frames and is already in the tree through wasmtime. Neither
-# adds a crate to Cargo.lock.
-ring = "0.17"
+# Cloud upstreams (src/cloud): crc32fast checks AWS event-stream frames, and
+# is already in the tree through wasmtime. SigV4's HMAC and Google's RS256
+# service-account assertion use `ring` (above).
 crc32fast = "1"
 
 # Advisory file locking (flock) for the standalone learning snapshot, so two
