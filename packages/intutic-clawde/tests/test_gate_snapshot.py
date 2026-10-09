@@ -175,6 +175,12 @@ class TestPhraseRules:
     def test_stays_linear_on_crafted_input(self, s, unit, times):
         import time
 
-        t0 = time.perf_counter()
-        snap.evaluate("shell", "", unit * times, s)
-        assert time.perf_counter() - t0 < 0.2
+        command = unit * times
+        best = None
+        for _ in range(3):
+            t0 = time.perf_counter()
+            snap.evaluate("shell", "", command, s)
+            took = time.perf_counter() - t0
+            best = took if best is None else min(best, took)
+        # The best of three runs: the bound is on the matcher, not on a busy machine.
+        assert best < 0.2

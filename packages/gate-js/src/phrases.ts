@@ -64,8 +64,8 @@ export function phraseText(input: unknown): PhraseText {
   const n = s.length
   const isSpace = (c: string): boolean =>
     c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\v' || c === '\f' ||
-    c === ' ' || c === ' ' || (c >= ' ' && c <= ' ') ||
-    c === ' ' || c === ' ' || c === ' ' || c === ' ' || c === '　' || c === '﻿'
+    c === '\u00a0' || c === '\u1680' || (c >= '\u2000' && c <= '\u200a') ||
+    c === '\u2028' || c === '\u2029' || c === '\u202f' || c === '\u205f' || c === '\u3000' || c === '\ufeff'
   const t: PhraseText = { raw: s, joined: '', toks: [], sep: [], nl: [], eol: [], dash: [], bar: [], tail: false, memo: {} }
   let start = -1
   let tokBar = false

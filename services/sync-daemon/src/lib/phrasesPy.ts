@@ -28,8 +28,8 @@ import re
 from bisect import bisect_left
 
 _SPACE_CHARS = (
-    " \t\n\r\v\f          "
-    "       　﻿"
+    " \t\n\r\v\f\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007"
+    "\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 )
 _SPACES = frozenset(_SPACE_CHARS)
 _WORD = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
@@ -42,6 +42,15 @@ _PIECE = re.compile(
     "|(?P<dash>-+)"
     "|(?P<backslash>\\\\+)"
     "|(?P<other>[/;&|])"
+)
+# The same once no "*/" is left in the text: no "/*" can open a comment, so a
+# slash is an ordinary character.
+_PIECE_NO_COMMENT = re.compile(
+    "(?P<plain>[^" + _SPACE_CHARS + "\\\\;&|-]+)"
+    "|(?P<space>[" + _SPACE_CHARS + "]+)"
+    "|(?P<dash>-+)"
+    "|(?P<backslash>\\\\+)"
+    "|(?P<other>[;&|])"
 )
 
 
@@ -73,10 +82,11 @@ def phrase_text(value):
     start = -1
     tok_bar = False
     pend_sep = pend_nl = pend_eol = False
-    close = -2  # the next "*/" at or after the last search; -1 once none is left
+    close = -2 if "*/" in s else -1  # the next "*/" at or after the last search; -1 once none is left
+    piece = _PIECE if close != -1 else _PIECE_NO_COMMENT
     i = 0
     while i < n:
-        m = _PIECE.match(s, i)
+        m = piece.match(s, i)
         kind = m.lastgroup
         j = m.end()
         if kind == "plain":
@@ -139,6 +149,8 @@ def phrase_text(value):
             if c == "/" and j < n and s[j] == "*" and close != -1:
                 if close < i + 2:
                     close = s.find("*/", i + 2)
+                    if close == -1:
+                        piece = _PIECE_NO_COMMENT
                 if close != -1:
                     word_break = True
                     nxt = close + 2

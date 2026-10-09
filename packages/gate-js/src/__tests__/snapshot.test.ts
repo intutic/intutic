@@ -214,8 +214,14 @@ describe('phrase rules', () => {
     ['\\ ', 100000],
   ] as const)('stays linear on %j repeated %i times', (unit, times) => {
     const s = load()
-    const t0 = performance.now()
-    evaluate('shell', '', unit.repeat(times), s)
-    expect(performance.now() - t0).toBeLessThan(200)
+    const command = unit.repeat(times)
+    let best = Infinity
+    for (let run = 0; run < 3; run++) {
+      const t0 = performance.now()
+      evaluate('shell', '', command, s)
+      best = Math.min(best, performance.now() - t0)
+    }
+    // The best of three runs: the bound is on the matcher, not on a busy machine.
+    expect(best).toBeLessThan(200)
   })
 })

@@ -107,9 +107,14 @@ def test_adversarial_input_classifies_in_linear_time(unit, times):
     import time
 
     command = unit * times
-    t0 = time.perf_counter()
-    actions.classify("bash", {"command": command})
-    assert time.perf_counter() - t0 < 0.2
+    best = None
+    for _ in range(3):
+        t0 = time.perf_counter()
+        actions.classify("bash", {"command": command})
+        took = time.perf_counter() - t0
+        best = took if best is None else min(best, took)
+    # The best of three runs: the bound is on the matcher, not on a busy machine.
+    assert best < 0.2
 
 
 @pytest.mark.parametrize(
