@@ -45,6 +45,7 @@ from typing import Optional
 
 from . import sso_groups as sso
 from . import actions
+from . import mcp_registry
 from .phrases import has_phrase, phrase_text
 from .sequence import compile_sequence, sequence_match
 
@@ -86,6 +87,13 @@ class Snapshot:
     # its integrity check the member's groups are None (unknown), so an edited
     # group list in the file clears nothing.
     sso_groups: Optional[sso.SsoGroupRecord] = None
+    # The workspace's MCP server registry decisions (the @mcp_registry record)
+    # and its mcpAllowedServers list (@mcp_allowlist), as mcp_registry.py
+    # reads them; None when there are none. On a snapshot that fails its
+    # integrity check the registry has no approvals and the allowlist admits
+    # no server and refuses at block, so an edit to either widens nothing.
+    mcp_registry: Optional[dict] = None
+    mcp_allowlist: Optional[dict] = None
 
     @property
     def health_message(self) -> str:
@@ -150,6 +158,12 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
         if line.startswith(sso.SSO_GROUP_RECORD_TAG + "\t"):
             snap.sso_groups = sso.decode_record(line)
             continue
+        if line.startswith(mcp_registry.MCP_REGISTRY_RECORD_TAG + "\t"):
+            snap.mcp_registry = mcp_registry.decode_registry_record(line)
+            continue
+        if line.startswith(mcp_registry.MCP_ALLOWLIST_RECORD_TAG + "\t"):
+            snap.mcp_allowlist = mcp_registry.decode_allowlist_record(line)
+            continue
         f = line.split("\t")
         # Column order: id, severity, flags, subject, reason, source(regex).
         # Flags: i = case-insensitive, s = a sequence rule.
@@ -188,6 +202,12 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
         # to a member whose groups this gate can no longer vouch for.
         if snap.sso_groups is not None:
             snap.sso_groups = sso.SsoGroupRecord(snap.sso_groups.policy, None, None, snap.sso_groups.issued_at)
+        # The MCP registry's refusals stay for the same reason, and its
+        # approvals go; the allowlist stays, admitting no server.
+        if snap.mcp_registry is not None:
+            snap.mcp_registry = dict(snap.mcp_registry, approvedServers=[])
+        if snap.mcp_allowlist is not None:
+            snap.mcp_allowlist = {"severity": "block", "servers": []}
 
     if snap.state == "ok" and snap.generated_at:
         try:

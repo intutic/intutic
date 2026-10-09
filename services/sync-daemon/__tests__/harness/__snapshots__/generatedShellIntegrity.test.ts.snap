@@ -10,7 +10,7 @@ exports[`generated hook scripts > antigravity > matches the recorded output byte
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v15 ─────────────────────────────
+# ── Intutic fail-closed prelude v16 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -408,6 +408,153 @@ def has_phrase(t, needle, bounded=False):
     return bool(ok)
 
 
+"""The MCP server registry and allowlist decisions, read from the policy snapshot.
+
+A transliteration of packages/shared-types/src/mcpRegistryRecord.ts: the
+registry decision (evaluateMcpRegistry), the allowlist decision
+(evaluateMcpAllowlist), and the snapshot's @mcp_registry and @mcp_allowlist
+records. The control plane's hook gate, the MCP proxy and the JavaScript hook
+gates run the TypeScript; the bash hook gates and this package run this file,
+and every one of them runs packages/shared-types/fixtures/mcp-registry-vectors.json,
+so all of them refuse a call with the same code, rule id and reason.
+
+The bash gates emit this file verbatim (services/sync-daemon/src/lib/mcpRegistryPy.ts
+holds a byte-identical copy, which a test compares). It must stay
+self-contained: the standard library only, no module state beyond the
+constants below, and no backtick or dollar-brace, which the TypeScript copy
+cannot hold.
+
+Both records sit inside the snapshot's digest. When the digest fails, a gate
+keeps what they refuse and drops what they admit: the registry loses its
+approvals, and the allowlist admits no server and refuses at block.
+"""
+
+import base64
+import json
+
+MCP_REGISTRY_RECORD_TAG = "@mcp_registry"
+MCP_ALLOWLIST_RECORD_TAG = "@mcp_allowlist"
+
+
+def split_mcp_tool_name(tool):
+    """(server, tool) for a harness name mcp__<server>__<tool>, else None.
+
+    The server is the part before the first double underscore; the tool, the
+    rest, may hold more of them.
+    """
+    if not isinstance(tool, str) or not tool.startswith("mcp__"):
+        return None
+    rest = tool[len("mcp__"):]
+    sep = rest.find("__")
+    if sep <= 0:
+        return None
+    return rest[:sep], rest[sep + 2:]
+
+
+def _strings(value):
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def parse_registry(value):
+    """The registry as the control plane sends it, or None for a non-object.
+
+    Wrong-typed lists read as empty, and any default but deny as allow.
+    """
+    if not isinstance(value, dict):
+        return None
+    disabled = {}
+    if isinstance(value.get("disabledTools"), dict):
+        for server, tools in value["disabledTools"].items():
+            names = _strings(tools)
+            if names:
+                disabled[server] = names
+    return {
+        "defaultPolicy": "deny" if value.get("defaultPolicy") == "deny" else "allow",
+        "approvedServers": _strings(value.get("approvedServers")),
+        "blockedServers": _strings(value.get("blockedServers")),
+        "heldServers": _strings(value.get("heldServers")),
+        "disabledTools": disabled,
+    }
+
+
+def decode_registry_record(line):
+    """The @mcp_registry line's registry; None for another line or a damaged one."""
+    parts = line.split("\\t")
+    if len(parts) != 2 or parts[0] != MCP_REGISTRY_RECORD_TAG or not parts[1]:
+        return None
+    try:
+        return parse_registry(json.loads(base64.b64decode(parts[1], validate=True).decode("utf-8")))
+    except Exception:
+        return None
+
+
+def evaluate_registry(registry, server, tool):
+    """(code, rule_id, reason) refusing one MCP call, or None to let it continue.
+
+    A blocked server, then a held one, then (under deny) one not approved,
+    then a disabled tool.
+    """
+    if server in registry["blockedServers"]:
+        return (
+            "SERVER_BLOCKED",
+            "mcp_registry." + server,
+            "MCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. "
+            "An owner or admin can change that on the MCP Servers page.",
+        )
+    if server in registry["heldServers"]:
+        return (
+            "SERVER_HELD",
+            "mcp_registry." + server,
+            "MCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace "
+            "holds such a server until it is approved again. It is waiting in the approval queue on the MCP "
+            "Servers page for an owner or admin.",
+        )
+    if registry["defaultPolicy"] == "deny" and server not in registry["approvedServers"]:
+        return (
+            "SERVER_NOT_APPROVED",
+            "mcpDefaultPolicy",
+            "MCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, "
+            "and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in "
+            "the approval queue on the MCP Servers page for an owner or admin.",
+        )
+    if tool in registry["disabledTools"].get(server, []):
+        return (
+            "TOOL_DISABLED",
+            "mcp_registry." + server + "." + tool,
+            "Tool \\"" + tool + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's "
+            "MCP server registry. An owner or admin can re-enable it on the MCP Servers page.",
+        )
+    return None
+
+
+def decode_allowlist_record(line):
+    """The @mcp_allowlist line as {"severity", "servers"}; None for another line.
+
+    A severity other than shadow reads as block, so a damaged one refuses.
+    """
+    parts = line.split("\\t")
+    if len(parts) != 3 or parts[0] != MCP_ALLOWLIST_RECORD_TAG:
+        return None
+    return {
+        "severity": "shadow" if parts[1] == "shadow" else "block",
+        "servers": [s for s in parts[2].split(",") if s],
+    }
+
+
+def evaluate_allowlist(allowlist, server):
+    """(code, rule_id, reason) for a server the allowlist does not name, else None.
+
+    Under shadow the caller records the refusal instead of enforcing it.
+    """
+    if server in allowlist["servers"]:
+        return None
+    return (
+        "SERVER_NOT_ALLOWED",
+        "mcp_allowlist",
+        "MCP server \\"" + server + "\\" is not on the MCP server allowlist for this workspace",
+    )
+
+
 _INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
 _INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
 
@@ -429,38 +576,18 @@ def intutic_phrase_rule(source, command):
 
 
 def intutic_mcp_registry(record_b64, tool, trust_approvals):
-    # The MCP server registry decision for one mcp__<server>__<tool> call: a
-    # transliteration of evaluateMcpRegistry (@intutic/shared-types
-    # mcpRegistryRecord.ts), held to the same vectors. Returns
-    # "code<TAB>ruleId<TAB>reason", or "" to let the call continue.
-    import base64
-    import json
-    try:
-        r = json.loads(base64.b64decode(record_b64, validate=True).decode("utf-8"))
-    except Exception:
+    # The registry decision for one mcp__<server>__<tool> call, from the
+    # snapshot's @mcp_registry record: "code<TAB>ruleId<TAB>reason", or "" to
+    # let the call continue. Without trust_approvals (the snapshot failed its
+    # digest) the record's approvals count for nothing.
+    call = split_mcp_tool_name(tool)
+    registry = decode_registry_record(MCP_REGISTRY_RECORD_TAG + "\\t" + record_b64)
+    if call is None or registry is None:
         return ""
-    if not isinstance(r, dict) or not tool.startswith("mcp__"):
-        return ""
-    rest = tool[len("mcp__"):]
-    sep = rest.find("__")
-    if sep <= 0:
-        return ""
-    server, name = rest[:sep], rest[sep + 2:]
-
-    def strings(v):
-        return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
-
-    approved = strings(r.get("approvedServers")) if trust_approvals else []
-    disabled = r.get("disabledTools") if isinstance(r.get("disabledTools"), dict) else {}
-    if server in strings(r.get("blockedServers")):
-        return "SERVER_BLOCKED\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
-    if server in strings(r.get("heldServers")):
-        return "SERVER_HELD\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if r.get("defaultPolicy") == "deny" and server not in approved:
-        return "SERVER_NOT_APPROVED\\tmcpDefaultPolicy\\tMCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if name in strings(disabled.get(server)):
-        return "TOOL_DISABLED\\tmcp_registry." + server + "." + name + "\\tTool \\"" + name + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
-    return ""
+    if not trust_approvals:
+        registry["approvedServers"] = []
+    refusal = evaluate_registry(registry, call[0], call[1])
+    return "\\t".join(refusal) if refusal else ""
 
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
@@ -627,7 +754,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v15 — harness: gemini-cli ────────────
+# ── Intutic gate body v16 — harness: gemini-cli ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -744,10 +871,9 @@ fi
 
 INTUTIC_SNAPSHOT_WORKSPACE=""
 INTUTIC_SNAPSHOT_GENERATED=""
-# M3: the per-server MCP allowlist header. Empty means "not configured" —
-# indistinguishable from "header absent", deliberately: writePolicySnapshot
-# omits the line entirely rather than shipping it with an empty list, so
-# empty-list-means-unrestricted holds all the way to the gate.
+# The per-server MCP allowlist (the @mcp_allowlist record, inside the digest).
+# No record means the workspace set no list, and every server is allowed.
+INTUTIC_MCP_ALLOWLIST=0
 INTUTIC_MCP_SEVERITY=""
 INTUTIC_MCP_SERVERS=""
 # The MCP server registry record (base64 JSON, inside the digest), and whether
@@ -761,12 +887,14 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
       '#digest '*)      INTUTIC_SNAPSHOT_DIGEST="\${_line#\\#digest }" ;;
       '#workspace '*)   INTUTIC_SNAPSHOT_WORKSPACE="\${_line#\\#workspace }" ;;
       '#generated '*)   INTUTIC_SNAPSHOT_GENERATED="\${_line#\\#generated }" ;;
-      '#mcpservers '*)
-        # \`#mcpservers <severity> <comma-joined-server-names>\` — parameter
-        # expansion only, no subshell, matching the other header lines here.
-        _intutic_mcp_rest="\${_line#\\#mcpservers }"
-        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%% *}"
-        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#* }"
+      '@mcp_allowlist'$'\\t'*)
+        # Tag, severity and comma-joined servers, tab-separated — parameter
+        # expansion only, no subshell. The writer drops a server name holding
+        # whitespace or a comma, so neither separator can appear in one.
+        INTUTIC_MCP_ALLOWLIST=1
+        _intutic_mcp_rest="\${_line#*$'\\t'}"
+        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%%$'\\t'*}"
+        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#*$'\\t'}"
         ;;
       '@mcp_registry'$'\\t'*) INTUTIC_MCP_REGISTRY="\${_line#*$'\\t'}" ;;
       '#'*|'') : ;;
@@ -800,9 +928,7 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   fi
 
   # Degrade to the compiled floor. The dynamic tier is additive, so dropping it
-  # returns to yesterday's behaviour rather than opening a hole. The MCP
-  # allowlist ships through the same file and degrades the same way — an
-  # invalid snapshot must not leave a stale allowlist enforcing.
+  # returns to yesterday's behaviour rather than opening a hole.
   # The SSO-group refusals survive it: they only ever refuse, and dropping
   # them would make editing the member's group list in this file a way to
   # clear a tool the workspace's group policy refuses.
@@ -817,11 +943,13 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
     fi
     INTUTIC_DYNAMIC=()
     if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
-    INTUTIC_MCP_SEVERITY=""
-    INTUTIC_MCP_SERVERS=""
     # The registry's refusals stay for the same reason; its approvals do not,
     # so an approval added to this file clears nothing.
     INTUTIC_MCP_REGISTRY_APPROVALS=0
+    # Likewise the allowlist: it still applies, but neither its servers nor
+    # its severity can be vouched for, so it admits no server and refuses.
+    INTUTIC_MCP_SEVERITY="block"
+    INTUTIC_MCP_SERVERS=""
   fi
 fi
 
@@ -1103,23 +1231,16 @@ sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2], sys.argv[
   esac
 fi
 
-# ── M3: MCP per-server allowlist backstop ────────────────────────────────────
-# A DEDICATED header field, not a synthetic GuardPattern rule — see
-# policySnapshot.ts's module doc and protectedPaths.ts's assertPortableEre:
-# expressing "allow only these servers" as a single regex needs negative
-# lookahead, which neither \`grep -E\` (POSIX ERE) nor this file's own
-# portable-ERE discipline support. So this is a plain string-membership test
-# over the parsed \${#mcpservers} header, independent of intutic_apply/the
-# GuardPattern tables entirely.
-#
-# Only fires when a \`mcp__<server>__<tool>\`-shaped tool name was actually
-# called AND the header was present (INTUTIC_MCP_SERVERS non-empty — absent
-# header means unrestricted, see the header-parsing block above). Refuses
-# through the SAME exit-2 + \${log} idiom every other block in this file uses,
-# not a parallel mechanism.
+# ── MCP per-server allowlist backstop ────────────────────────────────────────
+# A dedicated record, not a synthetic GuardPattern rule: "allow only these
+# servers" as one regex needs negative lookahead, which POSIX ERE (grep -E)
+# does not have. So this is a plain membership test over the @mcp_allowlist
+# record, with evaluateMcpAllowlist's code, rule id and reason (the shared
+# vectors hold this copy to it). Only for an mcp__<server>__<tool> call, and
+# only when the snapshot carries the record.
 case "\${TOOL:-}" in
   mcp__*__*)
-    if [ -n "$INTUTIC_MCP_SERVERS" ]; then
+    if [ "$INTUTIC_MCP_ALLOWLIST" = "1" ]; then
       _intutic_mcp_server="\${TOOL#mcp__}"
       _intutic_mcp_server="\${_intutic_mcp_server%%__*}"
       case ",$INTUTIC_MCP_SERVERS," in
@@ -1157,7 +1278,7 @@ exports[`generated hook scripts > goose > matches the recorded output byte for b
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v15 ─────────────────────────────
+# ── Intutic fail-closed prelude v16 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -1556,6 +1677,153 @@ def has_phrase(t, needle, bounded=False):
     return bool(ok)
 
 
+"""The MCP server registry and allowlist decisions, read from the policy snapshot.
+
+A transliteration of packages/shared-types/src/mcpRegistryRecord.ts: the
+registry decision (evaluateMcpRegistry), the allowlist decision
+(evaluateMcpAllowlist), and the snapshot's @mcp_registry and @mcp_allowlist
+records. The control plane's hook gate, the MCP proxy and the JavaScript hook
+gates run the TypeScript; the bash hook gates and this package run this file,
+and every one of them runs packages/shared-types/fixtures/mcp-registry-vectors.json,
+so all of them refuse a call with the same code, rule id and reason.
+
+The bash gates emit this file verbatim (services/sync-daemon/src/lib/mcpRegistryPy.ts
+holds a byte-identical copy, which a test compares). It must stay
+self-contained: the standard library only, no module state beyond the
+constants below, and no backtick or dollar-brace, which the TypeScript copy
+cannot hold.
+
+Both records sit inside the snapshot's digest. When the digest fails, a gate
+keeps what they refuse and drops what they admit: the registry loses its
+approvals, and the allowlist admits no server and refuses at block.
+"""
+
+import base64
+import json
+
+MCP_REGISTRY_RECORD_TAG = "@mcp_registry"
+MCP_ALLOWLIST_RECORD_TAG = "@mcp_allowlist"
+
+
+def split_mcp_tool_name(tool):
+    """(server, tool) for a harness name mcp__<server>__<tool>, else None.
+
+    The server is the part before the first double underscore; the tool, the
+    rest, may hold more of them.
+    """
+    if not isinstance(tool, str) or not tool.startswith("mcp__"):
+        return None
+    rest = tool[len("mcp__"):]
+    sep = rest.find("__")
+    if sep <= 0:
+        return None
+    return rest[:sep], rest[sep + 2:]
+
+
+def _strings(value):
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def parse_registry(value):
+    """The registry as the control plane sends it, or None for a non-object.
+
+    Wrong-typed lists read as empty, and any default but deny as allow.
+    """
+    if not isinstance(value, dict):
+        return None
+    disabled = {}
+    if isinstance(value.get("disabledTools"), dict):
+        for server, tools in value["disabledTools"].items():
+            names = _strings(tools)
+            if names:
+                disabled[server] = names
+    return {
+        "defaultPolicy": "deny" if value.get("defaultPolicy") == "deny" else "allow",
+        "approvedServers": _strings(value.get("approvedServers")),
+        "blockedServers": _strings(value.get("blockedServers")),
+        "heldServers": _strings(value.get("heldServers")),
+        "disabledTools": disabled,
+    }
+
+
+def decode_registry_record(line):
+    """The @mcp_registry line's registry; None for another line or a damaged one."""
+    parts = line.split("\\t")
+    if len(parts) != 2 or parts[0] != MCP_REGISTRY_RECORD_TAG or not parts[1]:
+        return None
+    try:
+        return parse_registry(json.loads(base64.b64decode(parts[1], validate=True).decode("utf-8")))
+    except Exception:
+        return None
+
+
+def evaluate_registry(registry, server, tool):
+    """(code, rule_id, reason) refusing one MCP call, or None to let it continue.
+
+    A blocked server, then a held one, then (under deny) one not approved,
+    then a disabled tool.
+    """
+    if server in registry["blockedServers"]:
+        return (
+            "SERVER_BLOCKED",
+            "mcp_registry." + server,
+            "MCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. "
+            "An owner or admin can change that on the MCP Servers page.",
+        )
+    if server in registry["heldServers"]:
+        return (
+            "SERVER_HELD",
+            "mcp_registry." + server,
+            "MCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace "
+            "holds such a server until it is approved again. It is waiting in the approval queue on the MCP "
+            "Servers page for an owner or admin.",
+        )
+    if registry["defaultPolicy"] == "deny" and server not in registry["approvedServers"]:
+        return (
+            "SERVER_NOT_APPROVED",
+            "mcpDefaultPolicy",
+            "MCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, "
+            "and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in "
+            "the approval queue on the MCP Servers page for an owner or admin.",
+        )
+    if tool in registry["disabledTools"].get(server, []):
+        return (
+            "TOOL_DISABLED",
+            "mcp_registry." + server + "." + tool,
+            "Tool \\"" + tool + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's "
+            "MCP server registry. An owner or admin can re-enable it on the MCP Servers page.",
+        )
+    return None
+
+
+def decode_allowlist_record(line):
+    """The @mcp_allowlist line as {"severity", "servers"}; None for another line.
+
+    A severity other than shadow reads as block, so a damaged one refuses.
+    """
+    parts = line.split("\\t")
+    if len(parts) != 3 or parts[0] != MCP_ALLOWLIST_RECORD_TAG:
+        return None
+    return {
+        "severity": "shadow" if parts[1] == "shadow" else "block",
+        "servers": [s for s in parts[2].split(",") if s],
+    }
+
+
+def evaluate_allowlist(allowlist, server):
+    """(code, rule_id, reason) for a server the allowlist does not name, else None.
+
+    Under shadow the caller records the refusal instead of enforcing it.
+    """
+    if server in allowlist["servers"]:
+        return None
+    return (
+        "SERVER_NOT_ALLOWED",
+        "mcp_allowlist",
+        "MCP server \\"" + server + "\\" is not on the MCP server allowlist for this workspace",
+    )
+
+
 _INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
 _INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
 
@@ -1577,38 +1845,18 @@ def intutic_phrase_rule(source, command):
 
 
 def intutic_mcp_registry(record_b64, tool, trust_approvals):
-    # The MCP server registry decision for one mcp__<server>__<tool> call: a
-    # transliteration of evaluateMcpRegistry (@intutic/shared-types
-    # mcpRegistryRecord.ts), held to the same vectors. Returns
-    # "code<TAB>ruleId<TAB>reason", or "" to let the call continue.
-    import base64
-    import json
-    try:
-        r = json.loads(base64.b64decode(record_b64, validate=True).decode("utf-8"))
-    except Exception:
+    # The registry decision for one mcp__<server>__<tool> call, from the
+    # snapshot's @mcp_registry record: "code<TAB>ruleId<TAB>reason", or "" to
+    # let the call continue. Without trust_approvals (the snapshot failed its
+    # digest) the record's approvals count for nothing.
+    call = split_mcp_tool_name(tool)
+    registry = decode_registry_record(MCP_REGISTRY_RECORD_TAG + "\\t" + record_b64)
+    if call is None or registry is None:
         return ""
-    if not isinstance(r, dict) or not tool.startswith("mcp__"):
-        return ""
-    rest = tool[len("mcp__"):]
-    sep = rest.find("__")
-    if sep <= 0:
-        return ""
-    server, name = rest[:sep], rest[sep + 2:]
-
-    def strings(v):
-        return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
-
-    approved = strings(r.get("approvedServers")) if trust_approvals else []
-    disabled = r.get("disabledTools") if isinstance(r.get("disabledTools"), dict) else {}
-    if server in strings(r.get("blockedServers")):
-        return "SERVER_BLOCKED\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
-    if server in strings(r.get("heldServers")):
-        return "SERVER_HELD\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if r.get("defaultPolicy") == "deny" and server not in approved:
-        return "SERVER_NOT_APPROVED\\tmcpDefaultPolicy\\tMCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if name in strings(disabled.get(server)):
-        return "TOOL_DISABLED\\tmcp_registry." + server + "." + name + "\\tTool \\"" + name + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
-    return ""
+    if not trust_approvals:
+        registry["approvedServers"] = []
+    refusal = evaluate_registry(registry, call[0], call[1])
+    return "\\t".join(refusal) if refusal else ""
 
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
@@ -1777,7 +2025,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v15 — harness: goose ────────────
+# ── Intutic gate body v16 — harness: goose ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -1894,10 +2142,9 @@ fi
 
 INTUTIC_SNAPSHOT_WORKSPACE=""
 INTUTIC_SNAPSHOT_GENERATED=""
-# M3: the per-server MCP allowlist header. Empty means "not configured" —
-# indistinguishable from "header absent", deliberately: writePolicySnapshot
-# omits the line entirely rather than shipping it with an empty list, so
-# empty-list-means-unrestricted holds all the way to the gate.
+# The per-server MCP allowlist (the @mcp_allowlist record, inside the digest).
+# No record means the workspace set no list, and every server is allowed.
+INTUTIC_MCP_ALLOWLIST=0
 INTUTIC_MCP_SEVERITY=""
 INTUTIC_MCP_SERVERS=""
 # The MCP server registry record (base64 JSON, inside the digest), and whether
@@ -1911,12 +2158,14 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
       '#digest '*)      INTUTIC_SNAPSHOT_DIGEST="\${_line#\\#digest }" ;;
       '#workspace '*)   INTUTIC_SNAPSHOT_WORKSPACE="\${_line#\\#workspace }" ;;
       '#generated '*)   INTUTIC_SNAPSHOT_GENERATED="\${_line#\\#generated }" ;;
-      '#mcpservers '*)
-        # \`#mcpservers <severity> <comma-joined-server-names>\` — parameter
-        # expansion only, no subshell, matching the other header lines here.
-        _intutic_mcp_rest="\${_line#\\#mcpservers }"
-        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%% *}"
-        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#* }"
+      '@mcp_allowlist'$'\\t'*)
+        # Tag, severity and comma-joined servers, tab-separated — parameter
+        # expansion only, no subshell. The writer drops a server name holding
+        # whitespace or a comma, so neither separator can appear in one.
+        INTUTIC_MCP_ALLOWLIST=1
+        _intutic_mcp_rest="\${_line#*$'\\t'}"
+        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%%$'\\t'*}"
+        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#*$'\\t'}"
         ;;
       '@mcp_registry'$'\\t'*) INTUTIC_MCP_REGISTRY="\${_line#*$'\\t'}" ;;
       '#'*|'') : ;;
@@ -1950,9 +2199,7 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   fi
 
   # Degrade to the compiled floor. The dynamic tier is additive, so dropping it
-  # returns to yesterday's behaviour rather than opening a hole. The MCP
-  # allowlist ships through the same file and degrades the same way — an
-  # invalid snapshot must not leave a stale allowlist enforcing.
+  # returns to yesterday's behaviour rather than opening a hole.
   # The SSO-group refusals survive it: they only ever refuse, and dropping
   # them would make editing the member's group list in this file a way to
   # clear a tool the workspace's group policy refuses.
@@ -1967,11 +2214,13 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
     fi
     INTUTIC_DYNAMIC=()
     if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
-    INTUTIC_MCP_SEVERITY=""
-    INTUTIC_MCP_SERVERS=""
     # The registry's refusals stay for the same reason; its approvals do not,
     # so an approval added to this file clears nothing.
     INTUTIC_MCP_REGISTRY_APPROVALS=0
+    # Likewise the allowlist: it still applies, but neither its servers nor
+    # its severity can be vouched for, so it admits no server and refuses.
+    INTUTIC_MCP_SEVERITY="block"
+    INTUTIC_MCP_SERVERS=""
   fi
 fi
 
@@ -2253,23 +2502,16 @@ sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2], sys.argv[
   esac
 fi
 
-# ── M3: MCP per-server allowlist backstop ────────────────────────────────────
-# A DEDICATED header field, not a synthetic GuardPattern rule — see
-# policySnapshot.ts's module doc and protectedPaths.ts's assertPortableEre:
-# expressing "allow only these servers" as a single regex needs negative
-# lookahead, which neither \`grep -E\` (POSIX ERE) nor this file's own
-# portable-ERE discipline support. So this is a plain string-membership test
-# over the parsed \${#mcpservers} header, independent of intutic_apply/the
-# GuardPattern tables entirely.
-#
-# Only fires when a \`mcp__<server>__<tool>\`-shaped tool name was actually
-# called AND the header was present (INTUTIC_MCP_SERVERS non-empty — absent
-# header means unrestricted, see the header-parsing block above). Refuses
-# through the SAME exit-2 + \${log} idiom every other block in this file uses,
-# not a parallel mechanism.
+# ── MCP per-server allowlist backstop ────────────────────────────────────────
+# A dedicated record, not a synthetic GuardPattern rule: "allow only these
+# servers" as one regex needs negative lookahead, which POSIX ERE (grep -E)
+# does not have. So this is a plain membership test over the @mcp_allowlist
+# record, with evaluateMcpAllowlist's code, rule id and reason (the shared
+# vectors hold this copy to it). Only for an mcp__<server>__<tool> call, and
+# only when the snapshot carries the record.
 case "\${TOOL:-}" in
   mcp__*__*)
-    if [ -n "$INTUTIC_MCP_SERVERS" ]; then
+    if [ "$INTUTIC_MCP_ALLOWLIST" = "1" ]; then
       _intutic_mcp_server="\${TOOL#mcp__}"
       _intutic_mcp_server="\${_intutic_mcp_server%%__*}"
       case ",$INTUTIC_MCP_SERVERS," in
@@ -2309,7 +2551,7 @@ exports[`generated hook scripts > hermes > matches the recorded output byte for 
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v15 ─────────────────────────────
+# ── Intutic fail-closed prelude v16 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -2717,6 +2959,153 @@ def has_phrase(t, needle, bounded=False):
     return bool(ok)
 
 
+"""The MCP server registry and allowlist decisions, read from the policy snapshot.
+
+A transliteration of packages/shared-types/src/mcpRegistryRecord.ts: the
+registry decision (evaluateMcpRegistry), the allowlist decision
+(evaluateMcpAllowlist), and the snapshot's @mcp_registry and @mcp_allowlist
+records. The control plane's hook gate, the MCP proxy and the JavaScript hook
+gates run the TypeScript; the bash hook gates and this package run this file,
+and every one of them runs packages/shared-types/fixtures/mcp-registry-vectors.json,
+so all of them refuse a call with the same code, rule id and reason.
+
+The bash gates emit this file verbatim (services/sync-daemon/src/lib/mcpRegistryPy.ts
+holds a byte-identical copy, which a test compares). It must stay
+self-contained: the standard library only, no module state beyond the
+constants below, and no backtick or dollar-brace, which the TypeScript copy
+cannot hold.
+
+Both records sit inside the snapshot's digest. When the digest fails, a gate
+keeps what they refuse and drops what they admit: the registry loses its
+approvals, and the allowlist admits no server and refuses at block.
+"""
+
+import base64
+import json
+
+MCP_REGISTRY_RECORD_TAG = "@mcp_registry"
+MCP_ALLOWLIST_RECORD_TAG = "@mcp_allowlist"
+
+
+def split_mcp_tool_name(tool):
+    """(server, tool) for a harness name mcp__<server>__<tool>, else None.
+
+    The server is the part before the first double underscore; the tool, the
+    rest, may hold more of them.
+    """
+    if not isinstance(tool, str) or not tool.startswith("mcp__"):
+        return None
+    rest = tool[len("mcp__"):]
+    sep = rest.find("__")
+    if sep <= 0:
+        return None
+    return rest[:sep], rest[sep + 2:]
+
+
+def _strings(value):
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def parse_registry(value):
+    """The registry as the control plane sends it, or None for a non-object.
+
+    Wrong-typed lists read as empty, and any default but deny as allow.
+    """
+    if not isinstance(value, dict):
+        return None
+    disabled = {}
+    if isinstance(value.get("disabledTools"), dict):
+        for server, tools in value["disabledTools"].items():
+            names = _strings(tools)
+            if names:
+                disabled[server] = names
+    return {
+        "defaultPolicy": "deny" if value.get("defaultPolicy") == "deny" else "allow",
+        "approvedServers": _strings(value.get("approvedServers")),
+        "blockedServers": _strings(value.get("blockedServers")),
+        "heldServers": _strings(value.get("heldServers")),
+        "disabledTools": disabled,
+    }
+
+
+def decode_registry_record(line):
+    """The @mcp_registry line's registry; None for another line or a damaged one."""
+    parts = line.split("\\t")
+    if len(parts) != 2 or parts[0] != MCP_REGISTRY_RECORD_TAG or not parts[1]:
+        return None
+    try:
+        return parse_registry(json.loads(base64.b64decode(parts[1], validate=True).decode("utf-8")))
+    except Exception:
+        return None
+
+
+def evaluate_registry(registry, server, tool):
+    """(code, rule_id, reason) refusing one MCP call, or None to let it continue.
+
+    A blocked server, then a held one, then (under deny) one not approved,
+    then a disabled tool.
+    """
+    if server in registry["blockedServers"]:
+        return (
+            "SERVER_BLOCKED",
+            "mcp_registry." + server,
+            "MCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. "
+            "An owner or admin can change that on the MCP Servers page.",
+        )
+    if server in registry["heldServers"]:
+        return (
+            "SERVER_HELD",
+            "mcp_registry." + server,
+            "MCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace "
+            "holds such a server until it is approved again. It is waiting in the approval queue on the MCP "
+            "Servers page for an owner or admin.",
+        )
+    if registry["defaultPolicy"] == "deny" and server not in registry["approvedServers"]:
+        return (
+            "SERVER_NOT_APPROVED",
+            "mcpDefaultPolicy",
+            "MCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, "
+            "and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in "
+            "the approval queue on the MCP Servers page for an owner or admin.",
+        )
+    if tool in registry["disabledTools"].get(server, []):
+        return (
+            "TOOL_DISABLED",
+            "mcp_registry." + server + "." + tool,
+            "Tool \\"" + tool + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's "
+            "MCP server registry. An owner or admin can re-enable it on the MCP Servers page.",
+        )
+    return None
+
+
+def decode_allowlist_record(line):
+    """The @mcp_allowlist line as {"severity", "servers"}; None for another line.
+
+    A severity other than shadow reads as block, so a damaged one refuses.
+    """
+    parts = line.split("\\t")
+    if len(parts) != 3 or parts[0] != MCP_ALLOWLIST_RECORD_TAG:
+        return None
+    return {
+        "severity": "shadow" if parts[1] == "shadow" else "block",
+        "servers": [s for s in parts[2].split(",") if s],
+    }
+
+
+def evaluate_allowlist(allowlist, server):
+    """(code, rule_id, reason) for a server the allowlist does not name, else None.
+
+    Under shadow the caller records the refusal instead of enforcing it.
+    """
+    if server in allowlist["servers"]:
+        return None
+    return (
+        "SERVER_NOT_ALLOWED",
+        "mcp_allowlist",
+        "MCP server \\"" + server + "\\" is not on the MCP server allowlist for this workspace",
+    )
+
+
 _INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
 _INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
 
@@ -2738,38 +3127,18 @@ def intutic_phrase_rule(source, command):
 
 
 def intutic_mcp_registry(record_b64, tool, trust_approvals):
-    # The MCP server registry decision for one mcp__<server>__<tool> call: a
-    # transliteration of evaluateMcpRegistry (@intutic/shared-types
-    # mcpRegistryRecord.ts), held to the same vectors. Returns
-    # "code<TAB>ruleId<TAB>reason", or "" to let the call continue.
-    import base64
-    import json
-    try:
-        r = json.loads(base64.b64decode(record_b64, validate=True).decode("utf-8"))
-    except Exception:
+    # The registry decision for one mcp__<server>__<tool> call, from the
+    # snapshot's @mcp_registry record: "code<TAB>ruleId<TAB>reason", or "" to
+    # let the call continue. Without trust_approvals (the snapshot failed its
+    # digest) the record's approvals count for nothing.
+    call = split_mcp_tool_name(tool)
+    registry = decode_registry_record(MCP_REGISTRY_RECORD_TAG + "\\t" + record_b64)
+    if call is None or registry is None:
         return ""
-    if not isinstance(r, dict) or not tool.startswith("mcp__"):
-        return ""
-    rest = tool[len("mcp__"):]
-    sep = rest.find("__")
-    if sep <= 0:
-        return ""
-    server, name = rest[:sep], rest[sep + 2:]
-
-    def strings(v):
-        return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
-
-    approved = strings(r.get("approvedServers")) if trust_approvals else []
-    disabled = r.get("disabledTools") if isinstance(r.get("disabledTools"), dict) else {}
-    if server in strings(r.get("blockedServers")):
-        return "SERVER_BLOCKED\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
-    if server in strings(r.get("heldServers")):
-        return "SERVER_HELD\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if r.get("defaultPolicy") == "deny" and server not in approved:
-        return "SERVER_NOT_APPROVED\\tmcpDefaultPolicy\\tMCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if name in strings(disabled.get(server)):
-        return "TOOL_DISABLED\\tmcp_registry." + server + "." + name + "\\tTool \\"" + name + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
-    return ""
+    if not trust_approvals:
+        registry["approvedServers"] = []
+    refusal = evaluate_registry(registry, call[0], call[1])
+    return "\\t".join(refusal) if refusal else ""
 
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
@@ -2928,7 +3297,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v15 — harness: hermes ────────────
+# ── Intutic gate body v16 — harness: hermes ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -3045,10 +3414,9 @@ fi
 
 INTUTIC_SNAPSHOT_WORKSPACE=""
 INTUTIC_SNAPSHOT_GENERATED=""
-# M3: the per-server MCP allowlist header. Empty means "not configured" —
-# indistinguishable from "header absent", deliberately: writePolicySnapshot
-# omits the line entirely rather than shipping it with an empty list, so
-# empty-list-means-unrestricted holds all the way to the gate.
+# The per-server MCP allowlist (the @mcp_allowlist record, inside the digest).
+# No record means the workspace set no list, and every server is allowed.
+INTUTIC_MCP_ALLOWLIST=0
 INTUTIC_MCP_SEVERITY=""
 INTUTIC_MCP_SERVERS=""
 # The MCP server registry record (base64 JSON, inside the digest), and whether
@@ -3062,12 +3430,14 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
       '#digest '*)      INTUTIC_SNAPSHOT_DIGEST="\${_line#\\#digest }" ;;
       '#workspace '*)   INTUTIC_SNAPSHOT_WORKSPACE="\${_line#\\#workspace }" ;;
       '#generated '*)   INTUTIC_SNAPSHOT_GENERATED="\${_line#\\#generated }" ;;
-      '#mcpservers '*)
-        # \`#mcpservers <severity> <comma-joined-server-names>\` — parameter
-        # expansion only, no subshell, matching the other header lines here.
-        _intutic_mcp_rest="\${_line#\\#mcpservers }"
-        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%% *}"
-        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#* }"
+      '@mcp_allowlist'$'\\t'*)
+        # Tag, severity and comma-joined servers, tab-separated — parameter
+        # expansion only, no subshell. The writer drops a server name holding
+        # whitespace or a comma, so neither separator can appear in one.
+        INTUTIC_MCP_ALLOWLIST=1
+        _intutic_mcp_rest="\${_line#*$'\\t'}"
+        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%%$'\\t'*}"
+        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#*$'\\t'}"
         ;;
       '@mcp_registry'$'\\t'*) INTUTIC_MCP_REGISTRY="\${_line#*$'\\t'}" ;;
       '#'*|'') : ;;
@@ -3101,9 +3471,7 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   fi
 
   # Degrade to the compiled floor. The dynamic tier is additive, so dropping it
-  # returns to yesterday's behaviour rather than opening a hole. The MCP
-  # allowlist ships through the same file and degrades the same way — an
-  # invalid snapshot must not leave a stale allowlist enforcing.
+  # returns to yesterday's behaviour rather than opening a hole.
   # The SSO-group refusals survive it: they only ever refuse, and dropping
   # them would make editing the member's group list in this file a way to
   # clear a tool the workspace's group policy refuses.
@@ -3118,11 +3486,13 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
     fi
     INTUTIC_DYNAMIC=()
     if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
-    INTUTIC_MCP_SEVERITY=""
-    INTUTIC_MCP_SERVERS=""
     # The registry's refusals stay for the same reason; its approvals do not,
     # so an approval added to this file clears nothing.
     INTUTIC_MCP_REGISTRY_APPROVALS=0
+    # Likewise the allowlist: it still applies, but neither its servers nor
+    # its severity can be vouched for, so it admits no server and refuses.
+    INTUTIC_MCP_SEVERITY="block"
+    INTUTIC_MCP_SERVERS=""
   fi
 fi
 
@@ -3404,23 +3774,16 @@ sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2], sys.argv[
   esac
 fi
 
-# ── M3: MCP per-server allowlist backstop ────────────────────────────────────
-# A DEDICATED header field, not a synthetic GuardPattern rule — see
-# policySnapshot.ts's module doc and protectedPaths.ts's assertPortableEre:
-# expressing "allow only these servers" as a single regex needs negative
-# lookahead, which neither \`grep -E\` (POSIX ERE) nor this file's own
-# portable-ERE discipline support. So this is a plain string-membership test
-# over the parsed \${#mcpservers} header, independent of intutic_apply/the
-# GuardPattern tables entirely.
-#
-# Only fires when a \`mcp__<server>__<tool>\`-shaped tool name was actually
-# called AND the header was present (INTUTIC_MCP_SERVERS non-empty — absent
-# header means unrestricted, see the header-parsing block above). Refuses
-# through the SAME exit-2 + \${log} idiom every other block in this file uses,
-# not a parallel mechanism.
+# ── MCP per-server allowlist backstop ────────────────────────────────────────
+# A dedicated record, not a synthetic GuardPattern rule: "allow only these
+# servers" as one regex needs negative lookahead, which POSIX ERE (grep -E)
+# does not have. So this is a plain membership test over the @mcp_allowlist
+# record, with evaluateMcpAllowlist's code, rule id and reason (the shared
+# vectors hold this copy to it). Only for an mcp__<server>__<tool> call, and
+# only when the snapshot carries the record.
 case "\${TOOL:-}" in
   mcp__*__*)
-    if [ -n "$INTUTIC_MCP_SERVERS" ]; then
+    if [ "$INTUTIC_MCP_ALLOWLIST" = "1" ]; then
       _intutic_mcp_server="\${TOOL#mcp__}"
       _intutic_mcp_server="\${_intutic_mcp_server%%__*}"
       case ",$INTUTIC_MCP_SERVERS," in
@@ -3458,7 +3821,7 @@ exports[`generated hook scripts > openhands > matches the recorded output byte f
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v15 ─────────────────────────────
+# ── Intutic fail-closed prelude v16 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -3856,6 +4219,153 @@ def has_phrase(t, needle, bounded=False):
     return bool(ok)
 
 
+"""The MCP server registry and allowlist decisions, read from the policy snapshot.
+
+A transliteration of packages/shared-types/src/mcpRegistryRecord.ts: the
+registry decision (evaluateMcpRegistry), the allowlist decision
+(evaluateMcpAllowlist), and the snapshot's @mcp_registry and @mcp_allowlist
+records. The control plane's hook gate, the MCP proxy and the JavaScript hook
+gates run the TypeScript; the bash hook gates and this package run this file,
+and every one of them runs packages/shared-types/fixtures/mcp-registry-vectors.json,
+so all of them refuse a call with the same code, rule id and reason.
+
+The bash gates emit this file verbatim (services/sync-daemon/src/lib/mcpRegistryPy.ts
+holds a byte-identical copy, which a test compares). It must stay
+self-contained: the standard library only, no module state beyond the
+constants below, and no backtick or dollar-brace, which the TypeScript copy
+cannot hold.
+
+Both records sit inside the snapshot's digest. When the digest fails, a gate
+keeps what they refuse and drops what they admit: the registry loses its
+approvals, and the allowlist admits no server and refuses at block.
+"""
+
+import base64
+import json
+
+MCP_REGISTRY_RECORD_TAG = "@mcp_registry"
+MCP_ALLOWLIST_RECORD_TAG = "@mcp_allowlist"
+
+
+def split_mcp_tool_name(tool):
+    """(server, tool) for a harness name mcp__<server>__<tool>, else None.
+
+    The server is the part before the first double underscore; the tool, the
+    rest, may hold more of them.
+    """
+    if not isinstance(tool, str) or not tool.startswith("mcp__"):
+        return None
+    rest = tool[len("mcp__"):]
+    sep = rest.find("__")
+    if sep <= 0:
+        return None
+    return rest[:sep], rest[sep + 2:]
+
+
+def _strings(value):
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def parse_registry(value):
+    """The registry as the control plane sends it, or None for a non-object.
+
+    Wrong-typed lists read as empty, and any default but deny as allow.
+    """
+    if not isinstance(value, dict):
+        return None
+    disabled = {}
+    if isinstance(value.get("disabledTools"), dict):
+        for server, tools in value["disabledTools"].items():
+            names = _strings(tools)
+            if names:
+                disabled[server] = names
+    return {
+        "defaultPolicy": "deny" if value.get("defaultPolicy") == "deny" else "allow",
+        "approvedServers": _strings(value.get("approvedServers")),
+        "blockedServers": _strings(value.get("blockedServers")),
+        "heldServers": _strings(value.get("heldServers")),
+        "disabledTools": disabled,
+    }
+
+
+def decode_registry_record(line):
+    """The @mcp_registry line's registry; None for another line or a damaged one."""
+    parts = line.split("\\t")
+    if len(parts) != 2 or parts[0] != MCP_REGISTRY_RECORD_TAG or not parts[1]:
+        return None
+    try:
+        return parse_registry(json.loads(base64.b64decode(parts[1], validate=True).decode("utf-8")))
+    except Exception:
+        return None
+
+
+def evaluate_registry(registry, server, tool):
+    """(code, rule_id, reason) refusing one MCP call, or None to let it continue.
+
+    A blocked server, then a held one, then (under deny) one not approved,
+    then a disabled tool.
+    """
+    if server in registry["blockedServers"]:
+        return (
+            "SERVER_BLOCKED",
+            "mcp_registry." + server,
+            "MCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. "
+            "An owner or admin can change that on the MCP Servers page.",
+        )
+    if server in registry["heldServers"]:
+        return (
+            "SERVER_HELD",
+            "mcp_registry." + server,
+            "MCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace "
+            "holds such a server until it is approved again. It is waiting in the approval queue on the MCP "
+            "Servers page for an owner or admin.",
+        )
+    if registry["defaultPolicy"] == "deny" and server not in registry["approvedServers"]:
+        return (
+            "SERVER_NOT_APPROVED",
+            "mcpDefaultPolicy",
+            "MCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, "
+            "and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in "
+            "the approval queue on the MCP Servers page for an owner or admin.",
+        )
+    if tool in registry["disabledTools"].get(server, []):
+        return (
+            "TOOL_DISABLED",
+            "mcp_registry." + server + "." + tool,
+            "Tool \\"" + tool + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's "
+            "MCP server registry. An owner or admin can re-enable it on the MCP Servers page.",
+        )
+    return None
+
+
+def decode_allowlist_record(line):
+    """The @mcp_allowlist line as {"severity", "servers"}; None for another line.
+
+    A severity other than shadow reads as block, so a damaged one refuses.
+    """
+    parts = line.split("\\t")
+    if len(parts) != 3 or parts[0] != MCP_ALLOWLIST_RECORD_TAG:
+        return None
+    return {
+        "severity": "shadow" if parts[1] == "shadow" else "block",
+        "servers": [s for s in parts[2].split(",") if s],
+    }
+
+
+def evaluate_allowlist(allowlist, server):
+    """(code, rule_id, reason) for a server the allowlist does not name, else None.
+
+    Under shadow the caller records the refusal instead of enforcing it.
+    """
+    if server in allowlist["servers"]:
+        return None
+    return (
+        "SERVER_NOT_ALLOWED",
+        "mcp_allowlist",
+        "MCP server \\"" + server + "\\" is not on the MCP server allowlist for this workspace",
+    )
+
+
 _INTUTIC_ACTION_NEEDLES = [["action:deploy",["git push","kubectl apply","kubectl rollout","helm upgrade","helm install","terraform apply","docker push","serverless deploy","fly deploy","vercel deploy","gcloud run deploy","aws deploy","aws s3 sync","eb deploy"]],["action:publish",["npm publish","pnpm publish","yarn publish","cargo publish","twine upload","poetry publish","gem push","docker manifest push"]],["action:release",["gh release create","git tag","npm version","cargo release","goreleaser release","semantic-release"]],["action:db_write",["insert into","update ","delete from","drop table","drop database","drop schema","truncate ","alter table"]]]
 _INTUTIC_ACTION_TOOLS = ["bash","shell","run_command","runcommand","execute_command","run_shell_command","terminal","execute","exec"]
 
@@ -3877,38 +4387,18 @@ def intutic_phrase_rule(source, command):
 
 
 def intutic_mcp_registry(record_b64, tool, trust_approvals):
-    # The MCP server registry decision for one mcp__<server>__<tool> call: a
-    # transliteration of evaluateMcpRegistry (@intutic/shared-types
-    # mcpRegistryRecord.ts), held to the same vectors. Returns
-    # "code<TAB>ruleId<TAB>reason", or "" to let the call continue.
-    import base64
-    import json
-    try:
-        r = json.loads(base64.b64decode(record_b64, validate=True).decode("utf-8"))
-    except Exception:
+    # The registry decision for one mcp__<server>__<tool> call, from the
+    # snapshot's @mcp_registry record: "code<TAB>ruleId<TAB>reason", or "" to
+    # let the call continue. Without trust_approvals (the snapshot failed its
+    # digest) the record's approvals count for nothing.
+    call = split_mcp_tool_name(tool)
+    registry = decode_registry_record(MCP_REGISTRY_RECORD_TAG + "\\t" + record_b64)
+    if call is None or registry is None:
         return ""
-    if not isinstance(r, dict) or not tool.startswith("mcp__"):
-        return ""
-    rest = tool[len("mcp__"):]
-    sep = rest.find("__")
-    if sep <= 0:
-        return ""
-    server, name = rest[:sep], rest[sep + 2:]
-
-    def strings(v):
-        return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
-
-    approved = strings(r.get("approvedServers")) if trust_approvals else []
-    disabled = r.get("disabledTools") if isinstance(r.get("disabledTools"), dict) else {}
-    if server in strings(r.get("blockedServers")):
-        return "SERVER_BLOCKED\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
-    if server in strings(r.get("heldServers")):
-        return "SERVER_HELD\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if r.get("defaultPolicy") == "deny" and server not in approved:
-        return "SERVER_NOT_APPROVED\\tmcpDefaultPolicy\\tMCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if name in strings(disabled.get(server)):
-        return "TOOL_DISABLED\\tmcp_registry." + server + "." + name + "\\tTool \\"" + name + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
-    return ""
+    if not trust_approvals:
+        registry["approvedServers"] = []
+    refusal = evaluate_registry(registry, call[0], call[1])
+    return "\\t".join(refusal) if refusal else ""
 
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
@@ -4077,7 +4567,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v15 — harness: openhands ────────────
+# ── Intutic gate body v16 — harness: openhands ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -4194,10 +4684,9 @@ fi
 
 INTUTIC_SNAPSHOT_WORKSPACE=""
 INTUTIC_SNAPSHOT_GENERATED=""
-# M3: the per-server MCP allowlist header. Empty means "not configured" —
-# indistinguishable from "header absent", deliberately: writePolicySnapshot
-# omits the line entirely rather than shipping it with an empty list, so
-# empty-list-means-unrestricted holds all the way to the gate.
+# The per-server MCP allowlist (the @mcp_allowlist record, inside the digest).
+# No record means the workspace set no list, and every server is allowed.
+INTUTIC_MCP_ALLOWLIST=0
 INTUTIC_MCP_SEVERITY=""
 INTUTIC_MCP_SERVERS=""
 # The MCP server registry record (base64 JSON, inside the digest), and whether
@@ -4211,12 +4700,14 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
       '#digest '*)      INTUTIC_SNAPSHOT_DIGEST="\${_line#\\#digest }" ;;
       '#workspace '*)   INTUTIC_SNAPSHOT_WORKSPACE="\${_line#\\#workspace }" ;;
       '#generated '*)   INTUTIC_SNAPSHOT_GENERATED="\${_line#\\#generated }" ;;
-      '#mcpservers '*)
-        # \`#mcpservers <severity> <comma-joined-server-names>\` — parameter
-        # expansion only, no subshell, matching the other header lines here.
-        _intutic_mcp_rest="\${_line#\\#mcpservers }"
-        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%% *}"
-        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#* }"
+      '@mcp_allowlist'$'\\t'*)
+        # Tag, severity and comma-joined servers, tab-separated — parameter
+        # expansion only, no subshell. The writer drops a server name holding
+        # whitespace or a comma, so neither separator can appear in one.
+        INTUTIC_MCP_ALLOWLIST=1
+        _intutic_mcp_rest="\${_line#*$'\\t'}"
+        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%%$'\\t'*}"
+        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#*$'\\t'}"
         ;;
       '@mcp_registry'$'\\t'*) INTUTIC_MCP_REGISTRY="\${_line#*$'\\t'}" ;;
       '#'*|'') : ;;
@@ -4250,9 +4741,7 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   fi
 
   # Degrade to the compiled floor. The dynamic tier is additive, so dropping it
-  # returns to yesterday's behaviour rather than opening a hole. The MCP
-  # allowlist ships through the same file and degrades the same way — an
-  # invalid snapshot must not leave a stale allowlist enforcing.
+  # returns to yesterday's behaviour rather than opening a hole.
   # The SSO-group refusals survive it: they only ever refuse, and dropping
   # them would make editing the member's group list in this file a way to
   # clear a tool the workspace's group policy refuses.
@@ -4267,11 +4756,13 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
     fi
     INTUTIC_DYNAMIC=()
     if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
-    INTUTIC_MCP_SEVERITY=""
-    INTUTIC_MCP_SERVERS=""
     # The registry's refusals stay for the same reason; its approvals do not,
     # so an approval added to this file clears nothing.
     INTUTIC_MCP_REGISTRY_APPROVALS=0
+    # Likewise the allowlist: it still applies, but neither its servers nor
+    # its severity can be vouched for, so it admits no server and refuses.
+    INTUTIC_MCP_SEVERITY="block"
+    INTUTIC_MCP_SERVERS=""
   fi
 fi
 
@@ -4553,23 +5044,16 @@ sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2], sys.argv[
   esac
 fi
 
-# ── M3: MCP per-server allowlist backstop ────────────────────────────────────
-# A DEDICATED header field, not a synthetic GuardPattern rule — see
-# policySnapshot.ts's module doc and protectedPaths.ts's assertPortableEre:
-# expressing "allow only these servers" as a single regex needs negative
-# lookahead, which neither \`grep -E\` (POSIX ERE) nor this file's own
-# portable-ERE discipline support. So this is a plain string-membership test
-# over the parsed \${#mcpservers} header, independent of intutic_apply/the
-# GuardPattern tables entirely.
-#
-# Only fires when a \`mcp__<server>__<tool>\`-shaped tool name was actually
-# called AND the header was present (INTUTIC_MCP_SERVERS non-empty — absent
-# header means unrestricted, see the header-parsing block above). Refuses
-# through the SAME exit-2 + \${log} idiom every other block in this file uses,
-# not a parallel mechanism.
+# ── MCP per-server allowlist backstop ────────────────────────────────────────
+# A dedicated record, not a synthetic GuardPattern rule: "allow only these
+# servers" as one regex needs negative lookahead, which POSIX ERE (grep -E)
+# does not have. So this is a plain membership test over the @mcp_allowlist
+# record, with evaluateMcpAllowlist's code, rule id and reason (the shared
+# vectors hold this copy to it). Only for an mcp__<server>__<tool> call, and
+# only when the snapshot carries the record.
 case "\${TOOL:-}" in
   mcp__*__*)
-    if [ -n "$INTUTIC_MCP_SERVERS" ]; then
+    if [ "$INTUTIC_MCP_ALLOWLIST" = "1" ]; then
       _intutic_mcp_server="\${TOOL#mcp__}"
       _intutic_mcp_server="\${_intutic_mcp_server%%__*}"
       case ",$INTUTIC_MCP_SERVERS," in

@@ -53,6 +53,8 @@ export type { Decision, Rule, RuleSubject, Severity, SnapshotState } from './sna
 
 export type { SsoGroupClearance, SsoGroupPolicy, SsoGroupRecord } from './ssoGroups.js'
 
+export type { McpAllowlistRecord, McpRegistryRecord } from './mcpRegistryRecord.js'
+
 export {
   firstMatch,
   parseRules,

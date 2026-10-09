@@ -13,13 +13,22 @@ stock Intutic before the call runs locally.
 This module is that enforcement point: the missing adapter, written against
 Intutic's own published gate contract.
 
-Five tiers, in order:
+Six tiers, in order:
 
   A0  SSO group policy  from the policy snapshot       unknown groups refused
   A1  policy snapshot   port of intuticGate()          fails CLOSED
+  M   MCP registry      from the policy snapshot       edited approvals refused
   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
   A2  image integrity   local check                    fails CLOSED
   B   POST /hook-gate   control-plane check            fail posture set by GateClient
+
+Tier M applies the workspace's MCP server registry and mcpAllowedServers list
+to an mcp__<server>__<tool> call, from the snapshot's @mcp_registry and
+@mcp_allowlist records, with the decision, codes, rule ids and reasons the hook
+gates and the MCP proxy use (mcp_registry.py). A refusal of an unapproved
+server reaches the control plane as a tool_blocked event whose reason ends
+[mcpDefaultPolicy], which puts the server in the approval queue, as a hook
+gate's refusal does.
 
 A1 and A2 are load-bearing and local. Tier B contributes the DLP regexes and
 workspace policy from the control plane; whether an unreachable control plane
@@ -48,7 +57,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..errors import ClawdeError
-from . import imagecheck, snapshot, soprules, sso_groups
+from . import imagecheck, mcp_registry, snapshot, soprules, sso_groups
 from .actions import is_deploy, touches_infra
 from .client import GateClient
 from .hold import hold_message, request_hold
@@ -68,6 +77,13 @@ GATE_REFUSAL_CODES = (
     "SSO_GROUP",
     "SNAPSHOT",
     "HELD",
+    # The MCP server registry and allowlist, from the policy snapshot or the
+    # control plane's hook gate.
+    "SERVER_BLOCKED",
+    "SERVER_HELD",
+    "SERVER_NOT_APPROVED",
+    "TOOL_DISABLED",
+    "SERVER_NOT_ALLOWED",
     "SOP_RULE",
     "HOOK_GATE",
     # The call is too large to evaluate (limits.py), before any tier runs.
@@ -275,6 +291,9 @@ class Gate:
         elif d.severity == snapshot.SEV_SHADOW:
             self._emit("tool_would_block", tool_name, d.reason, tool_input)
 
+        # ---- Tier M: the MCP server registry and allowlist ----------------
+        self._guard_mcp(tool_name, tool_input)
+
         # ---- Tier A3: SOP rules authored in the product --------------------
         #
         # Runs before A2 on purpose. When both would fire, the block should be
@@ -336,10 +355,37 @@ class Gate:
             resp = self.client.hook_gate(tool_name, tool_input)
             if not resp.allowed:
                 self._emit("tool_blocked", tool_name, resp.reason, tool_input, resp.incident_id)
-                raise IntuticGateRefusal(resp.reason, "HOOK_GATE", resp.incident_id)
+                # The hook gate names the MCP registry's own code when the
+                # registry refused; anything else it refuses is HOOK_GATE.
+                code = resp.code if resp.code in MCP_CODES else "HOOK_GATE"
+                raise IntuticGateRefusal(resp.reason, code, resp.incident_id)
 
         if tool_name not in READ_ONLY_TOOLS:
             self._emit("tool_allowed", tool_name, "", tool_input)
+
+    def _guard_mcp(self, tool_name: str, tool_input: dict) -> None:
+        """Raise when the workspace's MCP server registry or allowlist refuses
+        an mcp__<server>__<tool> call: the registry first, as every gate orders
+        them. An allowlist in shadow records the refusal and lets the call on."""
+        call = mcp_registry.split_mcp_tool_name(tool_name)
+        if call is None:
+            return
+        snap = self.snapshot()
+        if snap.mcp_registry is not None:
+            refusal = mcp_registry.evaluate_registry(snap.mcp_registry, call[0], call[1])
+            if refusal is not None:
+                code, rule_id, reason = refusal
+                self._emit("tool_blocked", tool_name, f"{reason} [{rule_id}]", tool_input)
+                raise IntuticGateRefusal(f"{reason} [{rule_id}]", code)
+        if snap.mcp_allowlist is not None:
+            refusal = mcp_registry.evaluate_allowlist(snap.mcp_allowlist, call[0])
+            if refusal is not None:
+                code, rule_id, reason = refusal
+                if snap.mcp_allowlist["severity"] == "shadow":
+                    self._emit("tool_would_block", tool_name, f"{reason} [{rule_id}]", tool_input)
+                    return
+                self._emit("tool_blocked", tool_name, f"{reason} [{rule_id}]", tool_input)
+                raise IntuticGateRefusal(f"{reason} [{rule_id}]", code)
 
     def _hold(self, rule_id: str, rule_reason: str, tool_name: str, tool_input: dict) -> None:
         """A hold rule matched: returns when an approved bypass lets this exact
@@ -356,6 +402,10 @@ class Gate:
         self._emit("tool_held", tool_name, f"{rule_reason} [{rule_id}]", tool_input)
         raise IntuticGateHold(hold_message(rule_reason, rule_id, outcome),
                               outcome.hold_id if outcome.recorded else None)
+
+
+#: The refusal codes of the MCP registry and allowlist, which the hook gate may also return.
+MCP_CODES = frozenset({"SERVER_BLOCKED", "SERVER_HELD", "SERVER_NOT_APPROVED", "TOOL_DISABLED", "SERVER_NOT_ALLOWED"})
 
 
 # Module-level active gate, so decorated tools do not need the instance

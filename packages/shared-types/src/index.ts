@@ -467,8 +467,18 @@ export {
   isUnrestrictedMcpRegistry,
   MCP_REGISTRY_RECORD_TAG,
   MCP_REGISTRY_JS_SOURCE,
+  encodeMcpAllowlistRecord,
+  decodeMcpAllowlistRecord,
+  evaluateMcpAllowlist,
+  MCP_ALLOWLIST_RECORD_TAG,
+  MCP_ALLOWLIST_JS_SOURCE,
 } from './mcpRegistryRecord.js'
-export type { McpRegistryRecord, McpRegistryRefusal } from './mcpRegistryRecord.js'
+export type {
+  McpRegistryRecord,
+  McpRegistryRefusal,
+  McpAllowlistRecord,
+  McpAllowlistRefusal,
+} from './mcpRegistryRecord.js'
 export { GEMINI_CLI_GATE_ID, gateIdentitiesOf, harnessOfGate } from './gateIdentity.js'
 
 // MCP governance: call budgets, tool-change risk, description poisoning

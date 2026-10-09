@@ -114,8 +114,8 @@ export interface GateEntry {
   note?: string
   /**
    * Whether `mcp__<server>__<tool>`-shaped tool calls reach this gate's
-   * evaluator at all (M3 — the per-server MCP allowlist / `#mcpservers`
-   * header work). Three values, not two, because "the gate script runs for
+   * evaluator at all (the per-server MCP allowlist and the MCP server
+   * registry). Three values, not two, because "the gate script runs for
    * this call" and "this harness's own MCP tool names actually take that
    * shape" are separate facts and conflating them overclaims:
    *

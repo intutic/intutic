@@ -44,6 +44,13 @@ export const GATE_REFUSAL_CODES = [
   'SSO_GROUP',
   'SNAPSHOT',
   'HELD',
+  // The MCP server registry and allowlist, from the policy snapshot or the
+  // control plane's hook gate.
+  'SERVER_BLOCKED',
+  'SERVER_HELD',
+  'SERVER_NOT_APPROVED',
+  'TOOL_DISABLED',
+  'SERVER_NOT_ALLOWED',
   'SOP_RULE',
   'HOOK_GATE',
   // The call is too large to evaluate (limits.ts), before any tier runs.

@@ -46,7 +46,7 @@ vocabulary.
 
 | Export | From | What it is |
 |---|---|---|
-| `Gate`, `GateConfig` | `gate.ts` | The five-tier evaluator. `new Gate(cfg, client?)`, `await gate.guard(toolName, toolInput)`. |
+| `Gate`, `GateConfig` | `gate.ts` | The six-tier evaluator. `new Gate(cfg, client?)`, `await gate.guard(toolName, toolInput)`. |
 | `install(gate)`, `active()` | `gate.ts` | Process-wide default gate, so wrapped tools don't need the instance threaded through every call site. |
 | `IntuticGateRefusal`, `GateError`, `GateConnectionError` | `errors.ts` | Thrown on refusal. `.reason`, `.code` (a `GateRefusalCode`, listed in `GATE_REFUSAL_CODES`), `.incidentId` carry the structured verdict; `.message` carries the `[Intutic Governance] BLOCKED: ...` text. |
 | `IntuticGateHold` | `errors.ts` | The `IntuticGateRefusal` a hold rule throws (`code` `HELD`) after recording the hold for approval; `.holdId` names it. See `hold.ts`. |
@@ -56,6 +56,7 @@ vocabulary.
 | `loadSnapshot`, `evaluate`, `Snapshot`, `guardDisabledFromEnv` | `snapshot.ts` | Tier A1: reads `~/.intutic/hooks/policy-snapshot.rules`. |
 | `parseRules`, `firstMatch`, `fetchRules`, `SopRule` | `soprules.ts` | Tier A3: SOP-authored `WHERE`-clause rules. |
 | `checkCommand`, `checkImages`, `checkWrittenManifest`, `ImageVerdict` | `imagecheck.ts` | Tier A2: container-image provenance on deploy commands. |
+| `McpRegistryRecord`, `McpAllowlistRecord` | `mcpRegistryRecord.ts` | Tier M: the snapshot's MCP server registry and allowlist (`Snapshot.mcpRegistry`, `Snapshot.mcpAllowlist`), decided as the hook gates and the MCP proxy decide them; a byte-identical copy of `@intutic/shared-types`' module. |
 | `classify`, `isDeploy`, `isTest`, `touchesInfra` | `actions.ts` | Command classifier shared by A2's deploy trigger. |
 
 ### A note for sibling adapter phases
@@ -250,7 +251,7 @@ above). Later adapter phases follow the SAME convention (also
    ```
 4. Each adapter file imports from `./gate.js`, `./errors.js`, etc. (this
    package's core, already built) rather than re-implementing any tier —
-   the whole point of splitting core from adapters is that the four-tier
+   the whole point of splitting core from adapters is that the tiered
    evaluation logic lives in exactly one place.
 
 No stub files are checked in for future adapters; the `exports` map above

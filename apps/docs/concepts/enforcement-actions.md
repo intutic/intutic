@@ -26,13 +26,13 @@ allow/block decision synchronously:
 Tool call arrives
        │
        ▼
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  DLP         │────▶│  BLOCK: SOP  │────▶│  SSO group   │────▶│  Promoted    │
-│  Scanner     │     │  match       │     │  policy      │     │  findings    │
-└──────┬───────┘     └──────┬───────┘     └──────┬───────┘     └──────┬───────┘
-       │ hit                │ hit                │ DENIED             │ KILL
-       ▼                    ▼                    ▼                    ▼
-    blocked              blocked              blocked              blocked
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  DLP         │────▶│  BLOCK: SOP  │────▶│  SSO group   │────▶│  MCP server  │────▶│  Promoted    │
+│  Scanner     │     │  match       │     │  policy      │     │  registry    │     │  findings    │
+└──────┬───────┘     └──────┬───────┘     └──────┬───────┘     └──────┬───────┘     └──────┬───────┘
+       │ hit                │ hit                │ DENIED             │ refused            │ KILL
+       ▼                    ▼                    ▼                    ▼                    ▼
+    blocked              blocked              blocked              blocked              blocked
 
   no hit at any stage ──▶ allowed
 ```
@@ -40,11 +40,12 @@ Tool call arrives
 1. **DLP Scanner** — credential patterns matched against the serialised tool arguments, and destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`) matched against each argument string as the tool receives it, with the SQL keywords split by any whitespace, a block or `--` comment, or an escaped `\n`. The SQL patterns are the ones the MCP governance proxy uses. A hit blocks the call and opens an incident.
 2. **BLOCK: SOP match** — `VALIDATED` SOPs whose title begins `BLOCK:` are compiled to a pattern and tested against the tool name. A title beginning `REQUIRE_APPROVAL:` is the same rule at the `hold` tier: the harness hook gates refuse the call and record it for **Findings › Review Queue › Held Changes** (approving it with `intutic decision approve <holdId>` or from Slack lets that exact call through once while the workspace's review-hold bypass is on, and otherwise records the decision); the MCP proxy and the [SDK gates](/reference/gate-sdk#holds) hold it the same way through the same decisions API (see [Approval holds](/guide/mcp-governance#approval-holds)); the proxy, which has no reviewer in the loop, treats it as a block.
 3. **SSO group policy** — decides the caller's [group clearance](/concepts/circuit-breaker#_3-sso-group-clearance) for the tool, from their SCIM groups while SCIM provisioning is on and from their last SSO sign-in otherwise. `DENIED` or `REQUIRES_OBO` blocks, and the reason names the deciding rule (`[sso_group.high_risk.<tool>]`).
-4. **Promoted findings** — repeat anomaly findings that have been promoted to enforcement. Only a promoted `KILL` blocks; a promoted `HIJACK` is recorded and falls through.
+4. **MCP server registry** — on an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance): a blocked or held server, a server not approved under `mcpDefaultPolicy: deny`, or a disabled tool blocks, with the MCP proxy's reason. The response names the refusal in `code` (`SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`) and `ruleId`, and a server refused as unapproved joins the approval queue on the MCP Servers page.
+5. **Promoted findings** — repeat anomaly findings that have been promoted to enforcement. Only a promoted `KILL` blocks; a promoted `HIJACK` is recorded and falls through.
 
 **The first match wins, and the order is deliberate** — this is a short-circuit, not a
 strictest-wins merge. Deterministic policy (DLP, an operator-authored `BLOCK:` SOP, an SSO
-group decision) is evaluated before the heuristic, so a promoted detector can never override a
+group decision, a registry decision) is evaluated before the heuristic, so a promoted detector can never override a
 decision an operator stated explicitly. Every stage after DLP fails **open**: if the check
 itself errors, the call is allowed and the error logged, rather than blocking work on an
 infrastructure fault.
@@ -55,8 +56,9 @@ Claude Code, Cursor, Cline, Claude Desktop, Windsurf, pi and openclaw integratio
 locally and report to the control plane asynchronously, which keeps their tool path free of a
 network round-trip. Everything on this page describes the gate. The local path enforces the
 protected-path and shell-bypass guards written into the generated hook script, plus the policy
-snapshot the sync daemon refreshes: the workspace's `BLOCK:` and `REQUIRE_APPROVAL:` rules and
-its SSO group policy, decided for the member the snapshot was issued to. A local gate refuses a
+snapshot the sync daemon refreshes: the workspace's `BLOCK:` and `REQUIRE_APPROVAL:` rules, its
+SSO group policy, decided for the member the snapshot was issued to, and its MCP server registry
+and allowlist. A local gate refuses a
 high-risk tool when it does not know the member's groups. Promoted findings and the gate's DLP
 scan run only at the gate; the local gates carry their own secret-content patterns.
 

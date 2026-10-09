@@ -33,7 +33,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { GATES, NO_GATE, type GateEntry } from './gateRegistry.js'
-import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MS, HarnessType, holdApprovalHint } from '@intutic/shared-types'
+import {
+  ARGUMENTS_SIZE_LIMIT,
+  COMMAND_SIZE_LIMIT,
+  GATE_DEADLINE_MS,
+  HarnessType,
+  encodeMcpAllowlistRecord,
+  holdApprovalHint,
+} from '@intutic/shared-types'
 import {
   UNIVERSAL_PROTECTED_PATHS,
   GOVERNANCE_BYPASS_PATTERNS,
@@ -63,18 +70,17 @@ function writeRulesFixture(
   target: string,
   patterns: readonly GuardPattern[],
   workspaceId = '',
-  /** Extra `#`-prefixed header lines, e.g. the `#mcpservers` header
-   *  `writePolicySnapshot` emits. Metadata, so outside the digest. */
-  extraHeaders: readonly string[] = [],
+  /** Record lines ahead of the rules, e.g. the `@mcp_allowlist` record
+   *  `writePolicySnapshot` emits. Data lines, so inside the digest. */
+  records: readonly string[] = [],
 ): string {
-  const lines = patterns.map(toRulesLine)
+  const lines = [...records, ...patterns.map(toRulesLine)]
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
   writeFileSync(
     target,
     `#digest ${digest}\n` +
       (workspaceId ? `#workspace ${workspaceId}\n` : '') +
       `#generated ${new Date().toISOString()}\n` +
-      extraHeaders.map((h) => `${h}\n`).join('') +
       lines.join('\n') +
       '\n',
   )
@@ -930,19 +936,18 @@ for (const g of GATES) {
 
     if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {
       it('refuses an MCP server off the allowlist with a verdict that names the rule, not a crash (regression pin)', async () => {
-        // The M3 allowlist backstop sits after the rule loop, whose `reason`
+        // The allowlist backstop sits after the rule loop, whose `reason`
         // is block-scoped to that loop. The stdout contracts' `${refuse}`
-        // snippet reads `reason`, so before the `var reason = _mcpReason`
+        // snippet reads `reason`, so before the `var reason`
         // at that site the emitted gate threw a ReferenceError there: the
         // writer's outer catch still failed closed, but the verdict lost its
         // reason and the audit line said "crashed" instead of naming the
-        // rule. Same `#mcpservers <severity> <servers>` header
-        // `writePolicySnapshot` emits.
+        // rule. Same `@mcp_allowlist` record `writePolicySnapshot` emits.
         const snap = writeRulesFixture(
           join(home, `mcp-${g.name}.rules`),
           DESTRUCTIVE_COMMAND_PATTERNS,
           'ws_test',
-          ['#mcpservers block allowed-server'],
+          [encodeMcpAllowlistRecord({ severity: 'block', servers: ['allowed-server'] })],
         )
         const r = await runGate(g, {}, { tool: 'mcp__other__x', snapshot: snap })
         assertCleanExit(g, r, 'an MCP call to a server off the allowlist')
@@ -1285,6 +1290,22 @@ describe('Open WebUI prompt filter', () => {
     const r = await ask('here is a canary-string', snap)
     expect(r.refused, 'an argPattern rule was applied to a prompt').toBe(false)
   })
+
+  it('reads the MCP allowlist record as part of the digest', async () => {
+    // The filter applies no allowlist (a prompt names no MCP server), but the
+    // record is a data line: the digest covers it, so a snapshot carrying it
+    // keeps its rules, and one whose list was widened by hand loses them.
+    const rule: GuardPattern = {
+      id: 'deny.canary', source: 'canary-string', subject: 'command', severity: 'block',
+      reason: 'No canary', rationale: '', matches: [], notMatches: [],
+    }
+    const snap = writeRulesFixture(join(home, 'owui-allowlist.rules'), [rule], '', [
+      encodeMcpAllowlistRecord({ severity: 'block', servers: ['github'] }),
+    ])
+    expect((await ask('here is a canary-string', snap)).refused, 'a valid snapshot with the record lost its rules').toBe(true)
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
+    expect((await ask('here is a canary-string', snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
+  })
 })
 
 describe('n8n workflow gate', () => {
@@ -1369,6 +1390,18 @@ describe('n8n workflow gate', () => {
       expect(r.refused, `allowed a node running \`rm -rf ${p}\``).toBe(true)
     }
   }, 120_000)
+
+  it('reads the MCP allowlist record as part of the digest', async () => {
+    // A workflow has no MCP tool calls to apply it to, but the record is a
+    // data line: a snapshot carrying it keeps its rules, and one whose list
+    // was widened by hand fails the digest and loses them.
+    const snap = writeRulesFixture(join(home, 'allowlist-n8n-wf.rules'), DESTRUCTIVE_COMMAND_PATTERNS.map((p) => ({ ...p, severity: 'block' as const })), '', [
+      encodeMcpAllowlistRecord({ severity: 'block', servers: ['github'] }),
+    ])
+    expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a valid snapshot with the record lost its rules').toBe(true)
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
+    expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
+  })
 
   it('applies destructive rules only when the snapshot supplies them', async () => {
     const withoutSnap = await runWorkflow(wf([commandNode('rm -rf /')]))
@@ -1639,7 +1672,7 @@ describe('OpenCode plugin gate', () => {
         '  }\n}\n',
     )
     const snap = writeRulesFixture(join(home, 'opencode-mcp.rules'), DESTRUCTIVE_COMMAND_PATTERNS, 'ws_test', [
-      '#mcpservers block github,my',
+      encodeMcpAllowlistRecord({ severity: 'block', servers: ['github', 'my'] }),
     ])
     try {
       for (const shape of ['server', 'setup'] as const) {
@@ -1906,7 +1939,9 @@ describe('Pi and OpenClaw plugin gates', () => {
       })
 
       it("applies the MCP server allowlist to the host's MCP tool names", async () => {
-        const snap = writeRulesFixture(join(home, `${g.name}-mcp.rules`), DESTRUCTIVE_COMMAND_PATTERNS, 'ws_test', ['#mcpservers block github'])
+        const snap = writeRulesFixture(join(home, `${g.name}-mcp.rules`), DESTRUCTIVE_COMMAND_PATTERNS, 'ws_test', [
+          encodeMcpAllowlistRecord({ severity: 'block', servers: ['github'] }),
+        ])
         // Pi names them mcp__<server>__<tool>; OpenClaw <server>__<tool>.
         const name = (server: string, tool: string) => (g.name === 'pi' ? `mcp__${server}__${tool}` : `${server}__${tool}`)
         const allowed = await runPluginGate(g, name('github', 'create_issue'), { title: 'x' }, { snapshot: snap })

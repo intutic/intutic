@@ -59,17 +59,20 @@ except IntuticGateRefusal as e:
 
 ## What a call goes through
 
-`gate.guard(toolName, toolInput)` evaluates five tiers in order and stops at the first refusal:
+`gate.guard(toolName, toolInput)` evaluates six tiers in order and stops at the first refusal:
 
 | Tier | Check | Needs a client | On failure |
 |---|---|---|---|
 | SSO group policy | The workspace's SSO group policy, decided for the member the policy snapshot was issued to | No | Refuses a high-risk tool when the member's groups are unknown |
 | Policy snapshot | The rules in `~/.intutic/hooks/policy-snapshot.rules`, which the sync daemon compiles for the workspace | No | Fails closed |
+| MCP servers | On an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance) and `mcpAllowedServers` list, from the same snapshot, with the codes, rule ids and reasons the hook gates and the MCP proxy use | No | A snapshot that fails its digest keeps the registry's refusals but none of its approvals, and its allowlist admits no server |
 | SOP rules | Rules authored in the SOP register, including their `WHERE` argument clauses, fetched once per process | Yes | Fails open; the image check below covers the same case |
 | Image integrity | On a deploy command, every container image it names (inline or in a referenced manifest) must be pinned to a digest approved in `.intutic/image-allowlist.json` | No | Fails closed, including when the allowlist is missing or unreadable |
-| Hook gate | `POST /api/v1/hook-gate` on the control plane: DLP patterns over the arguments, plus workspace policy | Yes | Set by the client's `failClosed` (default: block) |
+| Hook gate | `POST /api/v1/hook-gate` on the control plane: DLP patterns over the arguments, plus workspace policy and the MCP server registry | Yes | Set by the client's `failClosed` (default: block) |
 
 Read-only tools (`read_file`, `list_files`, `read`, `cat`, `view`, exported as `READ_ONLY_TOOLS`) get the snapshot check only. Every decision is reported to `POST /api/v1/hook-events` (`tool_blocked`, `tool_held`, `hold_approved_bypass_used`, `tool_flagged`, `tool_would_block`, `tool_allowed`, plus one snapshot-health event per process). Setting `INTUTIC_GUARD_DISABLE=1` skips the snapshot's destructive-command rules and reports `guards_disabled`.
+
+A call to a server the workspace has not approved under `mcpDefaultPolicy: deny` is refused with `SERVER_NOT_APPROVED`, and its `tool_blocked` event puts the server in the approval queue on the MCP Servers page, as a hook gate's refusal does. A server not on `mcpAllowedServers` is refused with `SERVER_NOT_ALLOWED`; in an observe-only (`SILENT_LOG`) workspace the call goes ahead and is reported as `tool_would_block`.
 
 The events carry `gateSource: "sdk"` and the client's `harness`, which is how the control plane watches an SDK gate for silence with no daemon to report it: once a gate's events have arrived on three different days within a week, [Gate health](/guide/settings) lists it, and **Gate Stopped Reporting** fires if it then sends nothing for 48 hours. A script run once or twice is never listed. Give each long-running agent its own `harness` name to watch it on its own.
 
@@ -88,7 +91,7 @@ A hold needs the control plane, to look for an approval and to record the reques
 
 ### Without a client
 
-`new Gate(config)` with no `GateClient` (`Gate(GateConfig())` in Python) runs the two local tiers, policy snapshot and image integrity, and nothing else: there is no SOP-rule fetch, no hook-gate call, and no events are sent. Use this for local, offline enforcement against the snapshot the daemon already wrote.
+`new Gate(config)` with no `GateClient` (`Gate(GateConfig())` in Python) runs the local tiers, the ones the table above marks as needing no client, and nothing else: there is no SOP-rule fetch, no hook-gate call, and no events are sent. Use this for local, offline enforcement against the snapshot the daemon already wrote.
 
 ### Fail-closed defaults
 
@@ -128,13 +131,18 @@ The image allowlist is JSON: `require_digest` (default `true`), `registries_allo
 
 ## Refusals
 
-A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Governance] BLOCKED:`; `reason`, `code` and `incidentId` (`incident_id`) carry the structured verdict. A hold throws the subclass `IntuticGateHold` instead, which adds `holdId` (`hold_id`) and starts its message with `[Intutic Governance] HELD:` (see [Holds](#holds)). `code` is one of these, exported as `GATE_REFUSAL_CODES` and, in TypeScript, typed as `GateRefusalCode`:
+A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Governance] BLOCKED:`; `reason`, `code` and `incidentId` (`incident_id`) carry the structured verdict. A hold throws the subclass `IntuticGateHold` instead, which adds `holdId` (`hold_id`) and starts its message with `[Intutic Governance] HELD:` (see [Holds](#holds)). `code` is one of these, exported as `GATE_REFUSAL_CODES` and, in TypeScript, typed as `GateRefusalCode`. A refusal from the hook gate is `HOOK_GATE`, or the registry's own code when the hook gate's MCP server registry refused:
 
 | Code | Meaning |
 |---|---|
 | `SSO_GROUP` | The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown |
 | `SNAPSHOT` | A block rule in the policy snapshot matched |
 | `HELD` | A hold rule matched: the call is held for a person's approval, and `holdId` names the hold |
+| `SERVER_BLOCKED` | The MCP server is blocked in the MCP server registry |
+| `SERVER_HELD` | The MCP server changed its tools in a way scored high risk and waits for an owner or admin to approve it again |
+| `SERVER_NOT_APPROVED` | The workspace refuses MCP servers it has not approved (`mcpDefaultPolicy: deny`), and this one is not approved |
+| `TOOL_DISABLED` | The tool is switched off on this MCP server in the registry |
+| `SERVER_NOT_ALLOWED` | The MCP server is not on the workspace's `mcpAllowedServers` list |
 | `SOP_RULE` | A block rule in the SOP register matched |
 | `HOOK_GATE` | The control plane's hook gate refused the call, or could not be reached while `failClosed` is on |
 | `COMMAND_TOO_LARGE` | The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls |

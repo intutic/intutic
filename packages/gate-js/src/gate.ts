@@ -9,13 +9,23 @@
  * PreToolUse hook for them. This package is that enforcement point: the
  * missing adapter, written against Intutic's own published gate contract.
  *
- * Five tiers, in order — identical precedence to the Python SDK:
+ * Six tiers, in order — identical precedence to the Python SDK:
  *
  *   A0  SSO group policy  from the policy snapshot       unknown groups refused
  *   A1  policy snapshot   port of intuticGate()          fails CLOSED
+ *   M   MCP registry      from the policy snapshot       edited approvals refused
  *   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
  *   A2  image integrity   local check                    fails CLOSED
  *   B   POST /hook-gate   control-plane check             fail posture set by GateClient
+ *
+ * Tier M applies the workspace's MCP server registry and `mcpAllowedServers`
+ * list to an `mcp__<server>__<tool>` call, from the snapshot's
+ * `@mcp_registry` and `@mcp_allowlist` records, with the decision, codes,
+ * rule ids and reasons the hook gates and the MCP proxy use
+ * (`mcpRegistryRecord.ts`, a byte-identical copy of `@intutic/shared-types`'
+ * module). A refusal of an unapproved server reaches the control plane as a
+ * `tool_blocked` event whose reason ends `[mcpDefaultPolicy]`, which puts the
+ * server in the approval queue, as a hook gate's refusal does.
  *
  * A hold rule in A1 or A3 (a `REQUIRE_APPROVAL:` SOP, or a local
  * `review_before:` token) refuses with {@link IntuticGateHold} after
@@ -54,10 +64,11 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { isDeploy, touchesInfra } from './actions.js'
-import { IntuticGateHold, IntuticGateRefusal } from './errors.js'
+import { IntuticGateHold, IntuticGateRefusal, type GateRefusalCode } from './errors.js'
 import { holdMessage, requestHold } from './hold.js'
 import { tooLargeReason } from './limits.js'
 import { GateClient } from './client.js'
+import { evaluateMcpAllowlist, evaluateMcpRegistry } from './mcpRegistryRecord.js'
 import * as imagecheck from './imagecheck.js'
 import * as snapshot from './snapshot.js'
 import * as soprules from './soprules.js'
@@ -288,6 +299,9 @@ export class Gate {
       await this.emit('tool_would_block', toolName, d.reason, toolInput)
     }
 
+    // ---- Tier M: the MCP server registry and allowlist ----------------
+    await this.guardMcp(toolName, toolInput)
+
     // ---- Tier A3: SOP rules authored in the product --------------------
     //
     // Runs before A2 on purpose. When both would fire, the block should be
@@ -348,12 +362,45 @@ export class Gate {
       const resp = await this.client.hookGate(toolName, toolInput)
       if (!resp.allowed) {
         await this.emit('tool_blocked', toolName, resp.reason, toolInput, resp.incidentId)
-        throw new IntuticGateRefusal(resp.reason, 'HOOK_GATE', resp.incidentId)
+        // The hook gate names the MCP registry's own code when the registry
+        // refused; anything else it refuses is HOOK_GATE.
+        const code = MCP_CODES.has(resp.code ?? '') ? (resp.code as GateRefusalCode) : 'HOOK_GATE'
+        throw new IntuticGateRefusal(resp.reason, code, resp.incidentId)
       }
     }
 
     if (!READ_ONLY_TOOLS.has(toolName)) {
       await this.emit('tool_allowed', toolName, '', toolInput)
+    }
+  }
+
+  /**
+   * Throws when the workspace's MCP server registry or allowlist refuses an
+   * `mcp__<server>__<tool>` call: the registry first, as every gate orders
+   * them. An allowlist in `shadow` records the refusal and lets the call on.
+   */
+  private async guardMcp(toolName: string, toolInput: ToolInput): Promise<void> {
+    if (!toolName.startsWith('mcp__')) return
+    const rest = toolName.slice('mcp__'.length)
+    const sep = rest.indexOf('__')
+    if (sep <= 0) return
+    const snap = this.getSnapshot()
+    const server = rest.slice(0, sep)
+    const registry = snap.mcpRegistry ? evaluateMcpRegistry(snap.mcpRegistry, server, rest.slice(sep + 2)) : null
+    if (registry) {
+      const reason = `${registry.reason} [${registry.ruleId}]`
+      await this.emit('tool_blocked', toolName, reason, toolInput)
+      throw new IntuticGateRefusal(reason, registry.code)
+    }
+    const allowlist = snap.mcpAllowlist ? evaluateMcpAllowlist(snap.mcpAllowlist, server) : null
+    if (allowlist) {
+      const reason = `${allowlist.reason} [${allowlist.ruleId}]`
+      if (snap.mcpAllowlist!.severity === 'shadow') {
+        await this.emit('tool_would_block', toolName, reason, toolInput)
+        return
+      }
+      await this.emit('tool_blocked', toolName, reason, toolInput)
+      throw new IntuticGateRefusal(reason, allowlist.code)
     }
   }
 
@@ -379,6 +426,15 @@ export class Gate {
     throw new IntuticGateHold(holdMessage(rule.reason, rule.id, outcome), outcome.recorded ? outcome.holdId : undefined)
   }
 }
+
+/** The refusal codes of the MCP registry and allowlist, which the hook gate may also return. */
+const MCP_CODES: ReadonlySet<string> = new Set<GateRefusalCode>([
+  'SERVER_BLOCKED',
+  'SERVER_HELD',
+  'SERVER_NOT_APPROVED',
+  'TOOL_DISABLED',
+  'SERVER_NOT_ALLOWED',
+])
 
 function isAbsolutePath(p: string): boolean {
   return p.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(p)

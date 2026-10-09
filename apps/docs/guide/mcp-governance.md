@@ -729,8 +729,12 @@ workspace's MCP settings, delivered through the sync daemon's policy snapshot:
   the digest broken keeps the registry's refusals and ignores its approvals,
   so editing the file approves nothing.
 - **The allowlist.** A server not on `mcpAllowedServers` (see
-  [The allowlist](#the-allowlist-mcpallowedservers) above) is refused, from the
-  `#mcpservers <severity> <comma-joined-server-names>` header.
+  [The allowlist](#the-allowlist-mcpallowedservers) above) is refused with
+  `SERVER_NOT_ALLOWED` (rule `mcp_allowlist`), or reported as
+  `tool_would_block` in an observe-only (`SILENT_LOG`) workspace. The list
+  rides as an `@mcp_allowlist` record, also inside the digest. A gate that
+  finds the digest broken keeps the allowlist but admits no server and
+  refuses rather than reports, so adding a server to the file admits nothing.
 
 Under `mcpDefaultPolicy: deny` this reaches servers the proxy never sees, the
 harness's own included: Claude Code's IDE tools (`mcp__ide__…`) are refused
@@ -738,6 +742,13 @@ until `ide` is approved. A server a gate refuses as unapproved joins the
 approval queue on the MCP Servers page, as one the proxy meets first does.
 A harness that reads a JSON decision from the gate gets the code in `code`
 ([refusal codes](/reference/harness-security-matrix#hook-refusal-codes)).
+
+The [tool gate SDKs](/reference/gate-sdk) apply both records the same way, from
+the same snapshot, for agents built on a framework with no hook file, and
+report a server they refuse as unapproved for the approval queue too. The
+control plane's `POST /api/v1/hook-gate`, which the SDKs call when they have a
+client, applies the registry from the workspace's own records, with the same
+codes in `code`.
 
 **This is a backstop, not a second primary control.** It is:
 

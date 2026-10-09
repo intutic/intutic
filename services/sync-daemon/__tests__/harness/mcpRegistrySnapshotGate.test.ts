@@ -9,10 +9,11 @@
  * proxy's decision.
  *
  * The conformance half runs `mcp-registry-vectors.json` — the cases
- * `evaluateMcpRegistry` and the MCP proxy also run — through one node gate and
- * one bash gate, each case with a snapshot written by the real
- * `writePolicySnapshot`. The tamper half adds an approval to a written
- * snapshot and checks it clears nothing.
+ * `evaluateMcpRegistry` and the MCP proxy also run, and the allowlist cases
+ * `evaluateMcpAllowlist` runs — through one node gate and one bash gate, each
+ * case with a snapshot written by the real `writePolicySnapshot`. The tamper
+ * half adds an approval, or an allowlisted server, to a written snapshot and
+ * checks it clears nothing.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
@@ -23,10 +24,14 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   decodeMcpRegistryRecord,
+  encodeMcpAllowlistRecord,
   encodeMcpRegistryRecord,
+  MCP_ALLOWLIST_RECORD_TAG,
   MCP_REGISTRY_RECORD_TAG,
+  type McpAllowlistRecord,
   type McpRegistryRecord,
 } from '@intutic/shared-types'
+import { MCP_REGISTRY_PY_SOURCE } from '../../src/lib/mcpRegistryPy.js'
 import { GATES, type GateEntry } from './gateRegistry.js'
 import {
   fetchResolvedPolicy,
@@ -37,9 +42,12 @@ import {
   type ResolvedPolicy,
 } from '../../src/lib/policySnapshot.js'
 
+interface Case { name: string; toolName: string; code: string | null; ruleId: string | null; reason: string | null }
 interface Vectors {
   registries: Record<string, McpRegistryRecord>
-  cases: Array<{ name: string; registry: string; toolName: string; code: string | null; ruleId: string | null; reason: string | null }>
+  cases: Array<Case & { registry: string }>
+  allowlists: Record<string, McpAllowlistRecord>
+  allowlistCases: Array<Case & { allowlist: string }>
 }
 const VECTORS: Vectors = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../../packages/shared-types/fixtures/mcp-registry-vectors.json'), 'utf8'),
@@ -67,6 +75,13 @@ function policy(over: Partial<ResolvedPolicy> = {}): ResolvedPolicy {
 const dataLines = (file: string) => readFileSync(file, 'utf8').split('\n').filter((l) => l && !l.startsWith('#'))
 
 afterEach(() => vi.restoreAllMocks())
+
+describe('the bash gates\' registry decision', () => {
+  it('is a byte-identical copy of intutic-clawde\'s mcp_registry.py', () => {
+    const clawde = join(dirname(fileURLToPath(import.meta.url)), '../../../../packages/intutic-clawde/intutic_clawde/gate/mcp_registry.py')
+    expect(MCP_REGISTRY_PY_SOURCE).toBe(readFileSync(clawde, 'utf8'))
+  })
+})
 
 describe('fetchResolvedPolicy — the registry', () => {
   it('reads mcpRegistry, and an older control plane without it as none', async () => {
@@ -139,15 +154,33 @@ const gates = CHOSEN.map((n) => GATES.find((g) => g.name === n)).filter((g): g i
 
 const home = mkdtempSync(join(tmpdir(), 'intutic-reg-gates-'))
 const roots = new Map<string, string>()
-/** One snapshot per registry in the vectors. */
+/** One snapshot per registry in the vectors, and one per allowlist. */
 const registrySnapshots = new Map<string, string>()
+const allowlistSnapshots = new Map<string, string>()
 let tampered = ''
+let tamperedAllowlist = ''
 
 beforeAll(async () => {
   for (const name of Object.keys(VECTORS.registries)) {
     const dir = join(home, `registry-${name}`)
     await writePolicySnapshot(policy({ mcpRegistry: VECTORS.registries[name]! }), dir)
     registrySnapshots.set(name, join(dir, SNAPSHOT_RULES))
+  }
+  for (const [name, allowlist] of Object.entries(VECTORS.allowlists)) {
+    const dir = join(home, `allowlist-${name}`)
+    await writePolicySnapshot(policy({ mcpAllowedServers: allowlist.servers }), dir)
+    const file = join(dir, SNAPSHOT_RULES)
+    if (allowlist.servers.length === 0) {
+      // The writer writes no record for an empty list (no record is
+      // "unrestricted"), so the record that admits no server is added by
+      // hand, with the digest recomputed so the snapshot stays valid.
+      const lines = [encodeMcpAllowlistRecord(allowlist), ...dataLines(file)]
+      const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
+      const header = readFileSync(file, 'utf8').split('\n').filter((l) => l.startsWith('#')).map((l) => (l.startsWith('#digest ') ? `#digest ${digest}` : l))
+      chmodSync(file, 0o644)
+      writeFileSync(file, [...header, ...lines].join('\n') + '\n')
+    }
+    allowlistSnapshots.set(name, file)
   }
 
   // A deny registry approving github — then an approval for "newcomer" and
@@ -163,6 +196,18 @@ beforeAll(async () => {
   const edited = encodeMcpRegistryRecord({ ...DENY, approvedServers: ['github', 'newcomer'] })
   chmodSync(tampered, 0o644)
   writeFileSync(tampered, text.replace(recordLine, edited))
+
+  // An allowlist of github — then "newcomer" added to it by hand.
+  const allowDir = join(home, 'tampered-allowlist')
+  await writePolicySnapshot(policy({
+    mcpAllowedServers: ['github'],
+    sopRules: [{ id: 's_write', toolPattern: 'Write', action: 'block', reason: 'no writes' }],
+  }), allowDir)
+  tamperedAllowlist = join(allowDir, SNAPSHOT_RULES)
+  const allowText = readFileSync(tamperedAllowlist, 'utf8')
+  const allowLine = allowText.split('\n').find((l) => l.startsWith(`${MCP_ALLOWLIST_RECORD_TAG}\t`))!
+  chmodSync(tamperedAllowlist, 0o644)
+  writeFileSync(tamperedAllowlist, allowText.replace(allowLine, encodeMcpAllowlistRecord({ severity: 'block', servers: ['github', 'newcomer'] })))
 
   for (const g of gates) {
     const root = join(home, g.name)
@@ -239,6 +284,20 @@ describe('the shared MCP registry vectors through the emitted gates', () => {
       })
     }, 180_000)
 
+    it(`${g.name} (${g.runner}): reaches every allowlist vector's decision, with its reason and rule`, async () => {
+      expect(roots.get(`${g.name}:error`), `the ${g.name} writer failed`).toBeUndefined()
+      await mapLimit(VECTORS.allowlistCases, 4, async (c) => {
+        const r = await runGate(g, c.toolName, allowlistSnapshots.get(c.allowlist)!)
+        const label = `${g.name}: ${c.name}`
+        if (c.code === null) {
+          expect(r.status, `${label}: expected an allow.\nstderr: ${r.stderr.slice(0, 400)}`).toBe(0)
+        } else {
+          expect(r.status, `${label}: expected a refusal.\nstderr: ${r.stderr.slice(0, 400)}`).toBe(2)
+          expect(r.stderr, `${label}: the refusal did not carry the reason and rule`).toContain(`${c.reason} [${c.ruleId}]`)
+        }
+      })
+    }, 180_000)
+
     it(`${g.name} (${g.runner}): leaves a tool that is not an MCP tool alone under deny`, async () => {
       expect((await runGate(g, 'Read', registrySnapshots.get('denyNothingApproved')!)).status).toBe(0)
     }, 30_000)
@@ -258,6 +317,18 @@ describe('an approval written into the snapshot', () => {
       // The SOP rule beside it is gone, which is how we know the gate read the
       // snapshot as invalid rather than missing the edit.
       expect((await runGate(g, 'Write', tampered)).status).toBe(0)
+    }, 60_000)
+  }
+})
+
+describe('a server added to the allowlist in the snapshot', () => {
+  for (const g of gates) {
+    it(`${g.name} (${g.runner}): fails the digest, admits nothing, and keeps the allowlist`, async () => {
+      const added = await runGate(g, 'mcp__newcomer__query', tamperedAllowlist)
+      expect(added.status, `the edit widened the allowlist.\nstderr: ${added.stderr.slice(0, 400)}`).toBe(2)
+      expect(added.stderr).toContain('[mcp_allowlist]')
+      expect((await runGate(g, 'mcp__github__create_issue', tamperedAllowlist)).status).toBe(2)
+      expect((await runGate(g, 'Write', tamperedAllowlist)).status).toBe(0)
     }, 60_000)
   }
 })

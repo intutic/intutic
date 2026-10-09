@@ -133,8 +133,8 @@ describe('Claude Code PreToolUse Hooks Compiler', () => {
 
   it('registers a mcp__.* PreToolUse matcher (M3)', async () => {
     // Without this matcher, an mcp__<server>__<tool> call never reaches the
-    // gate script at all — the v6 gate body's #mcpservers allowlist check and
-    // any workspace SOP rule shaped like BLOCK:mcp__github__.* are both dead
+    // gate script at all — the gate body's MCP allowlist and registry checks
+    // and any workspace SOP rule shaped like BLOCK:mcp__github__.* are all dead
     // code on Claude Code without it.
     const tempRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hooks-mcp-test-'))
     try {

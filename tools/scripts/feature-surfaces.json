@@ -30,13 +30,13 @@
         ],
         "dashboard": [{ "file": "apps/dashboard/src/routes/McpServersPage.tsx", "contains": "ungovernedReason" }],
         "cli": ["mcp list", "mcp approve", "mcp block", "mcp reset", "mcp enable-tool", "mcp disable-tool"],
-        "gateSdk": {
-          "gap": "the SDK gates do not read the registry from the policy snapshot, so a blocked or unapproved server's tools pass an SDK-gated agent",
-          "want": [
-            { "file": "packages/gate-js/src/snapshot.ts", "contains": "mcpRegistry" },
-            { "file": "packages/intutic-clawde/intutic_clawde/gate/snapshot.py", "contains": "mcpRegistry" }
-          ]
-        },
+        "gateSdk": [
+          "SERVER_BLOCKED",
+          "SERVER_NOT_APPROVED",
+          "TOOL_DISABLED",
+          { "file": "packages/gate-js/src/snapshot.ts", "contains": "mcpRegistry" },
+          { "file": "packages/intutic-clawde/intutic_clawde/gate/snapshot.py", "contains": "mcp_registry" }
+        ],
         "clawdeSdk": { "none": "MCP tool calls never pass through the clawde chat client" },
         "mcpTools": ["intutic_mcp_registry_status"],
         "kitkat": ["SERVER_NOT_APPROVED", "intutic_mcp_registry_status"],
@@ -56,6 +56,9 @@
           "hook:SERVER_BLOCKED",
           "hook:SERVER_NOT_APPROVED",
           "hook:TOOL_DISABLED",
+          "gate:SERVER_BLOCKED",
+          "gate:SERVER_NOT_APPROVED",
+          "gate:TOOL_DISABLED",
           { "file": "services/sync-daemon/src/lib/policySnapshot.ts", "contains": "mcpRegistry" },
           { "file": "packages/shared-types/fixtures/mcp-registry-vectors.json" }
         ]
@@ -144,7 +147,7 @@
         "api": [{ "ref": "GET /api/v1/mcp/servers", "badge": false }, "POST /api/v1/mcp/servers/observe"],
         "dashboard": [{ "file": "apps/dashboard/src/routes/McpServersPage.tsx", "contains": "lastToolChange" }],
         "cli": [{ "ref": "mcp list", "badge": false }],
-        "gateSdk": { "none": "scoring runs in the control plane" },
+        "gateSdk": ["SERVER_HELD"],
         "clawdeSdk": { "none": "scoring runs in the control plane" },
         "mcpTools": { "none": "a held server already refuses with its reason" },
         "kitkat": ["SERVER_HELD"],
@@ -156,7 +159,7 @@
           "want": [{ "file": "services/control-plane/src/services/siem/eventSourceRegistry.ts", "contains": "mcp_server_changes" }],
           "have": ["mcp.server.tool_change_risk"]
         },
-        "enforcement": ["mcp:SERVER_HELD", "hook:SERVER_HELD", { "file": "packages/shared-types/src/mcpToolRisk.ts" }]
+        "enforcement": ["mcp:SERVER_HELD", "hook:SERVER_HELD", "gate:SERVER_HELD", { "file": "packages/shared-types/src/mcpToolRisk.ts" }]
       }
     },
     {
@@ -664,7 +667,7 @@
         "api": { "none": "codes travel in each gate's own refusal, not through a control-plane route" },
         "dashboard": { "none": "operators read decisions, not refusal codes" },
         "cli": { "none": "the CLI does not receive tool-call refusals" },
-        "gateSdk": ["SNAPSHOT", "SOP_RULE", "HOOK_GATE", "COMMAND_TOO_LARGE"],
+        "gateSdk": ["SNAPSHOT", "SOP_RULE", "HOOK_GATE", "COMMAND_TOO_LARGE", "SERVER_NOT_ALLOWED"],
         "clawdeSdk": ["TOOL_DENIED", "RESPONSE_UNPARSEABLE", "OUTPUT_DLP", "policy_denied", "policy_reask"],
         "mcpTools": ["intutic_hold_status", "intutic_mcp_registry_status", "intutic_mcp_budget_remaining"],
         "kitkat": ["When a Call Is Refused or Held", "GATE_DEADLINE", "RESULT_WITHHELD_DLP"],
@@ -680,6 +683,7 @@
           "hook:BUILT_IN_RULE",
           "hook:SNAPSHOT",
           "hook:SERVER_NOT_ALLOWED",
+          "gate:SERVER_NOT_ALLOWED",
           "hook:COMMAND_TOO_LARGE",
           "hook:GATE_DEADLINE",
           "hook:UNREADABLE_CALL",

@@ -1,5 +1,5 @@
 {
-  "_comment": "MCP server registry vectors. Every implementation of the registry decision (evaluateMcpRegistry in shared-types, the MCP proxy, and the policy snapshot's @mcp_registry record through the JavaScript and bash hook gates) runs these cases and must reach the same code, rule id and reason. toolName is the name a harness hook sees; the server is the part before the first '__' after 'mcp__', the tool the rest. Edit the cases, never one implementation's expectations.",
+  "_comment": "MCP server registry vectors. Every implementation of the registry decision (evaluateMcpRegistry in shared-types, the MCP proxy, the control plane's hook gate, @intutic/gate, intutic-clawde, and the policy snapshot's @mcp_registry record through the JavaScript and bash hook gates) runs these cases and must reach the same code, rule id and reason. The allowlist cases do the same for evaluateMcpAllowlist and the @mcp_allowlist record (not the MCP proxy, which words its own allowlist refusal). toolName is the name a harness hook sees; the server is the part before the first '__' after 'mcp__', the tool the rest. Edit the cases, never one implementation's expectations.",
   "registries": {
     "unrestricted": {
       "defaultPolicy": "allow",
@@ -193,6 +193,69 @@
       "code": "SERVER_NOT_APPROVED",
       "ruleId": "mcpDefaultPolicy",
       "reason": "MCP server \"github2\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    }
+  ],
+  "allowlists": {
+    "githubAndPg": {
+      "severity": "block",
+      "servers": [
+        "github",
+        "pg-prod"
+      ]
+    },
+    "empty": {
+      "severity": "block",
+      "servers": []
+    }
+  },
+  "allowlistCases": [
+    {
+      "name": "a listed server passes",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__github__create_issue",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a listed server passes whatever the tool name holds",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__pg-prod__drop__all",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "an unlisted server is refused",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__pastebin__paste",
+      "code": "SERVER_NOT_ALLOWED",
+      "ruleId": "mcp_allowlist",
+      "reason": "MCP server \"pastebin\" is not on the MCP server allowlist for this workspace"
+    },
+    {
+      "name": "allowlisted names match exactly, not case-insensitively",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__GitHub__create_issue",
+      "code": "SERVER_NOT_ALLOWED",
+      "ruleId": "mcp_allowlist",
+      "reason": "MCP server \"GitHub\" is not on the MCP server allowlist for this workspace"
+    },
+    {
+      "name": "an allowlisted name is not a prefix match",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__github2__create_issue",
+      "code": "SERVER_NOT_ALLOWED",
+      "ruleId": "mcp_allowlist",
+      "reason": "MCP server \"github2\" is not on the MCP server allowlist for this workspace"
+    },
+    {
+      "name": "an allowlist with no servers admits none",
+      "allowlist": "empty",
+      "toolName": "mcp__github__create_issue",
+      "code": "SERVER_NOT_ALLOWED",
+      "ruleId": "mcp_allowlist",
+      "reason": "MCP server \"github\" is not on the MCP server allowlist for this workspace"
     }
   ]
 }

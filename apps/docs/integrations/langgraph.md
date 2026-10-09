@@ -118,9 +118,10 @@ def shell(command: str) -> str:
 **The python-raise contract:** on deny the gate raises `IntuticGateRefusal` *before the tool body runs*, with a message beginning `[Intutic Governance] BLOCKED:` — the same prefix family as the Open WebUI filter, so anything that already recognises that contract recognises this one. The gate evaluates, in order:
 
 1. the compiled **policy snapshot** (`~/.intutic/hooks/policy-snapshot.rules`) — the same artifact the sync-daemon compiles for every shipped harness,
-2. **SOP rules** authored in the product, including the argument-level `WHERE` clause (`argPattern`) — the gate sees the tool's full rendered arguments, with positionals bound to their parameter names so an argPattern cannot be dodged by calling convention,
-3. container **image provenance** on deploy commands,
-4. the control plane's **hook-gate** (`POST /api/v1/hook-gate`) — fail-closed by default: if the control plane cannot be reached, the call is refused rather than waved through.
+2. the workspace's **MCP server registry** and `mcpAllowedServers` list, from the same snapshot, on an `mcp__<server>__<tool>` call,
+3. **SOP rules** authored in the product, including the argument-level `WHERE` clause (`argPattern`) — the gate sees the tool's full rendered arguments, with positionals bound to their parameter names so an argPattern cannot be dodged by calling convention,
+4. container **image provenance** on deploy commands,
+5. the control plane's **hook-gate** (`POST /api/v1/hook-gate`) — fail-closed by default: if the control plane cannot be reached, the call is refused rather than waved through.
 
 Every decision is reported via `/api/v1/hook-events`, so gated LangGraph runs appear in the same audit feed as hook-based harnesses.
 

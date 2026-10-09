@@ -82,6 +82,8 @@ class GateResponse:
     reason: str = ""
     incident_id: Optional[str] = None
     reached: bool = True   # False when the call failed and fail_closed decided
+    # The refusal code the hook gate names, when it names one (the MCP registry's).
+    code: Optional[str] = None
 
 
 class GateClient:
@@ -156,6 +158,7 @@ class GateClient:
                 allowed=bool(d.get("allowed", True)),
                 reason=str(d.get("reason", "")),
                 incident_id=d.get("incidentId"),
+                code=d.get("code") if isinstance(d.get("code"), str) else None,
             )
         except Exception as exc:
             if self.fail_closed:

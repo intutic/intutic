@@ -61,6 +61,7 @@ import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
 import {
+  encodeMcpAllowlistRecord,
   encodeMcpRegistryRecord,
   encodeSsoGroupRecord,
   evaluateSsoGroupClearance,
@@ -204,9 +205,9 @@ export interface ResolvedPolicy {
    * this same field name off `workspaces.settings`, so this is not a new
    * name invented for the snapshot). Absent/empty means unrestricted — the
    * MCP proxy already reads it that way (`packages/mcp-proxy/src/policy.ts`),
-   * and the gate-side `#mcpservers` header this field feeds
+   * and the gate-side `@mcp_allowlist` record this field feeds
    * (`writePolicySnapshot` below) preserves the same convention: an empty
-   * list omits the header entirely rather than shipping a deny-everything one.
+   * list writes no record rather than a deny-everything one.
    */
   mcpAllowedServers: string[]
   /**
@@ -536,8 +537,8 @@ async function requestResolvedPolicy(
  * produce, so the observe-only branch was dead and a SILENT_LOG workspace
  * shipped fully-blocking snapshots.
  *
- * Extracted so `buildSnapshotRules` and `writePolicySnapshot`'s `#mcpservers`
- * header compute "is this workspace observe-only" the same way once, rather
+ * Extracted so `buildSnapshotRules` and `writePolicySnapshot`'s `@mcp_allowlist`
+ * record compute "is this workspace observe-only" the same way once, rather
  * than as two copies of the comparison that could drift.
  */
 function isSilentLogMode(policy: ResolvedPolicy): boolean {
@@ -545,11 +546,10 @@ function isSilentLogMode(policy: ResolvedPolicy): boolean {
 }
 
 /**
- * Drops MCP server names that would corrupt the comma-joined `#mcpservers`
- * `.rules` header line — a name carrying a comma would be misread as two
- * server names, and a tab or other whitespace would collide with the
- * `.rules` file's own column separator the moment anyone looked at the line
- * next to a rule row. Logged, not silently dropped: a server an operator
+ * Drops MCP server names that would corrupt the comma-joined `@mcp_allowlist`
+ * `.rules` line — a name carrying a comma would be misread as two server
+ * names, and a tab or other whitespace would collide with the `.rules`
+ * file's own column separator. Logged, not silently dropped: a server an operator
  * configured and then watched vanish from enforcement needs to know why,
  * the same discipline `validateRule` follows for a rejected SOP pattern.
  */
@@ -570,7 +570,7 @@ function sanitizeMcpServerNames(names: readonly string[]): string[] {
     if (/[\s,]/.test(name)) {
       log.warn(
         { action: 'mcp_server_name_rejected', name: raw },
-        'MCP server name contains whitespace or a comma — dropped rather than corrupting the .rules #mcpservers header',
+        'MCP server name contains whitespace or a comma — dropped rather than corrupting the .rules @mcp_allowlist record',
       )
       continue
     }
@@ -782,25 +782,22 @@ export async function writePolicySnapshot(
   // the digest too. A registry that refuses nothing writes no line, which
   // keeps the snapshot of a workspace that never used the registry unchanged.
   const mcpRegistry = policy.mcpRegistry && !isUnrestrictedMcpRegistry(policy.mcpRegistry) ? policy.mcpRegistry : null
+  // And the per-server MCP allowlist, sanitised once and reused for both
+  // artifacts so the JSON and the `.rules` record can never disagree about
+  // which names survived. Inside the digest, so a server added to it by hand
+  // fails the check. Severity follows SILENT_LOG the same way the dynamic
+  // tier's rules do: certain, just not acted on. An empty list writes no
+  // record: no record is "unrestricted", where a record with no servers
+  // would admit none.
+  const mcpServers = sanitizeMcpServerNames(policy.mcpAllowedServers)
+  const mcpSeverity: 'shadow' | 'block' = isSilentLogMode(policy) ? 'shadow' : 'block'
   const lines = [
     ...(ssoGroups ? [encodeSsoGroupRecord(ssoGroups)] : []),
     ...(mcpRegistry ? [encodeMcpRegistryRecord(mcpRegistry)] : []),
+    ...(mcpServers.length > 0 ? [encodeMcpAllowlistRecord({ severity: mcpSeverity, servers: mcpServers })] : []),
     ...rules.map(toRulesLine),
   ]
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
-
-  // M3: the per-server MCP allowlist, sanitised once and reused for both
-  // artifacts so the JSON and the `.rules` header can never disagree about
-  // which names survived. Severity follows SILENT_LOG the same way the
-  // dynamic tier's rules do: certain, just not acted on.
-  //
-  // Deliberately OUTSIDE `lines`/`digest` above — the digest covers RULE lines
-  // only, matching the trust model the `#workspace` header already has (parsed
-  // and integrity-checked by workspace-id comparison, not by the digest). A
-  // `#mcpservers` header is the same kind of metadata line, not a rule, so it
-  // must not change what `lines.join('\n')` hashes to.
-  const mcpServers = sanitizeMcpServerNames(policy.mcpAllowedServers)
-  const mcpSeverity: 'shadow' | 'block' = isSilentLogMode(policy) ? 'shadow' : 'block'
 
   await fs.mkdir(snapshotDir, { recursive: true })
 
@@ -823,8 +820,8 @@ export async function writePolicySnapshot(
       generatedAt,
       interventionMode: policy.interventionMode,
       digest,
-      // M3: sanitised, not `policy.mcpAllowedServers` verbatim — a name this
-      // module rejected for the `.rules` header must not silently survive in
+      // Sanitised, not `policy.mcpAllowedServers` verbatim — a name this
+      // module rejected for the `.rules` record must not silently survive in
       // the JSON, or the two artifacts would disagree about what is enforced.
       // Empty means unrestricted, same convention as `allowedServers` at the
       // control plane (`readMcpCurationSettings`).
@@ -875,23 +872,12 @@ export async function writePolicySnapshot(
   // read — only the JSON carries a timestamp, and they never open the JSON. A
   // snapshot from last year enforced identically to one written a second ago,
   // and nothing anywhere could say so.
-  // `#mcpservers <severity> <comma-joined-server-names>` — OMITTED entirely
-  // when the (sanitised) list is empty. This is the mandatory-mechanism/
-  // opt-in-effect split M3 is built on: the header-parsing and per-call
-  // allowlist check ship to every gate unconditionally, but they are a no-op
-  // until a workspace actually configures `mcpAllowedServers` — and "no
-  // header line" is how a v6 gate (and, for forward-compat, a hypothetical
-  // v5-reading-a-v6-file) tells "unrestricted" apart from "restricted to
-  // zero servers", which would otherwise block every MCP call by omission.
-  const mcpHeader = mcpServers.length > 0 ? `#mcpservers ${mcpSeverity} ${mcpServers.join(',')}\n` : ''
-
   const rulesText =
     `# Intutic policy snapshot (projection of ${SNAPSHOT_JSON}) — DO NOT EDIT.\n` +
     `# Columns: ${RULES_COLUMNS.join('\t')}\n` +
     `#digest ${digest}\n` +
     `#workspace ${policy.workspaceId}\n` +
     `#generated ${generatedAt}\n` +
-    mcpHeader +
     lines.join('\n') +
     '\n'
 

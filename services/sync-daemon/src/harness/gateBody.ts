@@ -60,11 +60,14 @@ import {
   ARGUMENTS_SIZE_LIMIT,
   COMMAND_SIZE_LIMIT,
   GATE_DEADLINE_MS,
+  MCP_ALLOWLIST_JS_SOURCE,
+  MCP_ALLOWLIST_RECORD_TAG,
   MCP_REGISTRY_JS_SOURCE,
   MCP_REGISTRY_RECORD_TAG,
   PHRASES_JS_SOURCE,
   SEQUENCE_JS_SOURCE,
 } from '@intutic/shared-types'
+import { MCP_REGISTRY_PY_SOURCE } from '../lib/mcpRegistryPy.js'
 import { PHRASES_PY_SOURCE } from '../lib/phrasesPy.js'
 import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
 
@@ -197,8 +200,19 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * started long before. Pi and OpenCode await a tool-call handler with no time
  * limit, and OpenClaw's own hook timeout cannot interrupt synchronous code,
  * so a v14 in-process gate on a slow ` WHERE ` pattern held the agent.
+ *
+ * v16: the MCP server allowlist moved inside the digest. It was a
+ * `#mcpservers` header, which the digest does not cover, so adding a server
+ * to it by hand widened the allowlist and left the snapshot valid. It is now
+ * an `@mcp_allowlist` data line (tag, severity, comma-joined servers; three
+ * columns, so every rule parser skips it), and a snapshot that fails its
+ * digest keeps the allowlist but admits no server and refuses at `block`,
+ * as it keeps the registry's refusals but not its approvals. The bash gates'
+ * registry decision is `intutic_clawde/gate/mcp_registry.py`, emitted
+ * verbatim. A v15 gate reading a v16 snapshot enforces no allowlist; the
+ * daemon regenerates every gate each sync cycle.
  */
-export const GATE_VERSION = 15
+export const GATE_VERSION = 16
 
 /**
  * The timeout every writer sets on its gate's hook entry, in seconds, where
@@ -300,19 +314,24 @@ export const REVIEW_REQUEST_VERSION = 1
 
 /**
  * The Python the bash gates run, defined once per gate script: the phrase
- * matcher ({@link PHRASES_PY_SOURCE}) and two entry points over it.
+ * matcher ({@link PHRASES_PY_SOURCE}), the MCP registry decision
+ * ({@link MCP_REGISTRY_PY_SOURCE}) and three entry points over them.
  *
  * - `intutic_actions(tool, command)` — the hold classifier, called by
  *   {@link SHELL_EXTRACT}'s Python, which already reads the raw tool input:
  *   space-padded action tokens (" action:deploy ") or " ".
  * - `intutic_phrase_rule(source, command)` — a `phrase`-subject rule: its
  *   source is `|`-separated phrases, each matched as words with boundaries.
+ * - `intutic_mcp_registry(record_b64, tool, trust_approvals)` — the
+ *   `@mcp_registry` record's decision on an MCP call.
  *
  * The classifier used to be `grep -E` with a gap regex over the normalised
  * command, and bash's own pattern substitution on it took a minute on a long
  * run of backslashes. Python is already required by every bash gate.
  */
 export const GATE_PY_LIB = `${PHRASES_PY_SOURCE}
+
+${MCP_REGISTRY_PY_SOURCE}
 
 _INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)}
 _INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)}
@@ -335,38 +354,18 @@ def intutic_phrase_rule(source, command):
 
 
 def intutic_mcp_registry(record_b64, tool, trust_approvals):
-    # The MCP server registry decision for one mcp__<server>__<tool> call: a
-    # transliteration of evaluateMcpRegistry (@intutic/shared-types
-    # mcpRegistryRecord.ts), held to the same vectors. Returns
-    # "code<TAB>ruleId<TAB>reason", or "" to let the call continue.
-    import base64
-    import json
-    try:
-        r = json.loads(base64.b64decode(record_b64, validate=True).decode("utf-8"))
-    except Exception:
+    # The registry decision for one mcp__<server>__<tool> call, from the
+    # snapshot's @mcp_registry record: "code<TAB>ruleId<TAB>reason", or "" to
+    # let the call continue. Without trust_approvals (the snapshot failed its
+    # digest) the record's approvals count for nothing.
+    call = split_mcp_tool_name(tool)
+    registry = decode_registry_record(MCP_REGISTRY_RECORD_TAG + "\\t" + record_b64)
+    if call is None or registry is None:
         return ""
-    if not isinstance(r, dict) or not tool.startswith("mcp__"):
-        return ""
-    rest = tool[len("mcp__"):]
-    sep = rest.find("__")
-    if sep <= 0:
-        return ""
-    server, name = rest[:sep], rest[sep + 2:]
-
-    def strings(v):
-        return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
-
-    approved = strings(r.get("approvedServers")) if trust_approvals else []
-    disabled = r.get("disabledTools") if isinstance(r.get("disabledTools"), dict) else {}
-    if server in strings(r.get("blockedServers")):
-        return "SERVER_BLOCKED\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
-    if server in strings(r.get("heldServers")):
-        return "SERVER_HELD\\tmcp_registry." + server + "\\tMCP server \\"" + server + "\\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if r.get("defaultPolicy") == "deny" and server not in approved:
-        return "SERVER_NOT_APPROVED\\tmcpDefaultPolicy\\tMCP server \\"" + server + "\\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
-    if name in strings(disabled.get(server)):
-        return "TOOL_DISABLED\\tmcp_registry." + server + "." + name + "\\tTool \\"" + name + "\\" is disabled on MCP server \\"" + server + "\\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
-    return ""
+    if not trust_approvals:
+        registry["approvedServers"] = []
+    refusal = evaluate_registry(registry, call[0], call[1])
+    return "\\t".join(refusal) if refusal else ""
 `
 
 /**
@@ -833,10 +832,9 @@ fi
 
 INTUTIC_SNAPSHOT_WORKSPACE=""
 INTUTIC_SNAPSHOT_GENERATED=""
-# M3: the per-server MCP allowlist header. Empty means "not configured" —
-# indistinguishable from "header absent", deliberately: writePolicySnapshot
-# omits the line entirely rather than shipping it with an empty list, so
-# empty-list-means-unrestricted holds all the way to the gate.
+# The per-server MCP allowlist (the @mcp_allowlist record, inside the digest).
+# No record means the workspace set no list, and every server is allowed.
+INTUTIC_MCP_ALLOWLIST=0
 INTUTIC_MCP_SEVERITY=""
 INTUTIC_MCP_SERVERS=""
 # The MCP server registry record (base64 JSON, inside the digest), and whether
@@ -850,12 +848,14 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
       '#digest '*)      INTUTIC_SNAPSHOT_DIGEST="\${_line#\\#digest }" ;;
       '#workspace '*)   INTUTIC_SNAPSHOT_WORKSPACE="\${_line#\\#workspace }" ;;
       '#generated '*)   INTUTIC_SNAPSHOT_GENERATED="\${_line#\\#generated }" ;;
-      '#mcpservers '*)
-        # \`#mcpservers <severity> <comma-joined-server-names>\` — parameter
-        # expansion only, no subshell, matching the other header lines here.
-        _intutic_mcp_rest="\${_line#\\#mcpservers }"
-        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%% *}"
-        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#* }"
+      '${MCP_ALLOWLIST_RECORD_TAG}'$'\\t'*)
+        # Tag, severity and comma-joined servers, tab-separated — parameter
+        # expansion only, no subshell. The writer drops a server name holding
+        # whitespace or a comma, so neither separator can appear in one.
+        INTUTIC_MCP_ALLOWLIST=1
+        _intutic_mcp_rest="\${_line#*$'\\t'}"
+        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%%$'\\t'*}"
+        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#*$'\\t'}"
         ;;
       '${MCP_REGISTRY_RECORD_TAG}'$'\\t'*) INTUTIC_MCP_REGISTRY="\${_line#*$'\\t'}" ;;
       '#'*|'') : ;;
@@ -890,9 +890,7 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   fi
 
   # Degrade to the compiled floor. The dynamic tier is additive, so dropping it
-  # returns to yesterday's behaviour rather than opening a hole. The MCP
-  # allowlist ships through the same file and degrades the same way — an
-  # invalid snapshot must not leave a stale allowlist enforcing.
+  # returns to yesterday's behaviour rather than opening a hole.
   # The SSO-group refusals survive it: they only ever refuse, and dropping
   # them would make editing the member's group list in this file a way to
   # clear a tool the workspace's group policy refuses.
@@ -907,11 +905,13 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
     fi
     INTUTIC_DYNAMIC=()
     if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
-    INTUTIC_MCP_SEVERITY=""
-    INTUTIC_MCP_SERVERS=""
     # The registry's refusals stay for the same reason; its approvals do not,
     # so an approval added to this file clears nothing.
     INTUTIC_MCP_REGISTRY_APPROVALS=0
+    # Likewise the allowlist: it still applies, but neither its servers nor
+    # its severity can be vouched for, so it admits no server and refuses.
+    INTUTIC_MCP_SEVERITY="block"
+    INTUTIC_MCP_SERVERS=""
   fi
 fi
 
@@ -1193,23 +1193,16 @@ sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2], sys.argv[
   esac
 fi
 
-# ── M3: MCP per-server allowlist backstop ────────────────────────────────────
-# A DEDICATED header field, not a synthetic GuardPattern rule — see
-# policySnapshot.ts's module doc and protectedPaths.ts's assertPortableEre:
-# expressing "allow only these servers" as a single regex needs negative
-# lookahead, which neither \`grep -E\` (POSIX ERE) nor this file's own
-# portable-ERE discipline support. So this is a plain string-membership test
-# over the parsed \${#mcpservers} header, independent of intutic_apply/the
-# GuardPattern tables entirely.
-#
-# Only fires when a \`mcp__<server>__<tool>\`-shaped tool name was actually
-# called AND the header was present (INTUTIC_MCP_SERVERS non-empty — absent
-# header means unrestricted, see the header-parsing block above). Refuses
-# through the SAME exit-2 + \${log} idiom every other block in this file uses,
-# not a parallel mechanism.
+# ── MCP per-server allowlist backstop ────────────────────────────────────────
+# A dedicated record, not a synthetic GuardPattern rule: "allow only these
+# servers" as one regex needs negative lookahead, which POSIX ERE (grep -E)
+# does not have. So this is a plain membership test over the @mcp_allowlist
+# record, with evaluateMcpAllowlist's code, rule id and reason (the shared
+# vectors hold this copy to it). Only for an mcp__<server>__<tool> call, and
+# only when the snapshot carries the record.
 case "\${TOOL:-}" in
   mcp__*__*)
-    if [ -n "$INTUTIC_MCP_SERVERS" ]; then
+    if [ "$INTUTIC_MCP_ALLOWLIST" = "1" ]; then
       _intutic_mcp_server="\${TOOL#mcp__}"
       _intutic_mcp_server="\${_intutic_mcp_server%%__*}"
       case ",$INTUTIC_MCP_SERVERS," in
@@ -1263,11 +1256,10 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   const fs = require('fs'), os = require('os'), path = require('path');
   const p = process.env.INTUTIC_SNAPSHOT_RULES ||
     path.join(os.homedir(), '.intutic', 'hooks', 'policy-snapshot.rules');
-  // M3: mcpServers/mcpSeverity default to unrestricted (empty list) — the
-  // same "header absent means unrestricted" reading writePolicySnapshot's
-  // \`#mcpservers\` header is built on.
+  // mcpAllowlist and mcpRegistry stay null without their records: the
+  // workspace set no allowlist and made no registry decision.
   const out = { rules: [], digest: 'none', state: 'absent', workspaceId: '', generatedAt: '', ageDays: 0,
-    mcpServers: [], mcpSeverity: 'block', mcpRegistry: null };
+    mcpAllowlist: null, mcpRegistry: null };
   let text;
   try { text = fs.readFileSync(p, 'utf8'); } catch (e) { return out; }
   out.state = 'ok';
@@ -1275,17 +1267,12 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     if (line.startsWith('#digest ')) { out.digest = line.slice(8).trim(); continue; }
     if (line.startsWith('#workspace ')) { out.workspaceId = line.slice(11).trim(); continue; }
     if (line.startsWith('#generated ')) { out.generatedAt = line.slice(11).trim(); continue; }
-    if (line.startsWith('#mcpservers ')) {
-      // \`#mcpservers <severity> <comma-joined-server-names>\` — same header a
-      // v5 gate would silently ignore via the generic '#'-prefix skip below,
-      // which is exactly the graceful-degradation contract this format change
-      // relies on.
-      const rest = line.slice('#mcpservers '.length);
-      const sp = rest.indexOf(' ');
-      if (sp === -1) { out.mcpSeverity = rest.trim(); out.mcpServers = []; }
-      else {
-        out.mcpSeverity = rest.slice(0, sp).trim();
-        out.mcpServers = rest.slice(sp + 1).trim().split(',').filter(Boolean);
+    if (line.startsWith('${MCP_ALLOWLIST_RECORD_TAG}\\t')) {
+      // The MCP server allowlist: tag, severity and comma-joined servers, a
+      // data line inside the digest. Any severity but shadow refuses.
+      const a = line.split('\\t');
+      if (a.length === 3) {
+        out.mcpAllowlist = { severity: a[1] === 'shadow' ? 'shadow' : 'block', servers: a[2].split(',').filter(Boolean) };
       }
       continue;
     }
@@ -1351,18 +1338,18 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   // exactly like a healthy quiet workspace.
   if (out.state === 'ok' && out.rules.length === 0) out.state = 'empty';
 
-  // Additive tier, so dropping it returns to yesterday's behaviour. The MCP
-  // allowlist ships through the same file and degrades the same way — an
-  // invalid snapshot must not leave a stale allowlist enforcing. The
+  // Additive tier, so dropping it returns to yesterday's behaviour. The
   // SSO-group refusals are the exception: they only ever refuse, and dropping
   // them would make editing the member's group list in this file a way to
   // clear a tool the workspace's group policy refuses.
   if (out.state === 'invalid') {
     out.rules = out.rules.filter(function (r) { return r.id.indexOf('sso_group.') === 0 && r.severity === 'block'; });
-    out.mcpServers = [];
     // The registry's refusals stay for the same reason; its approvals do not,
     // so an approval added to this file clears nothing.
     if (out.mcpRegistry) out.mcpRegistry.approvedServers = [];
+    // Likewise the allowlist: it still applies, but neither its servers nor
+    // its severity can be vouched for, so it admits no server and refuses.
+    if (out.mcpAllowlist) out.mcpAllowlist = { severity: 'block', servers: [] };
   }
 
   if (out.state === 'ok' && out.generatedAt) {
@@ -1475,9 +1462,12 @@ function intuticRuleCode(rule) {
   return INTUTIC_FLOOR.indexOf(rule) !== -1 ? 'BUILT_IN_RULE' : 'SNAPSHOT';
 }
 
-// The MCP server registry decision, emitted from @intutic/shared-types
-// mcpRegistryRecord.ts: the function the MCP proxy runs.
+// The MCP server registry and allowlist decisions, emitted from
+// @intutic/shared-types mcpRegistryRecord.ts: the registry decision is the
+// function the MCP proxy runs.
 ${MCP_REGISTRY_JS_SOURCE}
+
+${MCP_ALLOWLIST_JS_SOURCE}
 
 /**
  * Evaluates one tool call. Returns normally to allow; refuses via this harness's
@@ -1689,32 +1679,25 @@ ${refuseWith('_reg.code', '_reg.ruleId')}
     }
   }
 
-  // M3: MCP per-server allowlist backstop — see the shell emitter for why
-  // this is a plain membership test over the parsed \`#mcpservers\` header
-  // rather than a synthetic GuardPattern rule (no portable regex can express
-  // "allow only these servers" without negative lookahead). Only fires when
-  // \`toolName\` is actually \`mcp__<server>__<tool>\`-shaped AND the header was
-  // present (\`snap.mcpServers.length > 0\` — an absent header means
-  // unrestricted). Refuses through the SAME \`record\`/refusal path as
-  // every other block above, not a parallel mechanism.
-  if (snap.mcpServers.length > 0 && toolName.indexOf('mcp__') === 0) {
+  // MCP per-server allowlist backstop: a plain membership test over the
+  // snapshot's @mcp_allowlist record (see the shell emitter for why it is
+  // not a GuardPattern rule), only for an mcp__<server>__<tool> call and only
+  // when the snapshot carries the record.
+  if (snap.mcpAllowlist && toolName.indexOf('mcp__') === 0) {
     var _mcpRest = toolName.slice('mcp__'.length);
     var _mcpSep = _mcpRest.indexOf('__');
-    var _mcpServer = _mcpSep >= 0 ? _mcpRest.slice(0, _mcpSep) : '';
-    if (_mcpServer && snap.mcpServers.indexOf(_mcpServer) === -1) {
-      var _mcpReason = 'MCP server "' + _mcpServer + '" is not on the MCP server allowlist for this workspace [mcp_allowlist]';
-      if (snap.mcpSeverity === 'shadow') {
-        try { record('tool_would_block', toolName, _mcpReason); } catch (e) {}
+    var _mcp = _mcpSep > 0 ? evaluateMcpAllowlist(snap.mcpAllowlist, _mcpRest.slice(0, _mcpSep)) : null;
+    if (_mcp) {
+      // \`reason\` is what the refusal reads. The rule loop's own \`reason\` is
+      // block-scoped to that loop, so without this the two stdout contracts
+      // and the throw contract would hit a ReferenceError here.
+      var reason = _mcp.reason + ' [' + _mcp.ruleId + ']';
+      if (snap.mcpAllowlist.severity === 'shadow') {
+        try { record('tool_would_block', toolName, reason); } catch (e) {}
       } else {
-        try { console.error('[Intutic Governance] BLOCKED: ' + _mcpReason); } catch (e) {}
-        try { record('tool_blocked', toolName, _mcpReason); } catch (e) {}
-        // \`reason\` is what the refusal reads. The rule loop's own \`reason\` is
-        // block-scoped to that loop, so without this the two stdout contracts
-        // and the throw contract would hit a ReferenceError here — a refusal
-        // that crashes is still a refusal for exit-code gates, and a
-        // ReferenceError for the others.
-        var reason = _mcpReason;
-${refuseWith("'SERVER_NOT_ALLOWED'", "'mcp_allowlist'")}
+        try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+        try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuseWith('_mcp.code', '_mcp.ruleId')}
       }
     }
   }

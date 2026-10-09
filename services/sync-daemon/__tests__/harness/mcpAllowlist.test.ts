@@ -1,10 +1,10 @@
 /**
- * mcpAllowlist.test.ts — the M3 per-server MCP allowlist backstop.
+ * mcpAllowlist.test.ts — the per-server MCP allowlist backstop.
  *
  * Covers the gate-matrix cases `generatedGateBehaviour.test.ts`'s per-writer
- * loop does not: this is a NEW header field (`#mcpservers`), not a new
+ * loop does not: the allowlist is a record (`@mcp_allowlist`), not a
  * GuardPattern row, so it needs its own fixtures (a `.rules` file with/without
- * the header) and its own payload shapes (Cursor's real flat envelope,
+ * the record) and its own payload shapes (Cursor's real flat envelope,
  * Cline's `use_mcp_tool` envelope) rather than the shared `runGate` helper,
  * which always sends a Claude-Code-shaped `{tool_name, tool_input}` envelope.
  *
@@ -26,16 +26,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { encodeMcpAllowlistRecord, MCP_ALLOWLIST_RECORD_TAG } from '@intutic/shared-types'
 import { toRulesLine } from '../../src/harness/gateBody.js'
 import type { GuardPattern } from '../../src/harness/protectedPaths.js'
+import { writePolicySnapshot, SNAPSHOT_RULES } from '../../src/lib/policySnapshot.js'
 
 const PROXY_URL = 'http://127.0.0.1:4000'
 
 /**
- * A `.rules` fixture with an OPTIONAL `#mcpservers` header — the shape
- * `writePolicySnapshot` itself produces, reproduced by hand so a test can
- * also construct the states it deliberately never would (a v5 file, i.e. no
- * header at all — see the version-skew describe block below).
+ * A `.rules` fixture with an OPTIONAL `@mcp_allowlist` record — the shape
+ * `writePolicySnapshot` itself produces, with the digest computed the same
+ * way, so the gate's own digest check accepts it.
  */
 function writeMcpRulesFixture(
   target: string,
@@ -45,22 +46,16 @@ function writeMcpRulesFixture(
     mcpservers?: { severity: 'block' | 'shadow'; servers: string[] }
   } = {},
 ): string {
-  const lines = (opts.sopRules ?? []).map(toRulesLine)
-  // The digest covers rule-body lines only — same computation
-  // writePolicySnapshot uses — so the #mcpservers header (outside `lines`)
-  // never affects it. That invariant is exercised directly by
-  // policySnapshot.test.ts; this fixture just has to match the real
-  // computation so the gate's own digest check does not reject it.
+  const lines = [
+    ...(opts.mcpservers ? [encodeMcpAllowlistRecord(opts.mcpservers)] : []),
+    ...(opts.sopRules ?? []).map(toRulesLine),
+  ]
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
-  const mcpHeader = opts.mcpservers
-    ? `#mcpservers ${opts.mcpservers.severity} ${opts.mcpservers.servers.join(',')}\n`
-    : ''
   writeFileSync(
     target,
     `#digest ${digest}\n` +
       (opts.workspaceId ? `#workspace ${opts.workspaceId}\n` : '') +
       `#generated ${new Date().toISOString()}\n` +
-      mcpHeader +
       lines.join('\n') +
       '\n',
   )
@@ -195,16 +190,16 @@ describe('MCP per-server allowlist — claudeCode', () => {
       timeoutMs: 15_000,
     })
 
-  it('no #mcpservers header (v5-shaped snapshot) — unrestricted, no crash, no false block', async () => {
+  it('no @mcp_allowlist record — unrestricted, no crash, no false block', async () => {
     writeMcpRulesFixture(snap())
     const r = await run('mcp__anything__whatever', snap())
     expect(r.status, `stderr: ${r.stderr}`).toBe(0)
   })
 
   it('empty-list-means-unrestricted holds even with other snapshot content present', async () => {
-    // A snapshot that carries ordinary SOP rules but no #mcpservers header at
-    // all must still leave every MCP server unrestricted — the header's
-    // absence, not the snapshot's absence, is what this tests.
+    // A snapshot that carries ordinary SOP rules but no @mcp_allowlist record
+    // must still leave every MCP server unrestricted — the record's absence,
+    // not the snapshot's absence, is what this tests.
     writeMcpRulesFixture(snap(), { sopRules: [mcpSopRule('unrelated', 'other')] })
     const r = await run('mcp__totally_unlisted_server__tool', snap())
     expect(r.status, `stderr: ${r.stderr}`).toBe(0)
@@ -357,9 +352,9 @@ describe('MCP per-server allowlist — cline (use_mcp_tool normalization)', () =
   })
 
   it('normalizes into mcp__<server>__<tool> and feeds a workspace SOP rule shaped like mcp__github__.*', async () => {
-    // No #mcpservers header — the allowlist itself is unrestricted here, so a
-    // block can only come from the SOP rule, proving normalization also
-    // reaches ordinary tool-name SOP matching, not just the M3 allowlist.
+    // No @mcp_allowlist record — the allowlist itself is unrestricted here, so
+    // a block can only come from the SOP rule, proving normalization also
+    // reaches ordinary tool-name SOP matching, not just the allowlist.
     writeMcpRulesFixture(snap(), { sopRules: [mcpSopRule('gh_block', 'github')] })
     const r = await run('github', 'create_issue', snap())
     expect(wasCancelled(r.stdout), `stdout: ${r.stdout}`).toBe(true)
@@ -379,10 +374,9 @@ describe('MCP per-server allowlist — cline (use_mcp_tool normalization)', () =
   })
 })
 
-describe('version skew — GATE_VERSION 5 -> 6 (M3)', () => {
+describe('an allowlist edited in the snapshot', () => {
   const root = () => roots.get('claudeCode')!
   const script = () => join(root(), '.intutic', 'hooks', 'claude-code-check.js')
-  const snap = () => join(root(), 'skew.rules')
 
   const run = (toolName: string, snapshotPath: string) =>
     runProcess('node', [script()], {
@@ -391,52 +385,50 @@ describe('version skew — GATE_VERSION 5 -> 6 (M3)', () => {
       timeoutMs: 15_000,
     })
 
-  it('a v6 gate reading a v5-generated snapshot (no #mcpservers header) behaves as unrestricted', async () => {
-    // Realistic v5 output: no header line at all. `writeMcpRulesFixture` with
-    // no `mcpservers` option produces exactly this shape.
-    writeMcpRulesFixture(snap(), { sopRules: [mcpSopRule('unrelated', 'other')] })
-    const r = await run('mcp__anything__whatever', snap())
-    expect(r.status, `stderr: ${r.stderr}`).toBe(0)
+  /** A snapshot the real writer produced, with its allowlist record rewritten by hand. */
+  async function edited(interventionMode: string, edit: (record: string) => string): Promise<string> {
+    const dir = mkdtempSync(join(home, 'edited-'))
+    await writePolicySnapshot(
+      {
+        workspaceId: 'ws_test',
+        interventionMode,
+        sopRules: [{ id: 's_write', toolPattern: 'Write', action: 'block', reason: 'no writes' }],
+        mcpAllowedServers: ['github'],
+        sqlDropStrictBlock: false,
+      },
+      dir,
+    )
+    const file = join(dir, SNAPSHOT_RULES)
+    const text = readFileSync(file, 'utf8')
+    const record = text.split('\n').find((l) => l.startsWith(`${MCP_ALLOWLIST_RECORD_TAG}\t`))!
+    const out = join(dir, 'edited.rules')
+    writeFileSync(out, text.replace(record, edit(record)))
+    return out
+  }
+
+  it('a server added by hand fails the digest and is refused, and so is every listed one', async () => {
+    const snap = await edited('TRANSPARENT', (r) => `${r},evil_corp`)
+    const added = await run('mcp__evil_corp__steal_secrets', snap)
+    expect(added.status, `the edit widened the allowlist. stderr: ${added.stderr}`).toBe(2)
+    expect(added.stderr).toContain('[mcp_allowlist]')
+    // None of the file's servers can be vouched for once its digest fails.
+    expect((await run('mcp__github__create_issue', snap)).status).toBe(2)
+    // The SOP rule beside it is gone, which is how we know the gate read the
+    // snapshot as invalid rather than missing the edit.
+    expect((await run('Write', snap)).status).toBe(0)
+    expect((await run('Bash', snap)).status).toBe(0)
   })
 
-  it('what a v5 gate would have seen: stripping the #mcpservers header from a real v6 snapshot leaves it behaviorally identical to the no-header case', async () => {
-    // There is no old v5 binary left in this codebase to literally run
-    // against a v6-generated file — this is the realistic proxy the task
-    // calls for instead: take a snapshot a REAL v6 `writePolicySnapshot` call
-    // produced (not hand-rolled), delete only the `#mcpservers` line — the
-    // one thing a v5 gate's header-parsing loop would not recognise and
-    // would fall through to its generic `#`-comment case, exactly as the v6
-    // loop still does for any header it does not know either — and confirm
-    // the v6 gate itself now reads that file exactly as it read the
-    // never-had-a-header case above. That equivalence IS what "a v5 gate
-    // ignores the unknown header and degrades to v5 behaviour" rests on: the
-    // header line is genuinely inert once it is not there to parse.
-    const { writePolicySnapshot } = await import('../../src/lib/policySnapshot.js')
-    const dir = mkdtempSync(join(tmpdir(), 'intutic-skew-real-'))
-    try {
-      await writePolicySnapshot(
-        {
-          workspaceId: 'ws_test',
-          interventionMode: 'ENFORCE',
-          sopRules: [],
-          mcpAllowedServers: ['github'],
-          sqlDropStrictBlock: false,
-        },
-        dir,
-      )
-      const real = readFileSync(join(dir, 'policy-snapshot.rules'), 'utf8')
-      expect(real).toContain('#mcpservers block github')
-      const stripped = real
-        .split('\n')
-        .filter((l) => !l.startsWith('#mcpservers '))
-        .join('\n')
-      const strippedPath = join(dir, 'stripped.rules')
-      writeFileSync(strippedPath, stripped)
+  it('block turned into shadow by hand still refuses', async () => {
+    const snap = await edited('TRANSPARENT', (r) => r.replace('\tblock\t', '\tshadow\t'))
+    const r = await run('mcp__evil_corp__steal_secrets', snap)
+    expect(r.status, `stderr: ${r.stderr}`).toBe(2)
+  })
 
-      const r = await run('mcp__evil_corp__steal_secrets', strippedPath)
-      expect(r.status, `stderr: ${r.stderr}`).toBe(0) // NOT blocked — the header is gone
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+  it('an observe-only workspace whose snapshot fails its digest refuses too', async () => {
+    const intact = await edited('SILENT_LOG', (r) => r)
+    expect((await run('mcp__evil_corp__steal_secrets', intact)).status).toBe(0)
+    const snap = await edited('SILENT_LOG', (r) => `${r},evil_corp`)
+    expect((await run('mcp__evil_corp__steal_secrets', snap)).status).toBe(2)
   })
 })

@@ -5,7 +5,7 @@
  *
  * Endpoints used:
  *
- *   POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?}
+ *   POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?}
  *   POST /api/v1/hook-events     batched telemetry       -> creates governance_incidents rows
  *   POST /api/v1/decisions       record a hold           -> joins the review queue (hold.ts)
  *   GET  /api/v1/decisions/approved-bypasses             -> approvals that let a held call through
@@ -54,6 +54,8 @@ export interface GateResponse {
   allowed: boolean
   reason: string
   incidentId?: string | undefined
+  /** The refusal code the hook gate names, when it names one (the MCP registry's). */
+  code?: string | undefined
   /** False when the call failed and `failClosed` decided the verdict. */
   reached: boolean
 }
@@ -162,6 +164,7 @@ export class GateClient {
         allowed: Boolean(d.allowed ?? true),
         reason: String(d.reason ?? ''),
         incidentId: typeof d.incidentId === 'string' ? d.incidentId : undefined,
+        code: typeof d.code === 'string' ? d.code : undefined,
         reached: true,
       }
     } catch (exc) {

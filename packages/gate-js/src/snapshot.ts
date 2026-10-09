@@ -55,6 +55,14 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import {
+  decodeMcpAllowlistRecord,
+  decodeMcpRegistryRecord,
+  MCP_ALLOWLIST_RECORD_TAG,
+  MCP_REGISTRY_RECORD_TAG,
+  type McpAllowlistRecord,
+  type McpRegistryRecord,
+} from './mcpRegistryRecord.js'
 import { decodeSsoGroupRecord, SSO_GROUP_RECORD_TAG, type SsoGroupRecord } from './ssoGroups.js'
 import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
 import { classify } from './actions.js'
@@ -114,6 +122,20 @@ export class Snapshot {
    * edited group list in the file clears nothing.
    */
   ssoGroups: SsoGroupRecord | null = null
+  /**
+   * The workspace's MCP server registry decisions (the `@mcp_registry`
+   * record), or null when it made none. On a snapshot that fails its
+   * integrity check the approvals are dropped, so an approval added to the
+   * file clears nothing.
+   */
+  mcpRegistry: McpRegistryRecord | null = null
+  /**
+   * The workspace's `mcpAllowedServers` list (the `@mcp_allowlist` record),
+   * or null when it set none. On a snapshot that fails its integrity check it
+   * admits no server and refuses at `block`, so a server added to the file,
+   * or `block` edited to `shadow`, admits nothing.
+   */
+  mcpAllowlist: McpAllowlistRecord | null = null
 
   get healthMessage(): string {
     switch (this.state) {
@@ -190,6 +212,14 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
       snap.ssoGroups = decodeSsoGroupRecord(line)
       continue
     }
+    if (line.startsWith(`${MCP_REGISTRY_RECORD_TAG}\t`)) {
+      snap.mcpRegistry = decodeMcpRegistryRecord(line)
+      continue
+    }
+    if (line.startsWith(`${MCP_ALLOWLIST_RECORD_TAG}\t`)) {
+      snap.mcpAllowlist = decodeMcpAllowlistRecord(line)
+      continue
+    }
 
     const f = line.split('\t')
     // Column order: id, severity, flags, subject, reason, source(regex), [argPatternB64].
@@ -237,6 +267,10 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
     // Except the group policy, which only ever refuses: it still applies, to a
     // member whose groups this gate can no longer vouch for.
     if (snap.ssoGroups) snap.ssoGroups = { ...snap.ssoGroups, member: null }
+    // The MCP registry's refusals stay for the same reason, and its approvals
+    // go; the allowlist stays, admitting no server.
+    if (snap.mcpRegistry) snap.mcpRegistry = { ...snap.mcpRegistry, approvedServers: [] }
+    if (snap.mcpAllowlist) snap.mcpAllowlist = { severity: 'block', servers: [] }
   }
 
   if (snap.state === 'ok' && snap.generatedAt) {
