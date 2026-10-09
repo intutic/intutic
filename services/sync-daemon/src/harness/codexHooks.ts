@@ -36,6 +36,11 @@ import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-codex-hooks')
 
+/** Codex's user config directory: `$CODEX_HOME`, else `~/.codex`. */
+export function codexUserDir(): string {
+  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+}
+
 /**
  * The pre-tool gate script — receives Codex's PreToolUse JSON on stdin,
  * exits 0 to allow or 2 to block.
@@ -243,9 +248,8 @@ export async function writeCodexHooks(
   await mergeCodexHooksJson(path.join(projectCodexDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'codex_hooks_written', level: 'project', path: projectCodexDir }, 'Codex project-level hooks written')
 
-  // 2. User-level: $CODEX_HOME/hooks.json — Codex keeps its user config in
-  // CODEX_HOME when set, ~/.codex otherwise.
-  const userCodexDir = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+  // 2. User-level: $CODEX_HOME/hooks.json.
+  const userCodexDir = codexUserDir()
   await keepOriginal(path.join(userCodexDir, 'hooks.json'), workspaceRoot)
   await fs.mkdir(userCodexDir, { recursive: true })
   await mergeCodexHooksJson(path.join(userCodexDir, 'hooks.json'), hookScriptPath)

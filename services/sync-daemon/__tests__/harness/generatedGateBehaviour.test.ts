@@ -247,6 +247,26 @@ async function mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => 
 /** How many gate invocations run at once inside one test. */
 const GATE_CONCURRENCY = 4
 
+/**
+ * Files that install, load or configure a gate, by absolute path: each one a
+ * way for an agent to switch a gate off. The rest of the surface was already
+ * refused; `gateSurfaces.ts` lists all of it.
+ */
+const GATE_LOADER_FILES = [
+  '/w/.clinerules/hooks/PreToolUse',
+  '/home/u/.intutic/env/runtime.env',
+  '/w/.codex/hooks.json',
+  '/home/u/.codex/config.toml',
+  '/w/.github/hooks/intutic-governance.json',
+  '/home/u/.copilot/hooks/intutic-governance.json',
+  '/home/u/.hermes/config.yaml',
+  '/home/u/.config/goose/config.yaml',
+  '/home/u/.open-webui/intutic-governance-filter.py',
+  '/w/.pi/extensions/other.ts',
+  '/etc/cursor/hooks.json',
+  '/Library/Application Support/Cursor/hooks.json',
+]
+
 /** Environment a gate runs under, isolated to its own root. */
 function gateEnv(g: GateEntry, snapshot?: boolean | string): NodeJS.ProcessEnv {
   const root = roots.get(g.name)!
@@ -621,6 +641,17 @@ for (const g of GATES) {
       assertCleanExit(g, r, 'a Write to a protected path')
       expect(wasBlocked(g, r)).toBe(true)
     })
+
+    it('refuses a Write to, or a `sed -i` edit of, every file that loads or configures a gate', async () => {
+      await mapLimit(GATE_LOADER_FILES, GATE_CONCURRENCY, async (p) => {
+        const asWrite = await runGate(g, { file_path: p, content: '{}' }, { tool: 'Write' })
+        assertCleanExit(g, asWrite, `a Write to ${p}`)
+        expect(wasBlocked(g, asWrite), `${g.name} allowed a Write to ${p}`).toBe(true)
+        const asEdit = await runGate(g, { command: `sed -i 's/intutic//' '${p}'` })
+        assertCleanExit(g, asEdit, `sed -i on ${p}`)
+        expect(wasBlocked(g, asEdit), `${g.name} allowed \`sed -i\` on ${p}`).toBe(true)
+      })
+    }, FAN_OUT_TIMEOUT)
 
     it('enforces every governance-bypass pattern and spares its counter-examples', async () => {
       const cases = GOVERNANCE_BYPASS_PATTERNS.flatMap((pat) => [
@@ -1837,8 +1868,8 @@ describe('Pi and OpenClaw plugin gates', () => {
         }
       }, 180_000)
 
-      it("refuses an edit to the Pi extensions directory or OpenClaw's config, by absolute path", async () => {
-        for (const p of ['/home/u/.pi/agent/extensions/intutic-governance.js', '/home/u/.pi/agent/extensions/other.ts', '/home/u/.openclaw/openclaw.json']) {
+      it("refuses an edit to the Pi extensions directory, OpenClaw's config or any file that loads a gate, by absolute path", async () => {
+        for (const p of ['/home/u/.pi/agent/extensions/intutic-governance.js', '/home/u/.pi/agent/extensions/other.ts', '/home/u/.openclaw/openclaw.json', ...GATE_LOADER_FILES]) {
           const asWrite = await runPluginGate(g, 'write', { path: p, content: 'export default function () {}' })
           expect(asWrite.refused, `write to ${p} was allowed`).toBe(true)
           const asCommand = await runPluginGate(g, shell, { command: `sed -i 's/intutic-governance//' ${p}` })

@@ -39,6 +39,8 @@ intutic start
 
 `.clinerules` has to be a directory for both to fit. A flat `.clinerules` file that an earlier Intutic version wrote is converted automatically. A flat `.clinerules` file you wrote yourself is left alone, and no gate is installed until you move its content into a file inside a `.clinerules/` directory; the `intutic connect` log says so. A `PreToolUse` hook you wrote yourself is never overwritten.
 
+An agent cannot edit or remove the gate: the Intutic gate refuses a tool call that names `.clinerules/hooks`, reading it included, under Cline and under every other harness with a hook gate. If the gate is deleted, replaced or made non-executable anyway, the sync daemon writes it back while `intutic connect` runs. Cline runs the hooks in its other hook directories as well, and refuses a call when any of them does, so a hook added there cannot override the gate.
+
 To undo what `intutic connect` writes here, run `intutic disconnect --harness cline`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Proxy routing

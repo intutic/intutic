@@ -2906,6 +2906,81 @@
       ]
     },
     {
+      "id": "path.intutic_env",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.intutic_env\tblock\t-\tany\tShell command references the governance-protected path .intutic/env\t\\.intutic/env",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .intutic/env "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .intutic/env "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .intutic/env /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .intutic/en",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .intutic/env",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
       "id": "path.claude_settings_json",
       "subject": "any",
       "flags": "-",
@@ -3131,28 +3206,28 @@
       ]
     },
     {
-      "id": "path.cline_hooks",
+      "id": "path.etc_cursor_hooks_json",
       "subject": "any",
       "flags": "-",
-      "line": "path.cline_hooks\tblock\t-\tany\tShell command references the governance-protected path .cline/hooks\t\\.cline/hooks",
+      "line": "path.etc_cursor_hooks_json\tblock\t-\tany\tShell command references the governance-protected path /etc/cursor/hooks.json\t/etc/cursor/hooks\\.json",
       "argPattern": false,
       "held": [
         {
           "tool": "Bash",
           "input": {
-            "command": " rm -rf .cline/hooks "
+            "command": " rm -rf /etc/cursor/hooks.json "
           }
         },
         {
           "tool": "Bash",
           "input": {
-            "command": " printf x > .cline/hooks "
+            "command": " printf x > /etc/cursor/hooks.json "
           }
         },
         {
           "tool": "Bash",
           "input": {
-            "command": " mv .cline/hooks /tmp/x "
+            "command": " mv /etc/cursor/hooks.json /tmp/x "
           }
         }
       ],
@@ -3180,7 +3255,7 @@
         {
           "name": "the path less its last character, repeated",
           "prefix": "",
-          "unit": " .cline/hook",
+          "unit": " /etc/cursor/hooks.jso",
           "suffix": "",
           "length": 262144,
           "held": false,
@@ -3194,7 +3269,157 @@
           "name": "the path after a long command",
           "prefix": " cat",
           "unit": " x",
-          "suffix": " .cline/hooks",
+          "suffix": " /etc/cursor/hooks.json",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.Application_Support_Cursor_hooks_json",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.Application_Support_Cursor_hooks_json\tblock\t-\tany\tShell command references the governance-protected path Application Support/Cursor/hooks.json\tApplication Support/Cursor/hooks\\.json",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf Application Support/Cursor/hooks.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > Application Support/Cursor/hooks.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv Application Support/Cursor/hooks.json /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " Application Support/Cursor/hooks.jso",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " Application Support/Cursor/hooks.json",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.clinerules_hooks",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.clinerules_hooks\tblock\t-\tany\tShell command references the governance-protected path .clinerules/hooks\t\\.clinerules/hooks",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .clinerules/hooks "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .clinerules/hooks "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .clinerules/hooks /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .clinerules/hook",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .clinerules/hooks",
           "length": 262144,
           "held": true,
           "tool": "Bash",
@@ -4845,6 +5070,606 @@
           "prefix": " cat",
           "unit": " x",
           "suffix": " .openclaw/openclaw.json",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.pi_extensions",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.pi_extensions\tblock\t-\tany\tShell command references the governance-protected path .pi/extensions\t\\.pi/extensions",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .pi/extensions "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .pi/extensions "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .pi/extensions /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .pi/extension",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .pi/extensions",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.codex_hooks_json",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.codex_hooks_json\tblock\t-\tany\tShell command references the governance-protected path .codex/hooks.json\t\\.codex/hooks\\.json",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .codex/hooks.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .codex/hooks.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .codex/hooks.json /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .codex/hooks.jso",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .codex/hooks.json",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.codex_config_toml",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.codex_config_toml\tblock\t-\tany\tShell command references the governance-protected path .codex/config.toml\t\\.codex/config\\.toml",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .codex/config.toml "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .codex/config.toml "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .codex/config.toml /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .codex/config.tom",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .codex/config.toml",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.github_hooks_intutic_governance_json",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.github_hooks_intutic_governance_json\tblock\t-\tany\tShell command references the governance-protected path .github/hooks/intutic-governance.json\t\\.github/hooks/intutic-governance\\.json",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .github/hooks/intutic-governance.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .github/hooks/intutic-governance.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .github/hooks/intutic-governance.json /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .github/hooks/intutic-governance.jso",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .github/hooks/intutic-governance.json",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.copilot_hooks_intutic_governance_json",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.copilot_hooks_intutic_governance_json\tblock\t-\tany\tShell command references the governance-protected path .copilot/hooks/intutic-governance.json\t\\.copilot/hooks/intutic-governance\\.json",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .copilot/hooks/intutic-governance.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .copilot/hooks/intutic-governance.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .copilot/hooks/intutic-governance.json /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .copilot/hooks/intutic-governance.jso",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .copilot/hooks/intutic-governance.json",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.hermes_config_yaml",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.hermes_config_yaml\tblock\t-\tany\tShell command references the governance-protected path .hermes/config.yaml\t\\.hermes/config\\.yaml",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .hermes/config.yaml "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .hermes/config.yaml "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .hermes/config.yaml /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .hermes/config.yam",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .hermes/config.yaml",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.config_goose_config_yaml",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.config_goose_config_yaml\tblock\t-\tany\tShell command references the governance-protected path .config/goose/config.yaml\t\\.config/goose/config\\.yaml",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .config/goose/config.yaml "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .config/goose/config.yaml "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .config/goose/config.yaml /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .config/goose/config.yam",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .config/goose/config.yaml",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.open_webui_intutic_governance_filter_py",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.open_webui_intutic_governance_filter_py\tblock\t-\tany\tShell command references the governance-protected path .open-webui/intutic-governance-filter.py\t\\.open-webui/intutic-governance-filter\\.py",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .open-webui/intutic-governance-filter.py "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .open-webui/intutic-governance-filter.py "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .open-webui/intutic-governance-filter.py /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .open-webui/intutic-governance-filter.p",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .open-webui/intutic-governance-filter.py",
           "length": 262144,
           "held": true,
           "tool": "Bash",

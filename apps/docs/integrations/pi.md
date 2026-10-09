@@ -39,6 +39,6 @@ Intutic writes rules and configures:
 
 Both paths are in Pi's default agent directory, `~/.pi/agent`. If you move it with `PI_CODING_AGENT_DIR`, copy the extension into that directory's `extensions/` folder.
 
-An agent cannot edit or remove the extension: the Intutic gate refuses a tool call that names `.pi/agent/extensions`, reading it included, under Pi and under every other harness with a hook gate. Add or change your own extensions there yourself.
+An agent cannot edit or remove the extension, or add one beside it: the Intutic gate refuses a tool call that names `.pi/agent/extensions` or a project's `.pi/extensions`, reading them included, under Pi and under every other harness with a hook gate. Add or change your own extensions there yourself.
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness pi`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. Disconnect also removes what earlier versions wrote where Pi does not read it: the PreToolUse entries in `~/.pi/hooks.json`, the provider routing in `~/.pi/models.json`, and `~/.intutic/hooks/pi-check.sh`. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

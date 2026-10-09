@@ -109,6 +109,8 @@ merging non-destructively so your own hooks are preserved.
 
 Codex loads hooks by default (`[features] hooks = false` turns them off). It loads the project-level file only once you have trusted the project's `.codex/` folder; the user-level registration applies everywhere.
 
+An agent cannot remove the registration or turn hooks off: the Intutic gate refuses a tool call that names `.codex/hooks.json` or `.codex/config.toml`, reading them included, under Codex and under every other harness with a hook gate. If a `hooks.json` loses the gate anyway, the sync daemon puts the entry back while `intutic connect` runs. Change the Codex config yourself.
+
 Codex invokes the hook before each tool call with JSON on stdin
 (`{tool_name, tool_use_id, tool_input}`); the gate evaluates the compiled
 protection floor plus your workspace's policy snapshot — including ` WHERE `

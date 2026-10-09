@@ -52,7 +52,7 @@ export { injectMcpServer } from './harness/mcpAutoWrite.js'
 export { planDisconnect, DisconnectPlan, HARNESS_REVERSERS, keepOriginal, noteWritten, noteProxyUrl, writeOwnedFile } from './disconnect/index.js'
 export type { DisconnectOptions, PlannedChange, PlanNote } from './disconnect/index.js'
 
-export { guardSettingsFile, warnIfDshCoverageGap } from './watcher/settingsGuard.js'
+export { guardSettingsFile, isGuardedPath, warnIfDshCoverageGap } from './watcher/settingsGuard.js'
 
 export { readJsonObjectForMerge } from './harness/jsonMergeTarget.js'
 export { writeRulesSection, retireRulesFile, rulesSectionOf, RULES_SECTION_START, RULES_SECTION_END, RULES_MARKERS, DECISIONS_MARKERS } from './harness/rulesSection.js'
