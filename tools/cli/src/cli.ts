@@ -419,6 +419,7 @@ guardrailsCmd
   .description('List guardrails with their status and shadow evidence')
   .option('--status <status>', 'PROPOSED | SHADOW | ENFORCING | REJECTED | RETIRED')
   .option('--target <target>', 'hook_rule | sop_front_matter | wasm_rule | workspace_setting')
+  .option('--provenance <provenance>', 'extracted | authored')
   .option('--doc <docId>', 'Only guardrails cited from this document')
   .option('--limit <n>', 'Max rows (default 50, capped at 200)')
   .option('--json', 'Output as JSON')
@@ -436,6 +437,59 @@ guardrailsCmd
   .action(async (guardrailId, opts) => {
     const { runGuardrailsShow } = await import('./commands/guardrails.js')
     await runGuardrailsShow(guardrailId, opts)
+  })
+
+/** The IR flags `guardrails create` and `guardrails update` share; a file (`--file`) is the alternative. */
+function guardrailIrOptions(cmd: Command): Command {
+  return cmd
+    .option('--file <path>', 'YAML or JSON: a bare IR, or { name, description, ir }')
+    .option('--name <name>', 'One-line label (at most 80 characters)')
+    .option('--description <text>', 'What the rule is for; shown where an extracted guardrail shows its quote')
+    .option('--kind <kind>', 'hook_rule | deny_tools | review_before | requires_before | forbid_after | max_calls | forbid_with | wasm_predicate | allowed_models | egress_allow')
+    .option('--title <title>', 'hook_rule, wasm_predicate: the title in the block message')
+    .option('--tools <list>', 'hook_rule, deny_tools: comma-separated tool names')
+    .option('--tokens <list>', 'review_before: comma-separated tool or action tokens')
+    .option('--arg-contains <literal>', 'hook_rule: fire only when the input contains this (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+    .option('--arg-not-contains <literal>', 'hook_rule: fire only when the input does not contain this (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+    .option('--first <token>', 'requires_before, forbid_after: the first token')
+    .option('--then <token>', 'requires_before, forbid_after: the second token')
+    .option('--token <token>', 'max_calls, forbid_with: the token')
+    .option('--limit <n>', 'max_calls: the most calls allowed')
+    .option('--taint <taint>', 'forbid_with: secrets() | pii()')
+    .option('--roles <list>', 'Comma-separated roles the rule applies to (default: everyone)')
+    .option('--models <list>', 'allowed_models: comma-separated model ids')
+    .option('--hosts <list>', 'egress_allow: comma-separated hosts, suffixes or IPv4 CIDRs')
+    .option('--rationale <text>', 'wasm_predicate: why it re-asks')
+    .option('--predicate <json>', 'wasm_predicate: the predicate as JSON')
+    .option('--json', 'Output as JSON')
+    .option('--dev', 'Use local control plane (http://localhost:3001)')
+}
+
+guardrailIrOptions(
+  guardrailsCmd.command('create').description('Author a guardrail directly: the same IR and checks as an extracted one, created PROPOSED'),
+).action(async (opts) => {
+  const { runGuardrailsCreate } = await import('./commands/guardrails.js')
+  await runGuardrailsCreate(opts)
+})
+
+guardrailIrOptions(
+  guardrailsCmd
+    .command('update <guardrailId>')
+    .description('Edit an authored guardrail: a name or description in place; a changed IR creates the next version, PROPOSED with no evidence')
+    .option('--clear-description', 'Remove the description'),
+).action(async (guardrailId, opts) => {
+  const { runGuardrailsUpdate } = await import('./commands/guardrails.js')
+  await runGuardrailsUpdate(guardrailId, opts)
+})
+
+guardrailsCmd
+  .command('delete <guardrailId>')
+  .description('Retire an authored guardrail and undo what it wrote; its history is kept')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (guardrailId, opts) => {
+    const { runGuardrailsDelete } = await import('./commands/guardrails.js')
+    await runGuardrailsDelete(guardrailId, opts)
   })
 
 guardrailsCmd

@@ -1,12 +1,12 @@
 ---
 page_title: "Intutic Provider"
 description: |-
-  Manage an Intutic workspace's SOPs, enforcement policies, settings, virtual keys, self-hosted gateways, notification rules and MCP server decisions as code.
+  Manage an Intutic workspace's SOPs, enforcement policies, policy guardrails, settings, virtual keys, self-hosted gateways, notification rules and MCP server decisions as code.
 ---
 
 # Intutic Provider
 
-The Intutic provider manages one Intutic workspace through the control plane's REST API: SOPs, enforcement policies, workspace settings, virtual keys, self-hosted gateways, notification rules and MCP server decisions.
+The Intutic provider manages one Intutic workspace through the control plane's REST API: SOPs, enforcement policies, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules and MCP server decisions.
 
 ## Authentication
 

@@ -1566,7 +1566,7 @@ No options. For each `.wasm` file in the local rules dir (`INTUTIC_WASM_DIR`, de
 
 ## `intutic guardrails` <Badge type="warning" text="Self-serve+" />
 
-The Policy Clause Ledger from the terminal: sources, documents, the review queue, the three decisions that move a cited guardrail, and the file plane. A client of `/api/v1/policy-guardrails/*` and `/api/v1/connectors`; nothing here decides anything the server would not, and the acting identity is never a flag — the server records the authenticated member. Not `intutic policy` (the WASM rule loop) and not `intutic sops` (your own SOP files). See [Policy Guardrails](/guide/policy-guardrails).
+The Policy Clause Ledger from the terminal: sources, documents, the review queue, the three decisions that move a cited guardrail, guardrails you author directly, and the file plane. A client of `/api/v1/policy-guardrails/*` and `/api/v1/connectors`; nothing here decides anything the server would not, and the acting identity is never a flag — the server records the authenticated member. Not `intutic policy` (the WASM rule loop) and not `intutic sops` (your own SOP files). See [Policy Guardrails](/guide/policy-guardrails).
 
 ---
 
@@ -1770,13 +1770,14 @@ intutic guardrails list
 |--------|-------------|
 | `--status <status>` | `PROPOSED`, `SHADOW`, `ENFORCING`, `REJECTED` or `RETIRED` |
 | `--target <target>` | `hook_rule`, `sop_front_matter`, `wasm_rule` or `workspace_setting` |
+| `--provenance <provenance>` | `extracted` (compiled from a document) or `authored` (written directly) |
 | `--doc <docId>` | Only guardrails cited from this document |
 | `--limit <n>` | Max rows (default 50, capped at 200) |
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-One line per guardrail: id, status, target, the cited quote, and the shadow counters.
+One line per guardrail: id, status, target, what it stands on (the cited quote, or an authored guardrail's name, description and version), and the shadow counters.
 
 ---
 
@@ -1802,7 +1803,119 @@ intutic guardrails show <guardrailId>
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-For a hook rule, prints the tool and input patterns and the exact stderr line a developer sees on a block; for a front-matter rule, the lines the proxy reads; for a WASM rule, the predicate source; for a workspace setting, the setting and the values it proposes. A SHADOW guardrail also prints the server's readiness reasons verbatim.
+For a hook rule, prints the tool and input patterns and the exact stderr line a developer sees on a block; for a front-matter rule, the lines the proxy reads; for a WASM rule, the predicate source; for a workspace setting, the setting and the values it proposes. A SHADOW guardrail also prints the server's readiness reasons verbatim. An authored guardrail shows its name, description and version in place of a citation, and the version that replaced it, if one did.
+
+---
+
+## `intutic guardrails create` <Badge type="warning" text="Self-serve+" />
+
+Author a guardrail directly: the same IR and checks as an extracted one, created PROPOSED.
+
+```bash
+intutic guardrails create --file guardrail.yaml
+intutic guardrails create --name "Reviewed terraform apply" --kind hook_rule \
+  --title "Reviewed plan before terraform apply" --tools Bash --arg-contains "terraform apply"
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--file <path>` | YAML or JSON: a bare IR (an object with `kind`), or `{ name, description, ir }` |
+| `--name <name>` | One-line label, at most 80 characters, no surrounding whitespace |
+| `--description <text>` | What the rule is for, at most 480 characters; shown where an extracted guardrail shows its quote, including in a hook rule's block message |
+| `--kind <kind>` | The IR kind: `hook_rule`, `deny_tools`, `review_before`, `requires_before`, `forbid_after`, `max_calls`, `forbid_with`, `wasm_predicate`, `allowed_models` or `egress_allow` |
+| `--title <title>` | `hook_rule`, `wasm_predicate`: the title in the block message |
+| `--tools <list>` | `hook_rule`, `deny_tools`: comma-separated tool names |
+| `--tokens <list>` | `review_before`: comma-separated tool or action tokens |
+| `--arg-contains <literal>` | `hook_rule`: fire only when the tool input contains this; repeat for more |
+| `--arg-not-contains <literal>` | `hook_rule`: fire only when the tool input does not contain this; repeat for more |
+| `--first <token>` | `requires_before`, `forbid_after`: the first token |
+| `--then <token>` | `requires_before`, `forbid_after`: the second token |
+| `--token <token>` | `max_calls`, `forbid_with`: the token |
+| `--limit <n>` | `max_calls`: the most calls allowed |
+| `--taint <taint>` | `forbid_with`: `secrets()` or `pii()` |
+| `--roles <list>` | Comma-separated roles the rule applies to; without it, everyone |
+| `--models <list>` | `allowed_models`: comma-separated model ids |
+| `--hosts <list>` | `egress_allow`: comma-separated hosts, suffixes or IPv4 CIDRs |
+| `--rationale <text>` | `wasm_predicate`: why it re-asks |
+| `--predicate <json>` | `wasm_predicate`: the predicate, as JSON |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sends the guardrail to `POST /api/v1/policy-guardrails/guardrails`. The flags and the file field names are the IR's own (`argContains` in a file, `--arg-contains` as a flag), and a `--name` or `--description` flag overrides the file's. The server runs the validator an extracted guardrail passes, without the checks that compare a model's output against a cited passage; a refusal exits 1 and prints every check with the one that refused. The guardrail is created PROPOSED: it enforces and measures nothing until `intutic guardrails approve-shadow`, and promotion then waits on shadow evidence like any other. Needs an OWNER or ADMIN key. See [Authoring guardrails directly](/guide/policy-guardrails#authoring-guardrails-directly).
+
+```yaml
+# guardrail.yaml
+name: Reviewed terraform apply
+description: Production applies need a reviewed plan.
+ir:
+  kind: hook_rule
+  title: Reviewed plan before terraform apply
+  tools: [Bash]
+  argContains: [terraform apply]
+```
+
+---
+
+## `intutic guardrails update <guardrailId>` <Badge type="warning" text="Self-serve+" />
+
+Edit an authored guardrail: a name or description in place; a changed IR creates the next version, PROPOSED with no evidence.
+
+```bash
+intutic guardrails update <guardrailId> --description "Production applies need a reviewed plan and a ticket."
+intutic guardrails update <guardrailId> --file guardrail.yaml
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `guardrailId` | The authored guardrail to edit |
+
+**Options:**
+
+Every option of `intutic guardrails create`, plus:
+
+| Option | Description |
+|--------|-------------|
+| `--file <path>` | YAML or JSON: a bare IR, or `{ name, description, ir }` |
+| `--name <name>` | A new label |
+| `--description <text>` | A new description |
+| `--clear-description` | Remove the description |
+| `--kind <kind>` | A new IR, given with flags (`--title`, `--tools`, `--tokens`, `--arg-contains`, `--arg-not-contains`, `--first`, `--then`, `--token`, `--limit`, `--taint`, `--roles`, `--models`, `--hosts`, `--rationale`, `--predicate`) |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sends only what you give to `PUT /api/v1/policy-guardrails/guardrails/:guardrailId`. A name or description change happens in place and keeps the guardrail's status and evidence. A changed IR is a different rule: the server creates the next version under a new id, PROPOSED with no evidence, and retires this one, undoing what it wrote if it was an enforcing workspace-setting guardrail. The command prints the new id. An extracted guardrail is refused (exit 1): it changes when its document does.
+
+---
+
+## `intutic guardrails delete <guardrailId>` <Badge type="warning" text="Self-serve+" />
+
+Retire an authored guardrail and undo what it wrote; its history is kept.
+
+```bash
+intutic guardrails delete <guardrailId>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `guardrailId` | The authored guardrail to retire |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Any state but RETIRED becomes RETIRED: the rule leaves every rule endpoint on the next poll, and an enforcing allowed-models or egress guardrail's setting write is undone as `retire` undoes it. The guardrail and its history stay readable with `show`. An extracted guardrail is refused; retire or reject it instead.
 
 ---
 

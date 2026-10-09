@@ -54,6 +54,13 @@ export interface ApiClient {
    */
   postWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }>
   /**
+   * PUT and DELETE that hand back the status, for the same reason:
+   * `PUT /api/v1/policy-guardrails/guardrails/:id` answers 400 with the
+   * validator's named checks and 409 with a `code`, and both are the answer.
+   */
+  putWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }>
+  delWithStatus<T>(path: string): Promise<{ status: number; body: T }>
+  /**
    * Multipart POST that hands back the status.
    *
    * `POST /api/v1/rule-candidates/:id/bundle` reads a `file` field and a
@@ -99,6 +106,25 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
     }
 
     return unwrapToonEnvelope(await res.json()) as T
+  }
+
+  /** A JSON request whose non-2xx answer is returned, not thrown; a body that is not JSON comes back as `{ error: text }`. */
+  async function withStatus<T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
+    const headers: Record<string, string> = { ...baseHeaders }
+    injectTraceHeaders(headers)
+    const res = await fetch(`${controlPlaneUrl}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    const text = await res.text()
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      parsed = { error: text }
+    }
+    return { status: res.status, body: unwrapToonEnvelope(parsed) as T }
   }
 
   return {
@@ -158,21 +184,15 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
     },
 
     async postWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }> {
-      const headers: Record<string, string> = { ...baseHeaders }
-      injectTraceHeaders(headers)
-      const res = await fetch(`${controlPlaneUrl}${path}`, {
-        method: 'POST',
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      })
-      const text = await res.text()
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(text)
-      } catch {
-        parsed = { error: text }
-      }
-      return { status: res.status, body: unwrapToonEnvelope(parsed) as T }
+      return withStatus<T>('POST', path, body)
+    },
+
+    async putWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }> {
+      return withStatus<T>('PUT', path, body)
+    },
+
+    async delWithStatus<T>(path: string): Promise<{ status: number; body: T }> {
+      return withStatus<T>('DELETE', path)
     },
 
     async postForm<T>(path: string, form: FormData): Promise<{ status: number; body: T }> {

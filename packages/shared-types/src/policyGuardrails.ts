@@ -9,7 +9,8 @@
  * that is the casing they emit.
  */
 
-import type { GuardrailIr } from './guardrailIr.js'
+import { z } from 'zod'
+import { MAX_RATIONALE_CHARS, MAX_TITLE_CHARS, type GuardrailIr } from './guardrailIr.js'
 
 export const GUARDRAIL_STATUSES = ['PROPOSED', 'SHADOW', 'ENFORCING', 'REJECTED', 'RETIRED'] as const
 /**
@@ -66,8 +67,103 @@ export const GUARDRAIL_EVENT_TYPES = [
   'CITATION_REBOUND',
   /** The stored render was recomputed by the current renderer (TD-478); shadow evidence gathered under the old render was reset. */
   'RENDER_REBOUND',
+  /** An authored guardrail's name or description changed in place; what it enforces did not. */
+  'UPDATED',
 ] as const
 export type GuardrailEventType = (typeof GUARDRAIL_EVENT_TYPES)[number]
+
+/**
+ * Where a guardrail came from.
+ *
+ * - `extracted`: compiled from a cited clause of a policy document. It stands
+ *   on a passage, carries the quote, and goes stale when the passage changes.
+ * - `authored`: written directly by an OWNER or ADMIN (API, CLI, Terraform or
+ *   the dashboard). It has a name and an optional description instead of a
+ *   citation, and is held to the same IR and the same validator — minus the
+ *   checks that ground a model's proposal in the passage it was shown, which
+ *   have nothing to read.
+ *
+ * Both start PROPOSED and move through the same transitions on the same
+ * evidence.
+ */
+export const GUARDRAIL_PROVENANCES = ['extracted', 'authored'] as const
+export type GuardrailProvenance = (typeof GUARDRAIL_PROVENANCES)[number]
+
+/** An authored guardrail's name is a one-line label: it titles the projected SOP and the review card. */
+export const AUTHORED_NAME_MAX_CHARS = MAX_TITLE_CHARS
+/** The description stands where an extracted guardrail's quote stands — in a hook rule's block message, among others — so it has the quote's ceiling. */
+export const AUTHORED_DESCRIPTION_MAX_CHARS = MAX_RATIONALE_CHARS
+
+const AuthoredName = z
+  .string()
+  .min(1)
+  .max(AUTHORED_NAME_MAX_CHARS)
+  .refine((v) => [...v].every((ch) => ch.charCodeAt(0) >= 0x20 && ch.charCodeAt(0) !== 0x7f), { message: 'a name is one line: no tab, newline or control character' })
+  .refine((v) => v === v.trim(), { message: 'a name has no leading or trailing whitespace' })
+
+const AuthoredDescription = z.string().min(1).max(AUTHORED_DESCRIPTION_MAX_CHARS)
+
+/**
+ * `POST /api/v1/policy-guardrails/guardrails`. The IR is checked by the
+ * guardrail validator, not here: this schema only says the envelope is right.
+ */
+export const AuthoredGuardrailCreateSchema = z
+  .object({
+    name: AuthoredName,
+    description: AuthoredDescription.nullable().optional(),
+    ir: z.unknown().refine((v) => v !== undefined, { message: 'ir is required' }),
+  })
+  .strict()
+
+/**
+ * `PUT /api/v1/policy-guardrails/guardrails/:guardrailId`: any of the three.
+ * A changed IR creates a new version; `description: null` clears it.
+ */
+export const AuthoredGuardrailUpdateSchema = z
+  .object({
+    name: AuthoredName.optional(),
+    description: AuthoredDescription.nullable().optional(),
+    ir: z.unknown().optional(),
+  })
+  .strict()
+  .refine((v) => v.name !== undefined || v.description !== undefined || v.ir !== undefined, { message: 'nothing to update: send name, description or ir' })
+
+export type AuthoredGuardrailCreate = z.infer<typeof AuthoredGuardrailCreateSchema>
+export type AuthoredGuardrailUpdate = z.infer<typeof AuthoredGuardrailUpdateSchema>
+
+/** One named validator check, in the order the checks ran. */
+export interface GuardrailCheckResult {
+  name: string
+  passed: boolean
+  detail: string
+}
+
+/** `POST …/guardrails/validate`: what a create or an IR edit would be refused for, without writing anything. */
+export interface GuardrailValidationResponse {
+  valid: boolean
+  validation: GuardrailCheckResult[]
+  /** The enforcer the IR is projected into; null when the IR did not validate. */
+  target: GuardrailTarget | null
+  /** The artifact the enforcer would read; null when the IR did not validate. */
+  rendered: unknown
+}
+
+/** The 400 a create or an IR edit answers with when a check refuses the IR. */
+export interface GuardrailValidationFailure {
+  error: string
+  code: 'invalid_guardrail'
+  validation: GuardrailCheckResult[]
+}
+
+/** The answer to an authored create (201) or update (200). */
+export interface AuthoredGuardrailWriteResult {
+  ok: true
+  guardrail: GuardrailDetail
+  /** The IR changed: a new version, back in PROPOSED with no evidence, replaced the old one, which is now RETIRED. */
+  forked: boolean
+  /** The id of the version this one replaced, when `forked`. */
+  supersedes: string | null
+}
 
 /** The one promotion rule (LLD #71 decision 7), as `GET …/thresholds` reports it. */
 export interface GuardrailThresholds {
@@ -101,6 +197,15 @@ export interface GuardrailDocumentRef {
 
 export interface GuardrailSummary {
   guardrailId: string
+  provenance: GuardrailProvenance
+  /** Authored only: the author's label for it. Null for an extracted guardrail, whose label is its document and quote. */
+  name: string | null
+  /** Authored only: what the rule is for, in the author's words; shown where an extracted guardrail shows its quote. */
+  description: string | null
+  /** 1 for an extracted guardrail. Each IR edit of an authored guardrail creates the next version under a new id. */
+  version: number
+  /** The guardrail id of the version this one replaced, or null. */
+  supersedes: string | null
   target: GuardrailTarget
   status: GuardrailStatus
   ir: GuardrailIr
@@ -118,8 +223,10 @@ export interface GuardrailSummary {
   shadowAt: string | null
   promotedAt: string | null
   rejectedReason: string | null
-  clause: GuardrailClauseRef
-  document: GuardrailDocumentRef
+  /** Null for an authored guardrail: it cites nothing. */
+  clause: GuardrailClauseRef | null
+  /** Null for an authored guardrail. */
+  document: GuardrailDocumentRef | null
 }
 
 export interface GuardrailEvent {
@@ -142,11 +249,14 @@ export interface GuardrailDetail extends GuardrailSummary {
   validation: unknown
   passage: GuardrailPassageRef | null
   events: GuardrailEvent[]
+  /** The id of the version that replaced this one (an authored guardrail whose IR was edited), or null. */
+  supersededBy: string | null
 }
 
 export interface GuardrailListFilters {
   status?: GuardrailStatus
   target?: GuardrailTarget
+  provenance?: GuardrailProvenance
   docId?: string
   limit?: number
 }
@@ -360,6 +470,15 @@ export interface CandidateCitationEvidence {
     sourceUrl: string | null
     passageHash: string
     documentTitle: string
+  }
+}
+
+/** A candidate's evidence entry when the guardrail it came from was authored, not extracted: there is no citation to carry. */
+export interface AuthoredCandidateEvidence {
+  authored: {
+    guardrailId: string
+    name: string
+    version: number
   }
 }
 

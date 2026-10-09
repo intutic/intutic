@@ -23,6 +23,9 @@ import {
   runGuardrailsSearch,
   runGuardrailsImpact,
   runGuardrailsDuplicates,
+  runGuardrailsCreate,
+  runGuardrailsUpdate,
+  runGuardrailsDelete,
 } from './guardrails.js'
 
 // Real credential files in a throwaway home, read by the real config store —
@@ -82,6 +85,11 @@ const swallowExit = async (p: Promise<void>) => {
 
 const summary = (over: Record<string, unknown> = {}) => ({
   guardrailId: 'pgr_1',
+  provenance: 'extracted',
+  name: null,
+  description: null,
+  version: 1,
+  supersedes: null,
   target: 'hook_rule',
   status: 'SHADOW',
   ir: { kind: 'hook_rule', title: 'Reviewed plan before terraform apply', tools: ['Bash'] },
@@ -327,5 +335,141 @@ describe('intutic guardrails search --text / impact / duplicates', () => {
     const out = printed()
     expect(out).toContain('Handbook and Runbook (30 of 33 shingles shared)')
     expect(out).toContain('pps_b: Runbook excerpt')
+  })
+})
+
+const authoredDetail = (over: Record<string, unknown> = {}) => ({
+  ...summary({
+    guardrailId: 'pgr_a',
+    provenance: 'authored',
+    name: 'Reviewed terraform apply',
+    description: 'Production applies need a reviewed plan.',
+    status: 'PROPOSED',
+    clause: null,
+    document: null,
+    ...over,
+  }),
+  validation: [],
+  passage: null,
+  events: [],
+  supersededBy: null,
+})
+
+const HOOK = { kind: 'hook_rule', title: 'Reviewed plan before terraform apply', tools: ['Bash'], argContains: ['terraform apply'] }
+
+describe('intutic guardrails create / update / delete (authored)', () => {
+  let dir: string
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-authored-'))
+  })
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+  const sent = (i = 0) => {
+    const [url, init] = fetchMock.mock.calls[i] as [string, RequestInit]
+    return { path: new URL(url).pathname, method: init.method, body: init.body ? JSON.parse(String(init.body)) : undefined }
+  }
+
+  it('create from a YAML envelope posts name, description and the IR as written', async () => {
+    const file = path.join(dir, 'g.yaml')
+    await fs.writeFile(file, 'name: Reviewed terraform apply\ndescription: Production applies need a reviewed plan.\nir:\n  kind: hook_rule\n  title: Reviewed plan before terraform apply\n  tools: [Bash]\n  argContains: [terraform apply]\n')
+    fetchMock.mockResolvedValue(ok({ ok: true, guardrail: authoredDetail(), forked: false, supersedes: null }, 201))
+    await runGuardrailsCreate({ file })
+    expect(sent()).toEqual({ path: '/api/v1/policy-guardrails/guardrails', method: 'POST', body: { name: 'Reviewed terraform apply', description: 'Production applies need a reviewed plan.', ir: HOOK } })
+    expect(printed()).toContain('Created pgr_a (hook_rule), PROPOSED')
+    expect(printed()).toContain('intutic guardrails approve-shadow pgr_a')
+  })
+
+  it('create from a bare JSON IR takes the name from --name', async () => {
+    const file = path.join(dir, 'g.json')
+    await fs.writeFile(file, JSON.stringify({ kind: 'deny_tools', tools: ['WebFetch'] }))
+    fetchMock.mockResolvedValue(ok({ ok: true, guardrail: authoredDetail({ target: 'sop_front_matter' }), forked: false, supersedes: null }, 201))
+    await runGuardrailsCreate({ file, name: 'No web fetch' })
+    expect(sent().body).toEqual({ name: 'No web fetch', ir: { kind: 'deny_tools', tools: ['WebFetch'] } })
+  })
+
+  it('create from flags builds the IR from --kind and the keys it takes; repeatable literals keep their commas', async () => {
+    fetchMock.mockResolvedValue(ok({ ok: true, guardrail: authoredDetail(), forked: false, supersedes: null }, 201))
+    await runGuardrailsCreate({ name: 'x', kind: 'hook_rule', title: 'T', tools: 'Bash, Write', argContains: ['a,b'], argNotContains: ['--dry-run'], roles: 'deployer' })
+    expect(sent().body.ir).toEqual({ kind: 'hook_rule', title: 'T', tools: ['Bash', 'Write'], argContains: ['a,b'], argNotContains: ['--dry-run'], roles: ['deployer'] })
+    fetchMock.mockClear()
+    await runGuardrailsCreate({ name: 'x', kind: 'max_calls', token: 'Bash', limit: '20' })
+    expect(sent().body.ir).toEqual({ kind: 'max_calls', token: 'Bash', limit: 20 })
+    fetchMock.mockClear()
+    await runGuardrailsCreate({ name: 'x', kind: 'wasm_predicate', title: 'T', rationale: 'R', predicate: '{"all":[{"field":"depth","op":"atLeast","value":3}]}' })
+    expect(sent().body.ir).toEqual({ kind: 'wasm_predicate', title: 'T', rationale: 'R', verdict: 3, predicate: { all: [{ field: 'depth', op: 'atLeast', value: 3 }] } })
+  })
+
+  it('refuses before any request what the server would refuse: no IR, no name, an IR flag without --kind, a file and flags at once', async () => {
+    await swallowExit(runGuardrailsCreate({ name: 'x' }))
+    await swallowExit(runGuardrailsCreate({ kind: 'deny_tools', tools: 'WebFetch' }))
+    await swallowExit(runGuardrailsCreate({ name: 'x', tools: 'WebFetch' }))
+    const file = path.join(dir, 'g.json')
+    await fs.writeFile(file, JSON.stringify({ kind: 'deny_tools', tools: ['WebFetch'] }))
+    await swallowExit(runGuardrailsCreate({ name: 'x', file, kind: 'deny_tools', tools: 'Read' }))
+    await fs.writeFile(file, JSON.stringify({ name: 'x', ir: {}, extra: 1 }))
+    await swallowExit(runGuardrailsCreate({ file }))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(errors()).toContain('--tools needs --kind')
+    expect(errors()).toContain('not both')
+    expect(errors()).toContain('unknown key(s) extra')
+  })
+
+  it('a validator refusal prints every check and the one that refused, and exits 1', async () => {
+    fetchMock.mockResolvedValue(
+      ok({ error: 'The guardrail was refused by token_observable: not a harness tool name', code: 'invalid_guardrail', validation: [{ name: 'json_schema', passed: true, detail: 'object' }, { name: 'token_observable', passed: false, detail: 'not a harness tool name and none has been observed yet: kubectl' }] }, 400),
+    )
+    await swallowExit(runGuardrailsCreate({ name: 'x', kind: 'deny_tools', tools: 'kubectl' }))
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    expect(errors()).toContain('refused by token_observable')
+    expect(printed()).toContain('✗ token_observable — not a harness tool name')
+    expect(printed()).toContain('✓ json_schema')
+  })
+
+  it('update sends only what changed, and says when an IR edit forked a new version', async () => {
+    fetchMock.mockResolvedValue(ok({ ok: true, guardrail: authoredDetail({ description: 'Second.' }), forked: false, supersedes: null }))
+    await runGuardrailsUpdate('pgr_a', { description: 'Second.' })
+    expect(sent()).toEqual({ path: '/api/v1/policy-guardrails/guardrails/pgr_a', method: 'PUT', body: { description: 'Second.' } })
+    expect(printed()).toContain('updated in place')
+
+    fetchMock.mockResolvedValue(ok({ ok: true, guardrail: authoredDetail({ guardrailId: 'pgr_b', version: 2, supersedes: 'pgr_a' }), forked: true, supersedes: 'pgr_a' }))
+    await runGuardrailsUpdate('pgr_a', { kind: 'deny_tools', tools: 'WebFetch' })
+    expect(sent(1).body).toEqual({ ir: { kind: 'deny_tools', tools: ['WebFetch'] } })
+    expect(printed()).toContain('version 2 is pgr_b, PROPOSED with no evidence. pgr_a is retired.')
+
+    fetchMock.mockResolvedValue(ok({ ok: true, guardrail: authoredDetail({ description: null }), forked: false, supersedes: null }))
+    await runGuardrailsUpdate('pgr_a', { clearDescription: true })
+    expect(sent(2).body).toEqual({ description: null })
+  })
+
+  it('update with nothing to send makes no request; an extracted guardrail\'s 409 is reported', async () => {
+    await swallowExit(runGuardrailsUpdate('pgr_a', {}))
+    expect(fetchMock).not.toHaveBeenCalled()
+    fetchMock.mockResolvedValue(ok({ error: 'an extracted guardrail is read-only: it changes when its document changes', code: 'read_only' }, 409))
+    await swallowExit(runGuardrailsUpdate('pgr_1', { name: 'mine' }))
+    expect(errors()).toContain('read-only')
+  })
+
+  it('delete retires through DELETE, and a missing guardrail exits 1', async () => {
+    fetchMock.mockResolvedValueOnce(ok({ ok: true, guardrail: authoredDetail({ status: 'RETIRED' }) }))
+    await runGuardrailsDelete('pgr_a', {})
+    expect(sent()).toMatchObject({ path: '/api/v1/policy-guardrails/guardrails/pgr_a', method: 'DELETE' })
+    expect(printed()).toContain('retired')
+    fetchMock.mockResolvedValueOnce(ok({ error: 'Guardrail not found' }, 404))
+    await swallowExit(runGuardrailsDelete('pgr_nope', {}))
+    expect(errors()).toContain('"pgr_nope" not found')
+  })
+
+  it('list and show print an authored guardrail by its name, description and version instead of a citation', async () => {
+    fetchMock.mockResolvedValueOnce(ok({ guardrails: [authoredDetail({ version: 2 })] }))
+    await runGuardrailsList({ provenance: 'authored' })
+    expect(new URL(fetchMock.mock.calls[0]![0] as string).searchParams.get('provenance')).toBe('authored')
+    expect(printed()).toContain('authored: Reviewed terraform apply — "Production applies need a reviewed plan.", version 2')
+    fetchMock.mockResolvedValueOnce(ok({ guardrail: { ...authoredDetail({ status: 'RETIRED', supersedes: 'pgr_0', version: 2 }), supersededBy: 'pgr_c' } }))
+    await runGuardrailsShow('pgr_a', {})
+    expect(printed()).toContain('Reviewed terraform apply, version 2 (replaced pgr_0)')
+    expect(printed()).toContain('pgr_c — an IR edit created the next version')
+    await swallowExit(runGuardrailsList({ provenance: 'typed' }))
+    expect(errors()).toContain('extracted, authored')
   })
 })

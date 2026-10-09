@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 398 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 402 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -1064,8 +1064,11 @@ Every route the control plane serves: 398 routes, grouped by the source file tha
 | POST | `/api/v1/policy-guardrails/documents/upload` | OWNER/ADMIN | Upload a document with no connector behind it: multipart `file` (+ `title`), Markdown, text or HTML up to 1 MiB, Word or PDF up to 10 MiB |
 | GET | `/api/v1/policy-guardrails/duplicates` | OWNER/ADMIN/EM | Overlapping passages and rules cited twice |
 | GET | `/api/v1/policy-guardrails/graph` | OWNER/ADMIN/EM | The ledger as nodes and named edges (`docId=` to narrow) |
-| GET | `/api/v1/policy-guardrails/guardrails` | OWNER/ADMIN/EM | Guardrails, filterable by `status`, `target` and `docId` |
-| GET | `/api/v1/policy-guardrails/guardrails/:guardrailId` | OWNER/ADMIN/EM | One guardrail with its validation checks, cited passage and events |
+| GET | `/api/v1/policy-guardrails/guardrails` | OWNER/ADMIN/EM | Guardrails, filterable by `status`, `target`, `provenance` (`extracted` or `authored`) and `docId` |
+| POST | `/api/v1/policy-guardrails/guardrails` | OWNER/ADMIN | Author a guardrail directly (`name`, `description`, `ir`): the same IR and validator as an extracted one; created PROPOSED |
+| DELETE | `/api/v1/policy-guardrails/guardrails/:guardrailId` | OWNER/ADMIN | Retire an authored guardrail and undo what it wrote; its history is kept |
+| GET | `/api/v1/policy-guardrails/guardrails/:guardrailId` | OWNER/ADMIN/EM | One guardrail with its validation checks, cited passage (none for an authored guardrail), events and `supersededBy` |
+| PUT | `/api/v1/policy-guardrails/guardrails/:guardrailId` | OWNER/ADMIN | Edit an authored guardrail: a name or description in place; a changed `ir` creates the next version, PROPOSED, and retires this one |
 | POST | `/api/v1/policy-guardrails/guardrails/:guardrailId/approve-shadow` | OWNER/ADMIN | Approve a proposal into shadow |
 | POST | `/api/v1/policy-guardrails/guardrails/:guardrailId/promote` | OWNER/ADMIN | Promote to enforcing once the shadow evidence meets the thresholds (`acknowledgeNoTraffic` for a rule that never fired) |
 | GET | `/api/v1/policy-guardrails/guardrails/:guardrailId/readiness` | OWNER/ADMIN/EM | How close a guardrail is to the promotion thresholds |
@@ -1073,6 +1076,7 @@ Every route the control plane serves: 398 routes, grouped by the source file tha
 | POST | `/api/v1/policy-guardrails/guardrails/:guardrailId/reject` | OWNER/ADMIN | Reject a guardrail (`reason` required) |
 | POST | `/api/v1/policy-guardrails/guardrails/:guardrailId/replay` | OWNER/ADMIN/EM | How many captured calls the guardrail would have fired on |
 | POST | `/api/v1/policy-guardrails/guardrails/:guardrailId/retire` | OWNER/ADMIN | Retire a guardrail and undo what it wrote |
+| POST | `/api/v1/policy-guardrails/guardrails/validate` | OWNER/ADMIN/EM | Run the authored-guardrail checks on `name`, `description` and `ir` without writing anything |
 | GET | `/api/v1/policy-guardrails/impact` | OWNER/ADMIN/EM | What a change to a document or passage reaches (`docId=` or `passageId=`) |
 | GET | `/api/v1/policy-guardrails/search` | OWNER/ADMIN/EM | Full-text search over live passages (`q=`) |
 | GET | `/api/v1/policy-guardrails/thresholds` | OWNER/ADMIN/EM | The promotion thresholds and the daily extraction cap |

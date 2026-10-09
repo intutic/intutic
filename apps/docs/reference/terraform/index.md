@@ -39,6 +39,7 @@ provider "intutic" {
 
 - [intutic_sop](./resources/sop)
 - [intutic_policy](./resources/policy)
+- [intutic_guardrail](./resources/guardrail)
 - [intutic_workspace_settings](./resources/workspace_settings)
 - [intutic_virtual_key](./resources/virtual_key)
 - [intutic_gateway](./resources/gateway)

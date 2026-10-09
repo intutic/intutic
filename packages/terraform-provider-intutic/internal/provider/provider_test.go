@@ -28,7 +28,7 @@ func TestProviderSchemasAreValid(t *testing.T) {
 		t.Errorf("%s: %s", d.Summary, d.Detail)
 	}
 	for _, name := range []string{
-		"intutic_sop", "intutic_policy", "intutic_workspace_settings", "intutic_virtual_key",
+		"intutic_sop", "intutic_policy", "intutic_guardrail", "intutic_workspace_settings", "intutic_virtual_key",
 		"intutic_gateway", "intutic_notification_rule", "intutic_mcp_server_decision",
 	} {
 		if _, ok := resp.ResourceSchemas[name]; !ok {
@@ -121,6 +121,84 @@ resource "intutic_sop" "s" {
   risk_tier        = "LOW"
   complexity_tier  = "TIER_0"
 }`, `length must be between 1 and 256`},
+		{"guardrail: a kind's required attribute", `
+resource "intutic_guardrail" "g" {
+  name = "x"
+  kind = "hook_rule"
+  tools = ["Bash"]
+}`, `kind "hook_rule" requires title`},
+		{"guardrail: an attribute the kind does not take", `
+resource "intutic_guardrail" "g" {
+  name   = "x"
+  kind   = "deny_tools"
+  tools  = ["WebFetch"]
+  models = ["gpt-4o"]
+}`, `kind "deny_tools" does not take models`},
+		{"guardrail: none is not a kind you can author", `
+resource "intutic_guardrail" "g" {
+  name = "x"
+  kind = "none"
+}`, `value must be one of`},
+		{"guardrail: a hook rule names at most 8 tools", `
+resource "intutic_guardrail" "g" {
+  name  = "x"
+  kind  = "hook_rule"
+  title = "t"
+  tools = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "WebFetch", "WebSearch"]
+}`, `Takes 1 to 8 items; got 9`},
+		{"guardrail: a shell command is not a tool", `
+resource "intutic_guardrail" "g" {
+  name  = "x"
+  kind  = "deny_tools"
+  tools = ["terraform apply"]
+}`, `is not a token`},
+		{"guardrail: a known tool in its canonical case", `
+resource "intutic_guardrail" "g" {
+  name  = "x"
+  kind  = "deny_tools"
+  tools = ["bash"]
+}`, `write "bash" as "Bash"`},
+		{"guardrail: a literal with a double quote", `
+resource "intutic_guardrail" "g" {
+  name         = "x"
+  kind         = "hook_rule"
+  title        = "t"
+  tools        = ["Bash"]
+  arg_contains = ["say \"hi\""]
+}`, `double quote`},
+		{"guardrail: an upper-case role", `
+resource "intutic_guardrail" "g" {
+  name  = "x"
+  kind  = "deny_tools"
+  tools = ["WebFetch"]
+  roles = ["Deployer"]
+}`, `is not a role`},
+		{"guardrail: a catch-all egress entry", `
+resource "intutic_guardrail" "g" {
+  name  = "x"
+  kind  = "egress_allow"
+  hosts = ["0.0.0.0/0"]
+}`, `is not an egress entry`},
+		{"guardrail: an ordering rule on one token", `
+resource "intutic_guardrail" "g" {
+  name  = "x"
+  kind  = "requires_before"
+  first = "action:run_tests"
+  then  = "action:run_tests"
+}`, `two different tokens`},
+		{"guardrail: a count bound out of range", `
+resource "intutic_guardrail" "g" {
+  name  = "x"
+  kind  = "max_calls"
+  token = "Bash"
+  limit = 0
+}`, `between 1 and 1000`},
+		{"guardrail: a name with surrounding whitespace", `
+resource "intutic_guardrail" "g" {
+  name  = " x "
+  kind  = "deny_tools"
+  tools = ["WebFetch"]
+}`, `leading or trailing whitespace`},
 		{"unknown MCP status", `
 resource "intutic_mcp_server_decision" "m" {
   server_name = "github"

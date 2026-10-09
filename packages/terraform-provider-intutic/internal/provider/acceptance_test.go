@@ -9,6 +9,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 
 	"github.com/intutic/terraform-provider-intutic/internal/client"
@@ -39,6 +41,32 @@ func api(t *testing.T, method, path string, body any) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// apiStatus calls the control plane directly and returns the HTTP status,
+// for a call whose refusal is what the test is about.
+func apiStatus(t *testing.T, method, path string, body any) int {
+	t.Helper()
+	c := client.New(os.Getenv("INTUTIC_CONTROL_PLANE_URL"), os.Getenv("INTUTIC_API_KEY"), "acceptance-test")
+	var err error
+	switch method {
+	case "POST":
+		err = c.Post(context.Background(), path, body, nil)
+	case "PUT":
+		err = c.Put(context.Background(), path, body, nil)
+	case "DELETE":
+		err = c.Delete(context.Background(), path, nil)
+	default:
+		t.Fatalf("unsupported method %s", method)
+	}
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Status
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return 200
 }
 
 // drifted plans the same config and expects a change.
@@ -433,5 +461,264 @@ data "intutic_members" "all" {}`,
 			resource.TestCheckResourceAttrSet("data.intutic_members.all", "members.0.member_id"),
 			resource.TestCheckResourceAttrSet("data.intutic_members.all", "members.0.email"),
 		),
+	})
+}
+
+// planCheck runs fn against the plan, for a check whose expected value is
+// only known once an earlier step has run.
+type planCheck func(context.Context, plancheck.CheckPlanRequest, *plancheck.CheckPlanResponse)
+
+func (f planCheck) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+	f(ctx, req, resp)
+}
+
+func guardrailAttr(t *testing.T, id, attribute string) string {
+	t.Helper()
+	c := client.New(os.Getenv("INTUTIC_CONTROL_PLANE_URL"), os.Getenv("INTUTIC_API_KEY"), "acceptance-test")
+	var out struct {
+		Guardrail map[string]any `json:"guardrail"`
+	}
+	if err := c.Get(context.Background(), guardrailsPath+"/"+id, &out); err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprint(out.Guardrail[attribute])
+}
+
+// The lifecycle an authored guardrail keeps: created PROPOSED; approval and
+// promotion are review actions Terraform never takes, and promotion stays
+// refused until there is evidence; a label edit keeps the id and evidence; an
+// IR edit creates the next version and the plan says so first.
+func TestAccGuardrail(t *testing.T) {
+	cfg := func(description, literal string) string {
+		return fmt.Sprintf(`
+resource "intutic_guardrail" "apply" {
+  name         = "tf-acc reviewed terraform apply"
+  description  = %q
+  kind         = "hook_rule"
+  title        = "Reviewed plan before terraform apply"
+  tools        = ["Bash"]
+  arg_contains = [%q]
+}`, description, literal)
+	}
+	v1 := cfg("Production applies need a reviewed plan.", "terraform apply")
+	relabelled := cfg("Production applies need a reviewed plan and a ticket.", "terraform apply")
+	v2 := cfg("Production applies need a reviewed plan and a ticket.", "terraform apply -auto-approve")
+	const name = "intutic_guardrail.apply"
+	var firstID string
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: protoV6Factories,
+		CheckDestroy: func(*terraform.State) error {
+			// Destroy retires; the history stays readable.
+			if got := guardrailAttr(t, firstID, "status"); got != "RETIRED" {
+				return fmt.Errorf("version 1 after destroy: status %s, want RETIRED", got)
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: v1,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("status"), knownvalue.StringExact("PROPOSED")),
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("version"), knownvalue.Int64Exact(1)),
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("target"), knownvalue.StringExact("hook_rule")),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestMatchResourceAttr(name, "id", regexp.MustCompile(`^pgr_`)),
+					resource.TestCheckResourceAttrWith(name, "id", func(v string) error { firstID = v; return nil }),
+					resource.TestCheckResourceAttr(name, "provenance", "authored"),
+					resource.TestCheckResourceAttr(name, "status", "PROPOSED"),
+					resource.TestCheckResourceAttr(name, "shadow_evaluations", "0"),
+					resource.TestCheckNoResourceAttr(name, "supersedes"),
+				),
+			},
+			clean(v1),
+			imported(name),
+			// Approval for shadow is a review action, taken outside Terraform;
+			// the plan stays empty, and promotion is refused without evidence.
+			{
+				Config: v1,
+				PreConfig: func() {
+					api(t, "POST", guardrailsPath+"/"+firstID+"/approve-shadow", nil)
+					if got := apiStatus(t, "POST", guardrailsPath+"/"+firstID+"/promote", map[string]bool{"acknowledgeNoTraffic": true}); got != 409 {
+						t.Fatalf("promote without evidence: HTTP %d, want 409", got)
+					}
+				},
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}},
+				Check:            resource.TestCheckResourceAttr(name, "status", "SHADOW"),
+			},
+			// A description edit happens in place: same id, still in shadow.
+			{
+				Config: relabelled,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(name, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("status"), knownvalue.StringExact("SHADOW")),
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("version"), knownvalue.Int64Exact(1)),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrWith(name, "id", func(v string) error {
+						if v != firstID {
+							return fmt.Errorf("a label edit must keep id %s, got %s", firstID, v)
+						}
+						return nil
+					}),
+					resource.TestCheckResourceAttr(name, "status", "SHADOW"),
+				),
+			},
+			clean(relabelled),
+			// A rename behind Terraform's back is drift.
+			drifted(relabelled, func() {
+				api(t, "PUT", guardrailsPath+"/"+firstID, map[string]string{"name": "renamed in the dashboard"})
+			}),
+			{Config: relabelled},
+			// An IR edit creates the next version, and the plan says so: a new id,
+			// version 2, back in PROPOSED with no evidence, replacing version 1.
+			{
+				Config: v2,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(name, plancheck.ResourceActionUpdate),
+						plancheck.ExpectUnknownValue(name, tfjsonpath.New("id")),
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("version"), knownvalue.Int64Exact(2)),
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("status"), knownvalue.StringExact("PROPOSED")),
+						plancheck.ExpectKnownValue(name, tfjsonpath.New("shadow_evaluations"), knownvalue.Int64Exact(0)),
+						planCheck(func(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+							plancheck.ExpectKnownValue(name, tfjsonpath.New("supersedes"), knownvalue.StringExact(firstID)).CheckPlan(ctx, req, resp)
+						}),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrWith(name, "id", func(v string) error {
+						if v == firstID {
+							return fmt.Errorf("an IR edit must create a new version with a new id")
+						}
+						if got := guardrailAttr(t, firstID, "status"); got != "RETIRED" {
+							return fmt.Errorf("version 1 after the edit: status %s, want RETIRED", got)
+						}
+						return nil
+					}),
+					resource.TestCheckResourceAttr(name, "version", "2"),
+					resource.TestCheckResourceAttr(name, "status", "PROPOSED"),
+				),
+			},
+			clean(v2),
+			imported(name),
+			// Retired behind Terraform's back: the plan creates it again.
+			drifted(v2, func() {
+				c := client.New(os.Getenv("INTUTIC_CONTROL_PLANE_URL"), os.Getenv("INTUTIC_API_KEY"), "acceptance-test")
+				var out struct {
+					Guardrails []struct {
+						GuardrailID string `json:"guardrailId"`
+						Supersedes  string `json:"supersedes"`
+					} `json:"guardrails"`
+				}
+				if err := c.Get(context.Background(), guardrailsPath+"?provenance=authored&status=PROPOSED", &out); err != nil {
+					t.Fatal(err)
+				}
+				for _, g := range out.Guardrails {
+					if g.Supersedes == firstID {
+						if got := apiStatus(t, "DELETE", guardrailsPath+"/"+g.GuardrailID, nil); got != 200 {
+							t.Fatalf("delete: HTTP %d", got)
+						}
+						return
+					}
+				}
+				t.Fatal("version 2 not found")
+			}),
+			{Config: v2},
+			clean(v2),
+		},
+	})
+}
+
+// Every other kind applies, re-plans empty and imports: lists, a count, a
+// taint, settings values and a predicate read back exactly as written.
+func TestAccGuardrailKinds(t *testing.T) {
+	cfg := `
+resource "intutic_guardrail" "deny" {
+  name  = "tf-acc no web fetch"
+  kind  = "deny_tools"
+  tools = ["WebFetch"]
+  roles = ["contractor"]
+}
+
+resource "intutic_guardrail" "review" {
+  name   = "tf-acc review deploys"
+  kind   = "review_before"
+  tokens = ["action:deploy"]
+}
+
+resource "intutic_guardrail" "order" {
+  name  = "tf-acc tests before deploy"
+  kind  = "requires_before"
+  first = "action:run_tests"
+  then  = "action:deploy"
+}
+
+resource "intutic_guardrail" "count" {
+  name  = "tf-acc bounded shell"
+  kind  = "max_calls"
+  token = "Bash"
+  limit = 200
+}
+
+resource "intutic_guardrail" "taint" {
+  name  = "tf-acc no secrets out"
+  kind  = "forbid_with"
+  taint = "secrets()"
+  token = "action:http_post"
+}
+
+resource "intutic_guardrail" "models" {
+  name   = "tf-acc approved models"
+  kind   = "allowed_models"
+  models = ["claude-sonnet-4-5", "gpt-4o"]
+}
+
+resource "intutic_guardrail" "egress" {
+  name  = "tf-acc egress"
+  kind  = "egress_allow"
+  hosts = ["api.github.com", ".npmjs.org", "10.0.0.0/8"]
+}
+
+resource "intutic_guardrail" "wasm" {
+  name      = "tf-acc deep graphs re-ask"
+  kind      = "wasm_predicate"
+  title     = "Deep agent graphs re-ask"
+  rationale = "Deep graphs burn budget."
+  predicate = jsonencode({ all = [{ field = "depth", op = "atLeast", value = 4 }] })
+}`
+	all := []string{"deny", "review", "order", "count", "taint", "models", "egress", "wasm"}
+	targets := map[string]string{"deny": "sop_front_matter", "review": "sop_front_matter", "order": "sop_front_matter", "count": "sop_front_matter", "taint": "sop_front_matter", "models": "workspace_setting", "egress": "workspace_setting", "wasm": "wasm_rule"}
+	var checks []resource.TestCheckFunc
+	steps := []resource.TestStep{}
+	for _, r := range all {
+		checks = append(checks,
+			resource.TestCheckResourceAttr("intutic_guardrail."+r, "status", "PROPOSED"),
+			resource.TestCheckResourceAttr("intutic_guardrail."+r, "target", targets[r]))
+	}
+	steps = append(steps, resource.TestStep{Config: cfg, Check: resource.ComposeAggregateTestCheckFunc(checks...)}, clean(cfg))
+	for _, r := range all {
+		steps = append(steps, imported("intutic_guardrail."+r))
+	}
+	accTest(t, steps...)
+}
+
+// The plan asks the API's validator: a rule on a tool no harness in the
+// workspace has called is refused before anything is written.
+func TestAccGuardrailRefusedAtPlan(t *testing.T) {
+	accTest(t, resource.TestStep{
+		Config: `
+resource "intutic_guardrail" "kubectl" {
+  name  = "tf-acc kubectl"
+  kind  = "deny_tools"
+  tools = ["kubectl"]
+}`,
+		PlanOnly:    true,
+		ExpectError: regexp.MustCompile(`(?s)The API would refuse this guardrail.*token_observable`),
 	})
 }
