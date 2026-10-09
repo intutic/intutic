@@ -11,6 +11,7 @@ import {
   defaultOutPath,
   extractPolicyWasm,
   parseCases,
+  readsArgsIgnoringTruncation,
   runRulesBuild,
   runRulesTest,
   type RegoCase,
@@ -56,6 +57,16 @@ describe('intutic rules test', () => {
     const cases = parseCases(await fs.readFile(path.join(fixtures, 'examples', `${example}.cases.json`), 'utf-8'))
     expect(cases.length).toBeGreaterThan(3)
     for (const c of cases) expect(decideCase(rule!, c.input).decision, c.name).toBe(c.expect)
+  })
+
+  it.each(EXAMPLES)('the %s example refuses a call padded past the input limit', async (example) => {
+    const rule = loadRegoRule(await fs.readFile(path.join(fixtures, 'examples', `${example}.wasm`)), undefined, REGO_HOST)
+    const padding = 'x'.repeat(70 * 1024)
+    const input =
+      example === 'deny_writes_outside_repo'
+        ? { tool: 'Write', args: { file_path: `/workspace/app/${padding}/../../../etc/passwd`, content: '' } }
+        : { tool: 'Bash', args: { command: `${'echo ok; '.repeat(8_000)}${example === 'hold_prod_deploys' ? 'helm upgrade api ./chart -n prod' : 'rm -rf /'}` } }
+    expect(decideCase(rule!, input)).toMatchObject({ decision: 'deny', reason: expect.stringContaining('too long to check in full') })
   })
 
   it('reports the metadata risk tier when a decision names none', async () => {
@@ -126,6 +137,29 @@ describe('intutic rules build', () => {
     )
     expect(extractPolicyWasm(bundle).toString()).toBe('wasm!')
     expect(() => extractPolicyWasm(gzipSync(Buffer.alloc(1024)))).toThrow(/no policy.wasm/)
+  })
+
+  it('warns about a policy that reads input.args but never input.truncated', async () => {
+    expect(readsArgsIgnoringTruncation(['deny if regex.match(`rm`, input.args.command)'])).toBe(true)
+    expect(readsArgsIgnoringTruncation(['deny if input["args"].command == "x"'])).toBe(true)
+    expect(readsArgsIgnoringTruncation(['deny if input.tool == "Bash"'])).toBe(false)
+    expect(readsArgsIgnoringTruncation(['deny if { input.args.command; not input.truncated }'])).toBe(false)
+    // Across the policy's files, and not fooled by a comment.
+    expect(readsArgsIgnoringTruncation(['deny if input.args.command', 'guard if input["truncated"]'])).toBe(false)
+    expect(readsArgsIgnoringTruncation(['deny if input.args.command # input.truncated'])).toBe(true)
+    // `build` says so before compiling, and goes on.
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-rules-warn-'))
+    await fs.writeFile(path.join(dir, 'p.rego'), 'package p\ndeny if regex.match(`rm`, input.args.command)\n')
+    process.env['INTUTIC_OPA_BIN'] = '/nonexistent/opa'
+    await exits(() => runRulesBuild({ rego: dir, entrypoint: 'p/deny' }))
+    expect(output.join('\n')).toContain('reads input.args but never input.truncated')
+    expect(output.join('\n')).toMatch(/OPA is required/)
+    await fs.rm(dir, { recursive: true, force: true })
+    // Every shipped example checks it.
+    for (const example of EXAMPLES) {
+      const source = await fs.readFile(path.join(fixtures, 'examples', `${example}.rego`), 'utf-8')
+      expect(readsArgsIgnoringTruncation([source]), example).toBe(false)
+    }
   })
 
   it('names the output after the entrypoint', () => {

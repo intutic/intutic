@@ -187,6 +187,7 @@ def test_chat_reports_allow_and_sends_only_headers_the_proxy_reads(mock_post):
     (403, "LOOP_RUN_TERMINATED", "kill"),
     (403, "LOOP_RUN_PENDING_REVIEW", "hold"),
     (409, "policy_reask", "reask"),
+    (403, "GOVERNANCE_UNAVAILABLE", "kill"),
     (429, "BUDGET_EXCEEDED", "kill"),
     (429, "OVERAGE_HARD_CAP_EXCEEDED", "kill"),
     (402, "COST_GATE_EXCEEDED", "kill"),

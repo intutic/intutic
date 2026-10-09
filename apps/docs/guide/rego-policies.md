@@ -1,6 +1,6 @@
 # Rego policies <Badge type="tip" text="Open-Core" />
 
-Write governance rules in Rego, compile them with OPA, and run them in the Intutic proxy and the MCP governance proxy on every tool call. A Rego policy is a [custom filter](/guide/wasm-rules) like any other: it installs into the same rules directory, uploads through the same dashboard page, runs in the same sandbox and fails open the same way. Only the language and the build step differ.
+Write governance rules in Rego, compile them with OPA, and run them in the Intutic proxy and the MCP governance proxy on every tool call. A Rego policy is a [custom filter](/guide/wasm-rules) like any other: it installs into the same rules directory, uploads through the same dashboard page, runs in the same sandbox and follows the same [fail setting](/guide/wasm-rules#when-a-rule-reaches-no-verdict) when it reaches no verdict. Only the language and the build step differ.
 
 Rego rules are on wherever WASM rules are. `INTUTIC_DISABLE_REGO_RULES=1` switches them off on a proxy, which then refuses Rego modules at load.
 
@@ -34,7 +34,7 @@ A policy needs one rule to be its entrypoint. The rule's value decides:
 
 A decision object may also carry `"risk_tier"`: `low`, `medium`, `high` or `critical`. Without one, the rule's default from `intutic rules build --risk-tier` applies. The risk tier travels with a hold into the review queue and appears in `intutic rules test` output.
 
-Anything else, such as an object without a known `decision`, allows the call and logs a warning: the same fail-open a native rule gets for a verdict code the proxy does not know.
+Anything else, such as an object without a known `decision`, is not a decision: the rule reached no verdict, as a native rule returning an unknown verdict code does, and the proxy's [fail setting](/guide/wasm-rules#when-a-rule-reaches-no-verdict) decides. Failing closed, the default in the LLM proxy, the call is refused with `GOVERNANCE_UNAVAILABLE`.
 
 Reasons are trimmed, stripped of control characters and cut to 480 characters, as for every rule.
 
@@ -53,6 +53,13 @@ deny contains msg if {
 	some pattern in destructive
 	regex.match(pattern, input.args.command)
 	msg := sprintf("destructive shell command blocked: %s", [input.args.command])
+}
+
+# A command over the 64 KB input limit reaches the policy cut short, and what
+# was cut is what this policy cannot see. Padding a command must not hide it.
+deny contains "shell command too long to check in full: refused" if {
+	input.tool == "Bash"
+	input.truncated
 }
 
 destructive := [
@@ -74,6 +81,7 @@ package intutic.deploy
 
 import rego.v1
 
+# A decision object: allow, deny, hold or reask, with a reason and a risk tier.
 default decision := {"decision": "allow"}
 
 decision := {
@@ -82,8 +90,21 @@ decision := {
 	"risk_tier": "high",
 } if {
 	input.tool == "Bash"
+	not input.truncated
 	some pattern in prod_deploys
 	regex.match(pattern, input.args.command)
+}
+
+# A command over the 64 KB input limit reaches the policy cut short, so it
+# cannot be told apart from a deploy. Refused rather than held: an approver
+# would be approving a command nobody saw in full.
+decision := {
+	"decision": "deny",
+	"reason": "shell command too long to check in full: refused",
+	"risk_tier": "high",
+} if {
+	input.tool == "Bash"
+	input.truncated
 }
 
 prod_deploys := [
@@ -110,9 +131,20 @@ write_tools := {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
 deny contains msg if {
 	input.tool in write_tools
+	not input.truncated
 	path := target(input.args)
 	not inside_repo(path)
 	msg := sprintf("%s outside %s is not allowed: %s", [input.tool, repo_root, path])
+}
+
+# Arguments over the 64 KB input limit reach the policy cut short, the path
+# included, and a cut path can look inside the repository when it is not.
+# This refuses writing a file larger than about 64 KB, inside the repository
+# too; split such a write into smaller edits.
+deny contains msg if {
+	input.tool in write_tools
+	input.truncated
+	msg := sprintf("%s arguments too long to check in full: refused", [input.tool])
 }
 
 target(args) := args.file_path
@@ -159,7 +191,9 @@ A policy written against `input.tool` and `input.args` runs unchanged in both pr
 
 **Which calls are evaluated.** The MCP proxy evaluates each tool call it intercepts. The LLM proxy evaluates the calls in the request's latest assistant turn, one evaluation per call, and the most restrictive decision wins: a deny ends it, a hold outranks a reask. A request with no tool call is evaluated once, with `tool` and `args` set to `null`, so a policy on the model or the budget still runs.
 
-**Size.** The document is at most 64 KB. When a call's arguments make it larger, strings in `args` are cut, in steps of 16 KB, 4 KB, 1 KB and 256 bytes, until it fits, and `truncated` is set. 99.97% of real coding-agent tool calls fit untouched; the rest are mostly whole files passed to `Write`. A policy that inspects file contents should treat `truncated` as "not fully seen".
+**Size.** The document is at most 64 KB. When a call's arguments make it larger, strings in `args` are cut, in steps of 16 KB, 4 KB, 1 KB and 256 bytes, until it fits, and `truncated` is set; if they still do not fit, `args` is `null`. 99.97% of real coding-agent tool calls fit untouched; the rest are mostly whole files passed to `Write`.
+
+**A policy that inspects `args` must refuse the tools it governs when `truncated` is true.** The cut removes the end of a string, so padding a command past the limit moves whatever follows the padding out of the policy's sight: `echo ok; echo ok; … rm -rf /` arrives as `echo ok; echo ok; …`. The policy decides what an incomplete call means, as in OPA; for a policy that matches on arguments, the only safe answer is to refuse. All three examples above do, which is why the deny-writes example refuses a `Write` of a file larger than about 64 KB even inside the repository. `intutic rules build` warns about a policy that reads `input.args` and never `input.truncated`.
 
 ---
 
@@ -188,7 +222,7 @@ intutic rules build --rego policies/shell.rego --entrypoint intutic/shell/deny -
 
 1. Runs `opa build -t wasm -e <entrypoint>`. It needs the `opa` binary on the `PATH`, or `INTUTIC_OPA_BIN` set to it; without one it says how to install OPA.
 2. Appends the entrypoint, the ABI (`opa`) and the risk tier to the module, in a custom section named `intutic.rule`.
-3. Loads the result the way the proxies will, and refuses it if they would: a builtin the host does not provide, or a module built for an evaluation ABI older than 1.2.
+3. Loads the result the way the proxies will, and refuses it if they would: a builtin the host does not provide, or a module built for an evaluation ABI older than 1.2. It warns, before compiling, when the policy reads `input.args` and never `input.truncated` (see [Size](#the-input-document)).
 4. Writes `build/<entrypoint>.wasm`, or `--out <path>`.
 
 A module built with plain `opa build` loads too, when it has exactly one entrypoint.
@@ -208,7 +242,7 @@ A case file holds one input document, or an array of cases:
 ]
 ```
 
-Each case runs through the same Rego host the MCP proxy uses, which decides as the LLM proxy does: both hosts' builtins are tested against `opa eval` on the same inputs. The command prints each decision, and exits 1 when a case gets a decision other than its `expect`. `opa test` also works on the policy source unchanged.
+Each case runs through the same Rego host the MCP proxy uses, which decides as the LLM proxy does: both hosts' builtins are tested against `opa eval` on the same inputs. The command prints each decision, and exits 1 when a case gets a decision other than its `expect`, or reaches none. `opa test` also works on the policy source unchanged.
 
 ## Deploying
 
@@ -230,7 +264,7 @@ Replay (`intutic policy replay`, `POST /api/v1/wasm-rules/:id/replay`) runs nati
 
 ## Limits
 
-A Rego rule runs in the same sandbox as a native rule, with a larger budget, because OPA does inside the sandbox what a native rule leaves out: it parses the whole input document and compiles each regular expression the policy uses, on every evaluation. Both bounds stop the rule; either one fails the call open, as for every rule.
+A Rego rule runs in the same sandbox as a native rule, with a larger budget, because OPA does inside the sandbox what a native rule leaves out: it parses the whole input document and compiles each regular expression the policy uses, on every evaluation. Both bounds stop the rule, which then reaches no verdict: the proxy's [fail setting](/guide/wasm-rules#when-a-rule-reaches-no-verdict) decides, as for every rule. In the LLM proxy, a rule that reaches no verdict on one call of a turn refuses the request when it fails closed, unless it denied another call of that turn.
 
 | | Native rule | Rego rule, LLM proxy | Rego rule, MCP proxy |
 | :--- | :--- | :--- | :--- |

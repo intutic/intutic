@@ -275,8 +275,8 @@ pub struct PolicyConfig {
 
 | Setting | Behavior |
 |---|---|
-| `fail_closed: true` (default) | If the policy check times out or fails → block the request |
-| `fail_closed: false` | If the policy check times out or fails → allow the request (fail-open) |
+| `fail_closed: true` (default) | If the policy check times out or fails → block the request. A custom WASM or Rego rule that reaches no verdict (deadline, budget, error, or a result that is not a verdict) → block it with `GOVERNANCE_UNAVAILABLE` |
+| `fail_closed: false` | If the policy check times out or fails → allow the request (fail-open). A custom rule that reaches no verdict is skipped |
 | `timeout_ms: 3000` | Maximum time to wait for the control plane policy check response |
 
 ::: warning Fail-closed is the safe default

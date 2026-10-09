@@ -366,8 +366,17 @@ function sanitize(text: unknown): string | undefined {
 }
 
 /**
- * Map an `opa_eval` result to a decision. A result in none of the documented
- * shapes allows: the fail-open a native rule's unmapped verdict code gets.
+ * Thrown by {@link regoDecision} for a result in none of the documented
+ * shapes: the rule reached no decision, and the host's fail setting decides
+ * what that means for the call, as for a rule that ran out of time.
+ */
+export class RegoResultError extends Error {
+  override name = 'RegoResultError'
+}
+
+/**
+ * Map an `opa_eval` result to a decision. Undefined allows; a result in none
+ * of the documented shapes throws {@link RegoResultError}.
  */
 export function regoDecision(result: unknown, entrypoint: string): RegoDecision {
   const value = Array.isArray(result) ? (result[0] as { result?: unknown } | undefined)?.result : undefined
@@ -391,8 +400,9 @@ export function regoDecision(result: unknown, entrypoint: string): RegoDecision 
       case 'reask':
         return { decision: 'reask', reason: sanitize(obj['reason']) ?? fallback('Refused'), ...tier }
     }
+    throw new RegoResultError('it returned an object without a known `decision` (allow, deny, hold, reask)')
   }
-  return { decision: 'allow' }
+  throw new RegoResultError('it returned neither a boolean, a set of messages nor a decision object')
 }
 
 const utf8Length = (s: string): number => new TextEncoder().encode(s).length

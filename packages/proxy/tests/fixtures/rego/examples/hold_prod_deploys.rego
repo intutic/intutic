@@ -17,8 +17,21 @@ decision := {
 	"risk_tier": "high",
 } if {
 	input.tool == "Bash"
+	not input.truncated
 	some pattern in prod_deploys
 	regex.match(pattern, input.args.command)
+}
+
+# A command over the 64 KB input limit reaches the policy cut short, so it
+# cannot be told apart from a deploy. Refused rather than held: an approver
+# would be approving a command nobody saw in full.
+decision := {
+	"decision": "deny",
+	"reason": "shell command too long to check in full: refused",
+	"risk_tier": "high",
+} if {
+	input.tool == "Bash"
+	input.truncated
 }
 
 prod_deploys := [

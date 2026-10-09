@@ -16,6 +16,13 @@ deny contains msg if {
 	msg := sprintf("destructive shell command blocked: %s", [input.args.command])
 }
 
+# A command over the 64 KB input limit reaches the policy cut short, and what
+# was cut is what this policy cannot see. Padding a command must not hide it.
+deny contains "shell command too long to check in full: refused" if {
+	input.tool == "Bash"
+	input.truncated
+}
+
 destructive := [
 	`\brm\s+(-\S+\s+)*-[a-zA-Z]*[rR][a-zA-Z]*\s+(-\S+\s+)*(/|~|\$HOME|\.\.)/?(\s|$)`,
 	`\bmkfs(\.[a-z0-9]+)?\s`,

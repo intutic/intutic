@@ -76,6 +76,37 @@ export function extractPolicyWasm(bundle: Buffer): Buffer {
   throw new Error('the OPA bundle has no policy.wasm')
 }
 
+/** Every `.rego` file under `regoPath`, a file or a directory, with its text. */
+async function regoSources(regoPath: string): Promise<Array<{ file: string; text: string }>> {
+  const stat = await fs.stat(regoPath)
+  if (!stat.isDirectory()) return [{ file: regoPath, text: await fs.readFile(regoPath, 'utf-8') }]
+  const entries = await fs.readdir(regoPath, { recursive: true, withFileTypes: true })
+  const files = entries
+    .filter((e) => e.isFile() && e.name.endsWith('.rego'))
+    .map((e) => path.join(e.parentPath, e.name))
+  return Promise.all(files.map(async (file) => ({ file, text: await fs.readFile(file, 'utf-8') })))
+}
+
+/**
+ * Whether a policy's source files, together, read `input.args` but never
+ * `input.truncated`.
+ *
+ * Strings in `args` are cut to keep the input under 64 KB, and `truncated`
+ * says so. A policy that inspects `args` without checking it judges a cut
+ * command as if it were whole, so padding a command past the limit hides
+ * whatever was cut. A textual check, comments stripped: it can be fooled by
+ * an alias (`a := input; a.args`), which is why it only warns.
+ */
+export function readsArgsIgnoringTruncation(sources: readonly string[]): boolean {
+  const code = sources
+    .join('\n')
+    .split('\n')
+    .map((line) => line.replace(/#.*$/, ''))
+    .join('\n')
+  const reads = (field: string): boolean => new RegExp(`\\binput\\s*(\\.\\s*${field}\\b|\\[\\s*"${field}"\\s*\\])`).test(code)
+  return reads('args') && !reads('truncated')
+}
+
 /** Default output: `build/<entrypoint with / as _>.wasm`. */
 export function defaultOutPath(entrypoint: string): string {
   return path.join('build', `${entrypoint.replace(/[^A-Za-z0-9_-]+/g, '_')}.wasm`)
@@ -97,6 +128,20 @@ export async function runRulesBuild(opts: {
   if (!/^[A-Za-z_][\w.]*(\/[A-Za-z_][\w]*)+$/.test(opts.entrypoint)) {
     log.error(`Invalid entrypoint "${opts.entrypoint}". Use package/rule, e.g. intutic/shell/deny.`)
     process.exit(1)
+  }
+
+  // Warn, not fail: the check is textual, and a policy may have reasons of
+  // its own. Unreadable source is left for `opa build` to report.
+  const unguarded = await regoSources(opts.rego).then(
+    (sources) => readsArgsIgnoringTruncation(sources.map((s) => s.text)),
+    () => false,
+  )
+  if (unguarded) {
+    log.warn(
+      'The policy reads input.args but never input.truncated. Arguments over the 64 KB input limit ' +
+        'are cut before the policy sees them, so a padded command can hide what it looks for. ' +
+        'Refuse the tools it governs when input.truncated is true.',
+    )
   }
 
   const opa = opaBinary()
@@ -215,7 +260,10 @@ export async function runRulesTest(modulePath: string, opts: { input: string[] }
         decision = decideCase(rule, c.input)
       } catch (err) {
         failed += 1
-        log.error(`${label}: evaluation failed (a proxy allows the call): ${(err as Error).message}`)
+        log.error(
+          `${label}: evaluation reached no decision (a proxy refuses the call when it fails closed, ` +
+            `the default): ${(err as Error).message}`,
+        )
         continue
       }
       const detail = [

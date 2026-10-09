@@ -33,6 +33,7 @@ PROXY_REFUSALS: Dict[str, Tuple[int, str]] = {
     "LOOP_RUN_PENDING_REVIEW": (403, "hold"),
     "policy_held": (403, "hold"),
     "policy_reask": (409, "reask"),
+    "GOVERNANCE_UNAVAILABLE": (403, "kill"),
     "BUDGET_EXCEEDED": (429, "kill"),
     "OVERAGE_HARD_CAP_EXCEEDED": (429, "kill"),
     "COST_GATE_EXCEEDED": (402, "kill"),

@@ -12,7 +12,7 @@
  * Protocol (see `runner.ts` for the main-thread side):
  *   compile  { type:'compile',  id, ruleId, bytes }  -> { type:'compile-result',  id, ruleId, ok, unsupportedImports?, readsReferencedFiles?, rego?, error? }
  *   remove   { type:'remove', ruleId }                  (no reply)
- *   evaluate { type:'evaluate', id, ruleId, bytes, files? } -> { type:'evaluate-result', id, ruleId, ok, code?, decision?, reason?, riskTier?, error? }
+ *   evaluate { type:'evaluate', id, ruleId, bytes, files? } -> { type:'evaluate-result', id, ruleId, ok, code?, decision?, reason?, riskTier?, error?, fuelExhausted?, notADecision? }
  *
  * A Rego rule (an OPA build, `@intutic/shared-types`' Rego host) is compiled
  * and evaluated here too; its `evaluate` bytes are the Rego input document and
@@ -24,8 +24,8 @@
  *
  * A guest `abort` call is inert (hostImports.ts logs and returns); an
  * uncaught exception or trap during instantiation/evaluation is caught here
- * and reported as `ok:false` — the caller (runner.ts) treats that as
- * fail-open ALLOW, exactly like a timeout, never a crash.
+ * and reported as `ok:false` — the caller (runner.ts) treats that as a rule
+ * that reached no verdict, exactly like a timeout, never a crash.
  *
  * @module
  */
@@ -38,6 +38,7 @@ import {
   isOpaModule,
   loadRegoRule,
   regoDecision,
+  RegoResultError,
   unsupportedWasmImports,
   WASM_HOST_IMPORTS,
   type RegoHostOptions,
@@ -216,6 +217,7 @@ function evaluateRego(msg: EvaluateMessage, rule: RegoRule): void {
       ruleId: msg.ruleId,
       ok: false,
       fuelExhausted,
+      notADecision: err instanceof RegoResultError,
       error: fuelExhausted
         ? `Rego rule ran out of its ${REGO_FUEL_BUDGET}-instruction budget`
         : err instanceof Error ? err.message : String(err),

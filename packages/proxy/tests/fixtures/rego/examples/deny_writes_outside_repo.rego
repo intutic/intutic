@@ -13,9 +13,20 @@ write_tools := {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
 deny contains msg if {
 	input.tool in write_tools
+	not input.truncated
 	path := target(input.args)
 	not inside_repo(path)
 	msg := sprintf("%s outside %s is not allowed: %s", [input.tool, repo_root, path])
+}
+
+# Arguments over the 64 KB input limit reach the policy cut short, the path
+# included, and a cut path can look inside the repository when it is not.
+# This refuses writing a file larger than about 64 KB, inside the repository
+# too; split such a write into smaller edits.
+deny contains msg if {
+	input.tool in write_tools
+	input.truncated
+	msg := sprintf("%s arguments too long to check in full: refused", [input.tool])
 }
 
 target(args) := args.file_path

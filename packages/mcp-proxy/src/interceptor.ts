@@ -563,8 +563,17 @@ export class ToolCallInterceptor {
           corroboratingDetectors: corroboratingDetectorsForContext,
           toolContractChanged: this.session.getToolContractChanged(),
           serverName: this.serverName,
-        })
+        }, { failOpen: this.failOpen })
 
+        if (verdict.code === 'unavailable') {
+          // A rule reached no verdict and the proxy fails closed. Reported
+          // like any refusal, except a quarantined rule's: the call that
+          // quarantined it was reported already, and one event per refused
+          // call after it would file an incident per retry.
+          log.warn({ action: 'wasm_unavailable_block', toolName, ruleId: verdict.ruleId, stop: verdict.stop }, verdict.reason)
+          if (verdict.stop !== 'quarantined') this.emitter.emit('tool_blocked', toolName, toolInput, verdict.reason)
+          return block('GOVERNANCE_UNAVAILABLE', `wasm:${verdict.ruleId}`, verdict.reason)
+        }
         if (verdict.code === 'block') {
           log.warn({ action: 'wasm_block', toolName, ruleId: verdict.ruleId }, 'Tool call blocked by WASM governance rule')
           this.emitter.emit('tool_blocked', toolName, toolInput, verdict.reason)
@@ -584,11 +593,18 @@ export class ToolCallInterceptor {
         }
         // 'allow': fall through.
       } catch (err) {
-        // Fail-open, matching every other governance-check catch in this
-        // method — a WASM runner failure (not to be confused with a single
-        // rule's own timeout/trap, which `WasmRunner.evaluate` already
-        // absorbs internally) must not take the whole proxy down.
-        log.error({ action: 'wasm_evaluate_error', err: (err as Error).message }, 'WASM rule evaluation error — skipping')
+        // The runner itself failed (not one rule's timeout or trap, which
+        // `WasmRunner.evaluate` turns into a verdict): no rule judged the
+        // call, so it follows the fail setting like every other check here.
+        log.error({ action: 'wasm_evaluate_error', err: (err as Error).message }, 'WASM rule evaluation error')
+        if (!this.failOpen) {
+          return block(
+            'GOVERNANCE_UNAVAILABLE',
+            'wasm',
+            `Custom rules could not be evaluated: ${(err as Error).message}. Tool call blocked ` +
+              `(fail-closed mode: mcpProxyFailBehavior or INTUTIC_MCP_FAIL_OPEN=false).`,
+          )
+        }
       }
     }
 

@@ -42,11 +42,34 @@ Every custom filter runs inside a secure WebAssembly sandbox with strict constra
 | **CPU Fuel** | 1,000,000 units | Prevents infinite loops and excessive computation |
 | **Timeout** | 5 ms per evaluation | Maintains low proxy latency |
 
-If a filter exceeds any limit, it's immediately terminated and **fails open** — the request proceeds to maintain availability. The timeout interrupts a rule that is still running; it is not checked only after the rule returns. A [Rego rule](/guide/rego-policies#limits) has a larger budget, because OPA parses its input and compiles its regular expressions inside the sandbox.
+A filter that exceeds a limit is stopped at once and reaches no verdict; see [When a rule reaches no verdict](#when-a-rule-reaches-no-verdict) for what the request gets. The timeout interrupts a rule that is still running; it is not checked only after the rule returns. A [Rego rule](/guide/rego-policies#limits) has a larger budget, because OPA parses its input and compiles its regular expressions inside the sandbox. The MCP governance proxy gives a native rule 50 ms, because its deadline includes the round trip to the worker thread rules run in.
 
 ::: tip How the context arrives
-The host calls your `allocate(len)` export, writes the request context as UTF-8 JSON bytes into the buffer it returns, and calls `evaluate(offset, len)`. Parse those bytes directly. Building a string from them one character at a time allocates once per byte, which can use up the fuel budget on a large context; the rule is then skipped and the request allowed.
+The host calls your `allocate(len)` export, writes the request context as UTF-8 JSON bytes into the buffer it returns, and calls `evaluate(offset, len)`. Parse those bytes directly. Building a string from them one character at a time allocates once per byte, which can use up the fuel budget on a large context, and the rule then reaches no verdict.
 :::
+
+The context is never cut: a rule receives every tool call and its full arguments. A context too large for the rule's 16 MB of memory makes `allocate` fail, which is a rule that reaches no verdict, not a shorter context. (A [Rego rule's input](/guide/rego-policies#the-input-document) is capped at 64 KB instead, and says when it was cut.)
+
+### When a rule reaches no verdict
+
+A rule reaches no verdict when it runs past its deadline, uses up its instruction budget, traps or otherwise fails while running, or returns something that is not a verdict: a code other than `0`, `1`, `2` or `3`, or a Rego result in none of the [documented shapes](/guide/rego-policies#writing-a-policy). What the request gets is the proxy's fail setting, the one it already uses when a policy check cannot complete:
+
+| | Fail closed (the default) | Fail open |
+| :--- | :--- | :--- |
+| **LLM proxy** (`intutic_settings.policy.fail_closed`, default `true`) | HTTP 403, `GOVERNANCE_UNAVAILABLE` | The rule is skipped and the request continues |
+| **MCP proxy** (`mcpProxyFailBehavior`, else `INTUTIC_MCP_FAIL_OPEN`, default open) | The call is refused with `GOVERNANCE_UNAVAILABLE`, `ruleId` `wasm:<rule id>` | The rule is skipped and the call continues |
+
+The refusal names the rule and the cause, one of `deadline`, `budget`, `error` or `result`:
+
+```text
+Custom rule local:50_budget-guard.wasm reached no verdict (deadline): it ran past its 5 ms deadline. Request blocked because the proxy fails closed (intutic_settings.policy.fail_closed).
+```
+
+Failing closed is what policy engines do when they cannot decide: Envoy's external authorization denies unless `failure_mode_allow` is set, and a Kubernetes admission webhook defaults to `failurePolicy: Fail`. A rule that cannot judge a call has not cleared it, so it ranks with a block: it outranks another rule's hold or reask, which an approval or a retry could otherwise get past, and another rule's block still wins, because it says what is wrong with the call. Either way the proxy logs a warning naming the rule and the cause. A rule in shadow mode reports what it would have done and changes nothing.
+
+**Quarantine (MCP proxy).** A rule that runs past its deadline or its budget three times in a row is quarantined until the proxy next rescans the rules directory. Failing closed, every call is refused at once with `GOVERNANCE_UNAVAILABLE` (cause `quarantined`) without the rule running; otherwise padding three calls would switch the rule off. The call that quarantined the rule is recorded as a blocked call; the refusals after it are not, one per retry. Failing open, a quarantined rule is skipped. The LLM proxy has no quarantine: each request runs every rule within its deadline.
+
+**A rule that cannot load** is not a rule that reached no verdict, and neither fail setting applies. The proxy keeps the version of that rule it already runs, if any, and logs the error. A rule pushed from the dashboard that is refused also raises an incident once per version, saying whether an earlier version stays in force or the rule enforces nothing until a version loads.
 
 
 
@@ -79,7 +102,7 @@ refusal, never a trap:
 | Code | Meaning |
 | :--- | :--- |
 | `-1` | Malformed call — pointers outside your memory, a bad length, a non-UTF-8 path. |
-| `-2` | Refused. Either your request's tool calls never named this path, or it failed a path guard. |
+| `-2` | Refused. Either your request's tool calls never named this path, it failed a path guard, or it is past the scan limits below. |
 | `-3` | Referenced and allowed, but not on disk. |
 | `-4` | Larger than the 256 KiB cap. **No bytes are exposed** — a rule must not scan a prefix and conclude a manifest is clean. |
 | `-5` | Your buffer was smaller than the file. Nothing was written; ask for the size first. |
@@ -98,7 +121,12 @@ instantiated:
 - **Only inside the configured root.** `..` is refused outright, and a symlink
   leading out of the root is refused too, because confinement is checked against
   the fully resolved path.
-- **At most 8 files per request, 256 KiB each.**
+- **At most 8 files per request, 256 KiB each**, taken from the first 64 KiB of
+  a command. A ninth path, or one further into a longer command, answers `-2`
+  like a path the call never named. A rule that parsed the path out of the
+  command itself knows the call named it, so it should treat `-2` as "not
+  read" and refuse, not as "nothing to check" — otherwise padding a command
+  hides the manifest that matters.
 
 ::: warning Off unless configured
 Set `INTUTIC_WASM_MANIFEST_ROOT` to the directory rules may read manifests from.
@@ -129,7 +157,9 @@ corpus gates both assume determinism.
 This mattered: `env.seed` was once offered by the CLI's validation sandbox and
 registered by no proxy. A rule using randomness passed `policy test`, passed
 `policy install`, and then failed to link on every request — where the runner
-turns a link error into an allow. It enforced nothing, silently. If you need
+turned a link error into an allow. It enforced nothing, silently. A module
+importing anything outside the four functions above is now refused when it
+loads. If you need
 variation, derive it from the request context.
 :::
 
@@ -373,7 +403,7 @@ intutic policy install --wasm build/rule.wasm --name budget-guard --priority 50
 intutic policy list-local
 ```
 
-The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority numbers run first) and the proxy hot-loads it within ~5 seconds on the next request — no restart, no control plane. `install` refuses binaries that fail instantiation, because a broken rule enforces nothing (the sandbox fails open).
+The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority numbers run first) and the proxy hot-loads it within ~5 seconds on the next request — no restart, no control plane. `install` refuses binaries that fail instantiation: a proxy refuses to load them, so they would enforce nothing.
 
 > [!TIP]
 > Any AI coding agent in your workspace can drive this whole loop — authoring, compiling, dry-running, and installing — via the [Rule Author agent skill](/integrations/rule-author).

@@ -14,6 +14,7 @@ import { PolicyClient, UNRESTRICTED_REGISTRY, parseSsoGroupPolicy } from '../pol
 import type { McpPrincipal, McpRegistryPolicy, SopRule, SsoGroupPolicy } from '../policy.js'
 import { GovernanceEmitter, type DetectionFinding } from '../emitter.js'
 import { SessionState } from '../session.js'
+import type { WasmRunner, WasmVerdict } from '../wasm/runner.js'
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
 import { readFileSync } from 'node:fs'
@@ -517,6 +518,65 @@ describe('ToolCallInterceptor', () => {
       const decision = await interceptor.decide('Read', circular)
       expect(decision.action).toBe('block')
       expect((decision as { action: 'block'; reason: string }).reason).toContain('control plane unreachable')
+    })
+  })
+
+  describe('custom rules that reach no verdict', () => {
+    /** A runner answering `verdict`, recording the fail setting it was given. */
+    function runner(verdict: WasmVerdict | Error): { runner: WasmRunner; failOpen: Array<boolean | undefined> } {
+      const failOpen: Array<boolean | undefined> = []
+      const stub = {
+        evaluate: async (_input: unknown, options?: { failOpen?: boolean }) => {
+          failOpen.push(options?.failOpen)
+          if (verdict instanceof Error) throw verdict
+          return verdict
+        },
+      }
+      return { runner: stub as unknown as WasmRunner, failOpen }
+    }
+
+    function interceptorWith(r: WasmRunner, localFailOpen: boolean, policy = new StubPolicyClient()): ToolCallInterceptor {
+      return new ToolCallInterceptor(policy, emitter, localFailOpen, 'shell', 'warn', undefined, 'off', {}, r, 'test-ws')
+    }
+
+    const unavailable = (stop: 'deadline' | 'quarantined'): WasmVerdict => ({
+      code: 'unavailable',
+      stop,
+      ruleId: 'local:10_slow.wasm',
+      reason: `Custom rule local:10_slow.wasm reached no verdict (${stop}): it ran past its 50 ms deadline.`,
+    })
+
+    it('refuses as GOVERNANCE_UNAVAILABLE, naming the rule, and records the refusal', async () => {
+      const r = runner(unavailable('deadline'))
+      const decision = await interceptorWith(r.runner, false).decide('Bash', { command: 'ls' })
+      expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'wasm:local:10_slow.wasm' })
+      expect((decision as { reason: string }).reason).toContain('(deadline)')
+      expect(r.failOpen).toEqual([false])
+      expect(emitter.emitted.map((e) => e.kind)).toEqual(['tool_blocked'])
+    })
+
+    it("does not record each refusal of a quarantined rule: the call that quarantined it was recorded", async () => {
+      const decision = await interceptorWith(runner(unavailable('quarantined')).runner, false).decide('Bash', { command: 'ls' })
+      expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE' })
+      expect(emitter.emitted.filter((e) => e.kind === 'tool_blocked')).toEqual([])
+    })
+
+    it("passes the workspace's fail setting to the runner, over the local one", async () => {
+      const r = runner({ code: 'allow' })
+      const policy = new StubPolicyClient()
+      policy.failOpen = true
+      expect((await interceptorWith(r.runner, false, policy).decide('Bash', { command: 'ls' })).action).toBe('allow')
+      policy.failOpen = false
+      await interceptorWith(r.runner, true, policy).decide('Bash', { command: 'ls' })
+      expect(r.failOpen).toEqual([true, false])
+    })
+
+    it('a runner that throws refuses fail-closed and allows fail-open', async () => {
+      const failing = runner(new Error('worker gone')).runner
+      const closed = await interceptorWith(failing, false).decide('Bash', { command: 'ls' })
+      expect(closed).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'wasm' })
+      expect((closed as { reason: string }).reason).toContain('worker gone')
+      expect((await interceptorWith(failing, true).decide('Bash', { command: 'ls' })).action).toBe('allow')
     })
   })
 

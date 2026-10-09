@@ -77,6 +77,7 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 403 | `LOOP_RUN_PENDING_REVIEW` | `hold` | The loop run is paused until a reviewer approves or rejects it |
 | 403 | `policy_held` | `hold` | A Rego or WASM rule held the request for approval; the error names the hold id |
 | 409 | `policy_reask` | `reask` | Revise the approach and try again; repeated attempts escalate to `policy_denied` |
+| 403 | `GOVERNANCE_UNAVAILABLE` | `kill` | A custom WASM or Rego rule reached no verdict (its deadline, its instruction budget, an error, or a result that is not a verdict) and the proxy fails closed; the message names the rule |
 | 429 | `BUDGET_EXCEEDED` | `kill` | The key's remaining budget does not cover the request |
 | 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The daily spend cap is reached |
 | 402, or 200 | `COST_GATE_EXCEEDED` | `kill` | The request's estimated cost is over the workspace threshold: 402 on a stream, a 200 answer otherwise |

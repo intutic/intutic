@@ -764,17 +764,24 @@
         "dashboard": [{ "file": "apps/dashboard/src/routes/WasmRulesPage.tsx" }],
         "cli": ["rules build --rego --entrypoint --risk-tier", "rules test --input", "policy install --wasm"],
         "gateSdk": { "none": "Rego rules run in the proxy and the MCP proxy; the SDK gates evaluate the policy snapshot" },
-        "clawdeSdk": [{ "ref": "policy_held", "badge": false }],
+        "clawdeSdk": [{ "ref": "policy_held", "badge": false }, "GOVERNANCE_UNAVAILABLE"],
         "mcpTools": { "none": "a rule's decision arrives as the MCP proxy's refusal" },
         "kitkat": ["a Rego or WASM rule held the request"],
         "terraform": ["intutic_wasm_rule"],
-        "docs": ["guide/rego-policies.md#building", "guide/rego-policies.md#testing", "guide/rego-policies.md#deploying"],
+        "docs": [
+          "guide/rego-policies.md#building",
+          "guide/rego-policies.md#testing",
+          "guide/rego-policies.md#deploying",
+          "guide/wasm-rules.md#when-a-rule-reaches-no-verdict"
+        ],
         "website": [{ "file": "index.html", "contains": "Rules can also be written in Rego" }],
         "events": [{ "file": "services/control-plane/src/routes/decisions.ts", "contains": "'decision.pending'" }],
         "enforcement": [
           { "file": "packages/proxy/src/wasm/opa.rs" },
           { "file": "packages/shared-types/src/regoRules.ts" },
-          "mcp:WASM_RULE"
+          "mcp:WASM_RULE",
+          "proxy:GOVERNANCE_UNAVAILABLE",
+          "mcp:GOVERNANCE_UNAVAILABLE"
         ]
       }
     },

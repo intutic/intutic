@@ -23,17 +23,19 @@
 //! - `true` denies, `false` allows;
 //! - a set or array of messages denies with the first when non-empty;
 //! - an object `{"decision": "allow"|"deny"|"hold"|"reask", "reason", "risk_tier"}`;
-//! - undefined allows.
+//! - undefined allows;
+//! - anything else is no verdict, and the proxy's fail mode decides.
 //!
 //! **Packaging**: `intutic rules build --rego` appends an `intutic.rule`
 //! custom section with the entrypoint and a default risk tier. A module
 //! without one is accepted when it has exactly one entrypoint.
 //!
 //! **Limits**: [`limits::REGO`] — a separate fuel and time budget, still
-//! bounded and still failing open — and the same 16 MB of memory as every rule.
+//! bounded — and the same 16 MB of memory as every rule. A rule stopped by
+//! either reaches no verdict, and the proxy's fail mode decides.
 
 use super::context::{RequestContext, RiskLevel, ToolCall, Verdict};
-use super::limits;
+use super::limits::{self, Failure};
 use super::opa_builtins::{self, Builtin, EvalCtx};
 use super::runner::sanitize_reason;
 use serde::Deserialize;
@@ -615,10 +617,13 @@ pub enum Decision {
 
 /// Map an `opa_eval` result to a decision and the risk tier it names.
 ///
-/// A result that matches none of the documented shapes allows, with a warning
-/// naming the shape: the same fail-open a native rule returning an unmapped
-/// verdict code gets.
-pub fn decision(result: &Value, entrypoint: &str) -> (Decision, Option<RiskLevel>) {
+/// A result in none of the documented shapes is no decision: a [`Failure`],
+/// which the proxy's fail mode turns into a refusal or an allow, as for a
+/// native rule returning a code that is not a verdict.
+pub fn decision(
+    result: &Value,
+    entrypoint: &str,
+) -> Result<(Decision, Option<RiskLevel>), Failure> {
     let default_reason = || format!("Denied by Rego policy {entrypoint}");
     let reason_of = |v: Option<&Value>, fallback: String| {
         v.and_then(Value::as_str)
@@ -626,16 +631,16 @@ pub fn decision(result: &Value, entrypoint: &str) -> (Decision, Option<RiskLevel
             .unwrap_or(fallback)
     };
     let Some(value) = result.get(0).and_then(|r| r.get("result")) else {
-        return (Decision::Allow, None);
+        return Ok((Decision::Allow, None));
     };
     match value {
-        Value::Bool(true) => (Decision::Deny(default_reason()), None),
-        Value::Bool(false) => (Decision::Allow, None),
-        Value::Array(items) if items.is_empty() => (Decision::Allow, None),
-        Value::Array(items) => (
+        Value::Bool(true) => Ok((Decision::Deny(default_reason()), None)),
+        Value::Bool(false) => Ok((Decision::Allow, None)),
+        Value::Array(items) if items.is_empty() => Ok((Decision::Allow, None)),
+        Value::Array(items) => Ok((
             Decision::Deny(reason_of(items.first(), default_reason())),
             None,
-        ),
+        )),
         Value::Object(obj) => {
             let tier = obj
                 .get("risk_tier")
@@ -652,27 +657,18 @@ pub fn decision(result: &Value, entrypoint: &str) -> (Decision, Option<RiskLevel
                 Some("deny") => Decision::Deny(reason("Denied")),
                 Some("hold") => Decision::Hold(reason("Held for approval")),
                 Some("reask") => Decision::Reask(reason("Refused")),
-                other => {
-                    tracing::warn!(
-                        entrypoint,
-                        decision = ?other,
-                        "Rego rule returned an object without a known `decision` (allow, deny, \
-                         hold, reask); allowing"
-                    );
-                    Decision::Allow
+                _ => {
+                    return Err(Failure::result(
+                        "it returned an object without a known `decision` (allow, deny, hold, \
+                         reask)",
+                    ))
                 }
             };
-            (decision, tier)
+            Ok((decision, tier))
         }
-        other => {
-            tracing::warn!(
-                entrypoint,
-                result = %other,
-                "Rego rule returned neither a boolean, a set of messages nor a decision \
-                 object; allowing"
-            );
-            (Decision::Allow, None)
-        }
+        _ => Err(Failure::result(
+            "it returned neither a boolean, a set of messages nor a decision object",
+        )),
     }
 }
 
@@ -704,8 +700,15 @@ pub fn target_hash(args: &Value) -> String {
 /// (`RequestContext::turn_tool_calls`), or once with no call when it has none.
 ///
 /// The most restrictive decision wins — a deny ends it, a hold outranks a
-/// reask — and a call whose evaluation fails is allowed, as for every rule.
-pub fn evaluate(engine: &Engine, module: &Module, rule: &OpaRule, ctx: &RequestContext) -> Verdict {
+/// reask. A call the rule reached no verdict on is skipped and returned as
+/// the [`Failure`], with the verdict the other calls reached: the registry
+/// applies the fail mode, and a deny elsewhere in the turn refuses either way.
+pub fn evaluate(
+    engine: &Engine,
+    module: &Module,
+    rule: &OpaRule,
+    ctx: &RequestContext,
+) -> (Verdict, Option<Failure>) {
     let calls: Vec<Option<&ToolCall>> = if ctx.turn_tool_calls.is_empty() {
         vec![None]
     } else {
@@ -713,24 +716,30 @@ pub fn evaluate(engine: &Engine, module: &Module, rule: &OpaRule, ctx: &RequestC
     };
     let mut held: Option<Verdict> = None;
     let mut reasked: Option<Verdict> = None;
+    let mut failure: Option<Failure> = None;
     for call in calls {
         let input = policy_input(ctx, call);
-        let result = match evaluate_input(engine, module, rule, &input, limits::REGO) {
-            Ok((result, _)) => result,
-            Err(e) => {
-                limits::REGO.log_fail_open("Rego rule", &e);
+        let decided = evaluate_input(engine, module, rule, &input, limits::REGO)
+            .map_err(|e| limits::REGO.failure(&e))
+            .and_then(|(result, _)| decision(&result, &rule.entrypoint));
+        let (decision, tier) = match decided {
+            Ok(decided) => decided,
+            Err(f) => {
+                failure.get_or_insert(f);
                 continue;
             }
         };
-        let (decision, tier) = decision(&result, &rule.entrypoint);
         let risk_tier = tier.or(rule.risk_tier);
         match decision {
             Decision::Allow => {}
             Decision::Deny(reason) => {
-                return Verdict::Kill {
-                    reason,
-                    policy_id: None,
-                }
+                return (
+                    Verdict::Kill {
+                        reason,
+                        policy_id: None,
+                    },
+                    None,
+                )
             }
             Decision::Hold(reason) if held.is_none() => {
                 held = Some(Verdict::Hold {
@@ -751,7 +760,7 @@ pub fn evaluate(engine: &Engine, module: &Module, rule: &OpaRule, ctx: &RequestC
             Decision::Hold(_) | Decision::Reask(_) => {}
         }
     }
-    held.or(reasked).unwrap_or(Verdict::Bypass)
+    (held.or(reasked).unwrap_or(Verdict::Bypass), failure)
 }
 
 #[cfg(test)]
@@ -778,6 +787,13 @@ mod tests {
             .expect("loads")
             .expect("is OPA");
         (module, rule)
+    }
+
+    /// The verdict a rule reached, asserting it reached one on every call.
+    fn verdict(engine: &Engine, module: &Module, rule: &OpaRule, ctx: &RequestContext) -> Verdict {
+        let (verdict, failure) = evaluate(engine, module, rule, ctx);
+        assert_eq!(failure, None, "the rule reached no verdict on a call");
+        verdict
     }
 
     fn ctx(calls: Value) -> RequestContext {
@@ -964,7 +980,7 @@ mod tests {
             "dd if=/dev/zero of=/dev/sda bs=1M",
             "git push --force origin main",
         ] {
-            match evaluate(&engine, &module, &rule, &ctx(bash(command))) {
+            match verdict(&engine, &module, &rule, &ctx(bash(command))) {
                 Verdict::Kill { reason, .. } => assert_eq!(
                     reason,
                     format!("destructive shell command blocked: {command}")
@@ -979,14 +995,14 @@ mod tests {
             "git push origin main",
         ] {
             assert_eq!(
-                evaluate(&engine, &module, &rule, &ctx(bash(command))),
+                verdict(&engine, &module, &rule, &ctx(bash(command))),
                 Verdict::Bypass,
                 "{command}"
             );
         }
         // Another tool, and no call at all: evaluated, and allowed.
         assert_eq!(
-            evaluate(
+            verdict(
                 &engine,
                 &module,
                 &rule,
@@ -995,7 +1011,7 @@ mod tests {
             Verdict::Bypass
         );
         assert_eq!(
-            evaluate(&engine, &module, &rule, &ctx(json!([]))),
+            verdict(&engine, &module, &rule, &ctx(json!([]))),
             Verdict::Bypass
         );
     }
@@ -1005,7 +1021,7 @@ mod tests {
         let engine = engine();
         let (module, rule) = rule(&engine, DEPLOY);
         let command = "helm upgrade api ./chart -n prod";
-        match evaluate(&engine, &module, &rule, &ctx(bash(command))) {
+        match verdict(&engine, &module, &rule, &ctx(bash(command))) {
             Verdict::Hold {
                 reason,
                 risk_tier,
@@ -1024,7 +1040,7 @@ mod tests {
             other => panic!("expected a hold, got {other:?}"),
         }
         assert_eq!(
-            evaluate(
+            verdict(
                 &engine,
                 &module,
                 &rule,
@@ -1040,7 +1056,7 @@ mod tests {
         let (module, rule) = rule(&engine, PATHS);
         let write = |path: &str| ctx(call("Write", json!({ "file_path": path, "content": "x" })));
         assert_eq!(
-            evaluate(
+            verdict(
                 &engine,
                 &module,
                 &rule,
@@ -1055,14 +1071,14 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    evaluate(&engine, &module, &rule, &write(path)),
+                    verdict(&engine, &module, &rule, &write(path)),
                     Verdict::Kill { .. }
                 ),
                 "{path}"
             );
         }
         assert!(matches!(
-            evaluate(
+            verdict(
                 &engine,
                 &module,
                 &rule,
@@ -1075,7 +1091,7 @@ mod tests {
         ));
         // Reads are not writes.
         assert_eq!(
-            evaluate(
+            verdict(
                 &engine,
                 &module,
                 &rule,
@@ -1095,7 +1111,7 @@ mod tests {
             { "id": "b", "name": "Bash", "arguments": { "command": "rm -rf /" } }
         ]);
         assert!(matches!(
-            evaluate(&engine, &module, &rule, &ctx(calls)),
+            verdict(&engine, &module, &rule, &ctx(calls)),
             Verdict::Kill { .. }
         ));
     }
@@ -1162,18 +1178,141 @@ mod tests {
         );
     }
 
+    /// The examples' case files are the ones `intutic rules test` runs in the
+    /// TypeScript host: the same inputs, the same expected decisions here.
+    #[test]
+    fn every_example_case_gets_its_expected_decision_in_this_host_too() {
+        let engine = engine();
+        for (bytes, cases) in [
+            (
+                SHELL,
+                include_str!(
+                    "../../tests/fixtures/rego/examples/block_destructive_shell.cases.json"
+                ),
+            ),
+            (
+                DEPLOY,
+                include_str!("../../tests/fixtures/rego/examples/hold_prod_deploys.cases.json"),
+            ),
+            (
+                PATHS,
+                include_str!(
+                    "../../tests/fixtures/rego/examples/deny_writes_outside_repo.cases.json"
+                ),
+            ),
+        ] {
+            let (module, rule) = rule(&engine, bytes);
+            let cases: Vec<Value> = serde_json::from_str(cases).unwrap();
+            for case in cases {
+                let input = &case["input"];
+                let verdict = verdict(
+                    &engine,
+                    &module,
+                    &rule,
+                    &ctx(call(input["tool"].as_str().unwrap(), input["args"].clone())),
+                );
+                let got = match verdict {
+                    Verdict::Bypass => "allow",
+                    Verdict::Kill { .. } => "deny",
+                    Verdict::Hold { .. } => "hold",
+                    Verdict::Reask { .. } => "reask",
+                    other => panic!("{}: {other:?}", case["name"]),
+                };
+                assert_eq!(got, case["expect"], "{}", case["name"]);
+            }
+        }
+    }
+
+    /// Padding a call past the 64 KB input moves its end out of the policy's
+    /// sight; every shipped example refuses the tools it governs then, rather
+    /// than judging what is left.
+    #[test]
+    fn the_examples_refuse_a_call_padded_past_the_input_cap() {
+        let engine = engine();
+        let padding = "echo ok; ".repeat(8_000);
+        for (bytes, tool, args) in [
+            (
+                SHELL,
+                "Bash",
+                json!({ "command": format!("{padding}rm -rf /") }),
+            ),
+            (
+                DEPLOY,
+                "Bash",
+                json!({ "command": format!("{padding}helm upgrade api ./chart -n prod") }),
+            ),
+            (
+                PATHS,
+                "Write",
+                json!({
+                    "file_path": format!("/workspace/app/{}/../../../etc/passwd", "x".repeat(70_000)),
+                    "content": ""
+                }),
+            ),
+        ] {
+            let (module, rule) = rule(&engine, bytes);
+            let c = ctx(call(tool, args));
+            let input: Value =
+                serde_json::from_slice(&policy_input(&c, c.turn_tool_calls.first())).unwrap();
+            assert_eq!(input["truncated"], true, "the padding must reach the cap");
+            match verdict(&engine, &module, &rule, &c) {
+                Verdict::Kill { reason, .. } => {
+                    assert!(reason.contains("too long to check in full"), "{reason}")
+                }
+                other => panic!("{}: expected a refusal, got {other:?}", rule.entrypoint),
+            }
+        }
+    }
+
+    /// A call the rule reaches no verdict on comes back as the failure, with
+    /// whatever the rule decided about the turn's other calls.
+    #[test]
+    fn a_call_without_a_verdict_is_returned_as_the_failure() {
+        let engine = engine();
+        let (module, rule) = rule(&engine, CONFORMANCE);
+        let (verdict, failure) = evaluate(&engine, &module, &rule, &ctx(bash("ls")));
+        assert_eq!(verdict, Verdict::Bypass);
+        assert_eq!(failure.map(|f| f.stop), Some(limits::Stop::Result));
+
+        // A budget the evaluation cannot fit in is a failure named for it.
+        let c = ctx(bash("ls"));
+        let tiny = limits::Budget {
+            fuel: 1_000,
+            deadline: std::time::Duration::from_secs(10),
+        };
+        let err = evaluate_input(
+            &engine,
+            &module,
+            &rule,
+            &policy_input(&c, c.turn_tool_calls.first()),
+            tiny,
+        )
+        .unwrap_err();
+        let failure = tiny.failure(&err);
+        assert_eq!(failure.stop, limits::Stop::Fuel);
+        assert_eq!(failure.reason, "it used up its budget of 1000 instructions");
+    }
+
     #[test]
     fn results_map_to_decisions() {
         let ep = "p/r";
-        assert_eq!(decision(&json!([]), ep).0, Decision::Allow);
-        assert_eq!(decision(&json!([{"result": false}]), ep).0, Decision::Allow);
+        assert_eq!(decision(&json!([]), ep).unwrap().0, Decision::Allow);
         assert_eq!(
-            decision(&json!([{"result": true}]), ep).0,
+            decision(&json!([{"result": false}]), ep).unwrap().0,
+            Decision::Allow
+        );
+        assert_eq!(
+            decision(&json!([{"result": true}]), ep).unwrap().0,
             Decision::Deny("Denied by Rego policy p/r".into())
         );
-        assert_eq!(decision(&json!([{"result": []}]), ep).0, Decision::Allow);
         assert_eq!(
-            decision(&json!([{"result": ["no\nthanks"]}]), ep).0,
+            decision(&json!([{"result": []}]), ep).unwrap().0,
+            Decision::Allow
+        );
+        assert_eq!(
+            decision(&json!([{"result": ["no\nthanks"]}]), ep)
+                .unwrap()
+                .0,
             Decision::Deny("nothanks".into())
         );
         assert_eq!(
@@ -1181,17 +1320,23 @@ mod tests {
                 &json!([{"result": {"decision": "hold", "reason": "prod deploy", "risk_tier": "high"}}]),
                 ep
             ),
-            (Decision::Hold("prod deploy".into()), Some(RiskLevel::High))
+            Ok((Decision::Hold("prod deploy".into()), Some(RiskLevel::High)))
         );
         assert_eq!(
-            decision(&json!([{"result": {"decision": "reask"}}]), ep).0,
+            decision(&json!([{"result": {"decision": "reask"}}]), ep)
+                .unwrap()
+                .0,
             Decision::Reask("Refused by Rego policy p/r".into())
         );
-        assert_eq!(
-            decision(&json!([{"result": {"decision": "maybe"}}]), ep).0,
-            Decision::Allow
-        );
-        assert_eq!(decision(&json!([{"result": 7}]), ep).0, Decision::Allow);
+        // Not a verdict: the rule reached none, and the fail mode decides.
+        for result in [
+            json!([{"result": {"decision": "maybe"}}]),
+            json!([{"result": 7}]),
+            json!([{"result": null}]),
+        ] {
+            let failure = decision(&result, ep).expect_err("not a verdict");
+            assert_eq!(failure.stop, limits::Stop::Result, "{result}");
+        }
     }
 
     #[test]

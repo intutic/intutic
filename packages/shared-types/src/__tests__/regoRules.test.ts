@@ -11,6 +11,7 @@ import {
   loadRegoRule,
   readRegoMetadata,
   regoDecision,
+  RegoResultError,
   withRegoMetadata,
   type RegoHostOptions,
 } from '../regoRules.js'
@@ -142,8 +143,10 @@ describe('the TypeScript Rego host', () => {
       decision: 'reask',
       reason: 'Refused by Rego policy p/r',
     })
-    expect(regoDecision([{ result: { decision: 'maybe' } }], ep)).toEqual({ decision: 'allow' })
-    expect(regoDecision([{ result: 7 }], ep)).toEqual({ decision: 'allow' })
+    // Not a decision: the rule reached none, and the host's fail setting decides.
+    for (const result of [[{ result: { decision: 'maybe' } }], [{ result: 7 }], [{ result: null }]]) {
+      expect(() => regoDecision(result, ep), JSON.stringify(result)).toThrow(RegoResultError)
+    }
   })
 
   it('cuts an oversized input to fit and flags it, the same way as the Rust host', () => {

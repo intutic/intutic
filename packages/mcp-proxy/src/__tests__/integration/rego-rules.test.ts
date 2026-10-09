@@ -10,6 +10,8 @@
  * Also here: the per-rule deadline actually stopping a rule. The Rust proxy's
  * deadline used to be read only after the guest returned; this host's never
  * was, because it races the worker from the main thread and terminates it.
+ * A rule stopped by it, or returning something that is not a decision,
+ * reaches no verdict: refused fail-closed, allowed fail-open.
  *
  * @module
  */
@@ -92,15 +94,41 @@ describe('Rego rules in the MCP proxy', () => {
 
   it('evaluates the largest input the builder produces within the Rego budget', async () => {
     const r = await runnerWith({ '10_shell.wasm': fixture('examples/block_destructive_shell.wasm') })
-    // Just under the input cap, so nothing is cut, with the match at the end.
+    // Just under the input cap, so nothing is cut, with the match at the end:
+    // only the rule matching the whole command can block it.
     const long = `${'cd /workspace/app && npm test; '.repeat(2050)}rm -rf /`
     // It takes about 3 ms against a 100 ms deadline, but CI runs every
-    // package's suite at once and a starved worker can miss the deadline and
-    // fail open. One rerun separates that from a rule too slow for its budget,
-    // which misses it every time.
+    // package's suite at once and a starved worker can miss the deadline,
+    // which fail-closed refuses as `unavailable`. One rerun separates that
+    // from a rule too slow for its budget, which misses it every time.
     let verdict = await r.evaluate(bash(long))
-    if (verdict.code === 'allow') verdict = await r.evaluate(bash(long))
-    expect(verdict.code).toBe('block')
+    if (verdict.code === 'unavailable' && verdict.stop === 'deadline') verdict = await r.evaluate(bash(long))
+    // The pattern matched, not the truncation guard: the reason is the
+    // command's own, cut to the 480 characters a reason may have.
+    expect(verdict).toMatchObject({ code: 'block', ruleId: 'local:10_shell.wasm' })
+    expect(verdict.code === 'block' && verdict.reason).toMatch(/^destructive shell command blocked: cd \/workspace\/app/)
+  }, 30_000)
+
+  it('refuses a destructive command padded past the input cap, where the cut hides it', async () => {
+    const r = await runnerWith({ '10_shell.wasm': fixture('examples/block_destructive_shell.wasm') })
+    // Over 64 KB: the command is cut to fit and `truncated` is set, so the
+    // `rm -rf /` at the end never reaches the policy. The shipped example
+    // refuses a shell command it could not see in full.
+    const padded = `${'echo ok; '.repeat(8_000)}rm -rf /`
+    let verdict = await r.evaluate(bash(padded))
+    if (verdict.code === 'unavailable' && verdict.stop === 'deadline') verdict = await r.evaluate(bash(padded))
+    expect(verdict).toMatchObject({ code: 'block', ruleId: 'local:10_shell.wasm' })
+    expect(verdict.code === 'block' && verdict.reason).toContain('too long to check in full')
+  }, 30_000)
+
+  it('a Rego result that is not a decision reaches no verdict', async () => {
+    // The conformance policy's entrypoint is an object of builtin results,
+    // with no `decision`.
+    const r = await runnerWith({ '10_conformance.wasm': fixture('conformance.wasm') })
+    const closed = await r.evaluate(bash('ls'))
+    expect(closed).toMatchObject({ code: 'unavailable', stop: 'result', ruleId: 'local:10_conformance.wasm' })
+    expect(closed.code === 'unavailable' && closed.reason).toContain('without a known `decision`')
+    expect(await r.evaluate(bash('ls'), { failOpen: true })).toEqual({ code: 'allow' })
   }, 30_000)
 })
 
@@ -132,7 +160,7 @@ function slowLoopRule(): Uint8Array {
 }
 
 describe('the per-rule deadline', () => {
-  it('stops a rule that never returns while spending little fuel, and fails open', async () => {
+  it('stops a rule that never returns while spending little fuel: refused fail-closed, allowed fail-open', async () => {
     dir = mkdtempSync(join(tmpdir(), 'intutic-mcp-deadline-'))
     writeFileSync(join(dir, '10_slow.wasm'), slowLoopRule())
     runner = new WasmRunner(dir)
@@ -142,7 +170,11 @@ describe('the per-rule deadline', () => {
     // Each iteration fills a megabyte for one instruction of fuel, so the
     // 1,000,000-instruction budget alone would let it run for most of a minute.
     const started = Date.now()
-    expect(await runner.evaluate(bash('ls'))).toEqual({ code: 'allow' })
+    const closed = await runner.evaluate(bash('ls'))
     expect(Date.now() - started).toBeLessThan(5_000)
+    expect(closed).toMatchObject({ code: 'unavailable', stop: 'deadline', ruleId: 'local:10_slow.wasm' })
+    expect(closed.code === 'unavailable' && closed.reason).toContain('ran past its 50 ms deadline')
+
+    expect(await runner.evaluate(bash('ls'), { failOpen: true })).toEqual({ code: 'allow' })
   }, 30_000)
 })

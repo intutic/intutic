@@ -11,7 +11,9 @@ The WASM Rules Engine enables developers to write custom, high-performance polic
 To guarantee that custom user code cannot degrade proxy performance or compromise host security, each rule is strictly constrained:
 * **Memory Cap**: Limited to **16MB** of linear memory.
 * **CPU Fuel Limit**: Bound to **1,000,000 fuel units** to prevent infinite loops.
-* **Execution Timeout**: **5ms** budget per evaluation. If a rule exceeds 5ms, it is immediately terminated and fails open to maintain low latency. The engine uses `wasmtime` epoch interruption: a ticker advances the engine's epoch every millisecond, and a rule still running at its deadline traps at its next loop or function entry.
+* **Execution Timeout**: **5ms** budget per evaluation. A rule still running at 5ms is terminated. The engine uses `wasmtime` epoch interruption: a ticker advances the engine's epoch every millisecond, and a rule still running at its deadline traps at its next loop or function entry.
+
+A rule stopped by either bound, one that traps, or one that returns something other than a verdict reaches no verdict, and the proxy's fail mode (`intutic_settings.policy.fail_closed`, default `true`) decides: closed refuses the request with `403 GOVERNANCE_UNAVAILABLE`, naming the rule and the cause; open skips the rule. See [When a rule reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
 
 A Rego rule runs with 100,000,000 fuel units and a 20 ms deadline instead, in the same 16MB; see [Limits](/guide/rego-policies#limits).
 
@@ -63,7 +65,7 @@ In enterprise environments with centralized governance:
 ```
 
 1. **Registry Storage**: Rules are uploaded via the Custom Filters dashboard (`POST /api/v1/wasm-rules`) and persisted in the `wasm_rule_bundles` database table.
-2. **Sync**: The control plane writes the workspace's full active rule set to Valkey after every change; connected proxies poll it every 5 seconds and load a changed module dynamically. There is no pub/sub push — a new rule is live within one poll interval.
+2. **Sync**: The control plane writes the workspace's full active rule set to Valkey after every change; connected proxies poll it every 5 seconds and load a changed module dynamically. There is no pub/sub push — a new rule is live within one poll interval. A version a proxy refuses — its binary missing, not matching its SHA-256, or not loadable — leaves the version already running in force and raises one incident per version; the incident says when there is no earlier version, so the rule enforces nothing until one loads.
 <!-- ENTERPRISE_ONLY_END -->
 
 ---

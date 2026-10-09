@@ -10,6 +10,7 @@ use tokio::sync::RwLock;
 use wasmtime::{Engine, Module};
 
 use super::context::{RequestContext, Verdict};
+use super::limits::Failure;
 use super::local_loader;
 use super::referenced_files::{self, ReferencedFiles};
 use super::runner::evaluate_wasm_rule;
@@ -121,11 +122,11 @@ pub struct PluginRegistry {
     workspace_modules: RwLock<HashMap<String, WorkspaceModules>>,
     local_dir: PathBuf,
     local_rules: RwLock<LocalRules>,
-    /// `(workspace, descriptor hash, received hash)` of every refused binary
-    /// already reported. The sync reruns every 5 s and a tampered binary stays
-    /// tampered, so without this one bad upload would raise an incident every
+    /// `(workspace, descriptor hash, what was wrong)` of every refused rule
+    /// version already reported. The sync reruns every 5 s and a bad binary
+    /// stays bad, so without this one bad upload would raise an incident every
     /// five seconds for as long as it sat in the cache.
-    integrity_reported: std::sync::Mutex<HashSet<(String, String, String)>>,
+    refusals_reported: std::sync::Mutex<HashSet<(String, String, String)>>,
 }
 
 /// Whether `bytes` are the binary a descriptor names. The control plane keys
@@ -154,7 +155,7 @@ impl PluginRegistry {
             workspace_modules: RwLock::new(HashMap::new()),
             local_dir,
             local_rules: RwLock::new(LocalRules::default()),
-            integrity_reported: std::sync::Mutex::new(HashSet::new()),
+            refusals_reported: std::sync::Mutex::new(HashSet::new()),
         }))
     }
 
@@ -193,12 +194,15 @@ impl PluginRegistry {
     /// no counted evidence cannot support a promotion decision — and promotion
     /// is gated on exactly that evidence. A `tracing::info!` line is not a
     /// denominator.
+    ///
+    /// Under the default fail mode, closed; the request path passes the
+    /// configured one to [`Self::evaluate_with_shadow_exempting`].
     pub async fn evaluate_with_shadow(
         &self,
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
     ) -> (Verdict, Vec<ShadowReport>) {
-        self.evaluate_with_shadow_exempting(control_plane, ctx, None)
+        self.evaluate_with_shadow_exempting(control_plane, ctx, None, true)
             .await
     }
 
@@ -207,26 +211,32 @@ impl PluginRegistry {
     /// exactly that rule. Every other rule runs and may still Kill or Reask.
     /// An exempted rule is neither evaluated nor shadow-reported — a report
     /// would record a verdict nobody computed.
+    ///
+    /// `fail_closed` is the proxy's fail mode
+    /// (`intutic_settings.policy.fail_closed`): what a rule that reaches no
+    /// verdict means for the request. See [`Self::apply_fail_mode`].
     pub async fn evaluate_with_shadow_exempting(
         &self,
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
         exempt_rule_id: Option<&str>,
+        fail_closed: bool,
     ) -> (Verdict, Vec<ShadowReport>) {
         let mut shadow = Vec::new();
         let verdict = self
-            .evaluate_inner(control_plane, ctx, &mut shadow, exempt_rule_id)
+            .evaluate_inner(control_plane, ctx, &mut shadow, exempt_rule_id, fail_closed)
             .await;
         (verdict, shadow)
     }
 
+    /// Every rule's union verdict, under the default fail mode (closed).
     pub async fn evaluate(
         &self,
         control_plane: &Arc<dyn ControlPlaneCache>,
         ctx: &RequestContext,
     ) -> Verdict {
         let mut sink = Vec::new();
-        self.evaluate_inner(control_plane, ctx, &mut sink, None)
+        self.evaluate_inner(control_plane, ctx, &mut sink, None, true)
             .await
     }
 
@@ -236,6 +246,7 @@ impl PluginRegistry {
         ctx: &RequestContext,
         shadow_out: &mut Vec<ShadowReport>,
         exempt_rule_id: Option<&str>,
+        fail_closed: bool,
     ) -> Verdict {
         let workspace_id = &ctx.workspace_id;
 
@@ -281,6 +292,7 @@ impl PluginRegistry {
         // high-priority refusal simply by sorting first.
         let mut pending_reask: Option<Verdict> = None;
         let mut pending_hold: Option<Verdict> = None;
+        let mut unavailable: Option<Verdict> = None;
 
         for m in modules {
             if exempt_rule_id == Some(m.rule_id.as_str()) {
@@ -291,10 +303,17 @@ impl PluginRegistry {
                 );
                 continue;
             }
-            let verdict = if let Some(rule) = &m.rego {
+            let (verdict, failure) = if let Some(rule) = &m.rego {
                 super::opa::evaluate(&self.engine, &m.module, rule, ctx)
             } else {
-                evaluate_wasm_rule(&self.engine, &m.module, ctx, &files)
+                match evaluate_wasm_rule(&self.engine, &m.module, ctx, &files) {
+                    Ok(verdict) => (verdict, None),
+                    Err(failure) => (Verdict::Bypass, Some(failure)),
+                }
+            };
+            let verdict = match failure {
+                Some(failure) => Self::apply_fail_mode(&m, verdict, failure, fail_closed),
+                None => verdict,
             };
 
             // A shadowed rule reports and falls through. It is evaluated exactly
@@ -340,6 +359,14 @@ impl PluginRegistry {
                         policy_id: policy_id.or_else(|| Some(m.rule_id.clone())),
                     };
                 }
+                // Held rather than returned, like a hold: a later rule's block
+                // is the more useful refusal — it says what is wrong with the
+                // call, not that a rule could not tell. It still outranks a
+                // hold and a reask, because neither an approval nor a retry
+                // can clear a call a rule never judged.
+                v @ Verdict::Unavailable { .. } if unavailable.is_none() => {
+                    unavailable = Some(v);
+                }
                 // Attributed for the same reason, and one more: the request
                 // path keys the reask counter on this id. An unattributed reask
                 // would make every rule share one three-strike allowance, so an
@@ -379,7 +406,56 @@ impl PluginRegistry {
             }
         }
 
-        pending_hold.or(pending_reask).unwrap_or(Verdict::Bypass)
+        unavailable
+            .or(pending_hold)
+            .or(pending_reask)
+            .unwrap_or(Verdict::Bypass)
+    }
+
+    /// What a rule that reached no verdict means for the request.
+    ///
+    /// Fail-closed refuses: the call is not cleared by a rule that never judged
+    /// it — the `ext_authz` and admission-webhook default. Fail-open keeps the
+    /// verdict the rule did reach (a Rego rule judges each call in a turn, and
+    /// may have reached one on the others) and logs the failure.
+    ///
+    /// A block the same rule reached on another call stands either way: it
+    /// refuses already, and says why.
+    fn apply_fail_mode(
+        m: &LoadedModule,
+        verdict: Verdict,
+        failure: Failure,
+        fail_closed: bool,
+    ) -> Verdict {
+        let kind = if m.rego.is_some() {
+            "Rego rule"
+        } else {
+            "WASM rule"
+        };
+        let outcome = match (m.mode, fail_closed) {
+            (RuleMode::Shadow, _) => "shadow mode, request unchanged",
+            (RuleMode::Enforce, true) => "refusing (fail-closed)",
+            (RuleMode::Enforce, false) => "fail-open",
+        };
+        tracing::warn!(
+            rule_id = %m.rule_id,
+            cause = failure.stop.as_str(),
+            "{kind} reached no verdict: {}; {outcome}",
+            failure.reason
+        );
+        if !fail_closed || matches!(verdict, Verdict::Kill { .. }) {
+            return verdict;
+        }
+        Verdict::Unavailable {
+            reason: format!(
+                "Custom rule {} reached no verdict ({}): {}. Request blocked because the proxy \
+                 fails closed (intutic_settings.policy.fail_closed).",
+                m.rule_id,
+                failure.stop.as_str(),
+                failure.reason
+            ),
+            policy_id: Some(m.rule_id.clone()),
+        }
     }
 
     /// Resolve and read the files this request's tool calls reference.
@@ -579,53 +655,8 @@ impl PluginRegistry {
                     });
                 } else {
                     let bin_bytes = control_plane.wasm_binary(&desc.sha256).await?;
-                    if let Some(bytes) = bin_bytes {
-                        // The binary is fetched by the hash its descriptor
-                        // names, but nothing about a cache key makes the bytes
-                        // under it hash to it. Whoever can write that key could
-                        // swap a governance rule for one that allows
-                        // everything, and the proxy would run it as the rule
-                        // the dashboard lists. Refused like any rule that
-                        // cannot load, with one difference: the version this
-                        // workspace already enforces, if any, keeps enforcing,
-                        // because a tampered replacement is no reason to drop
-                        // a rule that was verified.
-                        let (matches, actual) = binary_matches(&bytes, &desc.sha256);
-                        if !matches {
-                            self.report_integrity_failure(
-                                control_plane,
-                                workspace_id,
-                                &desc,
-                                &actual,
-                            )
-                            .await;
-                            if let Some(previous) = previous_by_rule.get(&desc.rule_id) {
-                                new_modules.push(previous.clone());
-                            }
-                            continue;
-                        }
-                        let module = Module::from_binary(&self.engine, &bytes)?;
-                        // Same checks the local loader runs. Without them a rule
-                        // pushed from the dashboard installs, counts as active,
-                        // and then fails to link on every request — which the
-                        // runner turns into Bypass. The operator sees a rule
-                        // listed and enforcing nothing.
-                        let rego = match super::local_loader::check_loadable(
-                            &self.engine,
-                            &module,
-                            &bytes,
-                        ) {
-                            Ok(rego) => rego,
-                            Err(e) => {
-                                tracing::error!(
-                                    rule = %desc.name,
-                                    sha256 = %desc.sha256,
-                                    "Refusing control-plane WASM rule: {e}"
-                                );
-                                continue;
-                            }
-                        };
-                        new_modules.push(LoadedModule {
+                    match self.load_descriptor(&desc, bin_bytes.as_deref()) {
+                        Ok((module, rego)) => new_modules.push(LoadedModule {
                             rule_id: desc.rule_id,
                             name: desc.name,
                             sha256: desc.sha256,
@@ -636,12 +667,28 @@ impl PluginRegistry {
                             ),
                             rego,
                             module,
-                        });
-                    } else {
-                        tracing::warn!(
-                            "WASM binary missing from control plane for hash: {}",
-                            desc.sha256
-                        );
+                        }),
+                        // A version that cannot load is refused, and the version
+                        // this workspace already enforces, if any, keeps
+                        // enforcing: a bad replacement is no reason to drop a
+                        // rule that loaded. A rule with no previous version
+                        // enforces nothing until one loads, which is exactly
+                        // what the incident has to say — the dashboard lists
+                        // the rule either way.
+                        Err(refusal) => {
+                            let previous = previous_by_rule.get(&desc.rule_id);
+                            self.report_refusal(
+                                control_plane,
+                                workspace_id,
+                                &desc,
+                                &refusal,
+                                previous.is_some(),
+                            )
+                            .await;
+                            if let Some(previous) = previous {
+                                new_modules.push(previous.clone());
+                            }
+                        }
                     }
                 }
             }
@@ -658,46 +705,99 @@ impl PluginRegistry {
         Ok(())
     }
 
-    /// Logs a refused rule binary and raises it with the control plane as a
-    /// system anomaly (an incident), once per workspace, rule hash and received
-    /// hash.
-    async fn report_integrity_failure(
+    /// Compile and check the binary a control-plane descriptor names: the same
+    /// checks the local loader runs, plus the hash.
+    ///
+    /// Without the load checks a rule pushed from the dashboard installs, counts
+    /// as active, and then fails to link on every request. The hash check is
+    /// there because the binary is fetched by the hash its descriptor names,
+    /// but nothing about a cache key makes the bytes under it hash to it:
+    /// whoever can write that key could swap a governance rule for one that
+    /// allows everything, and the proxy would run it as the rule the dashboard
+    /// lists.
+    fn load_descriptor(
+        &self,
+        desc: &WasmPluginDescriptor,
+        bytes: Option<&[u8]>,
+    ) -> Result<(Module, Option<Arc<super::opa::OpaRule>>), Refusal> {
+        let bytes = bytes.ok_or(Refusal::Missing)?;
+        let (matches, actual) = binary_matches(bytes, &desc.sha256);
+        if !matches {
+            return Err(Refusal::HashMismatch { actual });
+        }
+        let module = Module::from_binary(&self.engine, bytes)
+            .map_err(|e| Refusal::Unloadable(e.to_string()))?;
+        let rego = super::local_loader::check_loadable(&self.engine, &module, bytes)
+            .map_err(|e| Refusal::Unloadable(e.to_string()))?;
+        Ok((module, rego))
+    }
+
+    /// Logs a refused rule version and raises it with the control plane as a
+    /// system anomaly (an incident), once per workspace, rule hash and reason.
+    async fn report_refusal(
         &self,
         control_plane: &Arc<dyn ControlPlaneCache>,
         workspace_id: &str,
         desc: &WasmPluginDescriptor,
-        actual: &str,
+        refusal: &Refusal,
+        has_previous: bool,
     ) {
         let first = self
-            .integrity_reported
+            .refusals_reported
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .insert((
-                workspace_id.to_string(),
-                desc.sha256.clone(),
-                actual.to_string(),
-            ));
+            .insert((workspace_id.to_string(), desc.sha256.clone(), refusal.key()));
         if !first {
             return;
         }
+        let why = match refusal {
+            Refusal::Missing => "its binary is missing from the control plane's cache".to_string(),
+            Refusal::HashMismatch { actual } => format!(
+                "its binary hashes to {actual} but its descriptor names {}",
+                desc.sha256
+            ),
+            Refusal::Unloadable(error) => format!("it cannot be loaded: {error}"),
+        };
+        let consequence = if has_previous {
+            "The previously loaded version stays in force."
+        } else {
+            "No version of this rule has loaded on this proxy, so it enforces nothing until one does."
+        };
         tracing::error!(
             workspace_id = %workspace_id,
             rule_id = %desc.rule_id,
             rule = %desc.name,
-            expected_sha256 = %desc.sha256,
-            actual_sha256 = %actual,
-            "Refusing control-plane WASM rule: the binary does not match its descriptor's SHA-256"
+            sha256 = %desc.sha256,
+            "Refusing control-plane WASM rule: {why}. {consequence}"
         );
         control_plane
             .publish_system_anomaly(
                 workspace_id,
                 &format!(
-                    "WASM rule '{}' ({}) was refused: its binary hashes to {} but its descriptor names {}. \
-                     The previously loaded version, if any, stays in force.",
-                    desc.name, desc.rule_id, actual, desc.sha256
+                    "WASM rule '{}' ({}) was refused: {why}. {consequence}",
+                    desc.name, desc.rule_id
                 ),
             )
             .await;
+    }
+}
+
+/// Why a control-plane rule version was not loaded.
+#[derive(Debug)]
+enum Refusal {
+    Missing,
+    HashMismatch { actual: String },
+    Unloadable(String),
+}
+
+impl Refusal {
+    /// What makes two refusals of one version the same report.
+    fn key(&self) -> String {
+        match self {
+            Self::Missing => "missing".to_string(),
+            Self::HashMismatch { actual } => actual.clone(),
+            Self::Unloadable(_) => "unloadable".to_string(),
+        }
     }
 }
 

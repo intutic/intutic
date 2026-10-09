@@ -65,6 +65,15 @@ pub enum Verdict {
         /// rule and the tool, what an approval lets through.
         target_hash: String,
     },
+    /// A custom rule reached no verdict — its deadline, its instruction
+    /// budget, an error, or a result that is not a verdict — and the proxy
+    /// fails closed (`intutic_settings.policy.fail_closed`, the default).
+    /// Refused as `GOVERNANCE_UNAVAILABLE`. Ranks with a block: nobody
+    /// cleared the call, so neither a retry nor an approval may pass it.
+    Unavailable {
+        reason: String,
+        policy_id: Option<String>,
+    },
 }
 
 /// Risk level from PCAS permission resolution.

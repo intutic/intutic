@@ -502,7 +502,6 @@
     "guide/traces.md",
     "guide/trajectory-monitor.md",
     "guide/virustotal-scanning.md",
-    "guide/wasm-rules.md",
     "index.md",
     "integrations/ag2.md",
     "integrations/agentcore.md",

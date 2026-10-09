@@ -39,7 +39,7 @@ mkdir -p .agents/skills/intutic-rule-author
 ## Guardrails built into the skill
 
 - The agent must produce **both** a should-block and a should-allow mock and verify them with `intutic policy test` before installing.
-- `intutic policy install` refuses rules that fail instantiation — a broken rule enforces nothing, because the proxy sandbox fails open.
+- `intutic policy install` refuses rules that fail instantiation — the proxy would refuse to load them, so they would enforce nothing.
 - Secrets in rule sources are flagged by `intutic skill audit`.
 - Allow-overrides are structurally impossible: the verdict lattice only adds blocks.
 

@@ -10,7 +10,7 @@
  * - **Fuel: the same 1,000,000-instruction budget, metered a different
  *   way.** V8 has no fuel hook, so `fuel.ts` rewrites each rule at load to
  *   count its own instructions and trap when the budget runs out (TD-440).
- *   A rule that exhausts it fails open for that call, as under Wasmtime.
+ *   A rule that exhausts it reaches no verdict, as under Wasmtime.
  * - **50ms per-rule deadline, not 5ms.** Fuel bounds the guest's own work;
  *   the deadline is the backstop for everything else, and it races a
  *   `postMessage` round trip that pays IPC overhead the in-process Wasmtime
@@ -65,9 +65,16 @@ const COMPILE_TIMEOUT_MS = 3_000
 
 /**
  * Consecutive per-rule runaways (a timeout, or the instruction budget running
- * out) before that rule is disabled until the next rescan.
+ * out) before that rule is quarantined until the next rescan.
  */
-const MAX_CONSECUTIVE_TIMEOUTS = 3
+export const MAX_CONSECUTIVE_RUNAWAYS = 3
+
+/**
+ * Why a rule reached no verdict, in the one word a refusal and a log line use
+ * — the Rust proxy's `limits::Stop` — plus `quarantined`: not evaluated at
+ * all, after {@link MAX_CONSECUTIVE_RUNAWAYS} runaways in a row.
+ */
+export type RuleStop = 'deadline' | 'budget' | 'error' | 'result' | 'quarantined'
 
 export type WasmVerdict =
   | { code: 'allow' }
@@ -75,11 +82,32 @@ export type WasmVerdict =
   | { code: 'reask'; reason: string; ruleId: string }
   /** A Rego rule's `hold`: the interceptor puts the call through the decisions API. */
   | { code: 'hold'; reason: string; ruleId: string; riskTier?: string }
+  /**
+   * A rule reached no verdict and the proxy fails closed: the call is refused
+   * as `GOVERNANCE_UNAVAILABLE`. Under fail-open the rule is skipped instead.
+   */
+  | { code: 'unavailable'; reason: string; ruleId: string; stop: RuleStop }
 
 /** One rule's answer: a native verdict code, or a Rego rule's decision. */
 type RuleResult =
   | { code: number; reason?: string }
   | { decision: 'allow' | 'deny' | 'hold' | 'reask'; reason?: string; riskTier?: string }
+
+/** A rule that ran and reached no verdict: why, in a phrase ("it ran past its 50 ms deadline"). */
+interface RuleFailure {
+  stop: Exclude<RuleStop, 'quarantined'>
+  detail: string
+}
+
+/** Options for {@link WasmRunner.evaluate}. */
+export interface EvaluateOptions {
+  /**
+   * The proxy's fail setting (`mcpProxyFailBehavior`, else
+   * `INTUTIC_MCP_FAIL_OPEN`): whether a rule that reaches no verdict lets
+   * the call through. Defaults to `false`, fail closed.
+   */
+  failOpen?: boolean
+}
 
 interface PendingEntry {
   resolve: (value: unknown) => void
@@ -125,8 +153,8 @@ export class WasmRunner implements CompileBridge {
   private worker: Worker | null = null
   private nextRequestId = 1
   private pending = new Map<number, PendingEntry>()
-  private consecutiveTimeouts = new Map<string, number>()
-  private disabledRuleIds = new Set<string>()
+  private consecutiveRunaways = new Map<string, number>()
+  private quarantined = new Set<string>()
 
   constructor(dirOverride?: string) {
     this.loader = new WasmLoader(resolveWasmDir(dirOverride))
@@ -204,21 +232,21 @@ export class WasmRunner implements CompileBridge {
 
   remove(ruleId: string): void {
     this.ensureWorker().postMessage({ type: 'remove', ruleId })
-    this.consecutiveTimeouts.delete(ruleId)
-    this.disabledRuleIds.delete(ruleId)
+    this.consecutiveRunaways.delete(ruleId)
+    this.quarantined.delete(ruleId)
   }
 
   // ── Rescan (driven by the existing policy-tick timer — see policy.ts) ──
 
   /**
    * Rescans `~/.intutic/wasm/` and (re)compiles anything changed. Also
-   * clears every rule's disabled-by-timeout status — "disable that rule
-   * until the next policy-driven rescan" is this call.
+   * releases every quarantined rule — "quarantined until the next
+   * policy-driven rescan" is this call.
    */
   async rescan(): Promise<void> {
     await this.loader.rescan(this)
-    this.disabledRuleIds.clear()
-    this.consecutiveTimeouts.clear()
+    this.quarantined.clear()
+    this.consecutiveRunaways.clear()
   }
 
   /** Terminates the worker and respawns a fresh one, resending every currently-loaded rule's bytes so its module cache is rebuilt. */
@@ -244,14 +272,41 @@ export class WasmRunner implements CompileBridge {
   // ── Evaluation ───────────────────────────────────────────────────────
 
   /**
-   * Evaluates every currently loaded, non-disabled rule (priority order)
-   * against one context, mirroring `registry.rs`'s `evaluate_inner`:
-   * short-circuit on the first block, carry the first reask through in case
-   * a later, higher-priority rule still blocks, `allow` when nothing fired
-   * or every loaded rule was fail-open (timeout/trap/unmapped code).
+   * Evaluates every currently loaded rule (priority order) against one
+   * context, as `registry.rs`'s `evaluate_inner` does: short-circuit on the
+   * first block, carry the first hold and reask through in case a later rule
+   * still blocks, `allow` when nothing fired.
+   *
+   * A rule that reaches no verdict — its deadline, its instruction budget, a
+   * trap or other error, or a result that is not a verdict — follows
+   * `failOpen`. Fail-open skips it, as before. Fail-closed refuses the call
+   * (`unavailable`), outranking a hold and a reask, since neither an approval
+   * nor a retry can clear a call a rule never judged; a later rule's block
+   * still wins, because it says what is wrong with the call.
+   *
+   * A quarantined rule (see {@link countRunaway}) is not evaluated. Fail-open
+   * skips it until the next rescan. Fail-closed refuses at once, without
+   * evaluating anything: otherwise three padded calls would switch a rule off.
    */
-  async evaluate(input: WasmContextInput): Promise<WasmVerdict> {
-    const rules = this.loader.getRules().filter((r) => !this.disabledRuleIds.has(r.ruleId))
+  async evaluate(input: WasmContextInput, options: EvaluateOptions = {}): Promise<WasmVerdict> {
+    const failOpen = options.failOpen ?? false
+    const loaded = this.loader.getRules()
+    if (!failOpen) {
+      const held = loaded.find((r) => this.quarantined.has(r.ruleId))
+      if (held) {
+        return {
+          code: 'unavailable',
+          stop: 'quarantined',
+          ruleId: held.ruleId,
+          reason: noVerdictReason(
+            held.ruleId,
+            'quarantined',
+            `it is quarantined after ${MAX_CONSECUTIVE_RUNAWAYS} runaway evaluations in a row (deadline or budget), until the next rescan`,
+          ),
+        }
+      }
+    }
+    const rules = loaded.filter((r) => !this.quarantined.has(r.ruleId))
     if (rules.length === 0) return { code: 'allow' }
 
     // Each built once, and only if a rule of that kind is loaded.
@@ -263,19 +318,40 @@ export class WasmRunner implements CompileBridge {
         : (contextBytes ??= Buffer.from(JSON.stringify(buildWasmContext(input))))
     let pendingReask: { code: 'reask'; reason: string; ruleId: string } | null = null
     let pendingHold: { code: 'hold'; reason: string; ruleId: string; riskTier?: string } | null = null
+    let unavailable: Extract<WasmVerdict, { code: 'unavailable' }> | null = null
 
     // Read once per evaluation, before any rule runs, so the per-rule
     // deadline covers guest execution only — and only when a rule will ask.
     const files = rules.some((r) => r.readsReferencedFiles) ? await this.prefetchReferencedFiles(input) : undefined
 
     for (const rule of rules) {
-      const result = await this.evaluateOne(
+      const outcome = await this.evaluateOne(
         rule.ruleId,
         bytesFor(rule.rego),
         rule.rego ? REGO_EVALUATE_TIMEOUT_MS : EVALUATE_TIMEOUT_MS,
         rule.readsReferencedFiles ? files : undefined,
       )
-      if (result === null) continue // fail-open ALLOW for this rule (timeout, trap, or worker error)
+      const failure = 'stop' in outcome ? outcome : undefinedVerdict(outcome)
+      if (failure) {
+        const quarantinedNow = this.quarantined.has(rule.ruleId)
+        const detail = quarantinedNow
+          ? `${failure.detail}; it is now quarantined until the next rescan, after ${MAX_CONSECUTIVE_RUNAWAYS} runaway evaluations in a row`
+          : failure.detail
+        log.warn(
+          { action: 'wasm_rule_no_verdict', ruleId: rule.ruleId, stop: failure.stop, failOpen },
+          `WASM rule reached no verdict: ${detail} — ${failOpen ? 'failing open' : 'refusing (fail-closed)'}`,
+        )
+        if (!failOpen && !unavailable) {
+          unavailable = {
+            code: 'unavailable',
+            stop: failure.stop,
+            ruleId: rule.ruleId,
+            reason: noVerdictReason(rule.ruleId, failure.stop, detail),
+          }
+        }
+        continue
+      }
+      const result = outcome as RuleResult
 
       if ('decision' in result) {
         // A Rego rule. Same ordering as the native codes below: a block ends
@@ -317,16 +393,10 @@ export class WasmRunner implements CompileBridge {
             }
           }
           break
-        default:
-          log.warn(
-            { action: 'wasm_unmapped_verdict', ruleId: rule.ruleId, code: result.code },
-            'WASM rule returned an unmapped verdict code; allowing. Valid codes are 0 (allow), 1 (block), 3 (reask).',
-          )
-          break
       }
     }
 
-    return pendingHold ?? pendingReask ?? { code: 'allow' }
+    return unavailable ?? pendingHold ?? pendingReask ?? { code: 'allow' }
   }
 
   /**
@@ -343,13 +413,13 @@ export class WasmRunner implements CompileBridge {
     return files.toTable()
   }
 
-  /** One rule's evaluation, raced against its deadline. `null` means fail-open (timeout, worker error, or guest trap). */
+  /** One rule's evaluation, raced against its deadline: its answer, or why it reached none. */
   private async evaluateOne(
     ruleId: string,
     contextBytes: Buffer,
     timeoutMs: number,
     files?: ReferencedFilesTable,
-  ): Promise<RuleResult | null> {
+  ): Promise<RuleResult | RuleFailure> {
     const id = this.allocId()
     const reply = await this.send<{
       ok: boolean
@@ -359,44 +429,42 @@ export class WasmRunner implements CompileBridge {
       riskTier?: string
       error?: string
       fuelExhausted?: boolean
+      /** Set by the worker when a Rego rule's result is not a decision. */
+      notADecision?: boolean
     }>(
       { type: 'evaluate', id, ruleId, bytes: toArrayBuffer(contextBytes), ...(files ? { files } : {}) },
       timeoutMs,
     )
 
     if (reply === null) {
-      // Timed out. Mirrors `runner.rs`'s `Err(_) => Bypass` — this call
-      // fails open — plus the MCP-specific per-rule consecutive-timeout
-      // disable ladder the task calls for.
-      log.warn({ action: 'wasm_evaluate_timeout', ruleId, timeoutMs }, 'WASM rule evaluation timed out — failing open')
+      // Timed out: `runner.rs`'s deadline, plus this proxy's quarantine.
       // terminate + lazily respawn: the NEXT evaluate() call pays the
       // respawn cost via ensureWorker()/rescan(force); triggered here so a
       // wedged worker does not keep timing out every rule behind it in this
       // same evaluate() loop.
       await this.respawnWorker()
       this.countRunaway(ruleId)
-      return null
+      return { stop: 'deadline', detail: `it ran past its ${timeoutMs} ms deadline` }
     }
 
     if (!reply.ok && reply.fuelExhausted) {
       // The budget trapped the guest, so the worker is healthy: no respawn,
-      // but the same disable ladder as a timeout, since it is the same
+      // but the same quarantine count as a timeout, since it is the same
       // runaway rule caught sooner.
-      log.warn({ action: 'wasm_evaluate_fuel_exhausted', ruleId }, 'WASM rule ran out of its instruction budget — failing open')
       this.countRunaway(ruleId)
-      return null
+      return { stop: 'budget', detail: 'it used up its instruction budget' }
     }
 
     if (!reply.ok) {
-      // Worker-reported failure: a guest trap (including one following an
-      // `abort` call) or an internal error. Fail-open ALLOW for this call,
-      // never a crash — matches the task's explicit instruction.
-      log.warn({ action: 'wasm_evaluate_error', ruleId, err: reply.error }, 'WASM rule evaluation failed — failing open')
-      return null
+      // A guest trap (including one following an `abort` call), a result
+      // that is not a decision, or an internal error — never a crash.
+      return reply.notADecision
+        ? { stop: 'result', detail: reply.error ?? 'it returned a result that is not a decision' }
+        : { stop: 'error', detail: `it failed while running: ${reply.error ?? 'unknown error'}` }
     }
 
-    // A clean reply resets this rule's timeout streak.
-    this.consecutiveTimeouts.delete(ruleId)
+    // A clean reply resets this rule's runaway streak.
+    this.consecutiveRunaways.delete(ruleId)
     if (reply.decision) {
       return {
         decision: reply.decision,
@@ -407,14 +475,19 @@ export class WasmRunner implements CompileBridge {
     return { code: reply.code ?? -1, reason: reply.reason }
   }
 
+  /**
+   * Counts one runaway (deadline or budget) against `ruleId`, quarantining
+   * the rule at {@link MAX_CONSECUTIVE_RUNAWAYS} in a row. Logged once, at the
+   * transition; what a quarantined rule means for a call is `evaluate`'s.
+   */
   private countRunaway(ruleId: string): void {
-    const attempts = (this.consecutiveTimeouts.get(ruleId) ?? 0) + 1
-    this.consecutiveTimeouts.set(ruleId, attempts)
-    if (attempts >= MAX_CONSECUTIVE_TIMEOUTS) {
-      this.disabledRuleIds.add(ruleId)
+    const runaways = (this.consecutiveRunaways.get(ruleId) ?? 0) + 1
+    this.consecutiveRunaways.set(ruleId, runaways)
+    if (runaways >= MAX_CONSECUTIVE_RUNAWAYS && !this.quarantined.has(ruleId)) {
+      this.quarantined.add(ruleId)
       log.warn(
-        { action: 'wasm_rule_disabled', ruleId, consecutiveRunaways: attempts },
-        'WASM rule disabled after consecutive timeouts or budget exhaustion — will retry on the next policy-driven rescan',
+        { action: 'wasm_rule_quarantined', ruleId, consecutiveRunaways: runaways },
+        'WASM rule quarantined after consecutive timeouts or budget exhaustion — retried on the next policy-driven rescan',
       )
     }
   }
@@ -430,6 +503,20 @@ export class WasmRunner implements CompileBridge {
     }
     if (worker) await worker.terminate()
   }
+}
+
+/** A native code that is not a verdict: the rule reached none. */
+function undefinedVerdict(result: RuleResult): RuleFailure | null {
+  if ('decision' in result || [0, 1, 2, 3].includes(result.code)) return null
+  return { stop: 'result', detail: `it returned ${result.code}, which is not a verdict code (0 allow, 1 block, 3 reask)` }
+}
+
+/** The refusal an agent reads when a rule reached no verdict: which rule, and why. */
+function noVerdictReason(ruleId: string, stop: RuleStop, detail: string): string {
+  return (
+    `Custom rule ${ruleId} reached no verdict (${stop}): ${detail}. Tool call blocked ` +
+    `(fail-closed mode: mcpProxyFailBehavior or INTUTIC_MCP_FAIL_OPEN=false).`
+  )
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

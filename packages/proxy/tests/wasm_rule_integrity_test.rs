@@ -7,6 +7,10 @@
 //! put a different, valid module under a rule's hash, which is that attack, and
 //! check that it is refused, reported once, and that a rule already enforcing
 //! keeps enforcing.
+//!
+//! A version that cannot load (a missing binary, or one importing what the host
+//! does not provide) is refused and reported the same way, so a rule that never
+//! loaded does not leave the workspace ungoverned without an incident.
 
 use intutic_proxy::store::ControlPlaneCache;
 use intutic_proxy::wasm::context::{RequestContext, Verdict};
@@ -259,5 +263,97 @@ async fn a_tampered_update_keeps_the_verified_version_and_is_reported_once() {
         1,
         "one incident per tampered binary, not one per resync"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Hashes correctly, compiles, and imports a host function the proxy does not
+/// provide (`env.seed`, what AssemblyScript emits for `Math.random()`): it
+/// cannot load.
+fn unloadable() -> Vec<u8> {
+    wat::parse_str(
+        r#"(module
+             (import "env" "seed" (func (result f64)))
+             (memory (export "memory") 1)
+             (func (export "allocate") (param i32) (result i32) i32.const 8)
+             (func (export "evaluate") (param i32 i32) (result i32) i32.const 1))"#,
+    )
+    .unwrap()
+}
+
+/// A rule whose first version cannot load enforces nothing, which the
+/// dashboard cannot show — it lists the rule either way — so the incident has
+/// to say it.
+#[tokio::test]
+async fn a_rule_whose_first_version_cannot_load_is_reported_once() {
+    let dir = empty_rule_dir("first");
+    let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
+    let rules = Arc::new(CloudRules::default());
+    let bytes = unloadable();
+    rules.publish("wasm_seed", &sha(&bytes), &bytes);
+    let cp: Arc<dyn ControlPlaneCache> = rules.clone();
+
+    assert_eq!(
+        registry.evaluate(&cp, &ctx("ws", "rm -rf /")).await,
+        Verdict::Bypass
+    );
+    assert_eq!(registry.plugin_count().await, 0);
+    tokio::time::sleep(RESYNC).await;
+    registry.evaluate(&cp, &ctx("ws", "ls")).await;
+
+    let anomalies = rules.anomalies();
+    assert_eq!(anomalies.len(), 1, "once, not per resync: {anomalies:?}");
+    assert!(anomalies[0].contains("wasm_seed"), "{}", anomalies[0]);
+    assert!(anomalies[0].contains("env.seed"), "{}", anomalies[0]);
+    assert!(
+        anomalies[0].contains("enforces nothing"),
+        "{}",
+        anomalies[0]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn an_update_that_cannot_load_keeps_the_loaded_version_and_is_reported() {
+    let dir = empty_rule_dir("unloadable-update");
+    let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
+    let rules = Arc::new(CloudRules::default());
+    rules.publish("wasm_shell", &sha(SHELL), SHELL);
+    let cp: Arc<dyn ControlPlaneCache> = rules.clone();
+    assert!(is_kill(
+        &registry.evaluate(&cp, &ctx("ws", "rm -rf /")).await
+    ));
+
+    let bytes = unloadable();
+    rules.publish("wasm_shell", &sha(&bytes), &bytes);
+    tokio::time::sleep(RESYNC).await;
+    assert!(
+        is_kill(&registry.evaluate(&cp, &ctx("ws", "rm -rf /")).await),
+        "the loaded version keeps enforcing"
+    );
+    let anomalies = rules.anomalies();
+    assert_eq!(anomalies.len(), 1, "{anomalies:?}");
+    assert!(anomalies[0].contains("stays in force"), "{}", anomalies[0]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A descriptor naming a binary that is not there: refused and reported like
+/// one that cannot load. The control plane writes binaries before descriptors,
+/// so this is not a window every upload passes through.
+#[tokio::test]
+async fn a_rule_whose_binary_is_missing_is_reported() {
+    let dir = empty_rule_dir("missing");
+    let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
+    let rules = Arc::new(CloudRules::default());
+    rules.publish("wasm_shell", &sha(SHELL), SHELL);
+    rules.binaries.lock().unwrap().clear();
+    let cp: Arc<dyn ControlPlaneCache> = rules.clone();
+
+    assert_eq!(
+        registry.evaluate(&cp, &ctx("ws", "rm -rf /")).await,
+        Verdict::Bypass
+    );
+    let anomalies = rules.anomalies();
+    assert_eq!(anomalies.len(), 1, "{anomalies:?}");
+    assert!(anomalies[0].contains("missing"), "{}", anomalies[0]);
     let _ = std::fs::remove_dir_all(&dir);
 }

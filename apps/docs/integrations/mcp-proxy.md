@@ -160,7 +160,7 @@ Every refusal is a JSON-RPC `-32603` error whose message is written for the agen
 | `REASK_EXHAUSTED` | The detector id, or `wasm:<rule id>` | The same detector or rule refused three attempts, so it now blocks outright |
 | `BUDGET_EXCEEDED` | The budget id | An MCP call budget covering this call is used up until `resetAt` |
 | `BUDGET_UNAVAILABLE` | `mcpProxyFailBehavior` | A call budget covers this call but could not be checked, and the proxy fails closed |
-| `GOVERNANCE_UNAVAILABLE` | `mcpProxyFailBehavior` | A governance check could not complete, and the proxy fails closed |
+| `GOVERNANCE_UNAVAILABLE` | `mcpProxyFailBehavior`, `piiDetectors`, `wasm:<rule id>` or `wasm` | A governance check could not complete, such as a custom WASM or Rego rule that reached no verdict, and the proxy fails closed; the reason names the check or rule |
 | `TOFU_UNAVAILABLE` | `mcpProxyFailBehavior` | The server's pinned tool definitions could not be read or written, and the proxy fails closed |
 | `TOOL_DEFINITIONS_CHANGED` | `tofu.<server>` | The server's tool definitions changed since they were first pinned, and the proxy fails closed |
 | `RESULT_WITHHELD_DLP` | `dlp.<pattern>` | The tool ran, but its result held sensitive data that could not be redacted safely, so it was not delivered |
@@ -196,12 +196,15 @@ context stays per process.
 
 An empty allowlist means unrestricted at every allowlist step above — never
 "permit nothing." A check that cannot complete fails **open** by default:
-DLP/SOP/TOFU checks that error out, and a registry the proxy has never been
-able to load, let the call through rather than blocking every request while
-policy is unreachable. The workspace's `mcpProxyFailBehavior` chooses, and
-`INTUTIC_MCP_FAIL_OPEN=false` sets it locally until the proxy has loaded the
-workspace's choice — see [When the registry has not
-loaded](/guide/mcp-governance#when-the-registry-has-not-loaded).
+DLP/SOP/TOFU checks that error out, a registry the proxy has never been able
+to load, and a custom rule that reaches no verdict let the call through rather
+than blocking every request while policy is unreachable. The workspace's
+`mcpProxyFailBehavior` chooses, and `INTUTIC_MCP_FAIL_OPEN=false` sets it
+locally until the proxy has loaded the workspace's choice — see [When the
+registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded).
+Failing closed, each of them refuses the call; for a custom rule the refusal
+is `GOVERNANCE_UNAVAILABLE` with `ruleId` `wasm:<rule id>` — see [When a rule
+reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
 
 **The RESPONSE direction is a separate code path** (`processServerLine`,
 `src/proxy.ts`), because by the time a result comes back the call has already

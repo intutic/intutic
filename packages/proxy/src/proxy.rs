@@ -4004,7 +4004,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         };
         let (wasm_verdict, shadow_reports) = state
             .wasm_registry
-            .evaluate_with_shadow_exempting(&state.control_plane, &wasm_ctx, exempt_rule)
+            .evaluate_with_shadow_exempting(
+                &state.control_plane,
+                &wasm_ctx,
+                exempt_rule,
+                state.config.intutic_settings.policy.fail_closed,
+            )
             .await;
         // Recorded, not merely logged. Promotion out of shadow is gated on a
         // counted false-positive rate, and a rule cannot earn that from log
@@ -4030,6 +4035,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     "policy_denied",
                     &format!("Request blocked by custom WASM governance rule: {}", reason),
                 );
+            }
+            // A rule reached no verdict and the proxy fails closed. Its own
+            // code rather than `policy_denied`: no rule decided against the
+            // call, and an agent or SDK should tell "not allowed" from "could
+            // not be checked". The reason names the rule and the cause.
+            crate::wasm::context::Verdict::Unavailable { reason, .. } => {
+                tracing::warn!(workspace_id = %workspace_id, reason = %reason, "WASM custom rule reached no verdict — blocking (fail-closed)");
+                crate::metrics::record_policy_refusal("wasm", "unavailable");
+                return json_error(StatusCode::FORBIDDEN, "GOVERNANCE_UNAVAILABLE", &reason);
             }
             // A WASM rule reaching the reask rung takes the same ladder the
             // anomaly detectors take, rather than a second one beside it: same

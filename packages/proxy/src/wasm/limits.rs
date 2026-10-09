@@ -15,8 +15,9 @@
 //! fired for any rule, and fuel was the only real bound. Epoch interruption
 //! stops a running guest, which is what the deadline was always meant to do.
 //!
-//! Either bound failing fails the evaluation open for that call, as every
-//! other guest error does.
+//! Either bound stopping a rule is a [`Failure`]: the rule reached no verdict.
+//! What the request then gets is the proxy's fail mode, decided by the
+//! registry, not here.
 
 use std::time::Duration;
 use wasmtime::{Config, Engine, Store, Trap};
@@ -94,29 +95,18 @@ impl Budget {
     }
 }
 
-/// Why an evaluation stopped, for the log line that reports it.
+/// Why an evaluation reached no verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
     /// The wall-clock deadline interrupted the guest.
     Deadline,
     /// The guest ran out of fuel.
     Fuel,
-    /// Anything else: a trap, a missing export, a host error.
+    /// Anything else that stopped it: a trap, a missing export, a host error.
     Error,
-}
-
-impl Budget {
-    /// Log why an evaluation under this budget failed open.
-    pub fn log_fail_open(&self, what: &str, error: &anyhow::Error) {
-        match Stop::of(error) {
-            Stop::Deadline => tracing::warn!(
-                deadline_ms = self.deadline.as_millis() as u64,
-                "{what} interrupted at its deadline (fail-open)"
-            ),
-            Stop::Fuel => tracing::warn!(fuel = self.fuel, "{what} ran out of fuel (fail-open)"),
-            Stop::Error => tracing::warn!("{what} execution error (fail-open): {error}"),
-        }
-    }
+    /// The rule finished, but what it returned is not a verdict: a native
+    /// code outside 0–3, or a Rego result in none of the documented shapes.
+    Result,
 }
 
 impl Stop {
@@ -126,6 +116,54 @@ impl Stop {
             Some(Trap::OutOfFuel) => Self::Fuel,
             _ => Self::Error,
         }
+    }
+
+    /// The one word a refusal and a log line use for it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Deadline => "deadline",
+            Self::Fuel => "budget",
+            Self::Error => "error",
+            Self::Result => "result",
+        }
+    }
+}
+
+/// A rule that ran and reached no verdict, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    pub stop: Stop,
+    /// One line, for the refusal the agent reads and the log the operator
+    /// reads: "it ran past its 5 ms deadline".
+    pub reason: String,
+}
+
+impl Failure {
+    /// A rule whose result is not a verdict.
+    pub fn result(reason: impl Into<String>) -> Self {
+        Self {
+            stop: Stop::Result,
+            reason: reason.into(),
+        }
+    }
+}
+
+impl Budget {
+    /// The failure an evaluation under this budget stopped with.
+    pub fn failure(&self, error: &anyhow::Error) -> Failure {
+        let stop = Stop::of(error);
+        let reason = match stop {
+            Stop::Deadline => format!("it ran past its {} ms deadline", self.deadline.as_millis()),
+            Stop::Fuel => format!("it used up its budget of {} instructions", self.fuel),
+            // The first line only: a trap's display continues with a
+            // multi-line wasm backtrace, which belongs in neither a refusal
+            // nor a single log line.
+            Stop::Error | Stop::Result => format!(
+                "it failed while running: {}",
+                error.to_string().lines().next().unwrap_or("unknown error")
+            ),
+        };
+        Failure { stop, reason }
     }
 }
 
