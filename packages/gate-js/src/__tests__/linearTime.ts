@@ -38,8 +38,13 @@ export function expectLinearTimes(label: string, small: number, large: number): 
   expect(large / Math.max(small, LINEAR_TIME_FLOOR_MS), why).toBeLessThan(LINEAR_TIME_RATIO)
 }
 
-/** Above this, 4× the input took more than linear time (linear: 4, quadratic: 16). */
-export const LINEAR_TIME_RATIO = 6
+/**
+ * Above this, 4× the input took more than linear time (linear: 4, quadratic:
+ * 16). The geometric midpoint, a factor of two from each: a 4n input outgrows
+ * caches the n input fits in, and on a busy CI runner linear matchers measured
+ * 6.2 and 6.4, failing the 6 this used to be.
+ */
+export const LINEAR_TIME_RATIO = 8
 /**
  * The time at n is counted as at least this, so noise on a fast run cannot
  * fail it: a saturated machine thrashes the caches a 4n run needs more of. A

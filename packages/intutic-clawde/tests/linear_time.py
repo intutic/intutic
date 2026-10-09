@@ -17,7 +17,10 @@ import time
 from typing import Callable
 
 #: Above this, 4x the input took more than linear time (linear: 4, quadratic: 16).
-LINEAR_TIME_RATIO = 6
+#: The geometric midpoint, a factor of two from each: a 4n input outgrows caches
+#: the n input fits in, and on a busy CI runner linear matchers measured 6.2 and
+#: 6.4, failing the 6 this used to be.
+LINEAR_TIME_RATIO = 8
 #: The time at n is counted as at least this, so noise on a fast run cannot fail
 #: it: a saturated machine thrashes the caches a 4n run needs more of. A
 #: quadratic matcher is still caught, since at these sizes its time at n is far
