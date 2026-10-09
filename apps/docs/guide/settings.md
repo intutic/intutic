@@ -105,6 +105,8 @@ Create keys (`vk_` prefix) for developers and their agents to reach the Intutic 
 - **Revoke** a compromised key immediately
 
 There is no in-place rotation: create a new key, move clients to it, then revoke the old one.
+Creating and revoking a key is recorded with who did it on the
+[audit timeline](/guide/audit-timeline#what-it-shows); the key itself is stored only as a hash.
 
 ### Provider Keys
 
@@ -134,6 +136,11 @@ intutic credentials unset anthropic
 A provider needing more than one field (e.g. Azure OpenAI: endpoint, deployment, key) takes a
 repeated `--field key=value` flag, one per field — the wizard's dynamic form and the CLI submit
 the same shape.
+
+Keys are encrypted before they are stored, and only the last four characters are ever shown
+again (see [Stored credentials](/security#stored-credentials)). Adding, replacing and removing a
+key is recorded with who did it on the [audit timeline](/guide/audit-timeline#what-it-shows) and
+sends the `credential.changed` notification.
 
 **Guided setup**, on the Provider Keys card, walks through provisioning a provider and verifying
 it against the provider's own API in one flow. See
@@ -431,6 +438,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `scim.group.changed` | Group Changed via SCIM: your identity provider created, changed or deleted a group; MEDIUM for a deletion, INFO otherwise |
 | `webhook.secret.rotated` | Webhook Signing Secret Replaced: an owner or admin replaced the signing secret of a notification webhook, a SIEM webhook destination or the GitHub pull-request webhook. Says whose and who, never the secret |
 | `evidence.exported` | Compliance Evidence Downloaded: a member downloaded the SOC 2 evidence archive, a framework coverage report as a file, or the human-oversight export; INFO. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
+| `credential.changed` | API Key or Provider Key Changed: a virtual key, gateway token or SCIM token was created, rotated or revoked, or a provider key was added, replaced or removed. Says which credential, what happened and who did it, never the value; INFO for a new virtual key, gateway token or SCIM token, MEDIUM otherwise. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
 

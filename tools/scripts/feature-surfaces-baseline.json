@@ -7,7 +7,6 @@
     "DELETE /api/v1/connectors/virustotal",
     "DELETE /api/v1/devices/:id",
     "DELETE /api/v1/gateways/:id",
-    "DELETE /api/v1/keys/:id",
     "DELETE /api/v1/members/:id",
     "DELETE /api/v1/policies/:policyId",
     "DELETE /api/v1/scim/tokens/:id",
@@ -16,7 +15,6 @@
     "DELETE /api/v1/task-management/connections/:connectionId",
     "DELETE /api/v1/wasm-rules/:ruleId",
     "DELETE /api/v1/workspace/org-sops/:orgSopId",
-    "DELETE /api/v1/workspace/provider-credentials/:provider",
     "DELETE /scim/v2/Groups/:id",
     "DELETE /scim/v2/Users/:id",
     "GET /api/v1/adapters/slack/oauth/authorize",
@@ -264,7 +262,6 @@
     "POST /api/v1/integrity/roots/:rootId/recompute",
     "POST /api/v1/judge/chunk",
     "POST /api/v1/judge/finalize",
-    "POST /api/v1/keys",
     "POST /api/v1/loops/:loopRunId/complete",
     "POST /api/v1/loops/:loopRunId/kill",
     "POST /api/v1/loops/:loopRunId/verify",
@@ -343,7 +340,6 @@
     "PUT /api/v1/policies/:policyId",
     "PUT /api/v1/sops/:sopId",
     "PUT /api/v1/users/me",
-    "PUT /api/v1/workspace/provider-credentials/:provider",
     "PUT /scim/v2/Groups/:id",
     "PUT /scim/v2/Users/:id"
   ],
@@ -353,8 +349,6 @@
     "budget",
     "connect",
     "credentials list",
-    "credentials set",
-    "credentials unset",
     "daemon install",
     "daemon start",
     "daemon status",
@@ -494,7 +488,6 @@
     "guide/self-host-compose.md",
     "guide/self-host-kubernetes.md",
     "guide/self-host-license.md",
-    "guide/self-host.md",
     "guide/skill-scanning.md",
     "guide/slash-commands.md",
     "guide/sops.md",
@@ -556,8 +549,7 @@
     "reference/cli-doctor.md",
     "reference/configuration.md",
     "reference/model-catalog.md",
-    "reference/sop-format.md",
-    "security.md"
+    "reference/sop-format.md"
   ],
   "refusalCodes": [
     "gate:E_DIGEST_MISMATCH",

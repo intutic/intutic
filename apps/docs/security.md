@@ -120,6 +120,20 @@ Intutic provides enterprise-grade identity and access management:
 
 ---
 
+## Stored Credentials <Badge type="tip" text="Cloud" />
+
+**Provider keys** (Settings › Provider Keys) are encrypted before they are stored. Each key gets its own random 256-bit data key and is sealed with AES-256-GCM; the data key is sealed in turn under a key encryption key derived from the deployment's `ENCRYPTION_KEY` with HKDF-SHA256. Both seals are bound to the workspace and the field the key belongs to, so a stored value copied to another workspace does not open there. Each stored value names the key that sealed it, which is what lets `ENCRYPTION_KEY` be rotated (see [Rotate the encryption key](/guide/self-host#rotate-the-encryption-key)). Only the control plane and the gateway proxy hold the key and open stored values; the API and the dashboard show the last four characters at most.
+
+**Other secrets you give Intutic** (SSO client secrets, connector and task-tracker tokens, SIEM destination settings, webhook signing secrets, trace storage credentials) are sealed with AES-256-GCM under a key derived from the same `ENCRYPTION_KEY`.
+
+**Credentials Intutic issues** (virtual keys, self-hosted gateway tokens, SCIM tokens) are stored only as hashes. Each is shown once, when it is created.
+
+**Every change is recorded.** Creating, rotating or revoking a virtual key, a gateway token or a SCIM token, and adding, replacing or removing a provider key, is recorded with who made the change and which credential it was, never its value. The records appear on the [audit timeline](/guide/audit-timeline#what-it-shows), stream to [SIEM export](/guide/siem-export#what-gets-streamed) as `credential_changes`, and send the `credential.changed` [notification](/guide/settings#rule-filters). They are append-only.
+
+The key encryption key is derived from `ENCRYPTION_KEY`, which you keep in your own secret store. Holding it in a cloud KMS (Google Cloud KMS, AWS KMS) is not available yet.
+
+---
+
 ## Compliance <Badge type="tip" text="Cloud" />
 
 Intutic helps your organization meet regulatory requirements for AI governance:

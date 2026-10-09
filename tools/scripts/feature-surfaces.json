@@ -866,6 +866,44 @@
         "events": { "none": "a refused call is a 403, not an event" },
         "enforcement": [{ "file": "services/control-plane/__tests__/unit/routeRoleGuards.test.ts" }]
       }
+    },
+    {
+      "id": "credential-encryption-and-audit",
+      "title": "Stored provider keys encrypted with a rotatable key; credential changes recorded",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/provider-credentials/:provider", "auth": "OWNER/ADMIN" },
+          { "ref": "DELETE /api/v1/workspace/provider-credentials/:provider", "auth": "OWNER/ADMIN" },
+          { "ref": "POST /api/v1/keys", "badge": false },
+          { "ref": "DELETE /api/v1/keys/:id", "badge": false },
+          { "ref": "GET /api/v1/audit/timeline", "auth": "OWNER/ADMIN", "badge": false }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/routes/AuditTimelinePage.tsx", "contains": "credentialChangeTitle" },
+          { "file": "apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx", "contains": "credential.changed" },
+          { "file": "apps/dashboard/src/components/settings/EditSiemSourcesModal.tsx", "contains": "credential_changes" }
+        ],
+        "cli": [{ "ref": "credentials set", "badge": false }, { "ref": "credentials unset", "badge": false }],
+        "gateSdk": { "none": "not agent-facing" },
+        "clawdeSdk": { "none": "not agent-facing" },
+        "mcpTools": { "none": "not agent-facing" },
+        "kitkat": { "none": "not agent-facing" },
+        "terraform": [{ "ref": "intutic_virtual_key", "badge": false }],
+        "docs": [
+          "security.md#stored-credentials",
+          { "ref": "guide/self-host.md#rotate-the-encryption-key", "badge": false },
+          { "ref": "guide/audit-timeline.md#what-it-shows", "badge": false }
+        ],
+        "website": { "none": "a security detail the docs carry; the landing page names no storage scheme" },
+        "events": ["credential.changed", "siem:credential_changes"],
+        "enforcement": [
+          { "file": "services/control-plane/src/lib/credentialEncryption.ts", "contains": "enc:v1:" },
+          { "file": "packages/proxy/src/credential_crypto.rs", "contains": "enc:v1:" },
+          { "file": "services/control-plane/src/services/credentialEncryptionBackfill.ts" },
+          { "file": "services/control-plane/src/services/credentialChangeService.ts" }
+        ]
+      }
     }
   ]
 }
