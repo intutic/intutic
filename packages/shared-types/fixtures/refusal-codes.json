@@ -39,6 +39,7 @@
       { "code": "HELD", "meaning": "A hold rule matched: the call is held for a person's approval, and `holdId` names the hold" },
       { "code": "SOP_RULE", "meaning": "A block rule in the SOP register matched" },
       { "code": "HOOK_GATE", "meaning": "The control plane's hook gate refused the call, or could not be reached while `failClosed` is on" },
+      { "code": "COMMAND_TOO_LARGE", "meaning": "The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls" },
       { "code": "E_UNPINNED_LATEST", "meaning": "A deploy uses an image tagged `latest`" },
       { "code": "E_UNPINNED_TAG", "meaning": "A deploy uses an image by tag where the allowlist requires a digest" },
       { "code": "E_UNKNOWN_REGISTRY", "meaning": "A deploy uses an image from a registry the allowlist does not name" },

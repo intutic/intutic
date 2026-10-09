@@ -86,6 +86,8 @@ import { createHash } from 'node:crypto'
 import { active as activeGate, type Gate, type ToolInput } from './gate.js'
 import { IntuticGateRefusal } from './errors.js'
 import { PHRASES_JS_SOURCE } from './phrases.js'
+import { SEQUENCE_JS_SOURCE } from './sequence.js'
+import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MS } from './limits.js'
 
 /** Structural copy of `ai`'s `ToolApprovalResponse` prompt part (re-exported
  *  from `@ai-sdk/provider-utils` — confirmed field-for-field on 5.0.27 and
@@ -772,13 +774,16 @@ function loadRules() {
     if (!line || line.charAt(0) === '#') continue;
     const f = line.split('\\t');
     if (f.length < 6 || !f[5]) continue;
+    // Flags: i = case-insensitive, s = a sequence rule (sequence.ts).
+    const ic = f[2].indexOf('i') !== -1;
     try {
       rules.push({
         id: f[0],
         severity: f[1],
         subject: f[3] || 'any',
         reason: f[4],
-        pattern: new RegExp(f[5], f[2] === 'i' ? 'i' : ''),
+        pattern: new RegExp(f[5], ic ? 'i' : ''),
+        steps: f[2].indexOf('s') !== -1 ? compileSequence(f[5], ic) : null,
       });
     } catch (e) {
       // Regex would not compile — dropped, not fatal. Matches snapshot.ts.
@@ -790,6 +795,10 @@ function loadRules() {
 // The phrase matcher snapshot.ts uses, emitted from phrases.ts: a \`phrase\`
 // rule's source is |-separated phrases matched as words, not a regex.
 ${PHRASES_JS_SOURCE}
+
+// The sequence-rule matcher snapshot.ts uses, emitted from sequence.ts: a rule
+// flagged \`s\` has its steps searched for in order, in linear time.
+${SEQUENCE_JS_SOURCE}
 
 function evaluate(toolName, target, command, rules) {
   const nTool = normalise(toolName);
@@ -809,7 +818,7 @@ function evaluate(toolName, target, command, rules) {
       rule.subject === 'target' ? [nTarget] :
       [nCommand, nTarget];
     for (const subject of subjects) {
-      if (!rule.pattern.test(subject)) continue;
+      if (!(rule.steps ? sequenceMatch(rule.steps, subject) : rule.pattern.test(subject))) continue;
       return { severity: rule.severity, reason: rule.reason + ' [' + rule.id + ']' };
     }
   }
@@ -826,8 +835,33 @@ process.stdin.on('end', () => {
     const target = toolInput.path || toolInput.file_path || toolInput.filePath ||
       toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
     const command = String(toolInput.command || toolInput.cmd || toolInput.script || '');
+    // Too large to evaluate inside the hook timeout: refused before any rule
+    // runs (limits.ts). Claude Code reads a hook that times out as an allow.
+    const commandBytes = Buffer.byteLength(command, 'utf8');
+    const argumentBytes = Buffer.byteLength(JSON.stringify(toolInput) || '', 'utf8');
+    if (commandBytes > ${COMMAND_SIZE_LIMIT} || argumentBytes > ${ARGUMENTS_SIZE_LIMIT}) {
+      console.error('[Intutic Guardrail] BLOCKED: COMMAND_TOO_LARGE: the ' +
+        (commandBytes > ${COMMAND_SIZE_LIMIT} ? 'command is ' + commandBytes : 'tool arguments are ' + argumentBytes) +
+        ' bytes, over the ' + (commandBytes > ${COMMAND_SIZE_LIMIT} ? ${COMMAND_SIZE_LIMIT} : ${ARGUMENTS_SIZE_LIMIT}) +
+        '-byte limit a gate evaluates; split the work into smaller calls');
+      process.exit(2);
+    }
     const rules = loadRules();
-    const decision = evaluate(toolName, target, command, rules);
+    // The rules run under a deadline that interrupts even a regex mid-match,
+    // measured from process start, and a call still undecided then is refused:
+    // a snapshot rule written in a workspace need not be linear.
+    let decision;
+    globalThis.__intuticEvaluate = function () { return evaluate(toolName, target, command, rules); };
+    try {
+      decision = require('vm').runInThisContext('__intuticEvaluate()', {
+        timeout: Math.max(1, ${GATE_DEADLINE_MS} - Math.round(process.uptime() * 1000)),
+      });
+    } catch (err) {
+      if (!err || err.code !== 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw err;
+      console.error('[Intutic Guardrail] BLOCKED: GATE_DEADLINE: the policy rules did not finish within ' +
+        ${GATE_DEADLINE_MS} + ' ms, so the call is refused rather than left to the hook timeout');
+      process.exit(2);
+    }
     if (decision && (decision.severity === 'warn' || decision.severity === 'shadow')) {
       console.error('[Intutic Guardrail] FLAGGED (' + decision.severity + '): ' + decision.reason);
     } else if (decision && decision.severity === 'hold') {

@@ -74,7 +74,7 @@ describe('harness adapters install their gates', () => {
     await access(join(root, '.github', 'copilot-instructions.md'))
   })
 
-  it('continue: registers the cn gate and routes OpenAI/Anthropic models in config.yaml', async () => {
+  it('continue: routes OpenAI/Anthropic models in config.yaml and registers no hook cn would never fire', async () => {
     await mkdir(join(home, '.continue'), { recursive: true })
     await writeFile(join(home, '.continue', 'config.yaml'), 'models:\n  - name: GPT\n    provider: openai\n    model: gpt-4o\n')
 
@@ -82,8 +82,9 @@ describe('harness adapters install their gates', () => {
 
     expect(await readFile(join(home, '.continue', 'config.yaml'), 'utf-8')).toContain(`apiBase: ${PROXY_URL}/v1/`)
     for (const settings of [join(root, '.continue', 'settings.json'), join(home, '.continue', 'settings.json')]) {
-      expect(await readFile(settings, 'utf-8')).toContain('continue-check.js')
+      await expect(access(settings)).rejects.toThrow()
     }
+    await expect(access(join(root, '.intutic', 'hooks', 'continue-check.js'))).rejects.toThrow()
   })
 
   it('antigravity: registers the BeforeTool gate in ~/.gemini/settings.json', async () => {

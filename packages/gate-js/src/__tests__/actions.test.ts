@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { classify, isDeploy, isTest, touchesInfra } from '../actions.js'
+import { expectLinearTime } from './linearTime.js'
 
 describe('classify', () => {
   it('only classifies shell-shaped tools', () => {
@@ -56,20 +57,10 @@ describe('db_write, whatever separates the keywords', () => {
   // The proxy's regex (SQL_GAP in actions.rs) is safe in Rust's linear
   // engine; here a backtracking one took seconds on text an agent can be talked
   // into writing. The phrase matcher must stay linear on every one of these.
-  it.each(vectors.adversarial)(
-    'classifies %j repeated %i times in under 200 ms',
-    (unit, times) => {
-      const command = unit.repeat(times)
-      let best = Infinity
-      for (let run = 0; run < 3; run++) {
-        const t0 = performance.now()
-        classify('bash', { command })
-        best = Math.min(best, performance.now() - t0)
-      }
-      // The best of three runs: the bound is on the matcher, not on a busy machine.
-      expect(best).toBeLessThan(200)
-    },
-  )
+  it.each(vectors.adversarial)('classifies %j repeated up to %i times in linear time', (unit, times) => {
+    const commands = { 1: unit.repeat(Math.ceil(times / 4)), 4: unit.repeat(Math.ceil(times / 4) * 4) }
+    expectLinearTime(JSON.stringify(unit), (scale) => classify('bash', { command: commands[scale] }))
+  })
 
   it('carries a byte-identical copy of the shared phrase matcher', () => {
     const shared = readFileSync(join(__dirname, '../../../shared-types/src/phrases.ts'), 'utf-8')

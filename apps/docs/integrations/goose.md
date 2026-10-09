@@ -34,7 +34,7 @@ intutic start
 
 Intutic generates and hardens Goose plugin rules:
 * **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `.goosehints`, written when at least one SOP targets Goose. Your own hints in the file are kept. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
-* **Plugin Path:** `~/.agents/plugins/intutic-governance/hooks/hooks.json`
+* **Plugin:** `~/.agents/plugins/intutic-governance/plugin.json` and `hooks/hooks.json`, which runs `scripts/intutic-check.sh` on every `PreToolUse` with `on_failure: "block"` (Goose refuses the call if the gate times out, crashes or answers nothing it reads; its default is to run it) and `timeout: 10`.
 * **Configuration:** Updates `OPENAI_HOST` and `GOOSE_PROVIDER` in `~/.config/goose/config.yaml`.
 * **Hardening:** Applies file system immutable flags (`chflags uchg` on macOS, `chattr +i` on Linux) to prevent Goose from disabling or deleting the governance hooks.
 

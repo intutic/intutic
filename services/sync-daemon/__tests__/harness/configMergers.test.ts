@@ -262,15 +262,28 @@ describe('Pi ~/.pi/models.json', () => {
 })
 
 describe('Hermes ~/.hermes/config.yaml', () => {
-  it('sets hooks.preToolUse.command without touching other command keys or comments', () => {
+  it('registers a fail-closed pre_tool_call hook in place of the preToolUse key Hermes never read, keeping comments', () => {
     const config = '# mine\nmcp_servers:\n  fs:\n    command: mcp-fs\nhooks:\n  preToolUse:\n    command: /old/hermes-check.sh\n'
     const merged = mergeHermesYaml(config, '/home/u/.intutic/hooks/hermes-check.sh')!
     expect(merged).toContain('# mine')
     expect(parseYaml(merged)).toEqual({
       mcp_servers: { fs: { command: 'mcp-fs' } },
-      hooks: { preToolUse: { command: '/home/u/.intutic/hooks/hermes-check.sh' } },
+      hooks: { pre_tool_call: [{ command: '/home/u/.intutic/hooks/hermes-check.sh', timeout: 10, fail_closed: true }] },
     })
     expect(mergeHermesYaml(merged, '/home/u/.intutic/hooks/hermes-check.sh')).toBe(merged)
+  })
+
+  it('keeps the user\'s own pre_tool_call hooks and quotes a path with a space for shlex', () => {
+    const config = 'hooks:\n  pre_tool_call:\n    - command: ~/.hermes/agent-hooks/scan.sh\n      fail_closed: true\n'
+    const merged = parseYaml(mergeHermesYaml(config, '/home/my u/.intutic/hooks/hermes-check.sh')!)
+    expect(merged.hooks.pre_tool_call).toEqual([
+      { command: '~/.hermes/agent-hooks/scan.sh', fail_closed: true },
+      { command: "'/home/my u/.intutic/hooks/hermes-check.sh'", timeout: 10, fail_closed: true },
+    ])
+  })
+
+  it('leaves a pre_tool_call it would not know how to edit untouched', () => {
+    expect(mergeHermesYaml('hooks:\n  pre_tool_call: nope\n', '/x/hermes-check.sh')).toBeNull()
   })
 
   it('leaves a file that does not parse untouched', () => {

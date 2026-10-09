@@ -33,7 +33,6 @@ export const GATE_ARTIFACTS: Readonly<Partial<Record<HarnessType, readonly strin
   'openclaw': ['.intutic/hooks/openclaw-check.js'],
   'muse-code': ['.intutic/hooks/muse-check.js'],
   'github-copilot': ['.intutic/hooks/github-copilot-check.js'],
-  'continue': ['.intutic/hooks/continue-check.js'],
   'grok': ['.intutic/hooks/grok-check.js'],
   'cline': ['.clinerules/hooks/PreToolUse'],
   'goose': ['.agents/plugins/intutic-governance/scripts/intutic-check.sh'],

@@ -45,7 +45,7 @@ afterEach(() => {
 /** Writes a one-rule `.rules` file (no header, so no digest/workspace check
  *  gets in the way of an isolated fidelity check) and loads it. */
 function loadIsolated(p: FixturePattern) {
-  const line = [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', p.reason, p.source].join('\t')
+  const line = [p.id, p.severity, (p.ignoreCase ? 'i' : '') + (p.sequence ? 's' : '') || '-', p.subject ?? 'any', p.reason, p.source].join('\t')
   const file = join(dir, 'policy-snapshot.rules')
   writeFileSync(file, line + '\n', 'utf-8')
   return loadSnapshot('', file)

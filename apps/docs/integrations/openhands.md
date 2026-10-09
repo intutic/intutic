@@ -4,7 +4,7 @@ Integrate Intutic governance with [OpenHands](https://github.com/All-Hands-AI/Op
 
 ## How it works
 
-Intutic writes your SOP text to `.openhands/microagents/intutic-governance.md`, a repository microagent. It has no triggers, so OpenHands adds it to every conversation. It also merges `[llm] base_url` into your project's `config.toml`, pointing OpenHands' model calls at the Intutic proxy, and keeps everything else in that file, including comments. A PreToolUse hook in `.openhands/hooks.json` blocks a tool call that breaks a rule before it runs.
+Intutic writes your SOP text to `.openhands/microagents/intutic-governance.md`, a repository microagent. It has no triggers, so OpenHands adds it to every conversation. It also merges `[llm] base_url` into your project's `config.toml`, pointing OpenHands' model calls at the Intutic proxy, and keeps everything else in that file, including comments. A PreToolUse hook in `.openhands/hooks.json` (`timeout: 10`) blocks a tool call that breaks a rule before it runs. OpenHands runs a call whose hook times out, so the gate refuses on its own after 4 seconds; see [Hook timeouts](/reference/harness-security-matrix#hook-timeouts).
 
 ## Setup
 

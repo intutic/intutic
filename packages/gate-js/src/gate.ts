@@ -56,6 +56,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { isDeploy, touchesInfra } from './actions.js'
 import { IntuticGateHold, IntuticGateRefusal } from './errors.js'
 import { holdMessage, requestHold } from './hold.js'
+import { tooLargeReason } from './limits.js'
 import { GateClient } from './client.js'
 import * as imagecheck from './imagecheck.js'
 import * as snapshot from './snapshot.js'
@@ -230,6 +231,17 @@ export class Gate {
 
     const target = String(toolInput.path ?? toolInput.file_path ?? '')
     const command = String(toolInput.command ?? '')
+
+    // ---- Size: refused before any tier reads the call ------------------
+    //
+    // Every built-in rule is linear, but a workspace's own WHERE patterns
+    // need not be, and the bound is what keeps a crafted call from holding
+    // the agent (or a harness hook) past its deadline. See limits.ts.
+    const tooLarge = tooLargeReason(command, toolInput)
+    if (tooLarge !== null) {
+      await this.emit('tool_blocked', toolName, tooLarge)
+      throw new IntuticGateRefusal(tooLarge, 'COMMAND_TOO_LARGE')
+    }
 
     await this.reportSnapshotHealthOnce(toolName)
 

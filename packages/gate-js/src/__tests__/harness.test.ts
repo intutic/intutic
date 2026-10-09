@@ -865,7 +865,7 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
   })
 
   function rulesLine(p: FixturePattern): string {
-    return [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', p.reason, p.source].join('\t')
+    return [p.id, p.severity, (p.ignoreCase ? 'i' : '') + (p.sequence ? 's' : '') || '-', p.subject ?? 'any', p.reason, p.source].join('\t')
   }
 
   /** Builds the stdin JSON envelope Claude Code's real PreToolUse hook sends,
@@ -959,7 +959,7 @@ describe('intuticSandboxBootstrap: generated hook script and hold rules', () => 
 })
 
 function writeIsolatedRules(dir: string, p: FixturePattern): string {
-  const line = [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', p.reason, p.source].join('\t')
+  const line = [p.id, p.severity, (p.ignoreCase ? 'i' : '') + (p.sequence ? 's' : '') || '-', p.subject ?? 'any', p.reason, p.source].join('\t')
   const file = join(dir, `isolated-${p.id.replace(/[^a-zA-Z0-9]/g, '_')}.rules`)
   writeFileSync(file, line + '\n', 'utf-8')
   return file

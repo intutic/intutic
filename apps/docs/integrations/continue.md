@@ -4,7 +4,7 @@ Integrate Intutic governance with [Continue](https://continue.dev) — the open-
 
 ## How it works
 
-Intutic points Continue's OpenAI and Anthropic models at the proxy by setting their `apiBase` in `~/.continue/config.yaml`, installs a PreToolUse gate for the Continue CLI (`cn`), and writes your SOPs to `.continue/rules/intutic-governance.md`, a rule with `alwaysApply: true` that Continue adds to every request. Everything else in your config — other models, context providers, comments — is kept.
+Intutic points Continue's OpenAI and Anthropic models at the proxy by setting their `apiBase` in `~/.continue/config.yaml`, and writes your SOPs to `.continue/rules/intutic-governance.md`, a rule with `alwaysApply: true` that Continue adds to every request. Everything else in your config — other models, context providers, comments — is kept.
 
 ## Setup
 
@@ -33,28 +33,17 @@ intutic start
 ## What gets written
 
 * **`~/.continue/config.yaml`:** `apiBase: http://localhost:4000/v1/` on each model whose `provider` is `openai` or `anthropic`. Models from other providers (Ollama, Gemini, …) are left alone — the proxy does not serve their APIs. A config with no such model, or one that does not parse, is left untouched and reported in the `intutic connect` log. Intutic does not set `apiKey`; keep your own.
-* **`~/.continue/settings.json` and `<repo>/.continue/settings.json`:** the CLI gate registration (below).
 * **`.continue/rules/intutic-governance.md`:** your SOP text, with `alwaysApply: true` front matter, written when at least one SOP targets Continue. The IDE extension reads the `.continue/rules/` of the workspace root; the `cn` CLI reads the `.continue/rules/` of the directory it runs in, so run `cn` from the workspace root. The file is Intutic's own; keep your own rules in other files there. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness continue`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
-## Pre-tool hooks (Continue CLI only)
+## No pre-tool gate
 
-The Continue **CLI** (`cn`) executes PreToolUse hooks; the IDE extension does
-not. The sync-daemon writes a blocking gate at
-`.intutic/hooks/continue-check.js` and registers it in
-`~/.continue/settings.json` (user) and `<repo>/.continue/settings.json`
-(project), preserving any hooks you registered yourself.
-
-The stdin contract is Claude-Code-compatible (`{tool_name, tool_input,
-tool_use_id}`) and the gate refuses with exit code 2. It enforces the
-compiled protection floor and your policy snapshot, including ` WHERE `
-(argPattern) rules against the serialized tool input.
-
-::: tip Overlap with Claude Code
-The Continue CLI also reads `.claude/settings.json`, so on a machine governed
-for Claude Code, `cn` may already run that gate. The dedicated registration in
-Continue's own settings makes governance deliberate — and covers machines that
-run Continue without Claude Code, which would otherwise have no gate at all.
-Both gates evaluate the same rules, so the overlap is harmless.
-:::
+Continue has no tool-call hook Intutic can use. The IDE extension has no hook
+system. The CLI (`cn`) loads `PreToolUse` hooks from its settings files but
+never runs them: nothing in it calls `firePreToolUse` (continuedev/continue
+`main` at `5522c6f`), and the pull request that would have wired it in was
+closed unmerged. So Continue is governed by the proxy, which sees every
+request its OpenAI and Anthropic models make, and by the rules file above.
+Earlier Intutic versions registered a gate in `.continue/settings.json` that
+`cn` never ran; `intutic disconnect --harness continue` removes it.

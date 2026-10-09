@@ -58,6 +58,7 @@ import { join } from 'node:path'
 import { decodeSsoGroupRecord, SSO_GROUP_RECORD_TAG, type SsoGroupRecord } from './ssoGroups.js'
 import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
 import { classify } from './actions.js'
+import { compileSequence, sequenceMatch } from './sequence.js'
 
 export const SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -87,6 +88,14 @@ export interface Rule {
   subject: RuleSubject
   reason: string
   pattern: RegExp
+  /**
+   * A sequence rule's compiled steps (flags `s`, sequence.ts), or null. The
+   * rule is matched by searching for its steps in order, in linear time,
+   * rather than by {@link pattern}, which a backtracking engine runs in time
+   * growing with the square of the text. Absent on a rule built by hand,
+   * which is matched by {@link pattern}.
+   */
+  steps?: RegExp[][] | null
 }
 
 export class Snapshot {
@@ -144,8 +153,7 @@ export function snapshotPath(): string {
 /**
  * Collapse and pad whitespace, as the shipped gates do — case is
  * DELIBERATELY left untouched; a rule that wants case-insensitivity sets its
- * own `ignoreCase` flag. See the module doc comment for both ways the Python
- * SDK's reader diverges from this.
+ * own `ignoreCase` flag. See the module doc comment.
  */
 function normalise(value: unknown): string {
   const s = value === null || value === undefined ? '' : String(value)
@@ -185,14 +193,17 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
 
     const f = line.split('\t')
     // Column order: id, severity, flags, subject, reason, source(regex), [argPatternB64].
+    // Flags: i = case-insensitive, s = a sequence rule.
     if (f.length < 6 || !f[5]) continue
+    const ic = f[2]!.includes('i')
     try {
       snap.rules.push({
         id: f[0]!,
         severity: f[1]!,
         subject: (f[3] as RuleSubject) || 'any',
         reason: f[4]!,
-        pattern: new RegExp(f[5]!, f[2] === 'i' ? 'i' : ''),
+        pattern: new RegExp(f[5]!, ic ? 'i' : ''),
+        steps: f[2]!.includes('s') ? compileSequence(f[5]!, ic) : null,
       })
     } catch {
       snap.droppedRules += 1
@@ -290,7 +301,7 @@ export function evaluate(
                 : [nCommand, nTarget]
 
     for (const subject of subjects) {
-      if (rule.subject !== 'phrase' && !rule.pattern.test(subject)) continue
+      if (rule.subject !== 'phrase' && !(rule.steps ? sequenceMatch(rule.steps, subject) : rule.pattern.test(subject))) continue
       if (rule.severity === SEV_SHADOW) {
         return { severity: SEV_SHADOW, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id }
       }

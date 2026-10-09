@@ -751,7 +751,7 @@ const continueHarness: HarnessReverser = async (plan, ctx) => {
 
 async function goosePlugin(plan: DisconnectPlan): Promise<void> {
   const plugin = join(home(), '.agents', 'plugins', 'intutic-governance')
-  for (const file of [join(plugin, 'hooks', 'hooks.json'), join(plugin, 'scripts', 'intutic-check.sh')]) {
+  for (const file of [join(plugin, 'plugin.json'), join(plugin, 'hooks', 'hooks.json'), join(plugin, 'scripts', 'intutic-check.sh')]) {
     // Hardened read-only and immutable while connected: the flag comes off first.
     await reverseOwnedFile(plan, file, home(), contains('Intutic'), { beforeApply: () => unharden(file) })
     plan.removeIfEmpty(node_path.dirname(file))
@@ -785,7 +785,11 @@ const hermes: HarnessReverser = async (plan, ctx) => {
   await agentsMd(plan, ctx)
   await gateScripts(plan, home(), ['hermes-check.sh'])
   await reverseStructuredFile(plan, join(home(), '.hermes', 'config.yaml'), home(), yamlFormat, (doc, c) =>
-    restoreKey(doc, ['hooks', 'preToolUse', 'command'], c, (v) => runsGate(v, 'hermes-check.sh')),
+    allEdits(
+      removeFromArray(doc, ['hooks', 'pre_tool_call'], (e) => isObject(e) && runsGate(e.command, 'hermes-check.sh'), c.original),
+      // Where earlier versions put it.
+      restoreKey(doc, ['hooks', 'preToolUse', 'command'], c, (v) => runsGate(v, 'hermes-check.sh')),
+    ),
   )
   const skill = join(home(), '.hermes', 'skills', 'intutic-governance')
   await reverseOwnedFile(plan, join(skill, 'SKILL.md'), home(), contains('name: intutic-governance'))

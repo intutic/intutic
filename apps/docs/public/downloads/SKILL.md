@@ -96,6 +96,7 @@ Continue without it, or tell the user what would have to change and who can chan
 - **Spend:** `BUDGET_EXCEEDED`, `OVERAGE_HARD_CAP_EXCEEDED`, `COST_GATE_EXCEEDED` (a smaller request may pass). An MCP `BUDGET_EXCEEDED` lasts until its `resetAt`; `intutic_mcp_budget_remaining` shows what is left.
 - **Images:** `E_UNPINNED_LATEST`, `E_UNPINNED_TAG`, `E_UNKNOWN_REGISTRY`, `E_UNKNOWN_IMAGE`, `E_DIGEST_MISMATCH`, `E_MANIFEST_UNPARSEABLE`: deploy an image pinned to a digest the image allowlist approves.
 - **Gate setup:** `WORKFLOW_SANDBOX`, `NO_GATE`: the gate is wired wrongly in the agent's code; fix the code, not the call.
+- **Size:** `COMMAND_TOO_LARGE`: the command is over 256 KiB, or the tool's arguments over 1 MiB, more than any gate evaluates. Split the work: smaller commands, or a file written in parts. A hook gate that could not finish deciding in time says `GATE_DEADLINE` in its reason; the call did not run, and the same call will be refused again, so tell the user.
 
 ### Not checked: retry once, later
 `GOVERNANCE_UNAVAILABLE`, `REGISTRY_UNAVAILABLE`, `BUDGET_UNAVAILABLE`, `TOFU_UNAVAILABLE`, `RESPONSE_UNPARSEABLE`, and `HOOK_GATE` when its reason says the control plane was unreachable: governance could not check the call, so it did not run. One later retry is fine; if it fails again, tell the user.

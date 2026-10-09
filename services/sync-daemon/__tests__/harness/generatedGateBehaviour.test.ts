@@ -33,7 +33,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { GATES, NO_GATE, type GateEntry } from './gateRegistry.js'
-import { HarnessType, holdApprovalHint } from '@intutic/shared-types'
+import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MS, HarnessType, holdApprovalHint } from '@intutic/shared-types'
 import {
   UNIVERSAL_PROTECTED_PATHS,
   GOVERNANCE_BYPASS_PATTERNS,
@@ -537,6 +537,47 @@ for (const g of GATES) {
       assertCleanExit(g, r, 'an ordinary command')
       expect(wasBlocked(g, r), `${g.name} blocked \`npm run build\``).toBe(false)
     })
+
+    it('refuses a command over the size limit as COMMAND_TOO_LARGE, and evaluates one at it', async () => {
+      // A gate slower than its hook timeout is an allow under most harnesses,
+      // so a call too large to evaluate in time is refused before any rule
+      // runs (gateLimits.ts). Bytes, not characters: é is two.
+      const atLimit = 'echo ' + 'x'.repeat(COMMAND_SIZE_LIMIT - 5)
+      const over = 'echo ' + 'é'.repeat(COMMAND_SIZE_LIMIT / 2)
+      const ok = await runGate(g, { command: atLimit })
+      assertCleanExit(g, ok, 'a command at the size limit')
+      expect(wasBlocked(g, ok), `${g.name} refused a command of exactly ${COMMAND_SIZE_LIMIT} bytes`).toBe(false)
+      const r = await runGate(g, { command: over })
+      assertCleanExit(g, r, 'a command over the size limit')
+      expect(wasBlocked(g, r), `${g.name} evaluated a command over ${COMMAND_SIZE_LIMIT} bytes`).toBe(true)
+      expect(r.stdout + r.stderr).toMatch(/COMMAND_TOO_LARGE/)
+    }, 60_000)
+
+    it('refuses tool arguments over the size limit as COMMAND_TOO_LARGE', async () => {
+      const r = await runGate(g, { file_path: '/w/notes.md', content: 'x'.repeat(ARGUMENTS_SIZE_LIMIT) }, { tool: 'Write' })
+      assertCleanExit(g, r, 'arguments over the size limit')
+      expect(wasBlocked(g, r), `${g.name} evaluated arguments over ${ARGUMENTS_SIZE_LIMIT} bytes`).toBe(true)
+      expect(r.stdout + r.stderr).toMatch(/COMMAND_TOO_LARGE/)
+    }, 60_000)
+
+    it('refuses at its own deadline, before the shortest harness timeout reads as an allow', async () => {
+      // A workspace's WHERE pattern is its own regex; this one backtracks
+      // exponentially on the call below in Python's re and in V8. Without the
+      // deadline the gate ran until the harness gave up — an allow under Grok
+      // Build (5 s), Copilot, VS Code, Goose, OpenHands and Hermes.
+      const snap = writeRulesFixture(join(home, `deadline-${g.name}.rules`), [{
+        id: 'sop.slow_where', source: ' (Bash) ', subject: 'tool', severity: 'block',
+        reason: 'Blocked by SOP slow_where', rationale: '', matches: [], notMatches: [],
+        argPattern: '(a+)+$',
+      }])
+      const started = Date.now()
+      const r = await runGate(g, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap })
+      const elapsed = Date.now() - started
+      assertCleanExit(g, r, 'a call whose WHERE pattern does not finish')
+      expect(wasBlocked(g, r), `${g.name} let a call through that its rules never decided`).toBe(true)
+      expect(r.stdout + r.stderr).toMatch(/GATE_DEADLINE/)
+      expect(elapsed, `${g.name} took ${elapsed} ms; Grok Build allows at 5000`).toBeLessThan(GATE_DEADLINE_MS + 900)
+    }, 30_000)
 
 
     // Explicit budget, not the file's 15s default. Each case runs a real gate,

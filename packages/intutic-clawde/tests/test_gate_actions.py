@@ -104,17 +104,11 @@ def test_adversarial_input_classifies_in_linear_time(unit, times):
     # The proxy's regex (SQL_GAP in actions.rs) is safe in Rust's linear
     # engine; Python's backtracking one took seconds on text an agent can be
     # talked into writing. The phrase matcher must stay linear on these.
-    import time
+    from linear_time import assert_linear_time
 
-    command = unit * times
-    best = None
-    for _ in range(3):
-        t0 = time.perf_counter()
-        actions.classify("bash", {"command": command})
-        took = time.perf_counter() - t0
-        best = took if best is None else min(best, took)
-    # The best of three runs: the bound is on the matcher, not on a busy machine.
-    assert best < 0.2
+    base = -(-times // 4)
+    commands = {1: unit * base, 4: unit * (base * 4)}
+    assert_linear_time(repr(unit), lambda scale: actions.classify("bash", {"command": commands[scale]}))
 
 
 # The commands and answers are the shared destructive-SQL vectors, run by every

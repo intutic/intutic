@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { scanToolInput, formatDlpBlockReason } from '../dlp.js'
+import { expectLinearTime } from './linearTime.js'
 
 describe('scanToolInput', () => {
   it('returns no findings for benign content', () => {
@@ -132,16 +133,9 @@ describe('scanToolInput', () => {
       (JSON.parse(readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8')) as {
         adversarial: Array<[string, number]>
       }).adversarial,
-    )('scans %j repeated %i times in under 200 ms', (unit, times) => {
-      const command = unit.repeat(times)
-      let best = Infinity
-      for (let run = 0; run < 3; run++) {
-        const t0 = performance.now()
-        scanToolInput({ command })
-        best = Math.min(best, performance.now() - t0)
-      }
-      // The best of three runs: the bound is on the matcher, not on a busy machine.
-      expect(best).toBeLessThan(200)
+    )('scans %j repeated up to %i times in linear time', (unit, times) => {
+      const commands = { 1: unit.repeat(Math.ceil(times / 4)), 4: unit.repeat(Math.ceil(times / 4) * 4) }
+      expectLinearTime(JSON.stringify(unit), (scale) => scanToolInput({ command: commands[scale] }))
     })
   })
 

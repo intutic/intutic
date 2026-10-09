@@ -45,7 +45,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { emitJsGate, emitJsFailClosedPrelude, HOOK_TIMEOUT_SECONDS } from './gateBody.js'
 
 const log = createLogger('sync-github-copilot-hooks')
 
@@ -181,7 +181,8 @@ function buildHookConfig(hookScriptPath: string) {
           // Catch-all: the gate decides from the arguments, so a tool name
           // nobody anticipated is still evaluated.
           matcher: '.*',
-          hooks: [{ type: 'command', command: `node "${hookScriptPath}"` }],
+          // \`timeout\` is VS Code's key and the Copilot CLI's alias for \`timeoutSec\`.
+          hooks: [{ type: 'command', command: `node "${hookScriptPath}"`, timeout: HOOK_TIMEOUT_SECONDS }],
         },
       ],
     },

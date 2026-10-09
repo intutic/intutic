@@ -175,14 +175,28 @@ class TestPhraseRules:
 
     @pytest.mark.parametrize("unit,times", [("drop -- ", 25000), ("drop /* ", 25000), ("\\ ", 100000)])
     def test_stays_linear_on_crafted_input(self, s, unit, times):
-        import time
+        from linear_time import assert_linear_time
 
-        command = unit * times
-        best = None
-        for _ in range(3):
-            t0 = time.perf_counter()
-            snap.evaluate("shell", "", command, s)
-            took = time.perf_counter() - t0
-            best = took if best is None else min(best, took)
-        # The best of three runs: the bound is on the matcher, not on a busy machine.
-        assert best < 0.2
+        commands = {1: unit * (times // 4), 4: unit * times}
+        assert_linear_time(repr(unit), lambda scale: snap.evaluate("shell", "", commands[scale], s))
+
+
+class TestNormalisation:
+    """The subject is padded and keeps its case, as in every hook gate."""
+
+    @pytest.fixture()
+    def s(self, tmp_path):
+        return snap.load_snapshot(WS, _rules_file(tmp_path, [
+            line("destructive.rm_rf_root", "block", "-", "command", "Recursive delete of the root",
+                 r" rm( +-[a-zA-Z-]+)+ +/( |\*)"),
+            line("bypass.env_kill_switch", "block", "-", "any", "Kill switch", r" [A-Z][A-Z0-9_]*_HOOKS?="),
+        ]))
+
+    def test_a_command_that_begins_with_the_verb_matches_a_padded_rule(self, s):
+        assert snap.evaluate("Bash", "", "rm -rf /", s).severity == snap.SEV_BLOCK
+
+    def test_a_rule_keyed_on_case_still_fires(self, s):
+        assert snap.evaluate("Bash", "", "CLAUDE_CODE_HOOKS=0 claude", s).severity == snap.SEV_BLOCK
+
+    def test_case_is_not_folded_for_a_rule_without_the_i_flag(self, s):
+        assert snap.evaluate("Bash", "", "claude_code_hooks=0 claude", s).severity is None

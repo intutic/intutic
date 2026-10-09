@@ -45,7 +45,6 @@ const GATE_REGISTRATION: Record<string, [file: string, marker: string]> = {
   antigravity: [join(home, '.gemini', 'settings.json'), 'antigravity-check.sh'],
   cline: [join(ws, '.clinerules', 'hooks', 'PreToolUse'), 'Intutic Cline PreToolUse governance gate.'],
   codex: [join(home, '.codex', 'hooks.json'), 'codex-check.js'],
-  continue: [join(home, '.continue', 'settings.json'), 'continue-check.js'],
   cursor: [join(home, '.cursor', 'hooks.json'), 'cursor-check.js'],
   dsh: [join(home, '.dsh', 'profiles', 'default', 'cordis.patch.yml'), 'intutic-governance'],
   'github-copilot': [join(ws, '.github', 'hooks', 'intutic-governance.json'), 'github-copilot-check.js'],
@@ -85,7 +84,7 @@ describe('connect installs gates with zero rule sets', () => {
     // The goose writer sets the user-immutable flag on its plugin files.
     if (process.platform === 'darwin') {
       const plugin = join(home, '.agents', 'plugins', 'intutic-governance')
-      for (const f of [join(plugin, 'hooks', 'hooks.json'), join(plugin, 'scripts', 'intutic-check.sh')]) {
+      for (const f of [join(plugin, 'plugin.json'), join(plugin, 'hooks', 'hooks.json'), join(plugin, 'scripts', 'intutic-check.sh')]) {
         await promisify(execFile)('chflags', ['nouchg', f]).catch(() => undefined)
       }
     }

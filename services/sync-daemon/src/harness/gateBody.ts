@@ -52,11 +52,19 @@ import { HOLD_APPROVAL_HINT_TEMPLATE, HOLD_ID_PLACEHOLDER } from '@intutic/share
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
   NORMALISE_CONTRACT,
+  ruleFlags,
   staticFloorPatterns,
   type GuardPattern,
 } from './protectedPaths.js'
-import { PHRASES_JS_SOURCE } from '@intutic/shared-types'
+import {
+  ARGUMENTS_SIZE_LIMIT,
+  COMMAND_SIZE_LIMIT,
+  GATE_DEADLINE_MS,
+  PHRASES_JS_SOURCE,
+  SEQUENCE_JS_SOURCE,
+} from '@intutic/shared-types'
 import { PHRASES_PY_SOURCE } from '../lib/phrasesPy.js'
+import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
 
 /**
  * Bumped when the emitted evaluator changes shape.
@@ -156,8 +164,31 @@ import { PHRASES_PY_SOURCE } from '../lib/phrasesPy.js'
  * substitution a minute on a long run of backslashes. A v11 gate reading a v12
  * snapshot reads a `phrase` rule's source — the phrases joined by `|` — as a
  * regex over the command, which still matches their plain spellings.
+ *
+ * v13: no gate rule runs a backtracking regex on a call, and no gate runs
+ * past its own deadline. Rules shaped `A.*B` carry the `s` flag in the
+ * `.rules` flags column (`is` with `i`) and run as sequences of steps
+ * (`@intutic/shared-types` sequence.ts, `sequence.py`); `grep -E` still runs
+ * them as written. A call whose command is over `COMMAND_SIZE_LIMIT` bytes or
+ * whose arguments are over `ARGUMENTS_SIZE_LIMIT` is refused as
+ * `COMMAND_TOO_LARGE`, and a gate still deciding `GATE_DEADLINE_MS` after it
+ * started refuses with `GATE_DEADLINE`, ahead of the harnesses that read a
+ * hook timeout as an allow. A v12 gate compares the flags column with `i`, so
+ * it runs a sequence rule as the regex it also is, case-sensitively.
  */
-export const GATE_VERSION = 12
+export const GATE_VERSION = 13
+
+/**
+ * The timeout every writer sets on its gate's hook entry, in seconds, where
+ * the harness has a key for one: Claude Code, Codex, the Copilot CLI and VS
+ * Code (`timeout`; the CLI's `timeoutSec` takes it as an alias), Antigravity,
+ * Goose, OpenHands and Hermes. Their defaults run from 30 s to 600 s, and most
+ * of them read a hook that outlives it as an allow; the gate refuses at
+ * `GATE_DEADLINE_MS` (4 s), so this leaves room for interpreter start-up and
+ * keeps a stalled gate from holding the agent for minutes. Grok Build's
+ * default and our setting is 5 s, the floor the deadline sits under.
+ */
+export const HOOK_TIMEOUT_SECONDS = 10
 
 /**
  * The coarse command → action-token classification the hold tier keys on:
@@ -290,21 +321,36 @@ function shellGuardTable(name: string, patterns: readonly GuardPattern[]): strin
   const rows = patterns.map(
     (p) =>
       `  ${shq(
-        [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', p.reason, p.source].join('\t'),
+        [p.id, p.severity, ruleFlags(p), p.subject ?? 'any', p.reason, p.source].join('\t'),
       )}`,
   )
   return `${name}=(\n${rows.join('\n')}\n)`
 }
 
-/** Emits a guard table as a JS array literal. */
+/**
+ * Emits a guard table as a JS array literal, preceded by the sequence-rule
+ * matcher its `seq` entries are compiled with (sequence.ts, emitted as source).
+ */
 function jsGuardTable(name: string, patterns: readonly GuardPattern[]): string {
   const rows = patterns.map(
     (p) =>
       `  { id: ${JSON.stringify(p.id)}, re: new RegExp(${JSON.stringify(p.source)}` +
-      `${p.ignoreCase ? ", 'i'" : ''}), severity: ${JSON.stringify(p.severity)}, ` +
+      `${p.ignoreCase ? ", 'i'" : ''}), ` +
+      `seq: ${p.sequence ? `compileSequence(${JSON.stringify(p.source)}, ${!!p.ignoreCase})` : 'null'}, ` +
+      `severity: ${JSON.stringify(p.severity)}, ` +
       `subject: ${JSON.stringify(p.subject ?? 'any')}, reason: ${JSON.stringify(p.reason)} },`,
   )
-  return `const ${name} = [\n${rows.join('\n')}\n];`
+  return (
+    `// Sequence rules (flags s): the regex's steps, each searched for once from\n` +
+    `// where the previous one ended, so a backtracking engine runs them in\n` +
+    `// linear time. Emitted from @intutic/shared-types sequence.ts.\n` +
+    `${SEQUENCE_JS_SOURCE}\n` +
+    `/** Whether a rule (floor or snapshot) matches one subject string. */\n` +
+    `function intuticRuleMatches(rule, subject) {\n` +
+    `  return rule.seq ? sequenceMatch(rule.seq, subject) : rule.re.test(subject);\n` +
+    `}\n\n` +
+    `const ${name} = [\n${rows.join('\n')}\n];`
+  )
 }
 
 /**
@@ -351,7 +397,7 @@ export const RULES_COLUMNS = ['id', 'severity', 'flags', 'subject', 'reason', 's
  */
 export function toRulesLine(p: GuardPattern): string {
   const reason = p.reason.replace(/[\t\n\r]/g, ' ')
-  const base = [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', reason, p.source].join('\t')
+  const base = [p.id, p.severity, ruleFlags(p), p.subject ?? 'any', reason, p.source].join('\t')
   // Appended only when present — see RULES_COLUMNS for why base64, and why a
   // rule without one must serialise byte-identically to the v3 layout.
   return p.argPattern ? base + '\t' + Buffer.from(p.argPattern, 'utf8').toString('base64') : base
@@ -403,6 +449,7 @@ intutic_fail_closed() {
   # that would replace the exit status it exists to correct.
   set +eu
   trap - EXIT
+  [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -413,6 +460,26 @@ intutic_fail_closed() {
   exit 2
 }
 trap intutic_fail_closed EXIT
+
+# ── Internal deadline ────────────────────────────────────────────────────────
+# Grok Build, the Copilot CLI, VS Code, Goose, OpenHands and Hermes run a call
+# whose hook outlives their timeout as if the hook had allowed it, Grok after
+# 5 s. So this gate refuses at ${GATE_DEADLINE_MS / 1000} s, from its own start: a
+# watchdog, detached so it holds none of the harness's pipes, stops the gate's
+# children (a grep or python3 still matching) and signals it; the trap below
+# refuses. Every built-in rule is linear; a workspace's own WHERE pattern need
+# not be.
+intutic_deadline() {
+  trap - USR1
+  echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within ${GATE_DEADLINE_MS / 1000} s, and refuses it rather than let the hook timeout allow it." >&2
+  if command -v log_event >/dev/null 2>&1; then
+    log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within ${GATE_DEADLINE_MS / 1000} s" || true
+  fi
+  exit 2
+}
+trap intutic_deadline USR1
+INTUTIC_GATE_PID=$$
+INTUTIC_WATCHDOG_PID="$( { ( sleep ${GATE_DEADLINE_MS / 1000}; pkill -P "$INTUTIC_GATE_PID" 2>/dev/null; kill -USR1 "$INTUTIC_GATE_PID" 2>/dev/null ) </dev/null >/dev/null 2>&1 & } ; echo $! )"
 `
 
 export interface ShellGateOptions {
@@ -625,6 +692,15 @@ if [ -z "\${1:-}" ] && [ "\${INTUTIC_EXTRACT_STATE:-malformed}" != "ok" ]; then
   _intutic_env_reason="unrecognised PreToolUse payload — neither a tool name nor a tool_input could be extracted from stdin; refusing rather than allowing a call the gate cannot read"
   echo "[Intutic Governance] BLOCKED: \${_intutic_env_reason}" >&2
   ${log} "tool_blocked" "unknown" "\${_intutic_env_reason}" || true
+  exit 2
+fi
+
+# Refuse a call too large to evaluate inside the hook timeout, before any rule
+# reads it (the extractor measured it; see gateLimits.ts). Scoped like the
+# envelope refusal above: the post/stop invocations carry no call to gate.
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_TOO_LARGE:-}" ]; then
+  echo "[Intutic Governance] BLOCKED: COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" >&2
+  ${log} "tool_blocked" "\${TOOL:-unknown}" "COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" || true
   exit 2
 fi
 
@@ -904,11 +980,13 @@ sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else
   [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
     [ "$rsubj" = "phrase" ] && break
-    if [ "$rflags" = "i" ]; then
-      printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
-    else
-      printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1
-    fi
+    # Flags: i = case-insensitive; s (a sequence rule) changes nothing here —
+    # grep matches with an automaton, linear in the text, so the regex runs
+    # as written.
+    case "$rflags" in
+      *i*) printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1 ;;
+      *)   printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1 ;;
+    esac
   done
   [ "$hit" = "1" ] || return 0
   # The argument condition of a WHERE rule. The tool-name half has matched; the
@@ -1076,11 +1154,16 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     if (!line || line.startsWith('#')) continue;
     const f = line.split('\\t');
     if (f.length < 6 || !f[5]) continue;
-    let re;
+    let re, seq = null;
     // A snapshot rule that will not compile is dropped, not fatal. The floor
     // above is compiled in and unaffected, so this degrades to "today's
-    // behaviour" rather than to "no gate".
-    try { re = new RegExp(f[5], f[2] === 'i' ? 'i' : ''); } catch (e) { continue; }
+    // behaviour" rather than to "no gate". Flags: i = case-insensitive,
+    // s = a sequence rule (see intuticRuleMatches).
+    const ic = f[2].indexOf('i') !== -1;
+    try {
+      re = new RegExp(f[5], ic ? 'i' : '');
+      if (f[2].indexOf('s') !== -1) seq = compileSequence(f[5], ic);
+    } catch (e) { continue; }
     // Optional seventh column: the WHERE clause, base64 so an arbitrary regex
     // cannot collide with the tab separator. Absent in v3-format files, which
     // is exactly "no argument condition". An argPattern that does not decode
@@ -1092,7 +1175,7 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
       try { argRe = new RegExp(Buffer.from(f[6], 'base64').toString('utf8')); }
       catch (e) { argDowngraded = true; }
     }
-    out.rules.push({ id: f[0], severity: f[1], subject: f[3] || 'any', re: re, reason: f[4],
+    out.rules.push({ id: f[0], severity: f[1], subject: f[3] || 'any', re: re, seq: seq, reason: f[4],
       argRe: argRe, argDowngraded: argDowngraded });
   }
 
@@ -1226,6 +1309,47 @@ ${refuse}
  * it itself so no writer can hand it a differently-shaped string.
  */
 function intuticGate(toolName, target, command, record, workspaceId, toolInput, sessionId) {
+  // Too large to evaluate inside the hook timeout (gateLimits.ts in
+  // @intutic/shared-types): refused before any rule reads the call.
+  var _commandBytes = Buffer.byteLength(String(command == null ? '' : command), 'utf8');
+  var _argumentBytes = 0;
+  try { _argumentBytes = Buffer.byteLength(JSON.stringify(toolInput == null ? {} : toolInput) || '', 'utf8'); } catch (e) {}
+  if (_commandBytes > ${COMMAND_SIZE_LIMIT} || _argumentBytes > ${ARGUMENTS_SIZE_LIMIT}) {
+    var reason = 'COMMAND_TOO_LARGE — ' + (_commandBytes > ${COMMAND_SIZE_LIMIT}
+      ? 'the command is ' + _commandBytes + ' bytes, over the ${COMMAND_SIZE_LIMIT}-byte limit a gate evaluates; split it into smaller commands'
+      : 'the tool arguments are ' + _argumentBytes + ' bytes, over the ${ARGUMENTS_SIZE_LIMIT}-byte limit a gate evaluates; write the content in smaller parts');
+    try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+    try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuse}
+  }
+${
+  opts.contract === 'throw'
+    ? `  // In-process (the harness awaits this with no time limit), so no deadline.
+  return _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId);
+}`
+    : `  // The rules run under a deadline measured from process start that
+  // interrupts even a regex mid-match, below the hook timeout of every
+  // harness that reads a timeout as an allow (Grok Build: 5 s). A call still
+  // undecided then is refused. Built-in rules are linear; a workspace's own
+  // WHERE pattern need not be.
+  globalThis.__intuticGateRules = function () {
+    return _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId);
+  };
+  try {
+    return require('vm').runInThisContext('__intuticGateRules()', {
+      timeout: Math.max(1, ${GATE_DEADLINE_MS} - Math.round(process.uptime() * 1000)),
+    });
+  } catch (err) {
+    if (!err || err.code !== 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw err;
+    var reason = 'GATE_DEADLINE — the gate did not finish evaluating this call within ${GATE_DEADLINE_MS / 1000} s, and refuses it rather than let the hook timeout allow it';
+    try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+    try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuse}
+  }
+}`
+}
+
+function _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId) {
   // M3: Cline's \`use_mcp_tool\` envelope, normalized into the
   // \`mcp__<server>__<tool>\` shape every other harness's MCP tool name already
   // takes — BEFORE any rule fires. Cline's own tool-call schema names the
@@ -1309,7 +1433,7 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
       : rule.subject === 'action' ? [nActions]
       : [nCommand, nTarget];
     for (const subject of subjects) {
-      if (rule.subject !== 'phrase' && !rule.re.test(subject)) continue;
+      if (rule.subject !== 'phrase' && !intuticRuleMatches(rule, subject)) continue;
       // The argument condition of a WHERE rule: the tool-name half has
       // matched, and the rule fires only if the argPattern also matches the
       // serialized tool input. A pattern that failed to compile at load time
@@ -1689,21 +1813,35 @@ def raw_first(*keys):
             return v
     return ""
 raw_command = raw_first("command", "cmd", "script", "shell_command")
+tool_input_json = json.dumps(i, separators=(",", ":"), ensure_ascii=False)
+# Too large to evaluate inside the hook timeout (gateLimits.ts): the gate body
+# refuses on this line, and the command and arguments are not passed on.
+command_bytes = len(raw_command.encode("utf-8", "surrogatepass"))
+argument_bytes = len(tool_input_json.encode("utf-8", "surrogatepass"))
+too_large = ""
+if command_bytes > ${COMMAND_SIZE_LIMIT}:
+    too_large = "the command is %d bytes, over the ${COMMAND_SIZE_LIMIT}-byte limit a gate evaluates; split it into smaller commands" % command_bytes
+elif argument_bytes > ${ARGUMENTS_SIZE_LIMIT}:
+    too_large = "the tool arguments are %d bytes, over the ${ARGUMENTS_SIZE_LIMIT}-byte limit a gate evaluates; write the content in smaller parts" % argument_bytes
+if too_large:
+    raw_command = ""
+    tool_input_json = "{}"
 # The hold classifier reads the raw command: a line continuation or a comment
 # is still in it. The library is the shared phrase matcher, not a regex.
 lib = {}
 try:
     exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command) if not too_large else " "
 except Exception:
     actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
 print(state)
+print(too_large)
 print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
-print(first("command", "cmd", "script", "shell_command"))
+print("" if too_large else first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
 print(actions)
 # The raw command as one JSON line, for phrase-subject rules.
@@ -1714,8 +1852,8 @@ print(json.dumps(raw_command, ensure_ascii=False))
 # collapsed for token matching; this one must NOT be, or a WHERE clause that
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
-print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n')"
+print(tool_input_json)
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -1723,12 +1861,14 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r INTUTIC_TOO_LARGE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
 # Space-padded action tokens the extractor's classifier found, or " ".
 INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+# Why the call is too large to evaluate, or empty (gateLimits.ts).
+INTUTIC_TOO_LARGE="\${INTUTIC_TOO_LARGE:-}"
 INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-\"\"}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
@@ -1771,7 +1911,7 @@ export function emitPythonGate(): string {
   const rows = floor.map(
     (p) =>
       `    (${JSON.stringify(p.id)}, ${JSON.stringify(p.source)}, ` +
-      `${p.ignoreCase ? 're.IGNORECASE' : '0'}, ${JSON.stringify(p.reason)}),`,
+      `${p.ignoreCase ? 're.IGNORECASE' : '0'}, ${JSON.stringify(p.reason)}, ${p.sequence ? 'True' : 'False'}),`,
   )
   return `
 # ── Intutic gate body v${GATE_VERSION} — harness: open-webui ─────────────────
@@ -1786,6 +1926,17 @@ ${NORMALISE_CONTRACT.pySource}
 
 # The phrase matcher (intutic_clawde/gate/phrases.py), for phrase rules.
 ${PHRASES_PY_SOURCE}
+
+
+# The sequence-rule matcher (intutic_clawde/gate/sequence.py), for rules whose
+# flags carry "s": each step searched for once, so re's backtracking stays linear.
+${SEQUENCE_PY_SOURCE}
+
+
+def _intutic_rule_search(src, subject, flags_re, seq):
+    if seq:
+        return sequence_match(compile_sequence(src, flags_re), subject)
+    return re.search(src, subject, flags_re) is not None
 
 
 _state = {"digest": "", "workspace": ""}
@@ -1841,7 +1992,7 @@ def _intutic_snapshot_rules():
                     # A rule that will not compile is dropped, not fatal.
                     if _skip_destructive and f[0].startswith("destructive."):
                         continue
-                    out.append((f[0], f[5], re.IGNORECASE if f[2] == "i" else 0, f[4], f[1], f[3]))
+                    out.append((f[0], f[5], re.IGNORECASE if "i" in f[2] else 0, f[4], f[1], f[3], "s" in f[2]))
                 except Exception:
                     continue
     except Exception:
@@ -1866,14 +2017,14 @@ def _intutic_evaluate(text):
     """Returns (blocks, flags) for a prompt. Floor rules can only flag."""
     subject = _intutic_normalise(text)
     blocks, flags, shadowed = [], [], []
-    for rid, src, flags_re, reason in _INTUTIC_FLOOR:
+    for rid, src, flags_re, reason, seq in _INTUTIC_FLOOR:
         try:
-            if re.search(src, subject, flags_re):
+            if _intutic_rule_search(src, subject, flags_re, seq):
                 flags.append((rid, reason))
         except Exception:
             continue
     words = None
-    for rid, src, flags_re, reason, severity, rsubj in _intutic_snapshot_rules():
+    for rid, src, flags_re, reason, severity, rsubj, seq in _intutic_snapshot_rules():
         try:
             if rsubj == "phrase":
                 # |-separated phrases matched as words (phrases.py), never as
@@ -1882,7 +2033,7 @@ def _intutic_evaluate(text):
                     words = phrase_text(text)
                 if not any(has_phrase(words, p, True) for p in src.split("|")):
                     continue
-            elif not re.search(src, subject, flags_re):
+            elif not _intutic_rule_search(src, subject, flags_re, seq):
                 continue
         except Exception:
             continue
@@ -2065,7 +2216,7 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
       // reason the per-tool gates never test a path pattern against "Write".
       const subjects = rule.subject === 'phrase' ? [nParams] : rule.subject === 'tool' ? [nType, nTypeBase] : [nParams].concat(nLeaves);
       for (const subject of subjects) {
-        if (rule.subject !== 'phrase' && !rule.re.test(subject)) continue;
+        if (rule.subject !== 'phrase' && !intuticRuleMatches(rule, subject)) continue;
         if (rule.argDowngraded) {
           try {
             record('rule_downgraded', 'n8n:' + nodeName,
