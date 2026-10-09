@@ -22,7 +22,7 @@
 import { access, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { HarnessType, openaiBaseUrl } from '@intutic/shared-types'
+import { HarnessType, rulesFrontMatterOf, openaiBaseUrl } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { loadCredentials } from '../config/store.js'
@@ -30,7 +30,6 @@ import { mergeContinueConfig, writeContinueHooks } from '@intutic/sync-daemon'
 import { ownRulesFileHash, writeOwnRulesFile } from './rulesFiles.js'
 
 const RULES_FILE = '.continue/rules/intutic-governance.md'
-const FRONT_MATTER = 'name: Intutic governance rules\nalwaysApply: true'
 
 /** `~/.continue/<name>`, resolved at call time so HOME changes (and tests
  *  that move HOME) are honoured. */
@@ -61,7 +60,7 @@ export const continueAdapter: IHarnessAdapter = {
   },
 
   writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    return writeOwnRulesFile(workspaceRoot, RULES_FILE, sops, proxyUrl, FRONT_MATTER)
+    return writeOwnRulesFile(workspaceRoot, RULES_FILE, sops, proxyUrl, rulesFrontMatterOf(HarnessType.CONTINUE, 'Intutic governance rules'))
   },
 
   readCurrentHash(workspaceRoot: string): Promise<string | null> {

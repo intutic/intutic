@@ -29,13 +29,22 @@
  *     pattern (i): a DO-NOT-EDIT header + `atomicWrite`. Gitignored — runtime
  *     artifacts stay untracked, the same rule this repo's own CLAUDE.md doc
  *     comment states for daemon-generated governance files.
- *  2. A bounded, marker-delimited section (last ~10 entries) idempotently
- *     injected into the workspace's `CLAUDE.md` when it has one (rule sets go
- *     to `.claude/rules/`, a file of Intutic's own) — this is what makes
- *     the digest something the agent actually reads without needing to know
- *     `.intutic/DECISIONS.md` exists. A marker pair
- *     (`INTUTIC:DECISIONS_LOG:START`/`END`) is replaced in place on every
- *     cycle, never re-appended.
+ *  2. The newest ~10 entries, delivered to every active harness that reads
+ *     an instructions file, where `HARNESS_RULES_FILES` says it reads them
+ *     (`decisionsTargetOf`) — this is what makes the digest something the
+ *     agent actually reads without needing to know `.intutic/DECISIONS.md`
+ *     exists. In a file the user also writes (`AGENTS.md`, `GEMINI.md`,
+ *     ...) it is a marked section of its own (`INTUTIC:DECISIONS_LOG`),
+ *     apart from the rules section; next to a rules file of Intutic's own it
+ *     is a second file (`.claude/rules/intutic-decisions.md`, ...). Claude
+ *     Code gets it from `.claude/rules/`, which it loads with or without a
+ *     `CLAUDE.md`; `CLAUDE.md` itself is never written. When Claude Code
+ *     also reads the workspace's `AGENTS.md` and that file carries the
+ *     section for another harness, Claude Code's own file is left out, so it
+ *     does not read the log twice (see `claudeAgentsMd.ts`).
+ *
+ * Earlier versions put the section in `CLAUDE.md`; {@link
+ * retireClaudeMdDigest} takes it out again on every sync.
  *
  * Deliberately does NOT reuse `configWriter.ts`'s own `fileHeader()` for the
  * DECISIONS.md header — that helper stamps `newIso()` (wall-clock "Last
@@ -50,16 +59,21 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
-import { HarnessType } from '@intutic/shared-types'
+import { HarnessType, decisionsTargetOf, rulesFileOf } from '@intutic/shared-types'
 import { atomicWrite } from '../configWriter.js'
+import { DECISIONS_MARKERS, removeRulesSection, retireRulesFile, writeRulesSection } from '../harness/rulesSection.js'
+import { claudeCodeReadsAgentsMd } from '../harness/claudeAgentsMd.js'
+import { openclawAgentWorkspace } from '../harness/openclawHooks.js'
+import { ensureAiderReadEntry } from '../harness/aiderConfigMerger.js'
+import { forgetOriginal, readOriginal, writeOwnedFile } from '../disconnect/originals.js'
 
 const log = createLogger('sync-decisions-digest')
 
 /** Relative to the workspace root. */
 export const DECISIONS_LOG_RELATIVE_PATH = path.join('.intutic', 'DECISIONS.md')
 
-const SECTION_START = '<!-- INTUTIC:DECISIONS_LOG:START -->'
-const SECTION_END = '<!-- INTUTIC:DECISIONS_LOG:END -->'
+/** First line of the decisions log's own files, which `intutic disconnect` recognises. */
+export const DECISIONS_FILE_HEADER = '# Intutic Governed Decisions Log (auto-generated)'
 
 /** One digest entry, exactly as `GET /api/v1/workspace/decisions-digest` returns it — the summary line is already rendered server-side. */
 export interface DecisionsDigestEntry {
@@ -79,7 +93,7 @@ export interface DecisionsDigestOptions {
   apiKey: string
   workspaceId: string
   workspaceRoot: string
-  /** Active harnesses this cycle — the bounded section is only injected when `claude-code` is among them. */
+  /** Active harnesses this cycle: each that reads an instructions file gets the newest entries there. */
   harnesses: HarnessType[]
 }
 
@@ -167,31 +181,94 @@ export function renderDecisionsMarkdown(entries: DecisionsDigestEntry[]): string
   return header + lines.join('\n') + '\n'
 }
 
-/** Renders the bounded, marker-delimited section injected into the harness config file — the newest `limit` entries only. */
-export function renderBoundedSection(entries: DecisionsDigestEntry[], limit = 10): string {
+/** The newest `limit` entries, as the body of the section or file each harness reads. */
+export function renderDecisionsSectionBody(entries: DecisionsDigestEntry[], limit = 10): string {
   const bounded = entries.slice(0, limit)
   const lines =
     bounded.length > 0
       ? bounded.map((e) => `- ${e.timestamp} — ${e.summary}`)
       : ['_No governance decisions recorded yet._']
-  return [SECTION_START, '## Recent Governed Decisions', '', ...lines, SECTION_END].join('\n')
+  return ['## Recent Governed Decisions', '', ...lines].join('\n')
+}
+
+/** A harness's decisions file: the product's front matter, the header, the entries. */
+function renderDecisionsFile(body: string, frontMatter: string): string {
+  const head = frontMatter ? `---\n${frontMatter}\n---\n\n` : ''
+  return `${head}${DECISIONS_FILE_HEADER}\n# DO NOT EDIT — managed by intutic sync daemon\n\n${body}\n`
+}
+
+async function readText(file: string): Promise<string | null> {
+  try {
+    return await fs.readFile(file, 'utf-8')
+  } catch {
+    return null
+  }
 }
 
 /**
- * Idempotently inject/replace the bounded section in `content`. If the
- * markers are present, everything between them (inclusive) is replaced — the
- * mechanism the `applyConfigEdits` SkillOpt writer already uses elsewhere in
- * this file's sibling module, `configWriter.ts` — never duplicated. If
- * absent, the section is appended once, with a separating blank line.
+ * Writes `body` wherever each of `harnesses` reads its instructions, once per
+ * file. Claude Code's own file is left out (and removed) when Claude Code
+ * reads the workspace's `AGENTS.md` and that file gets the section for
+ * another harness.
  */
-export function injectBoundedSection(content: string, section: string): string {
-  const startIdx = content.indexOf(SECTION_START)
-  const endIdx = content.indexOf(SECTION_END)
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    return content.slice(0, startIdx) + section + content.slice(endIdx + SECTION_END.length)
+export async function writeDecisionsTargets(workspaceRoot: string, harnesses: readonly HarnessType[], body: string): Promise<void> {
+  const claudeFromAgentsMd =
+    harnesses.includes(HarnessType.CLAUDE_CODE) &&
+    harnesses.some((h) => rulesFileOf(h) === 'AGENTS.md') &&
+    (await claudeCodeReadsAgentsMd(workspaceRoot))
+  const written = new Set<string>()
+  for (const harness of harnesses) {
+    const target = decisionsTargetOf(harness)
+    if (!target) continue
+    const file =
+      target.kind === 'section' && target.scope === 'user'
+        ? path.join(await openclawAgentWorkspace(), 'AGENTS.md')
+        : path.join(workspaceRoot, target.path)
+    if (harness === HarnessType.CLAUDE_CODE && claudeFromAgentsMd) {
+      await retireRulesFile(file, workspaceRoot)
+      continue
+    }
+    if (written.has(file)) continue
+    written.add(file)
+    if (target.kind === 'section') {
+      await writeRulesSection(file, workspaceRoot, body, DECISIONS_MARKERS)
+      continue
+    }
+    const content = renderDecisionsFile(body, target.frontMatter?.('Intutic governed decisions log') ?? '')
+    if ((await readText(file)) !== content) await writeOwnedFile(file, workspaceRoot, content)
+    // Aider loads no file it is not told about.
+    if (harness === HarnessType.AIDER) await ensureAiderReadEntry(path.join(workspaceRoot, '.aider.conf.yml'), file)
   }
-  const sep = content.endsWith('\n\n') ? '' : content.endsWith('\n') ? '\n' : '\n\n'
-  return `${content}${sep}${section}\n`
+}
+
+/**
+ * Takes out the decisions-log section earlier versions wrote into the
+ * workspace's `CLAUDE.md`, leaving the user's text as it was. A `CLAUDE.md`
+ * Intutic created that holds nothing else goes, with its record; one an
+ * earlier version wrote whole is given back (`retireRulesFile`). Runs on
+ * every sync, whether or not the decisions log is on.
+ */
+export async function retireClaudeMdDigest(workspaceRoot: string): Promise<void> {
+  const file = path.join(workspaceRoot, 'CLAUDE.md')
+  const text = await readText(file)
+  if (text === null) return
+  const next = removeRulesSection(text, DECISIONS_MARKERS)
+  if (next !== null) {
+    const record = await readOriginal(file, workspaceRoot)
+    if (next.trim() === '' && record && !record.existed) {
+      await fs.rm(file, { force: true })
+      await forgetOriginal(file, workspaceRoot)
+      log.info({ action: 'decisions_claude_md_removed', path: file }, 'Removed the CLAUDE.md an earlier version created for the decisions log')
+      return
+    }
+    const mode = (await fs.stat(file)).mode & 0o7777
+    const tmp = `${file}.intutic-tmp`
+    await fs.writeFile(tmp, next, 'utf-8')
+    await fs.chmod(tmp, mode)
+    await fs.rename(tmp, file)
+    log.info({ action: 'decisions_claude_md_section_removed', path: file }, 'Took the decisions-log section out of CLAUDE.md')
+  }
+  await retireRulesFile(file, workspaceRoot)
 }
 
 /**
@@ -211,27 +288,7 @@ export async function refreshDecisionsDigest(
     const fullPath = path.join(opts.workspaceRoot, DECISIONS_LOG_RELATIVE_PATH)
     await atomicWrite(fullPath, renderDecisionsMarkdown(digest.entries))
 
-    if (opts.harnesses.includes(HarnessType.CLAUDE_CODE)) {
-      const claudeMdPath = path.join(opts.workspaceRoot, 'CLAUDE.md')
-      let existing: string | null = null
-      try {
-        existing = await fs.readFile(claudeMdPath, 'utf-8')
-      } catch {
-        existing = null
-      }
-      if (existing !== null) {
-        const section = renderBoundedSection(digest.entries, 10)
-        const updated = injectBoundedSection(existing, section)
-        if (updated !== existing) {
-          await atomicWrite(claudeMdPath, updated)
-        }
-      } else {
-        log.debug(
-          { action: 'decisions_digest_skip_inject' },
-          'no CLAUDE.md in the workspace — skipping bounded-section injection this cycle',
-        )
-      }
-    }
+    await writeDecisionsTargets(opts.workspaceRoot, opts.harnesses, renderDecisionsSectionBody(digest.entries, 10))
 
     return { entriesWritten: digest.entries.length }
   } catch (err) {

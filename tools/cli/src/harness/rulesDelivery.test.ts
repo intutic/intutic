@@ -32,8 +32,8 @@ const fake = vi.hoisted(() => {
 import * as fs from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { HARNESS_RULES_FILES, HarnessType, rulesFileOf, type SyncSopEntry } from '@intutic/shared-types'
-import { HARNESS_FILES, RULES_SECTION_START } from '@intutic/sync-daemon'
+import { HARNESS_RULES_FILES, HarnessType, decisionsTargetOf, rulesFileOf, type SyncSopEntry } from '@intutic/shared-types'
+import { HARNESS_FILES, RULES_SECTION_START, writeDecisionsTargets } from '@intutic/sync-daemon'
 import { ALL_ADAPTERS, getAdapter } from './detector.js'
 import { buildSopSections } from './rulesFiles.js'
 import { writeHarnessConfigs } from '../commands/connect.js'
@@ -41,6 +41,7 @@ import { writeHarnessConfigs } from '../commands/connect.js'
 const { base, home, ws } = fake
 const PROXY = 'http://127.0.0.1:4000'
 const MARKER = 'rules-delivery-marker-7f3a'
+const DECISIONS_MARKER = 'decisions-delivery-marker-2c9e'
 const USER_TEXT = '# Team notes\n\nKeep me.\n'
 /** Where earlier versions wrote the rules whole; the user's own copies must be left as they are. */
 const LEGACY = ['CLAUDE.md', '.cursorrules', '.windsurfrules', '.roorules']
@@ -80,6 +81,14 @@ describe('HARNESS_RULES_FILES', () => {
     }
   })
 
+  it('names no CLAUDE.md for rule sets or the decisions log: it is the team\'s file, and creating one hides AGENTS.md from Claude Code', () => {
+    for (const h of harnesses) {
+      const target = HARNESS_RULES_FILES[h]
+      const paths = target.kind === 'none' ? [] : target.kind === 'file' ? [target.path, target.decisionsPath] : [target.path]
+      for (const p of paths) expect(p.split('/').pop()?.toUpperCase(), h).not.toMatch(/^CLAUDE(\.LOCAL)?\.MD$/)
+    }
+  })
+
   it('every adapter tracks drift on its rules file', () => {
     for (const adapter of ALL_ADAPTERS) {
       const file = rulesFileOf(adapter.type)
@@ -98,12 +107,19 @@ describe('HARNESS_RULES_FILES', () => {
     const docs = await fs.readFile(fileURLToPath(new URL('../../../../apps/docs/guide/how-it-works.md', import.meta.url)), 'utf-8')
     const table = docs.slice(docs.indexOf('## Where rule sets go'))
     const rows = new Map<string, string>()
-    for (const m of table.matchAll(/^\| [^|]+ \| `([a-z0-9-]+)` \| ([^|]+) \|/gm)) rows.set(m[1]!, m[2]!.trim())
+    const decisions = new Map<string, string>()
+    for (const m of table.matchAll(/^\| [^|]+ \| `([a-z0-9-]+)` \| ([^|]+) \| ([^|]+) \|/gm)) {
+      rows.set(m[1]!, m[2]!.trim())
+      decisions.set(m[1]!, m[3]!.trim())
+    }
     expect([...rows.keys()].sort()).toEqual([...harnesses].sort())
     for (const h of harnesses) {
       const target = HARNESS_RULES_FILES[h]
       const want = target.kind === 'none' ? 'No instructions file' : `\`${target.scope === 'user' ? '~/' : ''}${target.path}\``
       expect(rows.get(h), h).toContain(want)
+      const log = decisionsTargetOf(h)
+      const wantLog = log === null ? 'Does not reach it' : log.kind === 'section' ? 'Its own section' : `\`${log.path}\``
+      expect(decisions.get(h), h).toContain(wantLog)
     }
   })
 })
@@ -134,8 +150,13 @@ describe('each adapter writes its rule sets where the product reads them', () =>
     for (const legacy of LEGACY) await fs.writeFile(join(ws, legacy), `${legacy}: the user's own\n`)
 
     await adapter.writeConfig(ws, [sop('one', [harness])], PROXY)
+    await writeDecisionsTargets(ws, [harness], `## Recent Governed Decisions\n\n- ${DECISIONS_MARKER}`)
 
     const after = await files(home)
+    const logCarriers = [...after].filter(([, text]) => text.includes(DECISIONS_MARKER)).map(([p]) => p)
+    const log = decisionsTargetOf(harness)
+    const expectedLog = log === null ? null : join(log.kind === 'section' && log.scope === 'user' ? home : ws, log.path)
+    expect(logCarriers, `decisions log written to ${logCarriers.map((p) => relative(home, p)).join(', ')}`).toEqual(expectedLog ? [expectedLog] : [])
     const carrying = [...after].filter(([, text]) => text.includes(MARKER)).map(([p]) => p)
     expect(carrying, `rule text written to ${carrying.map((p) => relative(home, p)).join(', ')}`).toEqual(expected ? [expected] : [])
     for (const legacy of LEGACY) expect(after.get(join(ws, legacy))).toBe(`${legacy}: the user's own\n`)
@@ -192,5 +213,55 @@ describe('AGENTS.md, shared by every harness that reads it', () => {
     const text = await fs.readFile(join(ws, 'AGENTS.md'), 'utf-8')
     expect(text).toContain('Codex rule.')
     expect(text).not.toContain('Pi rule.')
+  })
+})
+
+describe('no writer creates CLAUDE.md', () => {
+  beforeEach(async () => {
+    await fs.rm(home, { recursive: true, force: true })
+    await fs.mkdir(ws, { recursive: true })
+  })
+
+  it('the rules and the decisions log for every harness at once leave the workspace without one', async () => {
+    const all = ALL_ADAPTERS.map((a) => a.type)
+    for (const adapter of ALL_ADAPTERS) await adapter.writeConfig(ws, [sop('one', all)], PROXY)
+    await writeDecisionsTargets(ws, all, `## Recent Governed Decisions\n\n- ${DECISIONS_MARKER}`)
+    for (const name of ['CLAUDE.md', join('.claude', 'CLAUDE.md'), 'CLAUDE.local.md']) {
+      await expect(fs.access(join(ws, name)), name).rejects.toThrow()
+    }
+  })
+})
+
+describe('Claude Code does not load a rule set twice', () => {
+  const claudeRules = () => join(ws, '.claude', 'rules', 'intutic-governance.md')
+  const both = [HarnessType.CLAUDE_CODE, HarnessType.CODEX]
+
+  beforeEach(async () => {
+    await fs.rm(home, { recursive: true, force: true })
+    await fs.mkdir(ws, { recursive: true })
+  })
+
+  it('without a CLAUDE.md it reads AGENTS.md, so a rule set aimed at it and Codex is only there', async () => {
+    await writeHarnessConfigs(both, ws, [sop('shared', both, 'Shared rule.'), sop('mine', [HarnessType.CLAUDE_CODE], 'Claude-only rule.')], PROXY, false)
+    const own = await fs.readFile(claudeRules(), 'utf-8')
+    expect(own).toContain('Claude-only rule.')
+    expect(own).not.toContain('Shared rule.')
+    const agents = await fs.readFile(join(ws, 'AGENTS.md'), 'utf-8')
+    expect(agents).toContain('Shared rule.')
+    expect(agents).not.toContain('Claude-only rule.')
+  })
+
+  it('takes its own file away when every rule set aimed at it comes through AGENTS.md', async () => {
+    await writeHarnessConfigs([HarnessType.CLAUDE_CODE], ws, [sop('shared', both, 'Shared rule.')], PROXY, false)
+    expect(await fs.readFile(claudeRules(), 'utf-8')).toContain('Shared rule.')
+    await writeHarnessConfigs(both, ws, [sop('shared', both, 'Shared rule.')], PROXY, false)
+    await expect(fs.access(claudeRules())).rejects.toThrow()
+  })
+
+  it('with a CLAUDE.md it does not read AGENTS.md, so its own file carries everything aimed at it', async () => {
+    await fs.writeFile(join(ws, 'CLAUDE.md'), '# Team\n')
+    await writeHarnessConfigs(both, ws, [sop('shared', both, 'Shared rule.')], PROXY, false)
+    expect(await fs.readFile(claudeRules(), 'utf-8')).toContain('Shared rule.')
+    expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toBe('# Team\n')
   })
 })
