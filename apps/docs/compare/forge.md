@@ -35,7 +35,7 @@ On audit integrity, Intutic covers what Forge's ledger does (a hash chain, datab
 - **Credential brokering.** It issues short-lived cloud credentials to agents and right-sizes their permissions. Intutic governs what an agent does with access it already has.
 - **MCP OAuth brokering.** Forge's MCP gateway brokers OAuth 2.1 for remote MCP servers. Intutic's MCP proxy passes a remote server's credentials through rather than obtaining, refreshing or scoping them. Both have server registries, budgets and tool-change risk scores; Intutic's budgets count calls in a Valkey the proxies share, so proxies on separate Valkeys count separately. New Intutic workspaces start with the registry allowing unapproved servers.
 - **Regulatory framework mapping.** Intutic maps its own evidence to SOC 2 and OWASP, and to the EU AI Act, ISO/IEC 42001, the NIST AI RMF and MITRE ATLAS where an enforcement layer can evidence a control, mostly as partial coverage. Forge also maps to HIPAA and other frameworks beyond AI governance and security.
-- **Policy as infrastructure code.** Rego policies with backtests against historical evidence, and a Terraform provider.
+- **Rego policies.** Forge evaluates Rego, with backtests against historical evidence. Intutic's custom rules are WASM modules written in AssemblyScript; Rego compiled to WASM runs only as an experimental local rule. Both have a Terraform provider: Intutic's is [open source](/guide/terraform) and not yet on the Terraform Registry.
 - **Protocol policies.** Connection and command decisions for HTTP, Postgres, MySQL and Redis. Intutic's `sql_guard` covers destructive SQL issued through an agent's tools.
 
 ## When to choose Intutic
@@ -50,7 +50,7 @@ On audit integrity, Intutic covers what Forge's ledger does (a hash chain, datab
 - You need to discover and inventory every AI agent and non-human identity across the organization.
 - You want agents to receive short-lived cloud credentials rather than standing keys.
 - Your compliance program needs mappings beyond the AI frameworks, such as HIPAA.
-- You manage policy as Rego and Terraform, and a hosted service suits your data posture.
+- You manage policy as Rego, and a hosted service suits your data posture.
 
 ---
 

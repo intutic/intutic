@@ -347,6 +347,8 @@ export interface ApiKeyInfo {
   lastUsedAt: string | null
   revokedAt: string | null
   createdAt: string
+  /** An automation key, exempt from the SSO-recency window (see `CreateApiKeyInputSchema`). */
+  isServiceAccount: boolean
 }
 
 // ─── Dashboard Summary ──────────────────────────────────────────────
