@@ -9,7 +9,7 @@ import {
   VerdictEvent,
 } from './types'
 import { ClawdeBlockedError, ClawdeConnectionError } from './errors'
-import { parseRefusal, headerRefusal, REFUSAL_HEADER } from './refusals'
+import { parseRefusal, headerRefusal, streamRefusal, REFUSAL_HEADER, REFUSAL_RULE_HEADER, type ProxyRefusal } from './refusals'
 import { normalizeRequest, normalizeResponse } from './schema-enforcer'
 import { resolveContext } from './context-resolver'
 import { BudgetChecker } from './budget-checker'
@@ -90,9 +90,10 @@ export class ClawdeClient {
    *
    * Resolves with `verdict: 'allow'` when the proxy let the request through. A
    * governance refusal, including one the proxy answers with a 200 and names in
-   * `x-intutic-refusal`, fires the matching event and rejects with
-   * `ClawdeBlockedError`, unretried. Transport failures, timeouts and 5xx
-   * answers are retried; anything else rejects with `ClawdeConnectionError`.
+   * `x-intutic-refusal` (or, on a stream, in its `: intutic-refusal` line),
+   * fires the matching event and rejects with `ClawdeBlockedError`, unretried.
+   * Transport failures, timeouts and 5xx answers are retried; anything else
+   * rejects with `ClawdeConnectionError`.
    */
   public async chat(params: ChatParams): Promise<ChatResponse> {
     const anthropic = this.provider === 'anthropic'
@@ -127,10 +128,12 @@ export class ClawdeClient {
       let status: number
       let text: string
       let refusedBy: string | null
+      let refusedRule: string | null
       try {
         const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal })
         status = response.status
         refusedBy = response.headers.get(REFUSAL_HEADER)
+        refusedRule = response.headers.get(REFUSAL_RULE_HEADER)
         text = await response.text()
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
@@ -144,25 +147,25 @@ export class ClawdeClient {
         try {
           json = JSON.parse(text)
         } catch {
+          // A `stream: true` request comes back as an event stream, which
+          // `chat()` does not parse; it still must not pass off a refusal
+          // the stream names as a transport failure.
+          const streamed = streamRefusal(text)
+          if (streamed) this.refuse(streamed, status)
           throw new ClawdeConnectionError(`Proxy answered ${status} with a body that is not JSON: ${text}`)
         }
         const normalized = normalizeResponse(json, this.provider)
-        // A refusal answered as an assistant turn (the cost-prediction gate).
+        // A refusal answered as an assistant turn: a withheld tool call, a
+        // withheld body, or the cost-prediction gate.
         const content = normalized.choices?.[0]?.message?.content
-        const answered = headerRefusal(refusedBy, typeof content === 'string' ? content : '')
-        if (answered) {
-          this.eventEmitter.emit(answered.verdict, { ...answered, status })
-          throw new ClawdeBlockedError(answered.verdict, answered.code, status, answered.message)
-        }
+        const answered = headerRefusal(refusedBy, refusedRule, typeof content === 'string' ? content : '')
+        if (answered) this.refuse(answered, status)
         normalized.verdict = 'allow'
         return normalized
       }
 
       const refusal = parseRefusal(status, text)
-      if (refusal) {
-        this.eventEmitter.emit(refusal.verdict, { ...refusal, status })
-        throw new ClawdeBlockedError(refusal.verdict, refusal.code, status, refusal.message)
-      }
+      if (refusal) this.refuse(refusal, status)
 
       lastError = `HTTP error ${status}: ${text}`
       // A 4xx that is not a refusal (bad key, malformed body) fails the same
@@ -171,5 +174,11 @@ export class ClawdeClient {
     }
 
     throw new ClawdeConnectionError(`Request failed after ${maxAttempts} attempts. Last error: ${lastError}`)
+  }
+
+  /** Fires the refusal's event, then throws it. */
+  private refuse(refusal: ProxyRefusal, status: number): never {
+    this.eventEmitter.emit(refusal.verdict, { ...refusal, status })
+    throw new ClawdeBlockedError(refusal.verdict, refusal.code, status, refusal.message, refusal.ruleId)
   }
 }

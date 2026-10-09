@@ -121,10 +121,12 @@ export interface BudgetCheckResult {
 export type EventCallback = (data: {
   /** One of the `RefusalVerdict` values; typed wider so listeners written against 2.0 compile. */
   verdict: Verdict | LegacyVerdict
-  /** The proxy's error code, e.g. `policy_denied` or `OVERAGE_HARD_CAP_EXCEEDED`. */
+  /** The proxy's refusal code, e.g. `policy_denied`, `OVERAGE_HARD_CAP_EXCEEDED` or `TOOL_DENIED`. */
   code: string
   status: number
   message: string
+  /** The rule that decided, when the proxy names one. */
+  ruleId?: string
   /** @deprecated Never set. */
   budgetRemainingUsd?: number
   /** @deprecated Never set. */

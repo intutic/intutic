@@ -1,0 +1,79 @@
+{
+  "_comment": "Every refusal code an agent or SDK can receive, per surface. The Rust proxy (packages/proxy/src/refusal.rs), both clawde SDKs (PROXY_REFUSALS), both gate SDKs (GATE_REFUSAL_CODES), the MCP proxy (MCP_REFUSAL_CODES), the reference tables in apps/docs and the Kitkat skill are each checked against this file. Add a code here first, then to every implementation the checks name.",
+  "proxy": {
+    "header": "x-intutic-refusal",
+    "ruleHeader": "x-intutic-refusal-rule",
+    "streamMarker": ": intutic-refusal ",
+    "refusals": [
+      { "code": "policy_denied", "status": 403, "verdict": "kill", "inBand": false, "meaning": "A policy, anomaly detector or custom WASM rule blocked the request" },
+      { "code": "model_not_allowed", "status": 403, "verdict": "kill", "inBand": false, "meaning": "The model is not on the approved-models list" },
+      { "code": "LOOP_RUN_TERMINATED", "status": 403, "verdict": "kill", "inBand": false, "meaning": "The loop run this request belongs to has stopped" },
+      { "code": "LOOP_RUN_PENDING_REVIEW", "status": 403, "verdict": "hold", "inBand": false, "meaning": "The loop run is paused until a reviewer approves or rejects it" },
+      { "code": "policy_reask", "status": 409, "verdict": "reask", "inBand": false, "meaning": "Revise the approach and try again; repeated attempts escalate to `policy_denied`" },
+      { "code": "BUDGET_EXCEEDED", "status": 429, "verdict": "kill", "inBand": false, "meaning": "The key's remaining budget does not cover the request" },
+      { "code": "OVERAGE_HARD_CAP_EXCEEDED", "status": 429, "verdict": "kill", "inBand": false, "meaning": "The daily spend cap is reached" },
+      { "code": "COST_GATE_EXCEEDED", "status": 402, "verdict": "kill", "inBand": true, "meaning": "The request's estimated cost is over the workspace threshold: 402 on a stream, a 200 answer otherwise" },
+      { "code": "dlp_policy_violation", "status": 400, "verdict": "kill", "inBand": false, "meaning": "The request contains content the DLP policy blocks" },
+      { "code": "TOOL_DENIED", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model called a tool an SOP denies to this agent role; the call was withheld" },
+      { "code": "SSO_GROUP", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model called a tool the workspace's SSO group policy does not clear for this member; the call was withheld" },
+      { "code": "SQL_GUARD", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model called a shell tool to run destructive SQL against a database the SQL allowlist does not admit; the call was withheld" },
+      { "code": "RESPONSE_UNPARSEABLE", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model's response did not parse while a tool policy was in force, so it was withheld; retrying may succeed" },
+      { "code": "OUTPUT_DLP", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model's response held sensitive content that could not be redacted safely, so it was withheld" }
+    ],
+    "notRefusals": [
+      "missing_key",
+      "vk_required",
+      "unauthorized",
+      "workspace_mismatch",
+      "org_mismatch",
+      "invalid_body",
+      "unsupported_route",
+      "byok_required",
+      "no_upstream_credential"
+    ]
+  },
+  "gate": {
+    "refusals": [
+      { "code": "SSO_GROUP", "meaning": "The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown" },
+      { "code": "SNAPSHOT", "meaning": "A block rule in the policy snapshot matched" },
+      { "code": "HELD", "meaning": "A hold rule matched: the call is held for a person's approval, and `holdId` names the hold" },
+      { "code": "SOP_RULE", "meaning": "A block rule in the SOP register matched" },
+      { "code": "HOOK_GATE", "meaning": "The control plane's hook gate refused the call, or could not be reached while `failClosed` is on" },
+      { "code": "E_UNPINNED_LATEST", "meaning": "A deploy uses an image tagged `latest`" },
+      { "code": "E_UNPINNED_TAG", "meaning": "A deploy uses an image by tag where the allowlist requires a digest" },
+      { "code": "E_UNKNOWN_REGISTRY", "meaning": "A deploy uses an image from a registry the allowlist does not name" },
+      { "code": "E_UNKNOWN_IMAGE", "meaning": "A deploy uses an image the allowlist does not name" },
+      { "code": "E_DIGEST_MISMATCH", "meaning": "A deploy uses an image digest the allowlist does not approve" },
+      { "code": "E_MANIFEST_UNPARSEABLE", "meaning": "The image allowlist, or a manifest the deploy names, is missing or unreadable" },
+      { "code": "WORKFLOW_SANDBOX", "only": "typescript", "meaning": "The Workflow DevKit adapter was called inside the workflow sandbox, where the gate cannot run; run it in a step" },
+      { "code": "NO_GATE", "only": "typescript", "meaning": "The Workflow DevKit adapter has no gate to call: none was passed and none was installed" }
+    ]
+  },
+  "mcp": {
+    "refusals": [
+      { "code": "REGISTRY_UNAVAILABLE", "meaning": "The MCP server registry has not loaded since the proxy started, and the proxy fails closed" },
+      { "code": "SERVER_BLOCKED", "meaning": "The server is blocked in the MCP server registry" },
+      { "code": "SERVER_HELD", "meaning": "The server changed its tools in a way scored high risk and waits for an owner or admin to approve it again" },
+      { "code": "SERVER_NOT_APPROVED", "meaning": "The workspace refuses servers it has not approved (`mcpDefaultPolicy: deny`), and this one is not approved" },
+      { "code": "TOOL_DISABLED", "meaning": "The tool is switched off on this server in the registry" },
+      { "code": "SERVER_NOT_ALLOWED", "meaning": "The server is not on the workspace's `mcpAllowedServers` list" },
+      { "code": "TOOL_NOT_ALLOWED", "meaning": "The tool is not on the workspace's `mcpAllowedTools` list" },
+      { "code": "SSO_GROUP", "meaning": "The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown" },
+      { "code": "DLP", "meaning": "The arguments contain a credential, a destructive command or a PII value the DLP scan blocks" },
+      { "code": "SOP_RULE", "meaning": "A `block` SOP rule matched" },
+      { "code": "HELD", "meaning": "A `require_approval` SOP rule matched: the call is held for a person's approval, and `holdId` names the hold" },
+      { "code": "INJECTION", "meaning": "The arguments matched a prompt-injection pattern, and the workspace blocks injection" },
+      { "code": "ANOMALY", "meaning": "An anomaly detector stopped the call" },
+      { "code": "WASM_RULE", "meaning": "A custom WASM rule blocked the call" },
+      { "code": "REASK", "meaning": "An anomaly detector or WASM rule refused this attempt; revise the approach" },
+      { "code": "REASK_EXHAUSTED", "meaning": "The same detector or rule refused three attempts, so it now blocks outright" },
+      { "code": "BUDGET_EXCEEDED", "meaning": "An MCP call budget covering this call is used up until `resetAt`" },
+      { "code": "BUDGET_UNAVAILABLE", "meaning": "A call budget covers this call but could not be checked, and the proxy fails closed" },
+      { "code": "GOVERNANCE_UNAVAILABLE", "meaning": "A governance check could not complete, and the proxy fails closed" },
+      { "code": "TOFU_UNAVAILABLE", "meaning": "The server's pinned tool definitions could not be read or written, and the proxy fails closed" },
+      { "code": "TOOL_DEFINITIONS_CHANGED", "meaning": "The server's tool definitions changed since they were first pinned, and the proxy fails closed" },
+      { "code": "RESULT_WITHHELD_DLP", "meaning": "The tool ran, but its result held sensitive data that could not be redacted safely, so it was not delivered" },
+      { "code": "RESULT_WITHHELD_INJECTION", "meaning": "The tool ran, but its result matched a prompt-injection pattern, so it was not delivered" }
+    ]
+  }
+}

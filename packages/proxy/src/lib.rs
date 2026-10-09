@@ -16,6 +16,8 @@ pub mod posture;
 pub mod probes;
 pub mod protocol;
 pub mod proxy;
+/// In-band refusals: the codes, headers and stream marker that name them
+pub mod refusal;
 pub mod router;
 pub mod snip;
 pub mod snip_code;

@@ -172,13 +172,22 @@ async fn a_member_outside_the_required_groups_never_receives_the_tool_call() {
                 .await
                 .expect("proxy reachable");
             let status = res.status();
-            (status, res.text().await.expect("body drains"))
+            let named = |h: &str| {
+                res.headers()
+                    .get(h)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string)
+            };
+            let refusal = (named("x-intutic-refusal"), named("x-intutic-refusal-rule"));
+            (status, res.text().await.expect("body drains"), refusal)
         }
     };
 
     // Streaming, member outside the required groups: the call is withheld
     // and the refusal names the rule, after the text that preceded it.
-    let (status, body) = send(UNCLEARED, "case-stream", true).await;
+    // The stream names the refusal to an SDK in a comment line, since its
+    // headers went out before the call was seen.
+    let (status, body, _) = send(UNCLEARED, "case-stream", true).await;
     assert!(status.is_success(), "{status}: {body}");
     assert!(
         !body.contains("call_ssogroup"),
@@ -186,27 +195,42 @@ async fn a_member_outside_the_required_groups_never_receives_the_tool_call() {
     );
     assert!(body.contains("Listing files."), "{body}");
     assert!(body.contains("[sso_group.high_risk.shell]"), "{body}");
+    assert!(
+        body.contains(r#": intutic-refusal {"code":"SSO_GROUP","#)
+            && body.contains(r#""rule":"sso_group.high_risk.shell""#),
+        "the stream does not name the refusal:\n{body}"
+    );
 
-    // Non-streaming, same member: the whole body is replaced.
-    let (status, body) = send(UNCLEARED, "case-json", false).await;
+    // Non-streaming, same member: the whole body is replaced, and the
+    // headers name the refusal.
+    let (status, body, refusal) = send(UNCLEARED, "case-json", false).await;
     assert!(status.is_success(), "{status}: {body}");
     assert!(!body.contains("call_ssogroup"), "{body}");
     assert!(body.contains("[sso_group.high_risk.shell]"), "{body}");
+    assert_eq!(
+        refusal,
+        (
+            Some("SSO_GROUP".to_string()),
+            Some("sso_group.high_risk.shell".to_string())
+        )
+    );
 
-    // A member in a required group gets the call, on both paths.
-    let (_, body) = send(CLEARED, "case-stream", true).await;
+    // A member in a required group gets the call, on both paths, unnamed.
+    let (_, body, _) = send(CLEARED, "case-stream", true).await;
     assert!(
         body.contains("call_ssogroup"),
         "a cleared call was dropped:\n{body}"
     );
     assert!(!body.contains("Blocked tool call"), "{body}");
-    let (_, body) = send(CLEARED, "case-json", false).await;
+    assert!(!body.contains("intutic-refusal"), "{body}");
+    let (_, body, refusal) = send(CLEARED, "case-json", false).await;
     assert!(body.contains("call_ssogroup"), "{body}");
+    assert_eq!(refusal, (None, None));
 
     // The policy cannot be fetched: fail-closed, the default, refuses the
     // request before it reaches the model, as an unreachable policy check does.
     let before = upstream.received_requests().await.expect("recording").len();
-    let (status, body) = send(UNREACHABLE, "case-json", false).await;
+    let (status, body, _) = send(UNREACHABLE, "case-json", false).await;
     assert_eq!(status, reqwest::StatusCode::FORBIDDEN, "{body}");
     assert!(body.contains("policy_denied"), "{body}");
     assert_eq!(

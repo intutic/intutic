@@ -1,7 +1,25 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { PROXY_REFUSALS, REFUSAL_HEADER, parseRefusal } from '../src/refusals'
+import {
+  PROXY_REFUSALS,
+  REFUSAL_HEADER,
+  REFUSAL_RULE_HEADER,
+  STREAM_REFUSAL_MARKER,
+  parseRefusal,
+  streamRefusal,
+} from '../src/refusals'
+
+/** The one list of refusal codes the proxy, both SDKs and the docs are held to. */
+const SHARED = JSON.parse(
+  readFileSync(join(__dirname, '../../shared-types/fixtures/refusal-codes.json'), 'utf-8'),
+).proxy as {
+  header: string
+  ruleHeader: string
+  streamMarker: string
+  refusals: Array<{ code: string; status: number; verdict: string; inBand: boolean; meaning: string }>
+  notRefusals: string[]
+}
 
 const STATUS: Record<string, number> = {
   BAD_REQUEST: 400,
@@ -14,23 +32,6 @@ const STATUS: Record<string, number> = {
   BAD_GATEWAY: 502,
   SERVICE_UNAVAILABLE: 503,
 }
-
-/**
- * 4xx errors the proxy returns that are not governance decisions: credentials,
- * workspace binding, a malformed request or route. A new 4xx code in proxy.rs
- * must land here or in PROXY_REFUSALS.
- */
-const NOT_REFUSALS = new Set([
-  'missing_key',
-  'vk_required',
-  'unauthorized',
-  'workspace_mismatch',
-  'org_mismatch',
-  'invalid_body',
-  'unsupported_route',
-  'byok_required',
-  'no_upstream_credential',
-])
 
 /** Every `json_error(StatusCode::X, "code", ...)` in the proxy, as [status, code]. */
 function proxyErrors(): Array<[number, string]> {
@@ -50,8 +51,20 @@ describe('proxy refusals', () => {
     expect(errors.length).toBeGreaterThan(20)
   })
 
-  it('pairs every refusal with the status the proxy sends it with', () => {
+  it('is the shared list, code for code', () => {
+    expect(PROXY_REFUSALS).toEqual(
+      Object.fromEntries(SHARED.refusals.map((r) => [r.code, { status: r.status, verdict: r.verdict }])),
+    )
+    expect([REFUSAL_HEADER, REFUSAL_RULE_HEADER, STREAM_REFUSAL_MARKER]).toEqual([
+      SHARED.header,
+      SHARED.ruleHeader,
+      SHARED.streamMarker,
+    ])
+  })
+
+  it('pairs every error-body refusal with the status the proxy sends it with', () => {
     for (const [code, { status }] of Object.entries(PROXY_REFUSALS)) {
+      if (status === 200) continue
       const statuses = errors.filter(([, c]) => c === code).map(([s]) => s)
       expect(statuses, code).not.toHaveLength(0)
       expect(new Set(statuses), code).toEqual(new Set([status]))
@@ -59,8 +72,9 @@ describe('proxy refusals', () => {
   })
 
   it('classifies every 4xx code the proxy sends', () => {
+    const notRefusals = new Set(SHARED.notRefusals)
     const unclassified = errors
-      .filter(([status, code]) => status < 500 && !(code in PROXY_REFUSALS) && !NOT_REFUSALS.has(code))
+      .filter(([status, code]) => status < 500 && !(code in PROXY_REFUSALS) && !notRefusals.has(code))
       .map(([status, code]) => `${status} ${code}`)
     expect(unclassified).toEqual([])
   })
@@ -74,13 +88,33 @@ describe('proxy refusals', () => {
   })
 })
 
-describe('refusals the proxy answers with a 200', () => {
-  const source = readFileSync(join(__dirname, '../../proxy/src/proxy.rs'), 'utf-8')
+describe('the clawde SDK reference', () => {
+  it('documents every proxy refusal in one table, with its status and verdict', () => {
+    const doc = readFileSync(join(__dirname, '../../../apps/docs/reference/clawde-sdk.md'), 'utf-8')
+    const rows = [...doc.matchAll(/^\| ([^|]+) \| `([A-Za-z_]+)` \| `(kill|reask|hold)` \| ([^|]+) \|$/gm)].map(
+      (m) => [m[2], m[1].trim(), m[3]],
+    )
+    const expected = SHARED.refusals.map((r) => [
+      r.code,
+      r.inBand && r.status !== 200 ? `${r.status}, or 200` : String(r.status),
+      r.verdict,
+    ])
+    expect(rows).toEqual(expected)
+  })
+})
 
-  it('reads the header the proxy sets, for a code it knows', () => {
-    expect(source).toContain(`REFUSAL_HEADER: &str = "${REFUSAL_HEADER}"`)
-    const named = [...source.matchAll(/\.header\(REFUSAL_HEADER, "([A-Za-z_]+)"\)/g)].map((m) => m[1])
-    expect(named).toEqual(['COST_GATE_EXCEEDED'])
-    for (const code of named) expect(PROXY_REFUSALS[code], code).toBeDefined()
+describe('the stream refusal marker', () => {
+  const line = `${STREAM_REFUSAL_MARKER}${JSON.stringify({ code: 'TOOL_DENIED', rule: 'deny_tools.Bash', message: 'no Bash' })}`
+
+  it('is found in a whole body or a single line', () => {
+    const expected = { verdict: 'kill', code: 'TOOL_DENIED', message: 'no Bash', ruleId: 'deny_tools.Bash' }
+    expect(streamRefusal(line)).toEqual(expected)
+    expect(streamRefusal(`data: {"choices":[]}\n\n${line}\n\ndata: [DONE]\n\n`)).toEqual(expected)
+  })
+
+  it('ignores every other line, other comments included', () => {
+    expect(streamRefusal('data: {"choices":[]}\n\n: keep-alive\n\ndata: [DONE]\n\n')).toBeNull()
+    expect(streamRefusal(`${STREAM_REFUSAL_MARKER}{not json`)).toBeNull()
+    expect(streamRefusal(`${STREAM_REFUSAL_MARKER}{"rule":"x"}`)).toBeNull()
   })
 })

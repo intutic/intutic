@@ -709,26 +709,27 @@ fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
     (status, axum::Json(body)).into_response()
 }
 
-/// Names the refusal on a 200 whose body is a synthetic assistant turn
-/// explaining it. A chat client shows that turn; an SDK reads this header, or
-/// it would take the explanation for the model's answer.
-pub(crate) const REFUSAL_HEADER: &str = "x-intutic-refusal";
-
 /// The cost-prediction gate's answer to a non-streaming request: the reason as
-/// an assistant turn, status 200, and `x-intutic-refusal: COST_GATE_EXCEEDED`.
+/// an assistant turn, status 200, and `x-intutic-refusal: COST_GATE_EXCEEDED`
+/// (see `crate::refusal`).
 fn cost_gate_response(body: Vec<u8>) -> Response {
-    Response::builder()
+    let mut response = Response::builder()
         .status(StatusCode::OK)
-        .header("content-type", "application/json")
-        .header(REFUSAL_HEADER, "COST_GATE_EXCEEDED")
-        .body(Body::from(body))
-        .unwrap_or_else(|_| {
-            json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "cost_gate_error",
-                "Cost gate failed",
-            )
-        })
+        .header("content-type", "application/json");
+    if let Some(headers) = response.headers_mut() {
+        crate::refusal::Refusal::new(
+            crate::refusal::Code::CostGateExceeded,
+            "cost_prediction.threshold",
+        )
+        .apply(headers);
+    }
+    response.body(Body::from(body)).unwrap_or_else(|_| {
+        json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "cost_gate_error",
+            "Cost gate failed",
+        )
+    })
 }
 
 /// Refusal response for a model that failed the workspace's approved-models
@@ -7222,6 +7223,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // because OpenAI dribbles `arguments` across chunks and no point in that
     // loop holds a complete version of either.
     let mut redaction_hijacks: Vec<crate::plugins::hijack::HijackedCall> = Vec::new();
+    // Set when output DLP withholds the whole body below, so the response
+    // names the refusal to an SDK (`crate::refusal`).
+    let mut output_dlp_withheld: Option<crate::refusal::Refusal> = None;
     let final_body = if state.config.intutic_settings.dlp.enabled
         && state.config.intutic_settings.dlp.scan_output
     {
@@ -7254,6 +7258,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         findings = findings.len(),
                         "Output DLP redaction produced invalid JSON — refusing rather than forwarding"
                     );
+                    output_dlp_withheld = Some(crate::refusal::Refusal::new(
+                        crate::refusal::Code::OutputDlp,
+                        format!(
+                            "dlp.{}",
+                            findings
+                                .first()
+                                .map(|f| f.pattern_name.as_str())
+                                .unwrap_or("output")
+                        ),
+                    ));
                     serde_json::to_vec(&crate::commands::non_streaming_body(
                         wire_for(&protocol, &provider),
                         &actual_model,
@@ -7812,6 +7826,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             if let Ok(v) = axum::http::HeaderValue::from_str(bad) {
                 headers_mut.insert("x-intutic-routing-fallback-from", v);
             }
+        }
+        // A body the response gate or output DLP replaced with a refusal is
+        // still a 200 assistant turn; these headers are how an SDK tells it
+        // from the model's answer. The gate also runs over the DLP refusal and
+        // finds no tool call in it, so at most one of the two is set.
+        if let Some(refusal) = response_denial
+            .as_ref()
+            .map(|d| d.refusal())
+            .or(output_dlp_withheld)
+        {
+            refusal.apply(headers_mut);
         }
     }
     response.body(Body::from(final_body)).unwrap_or_else(|_| {
@@ -11287,9 +11312,15 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::OK);
             assert_eq!(
                 resp.headers()
-                    .get(REFUSAL_HEADER)
+                    .get(crate::refusal::HEADER)
                     .and_then(|v| v.to_str().ok()),
                 Some("COST_GATE_EXCEEDED")
+            );
+            assert_eq!(
+                resp.headers()
+                    .get(crate::refusal::RULE_HEADER)
+                    .and_then(|v| v.to_str().ok()),
+                Some("cost_prediction.threshold")
             );
             assert_eq!(
                 resp.headers()

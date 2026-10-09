@@ -199,6 +199,12 @@ async fn destructive_sql_against_a_non_allowlisted_database_never_reaches_the_cl
     );
     assert!(body.contains("[Intutic] Blocked tool call"), "{body}");
     assert!(body.contains("postgres://db.prod.internal/app"), "{body}");
+    // A held block is released through a replay queue; the refusal still
+    // names itself to an SDK on the way out.
+    assert!(
+        body.contains(r#": intutic-refusal {"code":"SQL_GUARD","#),
+        "{body}"
+    );
 
     // Streaming, allowlisted target: released in order, nothing refused.
     let body = send("case-stream-local", true).await;
