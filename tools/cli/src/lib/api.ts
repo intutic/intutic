@@ -82,6 +82,23 @@ export interface ApiClient {
  * @param controlPlaneUrl - Base URL (e.g., http://localhost:3001 or https://api.intutic.ai)
  * @param apiKey - API key (vk_*) or JWT access token
  */
+/**
+ * The error a failed call throws. A 403 carries the server's `detail` when it
+ * gives one (a role guard names the roles that may make the call), so a member
+ * whose role cannot do something is told which role can, not shown raw JSON.
+ */
+export function apiFailure(method: string, path: string, status: number, text: string): Error {
+  if (status === 403) {
+    try {
+      const body = JSON.parse(text) as { detail?: unknown }
+      if (typeof body.detail === 'string') return new Error(`API ${method} ${path} refused (403): ${body.detail}`)
+    } catch {
+      // Not JSON: fall through to the raw text.
+    }
+  }
+  return new Error(`API ${method} ${path} failed (${status}): ${text}`)
+}
+
 export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiClient {
   const baseHeaders = {
     'Content-Type': 'application/json',
@@ -102,7 +119,7 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
 
     if (!res.ok) {
       const text = await res.text().catch(() => 'Unknown error')
-      throw new Error(`API ${method} ${path} failed (${res.status}): ${text}`)
+      throw apiFailure(method, path, res.status, text)
     }
 
     return unwrapToonEnvelope(await res.json()) as T
@@ -174,7 +191,7 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
       const res = await fetch(`${controlPlaneUrl}${path}`, { method: 'GET', headers })
       if (!res.ok) {
         const text = await res.text().catch(() => 'Unknown error')
-        throw new Error(`API GET ${path} failed (${res.status}): ${text}`)
+        throw apiFailure('GET', path, res.status, text)
       }
       return new Uint8Array(await res.arrayBuffer())
     },

@@ -6,7 +6,7 @@ title: "intutic_sop"
 
 # intutic_sop <Badge type="tip" text="Cloud" />
 
-A workspace SOP (rule set), managed through `/api/v1/sops`. A new SOP starts in `DRAFT`. Promotion through review, shadow and `VALIDATED` stays in the SOP review workflow, because each step is gated on evidence (the Gödel score, shadow results). Editing a SOP that is not a draft forks a new `DRAFT` version with a new id and retires the old one, exactly as an edit in the dashboard does; the plan shows `lifecycle_state` returning to `DRAFT` when that will happen.
+A workspace SOP (rule set), managed through `/api/v1/sops`. A new SOP starts in `DRAFT`. Promotion through review, shadow and `VALIDATED` stays in the SOP review workflow, because each step is gated on evidence (the Gödel score, shadow results). Editing a SOP that is not a draft forks a new `DRAFT` version with a new id and retires the old one, exactly as an edit in the dashboard does; the plan shows `lifecycle_state` returning to `DRAFT` when that will happen. Needs an OWNER or ADMIN key.
 
 ## Example Usage
 

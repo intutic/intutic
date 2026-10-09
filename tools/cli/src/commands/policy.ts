@@ -769,7 +769,7 @@ export async function uploadCandidateBundle(
     log.error(`Rule candidate "${candidateId}" was not found in this workspace.`)
     process.exit(1)
   }
-  if (status === 400 || status === 409) {
+  if (status === 400 || status === 403 || status === 409) {
     log.error(`Refused: ${body.error ?? `HTTP ${status}`}${body.detail ? ` — ${body.detail}` : ''}`)
     process.exit(1)
   }
@@ -1022,6 +1022,12 @@ export async function runPolicyReplay(
       } else {
         log.error(`Replay could not evaluate the rule: ${err.message ?? err.error}`)
       }
+      process.exit(1)
+    }
+
+    if (status === 403) {
+      const detail = (result as { detail?: string }).detail
+      log.error(`Replay refused: ${detail ?? 'your role cannot replay rules'}`)
       process.exit(1)
     }
 

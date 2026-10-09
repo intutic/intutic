@@ -35,12 +35,12 @@ Each member row has a role selector and **Deactivate** (or **Reactivate**). The 
 | Role | Access Level |
 |------|-------------|
 | **Owner** | Full control — billing, settings, member management |
-| **Admin** | Manage SOPs, members, budgets |
-| **EM** | View reports, manage budgets |
-| **Developer** | Use agents, view own traces |
+| **Admin** | Workspace policy and configuration — SOPs, custom filters, budgets, integrations |
+| **EM** | Run-time interventions and review — approve holds, kill runs, label findings |
+| **Developer** | Use agents; end or kill their own loop runs |
 | **Viewer** | Read-only dashboard access |
 
-The invite form offers Viewer, Developer, Engineering Manager and Admin. Which dashboard pages each role can open is listed in [Security & Identity](/guide/security#feature-access-by-role).
+The invite form offers Viewer, Developer, Engineering Manager and Admin. Which dashboard pages each role can open is listed in [Security & Identity](/guide/security#feature-access-by-role), and what each role can change in [What Each Role Can Change](/guide/security#what-each-role-can-change). Controls a role cannot use are disabled or hidden, with a note saying which roles can.
 
 ### Teams
 
@@ -287,7 +287,7 @@ Usage against your plan, invoices, and the spend caps that stop a runaway agent.
 - **Enterprise trial** — for an Owner on an eligible workspace, a banner offers **Start 14-day enterprise trial**; during a trial it shows the days remaining and **Talk to Sales**.
 - **Governed Request Usage** — Governed Requests this month against the requests your plan includes (for an organization's plan, counted across all its workspaces), any overage and its charge, the rate per 1,000 Governed Requests your workspace is billed at, and a daily trend.
 - **Billing History & Invoices** — invoices Stripe issued to this workspace, newest first.
-- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits**; and **Budget alerts**, each with **Acknowledge**. See [Budgets & FinOps](/guide/budgets).
+- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits** (Owners and Admins; other roles see the caps read-only); and **Budget alerts**, each with **Acknowledge** (Owners, Admins and EMs). See [Budgets & FinOps](/guide/budgets).
 
 ### Changing plan {#changing-plan}
 

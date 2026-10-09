@@ -157,9 +157,9 @@ Intutic uses role-based access control with five roles:
 | Role | Permissions |
 |------|------------|
 | **OWNER** | Full access — billing, workspace deletion, all admin actions |
-| **ADMIN** | Manage SOPs, review queue, team members, settings |
-| **EM** | Engineering manager — review queue access, SOP approval, read-only settings |
-| **DEVELOPER** | View traces, view SOPs, manage own budget tier |
+| **ADMIN** | Manage SOPs, policy, budgets, integrations, team members, settings |
+| **EM** | Engineering manager — review queue, hold approvals, killing runs, read-only settings |
+| **DEVELOPER** | Use agents, view traces and SOPs, end or kill their own loop runs |
 | **VIEWER** | Read-only access to dashboard and traces |
 
 ::: warning Role assignment
