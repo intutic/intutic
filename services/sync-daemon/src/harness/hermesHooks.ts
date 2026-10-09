@@ -24,7 +24,8 @@ import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { parseDocument, isMap, isSeq, type Document } from 'yaml'
 import { newIso } from '@intutic/id'
-import { emitShellGate, HOOK_TIMEOUT_SECONDS, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
+import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed } from './gateBody.js'
 
 const log = createLogger('sync-hermes-hooks')
 
@@ -48,7 +49,7 @@ function buildHermesCheckScript(
 # Generated: ${newIso()}
 # Workspace: ${workspaceId}
 set -euo pipefail
-${SHELL_FAIL_CLOSED}
+${emitShellFailClosed('hermes')}
 # Source runtime credentials (never embedded in this file)
 if [ -f "${runtimeEnv}" ]; then
   # shellcheck disable=SC1090

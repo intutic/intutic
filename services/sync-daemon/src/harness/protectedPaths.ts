@@ -352,7 +352,9 @@ export interface GuardPattern {
 
 /**
  * The normalisation every gate applies before matching, stated once so the
- * shell and JS emitters cannot drift.
+ * emitters cannot drift. The bash gates take it from their Python extractor,
+ * `SHELL_EXTRACT`, whose `" ".join(v.split())` leaves single spaces only, and
+ * pad the result.
  *
  * 1. Every whitespace run collapses to a single space.
  * 2. The result is padded with one space at each end.
@@ -409,33 +411,12 @@ export const NORMALISE_CONTRACT = {
    * property this contract claims, and the next edit would not have been so lucky.
    *
    * Python's `\s` on a `str` covers Unicode whitespace (U+00A0, U+3000), matching
-   * JS. The shell fallback cannot, which is why SHELL_EXTRACT pre-passes.
+   * JS, as does `SHELL_EXTRACT`'s `split()` for the bash gates.
    */
   /** Requires `re` in scope — the emitted filter imports it. */
   pySource: [
     'def _intutic_normalise(text):',
     '    return " " + re.sub(r"\\s+", " ", str(text if text is not None else "")) + " "',
-  ].join('\n'),
-
-  /**
-   * Shell: pure parameter expansion — no subshell, no `tr`, no `python3`.
-   *
-   * **ASCII only, and deliberately second in line.** Bash cannot express a
-   * Unicode whitespace class, so this collapses only the C0 set; U+00A0 would
-   * survive it and a pattern written with a literal space would then miss. The
-   * bash gates are not exposed to that because `SHELL_EXTRACT` runs every field
-   * through Python's `" ".join(str(v).split())` *before* this ever sees it —
-   * which is Unicode-aware. This is the belt to that pair of braces, and saying
-   * so here is the point: an earlier version of this comment claimed the three
-   * normalisers were provably identical, and they were not.
-   */
-  shell: [
-    'intutic_normalise() {',
-    '  local s="$1"',
-    "  s=\"${s//[$'\\t\\n\\r\\v\\f']/ }\"",
-    '  while [ "$s" != "${s//  / }" ]; do s="${s//  / }"; done',
-    '  printf \' %s \' "$s"',
-    '}',
   ].join('\n'),
 } as const
 

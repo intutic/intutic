@@ -19,9 +19,9 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitShellGate, HOOK_TIMEOUT_SECONDS, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed } from './gateBody.js'
 import { parse as parseToml } from 'smol-toml'
-import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
+import { anthropicBaseUrl, openaiBaseUrl, HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 
 const log = createLogger('sync-openhands-hooks')
 
@@ -82,7 +82,7 @@ export async function writeOpenHandsHooks(
 # Proxy: ${proxyUrl}
 # Generated: ${newIso()}
 set -euo pipefail
-${SHELL_FAIL_CLOSED}
+${emitShellFailClosed('openhands')}
 INPUT="$(cat)"
 ${SHELL_EXTRACT}
 

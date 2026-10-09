@@ -17,9 +17,9 @@ import * as node_os from 'node:os'
 import { z } from 'zod'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import { createLogger } from '@intutic/logger'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitJsGate, emitJsFailClosedPrelude,
   emitPreImageCapture,
-  HOOK_TIMEOUT_SECONDS,
   REVIEW_REQUESTS_BASENAME as GATE_REVIEW_REQUESTS_BASENAME,
   REVIEW_REQUESTS_LOG as GATE_REVIEW_REQUESTS_LOG,
   REVIEW_REQUEST_VERSION as GATE_REVIEW_REQUEST_VERSION,

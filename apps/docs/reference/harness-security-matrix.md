@@ -57,7 +57,7 @@ rule id in brackets.
 | `SERVER_NOT_ALLOWED` | The MCP server is not on the workspace's `mcpAllowedServers` list |
 | `POLICY_SNAPSHOT_UNVERIFIED` | The policy snapshot on this machine failed its integrity check, so it admits no MCP server; the sync daemon restores the last verified snapshot |
 | `COMMAND_TOO_LARGE` | The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls |
-| `GATE_DEADLINE` | The gate did not finish deciding within its 4-second deadline, and refuses rather than let the harness's hook timeout allow the call |
+| `GATE_DEADLINE` | The gate did not finish deciding within its deadline, a second under its harness's hook timeout and at most 9 seconds, and refuses rather than let the hook timeout allow the call |
 | `UNREADABLE_CALL` | The hook received no tool call it could read, and refuses rather than allow a call it cannot evaluate |
 | `GATE_CRASHED` | The gate failed while deciding, and refuses rather than allow an unevaluated call |
 
@@ -150,13 +150,16 @@ Most harnesses run a tool call whose `PreToolUse` hook outlives its timeout, or
 fails, as if the hook had allowed it. So a gate that is slow on a crafted call
 is no gate, and every gate bounds itself:
 
-- **A deadline.** A hook gate still deciding 4 seconds after it started refuses
-  the call with `GATE_DEADLINE` in its reason. The bash gates run a detached
-  watchdog that stops the gate's `grep` or `python3` and signals it; the
-  JavaScript gates run their rules under a `vm` timeout that interrupts even a
-  regular expression mid-match. The in-process gates (the OpenCode plugin, the
-  Pi extension, the OpenClaw plugin) measure it from the start of each call. 4 seconds is under Grok Build's 5, the shortest
-  timeout of a harness that allows on timeout.
+- **A deadline.** A hook gate still deciding at its deadline refuses the call
+  with `GATE_DEADLINE` in its reason. Each gate's deadline is one second under
+  the hook timeout its harness applies, and at most 9 seconds, the table below.
+  The second covers starting the interpreter and getting the refusal read: on a
+  14-core machine running 100 busy threads, a refusal reached the harness at
+  most 210 ms after the deadline. The bash gates run a detached watchdog that
+  stops the gate's `grep` or `python3` and signals it; the JavaScript gates
+  run their rules under a `vm` timeout that interrupts even a regular
+  expression mid-match. The in-process gates (the OpenCode plugin, the Pi
+  extension, the OpenClaw plugin) measure it from the start of each call.
 - **A size limit.** A command over 256 KiB, or tool arguments over 1 MiB of
   compact JSON (UTF-8 bytes), is refused as `COMMAND_TOO_LARGE` before any rule
   runs, in the hook gates and both gate SDKs. Across 85,314 tool calls in real
@@ -169,28 +172,36 @@ is no gate, and every gate bounds itself:
   time. Only a workspace's own ` WHERE ` pattern can be slow, and the deadline
   covers it.
 
-Where a harness has a setting to refuse on a failed or timed-out hook, connect
-sets it; where it has a key for the hook's timeout, connect sets 10 seconds,
-above the deadline.
+A legitimate call never comes near its deadline, even on a busy machine: on the
+same loaded machine, the slowest gates (the bash gates, which start `python3`)
+decided a call at the size limits in under a second, and the JavaScript gates
+in under half that.
 
-| Harness | Default timeout | On timeout | What connect sets |
-|---|---|---|---|
-| Claude Code | 600 s | runs the call | `timeout: 10` |
-| Cursor | not documented | refuses (`failClosed`) | `failClosed: true` |
-| Windsurf | not documented | not documented; any exit but 2 runs the call | nothing to set |
-| Codex CLI | 600 s | runs the call | `timeout: 10` |
-| Gemini CLI | 60 s (`timeout` in ms) | runs the call | `timeout: 10000` |
-| Antigravity | 30 s | not documented | `timeout: 10` |
-| Cline | 30 s, fixed | runs the call | nothing to set |
-| GitHub Copilot (VS Code agent hooks, CLI, cloud agent) | 30 s | runs the call, admin policy hooks included | `timeout: 10` (the CLI's alias for `timeoutSec`) |
-| Goose | 30 s | runs the call; refuses with `on_failure: "block"` | `on_failure: "block"`, `timeout: 10` |
-| OpenHands | 60 s | runs the call | `timeout: 10` |
-| Hermes (shell hooks) | 60 s | runs the call; refuses with `fail_closed: true` | `fail_closed: true`, `timeout: 10` |
-| Grok Build | 5 s | runs the call | `timeout: 5` |
-| Muse Code | not documented | not documented | nothing to set |
-| OpenClaw (plugin hook) | 15 s | refuses (the hook runner fails closed) | `timeoutMs: 10000` on the hook registration |
-| Pi (extension) | none (in process) | waits | nothing to set; the extension refuses at the deadline |
-| OpenCode, n8n, Open WebUI, dsh | none (in process) | waits | nothing to set |
+Where a harness has a setting to refuse on a failed or timed-out hook, connect
+sets it; where it has a key for the hook's timeout, connect sets 10 seconds.
+
+| Harness | Default timeout | On timeout | What connect sets | Gate deadline |
+|---|---|---|---|---|
+| Claude Code | 600 s | runs the call | `timeout: 10` | 9 s |
+| Cursor | not documented | refuses (`failClosed`) | `timeout: 10`, `failClosed: true` | 9 s |
+| Windsurf | not documented | not documented; any exit but 2 runs the call | nothing to set | 4 s |
+| Codex CLI | 600 s | runs the call | `timeout: 10` | 9 s |
+| Gemini CLI | 60 s (`timeout` in ms) | runs the call | `timeout: 10000` | 9 s |
+| Antigravity | 30 s | not documented | `timeout: 10` | 9 s |
+| Cline | 30 s, fixed | runs the call | nothing to set | 9 s |
+| GitHub Copilot (VS Code agent hooks, CLI, cloud agent) | 30 s | runs the call, admin policy hooks included | `timeout: 10` (the CLI's alias for `timeoutSec`) | 9 s |
+| Goose | 30 s | runs the call; refuses with `on_failure: "block"` | `on_failure: "block"`, `timeout: 10` | 9 s |
+| OpenHands | 60 s | runs the call | `timeout: 10` | 9 s |
+| Hermes (shell hooks) | 60 s | runs the call; refuses with `fail_closed: true` | `fail_closed: true`, `timeout: 10` | 9 s |
+| Grok Build | 5 s | runs the call | `timeout: 5` | 4 s |
+| Muse Code | not documented | not documented | nothing to set | 4 s |
+| OpenClaw (plugin hook) | 15 s | refuses (the hook runner fails closed) | `timeoutMs: 10000` on the hook registration | 9 s |
+| Pi (extension) | none (in process) | waits | nothing to set | 9 s |
+| OpenCode (plugin) | none (in process) | waits | nothing to set | 9 s |
+| n8n, Open WebUI, dsh | none (in process) | waits | nothing to set | none |
+
+Windsurf and Muse Code document no hook timeout, so their gates assume the
+shortest of any harness that runs a timed-out call, Grok Build's 5 seconds.
 
 ## Per-Harness Onboarding Guide
 

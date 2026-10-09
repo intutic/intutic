@@ -43,8 +43,8 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { GEMINI_CLI_GATE_ID } from '@intutic/shared-types'
-import { emitShellGate, HOOK_TIMEOUT_SECONDS, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { GEMINI_CLI_GATE_ID, HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
+import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-antigravity-hooks')
@@ -66,7 +66,7 @@ function buildAntigravityCheckScript(
 # Generated: ${newIso()}
 # Workspace: ${workspaceId}
 set -euo pipefail
-${SHELL_FAIL_CLOSED}
+${emitShellFailClosed(GEMINI_CLI_GATE_ID)}
 INPUT="$(cat)"
 ${SHELL_EXTRACT}
 

@@ -54,6 +54,8 @@
  * @module
  */
 
+import type { HookGateHarness } from '@intutic/shared-types'
+
 /**
  * A dynamically imported harness writer module.
  *
@@ -1171,17 +1173,12 @@ export const NO_GATE: ReadonlyArray<{
 ]
 
 /**
- * Runs a gate call, rerunning it up to twice while it refuses with
- * `GATE_DEADLINE`.
- *
- * The gate suites spawn interpreters in parallel across every fixture, and on a
- * loaded machine start-up alone can take most of the gate's 4 s deadline. The
- * refusal is right in production but says nothing about the fixture, so a
- * benign case reads as a false positive. A rerun that decides is the verdict.
- * Tests about the deadline itself call the gate once.
+ * The harness a generated gate was emitted for, read from its body's header
+ * (`Intutic gate body vN — harness: <id>`): the key its deadline is derived
+ * from (`gateDeadlineMs` in `@intutic/shared-types`).
  */
-export async function rerunOnDeadline<T>(once: () => Promise<T>, output: (r: T) => string): Promise<T> {
-  let r = await once()
-  for (let i = 0; i < 2 && /GATE_DEADLINE/.test(output(r)); i++) r = await once()
-  return r
+export function emittedHarness(artifactText: string): HookGateHarness {
+  const m = artifactText.match(/Intutic gate body v\d+ — harness: (\S+)/)
+  if (!m) throw new Error('no gate body header in the artifact')
+  return m[1] as HookGateHarness
 }

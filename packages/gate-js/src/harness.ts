@@ -88,7 +88,7 @@ import { IntuticGateRefusal } from './errors.js'
 import { MCP_ALLOWLIST_JS_SOURCE, MCP_REGISTRY_JS_SOURCE, MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE } from './mcpRegistryRecord.js'
 import { PHRASES_JS_SOURCE } from './phrases.js'
 import { SEQUENCE_JS_SOURCE } from './sequence.js'
-import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MS } from './limits.js'
+import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MS, HOOK_TIMEOUT_SECONDS } from './limits.js'
 
 /** Structural copy of `ai`'s `ToolApprovalResponse` prompt part (re-exported
  *  from `@ai-sdk/provider-utils` — confirmed field-for-field on 5.0.27 and
@@ -997,7 +997,7 @@ function sandboxClaudeSettings(hookScriptSandboxPath: string): {
       {
         type: 'command',
         command: `node ${hookScriptSandboxPath}`,
-        timeout: 10,
+        timeout: HOOK_TIMEOUT_SECONDS,
         statusMessage: 'Verifying tool execution against Intutic SOP policy...',
       },
     ],

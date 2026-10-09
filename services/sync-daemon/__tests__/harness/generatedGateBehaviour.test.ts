@@ -32,12 +32,14 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
-import { GATES, NO_GATE, type GateEntry, rerunOnDeadline } from './gateRegistry.js'
+import { GATES, NO_GATE, type GateEntry, emittedHarness } from './gateRegistry.js'
 import {
   ARGUMENTS_SIZE_LIMIT,
   COMMAND_SIZE_LIMIT,
-  GATE_DEADLINE_MS,
+  GATE_DEADLINE_MARGIN_MS,
+  HOOK_GATE_TIMEOUTS,
   HarnessType,
+  gateDeadlineMs,
   encodeMcpAllowlistRecord,
   mcpSnapshotUnverifiedRefusal,
   holdApprovalHint,
@@ -301,11 +303,10 @@ function gateEnv(g: GateEntry, snapshot?: boolean | string): NodeJS.ProcessEnv {
   }
 }
 
-/** `expectDeadline` calls the gate once, for the tests about the deadline itself. */
 async function runGate(
   g: GateEntry,
   toolInput: Record<string, string>,
-  opts: { tool?: string; snapshot?: boolean | string; expectDeadline?: boolean } = {},
+  opts: { tool?: string; snapshot?: boolean | string } = {},
 ): Promise<RunResult & { signal: NodeJS.Signals | null }> {
   const artifact = join(roots.get(g.name)!, g.artifact)
   const payload = JSON.stringify({
@@ -313,12 +314,11 @@ async function runGate(
     tool_input: toolInput,
     session_id: 'sess_test',
   })
-  const once = () => runProcess(g.runner, [artifact], {
+  return runProcess(g.runner, [artifact], {
     input: payload,
     env: gateEnv(g, opts.snapshot),
     timeoutMs: 20_000,
   })
-  return opts.expectDeadline ? once() : rerunOnDeadline(once, (r) => r.stdout + r.stderr)
 }
 
 /**
@@ -619,23 +619,30 @@ for (const g of GATES) {
       expect(r.stdout + r.stderr).toMatch(/COMMAND_TOO_LARGE/)
     }, 60_000)
 
-    it('refuses at its own deadline, before the shortest harness timeout reads as an allow', async () => {
+    it('refuses at its own deadline, before its harness timeout reads as an allow', async () => {
       // A workspace's WHERE pattern is its own regex; this one backtracks
       // exponentially on the call below in Python's re and in V8. Without the
       // deadline the gate ran until the harness gave up — an allow under Grok
-      // Build (5 s), Copilot, VS Code, Goose, OpenHands and Hermes.
+      // Build, Copilot, VS Code, Goose, OpenHands and Hermes.
       const snap = writeRulesFixture(join(home, `deadline-${g.name}.rules`), [{
         id: 'sop.slow_where', source: ' (Bash) ', subject: 'tool', severity: 'block',
         reason: 'Blocked by SOP slow_where', rationale: '', matches: [], notMatches: [],
         argPattern: '(a+)+$',
       }])
       const started = Date.now()
-      const r = await runGate(g, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap, expectDeadline: true })
+      const r = await runGate(g, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap })
       const elapsed = Date.now() - started
       assertCleanExit(g, r, 'a call whose WHERE pattern does not finish')
       expect(wasBlocked(g, r), `${g.name} let a call through that its rules never decided`).toBe(true)
       expect(r.stdout + r.stderr).toMatch(/GATE_DEADLINE/)
-      expect(elapsed, `${g.name} took ${elapsed} ms; Grok Build allows at 5000`).toBeLessThan(GATE_DEADLINE_MS + 900)
+      // Its own harness's deadline, not an earlier one, and refused inside the
+      // timeout that harness applies (hookEntryTimeouts.test.ts checks the
+      // deadlines themselves).
+      const harness = emittedHarness(readFileSync(join(roots.get(g.name)!, g.artifact), 'utf8'))
+      const deadline = gateDeadlineMs(harness)
+      expect(elapsed, `${g.name} refused before its ${deadline} ms deadline`).toBeGreaterThanOrEqual(deadline)
+      expect(elapsed, `${g.name} took ${elapsed} ms; ${harness} gives up at ${deadline + GATE_DEADLINE_MARGIN_MS}`)
+        .toBeLessThan(deadline + GATE_DEADLINE_MARGIN_MS)
     }, 30_000)
 
 
@@ -1840,7 +1847,9 @@ describe('OpenCode plugin gate', () => {
     const elapsed = Date.now() - started
     expect(r.refused, 'a call its rules never decided was allowed').toBe(true)
     expect(r.stderr).toMatch(/GATE_DEADLINE/)
-    expect(elapsed, `took ${elapsed} ms`).toBeLessThan(GATE_DEADLINE_MS + 2_000)
+    // Measured from the call; the bound adds starting the process that loads the plugin.
+    expect(elapsed, `took ${elapsed} ms`).toBeGreaterThanOrEqual(gateDeadlineMs('opencode'))
+    expect(elapsed, `took ${elapsed} ms`).toBeLessThan(gateDeadlineMs('opencode') + 2_000)
   }, 30_000)
 
   it('applies a WHERE clause from the snapshot: kubectl apply unpinned is refused, pinned is allowed', async () => {
@@ -2027,7 +2036,10 @@ describe('Pi and OpenClaw plugin gates', () => {
         const elapsed = Date.now() - started
         expect(r.refused, 'a call its rules never decided was allowed').toBe(true)
         expect(r.stderr).toMatch(/GATE_DEADLINE/)
-        expect(elapsed, `took ${elapsed} ms`).toBeLessThan(GATE_DEADLINE_MS + 2_000)
+        // Measured from the call; the bound adds starting the process that loads the plugin.
+        const deadline = gateDeadlineMs(g.name as 'pi' | 'openclaw')
+        expect(elapsed, `took ${elapsed} ms`).toBeGreaterThanOrEqual(deadline)
+        expect(elapsed, `took ${elapsed} ms`).toBeLessThan(deadline + 2_000)
       }, 30_000)
 
       it('records each verdict with its harnessType and session, under an eventId of its own', async () => {
@@ -2073,11 +2085,12 @@ describe('Pi and OpenClaw plugin gates', () => {
     })
   }
 
-  it('openclaw: registers its hook with a timeout above the gate deadline', async () => {
+  it('openclaw: registers its hook with the timeout its deadline sits inside', async () => {
     const g = plugins.find((p) => p.name === 'openclaw')!
     const r = await runPluginGate(g, 'exec', { command: 'ls' })
     expect(r.timeoutMs, 'no timeoutMs on the before_tool_call registration').toBeDefined()
-    expect(r.timeoutMs!).toBeGreaterThan(GATE_DEADLINE_MS)
+    expect(r.timeoutMs!).toBe(HOOK_GATE_TIMEOUTS.openclaw.timeoutMs)
+    expect(r.timeoutMs!).toBeGreaterThanOrEqual(gateDeadlineMs('openclaw') + GATE_DEADLINE_MARGIN_MS)
   })
 
   it('openclaw: checks every path apply_patch names in derivedPaths', async () => {

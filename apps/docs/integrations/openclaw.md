@@ -4,7 +4,7 @@ Integrate Intutic governance with [OpenClaw](https://github.com/openclaw/opencla
 
 ## How it works
 
-Intutic installs an OpenClaw plugin whose `before_tool_call` hook runs before every tool call, in the Gateway process, and refuses a call that breaks a rule by returning OpenClaw's block result with the reason, which the model reads. OpenClaw runs this hook fail-closed: if the plugin throws or does not answer within its timeout, the call is blocked. The plugin also refuses a call it cannot finish evaluating within 4 seconds. OpenClaw's internal hooks (`hooks.internal`) cannot stop a tool call, so the gate does not use them.
+Intutic installs an OpenClaw plugin whose `before_tool_call` hook runs before every tool call, in the Gateway process, and refuses a call that breaks a rule by returning OpenClaw's block result with the reason, which the model reads. OpenClaw runs this hook fail-closed: if the plugin throws or does not answer within its timeout, the call is blocked. The plugin also refuses a call it cannot finish evaluating within 9 seconds, inside that timeout. OpenClaw's internal hooks (`hooks.internal`) cannot stop a tool call, so the gate does not use them.
 
 Your SOPs go into a marked section of the `AGENTS.md` in OpenClaw's own agent workspace: OpenClaw reads standing instructions only from that workspace, never from a project's `AGENTS.md`, even when it works in the project.
 

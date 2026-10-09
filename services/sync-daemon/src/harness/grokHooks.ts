@@ -72,7 +72,7 @@ import * as os from 'node:os'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
-import { openaiBaseUrl } from '@intutic/shared-types'
+import { HOOK_GATE_TIMEOUTS, openaiBaseUrl } from '@intutic/shared-types'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
@@ -124,9 +124,9 @@ function buildHookRegistration(hookScriptPath: string) {
               // Grok Build's documented default; stated explicitly rather than
               // left to fall back, since a local policy-snapshot evaluation is
               // cheap but a future default change upstream should not silently
-              // starve this hook. The gate refuses at GATE_DEADLINE_MS (4 s),
-              // inside it, because Grok Build runs the call when it expires.
-              timeout: 5,
+              // starve this hook. The gate's deadline is derived from it
+              // (gateDeadlineMs), because Grok Build runs the call when it expires.
+              timeout: HOOK_GATE_TIMEOUTS.grok.timeoutMs / 1000,
             },
           ],
         },

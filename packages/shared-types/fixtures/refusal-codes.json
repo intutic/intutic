@@ -71,7 +71,7 @@
       { "code": "SERVER_NOT_ALLOWED", "meaning": "The MCP server is not on the workspace's `mcpAllowedServers` list" },
       { "code": "POLICY_SNAPSHOT_UNVERIFIED", "meaning": "The policy snapshot on this machine failed its integrity check, so it admits no MCP server; the sync daemon restores the last verified snapshot" },
       { "code": "COMMAND_TOO_LARGE", "meaning": "The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls" },
-      { "code": "GATE_DEADLINE", "meaning": "The gate did not finish deciding within its 4-second deadline, and refuses rather than let the harness's hook timeout allow the call" },
+      { "code": "GATE_DEADLINE", "meaning": "The gate did not finish deciding within its deadline, a second under its harness's hook timeout and at most 9 seconds, and refuses rather than let the hook timeout allow the call" },
       { "code": "UNREADABLE_CALL", "meaning": "The hook received no tool call it could read, and refuses rather than allow a call it cannot evaluate" },
       { "code": "GATE_CRASHED", "meaning": "The gate failed while deciding, and refuses rather than allow an unevaluated call" }
     ]

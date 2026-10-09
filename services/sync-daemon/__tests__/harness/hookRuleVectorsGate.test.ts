@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { GATES, type GateEntry, rerunOnDeadline } from './gateRegistry.js'
+import { GATES, type GateEntry } from './gateRegistry.js'
 import { toRulesLine } from '../../src/harness/gateBody.js'
 import { buildSnapshotRules } from '../../src/lib/policySnapshot.js'
 import type { GuardPattern } from '../../src/harness/protectedPaths.js'
@@ -130,11 +130,11 @@ function runProcess(cmd: string, args: string[], opts: { input: string; env: Nod
 
 async function runGate(g: GateEntry, tool: string, toolInput: Record<string, unknown>, snapshot: string): Promise<RunResult> {
   const root = roots.get(g.name)!
-  return rerunOnDeadline(() => runProcess(g.runner, [join(root, g.artifact)], {
+  return runProcess(g.runner, [join(root, g.artifact)], {
     input: JSON.stringify({ tool_name: tool, tool_input: toolInput, session_id: 'sess_vectors' }),
     env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot },
     timeoutMs: 20_000,
-  }), (r) => r.stdout + r.stderr)
+  })
 }
 
 async function mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

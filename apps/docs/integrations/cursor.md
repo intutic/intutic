@@ -7,7 +7,7 @@ Integrate Intutic governance with [Cursor](https://cursor.sh) — the AI-powered
 Intutic governs Cursor in three layers:
 
 - **Rules** — your SOPs in `.cursor/rules/intutic-governance.mdc`, a project rule with `alwaysApply: true`, which Cursor adds to every request. Your own rules stay in other files in `.cursor/rules/`.
-- **A blocking gate** — `.intutic/hooks/cursor-check.js`, registered in Cursor's hooks for `beforeShellExecution` (every shell command), `beforeMCPExecution` (every MCP tool call) and `preToolUse` with the matcher `Write|Delete` (file writes and deletions). It refuses with exit code 2, and is registered with `failClosed: true`, so a gate that crashes or times out blocks the call too.
+- **A blocking gate** — `.intutic/hooks/cursor-check.js`, registered in Cursor's hooks for `beforeShellExecution` (every shell command), `beforeMCPExecution` (every MCP tool call) and `preToolUse` with the matcher `Write|Delete` (file writes and deletions). It refuses with exit code 2, and is registered with `timeout: 10` and `failClosed: true`, so a gate that crashes or times out blocks the call too. The gate refuses on its own after 9 seconds.
 - **MCP servers** — every server in `.cursor/mcp.json` and in Cursor's global settings is wrapped with the Intutic MCP governance proxy.
 
 ## Setup
@@ -72,9 +72,9 @@ The gate is merged into `.cursor/hooks.json` (project) and `~/.cursor/hooks.json
 {
   "version": 1,
   "hooks": {
-    "beforeShellExecution": [{ "command": "node \"/path/to/project/.intutic/hooks/cursor-check.js\"", "failClosed": true }],
-    "beforeMCPExecution": [{ "command": "node \"/path/to/project/.intutic/hooks/cursor-check.js\"", "failClosed": true }],
-    "preToolUse": [{ "command": "node \"/path/to/project/.intutic/hooks/cursor-check.js\"", "matcher": "Write|Delete", "failClosed": true }]
+    "beforeShellExecution": [{ "command": "node \"/path/to/project/.intutic/hooks/cursor-check.js\"", "timeout": 10, "failClosed": true }],
+    "beforeMCPExecution": [{ "command": "node \"/path/to/project/.intutic/hooks/cursor-check.js\"", "timeout": 10, "failClosed": true }],
+    "preToolUse": [{ "command": "node \"/path/to/project/.intutic/hooks/cursor-check.js\"", "matcher": "Write|Delete", "timeout": 10, "failClosed": true }]
   }
 }
 ```

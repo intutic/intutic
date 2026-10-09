@@ -50,9 +50,9 @@ describe('mergeHooksConfig', () => {
       version: 1,
       hooks: {
         afterFileEdit: [{ command: './format.sh' }],
-        beforeMCPExecution: [{ command: './my-mcp-audit.sh' }, { command: 'node "/tmp/cursor-check.js"', failClosed: true }],
-        beforeShellExecution: [{ command: 'node "/tmp/cursor-check.js"', failClosed: true }],
-        preToolUse: [{ command: 'node "/tmp/cursor-check.js"', matcher: 'Write|Delete', failClosed: true }],
+        beforeMCPExecution: [{ command: './my-mcp-audit.sh' }, { command: 'node "/tmp/cursor-check.js"', timeout: 10, failClosed: true }],
+        beforeShellExecution: [{ command: 'node "/tmp/cursor-check.js"', timeout: 10, failClosed: true }],
+        preToolUse: [{ command: 'node "/tmp/cursor-check.js"', matcher: 'Write|Delete', timeout: 10, failClosed: true }],
       },
     })
   })

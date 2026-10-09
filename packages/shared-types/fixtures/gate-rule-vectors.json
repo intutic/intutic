@@ -3,7 +3,8 @@
   "limits": {
     "commandBytes": 262144,
     "argumentsBytes": 1048576,
-    "deadlineMs": 4000
+    "hookTimeoutSeconds": 10,
+    "deadlineMarginMs": 1000
   },
   "rules": [
     {

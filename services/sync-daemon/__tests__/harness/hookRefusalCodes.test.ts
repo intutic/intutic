@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
-import { GATES, type GateEntry, rerunOnDeadline } from './gateRegistry.js'
+import { GATES, type GateEntry } from './gateRegistry.js'
 import { HOOK_REFUSAL_CODES } from '../../src/harness/gateBody.js'
 import { writePolicySnapshot, SNAPSHOT_RULES } from '../../src/lib/policySnapshot.js'
 
@@ -87,7 +87,7 @@ afterAll(() => {
 /** Async spawn, never spawnSync: see the note in generatedGateBehaviour.test.ts. */
 function runGate(g: GateEntry, stdin: string): Promise<Record<string, unknown>> {
   const root = roots.get(g.name)!
-  return rerunOnDeadline(() => new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const child = spawn(g.runner, [join(root, g.artifact)], {
       env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot, INTUTIC_REVIEW_REQUESTS: join(root, 'holds.jsonl') },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -108,7 +108,7 @@ function runGate(g: GateEntry, stdin: string): Promise<Record<string, unknown>> 
       }
     })
     child.stdin.end(stdin)
-  }), (r) => JSON.stringify(r))
+  })
 }
 
 const call = (tool: string, input: Record<string, unknown> = {}) => JSON.stringify({ tool_name: tool, tool_input: input, session_id: 'sess_codes' })

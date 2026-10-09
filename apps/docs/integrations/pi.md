@@ -4,7 +4,7 @@ Integrate Intutic governance with [Pi](https://github.com/earendil-works/pi) —
 
 ## How it works
 
-Intutic installs a Pi extension whose `tool_call` handler runs inside Pi before every tool call (file reads, writes, edits, shell commands and MCP tools) and refuses a call that breaks a rule by returning Pi's block result with the reason, which the model reads. Pi waits for an extension's handler with no time limit, so the extension refuses a call it cannot finish evaluating within 4 seconds rather than hold the agent. It also points Pi's Anthropic and OpenAI providers at the proxy in Pi's `models.json`, and writes your SOPs into a marked section of the workspace's `AGENTS.md`, which Pi reads as instructions.
+Intutic installs a Pi extension whose `tool_call` handler runs inside Pi before every tool call (file reads, writes, edits, shell commands and MCP tools) and refuses a call that breaks a rule by returning Pi's block result with the reason, which the model reads. Pi waits for an extension's handler with no time limit, so the extension refuses a call it cannot finish evaluating within 9 seconds rather than hold the agent. It also points Pi's Anthropic and OpenAI providers at the proxy in Pi's `models.json`, and writes your SOPs into a marked section of the workspace's `AGENTS.md`, which Pi reads as instructions.
 
 ## Setup
 

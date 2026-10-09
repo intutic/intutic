@@ -59,7 +59,8 @@ import {
 import {
   ARGUMENTS_SIZE_LIMIT,
   COMMAND_SIZE_LIMIT,
-  GATE_DEADLINE_MS,
+  gateDeadlineMs,
+  type HookGateHarness,
   MCP_ALLOWLIST_JS_SOURCE,
   MCP_ALLOWLIST_RECORD_TAG,
   MCP_REGISTRY_JS_SOURCE,
@@ -92,7 +93,7 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  *
  * v5: the residual fail-open edges were closed. Every bash gate now converts
  * an accidental crash (exit != 0 and != 2 under `set -euo pipefail`) into
- * exit 2 via {@link SHELL_FAIL_CLOSED}; every bash gate refuses a stdin
+ * exit 2 via {@link emitShellFailClosed}; every bash gate refuses a stdin
  * payload from which neither a tool name nor a tool_input could be extracted
  * (the envelope posture githubCopilotHooks established, now uniform); every
  * JS gate installs `uncaughtException`/`unhandledRejection` handlers as its
@@ -177,8 +178,8 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * (`@intutic/shared-types` sequence.ts, `sequence.py`); `grep -E` still runs
  * them as written. A call whose command is over `COMMAND_SIZE_LIMIT` bytes or
  * whose arguments are over `ARGUMENTS_SIZE_LIMIT` is refused as
- * `COMMAND_TOO_LARGE`, and a gate still deciding `GATE_DEADLINE_MS` after it
- * started refuses with `GATE_DEADLINE`, ahead of the harnesses that read a
+ * `COMMAND_TOO_LARGE`, and a gate still deciding at its deadline refuses
+ * with `GATE_DEADLINE`, ahead of the harnesses that read a
  * hook timeout as an allow. A v12 gate compares the flags column with `i`, so
  * it runs a sequence rule as the regex it also is, case-sensitively.
  *
@@ -227,21 +228,19 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * `chat.useHooks` or `chat.hookFilesLocations` (`HOOK_SETTING_PATTERNS`),
  * which can switch off the GitHub Copilot gate. The `.rules` format is
  * unchanged.
+ *
+ * v18: each gate's deadline is its own harness's: a second under the hook
+ * timeout that harness applies (`HOOK_GATE_TIMEOUTS` and `gateDeadlineMs` in
+ * `@intutic/shared-types`), at most 9 s. One 4 s deadline for every gate,
+ * sized for Grok Build's 5 s, refused legitimate calls on a busy machine in
+ * harnesses that wait 10 s or more. The bash gates also screen each subject
+ * with one `grep` holding every rule's pattern before testing rule by rule,
+ * and take the whitespace-collapsed fields from the extractor as they are:
+ * a call at the size limit had forked a hundred `grep`s and spent seconds of
+ * a loaded machine before any rule could match. The `.rules` format is
+ * unchanged.
  */
-export const GATE_VERSION = 17
-
-/**
- * The timeout every writer sets on its gate's hook entry, in seconds, where
- * the harness has a key for one: Claude Code, Codex, the Copilot CLI and VS
- * Code (`timeout`; the CLI's `timeoutSec` takes it as an alias), Antigravity,
- * Goose, OpenHands and Hermes. Their defaults run from 30 s to 600 s, and most
- * of them read a hook that outlives it as an allow; the gate refuses at
- * `GATE_DEADLINE_MS` (4 s), so this leaves room for interpreter start-up and
- * keeps a stalled gate from holding the agent for minutes. Grok Build's
- * default and our setting is 5 s, the floor the deadline sits under. OpenClaw's
- * plugin hook takes it in milliseconds (`timeoutMs`).
- */
-export const HOOK_TIMEOUT_SECONDS = 10
+export const GATE_VERSION = 18
 
 /**
  * The refusal codes a hook gate's JSON decision carries, as `code` beside the
@@ -264,7 +263,8 @@ export const HOOK_TIMEOUT_SECONDS = 10
  * - `POLICY_SNAPSHOT_UNVERIFIED`: an MCP call on a snapshot that failed its
  *   integrity check, which admits no MCP server;
  * - `COMMAND_TOO_LARGE`: the call is over the size a gate evaluates;
- * - `GATE_DEADLINE`: the gate did not decide within `GATE_DEADLINE_MS`;
+ * - `GATE_DEADLINE`: the gate did not decide within its harness's deadline
+ *   (`gateDeadlineMs` in `@intutic/shared-types`);
  * - `UNREADABLE_CALL`: the payload held no tool call the gate could read;
  * - `GATE_CRASHED`: the gate failed while deciding.
  */
@@ -559,8 +559,13 @@ export function toRulesLine(p: GuardPattern): string {
  * defined by the writer AFTER this prelude, so the trap probes for it before
  * calling: a crash earlier than the definition still blocks, just without an
  * audit line (stderr carries the reason either way).
+ *
+ * It also starts the gate's deadline, which is the harness's own
+ * ({@link gateDeadlineMs}).
  */
-export const SHELL_FAIL_CLOSED = `
+export function emitShellFailClosed(harness: HookGateHarness): string {
+  const deadlineS = gateDeadlineMs(harness) / 1000
+  return `
 # ── Intutic fail-closed prelude v${GATE_VERSION} ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
@@ -586,29 +591,29 @@ intutic_fail_closed() {
 trap intutic_fail_closed EXIT
 
 # ── Internal deadline ────────────────────────────────────────────────────────
-# Grok Build, the Copilot CLI, VS Code, Goose, OpenHands and Hermes run a call
-# whose hook outlives their timeout as if the hook had allowed it, Grok after
-# 5 s. So this gate refuses at ${GATE_DEADLINE_MS / 1000} s, from its own start: a
-# watchdog, detached so it holds none of the harness's pipes, stops the gate's
-# children (a grep or python3 still matching) and signals it; the trap below
-# refuses. Every built-in rule is linear; a workspace's own WHERE pattern need
-# not be.
+# Most harnesses run a call whose hook outlives their timeout as if the hook had
+# allowed it. So this gate refuses at ${deadlineS} s from its own start, inside the
+# hook timeout ${harness} applies (gateLimits.ts): a watchdog, detached so it holds none of
+# the harness's pipes, stops the gate's children (a grep or python3 still
+# matching) and signals it; the trap below refuses. Every built-in rule is
+# linear; a workspace's own WHERE pattern need not be.
 intutic_deadline() {
   trap - USR1
-  echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within ${GATE_DEADLINE_MS / 1000} s, and refuses it rather than let the hook timeout allow it." >&2
+  echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within ${deadlineS} s, and refuses it rather than let the hook timeout allow it." >&2
   if command -v log_event >/dev/null 2>&1; then
-    log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within ${GATE_DEADLINE_MS / 1000} s" || true
+    log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within ${deadlineS} s" || true
   fi
   exit 2
 }
 trap intutic_deadline USR1
 INTUTIC_GATE_PID=$$
-INTUTIC_WATCHDOG_PID="$( { ( sleep ${GATE_DEADLINE_MS / 1000}; pkill -P "$INTUTIC_GATE_PID" 2>/dev/null; kill -USR1 "$INTUTIC_GATE_PID" 2>/dev/null ) </dev/null >/dev/null 2>&1 & } ; echo $! )"
+INTUTIC_WATCHDOG_PID="$( { ( sleep ${deadlineS}; pkill -P "$INTUTIC_GATE_PID" 2>/dev/null; kill -USR1 "$INTUTIC_GATE_PID" 2>/dev/null ) </dev/null >/dev/null 2>&1 & } ; echo $! )"
 `
+}
 
 export interface ShellGateOptions {
   /** Harness id, as it appears in audit lines. */
-  harness: string
+  harness: HookGateHarness
   /**
    * Name of the shell function the writer defined to record an event.
    * Called as `<fn> <verdict> <tool> <reason>`.
@@ -626,8 +631,9 @@ export interface ShellGateOptions {
 /**
  * The bash gate body.
  *
- * Expects in scope: `$TOOL`, `$TARGET`, `$COMMAND`, and the log function named
- * by {@link ShellGateOptions.logFn}. Refuses with `exit 2` — every bash harness
+ * Expects in scope: `$TOOL`, `$TARGET` and `$COMMAND` as {@link SHELL_EXTRACT}
+ * leaves them, whitespace collapsed to single spaces, and the log function
+ * named by {@link ShellGateOptions.logFn}. Refuses with `exit 2` — every bash harness
  * uses the exit-code contract.
  */
 /** Single-quotes a path for bash. */
@@ -786,6 +792,19 @@ function intuticHold(rule, toolName, command, target, toolInput, record, workspa
 }`
 }
 
+/**
+ * The subjects the bash gate screens ({@link emitShellGate}), each with the
+ * variable holding its text. Every subject a rule can test with grep is here;
+ * `phrase` rules run in Python and are not screened.
+ */
+const SCREEN_SUBJECTS: ReadonlyArray<readonly [string, string]> = [
+  ['tool', 'INTUTIC_NTOOL'],
+  ['command', 'INTUTIC_NCOMMAND'],
+  ['target', 'INTUTIC_NTARGET'],
+  ['content', 'TOOL_INPUT_JSON'],
+  ['action', 'INTUTIC_ACTIONS'],
+]
+
 export function emitShellGate(opts: ShellGateOptions): string {
   const log = opts.logFn ?? 'log_event'
   const floor = staticFloorPatterns()
@@ -827,8 +846,6 @@ if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_TOO_LARGE:-}" ]; then
   ${log} "tool_blocked" "\${TOOL:-unknown}" "COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" || true
   exit 2
 fi
-
-${NORMALISE_CONTRACT.shell}
 
 # The static floor: compiled in, always enforced, never sourced from disk.
 # These are the families with years of evidence behind them, so they block from
@@ -958,10 +975,14 @@ case "$INTUTIC_SNAPSHOT_STATE" in
   stale)   ${log} "snapshot_stale" "\${TOOL:-}" "Policy snapshot is \${_intutic_age_days} days old and still enforced" || true ;;
 esac
 
-# Normalise once; every pattern is written against this shape.
-INTUTIC_NCOMMAND="$(intutic_normalise "\${COMMAND:-}")"
-INTUTIC_NTARGET="$(intutic_normalise "\${TARGET:-}")"
-INTUTIC_NTOOL="$(intutic_normalise "\${TOOL:-}")"
+# Normalise once; every pattern is written against this shape. The extractor
+# hands each field over with its whitespace already collapsed to single spaces
+# by Python, Unicode whitespace included, which bash cannot match; padding is
+# all that is left to do. Bash substitutions over a 256 KiB command to find no
+# whitespace left took most of a second on a loaded machine.
+INTUTIC_NCOMMAND=" \${COMMAND:-} "
+INTUTIC_NTARGET=" \${TARGET:-} "
+INTUTIC_NTOOL=" \${TOOL:-} "
 
 # ── Hold tier (gate body v8) ─────────────────────────────────────────────────
 # A \`hold\` rule refuses the call and records it for a human; an exact,
@@ -1018,7 +1039,7 @@ intutic_bypass() {
 # continues), 2 when the call is held (the caller refuses).
 intutic_hold() {
   local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth hint
-  tn="$(intutic_normalise "\${TOOL:-}")"
+  tn="$INTUTIC_NTOOL"
   th="$( { printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
   if entry="$(intutic_bypass "$rid" "$tn" "$th")"; then
     decided_by="$(printf '%s' "$entry" | sed -n 's/.*"decidedBy":"\\([^"]*\\)".*/\\1/p')"
@@ -1069,19 +1090,22 @@ intutic_apply() {
       destructive.*) return 0 ;;
     esac
   fi
-  local _subs=()
+  local _subs=() _ci=
+  case "$rflags" in *i*) _ci=i ;; esac
+  # A subject the screen below cleared for this case is left out: no pattern
+  # matched it, this rule's included.
   case "$rsubj" in
-    tool)    _subs=("$INTUTIC_NTOOL") ;;
-    command) _subs=("$INTUTIC_NCOMMAND") ;;
-    target)  _subs=("$INTUTIC_NTARGET") ;;
+    tool)    intutic_unscreened tool "$_ci" && _subs=("$INTUTIC_NTOOL") ;;
+    command) intutic_unscreened command "$_ci" && _subs=("$INTUTIC_NCOMMAND") ;;
+    target)  intutic_unscreened target "$_ci" && _subs=("$INTUTIC_NTARGET") ;;
     # Serialized tool input, un-normalised — same subject the WHERE argPattern
     # machinery matches. The secrets.* floor rules ride this. Guaranteed
     # non-empty by the extractor (it defaults to "{}").
-    content) _subs=("$TOOL_INPUT_JSON") ;;
+    content) intutic_unscreened content "$_ci" && _subs=("$TOOL_INPUT_JSON") ;;
     # The space-padded action tokens the extractor's classifier derived from
     # the raw command (" action:deploy "), so a hold on \`action:deploy\`
     # matches whole tokens.
-    action)  _subs=("$INTUTIC_ACTIONS") ;;
+    action)  intutic_unscreened action "$_ci" && _subs=("$INTUTIC_ACTIONS") ;;
     # The source is |-separated phrases matched as words against the raw
     # command by the phrase matcher in Python, not a regex: grep is linear,
     # but the gap between the words was not expressible without one that
@@ -1102,8 +1126,12 @@ sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
     # together while neither does alone.
-    *)       _subs=("$INTUTIC_NCOMMAND" "$INTUTIC_NTARGET") ;;
+    *)
+      intutic_unscreened command "$_ci" && _subs+=("$INTUTIC_NCOMMAND")
+      intutic_unscreened target "$_ci" && _subs+=("$INTUTIC_NTARGET")
+      ;;
   esac
+  [ \${#_subs[@]} -gt 0 ] || return 0
   hit=0
   [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
@@ -1178,6 +1206,51 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
   echo "[Intutic Governance] BLOCKED: \${reason}" >&2
   ${log} "tool_blocked" "\${TOOL:-}" "\${reason}"
   exit 2
+}
+
+# ── Screening ────────────────────────────────────────────────────────────────
+# Rule by rule, the gate forks a grep per rule and subject: about a hundred on
+# every call, which on a loaded machine took seconds before any rule could
+# match. So each subject is first screened by one grep holding every pattern
+# that tests it, the case-insensitive ones apart. A subject none of them
+# matches is left out of every rule that tests it, since no one of them could
+# match it either. A screen that matches, or one grep cannot run (exit 2),
+# clears nothing, and the rules decide as before: the screen saves work and
+# never changes a verdict. grep is still the engine, so the screen is linear too.
+${SCREEN_SUBJECTS.map(([key]) => `_intutic_screen_${key}=(); _intutic_screen_${key}i=(); _intutic_clear_${key}=; _intutic_clear_${key}i=`).join('\n')}
+intutic_screen_add() {
+  case "$1$2" in
+${SCREEN_SUBJECTS.flatMap(([key]) => [`    ${key}) _intutic_screen_${key}+=(-e "$3") ;;`, `    ${key}i) _intutic_screen_${key}i+=(-e "$3") ;;`]).join('\n')}
+  esac
+}
+for _rec in "\${INTUTIC_FLOOR[@]}" \${INTUTIC_DYNAMIC[@]+"\${INTUTIC_DYNAMIC[@]}"}; do
+  IFS=$'\t' read -r _r_id _r_sev _r_flags _r_subj _r_reason _r_src _r_arg <<< "$_rec"
+  [ -n "$_r_src" ] || continue
+  _r_ci=
+  case "$_r_flags" in *i*) _r_ci=i ;; esac
+  case "$_r_subj" in
+    tool|command|target|content|action) intutic_screen_add "$_r_subj" "$_r_ci" "$_r_src" ;;
+    phrase) : ;;
+    *) intutic_screen_add command "$_r_ci" "$_r_src"; intutic_screen_add target "$_r_ci" "$_r_src" ;;
+  esac
+done
+# $1 subject, $2 "i" or empty, $3 its text, then the patterns as -e pairs.
+intutic_screen() {
+  local key="$1" ci="$2" text="$3" rc=0
+  shift 3
+  if [ "$ci" = "i" ]; then printf '%s' "$text" | grep -qiE "$@" || rc=$?
+  else printf '%s' "$text" | grep -qE "$@" || rc=$?
+  fi
+  [ "$rc" != "1" ] || printf -v "_intutic_clear_$key$ci" '%s' 1
+}
+${SCREEN_SUBJECTS.flatMap(([key, text]) => [
+  `[ \${#_intutic_screen_${key}[@]} -eq 0 ] || intutic_screen ${key} '' "$${text}" "\${_intutic_screen_${key}[@]}"`,
+  `[ \${#_intutic_screen_${key}i[@]} -eq 0 ] || intutic_screen ${key} i "$${text}" "\${_intutic_screen_${key}i[@]}"`,
+]).join('\n')}
+# Whether rules testing subject $1, case $2, still need to: not when screened clear.
+intutic_unscreened() {
+  local v="_intutic_clear_$1$2"
+  [ "\${!v:-}" != "1" ]
 }
 
 for _rec in "\${INTUTIC_FLOOR[@]}"; do
@@ -1277,7 +1350,8 @@ esac
 }
 
 export interface JsGateOptions {
-  harness: string
+  /** Harness id, as it appears in audit lines; it also picks the gate's deadline. */
+  harness: HookGateHarness
   /** How this harness refuses. */
   contract: BlockContract
   /**
@@ -1422,6 +1496,7 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
  */
 export function emitJsGate(opts: JsGateOptions): string {
   const floor = staticFloorPatterns()
+  const deadlineMs = gateDeadlineMs(opts.harness)
 
   /**
    * The refusal, through this harness's contract, for a `reason` in scope.
@@ -1550,18 +1625,19 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
 ${refuseWith("'COMMAND_TOO_LARGE'", 'null')}
   }
   // The rules run under a deadline that interrupts even a regex mid-match,
-  // below the hook timeout of every harness that reads a timeout as an allow
-  // (Grok Build: 5 s). A call still undecided then is refused. Built-in rules
-  // are linear; a workspace's own WHERE pattern need not be.
+  // inside the hook timeout ${opts.harness} applies (gateLimits.ts in
+  // @intutic/shared-types), which most harnesses read as an allow. A call
+  // still undecided then is refused. Built-in rules are linear; a workspace's
+  // own WHERE pattern need not be.
 ${
   opts.contract === 'throw'
     ? `  // In process, the deadline runs from the start of this call: the process
   // started long before it. Pi and OpenCode await the hook with no time limit,
   // and OpenClaw's hook timeout cannot interrupt synchronous code, so without
   // this a slow WHERE pattern holds the agent.
-  var _deadlineMs = ${GATE_DEADLINE_MS};`
+  var _deadlineMs = ${deadlineMs};`
     : `  // A hook process runs one call, so the deadline runs from process start.
-  var _deadlineMs = Math.max(1, ${GATE_DEADLINE_MS} - Math.round(process.uptime() * 1000));`
+  var _deadlineMs = Math.max(1, ${deadlineMs} - Math.round(process.uptime() * 1000));`
 }
   globalThis.__intuticGateRules = function () {
     return _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId);
@@ -1570,7 +1646,7 @@ ${
     return require('vm').runInThisContext('__intuticGateRules()', { timeout: _deadlineMs });
   } catch (err) {
     if (!err || err.code !== 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw err;
-    var reason = 'GATE_DEADLINE — the gate did not finish evaluating this call within ${GATE_DEADLINE_MS / 1000} s, and refuses it rather than let the hook timeout allow it';
+    var reason = 'GATE_DEADLINE — the gate did not finish evaluating this call within ${deadlineMs / 1000} s, and refuses it rather than let the hook timeout allow it';
     try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
     try { record('tool_blocked', toolName, reason); } catch (e) {}
 ${refuseWith("'GATE_DEADLINE'", 'null')}

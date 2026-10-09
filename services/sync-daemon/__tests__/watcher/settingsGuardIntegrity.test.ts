@@ -17,7 +17,7 @@ import { spawn } from 'node:child_process'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
-import { GATES, rerunOnDeadline, type GateEntry } from '../harness/gateRegistry.js'
+import { GATES, type GateEntry } from '../harness/gateRegistry.js'
 
 const PROXY_URL = 'http://127.0.0.1:4000'
 const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, INTUTIC_WORKSPACE_ID: process.env.INTUTIC_WORKSPACE_ID }
@@ -63,7 +63,7 @@ interface RunResult { status: number; stderr: string }
 
 /** Async spawn, never spawnSync: see the note in generatedGateBehaviour.test.ts. */
 function runGate(g: GateEntry, tool: string): Promise<RunResult> {
-  return rerunOnDeadline(() => new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const child = spawn(g.runner, [path.join(root, g.artifact)], {
       env: { ...process.env, HOME: home, USERPROFILE: home, INTUTIC_WORKSPACE_ID: 'ws_test' },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -79,7 +79,7 @@ function runGate(g: GateEntry, tool: string): Promise<RunResult> {
       resolve({ status: code === null ? -1 : code, stderr })
     })
     child.stdin.end(JSON.stringify({ tool_name: tool, tool_input: {}, session_id: 'sess_heal' }))
-  }), (r) => r.stderr)
+  })
 }
 
 beforeAll(async () => {

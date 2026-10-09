@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { GATES, type GateEntry, rerunOnDeadline } from './gateRegistry.js'
+import { GATES, type GateEntry } from './gateRegistry.js'
 import { toRulesLine } from '../../src/harness/gateBody.js'
 import { buildSnapshotRules, type ResolvedPolicy } from '../../src/lib/policySnapshot.js'
 import type { GuardPattern } from '../../src/harness/protectedPaths.js'
@@ -112,11 +112,11 @@ function runProcess(cmd: string, args: string[], opts: { input: string; env: Nod
 
 async function runGate(g: GateEntry, snapshot: 'shadow' | 'enforce', tool: string, toolInput: Record<string, unknown>): Promise<RunResult> {
   const root = roots.get(g.name)!
-  return rerunOnDeadline(() => runProcess(g.runner, [join(root, g.artifact)], {
+  return runProcess(g.runner, [join(root, g.artifact)], {
     input: JSON.stringify({ tool_name: tool, tool_input: toolInput, session_id: 'sess_shadow' }),
     env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshots.get(snapshot)! },
     timeoutMs: 20_000,
-  }), (r) => r.stdout + r.stderr)
+  })
 }
 
 /** Every audit line under the gate's root, parsed. */

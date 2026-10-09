@@ -45,7 +45,8 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitJsGate, emitJsFailClosedPrelude, HOOK_TIMEOUT_SECONDS } from './gateBody.js'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
+import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
 const log = createLogger('sync-github-copilot-hooks')
 

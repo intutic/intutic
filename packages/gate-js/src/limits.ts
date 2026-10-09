@@ -11,8 +11,17 @@ export const COMMAND_SIZE_LIMIT = 256 * 1024
 /** The largest tool arguments, in UTF-8 bytes of compact JSON, the gate evaluates. */
 export const ARGUMENTS_SIZE_LIMIT = 1024 * 1024
 
-/** How long a hook script the gate writes may run, from process start, before it refuses. */
-export const GATE_DEADLINE_MS = 4000
+/**
+ * The timeout, in seconds, on the Claude Code hook entry the sandbox bootstrap
+ * writes (`intuticSandboxBootstrap`); Claude Code runs a call whose hook times out.
+ */
+export const HOOK_TIMEOUT_SECONDS = 10
+
+/** How far below its harness's hook timeout a gate refuses: interpreter start-up, and the refusal written and read. */
+export const GATE_DEADLINE_MARGIN_MS = 1000
+
+/** How long the hook script the sandbox bootstrap writes may run, from process start, before it refuses. */
+export const GATE_DEADLINE_MS = HOOK_TIMEOUT_SECONDS * 1000 - GATE_DEADLINE_MARGIN_MS
 
 /**
  * Why a call is too large to evaluate, or null. Counts the command and the

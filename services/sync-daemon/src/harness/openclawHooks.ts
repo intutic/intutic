@@ -32,8 +32,9 @@
  * handler that throws or outlives its timeout blocks the call
  * (`src/plugins/hook-runner-global.ts`: `before_tool_call: "fail-closed"`;
  * default 15 s, `docs/plugins/hooks/reference.md`). That timeout cannot stop
- * synchronous code, so the gate runs under its own `GATE_DEADLINE_MS` and the
- * hook registers `timeoutMs: HOOK_TIMEOUT_SECONDS * 1000` above it.
+ * synchronous code, so the hook registers `timeoutMs: HOOK_TIMEOUT_SECONDS *
+ * 1000` and the gate runs under its own deadline inside it
+ * (`gateDeadlineMs('openclaw')`).
  *
  * The plugin embeds the shared `emitJsGate` body (`'throw'` contract) and
  * returns OpenClaw's block result for the refusal it throws. Any other fault
@@ -53,7 +54,8 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitJsGate, HOOK_TIMEOUT_SECONDS, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
+import { emitJsGate, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 
 const log = createLogger('sync-openclaw-hooks')
 

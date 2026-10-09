@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { IntuticGateRefusal } from '../errors.js'
 import { Gate } from '../gate.js'
-import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MS } from '../limits.js'
+import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MARGIN_MS, HOOK_TIMEOUT_SECONDS } from '../limits.js'
 import { evaluate, loadSnapshot, SEV_BLOCK } from '../snapshot.js'
 import { expectLinearTime } from './linearTime.js'
 import { rulesText } from './fixtures/rulesFile.js'
@@ -41,7 +41,7 @@ interface VectorRule {
   adversarial: Adversarial[]
 }
 const VECTORS = JSON.parse(readFileSync(join(FIXTURES, 'gate-rule-vectors.json'), 'utf-8')) as {
-  limits: { commandBytes: number; argumentsBytes: number; deadlineMs: number }
+  limits: { commandBytes: number; argumentsBytes: number; hookTimeoutSeconds: number; deadlineMarginMs: number }
   rules: VectorRule[]
 }
 
@@ -89,9 +89,12 @@ describe('gate rule vectors', () => {
   })
 
   it('use the shared limits', () => {
-    expect({ commandBytes: COMMAND_SIZE_LIMIT, argumentsBytes: ARGUMENTS_SIZE_LIMIT, deadlineMs: GATE_DEADLINE_MS }).toEqual(
-      VECTORS.limits,
-    )
+    expect({
+      commandBytes: COMMAND_SIZE_LIMIT,
+      argumentsBytes: ARGUMENTS_SIZE_LIMIT,
+      hookTimeoutSeconds: HOOK_TIMEOUT_SECONDS,
+      deadlineMarginMs: GATE_DEADLINE_MARGIN_MS,
+    }).toEqual(VECTORS.limits)
   })
 
   it('run sequence rules with a byte-identical copy of the shared matcher', () => {

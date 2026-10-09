@@ -22,7 +22,8 @@ import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { hardenGoosePlugin, unharden } from './gooseHardener.js'
-import { emitShellGate, HOOK_TIMEOUT_SECONDS, SHELL_EXTRACT, SHELL_FAIL_CLOSED, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
+import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 import { parseDocument, isMap, isScalar } from 'yaml'
 
 const log = createLogger('sync-goose-hooks')
@@ -109,7 +110,7 @@ export async function writeGooseHooks(proxyUrl: string, workspaceRoot = os.homed
 # Proxy: ${proxyUrl}
 # Generated: ${newIso()}
 set -euo pipefail
-${SHELL_FAIL_CLOSED}
+${emitShellFailClosed('goose')}
 EVENT="\${1:-pre}"
 INPUT="\$(cat)"
 ${SHELL_EXTRACT}

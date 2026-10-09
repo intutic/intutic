@@ -24,7 +24,8 @@ import { join } from 'node:path'
 import {
   ARGUMENTS_SIZE_LIMIT,
   COMMAND_SIZE_LIMIT,
-  GATE_DEADLINE_MS,
+  GATE_DEADLINE_MARGIN_MS,
+  HOOK_TIMEOUT_SECONDS,
   SKILL_SCAN_PATTERNS,
   compileSequence,
   hasPhrase,
@@ -160,7 +161,8 @@ function buildVectors(): { rules: VectorRule[] } & Record<string, unknown> {
     limits: {
       commandBytes: COMMAND_SIZE_LIMIT,
       argumentsBytes: ARGUMENTS_SIZE_LIMIT,
-      deadlineMs: GATE_DEADLINE_MS,
+      hookTimeoutSeconds: HOOK_TIMEOUT_SECONDS,
+      deadlineMarginMs: GATE_DEADLINE_MARGIN_MS,
     },
     rules: allRules().map(vectorRule),
   }

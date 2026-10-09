@@ -23,8 +23,8 @@
  * - failure: "A `tool_call` handler failure blocks the tool as a fail-safe"
  *   (`docs/extensions.md`); `ExtensionRunner.emitToolCall` awaits each
  *   handler with no timeout (`core/extensions/runner.ts`), so a handler that
- *   hangs hangs Pi. The gate body therefore runs under `GATE_DEADLINE_MS`,
- *   from the start of each call, and refuses past it.
+ *   hangs hangs Pi. The gate body therefore runs under its own deadline
+ *   (`gateDeadlineMs('pi')`), from the start of each call, and refuses past it.
  *
  * The extension embeds the shared `emitJsGate` body (`'throw'` contract) and
  * returns Pi's block result for the refusal it throws; any other fault is a

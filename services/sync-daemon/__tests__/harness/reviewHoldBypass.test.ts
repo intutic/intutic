@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { GATES, type GateEntry, rerunOnDeadline } from './gateRegistry.js'
+import { GATES, type GateEntry } from './gateRegistry.js'
 import { writeApprovedBypasses, type ApprovedBypassEntry } from '../../src/lib/approvedBypasses.js'
 import { NORMALISE_CONTRACT } from '../../src/harness/protectedPaths.js'
 import { toRulesLine, REVIEW_REQUESTS_LOG } from '../../src/harness/gateBody.js'
@@ -95,7 +95,7 @@ afterAll(() => {
 
 function runGate(g: GateEntry, payload: unknown): Promise<RunResult> {
   const root = roots.get(g.name)!
-  return rerunOnDeadline(() => new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const child = spawn(g.runner, [join(root, g.artifact)], {
       env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -111,7 +111,7 @@ function runGate(g: GateEntry, payload: unknown): Promise<RunResult> {
     child.on('close', (code) => { clearTimeout(timer); resolve({ status: code === null ? -1 : code, stdout, stderr }) })
     child.stdin.write(JSON.stringify(payload))
     child.stdin.end()
-  }), (r) => r.stdout + r.stderr)
+  })
 }
 
 function refused(g: GateEntry, r: RunResult): boolean {
