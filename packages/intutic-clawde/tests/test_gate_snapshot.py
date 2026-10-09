@@ -81,6 +81,15 @@ class TestIntegrity:
         s = snap.load_snapshot(WS, p)
         assert s.state == "invalid" and s.rules == []
 
+    def test_missing_digest_invalidates_as_in_every_gate(self, tmp_path):
+        p = _rules_file(tmp_path, [line("d", "block", "-", "command", "r", "rm")])
+        with open(p, encoding="utf-8") as fh:
+            text = "".join(l for l in fh if not l.startswith("#digest "))
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        s = snap.load_snapshot(WS, p)
+        assert s.state == "invalid" and s.rules == []
+
     def test_workspace_mismatch_invalidates(self, tmp_path):
         p = _rules_file(tmp_path, [line("d", "block", "-", "command", "r", "rm")],
                         workspace="ws_someone_else")
@@ -108,7 +117,9 @@ class TestEvaluation:
             line("proto.paths", "block", "-", "target", "governance-protected path", r"\.intutic/"),
             line("advise.curl", "warn", "-", "command", "Network egress", r"curl "),
             line("shadow.helm", "shadow", "-", "command", "Helm use", r"helm "),
-            line("tool.fetch", "block", "-", "tool", "Tool not permitted", r"^webfetch$"),
+            # The shape the snapshot writer ships a tool rule in (`toGuardPattern`
+            # in policySnapshot.ts strips ^/$ and pads), as gate-js's suite has it.
+            line("tool.fetch", "block", "-", "tool", "Tool not permitted", r" (webfetch) "),
         ]))
 
     def test_allows_benign(self, s):
@@ -143,3 +154,58 @@ class TestEvaluation:
         """INTUTIC_GUARD_DISABLE=1 must not disable a workspace's own rules."""
         assert snap.evaluate("shell", "", "rm -rf /", s, guard_disabled=True).severity is None
         assert snap.evaluate("write_file", ".intutic/x", "", s, guard_disabled=True).severity == snap.SEV_BLOCK
+
+
+class TestPhraseRules:
+    """A `phrase` rule's source is phrases joined by |, matched as words by the
+    phrase matcher, never as a regex: the gap regex it replaced backtracked for
+    seconds on a few hundred kilobytes of crafted command."""
+
+    @pytest.fixture()
+    def s(self, tmp_path):
+        return snap.load_snapshot(WS, _rules_file(tmp_path, [
+            line("destructive.sql_drop", "warn", "i", "phrase", "Destructive SQL statement",
+                 "drop table|drop database|drop schema|truncate table"),
+        ]))
+
+    @pytest.mark.parametrize("command", [
+        "psql -c 'DROP/**/TABLE users'",
+        "psql -c 'DROP -- why\nTABLE users'",
+        "psql -c 'DROP \\\nTABLE users'",
+        "printf 'DROP\\nTABLE users' | psql",
+    ])
+    def test_matches_the_words_whatever_separates_them(self, s, command):
+        d = snap.evaluate("shell", "", command, s)
+        assert d.severity == snap.SEV_WARN and d.rule_id == "destructive.sql_drop"
+
+    @pytest.mark.parametrize("command", ["git stash drop && cat table.md", "truncate --size 0 table.log", "./drop_table.sh"])
+    def test_needs_the_whole_words(self, s, command):
+        assert snap.evaluate("shell", "", command, s).severity is None
+
+    @pytest.mark.parametrize("unit,times", [("drop -- ", 25000), ("drop /* ", 25000), ("\\ ", 100000)])
+    def test_stays_linear_on_crafted_input(self, s, unit, times):
+        from linear_time import assert_linear_time
+
+        commands = {1: unit * (times // 4), 4: unit * times}
+        assert_linear_time(repr(unit), lambda scale: snap.evaluate("shell", "", commands[scale], s))
+
+
+class TestNormalisation:
+    """The subject is padded and keeps its case, as in every hook gate."""
+
+    @pytest.fixture()
+    def s(self, tmp_path):
+        return snap.load_snapshot(WS, _rules_file(tmp_path, [
+            line("destructive.rm_rf_root", "block", "-", "command", "Recursive delete of the root",
+                 r" rm( +-[a-zA-Z-]+)+ +/( |\*)"),
+            line("bypass.env_kill_switch", "block", "-", "any", "Kill switch", r" [A-Z][A-Z0-9_]*_HOOKS?="),
+        ]))
+
+    def test_a_command_that_begins_with_the_verb_matches_a_padded_rule(self, s):
+        assert snap.evaluate("Bash", "", "rm -rf /", s).severity == snap.SEV_BLOCK
+
+    def test_a_rule_keyed_on_case_still_fires(self, s):
+        assert snap.evaluate("Bash", "", "CLAUDE_CODE_HOOKS=0 claude", s).severity == snap.SEV_BLOCK
+
+    def test_case_is_not_folded_for_a_rule_without_the_i_flag(self, s):
+        assert snap.evaluate("Bash", "", "claude_code_hooks=0 claude", s).severity is None

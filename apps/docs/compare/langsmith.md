@@ -7,19 +7,19 @@ description: LangSmith traces and evaluates LLM applications and now offers an i
 
 *Last reviewed: 2026-10-08*
 
-Intutic decides each agent tool call before it runs, across 43 harnesses: native hook gates and in-process SDK gates allow or block the call, and hook gates can hold it for human approval. Around the gates, a policy proxy redacts sensitive data in model traffic, an MCP governance proxy governs MCP tools, an egress firewall and sandboxed execution stop the agent routing around governance, and a signed audit trail records every decision. LangSmith, from LangChain, is a platform for tracing, evaluating and improving LLM applications. Its LLM Gateway, in beta since August 2026, sits inline on model traffic to enforce hard spend caps and redact PII and secrets, with setup guides for Claude Code, Codex and Gemini CLI. LangSmith governs and records the model call; Intutic governs the action.
+Intutic decides agent tool calls before they run, across 43 supported harnesses: native hook gates in 18 of them and in-process SDK gates in 17 allow or block the call, hook gates, SDK gates and the MCP governance proxy can hold it for human approval, and the other eight are governed through the proxies, a bridge or the harness they orchestrate. Around the gates, a policy proxy redacts sensitive data in model traffic, an MCP governance proxy governs MCP tools, an egress firewall and sandboxed execution stop the agent routing around governance, and execution traces are sealed into a signed audit trail you can verify. LangSmith, from LangChain, is a platform for tracing, evaluating and improving LLM applications. Its LLM Gateway, in beta since August 2026, sits inline on model traffic to enforce hard spend caps and redact PII and secrets, with setup guides for Claude Code, Codex and Gemini CLI. LangSmith governs and records the model call; Intutic governs the action.
 
 ## Comparison
 
 | | Intutic | LangSmith |
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | Tracing, evaluation and prompt engineering for LLM applications |
-| **Where it enforces** | Native pre-execution hook gates in 19 of the 43 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | LLM Gateway (beta), inline on model traffic |
-| **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Gateway guides for Claude Code, Codex and Gemini CLI |
-| **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Block on a spend cap (HTTP 402); redact PII and secrets |
-| **Sensitive data** | Secrets and credentials in requests redacted or blocked by pattern before they leave | Gateway redaction of PII and provider keys; masking of trace inputs and outputs |
-| **Cost control** | Daily spend caps enforced before a request leaves | Hard spend caps in the gateway |
-| **Evaluation** | Shadow mode measures how often a rule would act before it enforces; judge findings go to a human review queue | Datasets and evaluators for LLM application quality |
+| **Where it enforces** | Pre-execution gates inside the agent (native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), plus request and response proxy, MCP governance proxy, egress firewall and sandbox | LLM Gateway (beta), inline on model traffic |
+| **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Gemini CLI, Cursor, GitHub Copilot, Windsurf and Cline | Gateway guides for Claude Code, Codex and Gemini CLI |
+| **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Block on a spend cap (HTTP 402); redact PII and secrets |
+| **Sensitive data** | Secrets, credentials, US Social Security numbers and patterns you define (such as PHI) redacted or blocked by pattern, in requests before they leave and in responses before the agent sees them | Gateway redaction of PII and provider keys; masking of trace inputs and outputs |
+| **Cost control** | Daily spend caps enforced before a request leaves; a loop run that exceeds its budget is stopped | Hard spend caps in the gateway |
+| **Evaluation** | Shadow mode measures how often a rule would act before it enforces; judge verdicts in the uncertain band go to a human review queue | Datasets and evaluators for LLM application quality |
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | Cloud; self-hosted and BYOC on Enterprise |
 | **Source** | Open core (MIT) | Closed platform |
 

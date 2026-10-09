@@ -20,8 +20,8 @@
  * policy-snapshot evaluation), and — this is the part that is independently
  * confirmed, unlike Muse Code's — signals a block by writing
  * `{"decision":"deny","reason":"..."}` as JSON on **stdout** and exiting 0.
- * That is a *different* stdout shape from Cline/Roo Code's `{"cancel":true}`
- * — Grok Build does not recognise `cancel`, and Cline/Roo Code do not
+ * That is a *different* stdout shape from Cline's `{"cancel":true}`
+ * — Grok Build does not recognise `cancel`, and Cline does not
  * recognise `decision` — so this writer uses its own `BlockContract` value,
  * `'stdout-decision-deny'` (see gateBody.ts's module doc for why the two
  * stdout shapes are not folded into one contract), rather than reusing
@@ -72,7 +72,7 @@ import * as os from 'node:os'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
-import { openaiBaseUrl } from '@intutic/shared-types'
+import { HOOK_GATE_TIMEOUTS, openaiBaseUrl } from '@intutic/shared-types'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
@@ -124,8 +124,9 @@ function buildHookRegistration(hookScriptPath: string) {
               // Grok Build's documented default; stated explicitly rather than
               // left to fall back, since a local policy-snapshot evaluation is
               // cheap but a future default change upstream should not silently
-              // starve this hook.
-              timeout: 5,
+              // starve this hook. The gate's deadline is derived from it
+              // (gateDeadlineMs), because Grok Build runs the call when it expires.
+              timeout: HOOK_GATE_TIMEOUTS.grok.timeoutMs / 1000,
             },
           ],
         },
@@ -168,6 +169,9 @@ function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
       // Passed through, not collapsed to two values: the advisory tier emits
       // 'tool_flagged', and a ternary here silently recorded it as an allow.
@@ -177,6 +181,7 @@ function logEvent(verdict, toolName, reason) {
       harnessType: 'grok',
       timestamp: ts,
       incidentId,
+      eventId,
       ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
     fs.appendFileSync(${JSON.stringify(hookEventsLog)}, entry, { flag: 'a' });
@@ -218,7 +223,7 @@ process.stdin.on('end', () => {
     const errMsg = String(err);
     process.stderr.write('[Intutic Governance] Hook error (fail-closed): ' + errMsg + '\\n');
     logEvent('tool_blocked', 'unknown', errMsg);
-    process.stdout.write(JSON.stringify({ decision: 'deny', reason: '[Intutic Governance] Hook error (fail-closed): ' + errMsg }) + '\\n');
+    process.stdout.write(JSON.stringify({ decision: 'deny', reason: '[Intutic Governance] Hook error (fail-closed): ' + errMsg, code: 'GATE_CRASHED', ruleId: null }) + '\\n');
     process.exit(0);
   }
 });

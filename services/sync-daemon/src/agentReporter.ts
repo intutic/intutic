@@ -382,7 +382,15 @@ async function readFileWithin(filePath: string, maxBytes: number): Promise<Buffe
  * report on.
  */
 async function collectSkills(workspaceRoot: string): Promise<AgentFacets['skills']> {
-  const dir = join(workspaceRoot, '.agents', 'skills')
+  return collectSkillsIn(join(workspaceRoot, '.agents', 'skills'), '.agents/skills')
+}
+
+/**
+ * {@link collectSkills} for any skills directory: one row per subdirectory,
+ * reported under `source`. The AI inventory also reads the Claude Code skill
+ * directories this way.
+ */
+export async function collectSkillsIn(dir: string, source: string): Promise<AgentFacets['skills']> {
   let entries
   try {
     entries = await readdir(dir, { withFileTypes: true })
@@ -403,7 +411,7 @@ async function collectSkills(workspaceRoot: string): Promise<AgentFacets['skills
       const sha256 = createHash('sha256').update(content, 'utf8').digest('hex')
       out.push({
         name: e.name,
-        source: '.agents/skills',
+        source,
         scanned: true,
         clean: result.clean,
         findingsCount: result.findings.length,
@@ -413,7 +421,7 @@ async function collectSkills(workspaceRoot: string): Promise<AgentFacets['skills
     } catch {
       out.push({
         name: e.name,
-        source: '.agents/skills',
+        source,
         scanned: false,
         clean: false,
         findingsCount: 0,
@@ -466,6 +474,12 @@ async function collectMcpTools(workspaceRoot: string): Promise<AgentFacets['mcp_
 export async function collectAgentReport(opts: {
   workspaceRoot: string
   harnessType: HarnessType
+  /**
+   * The gate id the agent registers under, when the harness has more than one
+   * gate (`gateIdentitiesOf` in `@intutic/shared-types`). Defaults to the
+   * harness id.
+   */
+  gateIdentity?: string
   agentRole?: string
   configSynced: boolean
   dlpEnabled: boolean
@@ -485,10 +499,11 @@ export async function collectAgentReport(opts: {
   ])
 
   const role = opts.agentRole ?? ''
+  const gateId = opts.gateIdentity ?? opts.harnessType
   return {
-    agentKey: `${opts.harnessType}:${role || 'default'}`,
-    displayName: role ? `${opts.harnessType} (${role})` : opts.harnessType,
-    harnessType: opts.harnessType,
+    agentKey: `${gateId}:${role || 'default'}`,
+    displayName: role ? `${gateId} (${role})` : gateId,
+    harnessType: gateId,
     agentRole: role,
     facets: {
       guardrails: {

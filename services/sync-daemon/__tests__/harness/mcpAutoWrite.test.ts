@@ -260,8 +260,36 @@ describe('discoverMcpServers', () => {
 
     const found = await discoverMcpServers(ctx.root)
 
-    expect(found).toContainEqual({ server: 'remote-sse', harness: 'claude-code', transport: 'sse', wrapped: false })
-    expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: false })
+    expect(found).toContainEqual({ server: 'remote-sse', harness: 'claude-code', transport: 'sse', wrapped: false, endpoint: 'https://example.com/mcp' })
+    expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: false, endpoint: 'https://example.com/other' })
+  })
+
+  it('reports a remote server\'s endpoint without credentials, query string or token path segment, wrapped or not', async () => {
+    ctx = setup()
+    mkdirSync(join(ctx.home, '.claude'), { recursive: true })
+    // Assembled at run time: no credential-shaped literal in source.
+    const password = ['pa', 'ss', 'word'].join('')
+    const pathToken = ['Zx9', 'Yw8Vu7', 'Ts6Rq5Po4'].join('')
+    writeFileSync(
+      claudeCodePath(ctx.home),
+      JSON.stringify({
+        mcpServers: {
+          keyed: { url: `https://bot:${password}@mcp.example.com/v1/sse?token=abc`, type: 'sse' },
+          'path-key': { url: `https://actions.example.com/mcp/${pathToken}/sse` },
+          local: { command: 'npx', args: ['-y', 'server', `--api-key=${password}`] },
+        },
+      }, null, 2),
+    )
+
+    for (const found of [await discoverMcpServers(ctx.root), (await injectMcpServer(ctx.root, 'ws_test'), await discoverMcpServers(ctx.root))]) {
+      const byName = Object.fromEntries(found.map((s) => [s.server, s]))
+      expect(byName.keyed?.endpoint).toBe('https://mcp.example.com/v1/sse')
+      expect(byName['path-key']?.endpoint).toBe('https://actions.example.com/mcp/[redacted]/sse')
+      expect(byName.local).not.toHaveProperty('endpoint')
+      expect(JSON.stringify(found)).not.toContain(password)
+      expect(JSON.stringify(found)).not.toContain(pathToken)
+      expect(JSON.stringify(found)).not.toContain('token=')
+    }
   })
 
   // M2: `classifyEntry` must read `__intutic_original` FIRST — a wrapped
@@ -284,8 +312,8 @@ describe('discoverMcpServers', () => {
     await injectMcpServer(ctx.root, 'ws_test')
     const found = await discoverMcpServers(ctx.root)
 
-    expect(found).toContainEqual({ server: 'remote-sse', harness: 'claude-code', transport: 'sse', wrapped: true })
-    expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: true })
+    expect(found).toContainEqual({ server: 'remote-sse', harness: 'claude-code', transport: 'sse', wrapped: true, endpoint: 'https://example.com/mcp' })
+    expect(found).toContainEqual({ server: 'remote-http', harness: 'claude-code', transport: 'http', wrapped: true, endpoint: 'https://example.com/other' })
     expect(found.find((s) => s.server === 'remote-sse')?.transport).not.toBe('stdio')
   })
 
@@ -556,7 +584,7 @@ describe('injectMcpServer — OpenCode opencode.json mcp block (TD-487)', () => 
     const before = (await discoverMcpServers(ctx.root)).filter((s) => s.harness === 'opencode')
     expect(before).toEqual(expect.arrayContaining([
       { server: 'github', harness: 'opencode', transport: 'stdio', wrapped: false },
-      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: false },
+      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: false, endpoint: 'https://docs.example/mcp' },
     ]))
 
     await injectMcpServer(ctx.root, 'ws_test')
@@ -564,10 +592,171 @@ describe('injectMcpServer — OpenCode opencode.json mcp block (TD-487)', () => 
     const after = (await discoverMcpServers(ctx.root)).filter((s) => s.harness === 'opencode')
     expect(after).toEqual(expect.arrayContaining([
       { server: 'github', harness: 'opencode', transport: 'stdio', wrapped: true },
-      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: true },
-      { server: 'sso', harness: 'opencode', transport: 'http', wrapped: false },
+      { server: 'docs', harness: 'opencode', transport: 'http', wrapped: true, endpoint: 'https://docs.example/mcp' },
+      { server: 'sso', harness: 'opencode', transport: 'http', wrapped: false, endpoint: 'https://sso.example/mcp' },
     ]))
     expect(after.some((s) => s.server === 'intutic')).toBe(false)
+  })
+})
+
+describe('injectMcpServer — Gemini CLI and Google Antigravity', () => {
+  let ctx: Ctx
+  let prevPath: string | undefined
+
+  afterEach(() => {
+    if (ctx) teardown(ctx)
+    process.env.PATH = prevPath
+  })
+
+  /** A machine whose products are only what each test puts there: PATH holds no `gemini` or `antigravity`. */
+  function setupGemini(): Ctx {
+    prevPath = process.env.PATH
+    const c = setup()
+    process.env.PATH = join(c.home, 'empty-bin')
+    return c
+  }
+
+  const geminiPath = (c: Ctx) => join(c.home, '.gemini', 'settings.json')
+  const antigravityPath = (c: Ctx) => join(c.home, '.gemini', 'config', 'mcp_config.json')
+  const write = (file: string, doc: unknown) => {
+    mkdirSync(join(file, '..'), { recursive: true })
+    writeFileSync(file, JSON.stringify(doc, null, 2) + '\n')
+  }
+  const read = (file: string) => JSON.parse(readFileSync(file, 'utf-8'))
+
+  const geminiSettings = {
+    security: { auth: { selectedType: 'oauth-personal' } },
+    hooks: { BeforeTool: [] },
+    mcpServers: {
+      github: {
+        command: 'npx', args: ['-y', 'server-github'], env: { GITHUB_TOKEN: '$GITHUB_TOKEN' },
+        cwd: '/work', trust: true, timeout: 9000, includeTools: ['create_issue'],
+      },
+      docs: { url: 'https://docs.example/mcp', headers: { 'X-Team': 'core' } },
+      events: { url: 'https://events.example/sse', type: 'sse' },
+      stream: { httpUrl: 'https://stream.example/mcp', excludeTools: ['delete'] },
+      sso: { httpUrl: 'https://sso.example/mcp', oauth: { enabled: true } },
+      gcp: { httpUrl: 'https://gcp.example/mcp', authProviderType: 'google_credentials' },
+      socket: { tcp: 'localhost:9000' },
+    },
+  }
+
+  it('wraps Gemini CLI servers by argv, with no marker key, and keeps their other settings', async () => {
+    ctx = setupGemini()
+    write(geminiPath(ctx), geminiSettings)
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const raw = readFileSync(geminiPath(ctx), 'utf-8')
+    // Gemini CLI warns about any key its schema does not declare.
+    expect(raw).not.toContain('__intutic')
+    const written = JSON.parse(raw)
+    expect(written.security).toEqual(geminiSettings.security)
+    expect(written.hooks).toEqual(geminiSettings.hooks)
+
+    const gh = written.mcpServers.github
+    expect(gh.command).toBe('node')
+    expect(gh.args[0]).toMatch(/mcp-(governance-)?proxy[\\/]dist[\\/]index\.js$/)
+    expect(gh.args.slice(1)).toEqual(['--workspace-id', 'ws_test', '--server-name', 'github', '--', 'npx', '-y', 'server-github'])
+    expect(gh.env).toEqual({ GITHUB_TOKEN: '$GITHUB_TOKEN', INTUTIC_WORKSPACE_ID: 'ws_test' })
+    expect(gh).toMatchObject({ cwd: '/work', trust: true, timeout: 9000, includeTools: ['create_issue'] })
+
+    const bridged = (name: string) => written.mcpServers[name].args.slice(5)
+    // No `type`: Gemini CLI tries streamable HTTP first, which is what the bridge speaks.
+    expect(bridged('docs')).toEqual(['--remote-url', 'https://docs.example/mcp', '--remote-transport', 'http'])
+    expect(JSON.parse(written.mcpServers.docs.env.INTUTIC_REMOTE_HEADERS)).toEqual({ 'X-Team': 'core' })
+    expect(Object.keys(written.mcpServers.docs).sort()).toEqual(['args', 'command', 'env'])
+    expect(bridged('events')).toEqual(['--remote-url', 'https://events.example/sse', '--remote-transport', 'sse'])
+    expect(bridged('stream')).toEqual(['--remote-url', 'https://stream.example/mcp', '--remote-transport', 'http'])
+    expect(written.mcpServers.stream.excludeTools).toEqual(['delete'])
+
+    // Servers Gemini CLI authenticates itself, and a websocket one, stay as they were.
+    for (const name of ['sso', 'gcp', 'socket'] as const) {
+      expect(written.mcpServers[name]).toEqual(geminiSettings.mcpServers[name])
+    }
+    expect(written.mcpServers.intutic.command).toBe('node')
+  })
+
+  it('writes nothing on a second sync', async () => {
+    ctx = setupGemini()
+    write(geminiPath(ctx), geminiSettings)
+    await injectMcpServer(ctx.root, 'ws_test')
+    const first = readFileSync(geminiPath(ctx), 'utf-8')
+    const mtime = statSync(geminiPath(ctx)).mtimeMs
+    await injectMcpServer(ctx.root, 'ws_test')
+    expect(readFileSync(geminiPath(ctx), 'utf-8')).toBe(first)
+    expect(statSync(geminiPath(ctx)).mtimeMs).toBe(mtime)
+  })
+
+  it("wraps a project's .gemini/settings.json servers without adding a second intutic server, and creates none", async () => {
+    ctx = setupGemini()
+    write(geminiPath(ctx), { security: {} })
+    await injectMcpServer(ctx.root, 'ws_test')
+    expect(() => statSync(join(ctx.root, '.gemini', 'settings.json'))).toThrow()
+
+    write(join(ctx.root, '.gemini', 'settings.json'), { mcpServers: { db: { command: 'db-mcp' } } })
+    await injectMcpServer(ctx.root, 'ws_test')
+    const project = read(join(ctx.root, '.gemini', 'settings.json'))
+    expect(Object.keys(project.mcpServers)).toEqual(['db'])
+    expect(project.mcpServers.db.args.slice(-2)).toEqual(['--', 'db-mcp'])
+  })
+
+  it("wraps Antigravity's mcp_config.json, a serverUrl server over SSE", async () => {
+    ctx = setupGemini()
+    mkdirSync(join(ctx.home, '.gemini', 'antigravity'), { recursive: true })
+    write(antigravityPath(ctx), {
+      mcpServers: {
+        sqlite: { command: 'sqlite-mcp-server', args: ['/db.sqlite'], env: { DB_READONLY: 'true' } },
+        remote: { serverUrl: 'https://mcp.example/sse' },
+      },
+    })
+
+    await injectMcpServer(ctx.root, 'ws_test')
+
+    const raw = readFileSync(antigravityPath(ctx), 'utf-8')
+    expect(raw).not.toContain('__intutic')
+    const written = JSON.parse(raw)
+    expect(written.mcpServers.sqlite.args.slice(1)).toEqual([
+      '--workspace-id', 'ws_test', '--server-name', 'sqlite', '--', 'sqlite-mcp-server', '/db.sqlite',
+    ])
+    expect(written.mcpServers.sqlite.env).toEqual({ DB_READONLY: 'true', INTUTIC_WORKSPACE_ID: 'ws_test' })
+    expect(written.mcpServers.remote).toEqual({
+      command: 'node',
+      args: [written.mcpServers.remote.args[0], '--workspace-id', 'ws_test', '--server-name', 'remote',
+        '--remote-url', 'https://mcp.example/sse', '--remote-transport', 'sse'],
+      env: { INTUTIC_WORKSPACE_ID: 'ws_test' },
+    })
+    expect(written.mcpServers.intutic.command).toBe('node')
+    // Gemini CLI is not on this machine, so its settings are not created.
+    expect(() => statSync(geminiPath(ctx))).toThrow()
+  })
+
+  it('writes neither file on a machine with neither product', async () => {
+    ctx = setupGemini()
+    await injectMcpServer(ctx.root, 'ws_test')
+    expect(() => statSync(geminiPath(ctx))).toThrow()
+    expect(() => statSync(antigravityPath(ctx))).toThrow()
+  })
+
+  it('reports each product under its own name, wrapped or not, and why a server stays ungoverned', async () => {
+    ctx = setupGemini()
+    write(geminiPath(ctx), geminiSettings)
+    mkdirSync(join(ctx.home, '.gemini', 'antigravity'), { recursive: true })
+    write(antigravityPath(ctx), { mcpServers: { remote: { serverUrl: 'https://mcp.example/sse' } } })
+
+    const before = await discoverMcpServers(ctx.root)
+    const row = (harness: string, server: string) => before.find((r) => r.harness === harness && r.server === server)
+    expect(row('gemini-cli', 'github')).toMatchObject({ transport: 'stdio', wrapped: false })
+    expect(row('gemini-cli', 'sso')?.ungovernedReason).toMatch(/authenticates this server itself/)
+    expect(row('antigravity', 'remote')).toMatchObject({ transport: 'sse', wrapped: false, endpoint: 'https://mcp.example/sse' })
+
+    await injectMcpServer(ctx.root, 'ws_test')
+    const after = await discoverMcpServers(ctx.root)
+    const again = (harness: string, server: string) => after.find((r) => r.harness === harness && r.server === server)
+    expect(again('gemini-cli', 'github')).toMatchObject({ transport: 'stdio', wrapped: true })
+    expect(again('gemini-cli', 'events')).toMatchObject({ transport: 'sse', wrapped: true })
+    expect(again('antigravity', 'remote')).toMatchObject({ transport: 'sse', wrapped: true, endpoint: 'https://mcp.example/sse' })
+    expect(again('gemini-cli', 'socket')).toMatchObject({ wrapped: false, ungovernedReason: expect.stringMatching(/websocket/) })
   })
 })
 

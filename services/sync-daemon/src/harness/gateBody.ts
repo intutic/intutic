@@ -48,12 +48,30 @@
  *
  * @module
  */
+import { HOLD_APPROVAL_HINT_TEMPLATE, HOLD_ID_PLACEHOLDER } from '@intutic/shared-types'
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
   NORMALISE_CONTRACT,
+  ruleFlags,
   staticFloorPatterns,
   type GuardPattern,
 } from './protectedPaths.js'
+import {
+  ARGUMENTS_SIZE_LIMIT,
+  COMMAND_SIZE_LIMIT,
+  gateDeadlineMs,
+  type HookGateHarness,
+  MCP_ALLOWLIST_JS_SOURCE,
+  MCP_ALLOWLIST_RECORD_TAG,
+  MCP_REGISTRY_JS_SOURCE,
+  MCP_REGISTRY_RECORD_TAG,
+  MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE,
+  PHRASES_JS_SOURCE,
+  SEQUENCE_JS_SOURCE,
+} from '@intutic/shared-types'
+import { MCP_REGISTRY_PY_SOURCE } from '../lib/mcpRegistryPy.js'
+import { PHRASES_PY_SOURCE } from '../lib/phrasesPy.js'
+import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
 
 /**
  * Bumped when the emitted evaluator changes shape.
@@ -75,7 +93,7 @@ import {
  *
  * v5: the residual fail-open edges were closed. Every bash gate now converts
  * an accidental crash (exit != 0 and != 2 under `set -euo pipefail`) into
- * exit 2 via {@link SHELL_FAIL_CLOSED}; every bash gate refuses a stdin
+ * exit 2 via {@link emitShellFailClosed}; every bash gate refuses a stdin
  * payload from which neither a tool name nor a tool_input could be extracted
  * (the envelope posture githubCopilotHooks established, now uniform); every
  * JS gate installs `uncaughtException`/`unhandledRejection` handlers as its
@@ -128,13 +146,150 @@ import {
  * change: an invalid snapshot keeps its `sso_group.*` block rules instead of
  * dropping them with the rest of the dynamic tier. A v8 gate reading a v9
  * snapshot enforces the same rules and drops them on an invalid one.
+ *
+ * v10: the hold classifier matches each action needle's words with a gap
+ * regex (`SQL_GAP_ERE`, replaced in v12) between them, over the normalised command, instead of
+ * as a plain substring of the raw one. `DROP/**\/TABLE`, `DROP -- why` +
+ * newline + `TABLE`, an escaped `\n`, a line continuation and (in the JS
+ * gates, which read the raw command) a tab or a doubled space all dodged a
+ * `review_before: action:db_write` or `action:deploy` hold. Only the emitted
+ * classifier changed; the `.rules` format did not, so v9 and v10 gates read
+ * each other's snapshots — a v9 gate just holds fewer spellings.
+ *
+ * v11: the classifier reads every harness's shell tool ({@link
+ * ACTION_TOOL_NAMES}, now the proxy's `SHELL_TOOLS`, Gemini CLI's
+ * `run_shell_command` included) with the v10 matching. A v10 gate does not
+ * classify a command run through those extra tool names. The `.rules` format
+ * is unchanged.
+ *
+ * v12: no regex runs on a command to find words that may be split apart. The
+ * hold classifier and `phrase`-subject rules (`destructive.sql_drop`) use the
+ * linear phrase matcher (`@intutic/shared-types` phrases.ts, emitted as
+ * JavaScript; `phrases.py`, emitted as Python and run by the bash gates'
+ * extractor), over the raw command. The v10 regex took seconds on a few
+ * hundred kilobytes of `git -- git -- …` in the JS gates, and bash's pattern
+ * substitution a minute on a long run of backslashes. A v11 gate reading a v12
+ * snapshot reads a `phrase` rule's source — the phrases joined by `|` — as a
+ * regex over the command, which still matches their plain spellings.
+ *
+ * v13: no gate rule runs a backtracking regex on a call, and no gate runs
+ * past its own deadline. Rules shaped `A.*B` carry the `s` flag in the
+ * `.rules` flags column (`is` with `i`) and run as sequences of steps
+ * (`@intutic/shared-types` sequence.ts, `sequence.py`); `grep -E` still runs
+ * them as written. A call whose command is over `COMMAND_SIZE_LIMIT` bytes or
+ * whose arguments are over `ARGUMENTS_SIZE_LIMIT` is refused as
+ * `COMMAND_TOO_LARGE`, and a gate still deciding at its deadline refuses
+ * with `GATE_DEADLINE`, ahead of the harnesses that read a
+ * hook timeout as an allow. A v12 gate compares the flags column with `i`, so
+ * it runs a sequence rule as the regex it also is, case-sensitively.
+ *
+ * v14: the MCP server registry and refusal codes. The snapshot carries the
+ * workspace's registry decisions as an `@mcp_registry` data line (two
+ * columns, inside the digest), and the JS and bash gates refuse an
+ * `mcp__<server>__<tool>` call to a blocked or held server, to a server the
+ * workspace has not approved under `mcpDefaultPolicy: deny`, or to a disabled
+ * tool, with the MCP proxy's codes, rule ids and reasons
+ * (`evaluateMcpRegistry` in `@intutic/shared-types`). An invalid snapshot
+ * keeps the record but not its approvals, as it keeps the SSO-group refusals
+ * but not the member's groups. A JSON decision (Cline, Grok Build,
+ * Antigravity) now carries `code` and `ruleId` ({@link HOOK_REFUSAL_CODES}).
+ * The `.rules` rule format is unchanged; a v13 gate skips the record line as
+ * it skips `@sso_groups`, and enforces no registry.
+ *
+ * v15: the in-process gates (the `'throw'` contract: OpenCode's plugin, Pi's
+ * extension, OpenClaw's plugin) run their rules under the same deadline,
+ * measured from the start of the call rather than of the process, which
+ * started long before. Pi and OpenCode await a tool-call handler with no time
+ * limit, and OpenClaw's own hook timeout cannot interrupt synchronous code,
+ * so a v14 in-process gate on a slow ` WHERE ` pattern held the agent.
+ *
+ * v16: the MCP server allowlist moved inside the digest. It was a
+ * `#mcpservers` header, which the digest does not cover, so adding a server
+ * to it by hand widened the allowlist and left the snapshot valid. It is now
+ * an `@mcp_allowlist` data line (tag, severity, comma-joined servers; three
+ * columns, so every rule parser skips it), and a snapshot that fails its
+ * digest keeps the allowlist but admits no server and refuses at `block`,
+ * as it keeps the registry's refusals but not its approvals. The bash gates'
+ * registry decision is `intutic_clawde/gate/mcp_registry.py`, emitted
+ * verbatim. A v15 gate reading a v16 snapshot enforces no allowlist; the
+ * daemon regenerates every gate each sync cycle.
+ *
+ * v17: an unverified snapshot admits no MCP server. A snapshot whose digest
+ * is broken or missing, or that names another workspace, used to keep the
+ * registry's refusals and an allowlist that admitted nothing; but a deleted
+ * record looks exactly like one never set, and an edit to the registry's
+ * blocked list or default policy still widened it. Every gate now refuses
+ * every MCP call on such a snapshot as `POLICY_SNAPSHOT_UNVERIFIED`
+ * (`mcpSnapshotUnverifiedRefusal` in `@intutic/shared-types`), at `block`
+ * in an observe-only workspace too, and the sync daemon restores the last
+ * snapshot it verified. The JS and Python readers also read a snapshot with
+ * no `#digest` line as unverified, as the bash gates already did. And the
+ * compiled floor refuses an edit to a VS Code settings file that sets
+ * `chat.useHooks` or `chat.hookFilesLocations` (`HOOK_SETTING_PATTERNS`),
+ * which can switch off the GitHub Copilot gate. The `.rules` format is
+ * unchanged.
+ *
+ * v18: each gate's deadline is its own harness's: a second under the hook
+ * timeout that harness applies (`HOOK_GATE_TIMEOUTS` and `gateDeadlineMs` in
+ * `@intutic/shared-types`), at most 9 s. One 4 s deadline for every gate,
+ * sized for Grok Build's 5 s default (connect now writes 10 s), refused legitimate calls on a busy machine in
+ * harnesses that wait 10 s or more. The bash gates also screen each subject
+ * with one `grep` holding every rule's pattern before testing rule by rule,
+ * and take the whitespace-collapsed fields from the extractor as they are:
+ * a call at the size limit had forked a hundred `grep`s and spent seconds of
+ * a loaded machine before any rule could match. The `.rules` format is
+ * unchanged.
  */
-export const GATE_VERSION = 9
+export const GATE_VERSION = 18
+
+/**
+ * The refusal codes a hook gate's JSON decision carries, as `code` beside the
+ * deciding `ruleId` (null when no rule decided), for the harnesses that read
+ * a decision from stdout rather than an exit code: Cline (`cancel`), Grok
+ * Build and Antigravity (`decision: deny`). The exit-code harnesses read the
+ * same refusal as text on stderr, the rule id in brackets. Held to
+ * `packages/shared-types/fixtures/refusal-codes.json` (`hook`) by a test.
+ *
+ * - `BUILT_IN_RULE`: a rule compiled into the gate (a governance bypass, a
+ *   write to a protected path or a skill directory, a secret in content);
+ * - `SNAPSHOT`: a block rule from the policy snapshot (an SOP, the
+ *   destructive-command tier, a skill-content rule);
+ * - `SSO_GROUP`: an `sso_group.*` rule, compiled from the workspace's SSO
+ *   group policy for this member;
+ * - `HELD`: a hold rule, with `holdId`;
+ * - `SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`:
+ *   the MCP server registry;
+ * - `SERVER_NOT_ALLOWED`: the workspace's `mcpAllowedServers` list;
+ * - `POLICY_SNAPSHOT_UNVERIFIED`: an MCP call on a snapshot that failed its
+ *   integrity check, which admits no MCP server;
+ * - `COMMAND_TOO_LARGE`: the call is over the size a gate evaluates;
+ * - `GATE_DEADLINE`: the gate did not decide within its harness's deadline
+ *   (`gateDeadlineMs` in `@intutic/shared-types`);
+ * - `UNREADABLE_CALL`: the payload held no tool call the gate could read;
+ * - `GATE_CRASHED`: the gate failed while deciding.
+ */
+export const HOOK_REFUSAL_CODES = [
+  'BUILT_IN_RULE',
+  'SNAPSHOT',
+  'SSO_GROUP',
+  'HELD',
+  'SERVER_BLOCKED',
+  'SERVER_HELD',
+  'SERVER_NOT_APPROVED',
+  'TOOL_DISABLED',
+  'SERVER_NOT_ALLOWED',
+  'POLICY_SNAPSHOT_UNVERIFIED',
+  'COMMAND_TOO_LARGE',
+  'GATE_DEADLINE',
+  'UNREADABLE_CALL',
+  'GATE_CRASHED',
+] as const
 
 /**
  * The coarse command → action-token classification the hold tier keys on:
- * `review_before: action:deploy` holds a shell command that contains any of
- * the deploy needles. Deliberately minimal — a gate that tries to be clever
+ * `review_before: action:deploy` holds a shell command that contains one of
+ * the deploy needles, whatever separates its words (the phrase matcher,
+ * `@intutic/shared-types` phrases.ts). Deliberately minimal — a gate that tries to be clever
  * about shell commands is a gate that blocks real work — and it mirrors the
  * proxy's `actions.rs` in both directions: `hookActionParity.test.ts` reads
  * THIS file as text and fails if either side knows a needle the other does
@@ -145,11 +300,28 @@ export const ACTION_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]>
   ['action:deploy', ['git push', 'kubectl apply', 'kubectl rollout', 'helm upgrade', 'helm install', 'terraform apply', 'docker push', 'serverless deploy', 'fly deploy', 'vercel deploy', 'gcloud run deploy', 'aws deploy', 'aws s3 sync', 'eb deploy']],
   ['action:publish', ['npm publish', 'pnpm publish', 'yarn publish', 'cargo publish', 'twine upload', 'poetry publish', 'gem push', 'docker manifest push']],
   ['action:release', ['gh release create', 'git tag', 'npm version', 'cargo release', 'goreleaser release', 'semantic-release']],
-  ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'truncate ', 'alter table']],
+  ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'drop database', 'drop schema', 'truncate ', 'alter table']],
 ]
 
-/** The (lower-cased) tool names whose `command` the classifier reads. */
-export const ACTION_TOOL_NAMES = ['bash', 'shell', 'run_command', 'terminal', 'execute'] as const
+/**
+ * The (lower-cased) tool names whose `command` the classifier reads: every
+ * harness's shell tool. The same list as the proxy's `SHELL_TOOLS` in
+ * `actions.rs` (`hookActionParity.test.ts` holds them equal), so a hold the
+ * proxy would classify is one the gate can hold before the call runs.
+ * `run_shell_command` is Gemini CLI's, `run_command` Antigravity's and
+ * `execute_command` Cline's.
+ */
+export const ACTION_TOOL_NAMES = [
+  'bash',
+  'shell',
+  'run_command',
+  'runcommand',
+  'execute_command',
+  'run_shell_command',
+  'terminal',
+  'execute',
+  'exec',
+] as const
 
 /** Where a gate appends a hold, relative to the workspace root; the daemon's
  *  `drainReviewRequests` reads the same file. */
@@ -159,21 +331,68 @@ export const REVIEW_REQUESTS_LOG = `.intutic/events/${REVIEW_REQUESTS_BASENAME}`
  *  other version at ingest. */
 export const REVIEW_REQUEST_VERSION = 1
 
-/** The bash classifier: echoes a space-padded token string for `$TOOL`/`$COMMAND`. */
-function shellActionClassifier(): string {
-  const cases = ACTION_NEEDLES.map(
-    ([action, needles]) =>
-      `  case "$_c" in ${needles.map((n) => `*"${n}"*`).join('|')}) out="\${out}${action} " ;; esac`,
-  ).join('\n')
-  return `intutic_actions() {
-  local _t _c out=" "
-  _t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$_t" in ${[...ACTION_TOOL_NAMES].join('|')}) ;; *) printf ' '; return 0 ;; esac
-  _c="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-${cases}
-  printf '%s' "$out"
-}`
-}
+/**
+ * The Python the bash gates run, defined once per gate script: the phrase
+ * matcher ({@link PHRASES_PY_SOURCE}), the MCP registry decision
+ * ({@link MCP_REGISTRY_PY_SOURCE}) and four entry points over them.
+ *
+ * - `intutic_actions(tool, command)` — the hold classifier, called by
+ *   {@link SHELL_EXTRACT}'s Python, which already reads the raw tool input:
+ *   space-padded action tokens (" action:deploy ") or " ".
+ * - `intutic_phrase_rule(source, command)` — a `phrase`-subject rule: its
+ *   source is `|`-separated phrases, each matched as words with boundaries.
+ * - `intutic_mcp_registry(record_b64, tool)` — the `@mcp_registry` record's
+ *   decision on an MCP call.
+ * - `intutic_mcp_unverified(tool)` — the refusal of an MCP call on a
+ *   snapshot that failed its integrity check.
+ *
+ * The classifier used to be `grep -E` with a gap regex over the normalised
+ * command, and bash's own pattern substitution on it took a minute on a long
+ * run of backslashes. Python is already required by every bash gate.
+ */
+export const GATE_PY_LIB = `${PHRASES_PY_SOURCE}
+
+${MCP_REGISTRY_PY_SOURCE}
+
+_INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)}
+_INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)}
+
+
+def intutic_actions(tool, command):
+    if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
+        return " "
+    words = phrase_text(command)
+    out = " "
+    for action, needles in _INTUTIC_ACTION_NEEDLES:
+        if any(has_phrase(words, n) for n in needles):
+            out += action + " "
+    return out
+
+
+def intutic_phrase_rule(source, command):
+    words = phrase_text(command)
+    return any(has_phrase(words, p, True) for p in source.split("|"))
+
+
+def intutic_mcp_registry(record_b64, tool):
+    # The registry decision for one mcp__<server>__<tool> call, from the
+    # snapshot's @mcp_registry record: "code<TAB>ruleId<TAB>reason", or "" to
+    # let the call continue.
+    call = split_mcp_tool_name(tool)
+    registry = decode_registry_record(MCP_REGISTRY_RECORD_TAG + "\\t" + record_b64)
+    if call is None or registry is None:
+        return ""
+    refusal = evaluate_registry(registry, call[0], call[1])
+    return "\\t".join(refusal) if refusal else ""
+
+
+def intutic_mcp_unverified(tool):
+    # The refusal of an mcp__<server>__<tool> call on a snapshot that failed
+    # its integrity check, as "code<TAB>ruleId<TAB>reason"; "" for a call that
+    # is not an MCP call.
+    call = split_mcp_tool_name(tool)
+    return "\\t".join(unverified_refusal(call[0])) if call else ""
+`
 
 /**
  * How old a snapshot may be before a gate reports it as stale.
@@ -190,21 +409,23 @@ export const SNAPSHOT_STALE_AFTER_DAYS = 7
  *
  * The three values are not stylistic. Claude Code, Cursor and the bash
  * harnesses read the **exit code** (2 = deny; 1 is an error and lets the call
- * through). Cline and Roo Code ignore the exit code and read a `{"cancel":
- * true}` object on stdout. Grok Build ALSO ignores the exit code, but its
+ * through). Cline ignores the exit code and reads a `{"cancel": true}`
+ * object on stdout. Grok Build ALSO ignores the exit code, but its
  * confirmed verdict shape is a *different* stdout object —
  * `{"decision":"deny","reason":"..."}` — not `{"cancel":true}`. The two
  * stdout contracts are kept as distinct union members rather than folded into
  * one "stdout-cancel" bucket precisely because a gate that emits the wrong
  * field name looks identical in a code review and enforces nothing: Grok
- * Build does not recognise `cancel`, and Cline/Roo Code do not recognise
+ * Build does not recognise `cancel`, and Cline does not recognise
  * `decision`. A gate that uses the wrong one is silently inert.
  */
 /**
  * `'throw'` is for a gate that runs INSIDE the harness process (OpenCode's
- * plugin hook): the refusal is a thrown Error carrying the BLOCKED message,
- * which the host turns into the tool-error the model reads. No exit code, no
- * stdout — the same in-process posture the n8n workflow gate takes.
+ * plugin hook, Pi's extension, OpenClaw's plugin): the refusal is a thrown
+ * Error carrying the BLOCKED message. OpenCode turns it into the tool-error
+ * the model reads; the Pi and OpenClaw handlers catch it and return their
+ * host's block result. No exit code, no stdout — the same in-process posture
+ * the n8n workflow gate takes.
  */
 export type BlockContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'throw'
 
@@ -224,21 +445,36 @@ function shellGuardTable(name: string, patterns: readonly GuardPattern[]): strin
   const rows = patterns.map(
     (p) =>
       `  ${shq(
-        [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', p.reason, p.source].join('\t'),
+        [p.id, p.severity, ruleFlags(p), p.subject ?? 'any', p.reason, p.source].join('\t'),
       )}`,
   )
   return `${name}=(\n${rows.join('\n')}\n)`
 }
 
-/** Emits a guard table as a JS array literal. */
+/**
+ * Emits a guard table as a JS array literal, preceded by the sequence-rule
+ * matcher its `seq` entries are compiled with (sequence.ts, emitted as source).
+ */
 function jsGuardTable(name: string, patterns: readonly GuardPattern[]): string {
   const rows = patterns.map(
     (p) =>
       `  { id: ${JSON.stringify(p.id)}, re: new RegExp(${JSON.stringify(p.source)}` +
-      `${p.ignoreCase ? ", 'i'" : ''}), severity: ${JSON.stringify(p.severity)}, ` +
+      `${p.ignoreCase ? ", 'i'" : ''}), ` +
+      `seq: ${p.sequence ? `compileSequence(${JSON.stringify(p.source)}, ${!!p.ignoreCase})` : 'null'}, ` +
+      `severity: ${JSON.stringify(p.severity)}, ` +
       `subject: ${JSON.stringify(p.subject ?? 'any')}, reason: ${JSON.stringify(p.reason)} },`,
   )
-  return `const ${name} = [\n${rows.join('\n')}\n];`
+  return (
+    `// Sequence rules (flags s): the regex's steps, each searched for once from\n` +
+    `// where the previous one ended, so a backtracking engine runs them in\n` +
+    `// linear time. Emitted from @intutic/shared-types sequence.ts.\n` +
+    `${SEQUENCE_JS_SOURCE}\n` +
+    `/** Whether a rule (floor or snapshot) matches one subject string. */\n` +
+    `function intuticRuleMatches(rule, subject) {\n` +
+    `  return rule.seq ? sequenceMatch(rule.seq, subject) : rule.re.test(subject);\n` +
+    `}\n\n` +
+    `const ${name} = [\n${rows.join('\n')}\n];`
+  )
 }
 
 /**
@@ -285,7 +521,7 @@ export const RULES_COLUMNS = ['id', 'severity', 'flags', 'subject', 'reason', 's
  */
 export function toRulesLine(p: GuardPattern): string {
   const reason = p.reason.replace(/[\t\n\r]/g, ' ')
-  const base = [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', reason, p.source].join('\t')
+  const base = [p.id, p.severity, ruleFlags(p), p.subject ?? 'any', reason, p.source].join('\t')
   // Appended only when present — see RULES_COLUMNS for why base64, and why a
   // rule without one must serialise byte-identically to the v3 layout.
   return p.argPattern ? base + '\t' + Buffer.from(p.argPattern, 'utf8').toString('base64') : base
@@ -323,8 +559,13 @@ export function toRulesLine(p: GuardPattern): string {
  * defined by the writer AFTER this prelude, so the trap probes for it before
  * calling: a crash earlier than the definition still blocks, just without an
  * audit line (stderr carries the reason either way).
+ *
+ * It also starts the gate's deadline, which is the harness's own
+ * ({@link gateDeadlineMs}).
  */
-export const SHELL_FAIL_CLOSED = `
+export function emitShellFailClosed(harness: HookGateHarness): string {
+  const deadlineS = gateDeadlineMs(harness) / 1000
+  return `
 # ── Intutic fail-closed prelude v${GATE_VERSION} ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
@@ -337,6 +578,7 @@ intutic_fail_closed() {
   # that would replace the exit status it exists to correct.
   set +eu
   trap - EXIT
+  [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -347,11 +589,31 @@ intutic_fail_closed() {
   exit 2
 }
 trap intutic_fail_closed EXIT
+
+# ── Internal deadline ────────────────────────────────────────────────────────
+# Most harnesses run a call whose hook outlives their timeout as if the hook had
+# allowed it. So this gate refuses at ${deadlineS} s from its own start, inside the
+# hook timeout ${harness} applies (gateLimits.ts): a watchdog, detached so it holds none of
+# the harness's pipes, stops the gate's children (a grep or python3 still
+# matching) and signals it; the trap below refuses. Every built-in rule is
+# linear; a workspace's own WHERE pattern need not be.
+intutic_deadline() {
+  trap - USR1
+  echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within ${deadlineS} s, and refuses it rather than let the hook timeout allow it." >&2
+  if command -v log_event >/dev/null 2>&1; then
+    log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within ${deadlineS} s" || true
+  fi
+  exit 2
+}
+trap intutic_deadline USR1
+INTUTIC_GATE_PID=$$
+INTUTIC_WATCHDOG_PID="$( { ( sleep ${deadlineS}; pkill -P "$INTUTIC_GATE_PID" 2>/dev/null; kill -USR1 "$INTUTIC_GATE_PID" 2>/dev/null ) </dev/null >/dev/null 2>&1 & } ; echo $! )"
 `
+}
 
 export interface ShellGateOptions {
   /** Harness id, as it appears in audit lines. */
-  harness: string
+  harness: HookGateHarness
   /**
    * Name of the shell function the writer defined to record an event.
    * Called as `<fn> <verdict> <tool> <reason>`.
@@ -369,13 +631,46 @@ export interface ShellGateOptions {
 /**
  * The bash gate body.
  *
- * Expects in scope: `$TOOL`, `$TARGET`, `$COMMAND`, and the log function named
- * by {@link ShellGateOptions.logFn}. Refuses with `exit 2` — every bash harness
+ * Expects in scope: `$TOOL`, `$TARGET` and `$COMMAND` as {@link SHELL_EXTRACT}
+ * leaves them, whitespace collapsed to single spaces, and the log function
+ * named by {@link ShellGateOptions.logFn}. Refuses with `exit 2` — every bash harness
  * uses the exit-code contract.
  */
 /** Single-quotes a path for bash. */
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * The JS classifier, `intuticActions(toolName, command)`. Needs
+ * `intuticNormalise` in scope. Exported for the classifier's tests.
+ */
+export function emitJsActionClassifier(): string {
+  return `// The phrase matcher, emitted from @intutic/shared-types phrases.ts. No
+// regex runs on a command to find words that may be split apart.
+${PHRASES_JS_SOURCE}
+const INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)};
+const INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)};
+
+/** Space-padded action tokens for a shell command (" action:deploy "), or " ". */
+function intuticActions(toolName, command) {
+  if (INTUTIC_ACTION_TOOLS.indexOf(String(toolName || '').toLowerCase()) === -1) return ' ';
+  var words = phraseText(command), out = ' ';
+  for (var i = 0; i < INTUTIC_ACTION_NEEDLES.length; i++) {
+    var needles = INTUTIC_ACTION_NEEDLES[i][1];
+    for (var j = 0; j < needles.length; j++) {
+      if (hasPhrase(words, needles[j])) { out += INTUTIC_ACTION_NEEDLES[i][0] + ' '; break; }
+    }
+  }
+  return out;
+}
+
+/** A \`phrase\`-subject rule: its source is |-separated phrases matched as words. */
+function intuticPhraseRule(source, words) {
+  var phrases = String(source).split('|');
+  for (var i = 0; i < phrases.length; i++) if (hasPhrase(words, phrases[i], true)) return true;
+  return false;
+}`
 }
 
 /**
@@ -387,21 +682,13 @@ function shellQuote(s: string): string {
  * the caller must refuse. Everything is local — no network on the tool path.
  */
 function jsHoldHelpers(reviewRequestFile: string | undefined): string {
-  return `const INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)};
-const INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)};
+  return `${emitJsActionClassifier()}
 const INTUTIC_REVIEW_REQUEST_FILE = ${JSON.stringify(reviewRequestFile ?? null)};
 
-/** Space-padded action tokens for a shell command (" action:deploy "), or " ". */
-function intuticActions(toolName, command) {
-  if (INTUTIC_ACTION_TOOLS.indexOf(String(toolName || '').toLowerCase()) === -1) return ' ';
-  var c = String(command || '').toLowerCase(), out = ' ';
-  for (var i = 0; i < INTUTIC_ACTION_NEEDLES.length; i++) {
-    var needles = INTUTIC_ACTION_NEEDLES[i][1];
-    for (var j = 0; j < needles.length; j++) {
-      if (c.indexOf(needles[j]) !== -1) { out += INTUTIC_ACTION_NEEDLES[i][0] + ' '; break; }
-    }
-  }
-  return out;
+// Who may approve a hold, and when the retry passes: the sentence every gate
+// and the MCP proxy print (holdMessages.ts in shared-types).
+function intuticHoldHint(holdId) {
+  return ${JSON.stringify(HOLD_APPROVAL_HINT_TEMPLATE)}.split(${JSON.stringify(HOLD_ID_PLACEHOLDER)}).join(holdId);
 }
 
 function intuticReviewRequestFile() {
@@ -499,11 +786,24 @@ function intuticHold(rule, toolName, command, target, toolInput, record, workspa
     try { console.error('[Intutic Guardrail] could not record the hold: ' + (e && e.message ? e.message : e)); } catch (e2) {}
   }
   var reason = rule.reason + ' [' + rule.id + ']';
-  try { console.error('[Intutic Guardrail] HELD: ' + reason + ' Approve with: intutic decision approve ' + holdId + ' (or: intutic decision reject ' + holdId + ')'); } catch (e) {}
+  try { console.error('[Intutic Guardrail] HELD: ' + reason + ' ' + intuticHoldHint(holdId)); } catch (e) {}
   try { record('tool_held', toolName, reason); } catch (e) {}
   return { holdId: holdId };
 }`
 }
+
+/**
+ * The subjects the bash gate screens ({@link emitShellGate}), each with the
+ * variable holding its text. Every subject a rule can test with grep is here;
+ * `phrase` rules run in Python and are not screened.
+ */
+const SCREEN_SUBJECTS: ReadonlyArray<readonly [string, string]> = [
+  ['tool', 'INTUTIC_NTOOL'],
+  ['command', 'INTUTIC_NCOMMAND'],
+  ['target', 'INTUTIC_NTARGET'],
+  ['content', 'TOOL_INPUT_JSON'],
+  ['action', 'INTUTIC_ACTIONS'],
+]
 
 export function emitShellGate(opts: ShellGateOptions): string {
   const log = opts.logFn ?? 'log_event'
@@ -538,7 +838,14 @@ if [ -z "\${1:-}" ] && [ "\${INTUTIC_EXTRACT_STATE:-malformed}" != "ok" ]; then
   exit 2
 fi
 
-${NORMALISE_CONTRACT.shell}
+# Refuse a call too large to evaluate inside the hook timeout, before any rule
+# reads it (the extractor measured it; see gateLimits.ts). Scoped like the
+# envelope refusal above: the post/stop invocations carry no call to gate.
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_TOO_LARGE:-}" ]; then
+  echo "[Intutic Governance] BLOCKED: COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" >&2
+  ${log} "tool_blocked" "\${TOOL:-unknown}" "COMMAND_TOO_LARGE — \${INTUTIC_TOO_LARGE}" || true
+  exit 2
+fi
 
 # The static floor: compiled in, always enforced, never sourced from disk.
 # These are the families with years of evidence behind them, so they block from
@@ -568,12 +875,13 @@ fi
 
 INTUTIC_SNAPSHOT_WORKSPACE=""
 INTUTIC_SNAPSHOT_GENERATED=""
-# M3: the per-server MCP allowlist header. Empty means "not configured" —
-# indistinguishable from "header absent", deliberately: writePolicySnapshot
-# omits the line entirely rather than shipping it with an empty list, so
-# empty-list-means-unrestricted holds all the way to the gate.
+# The per-server MCP allowlist (the @mcp_allowlist record, inside the digest).
+# No record means the workspace set no list, and every server is allowed.
+INTUTIC_MCP_ALLOWLIST=0
 INTUTIC_MCP_SEVERITY=""
 INTUTIC_MCP_SERVERS=""
+# The MCP server registry record (base64 JSON, inside the digest).
+INTUTIC_MCP_REGISTRY=""
 if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   INTUTIC_SNAPSHOT_STATE="ok"
   while IFS= read -r _line || [ -n "$_line" ]; do
@@ -581,13 +889,16 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
       '#digest '*)      INTUTIC_SNAPSHOT_DIGEST="\${_line#\\#digest }" ;;
       '#workspace '*)   INTUTIC_SNAPSHOT_WORKSPACE="\${_line#\\#workspace }" ;;
       '#generated '*)   INTUTIC_SNAPSHOT_GENERATED="\${_line#\\#generated }" ;;
-      '#mcpservers '*)
-        # \`#mcpservers <severity> <comma-joined-server-names>\` — parameter
-        # expansion only, no subshell, matching the other header lines here.
-        _intutic_mcp_rest="\${_line#\\#mcpservers }"
-        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%% *}"
-        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#* }"
+      '${MCP_ALLOWLIST_RECORD_TAG}'$'\\t'*)
+        # Tag, severity and comma-joined servers, tab-separated — parameter
+        # expansion only, no subshell. The writer drops a server name holding
+        # whitespace or a comma, so neither separator can appear in one.
+        INTUTIC_MCP_ALLOWLIST=1
+        _intutic_mcp_rest="\${_line#*$'\\t'}"
+        INTUTIC_MCP_SEVERITY="\${_intutic_mcp_rest%%$'\\t'*}"
+        INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#*$'\\t'}"
         ;;
+      '${MCP_REGISTRY_RECORD_TAG}'$'\\t'*) INTUTIC_MCP_REGISTRY="\${_line#*$'\\t'}" ;;
       '#'*|'') : ;;
       *) INTUTIC_DYNAMIC+=("$_line") ;;
     esac
@@ -620,9 +931,7 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   fi
 
   # Degrade to the compiled floor. The dynamic tier is additive, so dropping it
-  # returns to yesterday's behaviour rather than opening a hole. The MCP
-  # allowlist ships through the same file and degrades the same way — an
-  # invalid snapshot must not leave a stale allowlist enforcing.
+  # returns to yesterday's behaviour rather than opening a hole.
   # The SSO-group refusals survive it: they only ever refuse, and dropping
   # them would make editing the member's group list in this file a way to
   # clear a tool the workspace's group policy refuses.
@@ -637,8 +946,10 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
     fi
     INTUTIC_DYNAMIC=()
     if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
-    INTUTIC_MCP_SEVERITY=""
-    INTUTIC_MCP_SERVERS=""
+    # Neither MCP record can be vouched for, and a deleted one looks like one
+    # never set: the snapshot admits no MCP server (the refusal below).
+    INTUTIC_MCP_REGISTRY=""
+    INTUTIC_MCP_ALLOWLIST=0
   fi
 fi
 
@@ -659,15 +970,19 @@ fi
 
 case "$INTUTIC_SNAPSHOT_STATE" in
   absent)  ${log} "snapshot_absent" "\${TOOL:-}" "No policy snapshot at $INTUTIC_SNAPSHOT_RULES — built-in protections only" || true ;;
-  invalid) ${log} "snapshot_invalid" "\${TOOL:-}" "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals" || true ;;
+  invalid) ${log} "snapshot_invalid" "\${TOOL:-}" "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused" || true ;;
   empty)   ${log} "snapshot_empty" "\${TOOL:-}" "Policy snapshot contains no rules — the compile produced nothing" || true ;;
   stale)   ${log} "snapshot_stale" "\${TOOL:-}" "Policy snapshot is \${_intutic_age_days} days old and still enforced" || true ;;
 esac
 
-# Normalise once; every pattern is written against this shape.
-INTUTIC_NCOMMAND="$(intutic_normalise "\${COMMAND:-}")"
-INTUTIC_NTARGET="$(intutic_normalise "\${TARGET:-}")"
-INTUTIC_NTOOL="$(intutic_normalise "\${TOOL:-}")"
+# Normalise once; every pattern is written against this shape. The extractor
+# hands each field over with its whitespace already collapsed to single spaces
+# by Python, Unicode whitespace included, which bash cannot match; padding is
+# all that is left to do. Bash substitutions over a 256 KiB command to find no
+# whitespace left took most of a second on a loaded machine.
+INTUTIC_NCOMMAND=" \${COMMAND:-} "
+INTUTIC_NTARGET=" \${TARGET:-} "
+INTUTIC_NTOOL=" \${TOOL:-} "
 
 # ── Hold tier (gate body v8) ─────────────────────────────────────────────────
 # A \`hold\` rule refuses the call and records it for a human; an exact,
@@ -679,7 +994,6 @@ if [ -z "$INTUTIC_REVIEW_REQUEST_FILE" ]; then
   INTUTIC_REVIEW_REQUEST_FILE=${opts.reviewRequestFile ? shellQuote(opts.reviewRequestFile) : '"$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/events/review-requests.jsonl"'}
 fi
 INTUTIC_APPROVED_BYPASSES="\${INTUTIC_APPROVED_BYPASSES:-$HOME/.intutic/hooks/approved-bypasses.jsonl}"
-${shellActionClassifier()}
 intutic_sha256() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
   elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
@@ -724,8 +1038,8 @@ intutic_bypass() {
 # Returns 0 when an approved bypass lets the call through (the caller
 # continues), 2 when the call is held (the caller refuses).
 intutic_hold() {
-  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth
-  tn="$(intutic_normalise "\${TOOL:-}")"
+  local rid="$1" rreason="$2" tn th entry decided_by hold_id at file targeth hint
+  tn="$INTUTIC_NTOOL"
   th="$( { printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
   if entry="$(intutic_bypass "$rid" "$tn" "$th")"; then
     decided_by="$(printf '%s' "$entry" | sed -n 's/.*"decidedBy":"\\([^"]*\\)".*/\\1/p')"
@@ -747,12 +1061,13 @@ intutic_hold() {
       "$(intutic_json_escape "\${INTUTIC_WORKSPACE_ID:-}")" "$at" "$(intutic_json_escape "$tn")" "$targeth" >> "$file" 2>/dev/null; }; then
     echo "[Intutic Guardrail] could not record the hold at \${file}" >&2
   fi
-  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] Approve with: intutic decision approve \${hold_id} (or: intutic decision reject \${hold_id})" >&2
+  # Who may approve, and when the retry passes (holdMessages.ts in shared-types).
+  hint=${shq(HOLD_APPROVAL_HINT_TEMPLATE)}
+  hint="\${hint//\\{holdId\\}/$hold_id}"
+  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] \${hint}" >&2
   ${log} "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
-# Computed after the classifier is defined; read by the \`action\` subject.
-INTUTIC_ACTIONS="$(intutic_actions "\${TOOL:-}" "\${COMMAND:-}")"
 
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
@@ -775,31 +1090,59 @@ intutic_apply() {
       destructive.*) return 0 ;;
     esac
   fi
-  local _subs=()
+  local _subs=() _ci=
+  case "$rflags" in *i*) _ci=i ;; esac
+  # A subject the screen below cleared for this case is left out: no pattern
+  # matched it, this rule's included.
   case "$rsubj" in
-    tool)    _subs=("$INTUTIC_NTOOL") ;;
-    command) _subs=("$INTUTIC_NCOMMAND") ;;
-    target)  _subs=("$INTUTIC_NTARGET") ;;
+    tool)    intutic_unscreened tool "$_ci" && _subs=("$INTUTIC_NTOOL") ;;
+    command) intutic_unscreened command "$_ci" && _subs=("$INTUTIC_NCOMMAND") ;;
+    target)  intutic_unscreened target "$_ci" && _subs=("$INTUTIC_NTARGET") ;;
     # Serialized tool input, un-normalised — same subject the WHERE argPattern
     # machinery matches. The secrets.* floor rules ride this. Guaranteed
     # non-empty by the extractor (it defaults to "{}").
-    content) _subs=("$TOOL_INPUT_JSON") ;;
-    # The space-padded action tokens intutic_actions derived from the command
-    # (" action:deploy "), so a hold on \`action:deploy\` matches whole tokens.
-    action)  _subs=("$INTUTIC_ACTIONS") ;;
+    content) intutic_unscreened content "$_ci" && _subs=("$TOOL_INPUT_JSON") ;;
+    # The space-padded action tokens the extractor's classifier derived from
+    # the raw command (" action:deploy "), so a hold on \`action:deploy\`
+    # matches whole tokens.
+    action)  intutic_unscreened action "$_ci" && _subs=("$INTUTIC_ACTIONS") ;;
+    # The source is |-separated phrases matched as words against the raw
+    # command by the phrase matcher in Python, not a regex: grep is linear,
+    # but the gap between the words was not expressible without one that
+    # backtracks in the other gates. One python3 run, only for these rules.
+    # The command goes in on stdin: as an argument, a long one would exceed
+    # the kernel's per-argument limit and the rule would silently not run.
+    phrase)
+      if python3 -c 'import os, sys, json
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], json.load(sys.stdin)) else 1)' "$rsrc" <<< "$INTUTIC_RAW_COMMAND_JSON" 2>/dev/null; then
+        _subs=("$INTUTIC_NCOMMAND")
+      else
+        return 0
+      fi
+      ;;
     # Each field is tested separately rather than concatenated. Joining them
     # lets a pattern match across the seam — a command ending in "chflags" and
     # an unrelated target starting with "nouchg" would trip the bypass rule
     # together while neither does alone.
-    *)       _subs=("$INTUTIC_NCOMMAND" "$INTUTIC_NTARGET") ;;
+    *)
+      intutic_unscreened command "$_ci" && _subs+=("$INTUTIC_NCOMMAND")
+      intutic_unscreened target "$_ci" && _subs+=("$INTUTIC_NTARGET")
+      ;;
   esac
+  [ \${#_subs[@]} -gt 0 ] || return 0
   hit=0
+  [ "$rsubj" = "phrase" ] && hit=1
   for s in "\${_subs[@]}"; do
-    if [ "$rflags" = "i" ]; then
-      printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1
-    else
-      printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1
-    fi
+    [ "$rsubj" = "phrase" ] && break
+    # Flags: i = case-insensitive; s (a sequence rule) changes nothing here —
+    # grep matches with an automaton, linear in the text, so the regex runs
+    # as written.
+    case "$rflags" in
+      *i*) printf '%s' "$s" | grep -qiE -- "$rsrc" && hit=1 ;;
+      *)   printf '%s' "$s" | grep -qE -- "$rsrc" && hit=1 ;;
+    esac
   done
   [ "$hit" = "1" ] || return 0
   # The argument condition of a WHERE rule. The tool-name half has matched; the
@@ -865,6 +1208,51 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
   exit 2
 }
 
+# ── Screening ────────────────────────────────────────────────────────────────
+# Rule by rule, the gate forks a grep per rule and subject: about a hundred on
+# every call, which on a loaded machine took seconds before any rule could
+# match. So each subject is first screened by one grep holding every pattern
+# that tests it, the case-insensitive ones apart. A subject none of them
+# matches is left out of every rule that tests it, since no one of them could
+# match it either. A screen that matches, or one grep cannot run (exit 2),
+# clears nothing, and the rules decide as before: the screen saves work and
+# never changes a verdict. grep is still the engine, so the screen is linear too.
+${SCREEN_SUBJECTS.map(([key]) => `_intutic_screen_${key}=(); _intutic_screen_${key}i=(); _intutic_clear_${key}=; _intutic_clear_${key}i=`).join('\n')}
+intutic_screen_add() {
+  case "$1$2" in
+${SCREEN_SUBJECTS.flatMap(([key]) => [`    ${key}) _intutic_screen_${key}+=(-e "$3") ;;`, `    ${key}i) _intutic_screen_${key}i+=(-e "$3") ;;`]).join('\n')}
+  esac
+}
+for _rec in "\${INTUTIC_FLOOR[@]}" \${INTUTIC_DYNAMIC[@]+"\${INTUTIC_DYNAMIC[@]}"}; do
+  IFS=$'\t' read -r _r_id _r_sev _r_flags _r_subj _r_reason _r_src _r_arg <<< "$_rec"
+  [ -n "$_r_src" ] || continue
+  _r_ci=
+  case "$_r_flags" in *i*) _r_ci=i ;; esac
+  case "$_r_subj" in
+    tool|command|target|content|action) intutic_screen_add "$_r_subj" "$_r_ci" "$_r_src" ;;
+    phrase) : ;;
+    *) intutic_screen_add command "$_r_ci" "$_r_src"; intutic_screen_add target "$_r_ci" "$_r_src" ;;
+  esac
+done
+# $1 subject, $2 "i" or empty, $3 its text, then the patterns as -e pairs.
+intutic_screen() {
+  local key="$1" ci="$2" text="$3" rc=0
+  shift 3
+  if [ "$ci" = "i" ]; then printf '%s' "$text" | grep -qiE "$@" || rc=$?
+  else printf '%s' "$text" | grep -qE "$@" || rc=$?
+  fi
+  [ "$rc" != "1" ] || printf -v "_intutic_clear_$key$ci" '%s' 1
+}
+${SCREEN_SUBJECTS.flatMap(([key, text]) => [
+  `[ \${#_intutic_screen_${key}[@]} -eq 0 ] || intutic_screen ${key} '' "$${text}" "\${_intutic_screen_${key}[@]}"`,
+  `[ \${#_intutic_screen_${key}i[@]} -eq 0 ] || intutic_screen ${key} i "$${text}" "\${_intutic_screen_${key}i[@]}"`,
+]).join('\n')}
+# Whether rules testing subject $1, case $2, still need to: not when screened clear.
+intutic_unscreened() {
+  local v="_intutic_clear_$1$2"
+  [ "\${!v:-}" != "1" ]
+}
+
 for _rec in "\${INTUTIC_FLOOR[@]}"; do
   intutic_apply "$_rec"
 done
@@ -875,23 +1263,68 @@ if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
   done
 fi
 
-# ── M3: MCP per-server allowlist backstop ────────────────────────────────────
-# A DEDICATED header field, not a synthetic GuardPattern rule — see
-# policySnapshot.ts's module doc and protectedPaths.ts's assertPortableEre:
-# expressing "allow only these servers" as a single regex needs negative
-# lookahead, which neither \`grep -E\` (POSIX ERE) nor this file's own
-# portable-ERE discipline support. So this is a plain string-membership test
-# over the parsed \${#mcpservers} header, independent of intutic_apply/the
-# GuardPattern tables entirely.
-#
-# Only fires when a \`mcp__<server>__<tool>\`-shaped tool name was actually
-# called AND the header was present (INTUTIC_MCP_SERVERS non-empty — absent
-# header means unrestricted, see the header-parsing block above). Refuses
-# through the SAME exit-2 + \${log} idiom every other block in this file uses,
-# not a parallel mechanism.
+# ── Unverified snapshot (gate body v17) ──────────────────────────────────────
+# A snapshot that failed its digest or workspace check admits no MCP server:
+# neither record in it can be vouched for, and a deleted one looks like one
+# never set. Refused at block, in an observe-only workspace too, with the code,
+# rule id and reason of mcpSnapshotUnverifiedRefusal (intutic_mcp_unverified
+# in GATE_PY_LIB).
+if [ "$INTUTIC_SNAPSHOT_STATE" = "invalid" ]; then
+  case "\${TOOL:-}" in
+    mcp__*__*)
+      _intutic_unv="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_mcp_unverified"](sys.argv[1]))' "\${TOOL:-}" 2>/dev/null || true)"
+      if [ -n "$_intutic_unv" ]; then
+        IFS=$'\\t' read -r _ _intutic_unv_rid _intutic_unv_reason <<< "$_intutic_unv"
+      else
+        # python3 could not say why (it is required, and checked, before any
+        # rule runs): still a refusal, never an allow.
+        _intutic_unv_rid="policy_snapshot"
+        _intutic_unv_reason="POLICY_SNAPSHOT_UNVERIFIED — the policy snapshot failed its integrity check and admits no MCP server"
+      fi
+      echo "[Intutic Governance] BLOCKED: \${_intutic_unv_reason} [\${_intutic_unv_rid}]" >&2
+      ${log} "tool_blocked" "\${TOOL:-}" "\${_intutic_unv_reason} [\${_intutic_unv_rid}]"
+      exit 2
+      ;;
+  esac
+fi
+
+# ── MCP server registry backstop (gate body v14) ─────────────────────────────
+# The workspace's registry decisions from the snapshot's @mcp_registry record,
+# applied to every mcp__<server>__<tool> call: a blocked or held server, a
+# server not approved under mcpDefaultPolicy deny, a disabled tool. The same
+# decision, rule ids and reasons as the MCP proxy, so a server no proxy fronts
+# is refused as one it fronts would be. Evaluated in Python (intutic_mcp_registry
+# in GATE_PY_LIB), which reads the record's JSON; only for MCP-shaped calls.
+if [ -n "$INTUTIC_MCP_REGISTRY" ]; then
+  case "\${TOOL:-}" in
+    mcp__*__*)
+      _intutic_reg="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2]))' "$INTUTIC_MCP_REGISTRY" "\${TOOL:-}" 2>/dev/null || true)"
+      if [ -n "$_intutic_reg" ]; then
+        IFS=$'\\t' read -r _ _intutic_reg_rid _intutic_reg_reason <<< "$_intutic_reg"
+        echo "[Intutic Governance] BLOCKED: \${_intutic_reg_reason} [\${_intutic_reg_rid}]" >&2
+        ${log} "tool_blocked" "\${TOOL:-}" "\${_intutic_reg_reason} [\${_intutic_reg_rid}]"
+        exit 2
+      fi
+      ;;
+  esac
+fi
+
+# ── MCP per-server allowlist backstop ────────────────────────────────────────
+# A dedicated record, not a synthetic GuardPattern rule: "allow only these
+# servers" as one regex needs negative lookahead, which POSIX ERE (grep -E)
+# does not have. So this is a plain membership test over the @mcp_allowlist
+# record, with evaluateMcpAllowlist's code, rule id and reason (the shared
+# vectors hold this copy to it). Only for an mcp__<server>__<tool> call, and
+# only when the snapshot carries the record.
 case "\${TOOL:-}" in
   mcp__*__*)
-    if [ -n "$INTUTIC_MCP_SERVERS" ]; then
+    if [ "$INTUTIC_MCP_ALLOWLIST" = "1" ]; then
       _intutic_mcp_server="\${TOOL#mcp__}"
       _intutic_mcp_server="\${_intutic_mcp_server%%__*}"
       case ",$INTUTIC_MCP_SERVERS," in
@@ -917,9 +1350,17 @@ esac
 }
 
 export interface JsGateOptions {
-  harness: string
+  /** Harness id, as it appears in audit lines; it also picks the gate's deadline. */
+  harness: HookGateHarness
   /** How this harness refuses. */
   contract: BlockContract
+  /**
+   * The harness's decision object may carry only the fields it documents
+   * (Google Antigravity), so a refusal names its code in the reason text,
+   * `(refusal code SERVER_BLOCKED)`, rather than in `code` and `ruleId`
+   * fields. The rule id is already in the reason, in brackets.
+   */
+  documentedFieldsOnly?: boolean
   /** See {@link ShellGateOptions.reviewRequestFile}. Writers whose artifact
    *  does not live in `.intutic/hooks/` (cline, opencode) pass it. */
   reviewRequestFile?: string
@@ -938,11 +1379,10 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   const fs = require('fs'), os = require('os'), path = require('path');
   const p = process.env.INTUTIC_SNAPSHOT_RULES ||
     path.join(os.homedir(), '.intutic', 'hooks', 'policy-snapshot.rules');
-  // M3: mcpServers/mcpSeverity default to unrestricted (empty list) — the
-  // same "header absent means unrestricted" reading writePolicySnapshot's
-  // \`#mcpservers\` header is built on.
+  // mcpAllowlist and mcpRegistry stay null without their records: the
+  // workspace set no allowlist and made no registry decision.
   const out = { rules: [], digest: 'none', state: 'absent', workspaceId: '', generatedAt: '', ageDays: 0,
-    mcpServers: [], mcpSeverity: 'block' };
+    mcpAllowlist: null, mcpRegistry: null };
   let text;
   try { text = fs.readFileSync(p, 'utf8'); } catch (e) { return out; }
   out.state = 'ok';
@@ -950,28 +1390,45 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     if (line.startsWith('#digest ')) { out.digest = line.slice(8).trim(); continue; }
     if (line.startsWith('#workspace ')) { out.workspaceId = line.slice(11).trim(); continue; }
     if (line.startsWith('#generated ')) { out.generatedAt = line.slice(11).trim(); continue; }
-    if (line.startsWith('#mcpservers ')) {
-      // \`#mcpservers <severity> <comma-joined-server-names>\` — same header a
-      // v5 gate would silently ignore via the generic '#'-prefix skip below,
-      // which is exactly the graceful-degradation contract this format change
-      // relies on.
-      const rest = line.slice('#mcpservers '.length);
-      const sp = rest.indexOf(' ');
-      if (sp === -1) { out.mcpSeverity = rest.trim(); out.mcpServers = []; }
-      else {
-        out.mcpSeverity = rest.slice(0, sp).trim();
-        out.mcpServers = rest.slice(sp + 1).trim().split(',').filter(Boolean);
+    if (line.startsWith('${MCP_ALLOWLIST_RECORD_TAG}\\t')) {
+      // The MCP server allowlist: tag, severity and comma-joined servers, a
+      // data line inside the digest. Any severity but shadow refuses.
+      const a = line.split('\\t');
+      if (a.length === 3) {
+        out.mcpAllowlist = { severity: a[1] === 'shadow' ? 'shadow' : 'block', servers: a[2].split(',').filter(Boolean) };
       }
+      continue;
+    }
+    if (line.startsWith('${MCP_REGISTRY_RECORD_TAG}\\t')) {
+      // The MCP server registry record: base64 JSON, a data line inside the
+      // digest. Read into the shape evaluateMcpRegistry expects; a damaged
+      // record is no registry.
+      try {
+        const r = JSON.parse(Buffer.from(line.slice(${MCP_REGISTRY_RECORD_TAG.length + 1}), 'base64').toString('utf8'));
+        const strings = function (v) { return Array.isArray(v) ? v.filter(function (x) { return typeof x === 'string'; }) : []; };
+        const disabled = {};
+        if (r.disabledTools && typeof r.disabledTools === 'object') {
+          for (const k of Object.keys(r.disabledTools)) disabled[k] = strings(r.disabledTools[k]);
+        }
+        out.mcpRegistry = { defaultPolicy: r.defaultPolicy === 'deny' ? 'deny' : 'allow',
+          approvedServers: strings(r.approvedServers), blockedServers: strings(r.blockedServers),
+          heldServers: strings(r.heldServers), disabledTools: disabled };
+      } catch (e) { out.mcpRegistry = null; }
       continue;
     }
     if (!line || line.startsWith('#')) continue;
     const f = line.split('\\t');
     if (f.length < 6 || !f[5]) continue;
-    let re;
+    let re, seq = null;
     // A snapshot rule that will not compile is dropped, not fatal. The floor
     // above is compiled in and unaffected, so this degrades to "today's
-    // behaviour" rather than to "no gate".
-    try { re = new RegExp(f[5], f[2] === 'i' ? 'i' : ''); } catch (e) { continue; }
+    // behaviour" rather than to "no gate". Flags: i = case-insensitive,
+    // s = a sequence rule (see intuticRuleMatches).
+    const ic = f[2].indexOf('i') !== -1;
+    try {
+      re = new RegExp(f[5], ic ? 'i' : '');
+      if (f[2].indexOf('s') !== -1) seq = compileSequence(f[5], ic);
+    } catch (e) { continue; }
     // Optional seventh column: the WHERE clause, base64 so an arbitrary regex
     // cannot collide with the tab separator. Absent in v3-format files, which
     // is exactly "no argument condition". An argPattern that does not decode
@@ -983,7 +1440,7 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
       try { argRe = new RegExp(Buffer.from(f[6], 'base64').toString('utf8')); }
       catch (e) { argDowngraded = true; }
     }
-    out.rules.push({ id: f[0], severity: f[1], subject: f[3] || 'any', re: re, reason: f[4],
+    out.rules.push({ id: f[0], severity: f[1], subject: f[3] || 'any', re: re, seq: seq, reason: f[4],
       argRe: argRe, argDowngraded: argDowngraded });
   }
 
@@ -993,7 +1450,9 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   try {
     const body = text.split('\\n').filter(function (l) { return l && l.charAt(0) !== '#'; }).join('\\n');
     const actual = require('crypto').createHash('sha256').update(body).digest('hex').slice(0, 32);
-    if (out.digest !== 'none' && actual !== out.digest) out.state = 'invalid';
+    // A snapshot with no digest line is unverified too: the daemon always
+    // writes one, so its absence means the file was edited.
+    if (actual !== out.digest) out.state = 'invalid';
   } catch (e) { /* no crypto — leave the digest unverified rather than fail the gate */ }
 
   if (out.state === 'ok' && out.workspaceId && INTUTIC_WORKSPACE_ID && out.workspaceId !== INTUTIC_WORKSPACE_ID) {
@@ -1004,15 +1463,16 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   // exactly like a healthy quiet workspace.
   if (out.state === 'ok' && out.rules.length === 0) out.state = 'empty';
 
-  // Additive tier, so dropping it returns to yesterday's behaviour. The MCP
-  // allowlist ships through the same file and degrades the same way — an
-  // invalid snapshot must not leave a stale allowlist enforcing. The
+  // Additive tier, so dropping it returns to yesterday's behaviour. The
   // SSO-group refusals are the exception: they only ever refuse, and dropping
   // them would make editing the member's group list in this file a way to
   // clear a tool the workspace's group policy refuses.
   if (out.state === 'invalid') {
     out.rules = out.rules.filter(function (r) { return r.id.indexOf('sso_group.') === 0 && r.severity === 'block'; });
-    out.mcpServers = [];
+    // Neither MCP record can be vouched for, and a deleted one looks like one
+    // never set: the gate admits no MCP server on this snapshot at all.
+    out.mcpRegistry = null;
+    out.mcpAllowlist = null;
   }
 
   if (out.state === 'ok' && out.generatedAt) {
@@ -1036,19 +1496,34 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
  */
 export function emitJsGate(opts: JsGateOptions): string {
   const floor = staticFloorPatterns()
+  const deadlineMs = gateDeadlineMs(opts.harness)
 
-  const refuse =
-    opts.contract === 'stdout-cancel'
-      ? `      process.stdout.write(JSON.stringify({ cancel: true, reason: reason }) + '\\n');\n` +
+  /**
+   * The refusal, through this harness's contract, for a `reason` in scope.
+   * `code` and `ruleId` are JavaScript expressions: a JSON decision carries
+   * them ({@link HOOK_REFUSAL_CODES}), and `extra` adds fields such as `holdId`.
+   */
+  const refuseWith = (code: string, ruleId: string, extra = '') => {
+    const fields = `code: ${code}, ruleId: ${ruleId}${extra ? `, ${extra}` : ''}`
+    if (opts.contract === 'stdout-decision-deny' && opts.documentedFieldsOnly) {
+      return (
+        `      process.stdout.write(JSON.stringify({ decision: 'deny', reason: reason + ' (refusal code ' + ${code} + ')' }) + '\\n');\n` +
         `      process.exit(0);`
+      )
+    }
+    return opts.contract === 'stdout-cancel'
+      // Cline shows a cancel's `errorMessage`; it has no `reason` field.
+      ? `      process.stdout.write(JSON.stringify({ cancel: true, errorMessage: reason, ${fields} }) + '\\n');\n` +
+          `      process.exit(0);`
       : opts.contract === 'stdout-decision-deny'
-        ? `      process.stdout.write(JSON.stringify({ decision: 'deny', reason: reason }) + '\\n');\n` +
+        ? `      process.stdout.write(JSON.stringify({ decision: 'deny', reason: reason, ${fields} }) + '\\n');\n` +
           `      process.exit(0);`
         : opts.contract === 'throw'
           // The envelope guard's reason already carries the prefix; a rule's
           // reason does not. One message shape either way.
           ? `      throw new Error(String(reason).indexOf('[Intutic Governance]') === 0 ? String(reason) : '[Intutic Governance] BLOCKED: ' + reason);`
           : `      process.exit(2);`
+  }
 
   return `
 // ── Intutic gate body v${GATE_VERSION} — harness: ${opts.harness} ────────────
@@ -1098,8 +1573,27 @@ function intuticGuardEnvelope(ctx, keys, record) {
     'refusing rather than allowing a call the gate cannot read.';
   try { console.error(reason); } catch (e) {}
   try { record('tool_blocked', 'unknown', reason); } catch (e) {}
-${refuse}
+${refuseWith("'UNREADABLE_CALL'", 'null')}
 }
+
+/**
+ * The refusal code of a matched block rule: SSO_GROUP for the group policy's
+ * rules, BUILT_IN_RULE for this gate's compiled floor, SNAPSHOT for the rest
+ * of the policy snapshot.
+ */
+function intuticRuleCode(rule) {
+  if (rule.id.indexOf('sso_group.') === 0) return 'SSO_GROUP';
+  return INTUTIC_FLOOR.indexOf(rule) !== -1 ? 'BUILT_IN_RULE' : 'SNAPSHOT';
+}
+
+// The MCP server registry and allowlist decisions, emitted from
+// @intutic/shared-types mcpRegistryRecord.ts: the registry decision is the
+// function the MCP proxy runs.
+${MCP_REGISTRY_JS_SOURCE}
+
+${MCP_ALLOWLIST_JS_SOURCE}
+
+${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}
 
 /**
  * Evaluates one tool call. Returns normally to allow; refuses via this harness's
@@ -1117,6 +1611,49 @@ ${refuse}
  * it itself so no writer can hand it a differently-shaped string.
  */
 function intuticGate(toolName, target, command, record, workspaceId, toolInput, sessionId) {
+  // Too large to evaluate inside the hook timeout (gateLimits.ts in
+  // @intutic/shared-types): refused before any rule reads the call.
+  var _commandBytes = Buffer.byteLength(String(command == null ? '' : command), 'utf8');
+  var _argumentBytes = 0;
+  try { _argumentBytes = Buffer.byteLength(JSON.stringify(toolInput == null ? {} : toolInput) || '', 'utf8'); } catch (e) {}
+  if (_commandBytes > ${COMMAND_SIZE_LIMIT} || _argumentBytes > ${ARGUMENTS_SIZE_LIMIT}) {
+    var reason = 'COMMAND_TOO_LARGE — ' + (_commandBytes > ${COMMAND_SIZE_LIMIT}
+      ? 'the command is ' + _commandBytes + ' bytes, over the ${COMMAND_SIZE_LIMIT}-byte limit a gate evaluates; split it into smaller commands'
+      : 'the tool arguments are ' + _argumentBytes + ' bytes, over the ${ARGUMENTS_SIZE_LIMIT}-byte limit a gate evaluates; write the content in smaller parts');
+    try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+    try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuseWith("'COMMAND_TOO_LARGE'", 'null')}
+  }
+  // The rules run under a deadline that interrupts even a regex mid-match,
+  // inside the hook timeout ${opts.harness} applies (gateLimits.ts in
+  // @intutic/shared-types), which most harnesses read as an allow. A call
+  // still undecided then is refused. Built-in rules are linear; a workspace's
+  // own WHERE pattern need not be.
+${
+  opts.contract === 'throw'
+    ? `  // In process, the deadline runs from the start of this call: the process
+  // started long before it. Pi and OpenCode await the hook with no time limit,
+  // and OpenClaw's hook timeout cannot interrupt synchronous code, so without
+  // this a slow WHERE pattern holds the agent.
+  var _deadlineMs = ${deadlineMs};`
+    : `  // A hook process runs one call, so the deadline runs from process start.
+  var _deadlineMs = Math.max(1, ${deadlineMs} - Math.round(process.uptime() * 1000));`
+}
+  globalThis.__intuticGateRules = function () {
+    return _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId);
+  };
+  try {
+    return require('vm').runInThisContext('__intuticGateRules()', { timeout: _deadlineMs });
+  } catch (err) {
+    if (!err || err.code !== 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw err;
+    var reason = 'GATE_DEADLINE — the gate did not finish evaluating this call within ${deadlineMs / 1000} s, and refuses it rather than let the hook timeout allow it';
+    try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+    try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuseWith("'GATE_DEADLINE'", 'null')}
+  }
+}
+
+function _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId) {
   // M3: Cline's \`use_mcp_tool\` envelope, normalized into the
   // \`mcp__<server>__<tool>\` shape every other harness's MCP tool name already
   // takes — BEFORE any rule fires. Cline's own tool-call schema names the
@@ -1157,7 +1694,7 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
     var _msg = snap.state === 'absent'
       ? 'No policy snapshot — built-in protections only'
       : snap.state === 'invalid'
-        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals'
+        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused'
         : snap.state === 'empty'
           ? 'Policy snapshot contains no rules — the compile produced nothing'
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
@@ -1176,12 +1713,20 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
   // The space-padded action tokens the command classifies to, for \`action\`
   // subject rules (" action:deploy ").
   const nActions = intuticActions(toolName, command);
+  var words = null;
   const rules = INTUTIC_FLOOR.concat(snap.rules);
   for (const rule of rules) {
+    // A phrase rule's source is |-separated phrases matched as words against
+    // the raw command — never as a regex, which backtracks on crafted input.
+    if (rule.subject === 'phrase') {
+      if (words === null) words = phraseText(command);
+      if (!intuticPhraseRule(rule.re.source, words)) continue;
+    }
     // Each field is tested separately rather than concatenated — joining them
     // lets a pattern match across the seam between two innocuous values.
     const subjects =
-      rule.subject === 'tool' ? [nTool]
+      rule.subject === 'phrase' ? [nCommand]
+      : rule.subject === 'tool' ? [nTool]
       : rule.subject === 'command' ? [nCommand]
       : rule.subject === 'target' ? [nTarget]
       // The serialized tool input, un-normalised: a content rule (the
@@ -1192,7 +1737,7 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
       : rule.subject === 'action' ? [nActions]
       : [nCommand, nTarget];
     for (const subject of subjects) {
-      if (!rule.re.test(subject)) continue;
+      if (rule.subject !== 'phrase' && !intuticRuleMatches(rule, subject)) continue;
       // The argument condition of a WHERE rule: the tool-name half has
       // matched, and the rule fires only if the argPattern also matches the
       // serialized tool input. A pattern that failed to compile at load time
@@ -1218,8 +1763,8 @@ function intuticGate(toolName, target, command, record, workspaceId, toolInput, 
         // otherwise the hold is recorded for review and the call refused.
         const held = intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId);
         if (held.bypassed) continue;
-        const reason = '[Intutic Governance] HELD: ' + rule.reason + ' [' + rule.id + '] — approve with: intutic decision approve ' + held.holdId;
-${refuse}
+        const reason = '[Intutic Governance] HELD: ' + rule.reason + ' [' + rule.id + '] ' + intuticHoldHint(held.holdId);
+${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId')}
       }
       if (rule.severity === 'warn') {
         // Advisory tier — allowed, recorded with the rule id and the command's
@@ -1241,36 +1786,60 @@ ${refuse}
       const reason = rule.reason + ' [' + rule.id + ']';
       try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
       try { record('tool_blocked', toolName, reason); } catch (e) {}
-${refuse}
+${refuseWith('intuticRuleCode(rule)', 'rule.id')}
     }
   }
 
-  // M3: MCP per-server allowlist backstop — see the shell emitter for why
-  // this is a plain membership test over the parsed \`#mcpservers\` header
-  // rather than a synthetic GuardPattern rule (no portable regex can express
-  // "allow only these servers" without negative lookahead). Only fires when
-  // \`toolName\` is actually \`mcp__<server>__<tool>\`-shaped AND the header was
-  // present (\`snap.mcpServers.length > 0\` — an absent header means
-  // unrestricted). Refuses through the SAME \`record\`/\`\${refuse}\` path as
-  // every other block above, not a parallel mechanism.
-  if (snap.mcpServers.length > 0 && toolName.indexOf('mcp__') === 0) {
+  // An unverified snapshot admits no MCP server (gate body v17): neither
+  // record in it can be vouched for, and a deleted one looks like one never
+  // set. Refused at block, in an observe-only workspace too.
+  if (snap.state === 'invalid' && toolName.indexOf('mcp__') === 0) {
+    var _unvRest = toolName.slice('mcp__'.length);
+    var _unvSep = _unvRest.indexOf('__');
+    if (_unvSep > 0) {
+      var _unv = mcpSnapshotUnverifiedRefusal(_unvRest.slice(0, _unvSep));
+      var reason = _unv.reason + ' [' + _unv.ruleId + ']';
+      try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+      try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuseWith('_unv.code', '_unv.ruleId')}
+    }
+  }
+
+  // MCP server registry backstop (gate body v14): the workspace's registry
+  // decisions from the snapshot's @mcp_registry record, applied to every
+  // mcp__<server>__<tool> call — the servers no MCP proxy fronts included —
+  // with the proxy's own decision, codes, rule ids and reasons.
+  if (snap.mcpRegistry && toolName.indexOf('mcp__') === 0) {
+    var _regRest = toolName.slice('mcp__'.length);
+    var _regSep = _regRest.indexOf('__');
+    var _reg = _regSep > 0 ? evaluateMcpRegistry(snap.mcpRegistry, _regRest.slice(0, _regSep), _regRest.slice(_regSep + 2)) : null;
+    if (_reg) {
+      var reason = _reg.reason + ' [' + _reg.ruleId + ']';
+      try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+      try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuseWith('_reg.code', '_reg.ruleId')}
+    }
+  }
+
+  // MCP per-server allowlist backstop: a plain membership test over the
+  // snapshot's @mcp_allowlist record (see the shell emitter for why it is
+  // not a GuardPattern rule), only for an mcp__<server>__<tool> call and only
+  // when the snapshot carries the record.
+  if (snap.mcpAllowlist && toolName.indexOf('mcp__') === 0) {
     var _mcpRest = toolName.slice('mcp__'.length);
     var _mcpSep = _mcpRest.indexOf('__');
-    var _mcpServer = _mcpSep >= 0 ? _mcpRest.slice(0, _mcpSep) : '';
-    if (_mcpServer && snap.mcpServers.indexOf(_mcpServer) === -1) {
-      var _mcpReason = 'MCP server "' + _mcpServer + '" is not on the MCP server allowlist for this workspace [mcp_allowlist]';
-      if (snap.mcpSeverity === 'shadow') {
-        try { record('tool_would_block', toolName, _mcpReason); } catch (e) {}
+    var _mcp = _mcpSep > 0 ? evaluateMcpAllowlist(snap.mcpAllowlist, _mcpRest.slice(0, _mcpSep)) : null;
+    if (_mcp) {
+      // \`reason\` is what the refusal reads. The rule loop's own \`reason\` is
+      // block-scoped to that loop, so without this the two stdout contracts
+      // and the throw contract would hit a ReferenceError here.
+      var reason = _mcp.reason + ' [' + _mcp.ruleId + ']';
+      if (snap.mcpAllowlist.severity === 'shadow') {
+        try { record('tool_would_block', toolName, reason); } catch (e) {}
       } else {
-        try { console.error('[Intutic Governance] BLOCKED: ' + _mcpReason); } catch (e) {}
-        try { record('tool_blocked', toolName, _mcpReason); } catch (e) {}
-        // \`reason\` is what \`\${refuse}\` reads. The rule loop's own \`reason\` is
-        // block-scoped to that loop, so without this the two stdout contracts
-        // and the throw contract would hit a ReferenceError here — a refusal
-        // that crashes is still a refusal for exit-code gates, and a
-        // ReferenceError for the others.
-        var reason = _mcpReason;
-${refuse}
+        try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+        try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuseWith('_mcp.code', '_mcp.ruleId')}
       }
     }
   }
@@ -1468,21 +2037,23 @@ function _intuticCapturePreImage(toolName, input, ruleId) {
  * every emitted gate for real.
  *
  * Refuses through the harness's contract, like everything else: exit 2 means
- * nothing to cline or roo-code, whose harnesses only read stdout — a crashed
+ * nothing to cline, which only reads stdout — a crashed
  * stdout-cancel gate must still print its cancel object.
  */
 export function emitJsFailClosedPrelude(opts: JsGateOptions): string {
   const crashBody =
     opts.contract === 'stdout-cancel'
       ? `  try {\n` +
-        `    process.stdout.write(JSON.stringify({ cancel: true, reason:\n` +
-        `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err) }) + '\\n');\n` +
+        `    process.stdout.write(JSON.stringify({ cancel: true, errorMessage:\n` +
+        `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err),\n` +
+        `      code: 'GATE_CRASHED', ruleId: null }) + '\\n');\n` +
         `  } catch (e) { /* stdout gone too — nothing left to refuse through */ }\n` +
         `  process.exit(0);`
       : opts.contract === 'stdout-decision-deny'
         ? `  try {\n` +
           `    process.stdout.write(JSON.stringify({ decision: 'deny', reason:\n` +
-          `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err) }) + '\\n');\n` +
+          `      '[Intutic Governance] gate crashed — failing closed: ' + String((err && err.stack) || err)` +
+          (opts.documentedFieldsOnly ? ` + ' (refusal code GATE_CRASHED)' }) + '\\n');\n` : `,\n      code: 'GATE_CRASHED', ruleId: null }) + '\\n');\n`) +
           `  } catch (e) { /* stdout gone too — nothing left to refuse through */ }\n` +
           `  process.exit(0);`
         : `  try {\n` +
@@ -1526,8 +2097,16 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 2
 fi
 
+# The phrase matcher and the hold classifier (GATE_PY_LIB in gateBody.ts),
+# for the extractor below and for phrase-subject rules. A quoted heredoc, so
+# the shell expands nothing in it; read stops at end of input and returns 1.
+IFS= read -r -d '' INTUTIC_PY_LIB <<'INTUTIC_PY_LIB_END' || true
+${GATE_PY_LIB}
+INTUTIC_PY_LIB_END
+export INTUTIC_PY_LIB
+
 INTUTIC_FIELDS="$(printf '%s' "$INPUT" | python3 -c '
-import sys, json
+import os, sys, json
 def clean(v):
     return " ".join(str(v).split()) if isinstance(v, str) else ""
 state = "ok"
@@ -1557,22 +2136,54 @@ def first(*keys):
         if isinstance(v, str) and v:
             return clean(v)
     return ""
+def raw_first(*keys):
+    for k in keys:
+        v = i.get(k)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+raw_command = raw_first("command", "cmd", "script", "shell_command")
+tool_input_json = json.dumps(i, separators=(",", ":"), ensure_ascii=False)
+# Too large to evaluate inside the hook timeout (gateLimits.ts): the gate body
+# refuses on this line, and the command and arguments are not passed on.
+command_bytes = len(raw_command.encode("utf-8", "surrogatepass"))
+argument_bytes = len(tool_input_json.encode("utf-8", "surrogatepass"))
+too_large = ""
+if command_bytes > ${COMMAND_SIZE_LIMIT}:
+    too_large = "the command is %d bytes, over the ${COMMAND_SIZE_LIMIT}-byte limit a gate evaluates; split it into smaller commands" % command_bytes
+elif argument_bytes > ${ARGUMENTS_SIZE_LIMIT}:
+    too_large = "the tool arguments are %d bytes, over the ${ARGUMENTS_SIZE_LIMIT}-byte limit a gate evaluates; write the content in smaller parts" % argument_bytes
+if too_large:
+    raw_command = ""
+    tool_input_json = "{}"
+# The hold classifier reads the raw command: a line continuation or a comment
+# is still in it. The library is the shared phrase matcher, not a regex.
+lib = {}
+try:
+    exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+    actions = lib["intutic_actions"](d.get("tool_name", ""), raw_command) if not too_large else " "
+except Exception:
+    actions = " "
 # The state line comes FIRST: the lines after it may legitimately be empty,
 # and command substitution strips trailing newlines, so the last line is the
 # only position an empty value cannot survive in.
 print(state)
+print(too_large)
 print(clean(d.get("tool_name", "")))
 print(first("path", "file_path", "notebook_path", "filePath"))
-print(first("command", "cmd", "script", "shell_command"))
+print("" if too_large else first("command", "cmd", "script", "shell_command"))
 print(clean(d.get("session_id", d.get("sessionId", ""))))
+print(actions)
+# The raw command as one JSON line, for phrase-subject rules.
+print(json.dumps(raw_command, ensure_ascii=False))
 # The FULL tool_input, serialized to the exact shape argPattern rules are
 # matched against everywhere: JSON.stringify(tool_input) — compact separators,
 # insertion order, non-ASCII intact. The selected fields above are whitespace-
 # collapsed for token matching; this one must NOT be, or a WHERE clause that
 # spans a key/value boundary matches here and not in the JS gates. json.dumps
 # escapes every newline, so it is still exactly one line to read back.
-print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
-' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n')"
+print(tool_input_json)
+' 2>/dev/null || printf '\\n\\n\\n\\n\\n\\n\\n\\n\\n')"
 
 # Each read is \`|| true\` because command substitution strips trailing newlines:
 # a tool call with no command argument yields fewer lines than reads, so a late
@@ -1580,10 +2191,15 @@ print(json.dumps(i, separators=(",", ":"), ensure_ascii=False))
 # **exit 1** — which every harness reads as a hook error and lets the call
 # through. A guard that fails open on the most ordinary input there is (a Write
 # with no shell command) is worse than no guard, because it looks present.
-{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
+{ IFS= read -r INTUTIC_EXTRACT_STATE || true; IFS= read -r INTUTIC_TOO_LARGE || true; IFS= read -r TOOL || true; IFS= read -r TARGET || true; IFS= read -r COMMAND || true; IFS= read -r SESSION_ID || true; IFS= read -r INTUTIC_ACTIONS || true; IFS= read -r INTUTIC_RAW_COMMAND_JSON || true; IFS= read -r TOOL_INPUT_JSON || true; } <<EOF_INTUTIC_FIELDS
 $INTUTIC_FIELDS
 EOF_INTUTIC_FIELDS
 TOOL="\${TOOL:-}"; TARGET="\${TARGET:-}"; COMMAND="\${COMMAND:-}"; SESSION_ID="\${SESSION_ID:-}"
+# Space-padded action tokens the extractor's classifier found, or " ".
+INTUTIC_ACTIONS="\${INTUTIC_ACTIONS:- }"
+# Why the call is too large to evaluate, or empty (gateLimits.ts).
+INTUTIC_TOO_LARGE="\${INTUTIC_TOO_LARGE:-}"
+INTUTIC_RAW_COMMAND_JSON="\${INTUTIC_RAW_COMMAND_JSON:-\"\"}"
 # Empty means the extractor itself died (the fallback printf above): treat it
 # exactly like a payload the parser rejected. The gate body refuses on any
 # value other than "ok" — see the envelope refusal in emitShellGate.
@@ -1625,7 +2241,7 @@ export function emitPythonGate(): string {
   const rows = floor.map(
     (p) =>
       `    (${JSON.stringify(p.id)}, ${JSON.stringify(p.source)}, ` +
-      `${p.ignoreCase ? 're.IGNORECASE' : '0'}, ${JSON.stringify(p.reason)}),`,
+      `${p.ignoreCase ? 're.IGNORECASE' : '0'}, ${JSON.stringify(p.reason)}, ${p.sequence ? 'True' : 'False'}),`,
   )
   return `
 # ── Intutic gate body v${GATE_VERSION} — harness: open-webui ─────────────────
@@ -1636,6 +2252,21 @@ ${rows.join('\n')}
 
 
 ${NORMALISE_CONTRACT.pySource}
+
+
+# The phrase matcher (intutic_clawde/gate/phrases.py), for phrase rules.
+${PHRASES_PY_SOURCE}
+
+
+# The sequence-rule matcher (intutic_clawde/gate/sequence.py), for rules whose
+# flags carry "s": each step searched for once, so re's backtracking stays linear.
+${SEQUENCE_PY_SOURCE}
+
+
+def _intutic_rule_search(src, subject, flags_re, seq):
+    if seq:
+        return sequence_match(compile_sequence(src, flags_re), subject)
+    return re.search(src, subject, flags_re) is not None
 
 
 _state = {"digest": "", "workspace": ""}
@@ -1691,7 +2322,7 @@ def _intutic_snapshot_rules():
                     # A rule that will not compile is dropped, not fatal.
                     if _skip_destructive and f[0].startswith("destructive."):
                         continue
-                    out.append((f[0], f[5], re.IGNORECASE if f[2] == "i" else 0, f[4], f[1]))
+                    out.append((f[0], f[5], re.IGNORECASE if "i" in f[2] else 0, f[4], f[1], f[3], "s" in f[2]))
                 except Exception:
                     continue
     except Exception:
@@ -1703,7 +2334,8 @@ def _intutic_snapshot_rules():
             body = "\\n".join(l.rstrip("\\n") for l in fh
                             if l.strip() and not l.startswith("#"))
         actual = hashlib.sha256(body.encode()).hexdigest()[:32]
-        if _state["digest"] and actual != _state["digest"]:
+        # No digest line is unverified too: the daemon always writes one.
+        if actual != _state["digest"]:
             return []
     except Exception:
         pass
@@ -1716,15 +2348,23 @@ def _intutic_evaluate(text):
     """Returns (blocks, flags) for a prompt. Floor rules can only flag."""
     subject = _intutic_normalise(text)
     blocks, flags, shadowed = [], [], []
-    for rid, src, flags_re, reason in _INTUTIC_FLOOR:
+    for rid, src, flags_re, reason, seq in _INTUTIC_FLOOR:
         try:
-            if re.search(src, subject, flags_re):
+            if _intutic_rule_search(src, subject, flags_re, seq):
                 flags.append((rid, reason))
         except Exception:
             continue
-    for rid, src, flags_re, reason, severity in _intutic_snapshot_rules():
+    words = None
+    for rid, src, flags_re, reason, severity, rsubj, seq in _intutic_snapshot_rules():
         try:
-            if not re.search(src, subject, flags_re):
+            if rsubj == "phrase":
+                # |-separated phrases matched as words (phrases.py), never as
+                # a regex, which backtracks on crafted text.
+                if words is None:
+                    words = phrase_text(text)
+                if not any(has_phrase(words, p, True) for p in src.split("|")):
+                    continue
+            elif not _intutic_rule_search(src, subject, flags_re, seq):
                 continue
         except Exception:
             continue
@@ -1796,7 +2436,13 @@ ${jsGuardTable('INTUTIC_FLOOR', floor)}
 // had already drifted from the in-process one on null handling.
 ${NORMALISE_CONTRACT.jsSource}
 
+// The phrase matcher (@intutic/shared-types phrases.ts), for phrase rules.
+${PHRASES_JS_SOURCE}
+
 ${JS_SNAPSHOT_LOADER}
+
+// The refusal of an MCP call on an unverified snapshot (mcpRegistryRecord.ts).
+${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}
 
 /**
  * Evaluates one workflow. Returns normally to allow; throws to abort the
@@ -1821,7 +2467,7 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
     var _msg = snap.state === 'absent'
       ? 'No policy snapshot — built-in protections only'
       : snap.state === 'invalid'
-        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals'
+        ? 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused'
         : snap.state === 'empty'
           ? 'Policy snapshot contains no rules — the compile produced nothing'
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
@@ -1858,6 +2504,18 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
     if (!node || typeof node !== 'object') continue;
     const nodeType = String(node.type || '');
     const nodeName = String(node.name || nodeType || 'node');
+    // An MCP client node (n8n's MCP Client and MCP Client Tool, and the
+    // community package's) calls tools on an MCP server. A snapshot that
+    // failed its integrity check admits no MCP server (gate body v17), so a
+    // workflow that would call one is refused, observe-only or not. The node
+    // stands in for the server: n8n names it, the URL it reaches does not.
+    if (snap.state === 'invalid' && /^mcpclient/i.test(nodeType.slice(nodeType.lastIndexOf('.') + 1))) {
+      const _unv = mcpSnapshotUnverifiedRefusal(nodeName);
+      const reason = _unv.reason + ' [' + _unv.ruleId + '] (node "' + nodeName + '", type ' + nodeType + ')';
+      try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+      try { record('tool_blocked', 'n8n:' + nodeName, reason); } catch (e) {}
+      throw new Error('[Intutic Governance] BLOCKED: ' + reason);
+    }
     // Compact stringify, insertion order, non-ASCII intact — the same shape
     // matchSopRule and every per-tool gate pin for argPattern matching.
     var paramsJson = '{}';
@@ -1890,13 +2548,21 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
       if (v && typeof v === 'object') { for (const k in v) _walk(v[k]); }
     })(node.parameters == null ? {} : node.parameters);
     const nLeaves = _leaves.map(intuticNormalise);
+    var leafWords = null;
     for (const rule of rules) {
+      // A phrase rule's source is |-separated phrases matched as words in each
+      // parameter string — never as a regex, which backtracks on crafted input.
+      if (rule.subject === 'phrase') {
+        if (leafWords === null) leafWords = _leaves.map(phraseText);
+        var _phrases = rule.re.source.split('|');
+        if (!leafWords.some(function (w) { return _phrases.some(function (p) { return hasPhrase(w, p, true); }); })) continue;
+      }
       // A node has no separate command/target — its parameters are both. A
       // 'tool' rule matches the node TYPE and nothing else, for the same
       // reason the per-tool gates never test a path pattern against "Write".
-      const subjects = rule.subject === 'tool' ? [nType, nTypeBase] : [nParams].concat(nLeaves);
+      const subjects = rule.subject === 'phrase' ? [nParams] : rule.subject === 'tool' ? [nType, nTypeBase] : [nParams].concat(nLeaves);
       for (const subject of subjects) {
-        if (!rule.re.test(subject)) continue;
+        if (rule.subject !== 'phrase' && !intuticRuleMatches(rule, subject)) continue;
         if (rule.argDowngraded) {
           try {
             record('rule_downgraded', 'n8n:' + nodeName,

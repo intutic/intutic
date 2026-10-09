@@ -35,9 +35,11 @@ import { getAdapter } from '../harness/detector.js'
 import { printOnboardingGuide } from '../lib/onboarding.js'
 import { writeEnforcementState } from '../lib/enforcementState.js'
 import { reportDeviceState } from '../lib/deviceReport.js'
+import { reportMachineInventory, shouldReportInventoryThisIteration } from '../lib/inventory.js'
 import { parseChecksums, verifyChecksum } from '../lib/binaryChecksum.js'
 import { newIso } from '@intutic/id'
-import type { SopFileHash, HarnessType, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
+import { HarnessType, rulesFileOf } from '@intutic/shared-types'
+import type { SopFileHash, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
 import pc from 'picocolors'
 
 import { SyncWsClient,
@@ -45,7 +47,9 @@ import { SyncWsClient,
   updatePreToolUseHooks,
   injectMcpServer,
   noteProxyUrl,
+  guardPolicySnapshot,
   guardSettingsFile,
+  isGuardedPath,
   warnIfDshCoverageGap,
   writeRuntimeEnv,
   refreshPolicySnapshot,
@@ -64,6 +68,8 @@ import { SyncWsClient,
   captureAndUpload,
   shouldCaptureThisIteration,
   refreshDecisionsDigest,
+  retireClaudeMdDigest,
+  claudeCodeReadsAgentsMd,
   writeBundledSkills,
   clearImmutable,
   setImmutable,
@@ -105,17 +111,61 @@ function isPortInUse(port: number): Promise<boolean> {
 
 
 /**
- * Is this a path the tamper guard should inspect?
+ * Applies a synced configuration to each configured harness.
  *
- * Deliberately broad: `guardSettingsFile` already branches per harness, so the only
- * job here is to stop filtering out paths it knows how to handle.
+ * The gate is installed whatever rule sets the workspace has: it enforces the
+ * built-in protections, the destructive-command tier, group rules and holds,
+ * none of which need a rule set. Gating it on rule sets left a workspace with
+ * none, or with none targeting a harness, with that harness ungoverned. The
+ * rules file is written only when a rule set targets the harness, or on a
+ * forced sync.
+ *
+ * Harnesses that read the same file (Codex, Grok Build, OpenCode, Muse Code
+ * and others all read `AGENTS.md`) each get every rule set aimed at any of
+ * them that is configured here: one section, the same for every writer, so
+ * the last writer no longer replaces the others' rules.
+ *
+ * Claude Code reads its own `.claude/rules/` file at every launch, and also
+ * the workspace's `AGENTS.md` when there is no `CLAUDE.md` on the path (or
+ * the user chose `claude-md-and-agents-md`; see claudeAgentsMd.ts). When it
+ * does, a rule set aimed at both Claude Code and an `AGENTS.md` reader
+ * reaches it through `AGENTS.md`, so its own file leaves that rule set out
+ * rather than load it twice.
+ *
+ * @returns how many rule sets were written into rules files.
  */
-function isGovernedConfigPath(changedPath: string, filename: string): boolean {
-  if (filename === 'settings.json' || filename === 'settings.local.json') return true
-  if (filename === 'hooks.json') return true
-  // Goose's immutable governance plugin.
-  if (changedPath.includes('intutic-governance')) return true
-  return false
+export async function writeHarnessConfigs(
+  harnesses: readonly string[],
+  workspaceRoot: string,
+  sops: readonly SyncSopEntry[],
+  proxyUrl: string,
+  force: boolean,
+): Promise<number> {
+  let written = 0
+  const writtenFiles = new Set<string>()
+  const agentsMdReaders = harnesses.filter((h) => rulesFileOf(h as HarnessType) === 'AGENTS.md')
+  const claudeFromAgentsMd =
+    harnesses.includes(HarnessType.CLAUDE_CODE) && agentsMdReaders.length > 0 && (await claudeCodeReadsAgentsMd(workspaceRoot))
+  for (const harnessType of harnesses) {
+    const adapter = getAdapter(harnessType)
+    if (!adapter) continue
+
+    await adapter.installGate?.(workspaceRoot, proxyUrl)
+
+    const file = rulesFileOf(harnessType as HarnessType)
+    const readers = file === null ? [harnessType] : harnesses.filter((h) => rulesFileOf(h as HarnessType) === file)
+    const aimed = sops.filter((sop) => sop.harnessTargets.some((t) => readers.includes(t)))
+    const viaAgentsMd = harnessType === HarnessType.CLAUDE_CODE && claudeFromAgentsMd
+    const targetSops = viaAgentsMd ? aimed.filter((sop) => !sop.harnessTargets.some((t) => agentsMdReaders.includes(t))) : aimed
+    // Claude Code's own file is rewritten even when every rule set aimed at
+    // it now comes through AGENTS.md, so it stops carrying them.
+    if (aimed.length === 0 && !force) continue
+    if (!(await adapter.writeConfig(workspaceRoot, targetSops, proxyUrl))) continue
+    // A shared file counts once, however many of its readers wrote it.
+    if (file === null || !writtenFiles.has(file)) written += targetSops.length
+    if (file !== null) writtenFiles.add(file)
+  }
+  return written
 }
 
 /**
@@ -533,7 +583,12 @@ export async function runConnect(opts: {
   // The snapshot also carries this workspace's `review_before:` tokens as hold
   // rules (synced SOPs, settings and local `.intutic/sops`), so every gate —
   // not only the Claude Code hook — holds on them (TD-474 item 4).
-  async function refreshGateCachesForConnect(): Promise<void> {
+  //
+  // First, the snapshot's self-heal: a snapshot changed while the daemon was
+  // stopped is put back to the last verified copy, and reported, before the
+  // refresh replaces it. With `checkSnapshot` false the caller is that check.
+  async function refreshGateCachesForConnect(checkSnapshot = true): Promise<void> {
+    if (checkSnapshot) await guardPolicySnapshot(safeConfig.workspaceRoot, async () => {})
     const localHoldTokens = await localHoldTokensFor(
       safeConfig.workspaceRoot,
       lastCachedConfig?.sops ?? [],
@@ -553,11 +608,23 @@ export async function runConnect(opts: {
       .filter((f): f is string => Boolean(f))
       .map((f) => node_path.resolve(safeConfig.workspaceRoot, f))
 
+  // Whether Claude Code read the workspace's AGENTS.md at the last sync. A
+  // CLAUDE.md added or removed (or the user's Project instructions setting
+  // changed) moves rule sets between AGENTS.md and Claude Code's own file, so
+  // a change rewrites the rules files as a new config would.
+  let lastClaudeFromAgentsMd: boolean | undefined
+
   // 3. Define configuration applier function
   async function applySyncConfig(syncConfig: SyncConfigPayload, force = false): Promise<number> {
     let sopsWritten = 0
     lastCachedConfig = syncConfig
     await refreshGateCachesForConnect()
+
+    const claudeFromAgentsMd = safeConfig.harnesses.includes(HarnessType.CLAUDE_CODE)
+      ? await claudeCodeReadsAgentsMd(safeConfig.workspaceRoot)
+      : false
+    const claudeDeliveryMoved = lastClaudeFromAgentsMd !== undefined && claudeFromAgentsMd !== lastClaudeFromAgentsMd
+    lastClaudeFromAgentsMd = claudeFromAgentsMd
 
     // Write-protect (`bypassEnforcementTier: 'immutable'`, macOS): the rules
     // files carry the user-immutable flag between cycles, so it comes off
@@ -565,7 +632,7 @@ export async function runConnect(opts: {
     // comes off whenever the config moved, so a workspace that switched away
     // from write-protect is not left with files nothing can rewrite.
     const writeProtect = syncConfig.settings?.bypassEnforcementTier === 'immutable'
-    const configMoved = syncConfig.configVersion > localConfigVersion || force
+    const configMoved = syncConfig.configVersion > localConfigVersion || force || claudeDeliveryMoved
     if (writeProtect || configMoved) {
       for (const file of rulesFilePaths()) await clearImmutable(file)
     }
@@ -635,24 +702,13 @@ export async function runConnect(opts: {
       // first: `intutic disconnect` recognises the base-URL settings it is
       // written into by it.
       await noteProxyUrl(syncConfig.proxyUrl)
-      for (const harnessType of safeConfig.harnesses) {
-        const adapter = getAdapter(harnessType)
-        if (!adapter) continue
-
-        const targetSops = combinedSops.filter((sop) =>
-          sop.harnessTargets.includes(harnessType as HarnessType)
-        )
-        if (targetSops.length === 0 && !force) continue
-
-        const written = await adapter.writeConfig(
-          safeConfig.workspaceRoot,
-          targetSops,
-          syncConfig.proxyUrl
-        )
-        if (written) {
-          sopsWritten += targetSops.length
-        }
-      }
+      sopsWritten += await writeHarnessConfigs(
+        safeConfig.harnesses,
+        safeConfig.workspaceRoot,
+        combinedSops,
+        syncConfig.proxyUrl,
+        force,
+      )
 
       // b. Invalidate/update Claude Code hooks and settings
       if (safeConfig.harnesses.includes('claude-code' as HarnessType)) {
@@ -699,7 +755,11 @@ export async function runConnect(opts: {
     })
 
     // e. The governed decisions log, opt-in (`decisionsLogEnabled`, off by
-    // default). Also before the hashes: it writes a section into CLAUDE.md.
+    // default), into each harness's instructions file. Also before the hashes:
+    // it writes into shared files such as AGENTS.md, whose rules section they
+    // cover. The section earlier versions put in CLAUDE.md comes out whether
+    // or not the log is on.
+    await retireClaudeMdDigest(safeConfig.workspaceRoot)
     if (syncConfig.settings?.decisionsLogEnabled) {
       await refreshDecisionsDigest({
         controlPlaneUrl,
@@ -1241,17 +1301,12 @@ export async function runConnect(opts: {
 
     // B. Tamper detection for every governed config, not just Claude Code's.
     //
-    // This used to filter on `filename === 'settings.json'`, which silently disabled
-    // five of the six branches inside guardSettingsFile: the Cursor, Windsurf, Cline
-    // and OpenHands restores all key off `hooks.json`, and the Goose
-    // governance-plugin override incident keys off a path containing
-    // `intutic-governance`. None of those basenames could ever reach the guard, so a
-    // tampered hooks file on any harness but Claude Code was a no-op — and a tampered
-    // Windsurf/VS Code/Gemini settings file passed the basename test only to fall
-    // through and log `settings_intact`.
-    //
-    // Route anything on the governed list to the guard and let it decide.
-    if (isGovernedConfigPath(changedPath, filename)) {
+    // Routed on the guard's own watch list. A filter on file names here, first
+    // `settings.json` and later `settings.json`/`hooks.json`/`intutic-governance`,
+    // kept the guard from ever seeing the paths it restores under other names:
+    // a gate script, Cline's PreToolUse, OpenClaw's openclaw.json, Muse's
+    // managed-hooks file and every dsh profile patch.
+    if (isGuardedPath(changedPath, safeConfig.workspaceRoot)) {
       try {
         const sops = lastCachedConfig?.sops ?? []
         // The proxy URL too: the restored gate scripts carry it, and an empty
@@ -1263,6 +1318,7 @@ export async function runConnect(opts: {
           lastCachedConfig?.proxyUrl ?? '',
           undefined,
           new Set(safeConfig.disconnectedHarnesses ?? []),
+          () => refreshGateCachesForConnect(false),
         )
         if (tampered) {
           log.warn(`[Security] Governance settings tamper detected and restored: ${changedPath}`)
@@ -1280,9 +1336,10 @@ export async function runConnect(opts: {
       return
     }
 
-    // B. Handle governed harness file drift detection
+    // B. Handle governed harness file drift detection. By path, not
+    // basename: rules files sit in directories (`.cursor/rules/…`).
     const matchingHarness = safeConfig.harnesses.find(
-      (h) => getAdapter(h)?.configFileName === filename
+      (h) => getAdapter(h)?.configFileName === relativePath.split(node_path.sep).join('/')
     )
     if (!matchingHarness) return
 
@@ -1380,6 +1437,20 @@ export async function runConnect(opts: {
       })
       for (const { harness, error } of failures) {
         log.dim(`Agent report/session for harness '${harness}' failed: ${error}`)
+      }
+      // Every few minutes, the machine's AI inventory for the org-wide view:
+      // every harness the detection rules find, connected or not, with its
+      // gate state, and the MCP servers and skill bundles on the machine.
+      if (shouldReportInventoryThisIteration(pollIteration)) {
+        const inventory = await reportMachineInventory({
+          controlPlaneUrl,
+          apiKey: safeCreds.apiKey,
+          workspaceRoot: safeConfig.workspaceRoot,
+          configured: safeConfig.harnesses,
+          disconnected: safeConfig.disconnectedHarnesses,
+          cliVersion: cliPkgVersion,
+        })
+        if (!inventory.reported) log.dim(`AI inventory report not sent (will retry): ${inventory.reason}`)
       }
       // Every Nth poll, capture the rules files that changed for the config
       // history. Content goes only when this poll's settings have

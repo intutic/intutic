@@ -112,10 +112,10 @@ Role-Based Access Control determines what each team member can see and do in the
 | Role | Capabilities |
 |------|-------------|
 | **Owner** | Full control — billing, workspace settings, member management, all features |
-| **Admin** | Manage SOPs, members, budgets, compliance settings |
-| **EM** | View reports, manage budgets, review enforcement decisions |
-| **Developer** | Use agents, view own traces and compliance scores |
-| **Viewer** | Read-only access to the dashboard |
+| **Admin** | Workspace policy and configuration — SOPs, custom filters, guardrail promotion, budgets, integrations, notification and SIEM routing |
+| **EM** | Run-time interventions and review — approve holds and overrides, kill runs, hold or probe a SOP, label and adjudicate findings, acknowledge budget alerts |
+| **Developer** | Use agents and report from them; end or kill their own loop runs |
+| **Viewer** | Read-only: sees what the role's pages show and changes nothing |
 
 ### Role Hierarchy
 
@@ -124,6 +124,25 @@ Owner > Admin > EM > Developer > Viewer
 ```
 
 Higher roles inherit all permissions from lower roles.
+
+### What Each Role Can Change
+
+The API enforces these tiers on every route that changes state, so a script or the CLI gets the same answer as the dashboard. A refused call returns `403` with a `detail` naming the roles that may make it, for example `Requires the OWNER or ADMIN role`. The [API reference](/reference/api) lists the roles for each route.
+
+| Change | Required Role |
+|--------|--------------|
+| Workspace settings, budgets, SOP create, edit, delete and lifecycle transitions, SOP invalidation | Owner or Admin |
+| Custom filters (WASM rules), promoting rule candidates, applying SOP Optimizer suggestions | Owner or Admin |
+| Integrations (Slack, task management, connectors), notification rules, SIEM destinations, storage tests | Owner or Admin |
+| Approving holds and break-glass requests, reviewing decisions, killing any loop run | Owner, Admin, or EM |
+| Holds and Gödel probes on a SOP, labelling governance cards, adjudicating findings, dismissing suggestions and recommendations, acknowledging budget alerts | Owner, Admin, or EM |
+| Starting, completing, killing or verifying a loop run the member started | Developer and above |
+| What the sync daemon, gates, proxies and SDKs report with a member's key | Developer and above |
+| The member's own account: password, profile, API keys, Slack link | Every role |
+
+Viewers change nothing in the workspace. An API key acts with the role of the member who owns it, so give the key that the sync daemon or a CI job uses to a Developer or above, and the key for Terraform to an Owner or Admin.
+
+Adjudicating a `response_injection:*` finding also needs Owner or Admin, because it reveals the stored response snippet.
 
 ### Feature Access by Role
 

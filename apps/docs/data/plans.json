@@ -43,8 +43,11 @@
       "$2,250/day monitored LLM volume",
       "Unlimited API keys",
       "SSO — SAML 2.0 & OIDC (Okta & Entra ID)",
+      "SSO group policy for high-risk tools",
       "SOP Optimizer",
       "Custom WASM policy rules",
+      "SIEM export",
+      "Cost per developer, branch and pull request",
       "3-year trace retention"
     ]
   },
@@ -68,6 +71,9 @@
       "$12,500/day monitored LLM volume",
       "Unlimited API keys",
       "Everything in Biz Org",
+      "SCIM provisioning, with cost per team",
+      "Self-hosted gateway",
+      "Daily compliance evidence collection",
       "Data residency: US; EU on request",
       "3-year trace retention"
     ]

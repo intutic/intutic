@@ -18,7 +18,7 @@
  * @module
  */
 
-import { scanToolDescription } from '../toolPoison.js'
+import { scanToolDescription } from '@intutic/shared-types'
 import type { ToolsListEntry } from '../session.js'
 
 export type Disposition = 'steer' | 'reask' | 'kill'

@@ -50,6 +50,30 @@ pub enum Verdict {
         reason: String,
         policy_id: Option<String>,
     },
+    /// Stop this call until a person approves it, through the decisions API:
+    /// the request path records a hold, or lets an approved retry through.
+    ///
+    /// Produced by a Rego rule's `{"decision": "hold"}`. Between `Reask` and
+    /// `Kill`: it outranks a retry, and a block outranks it.
+    Hold {
+        reason: String,
+        policy_id: Option<String>,
+        risk_tier: Option<RiskLevel>,
+        /// The held call's tool name, empty when the request carried none.
+        tool: String,
+        /// SHA-256 of the held call's arguments with sorted keys: with the
+        /// rule and the tool, what an approval lets through.
+        target_hash: String,
+    },
+    /// A custom rule reached no verdict — its deadline, its instruction
+    /// budget, an error, or a result that is not a verdict. Refused as
+    /// `GOVERNANCE_UNAVAILABLE` whatever the proxy's fail mode, because an
+    /// agent can cause it by padding its input. Ranks with a block: nobody
+    /// cleared the call, so neither a retry nor an approval may pass it.
+    Unavailable {
+        reason: String,
+        policy_id: Option<String>,
+    },
 }
 
 /// Risk level from PCAS permission resolution.
@@ -159,6 +183,18 @@ pub struct RequestContext {
     pub model: String,
     pub tools: Vec<ToolSchema>,
     pub tool_calls: Vec<ToolCall>,
+    /// The calls in the request's latest assistant turn: the ones whose
+    /// results this request carries.
+    ///
+    /// A Rego rule is evaluated once per call here (`opa::evaluate`). Not the
+    /// whole history, which `tool_calls` above is: that grows with the session,
+    /// and so would the fuel a Rego rule spends parsing it. Not the per-turn
+    /// delta either, which is consumed by the request that reports it, so a
+    /// refused request retried unchanged would arrive with nothing to refuse.
+    ///
+    /// Not serialized: a native rule has always received `tool_calls`.
+    #[serde(skip)]
+    pub turn_tool_calls: Vec<ToolCall>,
     pub estimated_input_tokens: u32,
     pub budget_remaining_usd: f64,
     pub risk_tier: RiskLevel,
@@ -390,6 +426,7 @@ mod tests {
             virtual_key_prefix: "vk_1".into(),
             model: "claude-sonnet-4".into(),
             tools: vec![],
+            turn_tool_calls: Vec::new(),
             tool_calls: vec![],
             estimated_input_tokens: 42,
             budget_remaining_usd: 1.5,

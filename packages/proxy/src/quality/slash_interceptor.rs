@@ -22,7 +22,7 @@ pub async fn handle(
     workspace_id: &str,
     message: &str,
     protocol: &crate::protocol::Protocol,
-    api_key: &str,
+    virtual_key: &crate::credential::VirtualKey,
 ) -> Option<Vec<u8>> {
     let parts: Vec<&str> = message.split_whitespace().collect();
     let command = parts.get(1).copied().unwrap_or("help");
@@ -36,9 +36,8 @@ pub async fn handle(
     debug!(command, args = ?args, "Processing slash command");
 
     // Call control plane slash command API
-    let response = match http_client
-        .post(format!("{}/api/v1/slash-command", control_plane_url))
-        .header("Authorization", format!("Bearer {}", api_key))
+    let response = match virtual_key
+        .authorize(http_client.post(format!("{}/api/v1/slash-command", control_plane_url)))
         .json(&serde_json::json!({
             "sessionId": session_id,
             "workspaceId": workspace_id,

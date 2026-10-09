@@ -1,8 +1,12 @@
 pub mod commands;
 pub mod config;
+/// The caller's credential, typed by where it may be sent
+pub mod credential;
 pub mod dlp;
 pub mod graph;
 pub mod injection;
+/// The per-key `/auth/key-context` answer the workspace policy rides on
+pub mod key_context;
 pub mod manifest;
 pub mod memory;
 pub mod metering;
@@ -16,6 +20,8 @@ pub mod posture;
 pub mod probes;
 pub mod protocol;
 pub mod proxy;
+/// In-band refusals: the codes, headers and stream marker that name them
+pub mod refusal;
 pub mod router;
 pub mod snip;
 pub mod snip_code;

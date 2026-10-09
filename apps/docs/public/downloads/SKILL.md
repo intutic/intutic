@@ -16,7 +16,8 @@ Use the `intutic` CLI commands to manage the daemon, inspect execution traces, o
 ### 1. Connection & Session Setup
 - **Authenticate:** `intutic login [--control-plane-url <url>]` (authenticates with your Intutic control plane).
 - **Initialize Workspace:** `intutic init` (detects the developer harnesses in the workspace, like Claude Code or Cursor, and records them for sync).
-- **Start Connection:** `intutic connect` (boots the local interceptor proxy, writes each recorded harness's rules and hooks, and keeps them in sync with the control plane).
+- **Start Connection:** `intutic connect` (boots the local interceptor proxy, writes each recorded harness's rules and hooks, keeps them in sync with the control plane, and writes this skill and the rule-author skill into `.agents/skills/` when they are missing).
+- **Stop Governing:** `intutic disconnect [--harness <id>] [--dry-run] [--keep-login]` (undoes `connect` on this machine: restores every harness config it changed, removes its hooks, services and the skills it wrote, and logs out). Run it only when the user asks; `--dry-run` shows what would change.
 - **Offline Spend Sync:** The sync daemon automatically reconciles offline query consumption logs (`traces-*.jsonl`) and local budgets back to the control plane on reconnect.
 
 ### 2. Traces & Auditing
@@ -69,6 +70,40 @@ When interacting with LLM providers through the local proxy, prepend requests wi
   - *Note:* Blocking by default; it can be configured to pass the enhanced prompt through to the model instead. The recommendations are the handoff points into the rest of the toolchain — "add a WASM rule" is the `intutic-rule-author` skill's job, "write a role SOP" and "enable DLP" are handled here.
 - **Draw Guardrails:** `/draw` (aliases: `@draw`, `/intutic-draw`, `@intutic draw`)
   - *Description:* Renders a Mermaid diagram plus text summary of the agent's trajectory and the guardrails currently around it. Always blocking — a visualization has nothing to forward upstream.
+
+---
+
+## 🚦 When a Call Is Refused or Held
+
+Intutic names every refusal with a code: an SDK raises it (`ClawdeBlockedError.code`, `IntuticGateRefusal.code`), the MCP proxy puts it in `error.data.code`, a hook gate that answers in JSON (Cline, Grok Build, Antigravity) puts it in `code` beside `ruleId`, and the proxy names a withheld answer in its `x-intutic-refusal` header. A refusal you read as text, starting `[Intutic]` or `[Intutic Governance]`, is the same refusal: the call it names did not run (unless it says the result was withheld). Find the code below and act on it.
+
+### Held: tell the user, then wait
+A hold rule wants a person to see this call before it runs. Codes: `HELD` (with a hold id, `hold_…`), a hook gate's `[Intutic Governance] HELD:` message, `LOOP_RUN_PENDING_REVIEW` (the loop run is paused for review), and the proxy's `policy_held` (a Rego or WASM rule held the request; the error names the hold id). `SERVER_HELD` is the MCP registry's version: the server changed its tools in a risky way and waits for an owner or admin on the MCP Servers page.
+- Tell the user what was held and quote the hold id.
+- Only an **Owner, Admin or Engineering Manager** can decide it: `intutic decision approve <holdId>` or `intutic decision reject <holdId>`, or the Slack card. A developer cannot approve their own hold.
+- Do not retry while it is pending. After approval, the identical call (same tool, same arguments) passes only if the workspace's review-hold bypass (`reviewHoldBypassEnabled`) is on, and only for a short window (10 minutes by default); otherwise approval records the decision and a retry is held again. The `intutic_hold_status` MCP tool says which.
+- A hold with no hold id could not be recorded, so there is nothing to approve: tell the user.
+
+### Revise: change the approach
+`policy_reask` (proxy) and `REASK` (MCP proxy) refuse this attempt with a reason. Do something different; repeating it becomes a block (`policy_denied`, `REASK_EXHAUSTED`).
+
+### Blocked: do not retry the same call
+Continue without it, or tell the user what would have to change and who can change it.
+- **Policy:** `policy_denied`, `TOOL_DENIED`, `SOP_RULE`, `SNAPSHOT`, `HOOK_GATE`, `ANOMALY`, `WASM_RULE`, `REASK_EXHAUSTED`, `LOOP_RUN_TERMINATED`, `model_not_allowed`.
+- **Protected by the hook gate:** `BUILT_IN_RULE`: a governance bypass, a write to Intutic's own config or a skill directory, or a secret in written content. Do not look for another route to the same change; tell the user.
+- **Identity:** `SSO_GROUP`: the user's SSO groups do not clear this tool (rule `sso_group.high_risk.<tool>` or `sso_group.require_obo.<tool>`). An admin grants the group; you cannot work around it.
+- **Data:** `dlp_policy_violation` and `DLP` (a secret, destructive command or PII value in the input: remove it), `INJECTION` (the input carries a prompt-injection pattern), `SQL_GUARD` (destructive SQL against a database not on the SQL allowlist: use an allowlisted database, named explicitly on the command line).
+- **MCP servers:** `SERVER_BLOCKED`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`, `SERVER_NOT_ALLOWED`, `TOOL_NOT_ALLOWED`, `TOOL_DEFINITIONS_CHANGED`. An owner or admin decides on the MCP Servers page; the `intutic_mcp_registry_status` MCP tool shows what the registry says.
+- **Spend:** `BUDGET_EXCEEDED`, `OVERAGE_HARD_CAP_EXCEEDED`, `COST_GATE_EXCEEDED` (a smaller request may pass). An MCP `BUDGET_EXCEEDED` lasts until its `resetAt`; `intutic_mcp_budget_remaining` shows what is left.
+- **Images:** `E_UNPINNED_LATEST`, `E_UNPINNED_TAG`, `E_UNKNOWN_REGISTRY`, `E_UNKNOWN_IMAGE`, `E_DIGEST_MISMATCH`, `E_MANIFEST_UNPARSEABLE`: deploy an image pinned to a digest the image allowlist approves.
+- **Gate setup:** `WORKFLOW_SANDBOX`, `NO_GATE`: the gate is wired wrongly in the agent's code; fix the code, not the call. `UNREADABLE_CALL`: the hook could not read the tool call from its harness, which is a setup fault to report, not something to retry.
+- **Size:** `COMMAND_TOO_LARGE`: the command is over 256 KiB, or the tool's arguments over 1 MiB, more than any gate evaluates. Split the work: smaller commands, or a file written in parts. A hook gate that could not finish deciding in time says `GATE_DEADLINE` in its reason; the call did not run, and the same call will be refused again, so tell the user.
+
+### Not checked: retry once, later
+`GOVERNANCE_UNAVAILABLE`, `REGISTRY_UNAVAILABLE`, `BUDGET_UNAVAILABLE`, `TOFU_UNAVAILABLE`, `RESPONSE_UNPARSEABLE`, `GATE_CRASHED` (the hook gate failed while deciding), `POLICY_SNAPSHOT_UNVERIFIED` (the policy snapshot on this machine failed its integrity check, so no MCP call runs until the sync daemon restores it), and `HOOK_GATE` when its reason says the control plane was unreachable: governance could not check the call, so it did not run. One later retry is fine; if it fails again, tell the user.
+
+### Ran, but the result was withheld
+`RESULT_WITHHELD_DLP`, `RESULT_WITHHELD_INJECTION` (MCP proxy) and `OUTPUT_DLP` (proxy): the tool or model ran, and its output was not delivered. Do not run it again blindly, since it may already have had its effect; tell the user.
 
 ---
 

@@ -124,6 +124,7 @@ mod tests {
             virtual_key_prefix: "vk-test".into(),
             model: "gpt-4o".into(),
             tools: vec![],
+            turn_tool_calls: Vec::new(),
             tool_calls: vec![],
             estimated_input_tokens: 1000,
             budget_remaining_usd: 10.0,

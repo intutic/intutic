@@ -18,6 +18,8 @@
  * they are load-bearing and must survive editing.
  */
 
+import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
+
 export const ACTION_PREFIX = 'action:'
 
 /** Commands that put code or artefacts somewhere real. */
@@ -100,6 +102,8 @@ export const DB_WRITE_PATTERNS: readonly string[] = [
   'update ',
   'delete from',
   'drop table',
+  'drop database',
+  'drop schema',
   'truncate ',
   'alter table',
 ]
@@ -144,6 +148,8 @@ export const SHELL_TOOLS: readonly string[] = [
   'runcommand',
   // Cline / Roo Code's shell tool (kept in step with the Rust SHELL_TOOLS).
   'execute_command',
+  // Gemini CLI's shell tool.
+  'run_shell_command',
   'terminal',
   'execute',
   'exec',
@@ -194,6 +200,14 @@ export function flattenInput(value: unknown): string {
   return ''
 }
 
+/**
+ * Does `words` contain any of `patterns`, whatever separates each phrase's
+ * words? A one-word pattern is a plain substring (see phrases.ts).
+ */
+function matchesPhrase(words: PhraseText, patterns: readonly string[]): boolean {
+  return patterns.some((p) => hasPhrase(words, p))
+}
+
 export function matchesAny(haystack: string, patterns: readonly string[]): boolean {
   return patterns.some((p) => haystack.includes(p))
 }
@@ -218,20 +232,22 @@ export function toolIs(name: string, group: readonly string[]): boolean {
 export function classify(toolName: string, toolInput: unknown): string[] {
   const args = flattenInput(toolInput)
   const actions: string[] = []
+  // Cut into words once, for every phrase list below (see phrases.ts).
+  const words = phraseText(args)
 
   if (toolIs(toolName, SHELL_TOOLS)) {
     // Tests first: `make test && git push` is both, and the ordering rule
     // needs the test to be seen as having happened before the deploy.
-    if (matchesAny(args, TEST_PATTERNS)) actions.push('run_tests')
-    if (matchesAny(args, DEPLOY_PATTERNS)) actions.push('deploy')
-    if (matchesAny(args, PUBLISH_PATTERNS)) actions.push('publish')
-    if (matchesAny(args, RELEASE_PATTERNS)) actions.push('release')
+    if (matchesPhrase(words, TEST_PATTERNS)) actions.push('run_tests')
+    if (matchesPhrase(words, DEPLOY_PATTERNS)) actions.push('deploy')
+    if (matchesPhrase(words, PUBLISH_PATTERNS)) actions.push('publish')
+    if (matchesPhrase(words, RELEASE_PATTERNS)) actions.push('release')
     // Source before sink, so that (secret_read -> http_post) can still fire
     // on a single command that does both.
     if (matchesAny(args, SECRET_PATH_FRAGMENTS)) actions.push('secret_read')
     if (matchesAny(args, PII_PATH_FRAGMENTS)) actions.push('pii_export')
-    if (matchesAny(args, HTTP_POST_PATTERNS)) actions.push('http_post')
-    if (matchesAny(args, DB_WRITE_PATTERNS)) actions.push('db_write')
+    if (matchesPhrase(words, HTTP_POST_PATTERNS)) actions.push('http_post')
+    if (matchesPhrase(words, DB_WRITE_PATTERNS)) actions.push('db_write')
   }
 
   return actions.map((a) => ACTION_PREFIX + a)

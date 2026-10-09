@@ -7,20 +7,20 @@ description: Portkey is a model gateway with routing, caching and inline guardra
 
 *Last reviewed: 2026-10-08*
 
-Intutic decides each agent tool call before it runs, across 43 harnesses: native hook gates and in-process SDK gates allow or block the call, and hook gates can hold it for human approval. Around the gates, a policy proxy redacts sensitive data in model traffic, an MCP governance proxy governs MCP tools, an egress firewall and sandboxed execution stop the agent routing around governance, and a signed audit trail records every decision. Portkey is an AI gateway between applications and model providers, with routing, fallbacks, caching, budgets and guardrails that can reject a request inline. Palo Alto Networks completed its acquisition of Portkey on 2026-05-29 and makes it the AI gateway of Prisma AIRS. Portkey governs the model call; Intutic governs the action the agent takes with the answer.
+Intutic decides agent tool calls before they run, across 43 supported harnesses: native hook gates in 18 of them and in-process SDK gates in 17 allow or block the call, hook gates, SDK gates and the MCP governance proxy can hold it for human approval, and the other eight are governed through the proxies, a bridge or the harness they orchestrate. Around the gates, a policy proxy redacts sensitive data in model traffic, an MCP governance proxy governs MCP tools, an egress firewall and sandboxed execution stop the agent routing around governance, and execution traces are sealed into a signed audit trail you can verify. Portkey is an AI gateway between applications and model providers, with routing, fallbacks, caching, budgets and guardrails that can reject a request inline. Palo Alto Networks completed its acquisition of Portkey on 2026-05-29 and makes it the AI gateway of Prisma AIRS. Portkey governs the model call; Intutic governs the action the agent takes with the answer.
 
 ## Comparison
 
 | | Intutic | Portkey |
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | Gateway for model traffic |
-| **Where it enforces** | Native pre-execution hook gates in 19 of the 43 harnesses, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Model requests and responses; a failing guardrail set to deny rejects the request (HTTP 446) |
-| **Coding agents** | **43** supported harnesses with native gates or in-process SDK gates | Any client that can point its base URL at the gateway |
-| **Decisions** | Allow, warn, require approval (held until approved in Slack or the CLI), block, redact, re-ask, shadow | Allow or deny on guardrail results |
+| **Where it enforces** | Pre-execution gates inside the agent (native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Model requests and responses; a failing guardrail set to deny rejects the request (HTTP 446) |
+| **Coding agents** | **43** supported harnesses: native hook gates in 18, in-process SDK gates in 17, and the proxies, a bridge or the orchestrated harness for the other eight | Any client that can point its base URL at the gateway |
+| **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Allow or deny on guardrail results |
 | **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | MCP Gateway |
 | **Routing** | Thompson-sampling routing that learns cost and quality per workspace | Fallbacks, load balancing and conditional routing |
 | **Caching** | Exact and semantic cache | Simple cache on every plan; semantic cache on select Enterprise plans |
-| **Budgets** | Daily spend caps enforced before a request leaves | Budget and rate limits on paid plans |
+| **Budgets** | Daily spend caps enforced before a request leaves; a loop run that exceeds its budget is stopped | Budget and rate limits on paid plans |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, verifiable in the browser or CLI | Request and response logs |
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | Hosted, or self-host the open-source gateway (Docker, Kubernetes, major clouds) |
 | **Source** | Open core (MIT) | Gateway is MIT |
@@ -71,7 +71,7 @@ Three limits apply to this figure:
   completion — short (median 6 calls) and clean. Every sequence detector's exposure
   grows with trajectory length, and agentic coding runs are far longer.
 - **It covers 8 of 27 detectors.** Seven against the two corpora above, plus one
-  measured against 10,753 real tool and parameter descriptions. The other eighteen
+  measured against 10,753 real tool and parameter descriptions. The other nineteen
   read fields no public corpus supplies — graph depth, workflow budget, DLP findings —
   or fire only on an operator declaration and so have no false-positive rate to
   measure at all. The split is generated from the registry at test time into

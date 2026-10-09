@@ -2,9 +2,11 @@
  * dsh.ts — DeepSeek "dsh" adapter (binary `dsh`, `@deepseek-ai/dsh`,
  * developer preview since 2026-08-13).
  *
- * dsh is plugin-first (Cordis) and has no workspace-relative rules file this
- * adapter could write governance text into (see `types.ts`'s
- * `HARNESS_CONFIG_FILES.dsh`). The governance-critical half — the
+ * Rule sets go into the workspace's `AGENTS.md` through the shared writer
+ * (agentsMd.ts): dsh's default profile loads every `AGENTS.md` and
+ * `CLAUDE.md` from the git root down to where it runs
+ * (https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/packages/context/agent-instructions/README.md).
+ * The governance-critical half — the
  * `tools/pre-execute` Cordis plugin registration (`cordis.patch.yml` per
  * profile), the profile's `@intutic/gate` dependency, and the `llm-deepseek`
  * egress override in that same patch file — is delegated entirely to
@@ -20,16 +22,12 @@ import { join } from 'node:path'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
-import { writeDshHooks, resolveDshHome, listDshProfileDirs } from '@intutic/sync-daemon/harness/dshHooks'
+import { writeDshHooks, resolveDshHome } from '@intutic/sync-daemon/harness/dshHooks'
+import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 
 export const dshAdapter: IHarnessAdapter = {
   type: HarnessType.DEEPSEEK_HARNESS,
-  // No canonical workspace-relative config file — see types.ts's comment on
-  // this harness's HARNESS_CONFIG_FILES entry. detect/writeConfig/
-  // readCurrentHash below resolve dsh's real, $DSH_HOME-anchored paths
-  // directly, the same way goose.ts bypasses configFileName's
-  // workspaceRoot-join for its own home-anchored config.
-  configFileName: '',
+  configFileName: AGENTS_MD,
 
   async detect(_workspaceRoot: string): Promise<boolean> {
     const dshHome = resolveDshHome()
@@ -73,28 +71,18 @@ export const dshAdapter: IHarnessAdapter = {
     return false
   },
 
-  async writeConfig(workspaceRoot: string, _sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
-    // No rules/markdown file for dsh — `sops` are not consulted here (same
-    // "no text-rules file" posture as goose.ts's own adapter). The plugin
-    // registration + egress row in each profile patch is the entirety of what this
-    // harness gets, and it happens for every existing profile, not one file.
+  // The plugin registration + egress row in each profile patch is the
+  // entirety of what this harness gets, and it happens for every existing
+  // profile, not one file.
+  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
     await writeDshHooks(workspaceRoot, proxyUrl, '')
-
-    const dshHome = resolveDshHome()
-    const profiles = await listDshProfileDirs(dshHome)
-    // Representative path for the connect-summary UI, matching the "return
-    // the path written" contract every other adapter follows — the first
-    // profile's patch file when one exists, otherwise the $DSH_HOME root
-    // itself (nothing was written yet; the next sync cycle picks it up once
-    // a profile exists, per dshHooks.ts's own module doc).
-    return profiles.length > 0 ? join(profiles[0]!, 'cordis.patch.yml') : dshHome
   },
 
-  async readCurrentHash(_workspaceRoot: string): Promise<string | null> {
-    // No single canonical file to hash — dsh may have zero, one, or several
-    // profiles, each with its own cordis.patch.yml. Matching goose.ts/
-    // cline.ts's own "no rules file" precedent, this reports no hash rather
-    // than picking one arbitrary profile's file to represent all of them.
-    return null
+  writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+    return writeAgentsMd(workspaceRoot, sops, proxyUrl)
+  },
+
+  readCurrentHash(workspaceRoot: string): Promise<string | null> {
+    return agentsMdHash(workspaceRoot)
   },
 }

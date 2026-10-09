@@ -6,12 +6,15 @@
  * @module
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import type { WorkspacePiiDetectors } from '@intutic/shared-types'
 import { ToolCallInterceptor } from '../interceptor.js'
+import { configurePii } from '../dlp.js'
 import { PolicyClient, UNRESTRICTED_REGISTRY, parseSsoGroupPolicy } from '../policy.js'
 import type { McpPrincipal, McpRegistryPolicy, SopRule, SsoGroupPolicy } from '../policy.js'
 import { GovernanceEmitter, type DetectionFinding } from '../emitter.js'
 import { SessionState } from '../session.js'
+import type { WasmRunner, WasmVerdict } from '../wasm/runner.js'
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
 import { readFileSync } from 'node:fs'
@@ -95,6 +98,11 @@ class StubPolicyClient extends PolicyClient {
   principal: McpPrincipal | undefined = undefined
   ssoGroupPolicy: SsoGroupPolicy | undefined = undefined
   failOpen: boolean | undefined = undefined
+  piiDetectors: WorkspacePiiDetectors = { kind: 'none' }
+
+  override getPiiDetectors(): WorkspacePiiDetectors {
+    return this.piiDetectors
+  }
 
   override getRegistry(): McpRegistryPolicy | undefined {
     return this.registry
@@ -183,6 +191,15 @@ describe('ToolCallInterceptor', () => {
       expect(decision.action).toBe('block')
     })
 
+    it('blocks SQL DROP TABLE split across lines in the decoded arguments', async () => {
+      const policy = new StubPolicyClient()
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+
+      const args = JSON.parse(String.raw`{"query": "DROP\n/* x */TABLE users"}`)
+      const decision = await interceptor.decide('mcp__database__execute', args)
+      expect(decision.action).toBe('block')
+    })
+
     it('allows benign tool calls with no DLP match', async () => {
       const policy = new StubPolicyClient()
       const interceptor = new ToolCallInterceptor(policy, emitter, true)
@@ -190,6 +207,58 @@ describe('ToolCallInterceptor', () => {
       const decision = await interceptor.decide('Read', { path: '/tmp/hello.txt' })
       expect(decision.action).toBe('allow')
       expect(emitter.emitted[0]?.kind).toBe('tool_allowed')
+    })
+  })
+
+  describe("the workspace's PII detector actions", () => {
+    const card = (): string => ['4111', '1111', '1111', '1111'].join(' ')
+    const email = (): string => ['jane.doe', 'corp.io'].join('@')
+    const withWorkspace = (piiDetectors: WorkspacePiiDetectors): StubPolicyClient => {
+      const policy = new StubPolicyClient()
+      policy.piiDetectors = piiDetectors
+      return policy
+    }
+
+    afterEach(() => {
+      configurePii(undefined)
+    })
+
+    it('turns on a detector that is off by default, and off one that is on', async () => {
+      const policy = withWorkspace({ kind: 'set', actions: { 'pii.email': 'redact', 'pii.card': 'off' } })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+      const mail = await interceptor.decide('send', { to: email() })
+      expect(mail).toMatchObject({ action: 'block', code: 'DLP', ruleId: 'dlp.pii.email' })
+      expect((await interceptor.decide('note', { text: `refund ${card()}` })).action).toBe('allow')
+    })
+
+    it('a local INTUTIC_MCP_DLP_DETECTORS tightens the workspace but cannot loosen it', async () => {
+      configurePii('{"pii.card":"off","pii.email":"block"}')
+      const policy = withWorkspace({ kind: 'set', actions: { 'pii.card': 'redact', 'pii.email': 'off' } })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+      expect((await interceptor.decide('note', { text: `refund ${card()}` })).action).toBe('block')
+      expect((await interceptor.decide('send', { to: email() })).action).toBe('block')
+    })
+
+    it('unreadable under fail-closed: the call is refused and names the setting', async () => {
+      const policy = withWorkspace({ kind: 'unreadable', reason: 'the control plane could not read it' })
+      const decision = await new ToolCallInterceptor(policy, emitter, false).decide('Read', { path: '/tmp/ok.txt' })
+      expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'piiDetectors' })
+      expect((decision as { reason: string }).reason).toContain('PII detector actions could not be read')
+      expect(emitter.emitted[0]?.kind).toBe('tool_blocked')
+    })
+
+    it('unreadable under fail-open: the local config alone applies', async () => {
+      const policy = withWorkspace({ kind: 'unreadable', reason: 'the control plane could not read it' })
+      const interceptor = new ToolCallInterceptor(policy, emitter, true)
+      expect((await interceptor.decide('Read', { path: '/tmp/ok.txt' })).action).toBe('allow')
+      expect((await interceptor.decide('note', { text: `refund ${card()}` })).action).toBe('block')
+      expect((await interceptor.decide('send', { to: email() })).action).toBe('allow')
+    })
+
+    it('the workspace’s fail behaviour decides an unreadable setting over the local one', async () => {
+      const policy = withWorkspace({ kind: 'unreadable', reason: 'the control plane could not read it' })
+      policy.failOpen = false
+      expect((await new ToolCallInterceptor(policy, emitter, true).decide('Read', {})).action).toBe('block')
     })
   })
 
@@ -452,6 +521,61 @@ describe('ToolCallInterceptor', () => {
     })
   })
 
+  describe('custom rules that reach no verdict', () => {
+    /** A runner answering `verdict`. */
+    function runner(verdict: WasmVerdict | Error): WasmRunner {
+      const stub = {
+        evaluate: async () => {
+          if (verdict instanceof Error) throw verdict
+          return verdict
+        },
+      }
+      return stub as unknown as WasmRunner
+    }
+
+    function interceptorWith(r: WasmRunner, localFailOpen: boolean, policy = new StubPolicyClient()): ToolCallInterceptor {
+      return new ToolCallInterceptor(policy, emitter, localFailOpen, 'shell', 'warn', undefined, 'off', {}, r, 'test-ws')
+    }
+
+    const unavailable = (stop: 'deadline' | 'quarantined'): WasmVerdict => ({
+      code: 'unavailable',
+      stop,
+      ruleId: 'local:10_slow.wasm',
+      reason: `Custom rule local:10_slow.wasm reached no verdict (${stop}): it ran past its 1000 ms deadline.`,
+    })
+
+    /** Every way the fail setting can say "open" or "closed": local, then the workspace's. */
+    const settings: Array<[string, boolean, boolean | undefined]> = [
+      ['locally closed', false, undefined],
+      ['locally open', true, undefined],
+      ['open by the workspace', false, true],
+      ['closed by the workspace', true, false],
+    ]
+
+    it.each(settings)('refuses as GOVERNANCE_UNAVAILABLE, naming the rule, %s', async (_name, localFailOpen, workspaceFailOpen) => {
+      const policy = new StubPolicyClient()
+      policy.failOpen = workspaceFailOpen
+      const decision = await interceptorWith(runner(unavailable('deadline')), localFailOpen, policy).decide('Bash', { command: 'ls' })
+      expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'wasm:local:10_slow.wasm' })
+      expect((decision as { reason: string }).reason).toContain('(deadline)')
+      expect(emitter.emitted.map((e) => e.kind)).toEqual(['tool_blocked'])
+    })
+
+    it("does not record each refusal of a quarantined rule: the call that quarantined it was recorded", async () => {
+      const decision = await interceptorWith(runner(unavailable('quarantined')), true).decide('Bash', { command: 'ls' })
+      expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE' })
+      expect(emitter.emitted.filter((e) => e.kind === 'tool_blocked')).toEqual([])
+    })
+
+    it.each(settings)('a runner that throws refuses, %s', async (_name, localFailOpen, workspaceFailOpen) => {
+      const policy = new StubPolicyClient()
+      policy.failOpen = workspaceFailOpen
+      const decision = await interceptorWith(runner(new Error('worker gone')), localFailOpen, policy).decide('Bash', { command: 'ls' })
+      expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'wasm' })
+      expect((decision as { reason: string }).reason).toContain('worker gone')
+    })
+  })
+
   describe('anomaly detection (Phase 2)', () => {
     it('a kill-disposition detector (code_as_action) blocks immediately and ALSO emits tool_blocked', async () => {
       const policy = new StubPolicyClient()
@@ -617,6 +741,20 @@ describe('ToolCallInterceptor', () => {
       expect(refused.action).toBe('block')
       expect((refused as { reason: string }).reason).toContain('"delete_repo" is disabled on MCP server "github"')
       expect((await interceptor.decide('list_issues', {})).action).toBe('allow')
+    })
+
+    it('a server held after a high-risk tool change is refused under either default until approved again', async () => {
+      for (const defaultPolicy of ['allow', 'deny'] as const) {
+        const policy = new StubPolicyClient()
+        policy.registry = registry({ defaultPolicy, heldServers: ['github'] })
+        const interceptor = new ToolCallInterceptor(policy, emitter, true, 'github')
+        const decision = await interceptor.decide('list_issues', {})
+        expect(decision.action).toBe('block')
+        expect((decision as { reason: string }).reason).toContain('scored high risk')
+      }
+      const other = new StubPolicyClient()
+      other.registry = registry({ heldServers: ['gitlab'] })
+      expect((await new ToolCallInterceptor(other, emitter, true, 'github').decide('list_issues', {})).action).toBe('allow')
     })
 
     it('a tool disabled on another server does not affect this one', async () => {

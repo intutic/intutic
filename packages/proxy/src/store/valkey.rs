@@ -725,17 +725,7 @@ impl LocalStore for ValkeyStore {
     }
 
     async fn publish_system_anomaly(&self, workspace_id: &str, description: &str) {
-        let mut conn = self.conn();
-        let payload = serde_json::json!({
-            "workspace_id": workspace_id,
-            "description": description,
-            "severity": "HIGH",
-            "timestamp": chrono::Utc::now().to_rfc3339()
-        });
-        if let Ok(payload_str) = serde_json::to_string(&payload) {
-            let _: Result<(), redis::RedisError> =
-                conn.publish("intutic:system_anomalies", &payload_str).await;
-        }
+        publish_anomaly(self.conn(), workspace_id, description).await;
     }
 
     async fn publish_notification(&self, scope: NotifyScope, id: &str, payload: &str) {
@@ -1053,6 +1043,21 @@ impl LocalStore for ValkeyStore {
             // worth a second round trip to disambiguate).
             None => block.clone(),
         }
+    }
+}
+
+/// One message on `intutic:system_anomalies`, which the control plane's
+/// subscriber records as an incident. Both halves of the store publish it.
+async fn publish_anomaly(mut conn: ConnectionManager, workspace_id: &str, description: &str) {
+    let payload = serde_json::json!({
+        "workspace_id": workspace_id,
+        "description": description,
+        "severity": "HIGH",
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    });
+    if let Ok(payload_str) = serde_json::to_string(&payload) {
+        let _: Result<(), redis::RedisError> =
+            conn.publish("intutic:system_anomalies", &payload_str).await;
     }
 }
 
@@ -1534,6 +1539,10 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         let _: Result<(), redis::RedisError> = conn.rpush(&key, payloads).await;
         let _: Result<(), redis::RedisError> = conn.ltrim(&key, -DELIVERED_MARKER_CAP, -1).await;
         let _: Result<(), redis::RedisError> = conn.expire(&key, DELIVERED_MARKER_TTL_SECS).await;
+    }
+
+    async fn publish_system_anomaly(&self, workspace_id: &str, description: &str) {
+        publish_anomaly(self.conn(), workspace_id, description).await;
     }
 }
 

@@ -5,7 +5,10 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { scanToolInput, formatDlpBlockReason } from '../dlp.js'
+import { expectLinearTime } from './linearTime.js'
 
 describe('scanToolInput', () => {
   it('returns no findings for benign content', () => {
@@ -95,6 +98,45 @@ describe('scanToolInput', () => {
     const result = scanToolInput({ query: 'DROP TABLE users; SELECT 1' })
     expect(result.hasFinding).toBe(true)
     expect(result.findings.some((f) => f.description.includes('DROP TABLE'))).toBe(true)
+  })
+
+  // One set of answers for every destructive-SQL text rule: the vectors in
+  // shared-types, run here through the scanner exactly as a tool call reaches
+  // it (each decoded argument string), and by the control plane's DLP, the
+  // hook gates' phrase rule and both gate SDKs' readers elsewhere.
+  describe('destructive SQL, against the shared vectors', () => {
+    const VECTORS = join(__dirname, '../../../shared-types/fixtures/destructive-sql-vectors.json')
+    const cases = (JSON.parse(readFileSync(VECTORS, 'utf-8')) as { cases: Array<{ text: string; statement: string | null }> }).cases
+    const statements = (input: unknown) =>
+      scanToolInput(input).findings.map((f) => f.description).filter((d) => /^SQL [A-Z ]+ statement$/.test(d))
+
+    it('has the vectors to run', () => {
+      expect(cases.length).toBeGreaterThanOrEqual(40)
+    })
+
+    it.each(cases.map((c) => [JSON.stringify(c.text), c] as const))('%s', (_, c) => {
+      expect(statements({ command: c.text })).toEqual(c.statement ? [`SQL ${c.statement} statement`] : [])
+    })
+
+    it('reads an escaped newline in the JSON request body as the newline it is', () => {
+      expect(statements(JSON.parse(String.raw`{"query": "DROP\nTABLE users"}`))).toEqual(['SQL DROP TABLE statement'])
+    })
+
+    it('finds a statement in a nested argument or an object key', () => {
+      expect(statements({ batch: [{ sql: 'select 1' }, { sql: 'DROP\nTABLE users' }] })).toEqual(['SQL DROP TABLE statement'])
+      expect(statements({ 'DROP TABLE users': true })).toEqual(['SQL DROP TABLE statement'])
+    })
+
+    // The scan used a regex with the gap between the keywords, which a
+    // backtracking engine took seconds on; the phrase matcher stays linear.
+    it.each(
+      (JSON.parse(readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8')) as {
+        adversarial: Array<[string, number]>
+      }).adversarial,
+    )('scans %j repeated up to %i times in linear time', (unit, times) => {
+      const commands = { 1: unit.repeat(Math.ceil(times / 4)), 4: unit.repeat(Math.ceil(times / 4) * 4) }
+      expectLinearTime(JSON.stringify(unit), (scale) => scanToolInput({ command: commands[scale] }))
+    })
   })
 
   it('detects SQL DROP DATABASE', () => {

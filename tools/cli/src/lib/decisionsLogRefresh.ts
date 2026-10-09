@@ -14,8 +14,9 @@
 
 import { loadCredentials } from '../config/store.js'
 import { createApiClient } from './api.js'
-import { refreshDecisionsDigest } from '@intutic/sync-daemon'
-import { HarnessType } from '@intutic/shared-types'
+import { refreshDecisionsDigest, retireClaudeMdDigest } from '@intutic/sync-daemon'
+import type { HarnessType } from '@intutic/shared-types'
+import { loadConfig } from '../config/store.js'
 
 export interface DecisionsLogRefreshResult {
   refreshed: boolean
@@ -44,16 +45,15 @@ export async function refreshDecisionsLog(workspaceRoot: string): Promise<Decisi
       return { refreshed: false, reason: 'decisionsLogEnabled is off' }
     }
 
-    // The claude-code harness is the sole injection target (see
-    // decisionsDigest.ts's own doc comment) — passed unconditionally here
-    // since this one-shot trigger has no live harness-detection cycle to
-    // draw from the way the daemon's sync loop does.
+    // Every harness this machine governs gets the entries where it reads
+    // its instructions, as on the daemon's own cycle.
+    await retireClaudeMdDigest(workspaceRoot)
     const result = await refreshDecisionsDigest({
       controlPlaneUrl: creds.controlPlaneUrl,
       apiKey: creds.apiKey,
       workspaceId: creds.workspaceId,
       workspaceRoot,
-      harnesses: [HarnessType.CLAUDE_CODE],
+      harnesses: (loadConfig()?.harnesses ?? []) as HarnessType[],
     })
     return result ? { refreshed: true } : { refreshed: false, reason: 'digest fetch failed' }
   } catch (err) {

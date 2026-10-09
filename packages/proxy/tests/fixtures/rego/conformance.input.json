@@ -1,0 +1,680 @@
+{
+  "sprintf": {
+    "s_d": [
+      "%s ran %d times",
+      [
+        "Bash",
+        3
+      ]
+    ],
+    "v_scalars": [
+      "%v|%v|%v|%v",
+      [
+        1.5,
+        true,
+        null,
+        "x"
+      ]
+    ],
+    "v_composite": [
+      "%v and %v",
+      [
+        [
+          "a",
+          1,
+          true
+        ],
+        {
+          "b": 2,
+          "a": [
+            1
+          ]
+        }
+      ]
+    ],
+    "s_composite": [
+      "%s",
+      [
+        {
+          "k": "v"
+        }
+      ]
+    ],
+    "q": [
+      "%q|%q",
+      [
+        "a\"b\\c\n",
+        "tab\there"
+      ]
+    ],
+    "q_unicode": [
+      "%q",
+      [
+        "héllo ☃"
+      ]
+    ],
+    "width": [
+      "[%5d][%-5d][%05d][%+d][% d]",
+      [
+        42,
+        42,
+        42,
+        42,
+        42
+      ]
+    ],
+    "neg_zero_pad": [
+      "[%05d][%+05d]",
+      [
+        -42,
+        7
+      ]
+    ],
+    "radix": [
+      "%x %X %o %b %#x %#o %#b",
+      [
+        255,
+        255,
+        8,
+        5,
+        255,
+        8,
+        5
+      ]
+    ],
+    "neg_hex": [
+      "%x",
+      [
+        -255
+      ]
+    ],
+    "int_precision": [
+      "[%.4d][%8.4d]",
+      [
+        42,
+        42
+      ]
+    ],
+    "floats": [
+      "%f|%.2f|%8.3f|%-8.2f|%08.3f",
+      [
+        3.14159,
+        3.14159,
+        3.14159,
+        3.14159,
+        -3.14159
+      ]
+    ],
+    "exp": [
+      "%e|%E|%.2e|%+.3e",
+      [
+        1234.5678,
+        1234.5678,
+        0.000123,
+        1234.5678
+      ]
+    ],
+    "general": [
+      "%g|%G|%.3g|%g|%G",
+      [
+        1234.5678,
+        0.001,
+        1234.5678,
+        0.5,
+        1234567.25
+      ]
+    ],
+    "v_floats": [
+      "%v|%v|%v|%v",
+      [
+        0.1,
+        0.0001,
+        1234567.5,
+        123456.5
+      ]
+    ],
+    "str_precision": [
+      "[%.3s][%8s][%-8s][%08s]",
+      [
+        "abcdef",
+        "ab",
+        "ab",
+        "ab"
+      ]
+    ],
+    "str_hex": [
+      "%x|%X",
+      [
+        "hi!",
+        "hi!"
+      ]
+    ],
+    "char": [
+      "%c%c",
+      [
+        72,
+        9731
+      ]
+    ],
+    "type": [
+      "%T %T %T %T",
+      [
+        1,
+        1.5,
+        "s",
+        true
+      ]
+    ],
+    "percent": [
+      "100%% sure",
+      []
+    ],
+    "missing": [
+      "%s and %d",
+      [
+        "a"
+      ]
+    ],
+    "extra": [
+      "%s",
+      [
+        "a",
+        1,
+        "b"
+      ]
+    ],
+    "bad_verb_int": [
+      "%s",
+      [
+        12
+      ]
+    ],
+    "bad_verb_str": [
+      "%d",
+      [
+        "x"
+      ]
+    ],
+    "bad_verb_float": [
+      "%d",
+      [
+        1.5
+      ]
+    ],
+    "t_on_bool": [
+      "%t",
+      [
+        true
+      ]
+    ],
+    "unknown_verb": [
+      "%z",
+      [
+        1
+      ]
+    ],
+    "neg_float_v": [
+      "%v",
+      [
+        -0.5
+      ]
+    ],
+    "big_int": [
+      "%d",
+      [
+        9007199254740993
+      ]
+    ],
+    "no_verb_end": [
+      "trailing %",
+      []
+    ]
+  },
+  "sha256": {
+    "empty": "",
+    "abc": "abc",
+    "unicode": "héllo"
+  },
+  "sha1": {
+    "empty": "",
+    "abc": "abc"
+  },
+  "find_n": {
+    "all": [
+      "[0-9]+",
+      "a1b22c333",
+      -1
+    ],
+    "two": [
+      "[0-9]+",
+      "a1b22c333",
+      2
+    ],
+    "none": [
+      "x",
+      "abc",
+      -1
+    ],
+    "zero": [
+      "[0-9]+",
+      "a1b2",
+      0
+    ],
+    "empty_matches": [
+      "a*",
+      "baaab",
+      -1
+    ],
+    "invalid": [
+      "(",
+      "abc",
+      -1
+    ]
+  },
+  "replace": {
+    "simple": [
+      "a-b-c",
+      "-",
+      "+"
+    ],
+    "group": [
+      "2026-10-08",
+      "(\\d+)-(\\d+)-(\\d+)",
+      "$3/$2/$1"
+    ],
+    "named": [
+      "key=value",
+      "(?P<k>\\w+)=(?P<v>\\w+)",
+      "${v}=${k}"
+    ],
+    "empty_pattern": [
+      "abc",
+      "",
+      "-"
+    ],
+    "invalid": [
+      "abc",
+      "(",
+      "x"
+    ]
+  },
+  "split": {
+    "comma": [
+      ",",
+      "a,b,,c"
+    ],
+    "spaces": [
+      "\\s+",
+      "a  b\tc"
+    ],
+    "empty_input": [
+      ",",
+      ""
+    ],
+    "leading": [
+      ",",
+      ",a,b,"
+    ],
+    "empty_pattern": [
+      "",
+      "abc"
+    ],
+    "star": [
+      "x*",
+      "axbxxc"
+    ],
+    "invalid": [
+      "(",
+      "abc"
+    ]
+  },
+  "any_prefix_match": {
+    "str_str": [
+      "foobar",
+      "foo"
+    ],
+    "arr_arr": [
+      [
+        "a/b",
+        "c/d"
+      ],
+      [
+        "c/",
+        "x"
+      ]
+    ],
+    "none": [
+      [
+        "a",
+        "b"
+      ],
+      [
+        "c"
+      ]
+    ],
+    "empty_base": [
+      "abc",
+      []
+    ]
+  },
+  "any_suffix_match": {
+    "str_arr": [
+      "file.go",
+      [
+        ".rs",
+        ".go"
+      ]
+    ],
+    "none": [
+      "file.py",
+      [
+        ".rs"
+      ]
+    ]
+  },
+  "count": {
+    "simple": [
+      "cheese",
+      "e"
+    ],
+    "overlap": [
+      "aaaa",
+      "aa"
+    ],
+    "empty_sub": [
+      "five",
+      ""
+    ],
+    "unicode": [
+      "héhé",
+      ""
+    ]
+  },
+  "indexof_n": {
+    "many": [
+      "abcabc",
+      "bc"
+    ],
+    "overlap": [
+      "aaaa",
+      "aa"
+    ],
+    "unicode": [
+      "héllo héllo",
+      "llo"
+    ],
+    "none": [
+      "abc",
+      "z"
+    ],
+    "empty_needle": [
+      "abc",
+      ""
+    ]
+  },
+  "patch": {
+    "add": [
+      {
+        "a": 1
+      },
+      [
+        {
+          "op": "add",
+          "path": "/b",
+          "value": 2
+        }
+      ]
+    ],
+    "add_array_end": [
+      {
+        "a": [
+          1,
+          2
+        ]
+      },
+      [
+        {
+          "op": "add",
+          "path": "/a/-",
+          "value": 3
+        }
+      ]
+    ],
+    "add_array_index": [
+      {
+        "a": [
+          1,
+          2
+        ]
+      },
+      [
+        {
+          "op": "add",
+          "path": "/a/1",
+          "value": 9
+        }
+      ]
+    ],
+    "remove": [
+      {
+        "a": 1,
+        "b": 2
+      },
+      [
+        {
+          "op": "remove",
+          "path": "/a"
+        }
+      ]
+    ],
+    "replace": [
+      {
+        "a": {
+          "b": 1
+        }
+      },
+      [
+        {
+          "op": "replace",
+          "path": "/a/b",
+          "value": "x"
+        }
+      ]
+    ],
+    "move": [
+      {
+        "a": 1
+      },
+      [
+        {
+          "op": "move",
+          "from": "/a",
+          "path": "/b"
+        }
+      ]
+    ],
+    "copy": [
+      {
+        "a": [
+          1
+        ]
+      },
+      [
+        {
+          "op": "copy",
+          "from": "/a",
+          "path": "/b"
+        }
+      ]
+    ],
+    "test_ok": [
+      {
+        "a": 1
+      },
+      [
+        {
+          "op": "test",
+          "path": "/a",
+          "value": 1
+        },
+        {
+          "op": "add",
+          "path": "/t",
+          "value": true
+        }
+      ]
+    ],
+    "test_fail": [
+      {
+        "a": 1
+      },
+      [
+        {
+          "op": "test",
+          "path": "/a",
+          "value": 2
+        }
+      ]
+    ],
+    "escaped": [
+      {
+        "a/b": 1,
+        "m~n": 2
+      },
+      [
+        {
+          "op": "remove",
+          "path": "/a~1b"
+        },
+        {
+          "op": "replace",
+          "path": "/m~0n",
+          "value": 3
+        }
+      ]
+    ],
+    "array_path": [
+      {
+        "a": {
+          "b": 1
+        }
+      },
+      [
+        {
+          "op": "add",
+          "path": [
+            "a",
+            "c"
+          ],
+          "value": 2
+        }
+      ]
+    ],
+    "missing_parent": [
+      {
+        "a": 1
+      },
+      [
+        {
+          "op": "add",
+          "path": "/x/y",
+          "value": 1
+        }
+      ]
+    ],
+    "remove_missing": [
+      {
+        "a": 1
+      },
+      [
+        {
+          "op": "remove",
+          "path": "/z"
+        }
+      ]
+    ],
+    "root_replace": [
+      {
+        "a": 1
+      },
+      [
+        {
+          "op": "replace",
+          "path": "",
+          "value": {
+            "b": 2
+          }
+        }
+      ]
+    ]
+  },
+  "marshal": {
+    "compact": [
+      {
+        "b": [
+          1,
+          2
+        ],
+        "a": "<&>"
+      },
+      {}
+    ],
+    "pretty": [
+      {
+        "b": [
+          1,
+          2
+        ],
+        "a": {
+          "c": null
+        }
+      },
+      {
+        "pretty": true
+      }
+    ],
+    "indent": [
+      {
+        "a": [
+          1
+        ]
+      },
+      {
+        "indent": "  "
+      }
+    ],
+    "prefix": [
+      {
+        "a": 1
+      },
+      {
+        "prefix": "> ",
+        "indent": " "
+      }
+    ],
+    "pretty_false": [
+      [
+        1,
+        "x"
+      ],
+      {
+        "pretty": false
+      }
+    ],
+    "empty": [
+      {
+        "a": {},
+        "b": []
+      },
+      {
+        "pretty": true
+      }
+    ],
+    "bad_option": [
+      1,
+      {
+        "color": true
+      }
+    ]
+  }
+}

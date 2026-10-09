@@ -18,6 +18,7 @@
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 use wasmtime::{Engine, Module};
 
@@ -103,6 +104,25 @@ pub fn parse_priority(file_name: &str) -> (u32, String) {
     (DEFAULT_PRIORITY, stem.to_string())
 }
 
+/// Refuse a module the host cannot run, and resolve a Rego rule's entrypoint
+/// and builtins: `Some` for an OPA build, `None` for a native rule.
+///
+/// The one check both rule sources run, so a rule refused from the local
+/// directory is refused from the control plane too.
+pub fn check_loadable(
+    engine: &Engine,
+    module: &Module,
+    bytes: &[u8],
+) -> anyhow::Result<Option<Arc<super::opa::OpaRule>>> {
+    match super::opa::load(engine, module, bytes)? {
+        Some(rule) => Ok(Some(Arc::new(rule))),
+        None => {
+            super::host::check_imports_resolvable(module)?;
+            Ok(None)
+        }
+    }
+}
+
 /// Compile every rule file in the given signature set (from
 /// [`scan_signatures`]). Fail-open per file: a corrupt or mid-copy file is
 /// logged and skipped, and if a previous good module exists for the same file
@@ -135,12 +155,12 @@ pub fn load_local_modules(
             .and_then(|bytes| {
                 let sha256 = hex::encode(Sha256::digest(&bytes));
                 let module = Module::from_binary(engine, &bytes)?;
-                super::host::check_imports_resolvable(&module)?;
-                Ok((sha256, module))
+                let rego = check_loadable(engine, &module, &bytes)?;
+                Ok((sha256, module, rego))
             });
 
         match compiled {
-            Ok((sha256, module)) => {
+            Ok((sha256, module, rego)) => {
                 let (priority, name) = parse_priority(&file_name);
                 modules.push(LoadedModule {
                     rule_id,
@@ -155,6 +175,7 @@ pub fn load_local_modules(
                     // walk an import section to find out whether it needs to
                     // read anything from disk.
                     reads_referenced_files: super::host::module_reads_referenced_files(&module),
+                    rego,
                     module,
                 });
             }

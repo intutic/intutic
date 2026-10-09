@@ -272,7 +272,7 @@ In addition to organization-wide policies synced from the centralized control pl
 * **File Location**: Organize your personal rules inside subdirectories of `.intutic/sops/` (e.g., `.intutic/sops/security-dlp/rules.md` or `.intutic/sops/postgres-migration/migration.md`).
 * **Initialization & Scoping**: When you run `@intutic initialize`, the control plane lists both open board tickets and detected local rules folders as numbered choices.
 * **Activating SOPs**: Start the session scoping to a subset of local SOPs using option indices or names with the `--sops` flag (e.g., `@intutic start 1 --sops=3` or `@intutic start --sops=security-dlp`).
-* **Execution**: During the scoped session, the local daemon merges only the selected active local rules with corporate policies before writing them to harness files (`CLAUDE.md`, `.cursorrules`, etc.) and evaluating pre-flight prompts. If no options are specified, all detected local SOP folders are active by default.
+* **Execution**: During the scoped session, the local daemon merges only the selected active local rules with corporate policies before writing them to each harness's rules file (such as `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`) and evaluating pre-flight prompts. If no options are specified, all detected local SOP folders are active by default.
 * **Privacy Preservation**: If a personal prose rule is violated, the anomaly is flagged in the developer's console output to offer steering guidance. `deny_tools:` front matter in the same files is enforced harder: a call to a denied tool is blocked outright (403, `UNAUTHORIZED_TOOL`), and `allow_harnesses:` restricts which harnesses a role may use, but **no incident is logged in the remote organization database/dashboard**. `plan_steps:` is advisory rather than blocking — it declares the steps the SOP's task should consist of, and work drifting outside them raises a `SCOPE_VIOLATION` that steers. See [Graph guardrails](/guide/graph-guardrails#did-it-stay-inside-the-plan).
 * **Sharing & Version Control**: Since these rules are standard text files, you can check them into Git version control to share with specific teammates or add the `.intutic/sops/` folder to `.gitignore` to keep them strictly private to your machine.
 
@@ -304,11 +304,13 @@ Instead of manually entering and updating SOPs on the dashboard, you can connect
 
 - **Notion** — Sync Notion databases or specific page block trees.
 - **Confluence** — Sync Space wikis and page hierarchies.
-- **GitHub** — Sync markdown files from code repositories.
-- **Google Docs** — Sync the Google Docs in one Drive folder, read-only. Created by workspace owners and admins only, with a service-account key file (share the folder with the service account's email) or a short-lived access token. Google Drive is cloud-only and is unavailable in offline mode.
+- **GitHub** — Sync markdown files from code repositories, with a personal access token (`GITHUB_BASE_URL` points it at GitHub Enterprise Server). Reading needs Contents: Read on a fine-grained token, or the `repo` scope on a classic one for a private repository; writing an approved SOP back needs Contents: Read and write. The same token also maps branches to pull requests for [cost per pull request](/guide/budgets#cost-per-pull-request), which needs Pull requests: Read on a fine-grained token (a classic `repo` token already has it).
+- **Google Docs** — Sync the Google Docs in one Drive folder, read-only, with a service-account key file (share the folder with the service account's email) or a short-lived access token. Google Drive is cloud-only and is unavailable in offline mode.
 - **Upload** — A one-off Markdown, plain-text or HTML document (up to 1 MB) with no connector behind it, from Policy Guardrails → Sources. The same file twice is one document; an edited copy re-binds the citations that still hold.
 
 ### Configuring Connectors
+
+Only workspace owners and admins can connect, reschedule, sync, test or remove a source, whatever the provider: each one stores a token that Intutic uses on the workspace's behalf. Every member can see the sources and when they last synced.
 
 1. Open **Policy Guardrails → Sources** in the dashboard.
 2. Select your provider (**Notion**, **Confluence**, **GitHub** or **Google Docs**).

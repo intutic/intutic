@@ -2,6 +2,7 @@
  * gooseHooks.ts — Goose PreToolUse governance plugin injection.
  *
  * Writes the Intutic governance plugin to the Goose plugin directory:
+ *   ~/.agents/plugins/intutic-governance/plugin.json
  *   ~/.agents/plugins/intutic-governance/hooks/hooks.json
  *   ~/.agents/plugins/intutic-governance/scripts/intutic-check.sh
  *
@@ -21,13 +22,50 @@ import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { hardenGoosePlugin, unharden } from './gooseHardener.js'
-import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
+import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 import { parseDocument, isMap, isScalar } from 'yaml'
 
 const log = createLogger('sync-goose-hooks')
 
 const PLUGIN_DIR = path.join(os.homedir(), '.agents', 'plugins', 'intutic-governance')
 const GOOSE_CONFIG = path.join(os.homedir(), '.config', 'goose', 'config.yaml')
+
+/** The plugin manifest Goose identifies the plugin by. */
+export function gooseManifest(): Record<string, unknown> {
+  return {
+    name: 'intutic-governance',
+    version: '1.0.0',
+    description: 'Intutic governance gate — auto-generated. DO NOT EDIT.',
+  }
+}
+
+/**
+ * The plugin's `hooks/hooks.json`, in Goose's schema: each event a list of
+ * rules, each rule a list of command actions. Every tool call goes to the
+ * gate (no matcher). \`on_failure: "block"\` makes Goose deny a call whose
+ * gate fails — times out, crashes, or answers nothing it reads — where the
+ * default would run it; \`timeout\` replaces Goose's 30 s default, and the gate
+ * refuses at its own deadline inside it. A PostToolUse action cannot block,
+ * so it carries neither. The shape used before (\`{PreToolUse: {command,
+ * failClosed}}\`) is not one Goose loads: it skipped the file with a warning.
+ */
+export function gooseHooksConfig(scriptPath: string): Record<string, unknown> {
+  const command = shellQuote(scriptPath)
+  return {
+    _comment: 'Intutic governance plugin — auto-generated. DO NOT EDIT.',
+    _lastSync: newIso(),
+    hooks: {
+      PreToolUse: [{ hooks: [{ type: 'command', command, timeout: HOOK_TIMEOUT_SECONDS, on_failure: 'block' }] }],
+      PostToolUse: [{ hooks: [{ type: 'command', command: `${command} --event post`, timeout: HOOK_TIMEOUT_SECONDS }] }],
+    },
+  }
+}
+
+/** Single-quotes a path for the shell Goose runs a command through. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`
+}
 
 /**
  * Write Goose governance plugin and harden it.
@@ -39,39 +77,24 @@ const GOOSE_CONFIG = path.join(os.homedir(), '.config', 'goose', 'config.yaml')
 export async function writeGooseHooks(proxyUrl: string, workspaceRoot = os.homedir(), workspaceId = ''): Promise<void> {
   const hooksDir = path.join(PLUGIN_DIR, 'hooks')
   const scriptsDir = path.join(PLUGIN_DIR, 'scripts')
+  await keepOriginal(path.join(PLUGIN_DIR, 'plugin.json'), workspaceRoot)
   await keepOriginal(path.join(hooksDir, 'hooks.json'), workspaceRoot)
   await keepOriginal(path.join(scriptsDir, 'intutic-check.sh'), workspaceRoot)
   await fs.mkdir(hooksDir, { recursive: true })
   await fs.mkdir(scriptsDir, { recursive: true })
 
-  // ── hooks.json ──────────────────────────────────────────────────────
-  const hooksConfig = {
-    _comment: 'Intutic governance plugin — auto-generated. DO NOT EDIT.',
-    _lastSync: newIso(),
-    name: 'intutic-governance',
-    version: '1.0.0',
-    hooks: {
-      PreToolUse: {
-        command: path.join(scriptsDir, 'intutic-check.sh'),
-        failClosed: true,
-      },
-      PostToolUse: {
-        command: path.join(scriptsDir, 'intutic-check.sh --event post'),
-        failClosed: false,
-      },
-    },
+  // ── plugin.json + hooks.json ────────────────────────────────────────
+  for (const [file, content] of [
+    [path.join(PLUGIN_DIR, 'plugin.json'), JSON.stringify(gooseManifest(), null, 2) + '\n'],
+    [path.join(hooksDir, 'hooks.json'), JSON.stringify(gooseHooksConfig(path.join(scriptsDir, 'intutic-check.sh')), null, 2) + '\n'],
+  ] as const) {
+    // Unharden before writing (in case we're refreshing an existing install)
+    await unharden(file)
+    const tmp = file + '.intutic-tmp'
+    await fs.writeFile(tmp, content, 'utf-8')
+    await fs.rename(tmp, file)
+    await noteWritten(file, workspaceRoot, content)
   }
-
-  const hooksJsonPath = path.join(hooksDir, 'hooks.json')
-
-  // Unharden before writing (in case we're refreshing an existing install)
-  await unharden(hooksJsonPath)
-
-  const hooksJson = JSON.stringify(hooksConfig, null, 2) + '\n'
-  const tmpHooks = hooksJsonPath + '.intutic-tmp'
-  await fs.writeFile(tmpHooks, hooksJson, 'utf-8')
-  await fs.rename(tmpHooks, hooksJsonPath)
-  await noteWritten(hooksJsonPath, workspaceRoot, hooksJson)
 
   // ── intutic-check.sh ─────────────────────────────────────────────────
   const checkScriptPath = path.join(scriptsDir, 'intutic-check.sh')
@@ -87,7 +110,7 @@ export async function writeGooseHooks(proxyUrl: string, workspaceRoot = os.homed
 # Proxy: ${proxyUrl}
 # Generated: ${newIso()}
 set -euo pipefail
-${SHELL_FAIL_CLOSED}
+${emitShellFailClosed('goose')}
 EVENT="\${1:-pre}"
 INPUT="\$(cat)"
 ${SHELL_EXTRACT}
@@ -128,7 +151,11 @@ log_event() {
   ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[\$'\\x01'-\$'\\x1f']/ }"
   local ts; ts="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local incident_id; incident_id="\$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo \"\$(date +%s)\")"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"goose\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\"}"
+  # The event's id: random, made once here, and resent with the line it is
+  # written into, so the control plane processes the event once.
+  local event_id; event_id="\$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
+  [ -n "\$event_id" ] || event_id="\$(date +%s)\$\$\${RANDOM}\${RANDOM}\${RANDOM}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"goose\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\"}"
   # Path B: reliable file append
   printf '%s\\n' "\$entry" >> "\$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP (non-blocking, near-real-time)

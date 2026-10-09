@@ -9,9 +9,9 @@ Intutic supports **43 AI agent harnesses** out of the box. Run `intutic init` in
 
 ```bash
 intutic init
-#   ✔ cursor → .cursorrules
-#   ✔ claude-code → CLAUDE.md
-#   ✔ antigravity → .gemini/settings.json
+#   ✔ cursor → .cursor/rules/intutic-governance.mdc
+#   ✔ claude-code → .claude/rules/intutic-governance.md
+#   ✔ antigravity → GEMINI.md
 #   ○ windsurf (not detected)
 #   …
 ```
@@ -24,72 +24,72 @@ Every harness connects through the same governance pipeline — proxy intercepti
 
 Code editors with built-in AI that read project-level config files.
 
-| Harness | Description | Config File |
+| Harness | Description | Rule sets go to |
 |---|---|---|
-| [**Cursor**](/integrations/cursor) | AI-powered code editor by Anysphere | `.cursorrules` |
-| [**Windsurf**](/integrations/windsurf) | AI-native code editor by Codeium | `.windsurfrules` |
-| [**Cline**](/integrations/cline) | VS Code extension for autonomous agentic coding | `.clinerules/` (rules + `hooks/PreToolUse`) |
-| [**Roo Code**](/integrations/roo-code) | AI-powered VS Code extension (formerly Roo Clinic) | `.roorules` |
-| [**Continue**](/integrations/continue) | Open-source autopilot for VS Code and JetBrains | `~/.continue/config.yaml` + `.continue/settings.json` (CLI gate) |
+| [**Cursor**](/integrations/cursor) | AI-powered code editor by Anysphere | `.cursor/rules/intutic-governance.mdc` |
+| [**Windsurf**](/integrations/windsurf) | AI-native code editor by Codeium | `.windsurf/rules/intutic-governance.md` |
+| [**Cline**](/integrations/cline) | VS Code extension for autonomous agentic coding | `.clinerules/intutic-governance.md` |
+| [**Roo Code**](/integrations/roo-code) | AI-powered VS Code extension (formerly Roo Clinic) | `AGENTS.md` (section) |
+| [**Continue**](/integrations/continue) | Open-source autopilot for VS Code and JetBrains | `.continue/rules/intutic-governance.md` |
 
 ## CLI Tools
 
 Terminal-based agents that accept proxy environment variables or config files.
 
-| Harness | Description | Config File |
+| Harness | Description | Rule sets go to |
 |---|---|---|
-| [**Claude Code**](/integrations/claude-code) | Anthropic's agentic coding tool | `CLAUDE.md` |
-| [**Aider**](/integrations/aider) | AI pair programming CLI | `.aider.conf.yml` |
-| [**Codex**](/integrations/codex) | OpenAI's autonomous coding agent | `.env.intutic` + `~/.codex/config.toml` + `.codex/hooks.json` |
-| [**Antigravity**](/integrations/antigravity) | Google's Gemini AI coding agent | `.gemini/settings.json` + `~/.gemini/settings.json` (gate) |
-| [**Grok Build**](/integrations/grok) | xAI's terminal coding agent | `AGENTS.md` |
-| [**OpenCode**](/integrations/opencode) | Open-source terminal coding agent (`opencode-ai` 1.x, `@opencode/cli` 2.x); gated by a plugin loaded into its own process | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` |
-| [**Muse Code**](/integrations/muse-code) | Meta's beta terminal coding agent (model Muse Spark) | `AGENTS.md` |
-| [**dsh**](/integrations/dsh) <Badge type="warning" text="Preview" /> | DeepSeek's plugin-first ("Cordis") coding agent (developer preview) | `cordis.patch.yml` (Cordis plugin, not a rules file) |
+| [**Claude Code**](/integrations/claude-code) | Anthropic's agentic coding tool | `.claude/rules/intutic-governance.md` |
+| [**Aider**](/integrations/aider) | AI pair programming CLI | `.intutic/aider-sops.md`, listed under `read:` in `.aider.conf.yml` |
+| [**Codex**](/integrations/codex) | OpenAI's autonomous coding agent | `AGENTS.md` (section) |
+| [**Antigravity and Gemini CLI**](/integrations/antigravity) | Google Antigravity (app, IDE, CLI) and Gemini CLI | `GEMINI.md` (section) |
+| [**Grok Build**](/integrations/grok) | xAI's terminal coding agent | `AGENTS.md` (section) |
+| [**OpenCode**](/integrations/opencode) | Open-source terminal coding agent (`opencode-ai` 1.x, `@opencode/cli` 2.x); gated by a plugin loaded into its own process | `AGENTS.md` (section) |
+| [**Muse Code**](/integrations/muse-code) | Meta's beta terminal coding agent (model Muse Spark) | `AGENTS.md` (section) |
+| [**dsh**](/integrations/dsh) <Badge type="warning" text="Preview" /> | DeepSeek's plugin-first ("Cordis") coding agent (developer preview) | `AGENTS.md` (section) |
 
 ## Agent Frameworks
 
 Autonomous coding agents that run multi-step tasks with tool use.
 
-| Harness | Description | Config File |
+| Harness | Description | Rule sets go to |
 |---|---|---|
-| [**LangGraph**](/integrations/langgraph) | LangChain's graph-based agent framework | `.env.intutic` + SDK gate |
-| [**LangChain**](/integrations/langchain) | LangChain v1.x agents (`AgentMiddleware`) | `.env.intutic` + SDK gate |
-| [**CrewAI**](/integrations/crewai) | Multi-agent orchestration framework | `.env.intutic` + SDK gate |
-| [**Google ADK**](/integrations/google-adk) | Google's Agent Development Kit | `.env.intutic` + SDK gate |
-| [**OpenAI Agents SDK**](/integrations/openai-agents) | OpenAI's Python agents SDK | `.env.intutic` + SDK gate |
-| [**AutoGen**](/integrations/autogen) | Microsoft's multi-agent conversation framework | `.env.intutic` + SDK gate |
-| [**AG2**](/integrations/ag2) | CrewAI-style fork/continuation of pre-Microsoft AutoGen | `.env.intutic` + SDK gate |
-| [**Pydantic AI**](/integrations/pydantic-ai) | Pydantic's typed agent framework | `.env.intutic` + SDK gate |
-| [**smolagents**](/integrations/smolagents) | Hugging Face's code-executing agent framework | `.env.intutic` + SDK gate |
-| [**Strands Agents**](/integrations/strands) | AWS's open-source agent framework (Bedrock AgentCore default) | `.env.intutic` + SDK gate |
-| [**Microsoft Agent Framework**](/integrations/microsoft-agent-framework) | Microsoft's AutoGen + Semantic Kernel successor (`agent-framework`) | `.env.intutic` + SDK gate |
-| [**Mastra**](/integrations/mastra) | TypeScript agent framework | `.env.intutic` + SDK gate |
-| [**Vercel AI SDK**](/integrations/vercel-ai-sdk) | Vercel's `ai` package (v6+) | `.env.intutic` + SDK gate |
-| [**eve**](/integrations/eve) <Badge type="warning" text="Preview" /> | Vercel's filesystem-first durable backend agent framework | `.env.intutic` + SDK gate (per-tool/connection `approval`) |
-| [**AI SDK Harness**](/integrations/ai-sdk-harness) | Vercel's `@ai-sdk/harness` — coding-agent harnesses in Vercel Sandbox microVMs | `.env.intutic` + SDK gate (approval flow; see sandbox caveats) |
-| [**AI SDK Workflow**](/integrations/ai-sdk-workflow) | Vercel's `@ai-sdk/workflow` — durable workflow agents on the Workflow DevKit | `.env.intutic` + SDK gate (`needsApproval`) |
-| [**TrueForge** (embedded)](/integrations/trueforge) | TrueForge agent runtime used as a library in your own process | `.env.intutic` + SDK gate (approval responder) |
-| [**TrueForge** (server)](/integrations/trueforge#server-mode-standalone-hosted) | TrueForge run as its own standalone server | none — governed by the TrueForge bridge service |
-| [**AWS Bedrock AgentCore**](/integrations/agentcore) | AWS's managed hosting environment for the Runtime module — runs your own agent code (any framework) unchanged | none — delegates to whichever already-supported framework adapter your code uses |
-| [**OpenHands**](/integrations/openhands) | Open-source AI software developer platform | `config.toml` |
-| [**Goose**](/integrations/goose) | Block's terminal agent and desktop framework | `.agents/plugins/` |
-| [**Hermes**](/integrations/hermes) | NousResearch's skill-based developer agent | `~/.hermes/config.yaml` |
-| [**Pi**](/integrations/pi) | Pi coding agent (earendil-works/pi) | `~/.pi/hooks.json` + `~/.pi/models.json` |
-| [**OpenClaw**](/integrations/openclaw) | Developer terminal agent | `.openclaw/openclaw.json` |
+| [**LangGraph**](/integrations/langgraph) | LangChain's graph-based agent framework | No instructions file (SDK framework; the SDK gate applies) |
+| [**LangChain**](/integrations/langchain) | LangChain v1.x agents (`AgentMiddleware`) | No instructions file (SDK framework; the SDK gate applies) |
+| [**CrewAI**](/integrations/crewai) | Multi-agent orchestration framework | No instructions file (SDK framework; the SDK gate applies) |
+| [**Google ADK**](/integrations/google-adk) | Google's Agent Development Kit | No instructions file (SDK framework; the SDK gate applies) |
+| [**OpenAI Agents SDK**](/integrations/openai-agents) | OpenAI's Python agents SDK | No instructions file (SDK framework; the SDK gate applies) |
+| [**AutoGen**](/integrations/autogen) | Microsoft's multi-agent conversation framework | No instructions file (SDK framework; the SDK gate applies) |
+| [**AG2**](/integrations/ag2) | CrewAI-style fork/continuation of pre-Microsoft AutoGen | No instructions file (SDK framework; the SDK gate applies) |
+| [**Pydantic AI**](/integrations/pydantic-ai) | Pydantic's typed agent framework | No instructions file (SDK framework; the SDK gate applies) |
+| [**smolagents**](/integrations/smolagents) | Hugging Face's code-executing agent framework | No instructions file (SDK framework; the SDK gate applies) |
+| [**Strands Agents**](/integrations/strands) | AWS's open-source agent framework (Bedrock AgentCore default) | No instructions file (SDK framework; the SDK gate applies) |
+| [**Microsoft Agent Framework**](/integrations/microsoft-agent-framework) | Microsoft's AutoGen + Semantic Kernel successor (`agent-framework`) | No instructions file (SDK framework; the SDK gate applies) |
+| [**Mastra**](/integrations/mastra) | TypeScript agent framework | No instructions file (SDK framework; the SDK gate applies) |
+| [**Vercel AI SDK**](/integrations/vercel-ai-sdk) | Vercel's `ai` package (v6+) | No instructions file (SDK framework; the SDK gate applies) |
+| [**eve**](/integrations/eve) <Badge type="warning" text="Preview" /> | Vercel's filesystem-first durable backend agent framework | No instructions file (SDK framework; the SDK gate applies) |
+| [**AI SDK Harness**](/integrations/ai-sdk-harness) | Vercel's `@ai-sdk/harness` — coding-agent harnesses in Vercel Sandbox microVMs | No instructions file (SDK framework; the SDK gate applies) |
+| [**AI SDK Workflow**](/integrations/ai-sdk-workflow) | Vercel's `@ai-sdk/workflow` — durable workflow agents on the Workflow DevKit | No instructions file (SDK framework; the SDK gate applies) |
+| [**TrueForge** (embedded)](/integrations/trueforge) | TrueForge agent runtime used as a library in your own process | No instructions file (SDK framework; the SDK gate applies) |
+| [**TrueForge** (server)](/integrations/trueforge#server-mode-standalone-hosted) | TrueForge run as its own standalone server | No instructions file (governed by the TrueForge bridge) |
+| [**AWS Bedrock AgentCore**](/integrations/agentcore) | AWS's managed hosting environment for the Runtime module — runs your own agent code (any framework) unchanged | No instructions file (your framework's SDK gate applies) |
+| [**OpenHands**](/integrations/openhands) | Open-source AI software developer platform | `.openhands/microagents/intutic-governance.md` |
+| [**Goose**](/integrations/goose) | Block's terminal agent and desktop framework | `.goosehints` (section) |
+| [**Hermes**](/integrations/hermes) | NousResearch's skill-based developer agent | `AGENTS.md` (section) |
+| [**Pi**](/integrations/pi) | Pi coding agent (earendil-works/pi) | `AGENTS.md` (section) |
+| [**OpenClaw**](/integrations/openclaw) | Developer terminal agent | `AGENTS.md` (section) in OpenClaw's agent workspace |
 
 ## Platforms
 
 Web UIs, desktop apps, and collaboration tools that host AI agents.
 
-| Harness | Description | Config File |
+| Harness | Description | Rule sets go to |
 |---|---|---|
-| [**n8n**](/integrations/n8n) | Workflow automation platform | API-based + `~/.intutic/hooks/n8n-governance-hook.js` |
-| [**Open WebUI**](/integrations/open-webui) | Web interface for LLMs | `~/.open-webui/` filter (installed by an admin) |
-| [**Claude Desktop**](/integrations/claude-desktop) | Anthropic's desktop application | `claude_desktop_config.json` |
-| [**GitHub Copilot**](/integrations/github-copilot) | GitHub's AI pair programmer | `.github/copilot-instructions.md` + `.github/hooks/` |
-| [**Xirp**](/integrations/xirp) | Spotify's macOS orchestrator for parallel Claude Code/Codex/Gemini CLI sessions, each in its own tmux session + git worktree | none — delegates to the wrapped harness |
-| [**Agentic Orchestrator**](/integrations/agentic-orchestrator) | DoorDash's open-source (Apache-2.0) desktop app + CLI (`agentico`) for multi-phase feature workflows across Claude Code/Codex/OpenCode, each in its own git worktree | none — delegates to the wrapped backend (Claude Code, Codex and OpenCode each have their own gate) |
+| [**n8n**](/integrations/n8n) | Workflow automation platform | No instructions file (the workflow gate applies) |
+| [**Open WebUI**](/integrations/open-webui) | Web interface for LLMs | No instructions file (system prompts live in Open WebUI's settings) |
+| [**Claude Desktop**](/integrations/claude-desktop) | Anthropic's desktop application | No instructions file (instructions live in the app's projects) |
+| [**GitHub Copilot**](/integrations/github-copilot) | GitHub's AI pair programmer | `.github/copilot-instructions.md` (section) |
+| [**Xirp**](/integrations/xirp) | Spotify's macOS orchestrator for parallel Claude Code/Codex/Gemini CLI sessions, each in its own tmux session + git worktree | No instructions file (the harnesses it runs read their own) |
+| [**Agentic Orchestrator**](/integrations/agentic-orchestrator) | DoorDash's open-source (Apache-2.0) desktop app + CLI (`agentico`) for multi-phase feature workflows across Claude Code/Codex/OpenCode, each in its own git worktree | No instructions file (Claude Code, Codex and OpenCode read their own) |
 
 ---
 
@@ -161,11 +161,11 @@ All harnesses share the same integration flow:
 
 ## What writes harness files
 
-Only `intutic connect` writes harness files. On each config sync it writes, for every harness recorded in `~/.intutic/config.json`, the files that harness's page lists — **if at least one SOP targets that harness**: a synced SOP whose targets include it, or any local SOP under `.intutic/sops/`, which targets every recorded harness. A harness no SOP targets is left alone. Hooks, rules and proxy routing are written together, so a gate is in place as soon as a harness has rules.
+Only `intutic connect` writes harness files. On each config sync, for every harness recorded in `~/.intutic/config.json`, it installs the gate and the proxy routing that harness's page lists, whether or not any SOP targets it: the gate enforces the built-in protections, the destructive-command tier, group rules and holds, none of which needs an SOP. The harness's rules file ([Where rule sets go](/guide/how-it-works#where-rule-sets-go) lists each one) is written when **at least one SOP targets that harness**: a synced SOP whose targets include it, or any local SOP under `.intutic/sops/`, which targets every recorded harness.
 
 To govern a harness `intutic init` did not detect, add its id (the harness type, e.g. `"codex"`) to the `harnesses` list in `~/.intutic/config.json` and restart `intutic connect`.
 
-Files the user also edits — `settings.json`, `hooks.json`, `config.toml`, `config.yaml`, `.aider.conf.yml` — are merged: only the Intutic keys or entries are added or replaced, and a file that does not parse is left untouched and reported in the `intutic connect` log.
+Files the user also edits — `settings.json`, `hooks.json`, `config.toml`, `config.yaml`, `.aider.conf.yml` — are merged: only the Intutic keys or entries are added or replaced, and a file that does not parse is left untouched and reported in the `intutic connect` log. In `AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md` and `.goosehints`, connect writes only the section between the `INTUTIC:RULES` markers.
 
 Each adapter uses **atomic writes** (write to temp file, then rename) to prevent config corruption during sync.
 

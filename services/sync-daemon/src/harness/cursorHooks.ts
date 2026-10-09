@@ -2,7 +2,7 @@
  * cursorHooks.ts — Cursor hook injection.
  *
  * Registers the gate in Cursor's hooks.json (schema per cursor.com/docs/agent/
- * hooks: `{version: 1, hooks: {<event>: [{command, matcher?, failClosed?}]}}`)
+ * hooks: `{version: 1, hooks: {<event>: [{command, matcher?, timeout?, failClosed?}]}}`)
  * for three events:
  *   - `beforeShellExecution` — every shell command;
  *   - `beforeMCPExecution`   — every MCP tool call;
@@ -12,6 +12,8 @@
  * The gate refuses with exit code 2 and allows by printing
  * `{"permission":"allow"}`: with `failClosed: true` Cursor blocks on a hook
  * that crashes, times out or prints nothing, so an allow must be explicit.
+ * `timeout` (seconds) is set because Cursor does not state its default, and
+ * the gate's deadline is derived from it.
  *
  * Levels: project (`<workspaceRoot>/.cursor/hooks.json`) and user
  * (`~/.cursor/hooks.json`) on every sync; system level
@@ -31,6 +33,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
@@ -72,7 +75,7 @@ export function buildHooksConfig(hookScriptPath: string): { version: number; hoo
     hooks: Object.fromEntries(
       HOOK_EVENTS.map(({ event, matcher }) => [
         event,
-        [{ command: `node "${hookScriptPath}"`, ...(matcher ? { matcher } : {}), failClosed: true }],
+        [{ command: `node "${hookScriptPath}"`, ...(matcher ? { matcher } : {}), timeout: HOOK_TIMEOUT_SECONDS, failClosed: true }],
       ]),
     ),
   }
@@ -82,6 +85,8 @@ export function buildHooksConfig(hookScriptPath: string): { version: number; hoo
 export interface CursorHookEntry {
   command: string
   matcher?: string
+  /** Seconds. */
+  timeout?: number
   failClosed?: boolean
 }
 
@@ -152,6 +157,9 @@ function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
       // Passed through, not collapsed to two values: the advisory tier emits
       // 'tool_flagged', and a ternary here silently recorded it as an allow.
@@ -161,6 +169,7 @@ function logEvent(verdict, toolName, reason) {
       harnessType: 'cursor',
       timestamp: ts,
       incidentId,
+      eventId,
       ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
     fs.appendFileSync(${JSON.stringify(hookEventsLog)}, entry, { flag: 'a' });

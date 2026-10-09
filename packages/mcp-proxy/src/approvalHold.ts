@@ -12,12 +12,13 @@
  *    (`POST /api/v1/decisions`), which puts it in the review queue, notifies
  *    the workspace (`decision.pending`, Slack included), and gives the agent a
  *    hold id to quote.
- * 3. An approver approves it (`intutic decision approve <holdId>`, the
- *    dashboard, or Slack). When the workspace has `reviewHoldBypassEnabled`,
- *    approving writes the bypass step 1 finds, valid for
- *    `reviewHoldBypassTtlMinutes` — so the agent's identical retry passes.
- *    Without that setting an approval records the decision only, exactly as it
- *    does for a hook-gate hold.
+ * 3. An Owner, Admin or EM approves it (`intutic decision approve <holdId>`, the review
+ *    API, or the Slack card — all one code path in the control plane). The
+ *    approval lets the identical retry pass only while the workspace's
+ *    review-hold bypass (`reviewHoldBypassEnabled`) is on: approving then
+ *    writes the bypass step 1 finds, valid for `reviewHoldBypassTtlMinutes`.
+ *    Otherwise the approval records the decision only, exactly as it does for
+ *    a hook-gate hold.
  *
  * "Identical" is the bypass key: the rule id, `mcp__<server>__<tool>`
  * lower-cased, and a SHA-256 of the arguments serialised with sorted keys, so
@@ -91,7 +92,7 @@ export class ApprovalHolds {
   ) {}
 
   /** Lets the call through on an approved bypass, or records a hold and returns its id. Never throws. */
-  async request(rule: SopRule, toolName: string, toolInput: unknown): Promise<HoldOutcome> {
+  async request(rule: Pick<SopRule, 'id' | 'reason'>, toolName: string, toolInput: unknown): Promise<HoldOutcome> {
     const { toolNameNormalized, targetHash } = holdKey(this.serverName, toolName, toolInput)
 
     const bypass = await this.findBypass(rule.id, toolNameNormalized, targetHash)

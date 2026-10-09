@@ -55,8 +55,8 @@ Open **Policies › Emergency Overrides** (`/policies/overrides`; Owners, Admins
 
 ### 2. Peer Approval (Double Authorization)
 To prevent security gaps:
-- A developer **cannot approve their own override requests**.
-- Another administrator or manager clicks **Approve** on the request in the **Override requests** card on the same page, which lists each request's requester, status, scope, duration, expiry and approver.
+- Nobody **can approve their own override request**.
+- Approving needs the OWNER, ADMIN or EM role (`POST /api/v1/break-glass/approve` refuses any other role with `403`), so another owner, administrator or engineering manager clicks **Approve** on the request in the **Override requests** card on the same page, which lists each request's requester, status, scope, duration, expiry and approver.
 - Once approved, the control plane activates the token and writes it to the high-performance Valkey cache.
 
 ---

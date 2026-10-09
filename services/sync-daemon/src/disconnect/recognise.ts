@@ -11,7 +11,7 @@
 
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
-import { proxyHost } from '@intutic/shared-types'
+import { HARNESS_RULES_FILES, proxyHost } from '@intutic/shared-types'
 import { isObject } from './plan.js'
 
 /** First line of every rules file Intutic generates. */
@@ -40,7 +40,7 @@ export function runsGate(command: unknown, script: string): boolean {
 /**
  * Whether a `{ matcher, hooks: [{ command }] }` entry is Intutic's: every
  * hook in it runs `script`. The shape Claude Code, Codex, Continue, Muse,
- * Gemini CLI, Pi and Claude Desktop share.
+ * Gemini CLI and Pi share.
  */
 export function isGateEntry(script: string): (entry: unknown) => boolean {
   return (entry) => {
@@ -49,7 +49,7 @@ export function isGateEntry(script: string): (entry: unknown) => boolean {
   }
 }
 
-/** Whether a `{ command }` entry (Cursor, Windsurf, Roo) runs `script`. */
+/** Whether a `{ command }` entry (Cursor, Windsurf) runs `script`. */
 export function isGateCommandEntry(script: string): (entry: unknown) => boolean {
   return (entry) => isObject(entry) && runsGate(entry.command, script)
 }
@@ -84,7 +84,15 @@ export function proxyUrlMatcher(proxyUrls: readonly string[]): (value: unknown) 
  */
 export async function proxyUrlsInWorkspace(workspaceRoot: string): Promise<string[]> {
   const found = new Set<string>()
-  const files = ['CLAUDE.md', '.cursorrules', '.windsurfrules', 'AGENTS.md', '.github/copilot-instructions.md', '.env.intutic']
+  const files = [
+    ...new Set(Object.values(HARNESS_RULES_FILES).flatMap((t) => (t.kind !== 'none' && t.scope === 'workspace' ? [t.path] : []))),
+    // Where earlier versions wrote the rules whole.
+    'CLAUDE.md',
+    '.cursorrules',
+    '.windsurfrules',
+    '.roorules',
+    '.env.intutic',
+  ]
   for (const rel of files) {
     let text: string
     try {
@@ -92,7 +100,9 @@ export async function proxyUrlsInWorkspace(workspaceRoot: string): Promise<strin
     } catch {
       continue
     }
-    if (!startsWithRulesHeader(text)) continue
+    // A whole generated file, or one with the generated rules in it (a
+    // section, or after a rule file's front matter).
+    if (!text.includes(RULES_HEADER)) continue
     for (const m of text.matchAll(/^> \*\*Proxy URL:\*\* `([^`]+)`$/gm)) found.add(m[1]!)
     for (const m of text.matchAll(/^export INTUTIC_PROXY_URL="([^"]+)"$/gm)) found.add(m[1]!)
   }

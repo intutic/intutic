@@ -30,7 +30,8 @@ const guestSrc = readFileSync(join(here, '..', 'assembly', 'index.ts'), 'utf8')
  *
  * `NodeIdentity` is `#[serde(flatten)]`-ed onto the top level, so its fields
  * arrive as siblings — `node_id`, not `node.node_id` — and the guest must parse
- * them the same way.
+ * them the same way. A `#[serde(skip)]` field never reaches the guest, so it is
+ * not one the guest could parse.
  */
 function hostFields(): string[] {
   const rs = readFileSync(
@@ -42,8 +43,18 @@ function hostFields(): string[] {
     if (i < 0) throw new Error(`${name} not found in context.rs`)
     return rs.slice(i, rs.indexOf('\n}', i))
   }
-  const fieldsOf = (body: string) =>
-    [...body.matchAll(/^\s*pub ([a-z_0-9]+):/gm)].map((m) => m[1])
+  const fieldsOf = (body: string) => {
+    const out: string[] = []
+    let skipped = false
+    for (const line of body.split('\n')) {
+      if (/^\s*#\[serde\(skip[,)]/.test(line)) skipped = true
+      const m = /^\s*pub ([a-z_0-9]+):/.exec(line)
+      if (!m) continue
+      if (!skipped) out.push(m[1]!)
+      skipped = false
+    }
+    return out
+  }
 
   return [
     ...fieldsOf(structBody('RequestContext')).filter((f) => f !== 'node'),
@@ -72,6 +83,7 @@ describe('guest SDK context parity', () => {
     expect(fields.length).toBeGreaterThanOrEqual(30)
     expect(fields).toContain('session_id')
     expect(fields).toContain('node_id') // proves the flatten is handled
+    expect(fields).not.toContain('turn_tool_calls') // proves #[serde(skip)] is honoured
   })
 
   for (const field of hostFields()) {

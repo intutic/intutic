@@ -19,6 +19,8 @@ hook at services/sync-daemon/src/harness/claudeCodeHooks.ts:452.
 
 from __future__ import annotations
 
+from .phrases import has_phrase, phrase_text
+
 ACTION_PREFIX = "action:"
 
 # Commands that put code or artefacts somewhere real.
@@ -101,6 +103,8 @@ DB_WRITE_PATTERNS = [
     "update ",
     "delete from",
     "drop table",
+    "drop database",
+    "drop schema",
     "truncate ",
     "alter table",
 ]
@@ -133,7 +137,17 @@ PII_PATH_FRAGMENTS = ["customer", "users.csv", "pii", "personal", "gdpr", "payro
 #
 # An agent's shell tool should carry one of these names (lowercase) so that
 # tool_is() matches and the proxy classifies its arguments at all.
-SHELL_TOOLS = ["bash", "shell", "run_command", "runcommand", "execute_command", "terminal", "execute", "exec"]
+SHELL_TOOLS = [
+    "bash",
+    "shell",
+    "run_command",
+    "runcommand",
+    "execute_command",
+    "run_shell_command",
+    "terminal",
+    "execute",
+    "exec",
+]
 
 # Tool names harnesses use for "read a file".
 READ_TOOLS = ["read", "readfile", "view", "cat", "open_file"]
@@ -180,6 +194,15 @@ def matches_any(haystack: str, patterns: list[str]) -> bool:
     return any(p in haystack for p in patterns)
 
 
+def matches_phrase(words, patterns: list[str]) -> bool:
+    """matches_any for a phrase list, whatever separates each phrase's words.
+
+    A one-word pattern is a plain substring; see phrases.py, which matches in
+    linear time rather than with a backtracking regex.
+    """
+    return any(has_phrase(words, p) for p in patterns)
+
+
 def tool_is(name: str, group: list[str]) -> bool:
     """Match a tool name against a group.
 
@@ -197,17 +220,19 @@ def classify(tool_name: str, tool_input) -> list[str]:
     """
     args = flatten_input(tool_input)
     actions: list[str] = []
+    # Cut into words once, for every phrase list below.
+    words = phrase_text(args)
 
     if tool_is(tool_name, SHELL_TOOLS):
         # Tests first: `make test && git push` is both, and the ordering rule
         # needs the test to be seen as having happened before the deploy.
-        if matches_any(args, TEST_PATTERNS):
+        if matches_phrase(words, TEST_PATTERNS):
             actions.append("run_tests")
-        if matches_any(args, DEPLOY_PATTERNS):
+        if matches_phrase(words, DEPLOY_PATTERNS):
             actions.append("deploy")
-        if matches_any(args, PUBLISH_PATTERNS):
+        if matches_phrase(words, PUBLISH_PATTERNS):
             actions.append("publish")
-        if matches_any(args, RELEASE_PATTERNS):
+        if matches_phrase(words, RELEASE_PATTERNS):
             actions.append("release")
         # Source before sink, so that (secret_read -> http_post) can still fire
         # on a single command that does both.
@@ -215,9 +240,9 @@ def classify(tool_name: str, tool_input) -> list[str]:
             actions.append("secret_read")
         if matches_any(args, PII_PATH_FRAGMENTS):
             actions.append("pii_export")
-        if matches_any(args, HTTP_POST_PATTERNS):
+        if matches_phrase(words, HTTP_POST_PATTERNS):
             actions.append("http_post")
-        if matches_any(args, DB_WRITE_PATTERNS):
+        if matches_phrase(words, DB_WRITE_PATTERNS):
             actions.append("db_write")
 
     return [ACTION_PREFIX + a for a in actions]

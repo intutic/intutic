@@ -6,18 +6,16 @@ Integrate Intutic governance with [Windsurf](https://codeium.com/windsurf) — t
 
 Intutic governs Windsurf in four layers:
 
-- **Rules** — your SOPs in the project's `.windsurfrules`, which Windsurf reads as custom instructions.
+- **Rules** — your SOPs in `.windsurf/rules/intutic-governance.md`, a workspace rule with `trigger: always_on`, which Cascade includes in every message. Your own rules stay in other files in `.windsurf/rules/`.
 - **A blocking gate** — a Cascade hook (`.intutic/hooks/windsurf-check.js`) registered for `pre_run_command`, `pre_write_code` and `pre_mcp_tool_use`. Cascade runs it before each shell command, file write and MCP tool call, and refuses the action when it exits with code 2.
 - **Proxy routing** — Windsurf has no base-URL setting for Cascade's own models, so Intutic routes its HTTPS traffic through the proxy, which decrypts it with a local certificate authority (see below).
 - **MCP servers** — every server in `~/.codeium/windsurf/mcp_config.json` is wrapped with the Intutic MCP governance proxy.
 
 ## Setup
 
-### 1. Ensure .windsurfrules exists
+### 1. Check that Windsurf is detected
 
-```bash
-touch .windsurfrules
-```
+`intutic init` detects Windsurf from a `.windsurf/` directory or a `.windsurfrules` file in the project, or from `~/.codeium/windsurf`. There is usually nothing to do.
 
 ### 2. Initialize Intutic
 
@@ -26,7 +24,7 @@ intutic init
 ```
 
 ```
-  ✔ windsurf → .windsurfrules
+  ✔ windsurf → .windsurf/rules/intutic-governance.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
@@ -41,18 +39,23 @@ intutic start
 
 ## What gets written
 
-Same markdown format as Cursor and Claude Code:
+`.windsurf/rules/intutic-governance.md`, written when at least one SOP targets Windsurf:
 
 ```markdown
+---
+trigger: always_on
+---
+
 # Intutic Governance Rules (auto-generated)
-# DO NOT EDIT — managed by intutic sync daemon
-# Last sync: 2026-06-11T22:24:00Z
+# DO NOT EDIT — managed by intutic sync daemon; put rules of your own in another file
 
-> **Proxy URL:** `http://localhost:4000/v1`
+> **Proxy URL:** `http://localhost:4000`
 
-## SOP: Code Quality Standards
+## Code Quality Standards
 ...
 ```
+
+Windsurf reads at most 12,000 characters of a rule file. The file is Intutic's own and is replaced on each sync. Earlier versions overwrote `.windsurfrules` whole; the first sync with this version gives you your own copy of it back. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
 
 ### Hooks
 
@@ -92,9 +95,9 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness wi
 | Property | Value |
 |----------|-------|
 | Harness type | `windsurf` |
-| Config file | `.windsurfrules` |
+| Rules file | `.windsurf/rules/intutic-governance.md` |
 | Hook files | `~/.codeium/windsurf/hooks.json`, `~/.codeium/hooks.json`, `.windsurf/hooks.json`, `.intutic/hooks/windsurf-check.js` |
 | Proxy settings | Windsurf's user `settings.json` (see [Proxy and certificate](#proxy-and-certificate)); JetBrains IDE proxy where the Windsurf plugin is set up |
-| Detection | Checks for `.windsurfrules` in workspace root |
-| Format | Markdown (header + SOP sections) |
+| Detection | `.windsurf/` or `.windsurfrules` in the workspace root, or `~/.codeium/windsurf` |
+| Format | Markdown with `trigger: always_on` front matter (header + SOP sections) |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

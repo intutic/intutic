@@ -6,6 +6,8 @@ Write custom validation rules that run at wire speed in the Intutic proxy using 
 
 Custom Filters let you write policy rules in AssemblyScript (a TypeScript subset), compile them to WebAssembly, and run them inside the Intutic proxy on every request. They execute in a sandboxed environment with strict resource limits.
 
+Rules can also be written in Rego and compiled with OPA: see [Rego policies](/guide/rego-policies). They install, upload and run the same way, with a budget of their own.
+
 ::: info Availability
 Local filters installed into `~/.intutic/wasm/` need no capability and no role — the open-core proxy loads them on the request path in any build. Dashboard-managed filters (Cloud) require the `feature.wasm_rules` capability and are accessible to **Owner**, **Admin**, and **EM** roles.
 :::
@@ -37,14 +39,34 @@ Every custom filter runs inside a secure WebAssembly sandbox with strict constra
 | Limit | Value | Purpose |
 |-------|-------|---------|
 | **Memory** | 16 MB | Prevents excessive memory consumption |
-| **CPU Fuel** | 1,000,000 units | Prevents infinite loops and excessive computation |
-| **Timeout** | 5 ms per request | Maintains low proxy latency |
+| **Fuel** | 1,000,000 instructions | The limit a rule is written against: stops infinite loops and excessive computation, the same way on any machine |
+| **Deadline** | 1 s per evaluation | A backstop for stalls fuel cannot see |
 
-If a filter exceeds any limit, it's immediately terminated and **fails open** — the request proceeds to maintain availability.
+A filter that exceeds a limit is stopped at once and reaches no verdict; see [When a rule reaches no verdict](#when-a-rule-reaches-no-verdict) for what the request gets. A [Rego rule](/guide/rego-policies#limits) has a larger budget, because OPA parses its input and compiles its regular expressions inside the sandbox.
+
+**Fuel is the limit; the deadline is a backstop.** Fuel counts instructions, so a rule within it reaches its verdict however busy the machine is. Wall time is not the rule's own: on a loaded machine the thread evaluating it waits to run, and an evaluation that takes under a millisecond idle measured up to 260 ms on a 14-core machine running 100 busy threads, about the load of a 4-vCPU CI runner running a test suite. Since a rule that reaches no verdict refuses the call, the deadline is set far above the time it takes to use up the whole fuel budget on such a machine (at most 91 ms for a native rule), so it only stops what fuel cannot see: a bulk `memory.fill` costs one instruction whatever its length, and a host call costs none. The deadline interrupts a rule that is still running; it is not checked only after the rule returns. The MCP governance proxy uses the same 1 s, measured to the reply from the worker thread rules run in.
 
 ::: tip How the context arrives
-The host calls your `allocate(len)` export, writes the request context as UTF-8 JSON bytes into the buffer it returns, and calls `evaluate(offset, len)`. Parse those bytes directly. Building a string from them one character at a time allocates once per byte, which can use up the fuel budget on a large context; the rule is then skipped and the request allowed.
+The host calls your `allocate(len)` export, writes the request context as UTF-8 JSON bytes into the buffer it returns, and calls `evaluate(offset, len)`. Parse those bytes directly. Building a string from them one character at a time allocates once per byte, which can use up the fuel budget on a large context, and the rule then reaches no verdict.
 :::
+
+The context is never cut: a rule receives every tool call and its full arguments. A context too large for the rule's 16 MB of memory makes `allocate` fail, which is a rule that reaches no verdict, not a shorter context. (A [Rego rule's input](/guide/rego-policies#the-input-document) is capped at 64 KB instead, and says when it was cut.)
+
+### When a rule reaches no verdict
+
+A rule reaches no verdict when it runs past its deadline, uses up its instruction budget, traps or otherwise fails while running, or returns something that is not a verdict: a code other than `0`, `1`, `2` or `3`, or a Rego result in none of the [documented shapes](/guide/rego-policies#writing-a-policy). The call is then refused with `GOVERNANCE_UNAVAILABLE`, in both proxies: HTTP 403 from the LLM proxy, and a refused call with `ruleId` `wasm:<rule id>` from the MCP proxy. The refusal names the rule and the cause, one of `deadline`, `budget`, `error` or `result`:
+
+```text
+Custom rule local:50_budget-guard.wasm reached no verdict (budget): it used up its budget of 1000000 instructions. Request blocked: a rule that cannot decide never allows.
+```
+
+**The fail setting does not apply.** The LLM proxy's `intutic_settings.policy.fail_closed`, and the MCP proxy's `mcpProxyFailBehavior` and `INTUTIC_MCP_FAIL_OPEN`, decide what happens when the control plane cannot be reached: an outage an agent cannot cause. An agent can make a rule run out of time or budget by padding its input, so a rule that could not decide is refused even on a proxy that fails open. This is what policy engines do when they cannot decide: Envoy's external authorization denies unless `failure_mode_allow` is set, and a Kubernetes admission webhook defaults to `failurePolicy: Fail`.
+
+A rule that cannot judge a call has not cleared it, so the refusal ranks with a block: it outranks another rule's hold or reask, which an approval or a retry could otherwise get past, and another rule's block still wins, because it says what is wrong with the call. The proxy logs a warning naming the rule and the cause. A rule in shadow mode reports what it would have done and changes nothing.
+
+**Quarantine (MCP proxy).** A rule that runs past its deadline or its budget three times in a row is quarantined until the proxy next rescans the rules directory. Every call is then refused at once with `GOVERNANCE_UNAVAILABLE` (cause `quarantined`) without the rule running. The call that quarantined the rule is recorded as a blocked call; the refusals after it are not, one per retry. The LLM proxy has no quarantine: each request runs every rule within its deadline.
+
+**A rule that cannot load** is not a rule that reached no verdict, and is not refused per call. The proxy keeps the version of that rule it already runs, if any, and logs the error. A rule pushed from the dashboard that is refused also raises an incident once per version, saying whether an earlier version stays in force or the rule enforces nothing until a version loads.
 
 
 
@@ -82,6 +104,20 @@ refusal, never a trap:
 | `-4` | Larger than the 256 KiB cap. **No bytes are exposed** — a rule must not scan a prefix and conclude a manifest is clean. |
 | `-5` | Your buffer was smaller than the file. Nothing was written; ask for the size first. |
 | `-6` | This evaluation used its 64 reads. |
+| `-7` | Not read: the request names more manifests than the host reads, or a command longer than it scans (the limits below), and this path is not among those read. Refuse on it for a path your rule governs: padding a command with decoy paths produces exactly this. |
+
+The SDK wraps the import as `readReferencedFile(path)`, in
+`assembly/referencedFiles.ts` (import it only in a rule that reads files, so
+no other rule carries the import). It sizes the buffer, copies the bytes, and
+returns them with the code; its `unread` is true for every code except `-3`,
+which is the cue for a rule governing that path to refuse:
+
+```typescript
+import { readReferencedFile } from "../assembly/referencedFiles";
+
+const manifest = readReferencedFile("k8s/prod.yaml");
+if (manifest.unread) return 1; // named by the call, not seen by the rule
+```
 
 What you can read is decided entirely by the host, before your rule is even
 instantiated:
@@ -96,7 +132,8 @@ instantiated:
 - **Only inside the configured root.** `..` is refused outright, and a symlink
   leading out of the root is refused too, because confinement is checked against
   the fully resolved path.
-- **At most 8 files per request, 256 KiB each.**
+- **At most 8 files per request, 256 KiB each**, taken from the first 64 KiB of
+  a command. A ninth path, or one further into a longer command, answers `-7`.
 
 ::: warning Off unless configured
 Set `INTUTIC_WASM_MANIFEST_ROOT` to the directory rules may read manifests from.
@@ -127,7 +164,9 @@ corpus gates both assume determinism.
 This mattered: `env.seed` was once offered by the CLI's validation sandbox and
 registered by no proxy. A rule using randomness passed `policy test`, passed
 `policy install`, and then failed to link on every request — where the runner
-turns a link error into an allow. It enforced nothing, silently. If you need
+turned a link error into an allow. It enforced nothing, silently. A module
+importing anything outside the four functions above is now refused when it
+loads. If you need
 variation, derive it from the request context.
 :::
 
@@ -183,14 +222,14 @@ rule author ends up not knowing that `forbid_after`, `changes` or
 | Field | Type | What it is |
 | :--- | :--- | :--- |
 | `tools` | `ToolSchema[]` | Tools declared on this request. Name and description only — **not** the input schema. |
-| `tool_calls` | `ToolCall[]` | Calls in this turn's message. |
+| `tool_calls` | `ToolCall[]` | Every tool call in the request's messages, oldest first. Harnesses resend the conversation each turn, so this includes earlier turns' calls; `new_tool_calls` is this turn's. |
 | `tool_sequence` | `string[]` | Session history, oldest first. Includes this turn. |
 | `tool_call_counts` | `(string, i32)[]` | How many times each distinct tool/action appears in `tool_sequence` — a fold of it, not a fetch. AssemblyScript has no map type to fold `tool_sequence` into itself, so this is pre-resolved for you. |
 | `calls_last_60s` | `i32` | Tool calls in the last 60 seconds, across the whole session. Not derivable from `tool_sequence`/`tool_call_counts`: that window is a fixed entry count with no timestamps, so a burst that fills it in ten seconds and one spread over an hour look identical there. Always a real count — `0` means none, never "unknown". See [Temporal policy](#temporal-policy) below. |
 | `corroborating_detectors` | `i32` | How many *distinct* built-in anomaly detectors fired at Medium+ severity on this request — the same pool the proxy's own corroboration escalation counts, so `ctx.corroborating_detectors >= 2` agrees with the built-in rung by construction, and `>= 3` gives you a stricter bar than the built-in without re-deriving anything. `0` when nothing fired and under break-glass. A rule gating on this stays advisory territory until you have measured what your traffic's agreement rate actually is — replay it first. |
 | `new_tool_calls` | `string[]` | This turn's delta. **Use this, not `tool_sequence`, for a hold** — matching on history re-fires the hold forever. |
 | `tool_contract_changed` | `bool` | A server changed a tool's contract mid-session. |
-| `transition_baseline` | `map` \| `null` | Observed tool-transition frequencies; `null` until the workspace has a fitted model. The SDK deliberately does not parse it: the proxy's own detector acts on it, and walking the map would spend the 5 ms budget re-deriving a statistic. |
+| `transition_baseline` | `map` \| `null` | Observed tool-transition frequencies; `null` until the workspace has a fitted model. The SDK deliberately does not parse it: the proxy's own detector acts on it, and walking the map would spend the fuel budget re-deriving a statistic. |
 
 ### Findings
 
@@ -371,7 +410,7 @@ intutic policy install --wasm build/rule.wasm --name budget-guard --priority 50
 intutic policy list-local
 ```
 
-The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority numbers run first) and the proxy hot-loads it within ~5 seconds on the next request — no restart, no control plane. `install` refuses binaries that fail instantiation, because a broken rule enforces nothing (the sandbox fails open).
+The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority numbers run first) and the proxy hot-loads it within ~5 seconds on the next request — no restart, no control plane. `install` refuses binaries that fail instantiation: a proxy refuses to load them, so they would enforce nothing.
 
 > [!TIP]
 > Any AI coding agent in your workspace can drive this whole loop — authoring, compiling, dry-running, and installing — via the [Rule Author agent skill](/integrations/rule-author).
@@ -395,8 +434,10 @@ Filters are hot-reloaded into the proxy without requiring a service restart:
 
 1. The compiled WASM binary is stored in the database and the workspace's active rule set is published to Valkey
 2. Each connected proxy polls that rule set every 5 seconds (there is no push channel)
-3. A new WebAssembly module is instantiated on the fly when the descriptor changes
+3. A new WebAssembly module is instantiated on the fly when the descriptor changes, once its bytes match the SHA-256 the descriptor names
 4. The filter is active on the request path within one poll interval
+
+A module whose bytes do not match its SHA-256 is not loaded. The proxy logs it and raises an incident for the workspace, and the version of that filter it already runs, if any, stays in force.
 
 ---
 
@@ -437,6 +478,8 @@ From there the candidate takes the same three human steps as a mined one, with t
 2. **The bundle must be compiled from the source of record.** `intutic policy compile --candidate <id> --upload` fetches `GET /api/v1/rule-candidates/<id>/source`, verifies its hash, compiles it, and uploads the bundle together with that hash. `/bundle` recomputes the hash from the candidate row and refuses a bundle built from anything else. The dashboard's upload control is disabled for these candidates for the same reason.
 
 Promotion is unchanged — at least 200 shadow evaluations, at most 1 % would-block, by a named member — and it moves the originating guardrail to *Enforcing* with the same member on its authority chain. A gate rejection moves it to *Rejected* with the gate's reason. The guardrail row itself is never promoted directly; its Review card says so and points at the candidate.
+
+The candidate also ends with its guardrail. Retiring or rejecting the guardrail, deleting an authored one, or editing an authored one's rule (which creates a new version) retires the candidate in the same step: it shows as *Retired*, it can no longer be promoted, and its bundle, if it has one, stops being distributed to the proxy. A new version of an authored guardrail gets a candidate of its own only when it is approved for shadow.
 <!-- ENTERPRISE_ONLY_END -->
 
 ---

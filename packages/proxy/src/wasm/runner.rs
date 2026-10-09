@@ -2,9 +2,9 @@
 
 use super::context::{RequestContext, Verdict};
 use super::host::register_host_imports;
+use super::limits::{self, Failure};
 use super::referenced_files::{ReferencedFiles, MAX_READS_PER_EVALUATION};
 use std::sync::Arc;
-use std::time::Duration;
 use wasmtime::{Engine, Linker, Module, ResourceLimiter, Store, StoreLimits, StoreLimitsBuilder};
 
 /// Host state passed to wasmtime Store.
@@ -73,8 +73,6 @@ impl ResourceLimiter for WasmState {
     }
 }
 
-/// Evaluates a RequestContext against a loaded WASM module.
-/// Enforces a 16MB memory limit, 1,000,000 fuel limit, and a 5ms timeout.
 /// Longest reason a guest may return. A rule that needs more than this is
 /// writing prose, and the string lands in an HTTP error body and an incident
 /// description that are themselves length-capped downstream.
@@ -116,12 +114,24 @@ fn read_guest_reason(
         return None;
     }
 
-    let text = std::str::from_utf8(&data[ptr..end]).ok()?.trim();
+    sanitize_reason(std::str::from_utf8(&data[ptr..end]).ok()?)
+}
+
+/// A guest-supplied reason made safe to show: trimmed, at most
+/// [`MAX_GUEST_REASON`] characters, control characters removed. `None` when
+/// nothing is left. Also used for an OPA policy's `deny` message (`opa.rs`).
+pub(super) fn sanitize_reason(text: &str) -> Option<String> {
+    let text = text.trim();
     if text.is_empty() {
         return None;
     }
     // Control characters would corrupt a log line or an HTTP header.
-    Some(text.chars().filter(|c| !c.is_control()).collect())
+    Some(
+        text.chars()
+            .take(MAX_GUEST_REASON)
+            .filter(|c| !c.is_control())
+            .collect(),
+    )
 }
 
 /// Evaluate one rule.
@@ -136,43 +146,34 @@ fn read_guest_reason(
 /// Pass [`ReferencedFiles::empty`] when no rule asked for files. That is the
 /// case for every module that does not import `env.read_referenced_file`, which
 /// is every module that existed before it did.
-pub async fn evaluate_wasm_rule(
+///
+/// A [`Failure`] is a rule that reached no verdict, which the registry turns
+/// into a refusal.
+pub fn evaluate_wasm_rule(
     engine: &Engine,
     module: &Module,
     ctx: &RequestContext,
     files: &Arc<ReferencedFiles>,
-) -> Verdict {
-    let json_bytes = match serde_json::to_vec(ctx) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            tracing::error!("Failed to serialize RequestContext to JSON for WASM: {}", e);
-            return Verdict::Bypass;
-        }
-    };
+) -> Result<Verdict, Failure> {
+    let host_error = |e: anyhow::Error| limits::NATIVE.failure(&e);
+    let json_bytes = serde_json::to_vec(ctx).map_err(|e| host_error(e.into()))?;
 
-    // Configure memory limit of 16MB (256 pages)
     let limits = StoreLimitsBuilder::new()
-        .memory_size(16 * 1024 * 1024)
+        .memory_size(limits::MAX_MEMORY_BYTES)
         .build();
 
     let mut store = Store::new(engine, WasmState::new(limits, files.clone()));
     store.limiter(|state| state);
 
-    // Set fuel limit of 1,000,000 units
-    if let Err(e) = store.set_fuel(1_000_000) {
-        tracing::error!("Failed to set WASM store fuel: {}", e);
-        return Verdict::Bypass;
-    }
+    limits::NATIVE.arm(&mut store).map_err(host_error)?;
 
     // Set up host functions Linker
     let mut linker = Linker::new(engine);
-    if let Err(e) = register_host_imports(&mut linker) {
-        tracing::error!("Failed to register WASM host imports: {}", e);
-        return Verdict::Bypass;
-    }
+    register_host_imports(&mut linker).map_err(host_error)?;
 
-    // Wrap execution in a tokio timeout (5ms)
-    let eval_future = async {
+    // Bounded by the fuel and deadline armed above; either one stopping the
+    // guest surfaces here as an error.
+    let mut eval = || -> anyhow::Result<(i32, Option<String>)> {
         let instance = linker.instantiate(&mut store, module)?;
 
         // Find memory export
@@ -215,7 +216,7 @@ pub async fn evaluate_wasm_rule(
         // so every already-installed module keeps working byte-for-byte — this
         // must not become a flag day for rules that are already deployed.
         //
-        // Read inside the same fuel/timeout budget as evaluate, deliberately: a
+        // Read inside the same fuel/deadline budget as evaluate, deliberately: a
         // guest that returns a hostile length must not be able to buy extra time
         // by doing it after the verdict.
         let reason = read_guest_reason(&mut store, &instance, &memory);
@@ -223,76 +224,56 @@ pub async fn evaluate_wasm_rule(
         Ok((res, reason))
     };
 
-    match tokio::time::timeout(Duration::from_millis(5), eval_future).await {
-        Ok(Ok((verdict_val, guest_reason))) => {
-            match verdict_val {
-                0 => Verdict::Bypass,
-                1 => Verdict::Kill {
-                    reason: guest_reason
-                        .clone()
-                        .unwrap_or_else(|| "Blocked by custom WASM governance rule".to_string()),
-                    policy_id: None,
-                },
-                // `2` was specified as REDACT and can never have meant it.
-                //
-                // The guest is deliberately never given the request body —
-                // `RequestContext` carries no prompt and no raw payload — so
-                // there is nothing for a rule to redact. That is why the comment
-                // that stood here was an unresolved argument with itself rather
-                // than a decision.
-                //
-                // Retained as a kill, because an already-installed rule
-                // returning `2` must not change meaning under an upgrade, and
-                // named in the log so its author can move to `1`.
-                //
-                // `intutic policy install` still ACCEPTS this code — it must, or
-                // reinstalling an existing rule would fail — but it warns. This
-                // comment used to claim install refused it, which was simply
-                // untrue: install checked membership of {0,1,2,3} and said
-                // nothing about 2.
-                2 => {
-                    tracing::warn!(
-                        "WASM rule returned deprecated verdict code 2 (REDACT). The guest \
-                         never receives the request body, so redaction was never expressible; \
-                         treating it as a block. Return 1 to block, or 3 to reask."
-                    );
-                    Verdict::Kill {
-                        reason: "Blocked by custom WASM governance rule (legacy code 2)"
-                            .to_string(),
-                        policy_id: None,
-                    }
-                }
-                // `3` = reask: refuse this attempt, tell the agent why, let it
-                // retry. `attempts_remaining` is a placeholder — only the
-                // request path knows how many tries are left, because only it
-                // has incremented the counter. `policy_id` is filled in by the
-                // registry, the only layer that knows the rule id.
-                3 => Verdict::Reask {
-                    reason: "Refused by custom WASM governance rule — revise and retry".to_string(),
-                    attempts_remaining: 0,
-                    policy_id: None,
-                },
-                _ => {
-                    // Still fail-open, but loud and specific. A rule returning
-                    // an unmapped code was silently allowed, so an author who
-                    // invented a rung got no signal at all.
-                    tracing::warn!(
-                        code = verdict_val,
-                        "WASM rule returned an unmapped verdict code; allowing. Valid codes \
-                         are 0 (allow), 1 (block) and 3 (reask)."
-                    );
-                    Verdict::Bypass
-                }
-            }
+    let (verdict_val, guest_reason) = eval().map_err(|e| limits::NATIVE.failure(&e))?;
+    match verdict_val {
+        0 => Ok(Verdict::Bypass),
+        1 => Ok(Verdict::Kill {
+            reason: guest_reason
+                .unwrap_or_else(|| "Blocked by custom WASM governance rule".to_string()),
+            policy_id: None,
+        }),
+        // `2` was specified as REDACT and can never have meant it.
+        //
+        // The guest is deliberately never given the request body —
+        // `RequestContext` carries no prompt and no raw payload — so there is
+        // nothing for a rule to redact. That is why the comment that stood here
+        // was an unresolved argument with itself rather than a decision.
+        //
+        // Retained as a kill, because an already-installed rule returning `2`
+        // must not change meaning under an upgrade, and named in the log so its
+        // author can move to `1`.
+        //
+        // `intutic policy install` still ACCEPTS this code — it must, or
+        // reinstalling an existing rule would fail — but it warns. This comment
+        // used to claim install refused it, which was simply untrue: install
+        // checked membership of {0,1,2,3} and said nothing about 2.
+        2 => {
+            tracing::warn!(
+                "WASM rule returned deprecated verdict code 2 (REDACT). The guest \
+                 never receives the request body, so redaction was never expressible; \
+                 treating it as a block. Return 1 to block, or 3 to reask."
+            );
+            Ok(Verdict::Kill {
+                reason: "Blocked by custom WASM governance rule (legacy code 2)".to_string(),
+                policy_id: None,
+            })
         }
-        Ok(Err(e)) => {
-            tracing::warn!("WASM plugin execution error (fail-open): {}", e);
-            Verdict::Bypass
-        }
-        Err(_) => {
-            tracing::warn!("WASM plugin execution timed out after 5ms (fail-open)");
-            Verdict::Bypass
-        }
+        // `3` = reask: refuse this attempt, tell the agent why, let it retry.
+        // `attempts_remaining` is a placeholder — only the request path knows
+        // how many tries are left, because only it has incremented the counter.
+        // `policy_id` is filled in by the registry, the only layer that knows
+        // the rule id.
+        3 => Ok(Verdict::Reask {
+            reason: "Refused by custom WASM governance rule — revise and retry".to_string(),
+            attempts_remaining: 0,
+            policy_id: None,
+        }),
+        // Not a verdict, so the rule reached none and the request is refused,
+        // as for a rule that ran out of time. Allowing it would turn an
+        // author's typo into a rule that enforces nothing.
+        code => Err(Failure::result(format!(
+            "it returned {code}, which is not a verdict code (0 allow, 1 block, 3 reask)"
+        ))),
     }
 }
 
@@ -308,12 +289,10 @@ mod referenced_file_evaluation_tests {
     use crate::wasm::referenced_files as rf;
     use serde_json::json;
 
-    /// Fuel is required — the runner sets it, and an engine without
-    /// `consume_fuel` makes every evaluation bail to `Bypass` before it starts.
+    /// The registry's engine: fuel metering, which the runner requires, and the
+    /// epoch ticker its deadline needs.
     fn engine() -> Engine {
-        let mut config = wasmtime::Config::new();
-        config.consume_fuel(true);
-        Engine::new(&config).expect("engine")
+        crate::wasm::limits::engine().expect("engine")
     }
 
     /// Built from a legacy-shaped payload rather than a struct literal:
@@ -360,8 +339,8 @@ mod referenced_file_evaluation_tests {
     /// with a populated one, must produce the same verdict — and the registry
     /// must be able to tell from the module alone that it need not read
     /// anything at all.
-    #[tokio::test]
-    async fn a_module_that_does_not_import_the_reader_is_completely_unaffected() {
+    #[test]
+    fn a_module_that_does_not_import_the_reader_is_completely_unaffected() {
         let engine = engine();
         let module = Module::new(&engine, LEGACY_RULE).expect("legacy rule compiles");
 
@@ -375,21 +354,20 @@ mod referenced_file_evaluation_tests {
 
         let ctx = ctx();
         let without =
-            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty())).await;
+            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty()));
         let with = evaluate_wasm_rule(
             &engine,
             &module,
             &ctx,
             &Arc::new(rf::read_tokens(vec!["deploy.yaml".to_string()], &root)),
-        )
-        .await;
+        );
 
         assert_eq!(
             without,
-            Verdict::Kill {
+            Ok(Verdict::Kill {
                 reason: "Blocked by custom WASM governance rule".to_string(),
                 policy_id: None
-            }
+            })
         );
         assert_eq!(without, with, "a populated file table must change nothing");
 
@@ -399,8 +377,8 @@ mod referenced_file_evaluation_tests {
     /// A rule that *does* use the import blocks on the manifest it was given
     /// and allows when there is nothing to read — the same module, the same
     /// request, differing only in what the host made available.
-    #[tokio::test]
-    async fn a_rule_reading_a_referenced_manifest_reaches_a_verdict_from_it() {
+    #[test]
+    fn a_rule_reading_a_referenced_manifest_reaches_a_verdict_from_it() {
         const MANIFEST_READER: &str = r#"(module
              (import "env" "read_referenced_file"
                (func $read (param i32 i32 i32 i32) (result i32)))
@@ -428,17 +406,71 @@ mod referenced_file_evaluation_tests {
             &module,
             &ctx,
             &Arc::new(rf::read_tokens(vec!["deploy.yaml".to_string()], &root)),
-        )
-        .await;
-        assert!(matches!(blocked, Verdict::Kill { .. }), "got {blocked:?}");
+        );
+        assert!(
+            matches!(blocked, Ok(Verdict::Kill { .. })),
+            "got {blocked:?}"
+        );
 
         // Nothing readable: the refusal is a negative code, the rule allows,
         // and — importantly — the evaluation completes rather than trapping.
         let allowed =
-            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty())).await;
-        assert_eq!(allowed, Verdict::Bypass);
+            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty()));
+        assert_eq!(allowed, Ok(Verdict::Bypass));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// The deadline is a real bound, not a timer read after the fact.
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Loops forever while spending little fuel: each iteration fills a
+    /// megabyte of memory for one instruction's worth of fuel, so the 1,000,000
+    /// fuel budget alone would let it run for about a minute. This is the stall
+    /// the deadline is the backstop for.
+    const SLOW_LOOP: &str = r#"(module
+         (memory (export "memory") 17)
+         (func (export "allocate") (param i32) (result i32) i32.const 0)
+         (func (export "evaluate") (param i32 i32) (result i32)
+           (loop $l
+             (memory.fill (i32.const 65536) (i32.const 7) (i32.const 1048576))
+             (br $l))
+           i32.const 1))"#;
+
+    #[test]
+    fn a_rule_that_never_returns_is_interrupted_at_the_deadline() {
+        let engine = crate::wasm::limits::engine().expect("engine");
+        let module = Module::new(&engine, SLOW_LOOP).expect("compiles");
+        let ctx: RequestContext = serde_json::from_value(serde_json::json!({
+            "session_id": "ses_1", "workspace_id": "ws_1", "virtual_key_prefix": "vk_1",
+            "model": "m", "tools": [], "tool_calls": [], "estimated_input_tokens": 1,
+            "budget_remaining_usd": 1.0, "risk_tier": "Low", "dlp_findings": [],
+            "tool_sequence": []
+        }))
+        .unwrap();
+
+        let started = Instant::now();
+        let verdict =
+            evaluate_wasm_rule(&engine, &module, &ctx, &Arc::new(ReferencedFiles::empty()));
+        let elapsed = started.elapsed();
+
+        let failure = verdict.expect_err("a runaway rule reaches no verdict");
+        assert_eq!(failure.stop, crate::wasm::limits::Stop::Deadline);
+        assert_eq!(failure.reason, "it ran past its 1000 ms deadline");
+        assert!(
+            elapsed >= crate::wasm::limits::NATIVE.deadline,
+            "{elapsed:?}"
+        );
+        // Late on a loaded machine (the ticker oversleeps), but far short of
+        // the minute fuel would allow.
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "not interrupted: {elapsed:?}"
+        );
     }
 }
 

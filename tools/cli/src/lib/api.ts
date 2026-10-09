@@ -34,6 +34,14 @@ export interface ApiClient {
    * leave the caller digging the break out of an error message.
    */
   getWithStatus<T>(path: string): Promise<{ status: number; body: T }>
+  /**
+   * GET for a file download: the body as bytes.
+   *
+   * `get()` parses JSON, which a report served as markdown, CSV or PDF is
+   * not (`/api/v1/compliance/frameworks/:id/coverage?format=pdf`). A non-2xx
+   * throws exactly as `get()` does, since those errors are JSON.
+   */
+  getFile(path: string): Promise<Uint8Array>
   /** Generic POST request for arbitrary API paths. */
   post<T>(path: string, body?: unknown): Promise<T>
   /**
@@ -45,6 +53,13 @@ export interface ApiClient {
    * answer a caller needs to report, not a failure to unwrap and discard.
    */
   postWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }>
+  /**
+   * PUT and DELETE that hand back the status, for the same reason:
+   * `PUT /api/v1/policy-guardrails/guardrails/:id` answers 400 with the
+   * validator's named checks and 409 with a `code`, and both are the answer.
+   */
+  putWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }>
+  delWithStatus<T>(path: string): Promise<{ status: number; body: T }>
   /**
    * Multipart POST that hands back the status.
    *
@@ -67,6 +82,23 @@ export interface ApiClient {
  * @param controlPlaneUrl - Base URL (e.g., http://localhost:3001 or https://api.intutic.ai)
  * @param apiKey - API key (vk_*) or JWT access token
  */
+/**
+ * The error a failed call throws. A 403 carries the server's `detail` when it
+ * gives one (a role guard names the roles that may make the call), so a member
+ * whose role cannot do something is told which role can, not shown raw JSON.
+ */
+export function apiFailure(method: string, path: string, status: number, text: string): Error {
+  if (status === 403) {
+    try {
+      const body = JSON.parse(text) as { detail?: unknown }
+      if (typeof body.detail === 'string') return new Error(`API ${method} ${path} refused (403): ${body.detail}`)
+    } catch {
+      // Not JSON: fall through to the raw text.
+    }
+  }
+  return new Error(`API ${method} ${path} failed (${status}): ${text}`)
+}
+
 export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiClient {
   const baseHeaders = {
     'Content-Type': 'application/json',
@@ -87,10 +119,29 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
 
     if (!res.ok) {
       const text = await res.text().catch(() => 'Unknown error')
-      throw new Error(`API ${method} ${path} failed (${res.status}): ${text}`)
+      throw apiFailure(method, path, res.status, text)
     }
 
     return unwrapToonEnvelope(await res.json()) as T
+  }
+
+  /** A JSON request whose non-2xx answer is returned, not thrown; a body that is not JSON comes back as `{ error: text }`. */
+  async function withStatus<T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
+    const headers: Record<string, string> = { ...baseHeaders }
+    injectTraceHeaders(headers)
+    const res = await fetch(`${controlPlaneUrl}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    const text = await res.text()
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      parsed = { error: text }
+    }
+    return { status: res.status, body: unwrapToonEnvelope(parsed) as T }
   }
 
   return {
@@ -134,26 +185,31 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
       return { status: res.status, body: body as T }
     },
 
+    async getFile(path: string): Promise<Uint8Array> {
+      const headers: Record<string, string> = { Authorization: baseHeaders.Authorization }
+      injectTraceHeaders(headers)
+      const res = await fetch(`${controlPlaneUrl}${path}`, { method: 'GET', headers })
+      if (!res.ok) {
+        const text = await res.text().catch(() => 'Unknown error')
+        throw apiFailure('GET', path, res.status, text)
+      }
+      return new Uint8Array(await res.arrayBuffer())
+    },
+
     async post<T>(path: string, body?: unknown): Promise<T> {
       return request<T>('POST', path, body)
     },
 
     async postWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }> {
-      const headers: Record<string, string> = { ...baseHeaders }
-      injectTraceHeaders(headers)
-      const res = await fetch(`${controlPlaneUrl}${path}`, {
-        method: 'POST',
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      })
-      const text = await res.text()
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(text)
-      } catch {
-        parsed = { error: text }
-      }
-      return { status: res.status, body: unwrapToonEnvelope(parsed) as T }
+      return withStatus<T>('POST', path, body)
+    },
+
+    async putWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }> {
+      return withStatus<T>('PUT', path, body)
+    },
+
+    async delWithStatus<T>(path: string): Promise<{ status: number; body: T }> {
+      return withStatus<T>('DELETE', path)
     },
 
     async postForm<T>(path: string, form: FormData): Promise<{ status: number; body: T }> {

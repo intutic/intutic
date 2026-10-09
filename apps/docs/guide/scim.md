@@ -40,6 +40,13 @@ directory credentials. Revoke from the same panel or
 `DELETE /api/v1/scim/tokens/:tokenId`; revocation takes effect on the next request.
 
 The token is workspace-scoped and separate from regular API keys.
+
+Issuing a token needs the Enterprise or Self-host plan, the same check every
+`/scim/v2` request makes. On another plan, Biz Org included, the panel says
+which plans include SCIM and `POST /api/v1/scim/tokens` answers `403`
+(`Upgrade required — SCIM user provisioning requires an Enterprise plan`).
+Tokens issued before a downgrade stay listed so you can revoke them; `/scim/v2`
+refuses them until the workspace is back on a plan with SCIM.
 :::
 
 ---
@@ -351,6 +358,10 @@ recomputed from the groups that remain, as described in
 **Response:** `204 No Content`
 
 ---
+
+## Change notifications {#change-notifications}
+
+Every write your identity provider makes through SCIM that succeeds is announced once: `scim.user.changed` for a user provisioned, changed or deprovisioned (a `PATCH` or `PUT` that sets `active: false` counts as a deprovisioning), and `scim.group.changed` for a group created, changed or deleted. Add either to a [notification rule](/guide/settings#rule-filters); a deprovisioning or a deleted group is MEDIUM severity, the rest INFO. Both stream to [SIEM export](/guide/siem-export#what-gets-streamed) as `scim_changes`, with the resource, the action, the PATCH operations by `op` and `path` (never their values) and the SCIM token that made the change. A refused write announces nothing.
 
 ## Offboarding Cascade
 

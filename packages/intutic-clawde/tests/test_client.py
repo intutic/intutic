@@ -1,9 +1,11 @@
 import pytest
+import subprocess
 import os
 import json
 from unittest.mock import MagicMock, patch
 import requests
 from intutic_clawde import ClawdeBlockedError, ClawdeClient, ClawdeConnectionError, ClawdeVerdictError
+from intutic_clawde.client import SDK_HARNESS
 
 def test_client_init():
     # API key is required
@@ -147,6 +149,7 @@ def test_circuit_breaker_reraises_a_proxy_refusal():
 def _reply(status, body, headers=None):
     res = MagicMock()
     res.status_code = status
+    res.ok = 200 <= status < 300
     res.headers = headers or {}
     res.text = json.dumps(body)
     res.json.return_value = body
@@ -164,7 +167,8 @@ COMPLETION = {"choices": [{"message": {"role": "assistant", "content": "hi"}}]}
 @patch("requests.post")
 def test_chat_reports_allow_and_sends_only_headers_the_proxy_reads(mock_post):
     mock_post.return_value = _reply(200, COMPLETION)
-    client = ClawdeClient(api_key="vk_test", base_url="http://proxy")
+    # No session to register: this is about the headers of the call itself.
+    client = ClawdeClient(api_key="vk_test", base_url="http://proxy", auto_context=False)
 
     result = client.chat("gpt-4o", [{"role": "user", "content": "hello"}])
 
@@ -183,6 +187,7 @@ def test_chat_reports_allow_and_sends_only_headers_the_proxy_reads(mock_post):
     (403, "LOOP_RUN_TERMINATED", "kill"),
     (403, "LOOP_RUN_PENDING_REVIEW", "hold"),
     (409, "policy_reask", "reask"),
+    (403, "GOVERNANCE_UNAVAILABLE", "kill"),
     (429, "BUDGET_EXCEEDED", "kill"),
     (429, "OVERAGE_HARD_CAP_EXCEEDED", "kill"),
     (402, "COST_GATE_EXCEEDED", "kill"),
@@ -227,6 +232,56 @@ def test_chat_treats_a_200_the_proxy_names_as_a_refusal_as_one(mock_post):
     assert str(exc.value) == explanation
     assert mock_post.call_count == 1
     assert events == [{"verdict": "kill", "code": "COST_GATE_EXCEEDED", "status": 200, "message": explanation}]
+
+
+@pytest.mark.parametrize("code,rule_id", [
+    ("TOOL_DENIED", "deny_tools.Bash"),
+    ("SSO_GROUP", "sso_group.high_risk.Bash"),
+    ("SQL_GUARD", "sql_guard.sql_allow_dsns"),
+    ("RESPONSE_UNPARSEABLE", "response_gate.fail_closed"),
+    ("OUTPUT_DLP", "dlp.aws_access_key"),
+])
+@patch("requests.post")
+def test_chat_raises_a_withheld_answer_with_its_rule_id(mock_post, code, rule_id):
+    # The proxy's response gate withholds a tool call the model made and puts
+    # the reason in its place. That 200 used to come back as allow.
+    reason = f"[Intutic] Blocked: {code}"
+    mock_post.return_value = _reply(
+        200,
+        {"choices": [{"message": {"role": "assistant", "content": reason}}]},
+        {"x-intutic-refusal": code, "x-intutic-refusal-rule": rule_id},
+    )
+    client = ClawdeClient(api_key="test-key")
+    events = []
+    client.on("kill", events.append)
+
+    with pytest.raises(ClawdeBlockedError) as exc:
+        client.chat("gpt-4o", [{"role": "user", "content": "hello"}])
+
+    assert (exc.value.verdict, exc.value.code, exc.value.status, exc.value.rule_id) == ("kill", code, 200, rule_id)
+    assert str(exc.value) == reason
+    assert events == [{"verdict": "kill", "code": code, "status": 200, "message": reason, "rule_id": rule_id}]
+
+
+@patch("requests.post")
+def test_chat_raises_a_refusal_a_stream_names_not_a_connection_error(mock_post):
+    reason = "[Intutic] Blocked tool call: Bash."
+    stream = (
+        'data: {"choices":[{"index":0,"delta":{"content":"Let me look."}}]}\n\n'
+        + ": intutic-refusal " + json.dumps({"code": "TOOL_DENIED", "rule": "deny_tools.Bash", "message": reason})
+        + "\n\ndata: [DONE]\n\n"
+    )
+    res = _reply(200, None, {"content-type": "text/event-stream"})
+    res.text = stream
+    res.json.side_effect = ValueError("not JSON")
+    mock_post.return_value = res
+    client = ClawdeClient(api_key="test-key")
+
+    with pytest.raises(ClawdeBlockedError) as exc:
+        client.chat("gpt-4o", [{"role": "user", "content": "hello"}], stream=True)
+
+    assert (exc.value.code, exc.value.status, exc.value.rule_id) == ("TOOL_DENIED", 200, "deny_tools.Bash")
+    assert str(exc.value) == reason
 
 
 @patch("time.sleep")
@@ -274,3 +329,113 @@ def test_chat_other_4xx_is_not_a_refusal_and_not_retried(mock_post, status, body
     assert str(status) in str(exc.value)
     assert mock_post.call_count == 1
     assert events == []
+
+
+# ── The session chat() files its calls under ─────────────────────────────────
+
+
+@pytest.fixture
+def git_repo(tmp_path, monkeypatch):
+    # A pull request build in CI sets it, and it would name a branch outside a repository.
+    monkeypatch.delenv("GITHUB_HEAD_REF", raising=False)
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
+
+    git("init", "-q", "-b", "feat/retry")
+    git("-c", "user.email=dev@example.com", "-c", "user.name=dev", "commit", "-q", "--allow-empty", "-m", "first")
+    git("remote", "add", "origin", "git@github.com:acme/app.git")
+    return tmp_path, git("rev-parse", "HEAD")
+
+
+def _control_plane(refuse=False):
+    """requests.request as the control plane answers it, recording each call."""
+    calls = []
+
+    def answer(method, url, json=None, headers=None, timeout=None):
+        calls.append({"method": method, "url": url, "json": json, "headers": headers})
+        if refuse:
+            return _reply(401, {"error": "Unauthorized"})
+        if url.endswith("/api/v1/auth/me"):
+            return _reply(200, {"workspaceId": "ws_1"})
+        return _reply(201, {"sessionId": "ses_sdk"})
+
+    return calls, answer
+
+
+@patch("requests.post")
+def test_chat_registers_one_session_with_the_git_context_and_sends_it(mock_post, git_repo):
+    repo, commit = git_repo
+    mock_post.return_value = _reply(200, COMPLETION)
+    calls, answer = _control_plane()
+    client = ClawdeClient(api_key="vk_test", base_url="http://proxy", control_plane_url="http://cp")
+    with patch("intutic_clawde.client.resolve_context", return_value={"workingDirectory": str(repo)}), \
+            patch("requests.request", side_effect=answer):
+        client.chat("gpt-4o", [{"role": "user", "content": "hi"}])
+        client.chat("gpt-4o", [{"role": "user", "content": "hi"}])
+
+    assert [c["url"] for c in calls] == ["http://cp/api/v1/auth/me", "http://cp/api/v1/sessions"]
+    assert calls[1]["method"] == "POST"
+    assert calls[1]["headers"]["Authorization"] == "Bearer vk_test"
+    assert calls[1]["json"] == {
+        "workspaceId": "ws_1",
+        "harnessType": SDK_HARNESS,
+        "repoUrl": "github.com/acme/app",
+        "branchName": "feat/retry",
+        "commitHash": commit,
+    }
+    assert [c.kwargs["headers"]["x-session-id"] for c in mock_post.call_args_list] == ["ses_sdk", "ses_sdk"]
+
+
+@patch("requests.post")
+def test_chat_sends_the_session_it_was_started_in_and_registers_nothing(mock_post, git_repo):
+    repo, _ = git_repo
+    mock_post.return_value = _reply(200, COMPLETION)
+    client = ClawdeClient(api_key="vk_test", base_url="http://proxy", control_plane_url="http://cp")
+    with patch("intutic_clawde.client.resolve_context", return_value={"workingDirectory": str(repo), "sessionId": "ses_parent"}), \
+            patch("requests.request") as cp:
+        client.chat("gpt-4o", [{"role": "user", "content": "hi"}])
+    cp.assert_not_called()
+    assert mock_post.call_args.kwargs["headers"]["x-session-id"] == "ses_parent"
+
+
+@patch("requests.post")
+def test_chat_never_sends_a_provider_key_to_the_control_plane(mock_post, git_repo):
+    repo, _ = git_repo
+    mock_post.return_value = _reply(200, COMPLETION)
+    client = ClawdeClient(api_key="sk-provider-key", base_url="http://proxy", control_plane_url="http://cp")
+    with patch("intutic_clawde.client.resolve_context", return_value={"workingDirectory": str(repo)}), \
+            patch("requests.request") as cp:
+        client.chat("gpt-4o", [{"role": "user", "content": "hi"}])
+    cp.assert_not_called()
+    assert "x-session-id" not in mock_post.call_args.kwargs["headers"]
+
+
+@patch("requests.post")
+def test_chat_still_runs_when_the_control_plane_refuses_and_does_not_ask_again(mock_post, git_repo):
+    repo, _ = git_repo
+    mock_post.return_value = _reply(200, COMPLETION)
+    calls, answer = _control_plane(refuse=True)
+    client = ClawdeClient(api_key="vk_test", base_url="http://proxy", control_plane_url="http://cp")
+    with patch("intutic_clawde.client.resolve_context", return_value={"workingDirectory": str(repo)}), \
+            patch("requests.request", side_effect=answer):
+        client.chat("gpt-4o", [{"role": "user", "content": "hi"}])
+        client.chat("gpt-4o", [{"role": "user", "content": "hi"}])
+    assert len(calls) == 1
+    assert all("x-session-id" not in c.kwargs["headers"] for c in mock_post.call_args_list)
+
+
+@patch("requests.post")
+def test_chat_registers_nothing_outside_a_repository_or_with_auto_context_off(mock_post, git_repo, tmp_path_factory):
+    repo, _ = git_repo
+    mock_post.return_value = _reply(200, COMPLETION)
+    elsewhere = tmp_path_factory.mktemp("nogit")
+    with patch("requests.request") as cp:
+        with patch("intutic_clawde.client.resolve_context", return_value={"workingDirectory": str(elsewhere)}):
+            ClawdeClient(api_key="vk_test", base_url="http://proxy").chat("gpt-4o", [{"role": "user", "content": "hi"}])
+        with patch("intutic_clawde.client.resolve_context", return_value={"workingDirectory": str(repo)}):
+            ClawdeClient(api_key="vk_test", base_url="http://proxy", auto_context=False).chat(
+                "gpt-4o", [{"role": "user", "content": "hi"}]
+            )
+    cp.assert_not_called()
+    assert all("x-session-id" not in c.kwargs["headers"] for c in mock_post.call_args_list)

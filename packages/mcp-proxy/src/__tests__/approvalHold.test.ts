@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import * as http from 'node:http'
 import type { AddressInfo } from 'node:net'
+import * as node_fs from 'node:fs'
 import * as node_os from 'node:os'
 import * as node_path from 'node:path'
 import { ApprovalHolds, canonicalJson, holdKey } from '../approvalHold.js'
@@ -15,6 +16,8 @@ import { ToolCallInterceptor } from '../interceptor.js'
 import { PolicyClient, UNRESTRICTED_REGISTRY, type McpRegistryPolicy, type SopRule } from '../policy.js'
 import { GovernanceEmitter } from '../emitter.js'
 import { handleHarnessLine, type PendingRequest } from '../proxy.js'
+import type { WasmRunner } from '../wasm/runner.js'
+import { holdApprovalHint } from '@intutic/shared-types'
 
 const RULE: SopRule = { id: 'sop_deploy', toolPattern: '^deploy$', action: 'require_approval', reason: 'Deploys need a second pair of eyes' }
 
@@ -114,7 +117,12 @@ describe('approval holds', () => {
     expect(holdId).toMatch(/^hold_[0-9a-z]+_[0-9a-f]{8}$/)
     expect(reason).toContain(`Hold id: ${holdId}`)
     expect(reason).toContain(`intutic decision approve ${holdId}`)
-    expect(reason).toContain('Retry this exact call')
+    // Who can approve, and that the retry passes only under the bypass, which
+    // is off by default: a Developer cannot approve their own hold, and a
+    // promise that the retry passes would be false on a default workspace.
+    expect(reason).toContain('An Owner, Admin or EM can approve it')
+    expect(reason).toContain('only if the workspace has turned on the review-hold bypass')
+    expect(reason).toBe(`HELD for approval: Deploys need a second pair of eyes [sop_deploy]. Hold id: ${holdId}. ${holdApprovalHint(holdId)}`)
 
     expect(holds).toHaveLength(1)
     expect(holds[0]).toMatchObject({
@@ -168,6 +176,28 @@ describe('approval holds', () => {
     expect((await interceptor.decide('deploy', { env: 'prod' })).action).toBe('hold')
   })
 
+  it("a Rego rule's hold takes the same path, keyed on the rule id", async () => {
+    const runner = {
+      evaluate: async () => ({ code: 'hold', reason: 'release needs approval', ruleId: 'local:20_release.wasm', riskTier: 'high' }),
+    } as unknown as WasmRunner
+    const emitter = new Emitter()
+    const interceptor = new ToolCallInterceptor(
+      new Policy(), emitter, true, 'deployer', 'warn', undefined, 'off', {}, runner, 'ws_hold',
+      new ApprovalHolds(baseUrl, 'vk_test', 'ws_hold', 'deployer'),
+    )
+    const decision = await interceptor.decide('release', { version: '2.2.0' })
+    expect(decision.action).toBe('hold')
+    expect(holds[0]).toMatchObject({
+      reason: 'local:20_release.wasm',
+      toolNameNormalized: 'mcp__deployer__release',
+      targetHash: holdKey('deployer', 'release', { version: '2.2.0' }).targetHash,
+    })
+    expect(emitter.emitted[0]!.reason).toBe('release needs approval [local:20_release.wasm]')
+
+    approve(holds[0]!)
+    expect((await interceptor.decide('release', { version: '2.2.0' })).action).toBe('allow')
+  })
+
   it('stays held, and says nothing was recorded, when the control plane is unreachable', async () => {
     const decision = await interceptorWith(new Emitter(), 'http://127.0.0.1:1').decide('deploy', { env: 'prod' })
     expect(decision.action).toBe('hold')
@@ -183,6 +213,19 @@ describe('approval holds', () => {
 
   it('canonicalJson sorts keys at every level and ignores undefined members', () => {
     expect(canonicalJson({ b: 1, a: { d: [2, { z: 1, y: 2 }], c: undefined } })).toBe('{"a":{"d":[2,{"y":2,"z":1}]},"b":1}')
+  })
+
+  // The SDK gates (`@intutic/gate`, `intutic_clawde.gate`) key their bypasses
+  // the same way and run the same vectors; this side is the reference.
+  it('hashes every shared hold-key vector to its expected target hash', () => {
+    const { vectors } = JSON.parse(
+      node_fs.readFileSync(node_path.join(__dirname, '../../../shared-types/fixtures/hold-key-vectors.json'), 'utf-8'),
+    ) as { vectors: Array<{ toolInput: unknown; canonical: string; targetHash: string }> }
+    expect(vectors.length).toBeGreaterThan(5)
+    for (const v of vectors) {
+      expect(canonicalJson(v.toolInput)).toBe(v.canonical)
+      expect(holdKey('deployer', 'deploy', v.toolInput).targetHash).toBe(v.targetHash)
+    }
   })
 
   it('the proxy answers a held call with a held error frame carrying the hold id', async () => {
@@ -207,6 +250,6 @@ describe('approval holds', () => {
     const frame = JSON.parse(writes[0]!) as { id: number; error: { message: string; data: { status: string; holdId: string } } }
     expect(frame.id).toBe(7)
     expect(frame.error.message).toMatch(/^\[Intutic Governance\] Tool call HELD for approval/)
-    expect(frame.error.data).toEqual({ status: 'pending_approval', holdId: holds[0]!['holdId'] })
+    expect(frame.error.data).toEqual({ code: 'HELD', ruleId: 'sop_deploy', status: 'pending_approval', holdId: holds[0]!['holdId'] })
   })
 })

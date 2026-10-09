@@ -1,0 +1,30 @@
+Intutic PII detectors — false-positive baseline
+===============================================
+
+Produced by:
+    cd packages/proxy && INTUTIC_WRITE_BASELINE=1 cargo test --test pii_corpus_test
+
+Every detector runs on every row with all detectors enabled, whatever its
+default (card, IBAN and SSN ship on; email and phone ship off). A cell is
+the number of rows with at least one validated match.
+
+The first four corpora are external (see PROVENANCE.md). Their rows carry
+no real PII, but BFCL's API tasks do pass made-up emails and phone numbers
+as arguments, so a firing there can be a correct detection of a fake value;
+every firing row is listed below so it can be read. The last corpus is
+self-authored coding-agent traffic with no PII in it at all: a firing there
+is a false positive. Its authors also wrote the detectors.
+
+  corpus                   |   rows |  pii.card |  pii.iban |   pii.ssn | pii.email | pii.phone
+  -------------------------|--------|-----------|-----------|-----------|-----------|----------
+  bfcl-call-arguments      |   5959 |        20 |         0 |         0 |         0 |         0
+  notinject-prompts        |    339 |         0 |         0 |         0 |         0 |         0
+  bfcl-tool-descriptions   |  10753 |         0 |         0 |         0 |        11 |         5
+  response-echo-outputs    |    150 |         0 |         0 |         0 |         0 |         0
+  coding-agent (self)      |     70 |         0 |         0 |         0 |         7 |         0
+
+Firing rows:
+  bfcl-call-arguments / pii.card: multi_turn_base_169#1, multi_turn_base_169#2, multi_turn_base_172#2, multi_turn_base_178#1, multi_turn_composite_169#3, multi_turn_composite_169#4, multi_turn_composite_172#2, multi_turn_composite_178#1, multi_turn_long_context_169#1, multi_turn_long_context_169#2, multi_turn_long_context_172#2, multi_turn_long_context_178#1, multi_turn_miss_func_169#1, multi_turn_miss_func_169#2, multi_turn_miss_func_172#2, multi_turn_miss_func_178#1, multi_turn_miss_param_169#1, multi_turn_miss_param_169#2, multi_turn_miss_param_172#2, multi_turn_miss_param_178#1
+  bfcl-tool-descriptions / pii.email: tooldesc_01009, tooldesc_06389, tooldesc_06390, tooldesc_06393, tooldesc_06394, tooldesc_06395, tooldesc_06914, tooldesc_07341, tooldesc_10014, tooldesc_10051, tooldesc_10219
+  bfcl-tool-descriptions / pii.phone: tooldesc_06914, tooldesc_08477, tooldesc_10196, tooldesc_10223, tooldesc_10225
+  coding-agent (self) / pii.email: coding_0001, coding_0002, coding_0003, coding_0004, coding_0014, coding_0016, coding_0020

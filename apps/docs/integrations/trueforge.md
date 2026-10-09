@@ -211,7 +211,7 @@ This is the step embedded mode does not need an operator to think about (an embe
 
 ### What gets written
 
-Nothing, on the TrueForge side — `TRUEFORGE_SERVER` writes no config file (see [How it works](#how-it-works-1)). What "gets written" instead is the bridge's own decision log: every allow/deny verdict is logged structurally (`@intutic/logger`) and reported to the control plane exactly like any other harness's hook-gate call, so a blocked TrueForge tool call shows up on the dashboard the same way a blocked Claude Code or Cursor call does.
+Nothing, on the TrueForge side — `TRUEFORGE_SERVER` writes no config file and has no instructions file (see [How it works](#how-it-works-1)). What "gets written" instead is the bridge's own decision log: every allow/deny verdict is logged structurally (`@intutic/logger`) and reported to the control plane exactly like any other harness's hook-gate call, so a blocked TrueForge tool call shows up on the dashboard the same way a blocked Claude Code or Cursor call does.
 
 ### What the adapter does NOT do
 

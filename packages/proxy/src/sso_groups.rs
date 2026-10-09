@@ -20,27 +20,25 @@
 //!
 //! Names and groups match exactly — no case folding — unlike the response
 //! gate's `deny_tools` match. A looser match here would refuse calls the hook
-//! gate allows.
+//! gate allows. The one widening every gate shares is MCP's two names for one
+//! tool ([`tool_matches`]): an entry naming the tool as its server declares it
+//! (`run_query`) also matches the name a harness gives it
+//! (`mcp__postgres__run_query`).
 //!
 //! # Where the policy and the groups come from
 //!
 //! `GET /api/v1/auth/key-context`, the per-key route the proxy already calls
 //! to validate a virtual key, carries an `ssoGroups` object: the workspace's
 //! policy and the groups of the member the key belongs to. [`resolve`] fetches
-//! it per key and caches it for [`CACHE_TTL`]. A standalone proxy has no
-//! control plane and therefore no group policy, so nothing here runs.
+//! it per key through `crate::key_context`, which caches the answer for
+//! [`crate::key_context::CACHE_TTL`]. A standalone proxy has no control plane
+//! and therefore no group policy, so nothing here runs.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-
-/// How long one key's policy and groups are reused before the proxy asks the
-/// control plane again. The same 30 seconds as the proxy's workspace SOP cache
-/// (`sops::CACHE_TTL`) and the sync daemon's default refresh, so the response
-/// gate is no staler than the harness gates fed by that daemon.
-pub const CACHE_TTL: Duration = Duration::from_secs(30);
 
 /// A workspace's `sso_group_policy`, as `parseSsoGroupPolicy` reads it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -122,22 +120,43 @@ impl SsoGroupDecision {
 
 /// A rule id that survives `ruleIdFromReason` (`[A-Za-z0-9_.:-]`).
 pub fn rule_id(kind: &str, tool_name: &str) -> String {
-    let safe: String = tool_name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '-') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    format!("sso_group.{kind}.{safe}")
+    crate::refusal::tool_rule_id(&format!("sso_group.{kind}"), tool_name)
+}
+
+/// Whether a call named `name` is the tool a policy entry names: exactly, or,
+/// for an entry that is an MCP tool's own name (not starting with `mcp__`), as
+/// the name a harness gives it on any server, `mcp__<server>__<entry>`.
+pub fn tool_matches(entry: &str, name: &str) -> bool {
+    if name == entry {
+        return true;
+    }
+    if entry.starts_with("mcp__") || !name.starts_with("mcp__") {
+        return false;
+    }
+    let suffix_len = entry.len() + 2;
+    name.len() > "mcp__".len() + suffix_len
+        && name.ends_with(entry)
+        && name[..name.len() - entry.len()].ends_with("__")
+}
+
+/// The first entry of `list` a call matches: an exact match on any of its
+/// names first, then an MCP tool's own name matching a harness name.
+fn matching_entry<'a>(list: &'a [String], tool_names: &[&str]) -> Option<&'a str> {
+    for n in tool_names {
+        if let Some(e) = list.iter().find(|e| e.as_str() == *n) {
+            return Some(e);
+        }
+    }
+    tool_names
+        .iter()
+        .find_map(|n| list.iter().find(|e| tool_matches(e, n)))
+        .map(String::as_str)
 }
 
 /// Decides one tool call. `tool_names` is every name the call goes by; a
-/// policy entry naming any of them applies. `member_groups` `None` means the
-/// gate does not know the member's groups.
+/// policy entry naming any of them applies ([`tool_matches`]), and the rule id
+/// and reason name the entry. `member_groups` `None` means the gate does not
+/// know the member's groups.
 pub fn evaluate(
     policy: Option<&SsoGroupPolicy>,
     tool_names: &[&str],
@@ -147,10 +166,7 @@ pub fn evaluate(
         return SsoGroupDecision::granted();
     };
 
-    if let Some(obo) = tool_names
-        .iter()
-        .find(|n| policy.require_obo_for.iter().any(|t| t == *n))
-    {
+    if let Some(obo) = matching_entry(&policy.require_obo_for, tool_names) {
         return SsoGroupDecision {
             clearance: Clearance::RequiresObo,
             rule_id: Some(rule_id("require_obo", obo)),
@@ -160,10 +176,7 @@ pub fn evaluate(
         };
     }
 
-    let Some(risky) = tool_names
-        .iter()
-        .find(|n| policy.high_risk_tools.iter().any(|t| t == *n))
-    else {
+    let Some(risky) = matching_entry(&policy.high_risk_tools, tool_names) else {
         return SsoGroupDecision::granted();
     };
     if let Some(groups) = member_groups {
@@ -244,28 +257,26 @@ pub fn parse_key_context(body: &Value) -> Result<Option<SsoGroupGate>, String> {
     }))
 }
 
-struct Cached {
+/// The answer last parsed for each key, kept for one use only: when the
+/// control plane later refuses the key, the policy last seen for it is applied
+/// with the groups unknown. Bounds the map to the keys active in [`RETAIN`].
+struct LastSeen {
     gate: Option<SsoGroupGate>,
     read_at: Instant,
-    /// The workspace's config version when this was fetched; `None` when no
-    /// version was readable, and then only the TTL applies.
-    version: Option<u64>,
 }
 
-/// How long an answer is kept after its TTL, for one use only: when the
-/// control plane later refuses the key, the policy last seen for it is applied
-/// with the groups unknown. Bounds the map to the keys active in this window.
+/// How long an answer is kept for that one use.
 const RETAIN: Duration = Duration::from_secs(3600);
 
 /// Keyed by the SHA-256 of the virtual key, never the key itself.
-fn cache() -> &'static Mutex<HashMap<String, Cached>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Cached>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn last_seen() -> &'static Mutex<HashMap<String, LastSeen>> {
+    static LAST_SEEN: OnceLock<Mutex<HashMap<String, LastSeen>>> = OnceLock::new();
+    LAST_SEEN.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The group gate for one virtual key: from the cache within [`CACHE_TTL`]
-/// while the workspace's config version has not moved, else from
-/// `/api/v1/auth/key-context`.
+/// The group gate for one virtual key, from the key's
+/// `/api/v1/auth/key-context` answer (`crate::key_context`, which caches it
+/// for [`crate::key_context::CACHE_TTL`] and refetches early when `policy_version` moves).
 ///
 /// `policy_version` is `v2:sync:config_version:{ws}`, read by the caller
 /// before this runs. The control plane bumps it on every change that moves a
@@ -284,70 +295,47 @@ fn cache() -> &'static Mutex<HashMap<String, Cached>> {
 pub async fn resolve(
     client: &reqwest::Client,
     control_plane_url: &str,
-    token: &str,
+    virtual_key: &crate::credential::VirtualKey,
     timeout: Duration,
     policy_version: Option<u64>,
 ) -> Result<Option<SsoGroupGate>, String> {
-    let key = crate::store::valkey::sha256_hex(token);
-    // `Some(gate)` when an earlier answer exists for this key, fresh or not.
-    let previous: Option<Option<SsoGroupGate>> = {
-        let guard = cache().lock().unwrap_or_else(|p| p.into_inner());
-        match guard.get(&key) {
-            Some(c) => {
-                let version_moved =
-                    matches!((policy_version, c.version), (Some(now), Some(then)) if now != then);
-                if c.read_at.elapsed() < CACHE_TTL && !version_moved {
-                    return Ok(c.gate.clone());
-                }
-                Some(c.gate.clone())
-            }
-            None => None,
-        }
-    };
-
-    let resp = client
-        .get(format!("{control_plane_url}/api/v1/auth/key-context"))
-        .header("authorization", format!("Bearer {token}"))
-        .timeout(timeout)
-        .send()
-        .await
-        .map_err(|e| format!("SSO group policy fetch failed: {e}"))?;
-    let status = resp.status();
-    let gate = if status == reqwest::StatusCode::UNAUTHORIZED
-        || status == reqwest::StatusCode::FORBIDDEN
-    {
-        match previous {
-            Some(gate) => gate.map(|g| SsoGroupGate {
-                member_groups: None,
-                ..g
-            }),
-            None => {
-                return Err(format!(
+    let answer = crate::key_context::fetch(
+        client,
+        control_plane_url,
+        virtual_key,
+        timeout,
+        policy_version,
+    )
+    .await
+    .map_err(|e| format!("SSO group policy fetch failed: {e}"))?;
+    let key = crate::store::valkey::sha256_hex(virtual_key.as_str());
+    match answer {
+        crate::key_context::Answer::Refused(status) => {
+            let guard = last_seen().lock().unwrap_or_else(|p| p.into_inner());
+            match guard.get(&key) {
+                Some(seen) => Ok(seen.gate.clone().map(|g| SsoGroupGate {
+                    member_groups: None,
+                    ..g
+                })),
+                None => Err(format!(
                     "the control plane refused the key ({status}) before its SSO group policy was known"
-                ))
+                )),
             }
         }
-    } else if !status.is_success() {
-        return Err(format!("SSO group policy fetch returned {status}"));
-    } else {
-        let body: Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("SSO group policy response did not parse: {e}"))?;
-        parse_key_context(&body)?
-    };
-
-    let mut guard = cache().lock().unwrap_or_else(|p| p.into_inner());
-    guard.retain(|_, c| c.read_at.elapsed() < RETAIN);
-    guard.insert(
-        key,
-        Cached {
-            gate: gate.clone(),
-            read_at: Instant::now(),
-            version: policy_version,
-        },
-    );
-    Ok(gate)
+        crate::key_context::Answer::Body(body) => {
+            let gate = parse_key_context(&body)?;
+            let mut guard = last_seen().lock().unwrap_or_else(|p| p.into_inner());
+            guard.retain(|_, s| s.read_at.elapsed() < RETAIN);
+            guard.insert(
+                key,
+                LastSeen {
+                    gate: gate.clone(),
+                    read_at: Instant::now(),
+                },
+            );
+            Ok(gate)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -492,6 +480,13 @@ mod tests {
         use wiremock::matchers::{header, method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
+        fn key(token: &str) -> crate::credential::VirtualKey {
+            crate::credential::RequestCredential::classify(token)
+                .virtual_key()
+                .cloned()
+                .expect("a virtual key")
+        }
+
         fn body() -> Value {
             serde_json::json!({
                 "workspaceId": "ws_a",
@@ -536,14 +531,14 @@ mod tests {
             let client = reqwest::Client::new();
             let t = Duration::from_secs(2);
             for _ in 0..3 {
-                let gate = resolve(&client, &server.uri(), &token_a, t, Some(1))
+                let gate = resolve(&client, &server.uri(), &key(&token_a), t, Some(1))
                     .await
                     .unwrap()
                     .unwrap();
                 assert_eq!(gate.decide("Bash").clearance, Clearance::Denied);
             }
             assert_eq!(
-                resolve(&client, &server.uri(), &token_b, t, None).await,
+                resolve(&client, &server.uri(), &key(&token_b), t, None).await,
                 Ok(None)
             );
             // `expect(1)` on each mock is verified when the server drops.
@@ -561,10 +556,10 @@ mod tests {
                 .await;
             let client = reqwest::Client::new();
             let t = Duration::from_secs(2);
-            assert!(resolve(&client, &server.uri(), &token, t, None)
+            assert!(resolve(&client, &server.uri(), &key(&token), t, None)
                 .await
                 .is_err());
-            assert!(resolve(&client, &server.uri(), &token, t, None)
+            assert!(resolve(&client, &server.uri(), &key(&token), t, None)
                 .await
                 .is_err());
         }
@@ -583,7 +578,7 @@ mod tests {
             let client = reqwest::Client::new();
             let t = Duration::from_secs(2);
             for version in [Some(4), Some(4), Some(5), Some(5)] {
-                assert!(resolve(&client, &server.uri(), &token, t, version)
+                assert!(resolve(&client, &server.uri(), &key(&token), t, version)
                     .await
                     .unwrap()
                     .is_some());
@@ -615,12 +610,12 @@ mod tests {
                 .await;
             let client = reqwest::Client::new();
             let t = Duration::from_secs(2);
-            let cleared = resolve(&client, &server.uri(), &token, t, Some(1))
+            let cleared = resolve(&client, &server.uri(), &key(&token), t, Some(1))
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(cleared.decide("Bash").clearance, Clearance::Granted);
-            let refused = resolve(&client, &server.uri(), &token, t, Some(2))
+            let refused = resolve(&client, &server.uri(), &key(&token), t, Some(2))
                 .await
                 .unwrap()
                 .unwrap();
@@ -630,7 +625,7 @@ mod tests {
             // A key refused before any policy was seen for it is a failure,
             // which the proxy's fail mode decides.
             let unseen = format!("vk_{}", "f".repeat(32));
-            assert!(resolve(&client, &server.uri(), &unseen, t, None)
+            assert!(resolve(&client, &server.uri(), &key(&unseen), t, None)
                 .await
                 .is_err());
         }

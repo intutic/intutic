@@ -11,6 +11,12 @@ import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
 import { HttpStatusError, httpRequest } from './httpJson.js'
 import type { ResolvedPolicy } from './daemon/policyCache.js'
+import {
+  parseMcpBudgetPolicy,
+  parseWorkspacePiiDetectors,
+  type McpBudgetPolicy,
+  type WorkspacePiiDetectors,
+} from '@intutic/shared-types'
 
 const log = createLogger('mcp-proxy-policy')
 
@@ -73,6 +79,12 @@ export interface McpRegistryPolicy {
   defaultPolicy: 'allow' | 'deny'
   approvedServers: string[]
   blockedServers: string[]
+  /**
+   * Servers a high-risk tool-set change sent back to the approval queue
+   * (`mcpHighRiskToolChange: hold`). Refused under either default until an
+   * owner or admin decides again.
+   */
+  heldServers: string[]
   disabledTools: Record<string, string[]>
 }
 
@@ -86,6 +98,7 @@ export const UNRESTRICTED_REGISTRY: McpRegistryPolicy = Object.freeze({
   defaultPolicy: 'allow',
   approvedServers: [],
   blockedServers: [],
+  heldServers: [],
   disabledTools: {},
 }) as McpRegistryPolicy
 
@@ -133,6 +146,7 @@ export function parseRegistry(value: unknown): McpRegistryPolicy | undefined {
     defaultPolicy: value['defaultPolicy'] === 'deny' ? 'deny' : 'allow',
     approvedServers: stringList(value['approvedServers']),
     blockedServers: stringList(value['blockedServers']),
+    heldServers: stringList(value['heldServers']),
     disabledTools,
   }
 }
@@ -227,6 +241,15 @@ export class PolicyClient {
    */
   private failOpen: boolean | undefined
   private ssoGroupPolicy: SsoGroupPolicy | undefined
+  /** The workspace's MCP call budgets (`mcpBudgets`); no budgets until a policy says otherwise. */
+  private mcpBudgets: McpBudgetPolicy = parseMcpBudgetPolicy(undefined)
+  /**
+   * The workspace's `piiDetectors` setting, read as the LLM proxy reads it
+   * from key-context (`parseWorkspacePiiDetectors`). `none` until a policy
+   * carries one. `unreadable` when the control plane says it could not read
+   * the stored value; the interceptor applies the fail setting to that.
+   */
+  private piiDetectors: WorkspacePiiDetectors = { kind: 'none' }
   /** The first refresh `start()` kicks off, so the first tool call can wait for it. */
   private firstRefresh: Promise<void> | null = null
   private lastRefreshAttemptAt = 0
@@ -309,6 +332,16 @@ export class PolicyClient {
   /** The workspace's SSO group policy, when it has one. */
   getSsoGroupPolicy(): SsoGroupPolicy | undefined {
     return this.ssoGroupPolicy
+  }
+
+  /** The workspace's MCP call budgets; an empty list means no limits. */
+  getMcpBudgets(): McpBudgetPolicy {
+    return this.mcpBudgets
+  }
+
+  /** The workspace's PII detector actions (see the field). */
+  getPiiDetectors(): WorkspacePiiDetectors {
+    return this.piiDetectors
   }
 
   /** The workspace's fail-open choice, or `undefined` to fall back to the local setting (see the field). */
@@ -404,8 +437,13 @@ export class PolicyClient {
     }
     this.principal = parsePrincipal(source['principal'])
     this.ssoGroupPolicy = parseSsoGroupPolicy(source['ssoGroupPolicy'])
+    this.mcpBudgets = parseMcpBudgetPolicy(source['mcpBudgets'])
     const failBehavior = source['mcpProxyFailBehavior']
     this.failOpen = failBehavior === 'open' ? true : failBehavior === 'closed' ? false : undefined
+    this.piiDetectors = parseWorkspacePiiDetectors(source['piiDetectors'])
+    if (this.piiDetectors.kind === 'unreadable') {
+      log.warn({ action: 'pii_detectors_unreadable', reason: this.piiDetectors.reason }, 'Workspace PII detector actions unreadable')
+    }
   }
 
   /** Find the first matching rule for a given tool name + serialized args. */
@@ -472,7 +510,9 @@ export class PolicyClient {
             (p): p is string => typeof p === 'string',
           )
           this.absorbCuration(policy as unknown as Record<string, unknown>)
-          if (policy.mcpRegistry) this.registry = policy.mcpRegistry
+          // Re-parsed, not trusted: a daemon on an older version, or an entry it
+          // cached before a field existed, can carry a registry without one.
+          if (policy.mcpRegistry) this.registry = parseRegistry(policy.mcpRegistry) ?? this.registry
           if (!policy.fromSnapshot) this.loadedFromControlPlane = true
           log.info({ action: 'policy_refreshed_from_daemon', ruleCount: this.rules.length }, 'SOP rules refreshed from daemon')
           return

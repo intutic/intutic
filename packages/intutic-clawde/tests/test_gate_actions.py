@@ -70,6 +70,51 @@ def test_pattern_lists_match_rust(rust_name, py_value):
     )
 
 
+_VECTORS = Path(ACTIONS_RS).with_name("action_vectors.json")
+
+
+def _vectors() -> dict:
+    import json
+    return json.loads(_VECTORS.read_text(encoding="utf-8")) if _VECTORS.exists() else {"held": [], "notHeld": []}
+
+
+@pytestmark_parity
+@pytest.mark.parametrize("command,tokens", _vectors()["held"])
+def test_shared_vector_classifies_as_listed(command, tokens):
+    # The vectors every classifier shares (actions.rs, actions.ts, the hook
+    # gates' hold classifier): `git\tpush`, a line continuation or a long
+    # option between the words used to classify as nothing here.
+    assert actions.classify("bash", {"command": command}) == tokens
+
+
+@pytestmark_parity
+@pytest.mark.parametrize("command", _vectors()["notHeld"])
+def test_shared_vector_classifies_as_nothing(command):
+    assert actions.classify("bash", {"command": command}) == []
+
+
+def _adversarial():
+    v = _vectors()
+    return v.get("adversarial", [])
+
+
+@pytestmark_parity
+@pytest.mark.parametrize("unit,times", _adversarial())
+def test_adversarial_input_classifies_in_linear_time(unit, times):
+    # The proxy's regex (SQL_GAP in actions.rs) is safe in Rust's linear
+    # engine; Python's backtracking one took seconds on text an agent can be
+    # talked into writing. The phrase matcher must stay linear on these.
+    from linear_time import assert_linear_time
+
+    base = -(-times // 4)
+    commands = {1: unit * base, 4: unit * (base * 4)}
+    assert_linear_time(repr(unit), lambda scale: actions.classify("bash", {"command": commands[scale]}))
+
+
+# The commands and answers are the shared destructive-SQL vectors, run by every
+# classifier and text rule; test_destructive_sql_vectors.py runs them here.
+
+
 def test_trailing_spaces_preserved():
     """`"update "` without its space matches every occurrence of the word."""
     assert "update " in actions.DB_WRITE_PATTERNS

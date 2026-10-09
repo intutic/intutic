@@ -61,9 +61,14 @@ import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
 import {
+  encodeMcpAllowlistRecord,
+  encodeMcpRegistryRecord,
   encodeSsoGroupRecord,
   evaluateSsoGroupClearance,
+  isUnrestrictedMcpRegistry,
+  parseMcpRegistryRecord,
   parseSsoGroupPolicy,
+  type McpRegistryRecord,
   type SsoGroupPolicy,
 } from '@intutic/shared-types'
 import { toRulesLine, GATE_VERSION, RULES_COLUMNS } from '../harness/gateBody.js'
@@ -82,6 +87,29 @@ const log = createLogger('sync-policy-snapshot')
 export const DEFAULT_SNAPSHOT_DIR = path.join(os.homedir(), '.intutic', 'hooks')
 export const SNAPSHOT_JSON = 'policy-snapshot.json'
 export const SNAPSHOT_RULES = 'policy-snapshot.rules'
+
+/**
+ * The subdirectory of the snapshot directory holding the last snapshot the
+ * daemon wrote and so verified: both artifacts, byte for byte, read-only.
+ * Inside `.intutic/hooks`, which every gate refuses to touch. The settings
+ * guard compares the live snapshot with it and restores it when they differ
+ * ({@link restoreVerifiedSnapshot}), the way a policy agent keeps its last
+ * verified bundle active when a new one fails verification.
+ */
+export const VERIFIED_SNAPSHOT_DIR = 'verified'
+
+/**
+ * Whether a `.rules` text verifies: it carries a `#digest` line, and the
+ * digest of its data lines matches it — the check every gate makes. A
+ * missing digest fails, since the writer always writes one.
+ */
+export function snapshotRulesVerify(text: string): boolean {
+  const lines = text.split('\n')
+  const header = lines.find((l) => l.startsWith('#digest '))
+  if (!header) return false
+  const body = lines.filter((l) => l && !l.startsWith('#')).join('\n')
+  return createHash('sha256').update(body).digest('hex').slice(0, 32) === header.slice(8).trim()
+}
 
 /**
  * Whether the destructive tier ships as `block` or as `warn`.
@@ -200,9 +228,9 @@ export interface ResolvedPolicy {
    * this same field name off `workspaces.settings`, so this is not a new
    * name invented for the snapshot). Absent/empty means unrestricted — the
    * MCP proxy already reads it that way (`packages/mcp-proxy/src/policy.ts`),
-   * and the gate-side `#mcpservers` header this field feeds
+   * and the gate-side `@mcp_allowlist` record this field feeds
    * (`writePolicySnapshot` below) preserves the same convention: an empty
-   * list omits the header entirely rather than shipping a deny-everything one.
+   * list writes no record rather than a deny-everything one.
    */
   mcpAllowedServers: string[]
   /**
@@ -225,6 +253,14 @@ export interface ResolvedPolicy {
    * control plane named no member, which every gate reads as "groups unknown".
    */
   principal?: { memberId: string; ssoGroups: string[] } | null
+  /**
+   * The workspace's MCP server registry decisions (`mcpRegistry`): blocked,
+   * held and approved servers, disabled tools and `mcpDefaultPolicy`. Written
+   * as an `@mcp_registry` record so the hook gates apply them to every
+   * `mcp__<server>__<tool>` call, not only the calls an MCP proxy fronts.
+   * Absent or null: an older control plane, and no record is written.
+   */
+  mcpRegistry?: McpRegistryRecord | null
 }
 
 export interface PolicySnapshotOptions {
@@ -504,6 +540,7 @@ async function requestResolvedPolicy(
       // the policy `resolveSsoGroupPrivilege` enforces.
       ssoGroupPolicy: parseSsoGroupPolicy(rec.ssoGroupPolicy),
       principal: parsePrincipal(rec.principal),
+      mcpRegistry: parseMcpRegistryRecord(rec.mcpRegistry),
     }
   } catch (err) {
     log.warn({ action: 'policy_fetch_failed', err }, 'Policy resolve unreachable')
@@ -523,8 +560,8 @@ async function requestResolvedPolicy(
  * produce, so the observe-only branch was dead and a SILENT_LOG workspace
  * shipped fully-blocking snapshots.
  *
- * Extracted so `buildSnapshotRules` and `writePolicySnapshot`'s `#mcpservers`
- * header compute "is this workspace observe-only" the same way once, rather
+ * Extracted so `buildSnapshotRules` and `writePolicySnapshot`'s `@mcp_allowlist`
+ * record compute "is this workspace observe-only" the same way once, rather
  * than as two copies of the comparison that could drift.
  */
 function isSilentLogMode(policy: ResolvedPolicy): boolean {
@@ -532,11 +569,10 @@ function isSilentLogMode(policy: ResolvedPolicy): boolean {
 }
 
 /**
- * Drops MCP server names that would corrupt the comma-joined `#mcpservers`
- * `.rules` header line — a name carrying a comma would be misread as two
- * server names, and a tab or other whitespace would collide with the
- * `.rules` file's own column separator the moment anyone looked at the line
- * next to a rule row. Logged, not silently dropped: a server an operator
+ * Drops MCP server names that would corrupt the comma-joined `@mcp_allowlist`
+ * `.rules` line — a name carrying a comma would be misread as two server
+ * names, and a tab or other whitespace would collide with the `.rules`
+ * file's own column separator. Logged, not silently dropped: a server an operator
  * configured and then watched vanish from enforcement needs to know why,
  * the same discipline `validateRule` follows for a rejected SOP pattern.
  */
@@ -557,7 +593,7 @@ function sanitizeMcpServerNames(names: readonly string[]): string[] {
     if (/[\s,]/.test(name)) {
       log.warn(
         { action: 'mcp_server_name_rejected', name: raw },
-        'MCP server name contains whitespace or a comma — dropped rather than corrupting the .rules #mcpservers header',
+        'MCP server name contains whitespace or a comma — dropped rather than corrupting the .rules @mcp_allowlist record',
       )
       continue
     }
@@ -658,14 +694,31 @@ function ssoGroupPatterns(policy: ResolvedPolicy): GuardPattern[] {
   if (!groupPolicy) return []
   const groups = policy.principal ? policy.principal.ssoGroups : null
   const out: GuardPattern[] = []
-  for (const tool of new Set([...groupPolicy.requireOboFor, ...groupPolicy.highRiskTools])) {
+  // The gates stop at the first rule that refuses, and the evaluator prefers
+  // an entry naming the call exactly: so within each list, the entries that
+  // already name the harness form (`mcp__…`) go before the ones that name an
+  // MCP tool by its own name and also match it on any server.
+  const harnessFormFirst = (list: readonly string[]) => [
+    ...list.filter((t) => t.startsWith('mcp__')),
+    ...list.filter((t) => !t.startsWith('mcp__')),
+  ]
+  const entries = new Set([...harnessFormFirst(groupPolicy.requireOboFor), ...harnessFormFirst(groupPolicy.highRiskTools)])
+  const compiled = new Set<string>()
+  for (const tool of entries) {
     const decision = evaluateSsoGroupClearance(groupPolicy, tool, groups)
     if (decision.clearance === 'GRANTED' || !decision.ruleId) continue
+    // An entry another entry already refuses (`mcp__pg__x` beside an
+    // on-behalf-of `x`) decides to that entry's rule, which already matches it.
+    if (compiled.has(decision.ruleId)) continue
+    compiled.add(decision.ruleId)
     // The gates match a whitespace-collapsed, space-padded tool name, so the
-    // name is collapsed the same way and escaped to a literal.
+    // name is collapsed the same way and escaped to a literal. An entry that
+    // is an MCP tool's own name also matches the name a harness gives that
+    // tool on any server, `mcp__<server>__<tool>` (ssoGroupToolMatches).
     const name = tool.replace(/\s+/g, ' ').trim()
     if (!name) continue
-    const source = ` (${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}) `
+    const literal = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const source = name.startsWith('mcp__') ? ` (${literal}) ` : ` (${literal}|mcp__.+__${literal}) `
     try {
       assertPortableEre(source, decision.ruleId)
     } catch (err) {
@@ -748,21 +801,26 @@ export async function writePolicySnapshot(
         issuedAt: generatedAt,
       }
     : null
-  const lines = [...(ssoGroups ? [encodeSsoGroupRecord(ssoGroups)] : []), ...rules.map(toRulesLine)]
-  const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
-
-  // M3: the per-server MCP allowlist, sanitised once and reused for both
-  // artifacts so the JSON and the `.rules` header can never disagree about
-  // which names survived. Severity follows SILENT_LOG the same way the
-  // dynamic tier's rules do: certain, just not acted on.
-  //
-  // Deliberately OUTSIDE `lines`/`digest` above — the digest covers RULE lines
-  // only, matching the trust model the `#workspace` header already has (parsed
-  // and integrity-checked by workspace-id comparison, not by the digest). A
-  // `#mcpservers` header is the same kind of metadata line, not a rule, so it
-  // must not change what `lines.join('\n')` hashes to.
+  // The MCP registry record rides the same way, so an edited registry fails
+  // the digest too. A registry that refuses nothing writes no line, which
+  // keeps the snapshot of a workspace that never used the registry unchanged.
+  const mcpRegistry = policy.mcpRegistry && !isUnrestrictedMcpRegistry(policy.mcpRegistry) ? policy.mcpRegistry : null
+  // And the per-server MCP allowlist, sanitised once and reused for both
+  // artifacts so the JSON and the `.rules` record can never disagree about
+  // which names survived. Inside the digest, so a server added to it by hand
+  // fails the check. Severity follows SILENT_LOG the same way the dynamic
+  // tier's rules do: certain, just not acted on. An empty list writes no
+  // record: no record is "unrestricted", where a record with no servers
+  // would admit none.
   const mcpServers = sanitizeMcpServerNames(policy.mcpAllowedServers)
   const mcpSeverity: 'shadow' | 'block' = isSilentLogMode(policy) ? 'shadow' : 'block'
+  const lines = [
+    ...(ssoGroups ? [encodeSsoGroupRecord(ssoGroups)] : []),
+    ...(mcpRegistry ? [encodeMcpRegistryRecord(mcpRegistry)] : []),
+    ...(mcpServers.length > 0 ? [encodeMcpAllowlistRecord({ severity: mcpSeverity, servers: mcpServers })] : []),
+    ...rules.map(toRulesLine),
+  ]
+  const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
 
   await fs.mkdir(snapshotDir, { recursive: true })
 
@@ -785,16 +843,19 @@ export async function writePolicySnapshot(
       generatedAt,
       interventionMode: policy.interventionMode,
       digest,
-      // M3: sanitised, not `policy.mcpAllowedServers` verbatim — a name this
-      // module rejected for the `.rules` header must not silently survive in
+      // Sanitised, not `policy.mcpAllowedServers` verbatim — a name this
+      // module rejected for the `.rules` record must not silently survive in
       // the JSON, or the two artifacts would disagree about what is enforced.
       // Empty means unrestricted, same convention as `allowedServers` at the
       // control plane (`readMcpCurationSettings`).
       mcpAllowedServers: mcpServers,
       // The same record as the `.rules` file's `@sso_groups` line, readable.
       ...(ssoGroups ? { ssoGroups } : {}),
-      // With `sopRules`, `interventionMode` and `mcpAllowedServers`, enough to
-      // rebuild this snapshot without the control plane (`forgetSnapshotMember`).
+      // The same record as the `.rules` file's `@mcp_registry` line.
+      ...(mcpRegistry ? { mcpRegistry } : {}),
+      // With `sopRules`, `interventionMode`, `mcpAllowedServers` and
+      // `mcpRegistry`, enough to rebuild this snapshot without the control
+      // plane (`forgetSnapshotMember`).
       sqlDropStrictBlock: policy.sqlDropStrictBlock,
       /**
        * The resolve response verbatim, alongside the gate projection below.
@@ -834,26 +895,22 @@ export async function writePolicySnapshot(
   // read — only the JSON carries a timestamp, and they never open the JSON. A
   // snapshot from last year enforced identically to one written a second ago,
   // and nothing anywhere could say so.
-  // `#mcpservers <severity> <comma-joined-server-names>` — OMITTED entirely
-  // when the (sanitised) list is empty. This is the mandatory-mechanism/
-  // opt-in-effect split M3 is built on: the header-parsing and per-call
-  // allowlist check ship to every gate unconditionally, but they are a no-op
-  // until a workspace actually configures `mcpAllowedServers` — and "no
-  // header line" is how a v6 gate (and, for forward-compat, a hypothetical
-  // v5-reading-a-v6-file) tells "unrestricted" apart from "restricted to
-  // zero servers", which would otherwise block every MCP call by omission.
-  const mcpHeader = mcpServers.length > 0 ? `#mcpservers ${mcpSeverity} ${mcpServers.join(',')}\n` : ''
-
   const rulesText =
     `# Intutic policy snapshot (projection of ${SNAPSHOT_JSON}) — DO NOT EDIT.\n` +
     `# Columns: ${RULES_COLUMNS.join('\t')}\n` +
     `#digest ${digest}\n` +
     `#workspace ${policy.workspaceId}\n` +
     `#generated ${generatedAt}\n` +
-    mcpHeader +
     lines.join('\n') +
     '\n'
 
+  // The verified copy first, then the live one. The settings guard restores
+  // the copy whenever the two differ, so this order means an interrupted
+  // write ends with the new snapshot in force, never the old one.
+  const verifiedDir = path.join(snapshotDir, VERIFIED_SNAPSHOT_DIR)
+  await fs.mkdir(verifiedDir, { recursive: true, mode: 0o700 })
+  await writeAtomic(path.join(verifiedDir, SNAPSHOT_JSON), json)
+  await writeAtomic(path.join(verifiedDir, SNAPSHOT_RULES), rulesText)
   await writeAtomic(path.join(snapshotDir, SNAPSHOT_JSON), json)
   await writeAtomic(path.join(snapshotDir, SNAPSHOT_RULES), rulesText)
 
@@ -873,6 +930,45 @@ async function writeAtomic(target: string, content: string): Promise<void> {
   // `.intutic/hooks` at all.
   await fs.chmod(tmp, 0o444)
   await fs.rename(tmp, target)
+}
+
+/**
+ * Puts the last verified snapshot back when the live one differs from it.
+ *
+ * `'intact'`: the live snapshot is the verified one, or there is nothing to
+ * compare (no snapshot written yet, or a live one from before the verified
+ * copy existed that still verifies). `'restored'`: either live artifact was
+ * edited, replaced or deleted, and both are the verified copy again.
+ * `'unverifiable'`: the live `.rules` fails its digest and there is no
+ * verified copy to restore, so the caller fetches a fresh snapshot. Any
+ * difference counts, a valid-looking one included: the daemon is the only
+ * writer of these files, so an older snapshot copied back in is tampering
+ * too. Never throws.
+ */
+export async function restoreVerifiedSnapshot(
+  snapshotDir: string = DEFAULT_SNAPSHOT_DIR,
+): Promise<'intact' | 'restored' | 'unverifiable'> {
+  const read = (file: string) => fs.readFile(file, 'utf-8').catch(() => null)
+  const verifiedDir = path.join(snapshotDir, VERIFIED_SNAPSHOT_DIR)
+  const [liveRules, liveJson, keptRules, keptJson] = await Promise.all([
+    read(path.join(snapshotDir, SNAPSHOT_RULES)),
+    read(path.join(snapshotDir, SNAPSHOT_JSON)),
+    read(path.join(verifiedDir, SNAPSHOT_RULES)),
+    read(path.join(verifiedDir, SNAPSHOT_JSON)),
+  ])
+  if (keptRules === null || keptJson === null || !snapshotRulesVerify(keptRules)) {
+    return liveRules !== null && !snapshotRulesVerify(liveRules) ? 'unverifiable' : 'intact'
+  }
+  if (liveRules === keptRules && liveJson === keptJson) return 'intact'
+  try {
+    await writeAtomic(path.join(snapshotDir, SNAPSHOT_JSON), keptJson)
+    await writeAtomic(path.join(snapshotDir, SNAPSHOT_RULES), keptRules)
+  } catch (err) {
+    log.warn({ action: 'policy_snapshot_restore_failed', err }, 'Could not restore the verified policy snapshot')
+    return liveRules !== null && snapshotRulesVerify(liveRules) ? 'intact' : 'unverifiable'
+  }
+  log.warn({ action: 'policy_snapshot_restored' }, 'The policy snapshot was changed outside the sync daemon; restored the last verified copy')
+  return 'restored'
 }
 
 /**
@@ -917,7 +1013,12 @@ export async function refreshPolicySnapshot(
  */
 async function forgetSnapshotMember(dir: string, localHoldTokens: readonly string[]): Promise<void> {
   try {
-    const doc = JSON.parse(await fs.readFile(path.join(dir, SNAPSHOT_JSON), 'utf-8')) as Record<string, unknown>
+    // Rebuilt from the verified copy, not the live JSON, which no digest
+    // covers: an edit to it must not come back as a valid snapshot. A machine
+    // whose last write predates the verified copy has only the live one.
+    const verified = path.join(dir, VERIFIED_SNAPSHOT_DIR, SNAPSHOT_JSON)
+    const source = await fs.readFile(verified, 'utf-8').catch(() => fs.readFile(path.join(dir, SNAPSHOT_JSON), 'utf-8'))
+    const doc = JSON.parse(source) as Record<string, unknown>
     const record = doc.ssoGroups as { policy?: unknown; member?: unknown } | undefined
     const ssoGroupPolicy = parseSsoGroupPolicy(record?.policy)
     if (!ssoGroupPolicy || !record?.member || typeof doc.workspaceId !== 'string') return
@@ -932,6 +1033,7 @@ async function forgetSnapshotMember(dir: string, localHoldTokens: readonly strin
         sqlDropStrictBlock: doc.sqlDropStrictBlock === true,
         ssoGroupPolicy,
         principal: null,
+        mcpRegistry: parseMcpRegistryRecord(doc.mcpRegistry),
       },
       dir,
       localHoldTokens,

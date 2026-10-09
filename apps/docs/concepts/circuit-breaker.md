@@ -107,7 +107,7 @@ it has no cache dependency to degrade.
 
 ---
 
-## 3. SSO group clearance
+## 3. SSO group clearance <Badge type="warning" text="Biz Org+" />
 
 A workspace can restrict high-risk tools to members of named identity-provider groups. The
 policy is the `sso_group_policy` workspace setting. An owner or admin sets it in
@@ -130,6 +130,12 @@ Each list holds up to 500 names of 1 to 256 characters, and a list left out is e
 else is refused with a `400` naming `sso_group_policy`, and nothing is stored. `null` removes
 the policy. Every change is recorded in the workspace's settings history.
 
+**Plans.** The policy needs single sign-on, because members get their groups only through SSO
+sign-ins and SCIM provisioning. On a plan without SSO (Free and Self-serve) a policy is refused
+with a `403` (`Upgrade required — … requires a Biz Org plan or higher`), the same refusal as the
+SSO settings, and a policy stored before a downgrade is not enforced: every gate reads it as
+absent. It stays stored, so it applies again after an upgrade, and `null` still removes it.
+
 **Where a member's groups come from.** One rule, used by every gate:
 
 - **SCIM provisioning on:** the member's [SCIM group](/guide/scim#groups-and-nesting)
@@ -148,14 +154,18 @@ their sign-in groups.
 
 | Step | Condition | Clearance |
 |---|---|---|
-| 1 | The workspace has no `sso_group_policy` | `GRANTED` |
+| 1 | The workspace has no `sso_group_policy`, or its plan has no SSO | `GRANTED` |
 | 2 | The tool is on `requireOboFor` | `REQUIRES_OBO` |
 | 3 | The tool is not on `highRiskTools` | `GRANTED` |
 | 4 | The gate does not know the member's groups | `DENIED` |
 | 5 | The member holds one of `requiredGroups` | `GRANTED` |
 | 6 | Otherwise | `DENIED` |
 
-Tool and group names match exactly, including case. Every gate refuses `DENIED` and
+Tool and group names match exactly, including case, with one widening for MCP tools, which
+go by two names: an entry naming a tool as its MCP server declares it (`run_query`) also
+matches the name a harness gives that tool on any server (`mcp__postgres__run_query`). An
+entry that already names the harness form (`mcp__postgres__run_query`) matches only that
+server's tool. Every gate applies both rules alike. Every gate refuses `DENIED` and
 `REQUIRES_OBO` alike: a tool-call gate acts with the member's own credentials and has no
 on-behalf-of token to present. The refusal names the rule that decided, for example
 `[sso_group.high_risk.Bash]` or `[sso_group.require_obo.production_deploy]`. That id is
@@ -205,8 +215,8 @@ the only gate. It is the same check that withholds a tool on an SOP's `deny_tool
   are refused. A key the control plane refuses (revoked, or its member deactivated) keeps the
   policy last seen for it with the groups unknown.
 - **What is matched.** The tool name the model emitted, which is the name a harness hook sees
-  (`Bash`, `mcp__github__create_issue`). Names match exactly, as at the hook gate; the
-  case-insensitive match `deny_tools` uses does not apply. Gemini's native function-call format
+  (`Bash`, `mcp__github__create_issue`). Names match as at the hook gate, an MCP tool's own
+  name included; the case-insensitive match `deny_tools` uses does not apply. Gemini's native function-call format
   is not read by the response gate, for group rules or `deny_tools`.
 - **What the client sees.** The tool call never reaches the harness. In its place the model's
   turn carries a message naming the tool, the reason and the rule, for example
@@ -225,9 +235,10 @@ the only gate. It is the same check that withholds a tool on an SOP's `deny_tool
 
 **Propagation.** A SCIM change needs no sign-in. Every SCIM write (a group created, renamed,
 deleted or re-membered, a user provisioned or deactivated), every SCIM token issued or revoked,
-and every change to `sso_group_policy` drops the cached policy the MCP proxies read, moves the
-workspace's configuration version, and pushes a configuration update to connected sync daemons.
-A policy change also drops the hook gate's own 60-second policy cache. End to end:
+every change to `sso_group_policy`, and every plan change of a workspace that stores one, drops
+the cached policy the MCP proxies read, moves the workspace's configuration version, and pushes a
+configuration update to connected sync daemons. A policy or plan change also drops the hook
+gate's own 60-second policy cache. End to end:
 
 | Change | Hook gate | Harness and SDK gates | MCP proxy | Proxy response gate |
 |---|---|---|---|---|
@@ -235,6 +246,7 @@ A policy change also drops the hook gate's own 60-second policy cache. End to en
 | Member deactivated or deprovisioned | Key refused on the next call | Next refresh: the key is refused and the snapshot forgets the member's groups | Next policy refresh: the key is refused and the proxy forgets the member's groups | Key refused on the next request |
 | Groups changed at the identity provider, SCIM off | When the member next signs in through SSO, then next call | The sync cycle after that sign-in | The policy refresh after that sign-in | Within 30 seconds of that sign-in |
 | `sso_group_policy` changed through the settings API or the dashboard | Next call | Seconds, through the push; at most one sync cycle otherwise | Next policy refresh, at most 60 seconds | Next request: the configuration version moved, so the key's cached answer is refetched |
+| The plan changes to or from one with SSO (a purchase, a cancellation, a trial ending) | Next call | Seconds, through the push; at most one sync cycle otherwise | Next policy refresh, at most 60 seconds | Next request: the configuration version moved, so the key's cached answer is refetched |
 
 A proxy that does not read the control plane's Valkey cannot see the configuration version, so
 the response gate's answer for a key is at most 30 seconds old there for every change.
@@ -266,6 +278,8 @@ pub struct PolicyConfig {
 | `fail_closed: true` (default) | If the policy check times out or fails → block the request |
 | `fail_closed: false` | If the policy check times out or fails → allow the request (fail-open) |
 | `timeout_ms: 3000` | Maximum time to wait for the control plane policy check response |
+
+A custom WASM or Rego rule that reaches no verdict (deadline, budget, an error, or a result that is not a verdict) is outside this setting: it blocks the request with `GOVERNANCE_UNAVAILABLE` either way, because an agent can cause it by padding its input. See [When a rule reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
 
 ::: warning Fail-closed is the safe default
 In production, always use `fail_closed: true`. Fail-open mode should only be used during initial setup or development when the control plane is not yet deployed.

@@ -1,19 +1,45 @@
 /**
- * piHooks.ts — Pi (earendil-works/pi) coding agent governance hook injection.
+ * piHooks.ts — Pi (earendil-works/pi) extension gate and provider routing.
  *
- * Pi uses:
- * - `~/.pi/hooks.json` for PreToolUse hook matchers (stdin JSON, exit 2 = block)
- * - `~/.pi/models.json` for per-provider base URL routing
+ * Pi has no hook file. Its hooks are extensions: TypeScript or JavaScript
+ * modules it loads into its own process from `~/.pi/agent/extensions/` (and a
+ * trusted project's `.pi/extensions/`), each a default-exported factory that
+ * receives the `ExtensionAPI`. Earlier versions of this writer registered a
+ * Claude-Code-style `PreToolUse` hook in `~/.pi/hooks.json`, a file Pi never
+ * reads, and pointed providers at the proxy in `~/.pi/models.json`, where Pi
+ * does not look either: both live in the agent directory, `~/.pi/agent`.
+ * Sources, at earendil-works/pi 6fb2e7815167e6b19006fc526d1a5d0f5f998787:
  *
- * This module:
- * 1. Writes/merges `~/.pi/hooks.json` with intutic-governance hook entries.
- * 2. Writes/merges `~/.pi/models.json` to redirect LLM providers via proxyUrl.
- * 3. Writes `~/.intutic/hooks/pi-check.sh` — dual-path bash governance hook.
- * 4. Writes `.intutic/env/pi.env` — env snippet for IDE/shell integration.
+ * - discovery: `packages/coding-agent/src/core/extensions/loader.ts`
+ *   (`discoverExtensionsInDir`: direct `*.ts`/`*.js` files, or `<dir>/index.*`;
+ *   loaded with jiti, `{ default: true }`, and the default export must be a
+ *   function), `packages/coding-agent/docs/configuration.md` (the agent
+ *   directory and `models.json`);
+ * - the hook: `pi.on("tool_call", handler)`, with
+ *   `event = { type: "tool_call", toolName, toolCallId, input }`, refused by
+ *   returning `{ block: true, reason }` (`core/extensions/types.ts`,
+ *   `ToolCallEventResult`). The agent loop turns the reason into the error
+ *   result the model reads (`packages/agent/src/agent-loop.ts`).
+ * - failure: "A `tool_call` handler failure blocks the tool as a fail-safe"
+ *   (`docs/extensions.md`); `ExtensionRunner.emitToolCall` awaits each
+ *   handler with no timeout (`core/extensions/runner.ts`), so a handler that
+ *   hangs hangs Pi. The gate body therefore runs under its own deadline
+ *   (`gateDeadlineMs('pi')`), from the start of each call, and refuses past it.
  *
- * WS-C3 — Pi harness (Phase 3 cross-harness defence)
- * LLD #14 — Phase 3 cross-harness defence (Gap 3)
- * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
+ * The extension embeds the shared `emitJsGate` body (`'throw'` contract) and
+ * returns Pi's block result for the refusal it throws; any other fault is a
+ * block too. Pi names MCP tools `mcp__<server>__<tool>` already
+ * (`docs/mcp.md`), and calls a tool makes through `ctx.executeTool()` pass
+ * through `tool_call` handlers like the model's own (`docs/extensions.md`).
+ *
+ * The file is ESM with `createRequire`, the shape the OpenCode plugin uses:
+ * Node (Pi needs 22.19 or later) detects the module syntax, and jiti
+ * transforms the file where native loading fails and in Pi's compiled binary
+ * (`core/extensions/jiti-loader.ts`, `loader.ts`).
+ *
+ * Only the default agent directory is written. A user who moves it with
+ * `PI_CODING_AGENT_DIR` copies the extension there (the Pi integration page
+ * says so).
  *
  * @module
  */
@@ -22,40 +48,22 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
-import { keepOriginal } from '../disconnect/originals.js'
+import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { emitJsGate, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-pi-hooks')
 
-/** Path to the Pi hooks config. */
-const PI_HOOKS_CONFIG = path.join(os.homedir(), '.pi', 'hooks.json')
+/** Pi's default agent directory, relative to the home directory. */
+export const PI_AGENT_DIR = path.join('.pi', 'agent')
 
-/** Path to the Pi models config. */
-const PI_MODELS_CONFIG = path.join(os.homedir(), '.pi', 'models.json')
+/** The extension file, relative to the home directory. */
+export const PI_EXTENSION_FILE = path.join(PI_AGENT_DIR, 'extensions', 'intutic-governance.js')
 
-/** Governance-sensitive paths that the hook gate protects. */
-// ─── Pi hook entry types ──────────────────────────────────────────────────────
-
-interface PiHookCommand {
-  type: 'command'
-  command: string
-}
-
-interface PiHookMatcher {
-  matcher: string
-  hooks: PiHookCommand[]
-}
-
-interface PiHooksConfig {
-  hooks?: {
-    PreToolUse?: PiHookMatcher[]
-    [key: string]: unknown
-  }
-  [key: string]: unknown
-}
+/** The first line of the extension's header, which disconnect recognises it by. */
+export const PI_EXTENSION_MARKER = 'Intutic Pi governance extension.'
 
 interface PiProvider {
   baseUrl?: string
@@ -67,131 +75,140 @@ interface PiModelsConfig {
   [key: string]: unknown
 }
 
-// ─── Bash hook script template ────────────────────────────────────────────────
+// ─── The extension ───────────────────────────────────────────────────────────
 
-function buildPiCheckScript(
-  proxyUrl: string,
-  workspaceRoot: string,
-  workspaceId: string,
-): string {
+export function buildPiExtension(proxyUrl: string, workspaceRoot: string, workspaceId: string): string {
   const hookEventsLog = path.join(workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
-  const runtimeEnv = path.join(os.homedir(), '.intutic', 'env', 'runtime.env')
-  return `#!/usr/bin/env bash
-# Intutic Pi (earendil-works/pi) PreToolUse governance gate.
-# Auto-generated by intutic sync-daemon. DO NOT EDIT.
-# Proxy: ${proxyUrl}
-# Generated: ${newIso()}
-# Workspace: ${workspaceId}
-set -euo pipefail
-${SHELL_FAIL_CLOSED}
-# Source runtime credentials (never embedded in this file)
-if [ -f "${runtimeEnv}" ]; then
-  # shellcheck disable=SC1090
-  source "${runtimeEnv}"
-fi
-
-INTUTIC_HOST="\${INTUTIC_HOST:-https://api.intutic.ai}"
-INTUTIC_API_KEY="\${INTUTIC_API_KEY:-}"
-INTUTIC_WORKSPACE_ID="\${INTUTIC_WORKSPACE_ID:-${workspaceId}}"
-
-INPUT="$(cat)"
-${SHELL_EXTRACT}
-
-HOOK_EVENTS_LOG="${hookEventsLog}"
-
-log_event() {
-  local verdict="$1" tool="$2" reason="$3"
-  # \`tool\`, \`reason\` and \`SESSION_ID\` carry agent-controlled text — the tool
-  # name, the target path quoted into the block reason, and a field lifted
-  # straight out of the hook's stdin — and all three are spliced into the JSON
-  # string below. Escape first: one unescaped quote yields a line JSON.parse
-  # rejects, and drainHookEvents drops malformed lines then wipes the log on a
-  # successful drain, so the record of a block is destroyed rather than delayed.
-  # A crafted path could otherwise close the string and forge fields.
-  tool="\${tool//\\\\/\\\\\\\\}";     tool="\${tool//\\"/\\\\\\"}"
-  reason="\${reason//\\\\/\\\\\\\\}"; reason="\${reason//\\"/\\\\\\"}"
-  # Every C0 control character, not just newline and carriage return. JSON
-  # forbids all of U+0000-U+001F unescaped, so a plain TAB in a filename — no
-  # adversary required — was still enough to produce a line JSON.parse rejects.
-  # (NUL cannot appear in a bash variable, so the range starts at \\x01.)
-  tool="\${tool//[\$'\\x01'-\$'\\x1f']/ }"; reason="\${reason//[\$'\\x01'-\$'\\x1f']/ }"
-  # The workspace id is spliced into the same JSON string. It comes from
-  # runtime.env on disk rather than from the agent, so it is lower risk — but a
-  # value with a quote in it breaks every audit line the same way, and "lower
-  # risk" is not "cannot happen" for a file the operator edits by hand.
-  local ws="\${INTUTIC_WORKSPACE_ID}"
-  ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[\$'\\x01'-\$'\\x1f']/ }"
-  local sid="\$SESSION_ID"
-  sid="\${sid//\\\\/\\\\\\\\}"; sid="\${sid//\\"/\\\\\\"}"
-  sid="\${sid//\$'\\n'/ }";     sid="\${sid//\$'\\r'/ }"
-  local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  # incidentId = sha1(timestamp + toolName + workspaceId).slice(0,16)
-  local incident_id; incident_id="$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo "$(date +%s)")"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"pi\\",\\"incidentId\\":\\"\${incident_id}\\",\\"timestamp\\":\\"\${ts}\\"\${sid:+,\\"sessionId\\":\\"\${sid}\\"}}"
-  # Path B: reliable file append (sync-daemon drains on FSEvents change)
-  printf '%s\\n' "\$entry" >> "\$HOOK_EVENTS_LOG" 2>/dev/null || true
-  # Path A: fire-and-forget HTTP POST (near-real-time dashboard, non-blocking)
-  if [ -n "\$INTUTIC_API_KEY" ]; then
-    curl -s -o /dev/null --max-time 3 -X POST \\
-      -H "Content-Type: application/json" \\
-      -H "Authorization: Bearer \$INTUTIC_API_KEY" \\
-      -d "{\\"events\\":[\$entry]}" \\
-      "\${INTUTIC_HOST}/api/v1/hook-events" & disown 2>/dev/null || true
-  fi
-}
-
-${emitShellGate({ harness: "pi" })}
-log_event "tool_allowed" "$TOOL_NAME" ""
-exit 0
-`
-}
-
-// ─── Pi hooks.json merge ──────────────────────────────────────────────────────
-
-/**
- * Build the 4 canonical Pi PreToolUse hook matchers pointing at the given
- * hook script path. The wildcard `.*` matcher catches all tools not matched
- * by the more specific matchers above it.
+  return `/**
+ * ${PI_EXTENSION_MARKER}
+ * Auto-generated by intutic sync-daemon. DO NOT EDIT.
+ * Proxy: ${proxyUrl}
+ * Generated: ${newIso()}
+ *
+ * A tool_call handler Pi loads from its extensions directory. Refuses a tool
+ * call by returning { block: true, reason }. See
+ * services/sync-daemon/src/harness/piHooks.ts.
  */
-function buildPiHookMatchers(hookScriptPath: string): PiHookMatcher[] {
-  return [
-    { matcher: 'Bash', hooks: [{ type: 'command', command: hookScriptPath }] },
-    { matcher: 'Edit', hooks: [{ type: 'command', command: hookScriptPath }] },
-    { matcher: 'Write', hooks: [{ type: 'command', command: hookScriptPath }] },
-    { matcher: '.*', hooks: [{ type: 'command', command: hookScriptPath }] },
-  ]
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+const crypto = require('crypto');
+const https = require('https');
+
+// Runtime credentials, read when Pi loads the extension.
+const _runtimeEnvPath = path.join(os.homedir(), '.intutic', 'env', 'runtime.env');
+let _intuticHost = 'https://api.intutic.ai', _intuticKey = '', _intuticWsId = ${JSON.stringify(workspaceId)};
+try {
+  fs.readFileSync(_runtimeEnvPath, 'utf-8').split('\\n').forEach(line => {
+    const eq = line.indexOf('='); if (eq < 0) return;
+    const k = line.slice(0, eq).trim(), v = line.slice(eq + 1).trim();
+    if (k === 'INTUTIC_HOST' && v) _intuticHost = v;
+    if (k === 'INTUTIC_API_KEY' && v) _intuticKey = v;
+    if (k === 'INTUTIC_WORKSPACE_ID' && v) _intuticWsId = v;
+  });
+} catch {}
+
+${emitJsGate({ harness: 'pi', contract: 'throw', reviewRequestFile: path.join(workspaceRoot, '.intutic', 'events', REVIEW_REQUESTS_BASENAME) })}
+
+let _intuticSessionId = '';
+function logEvent(verdict, toolName, reason) {
+  try {
+    const ts = new Date().toISOString();
+    const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
+    const entry = JSON.stringify({
+      event: verdict,
+      toolName, reason: reason || '',
+      workspaceId: _intuticWsId,
+      harnessType: 'pi',
+      timestamp: ts,
+      incidentId,
+      eventId,
+      ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
+    }) + '\\n';
+    const logPath = ${JSON.stringify(hookEventsLog)};
+    try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); } catch {}
+    fs.appendFileSync(logPath, entry, { flag: 'a' });
+    if (_intuticKey) {
+      try {
+        const body = JSON.stringify({ events: [JSON.parse(entry)] });
+        const urlObj = new URL('/api/v1/hook-events', _intuticHost);
+        const isHttps = urlObj.protocol === 'https:';
+        const mod = isHttps ? https : require('http');
+        const req = mod.request({ hostname: urlObj.hostname, port: urlObj.port || (isHttps ? 443 : 80), path: urlObj.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), 'Authorization': 'Bearer ' + _intuticKey } });
+        req.on('error', () => { /* fire-and-forget */ });
+        req.write(body); req.end();
+      } catch { /* never crash the hook */ }
+    }
+  } catch { /* never crash the hook */ }
 }
 
 /**
- * Merge Pi hooks.json — upsert intutic-governance entries under
- * `hooks.PreToolUse`. Existing entries with our command path are filtered out
- * then re-added so there are no duplicates.
+ * One tool call. Returns to allow; throws '[Intutic Governance] …' to refuse.
+ * Input that is not an object is refused outright: the gate reads paths and
+ * commands out of it, and a shape it cannot read is not one it can allow.
  */
-function mergePiHooks(existing: PiHooksConfig, hookScriptPath: string): PiHooksConfig {
-  const preToolUse = existing.hooks?.PreToolUse ?? []
+function intuticEvaluate(event, ctx) {
+  _intuticSessionId = '';
+  try { _intuticSessionId = String(ctx.sessionManager.getSessionId() || ''); } catch (e) {}
+  const tool = String((event && event.toolName) || 'tool');
+  const input = event && event.input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    const reason = '[Intutic Governance] BLOCKED: tool "' + tool + '" was called with input the gate cannot read (' +
+      (input === null ? 'null' : typeof input) + '); refusing rather than allowing a call it cannot evaluate.';
+    try { logEvent('tool_blocked', tool, reason); } catch (e) {}
+    throw new Error(reason);
+  }
+  const target = input.path || input.file_path || input.filePath || input.target || '';
+  const command = input.command || input.cmd || input.script || '';
+  intuticGate(tool, target, command, logEvent, _intuticWsId, input, _intuticSessionId);
+  logEvent('tool_allowed', tool, '');
+}
 
-  // Filter out any existing entries that reference our hook script
-  const filtered = preToolUse.filter(
-    (m) => !m.hooks.some((h) => h.command === hookScriptPath),
-  )
-
-  return {
-    ...existing,
-    hooks: {
-      ...(existing.hooks ?? {}),
-      PreToolUse: [...filtered, ...buildPiHookMatchers(hookScriptPath)],
-    },
+/**
+ * Fail closed: a fault inside the gate is a refusal, never an allow. The gate
+ * body reports a refusal on stderr for the hook processes; inside Pi that
+ * line would land in the middle of the terminal UI, and the reason reaches
+ * the user in the tool result anyway, so stderr is muted for the call. The
+ * evaluation is synchronous, so nothing else logs in between.
+ */
+function toolCall(event, ctx) {
+  const consoleError = console.error;
+  console.error = () => {};
+  try {
+    intuticEvaluate(event, ctx);
+    return undefined;
+  } catch (err) {
+    let reason = String((err && err.message) || err);
+    if (reason.indexOf('[Intutic Governance]') !== 0) {
+      reason = '[Intutic Governance] BLOCKED: gate fault (failing closed): ' + reason;
+      try { logEvent('tool_blocked', String((event && event.toolName) || 'unknown'), reason); } catch (e) {}
+    }
+    return { block: true, reason };
+  } finally {
+    console.error = consoleError;
   }
 }
 
-// ─── Pi models.json merge ─────────────────────────────────────────────────────
+export default function intuticGovernance(pi) {
+  pi.on('tool_call', toolCall);
+}
+`
+}
+
+// ─── <agent-dir>/models.json ─────────────────────────────────────────────────
 
 /**
  * Merge Pi models.json — point the anthropic and openai providers at the
  * proxy, each with the base URL its SDK expects (the Anthropic SDK appends
  * `/v1/messages`, the OpenAI one `/chat/completions`). Google is left alone:
  * the proxy does not serve the Gemini API, so routing it there would break it.
- * Every other provider and key is kept.
+ * Every other provider and key is kept. A provider entry may carry `baseUrl`
+ * alone (`ProviderConfigSchema` in `packages/coding-agent/src/core/model-config.ts`).
  */
 export function mergePiModels(existing: PiModelsConfig, proxyUrl: string): PiModelsConfig {
   const providers = existing.providers ?? {}
@@ -217,11 +234,12 @@ export function mergePiModels(existing: PiModelsConfig, proxyUrl: string): PiMod
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
- * Write the Pi governance hook script, merge hooks.json and models.json,
- * and write the env snippet.
+ * Write the Pi governance extension into `~/.pi/agent/extensions/` and merge
+ * the proxy routing into `~/.pi/agent/models.json`.
  *
- * Safe to call repeatedly — uses atomic rename so partial writes never
- * leave a corrupt state.
+ * Safe to call repeatedly: atomic renames and a fixed file name, so repeated
+ * syncs replace rather than stack. Pi discovers the extension by scanning the
+ * directory; nothing registers it.
  *
  * @param workspaceRoot - Absolute workspace root path.
  * @param proxyUrl      - Intutic proxy URL for LLM provider routing.
@@ -232,82 +250,22 @@ export async function writePiHooks(
   proxyUrl: string,
   workspaceId = '',
 ): Promise<void> {
-  // ── 1. Ensure directories ──────────────────────────────────────────────────
+  await fs.mkdir(path.join(workspaceRoot, '.intutic', 'events'), { recursive: true })
 
-  const globalHookDir = path.join(os.homedir(), '.intutic', 'hooks')
-  const hookEventsDir = path.join(workspaceRoot, '.intutic', 'events')
-  const envDir = path.join(workspaceRoot, '.intutic', 'env')
-  const piDir = path.join(os.homedir(), '.pi')
-
-  await keepOriginal(PI_HOOKS_CONFIG, workspaceRoot)
-  await keepOriginal(PI_MODELS_CONFIG, workspaceRoot)
-  await Promise.all([
-    fs.mkdir(globalHookDir, { recursive: true }),
-    fs.mkdir(hookEventsDir, { recursive: true }),
-    fs.mkdir(envDir, { recursive: true }),
-    fs.mkdir(piDir, { recursive: true }),
-  ])
-
-  // ── 2. Write bash hook script ──────────────────────────────────────────────
-
-  const hookScriptPath = path.join(globalHookDir, 'pi-check.sh')
-  const tmpScript = hookScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, buildPiCheckScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
-
-  log.info({ action: 'pi_hook_script_written', path: hookScriptPath }, 'Pi hook script written')
-
-  // ── 3. Write/merge ~/.pi/hooks.json ───────────────────────────────────────
+  const extensionPath = path.join(os.homedir(), PI_EXTENSION_FILE)
+  await writeOwnedFile(extensionPath, workspaceRoot, buildPiExtension(proxyUrl, workspaceRoot, workspaceId))
+  log.info({ action: 'pi_extension_written', path: extensionPath }, 'Pi governance extension written')
 
   // A file that is not a plain JSON object is left untouched (and reported)
   // rather than replaced with only the Intutic entries.
-  const existingHooks = await readJsonObjectForMerge(PI_HOOKS_CONFIG) as PiHooksConfig | null
-  if (existingHooks !== null) {
-    const mergedHooks = mergePiHooks(existingHooks, hookScriptPath)
-    const tmpHooks = PI_HOOKS_CONFIG + '.intutic-tmp'
-    await fs.writeFile(tmpHooks, JSON.stringify(mergedHooks, null, 2) + '\n', 'utf-8')
-    await fs.rename(tmpHooks, PI_HOOKS_CONFIG)
-  }
-
-  log.info(
-    { action: 'pi_hooks_written', path: PI_HOOKS_CONFIG },
-    'Pi hooks.json written',
-  )
-
-  // ── 4. Write/merge ~/.pi/models.json ──────────────────────────────────────
-
-  const existingModels = await readJsonObjectForMerge(PI_MODELS_CONFIG) as PiModelsConfig | null
+  const modelsPath = path.join(os.homedir(), PI_AGENT_DIR, 'models.json')
+  const existingModels = await readJsonObjectForMerge(modelsPath) as PiModelsConfig | null
   if (existingModels !== null) {
-    const mergedModels = mergePiModels(existingModels, proxyUrl)
-    const tmpModels = PI_MODELS_CONFIG + '.intutic-tmp'
-    await fs.writeFile(tmpModels, JSON.stringify(mergedModels, null, 2) + '\n', 'utf-8')
-    await fs.rename(tmpModels, PI_MODELS_CONFIG)
+    await keepOriginal(modelsPath, workspaceRoot)
+    await fs.mkdir(path.dirname(modelsPath), { recursive: true })
+    const tmp = modelsPath + '.intutic-tmp'
+    await fs.writeFile(tmp, JSON.stringify(mergePiModels(existingModels, proxyUrl), null, 2) + '\n', 'utf-8')
+    await fs.rename(tmp, modelsPath)
+    log.info({ action: 'pi_models_written', path: modelsPath }, 'Pi models.json written')
   }
-
-  log.info(
-    { action: 'pi_models_written', path: PI_MODELS_CONFIG },
-    'Pi models.json written',
-  )
-
-  // ── 5. Write env snippet ───────────────────────────────────────────────────
-
-  const envSnippet = [
-    `# Intutic pi governance env`,
-    `INTUTIC_PI_HOOK=~/.intutic/hooks/pi-check.sh`,
-    `INTUTIC_PI_HOOKS_CONFIG=~/.pi/hooks.json`,
-    `INTUTIC_PI_MODELS_CONFIG=~/.pi/models.json`,
-    `OPENAI_BASE_URL=${proxyUrl}`,
-    `ANTHROPIC_BASE_URL=${proxyUrl}`,
-  ].join('\n') + '\n'
-
-  const envFilePath = path.join(envDir, 'pi.env')
-  const tmpEnv = envFilePath + '.intutic-tmp'
-  await fs.writeFile(tmpEnv, envSnippet, 'utf-8')
-  await fs.rename(tmpEnv, envFilePath)
-
-  log.info(
-    { action: 'pi_env_written', path: envFilePath },
-    'Pi env snippet written',
-  )
 }

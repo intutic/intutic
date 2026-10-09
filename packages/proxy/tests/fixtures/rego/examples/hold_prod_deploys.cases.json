@@ -1,0 +1,7 @@
+[
+  { "name": "helm upgrade to prod", "input": { "tool": "Bash", "args": { "command": "helm upgrade api ./chart -n prod" } }, "expect": "hold" },
+  { "name": "kubectl against a prod context", "input": { "tool": "Bash", "args": { "command": "kubectl apply -f k8s/ --context=prod-eu" } }, "expect": "hold" },
+  { "name": "terraform apply to prod", "input": { "tool": "Bash", "args": { "command": "terraform apply -var env=prod" } }, "expect": "hold" },
+  { "name": "helm upgrade to staging", "input": { "tool": "Bash", "args": { "command": "helm upgrade api ./chart -n staging" } }, "expect": "allow" },
+  { "name": "terraform plan", "input": { "tool": "Bash", "args": { "command": "terraform plan -var env=prod" } }, "expect": "allow" }
+]

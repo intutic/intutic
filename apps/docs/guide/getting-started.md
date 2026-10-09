@@ -153,8 +153,8 @@ files; `intutic connect` (Step 4) writes those.
 
 Detecting AI harnesses...
 
-  ✔ cursor       → .cursorrules
-  ✔ claude-code  → CLAUDE.md
+  ✔ cursor       → .cursor/rules/intutic-governance.mdc
+  ✔ claude-code  → .claude/rules/intutic-governance.md
   ○ windsurf     (not detected)
   ○ aider        (not detected)
   ...

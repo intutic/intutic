@@ -7,6 +7,8 @@ interface Reply {
   status: number
   body: unknown
   headers?: Record<string, string>
+  /** Sent as is instead of `body`, for an event stream. */
+  raw?: string
 }
 
 interface Received {
@@ -39,7 +41,7 @@ describe('ClawdeClient', () => {
           // The last reply repeats, so "always 503" is one entry.
           const reply = replies.length > 1 ? replies.shift()! : replies[0]
           res.writeHead(reply.status, { 'Content-Type': 'application/json', ...reply.headers })
-          res.end(JSON.stringify(reply.body))
+          res.end(reply.raw ?? JSON.stringify(reply.body))
         })
       })
       server.listen(0, '127.0.0.1', () => {
@@ -85,6 +87,7 @@ describe('ClawdeClient', () => {
     [403, 'LOOP_RUN_TERMINATED', 'kill'],
     [403, 'LOOP_RUN_PENDING_REVIEW', 'hold'],
     [409, 'policy_reask', 'reask'],
+    [403, 'GOVERNANCE_UNAVAILABLE', 'kill'],
     [429, 'BUDGET_EXCEEDED', 'kill'],
     [429, 'OVERAGE_HARD_CAP_EXCEEDED', 'kill'],
     [402, 'COST_GATE_EXCEEDED', 'kill'],
@@ -124,6 +127,51 @@ describe('ClawdeClient', () => {
     expect(err).toMatchObject({ verdict: 'kill', code: 'COST_GATE_EXCEEDED', status: 200, message: explanation })
     expect(events).toEqual([{ verdict: 'kill', code: 'COST_GATE_EXCEEDED', status: 200, message: explanation }])
     expect(received).toHaveLength(1)
+  })
+
+  // The proxy's response gate withholds a tool call the model made and puts
+  // the reason in its place. That 200 used to come back as `allow`.
+  it.each([
+    ['TOOL_DENIED', 'deny_tools.Bash'],
+    ['SSO_GROUP', 'sso_group.high_risk.Bash'],
+    ['SQL_GUARD', 'sql_guard.sql_allow_dsns'],
+    ['RESPONSE_UNPARSEABLE', 'response_gate.fail_closed'],
+    ['OUTPUT_DLP', 'dlp.aws_access_key'],
+  ])('throws a withheld answer named %s with its rule id', async (code, ruleId) => {
+    const reason = `[Intutic] Blocked: ${code}`
+    replies = [{
+      status: 200,
+      headers: { 'x-intutic-refusal': code, 'x-intutic-refusal-rule': ruleId },
+      body: { ...completion, choices: [{ index: 0, message: { role: 'assistant', content: reason }, finish_reason: 'stop' }] },
+    }]
+    const c = client()
+    const events: any[] = []
+    c.on('kill', (event) => { events.push(event) })
+
+    const err = await ask(c).catch((e) => e)
+
+    expect(err).toBeInstanceOf(ClawdeBlockedError)
+    expect(err).toMatchObject({ verdict: 'kill', code, status: 200, message: reason, ruleId })
+    expect(events).toEqual([{ verdict: 'kill', code, status: 200, message: reason, ruleId }])
+    expect(received).toHaveLength(1)
+  })
+
+  it('throws a refusal a stream names in its marker line, not a connection error', async () => {
+    const reason = '[Intutic] Blocked tool call: Bash.'
+    replies = [{
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+      body: null,
+      raw:
+        'data: {"choices":[{"index":0,"delta":{"content":"Let me look."}}]}\n\n' +
+        `: intutic-refusal ${JSON.stringify({ code: 'TOOL_DENIED', rule: 'deny_tools.Bash', message: reason })}\n\n` +
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: reason } }] })}\n\ndata: [DONE]\n\n`,
+    }]
+
+    const err = await client().chat({ model: 'gpt-4o', stream: true, messages: [{ role: 'user', content: 'Hello' }] }).catch((e) => e)
+
+    expect(err).toBeInstanceOf(ClawdeBlockedError)
+    expect(err).toMatchObject({ verdict: 'kill', code: 'TOOL_DENIED', status: 200, message: reason, ruleId: 'deny_tools.Bash' })
   })
 
   it('retries a 5xx and returns the answer that follows', async () => {

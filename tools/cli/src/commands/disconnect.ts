@@ -8,6 +8,10 @@
  * started, the gate caches and, unless `--keep-login`, the stored
  * credentials.
  *
+ * A real run tells the control plane before it removes the credentials
+ * (`reportDisconnect`), so the silent-gate check, the devices list and the AI
+ * inventory treat the machine as disconnected rather than broken.
+ *
  * Everything is planned before anything changes, so `--dry-run` prints
  * exactly what a real run does. Running connect would write it all straight
  * back, so a real run stops the services first and refuses while another
@@ -25,10 +29,10 @@ import { DisconnectPlan, planDisconnect, HARNESS_REVERSERS } from '@intutic/sync
 import { HarnessType } from '@intutic/shared-types'
 import type { IntuticConfig } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
+import { reportDisconnect } from '../lib/deviceReport.js'
 import { clearCredentials, loadConfig, saveConfig } from '../config/store.js'
 import { getCredentialsPath, getIntuticDir } from '../config/paths.js'
 import { getServicePaths, uninstallDaemon, uninstallMcpDaemon, uninstallProxyService, type ServiceTarget } from './install-daemon.js'
-import { planN8nDisconnect } from '../harness/n8n.js'
 
 export interface DisconnectOptions {
   /** One harness id; every harness when omitted. */
@@ -214,7 +218,6 @@ export async function runDisconnect(opts: DisconnectOptions): Promise<void> {
     harnesses: full ? undefined : [opts.harness!],
     remaining: full ? [] : (config?.harnesses ?? []).filter((h) => h !== opts.harness),
   })
-  if (config?.harnesses.includes('n8n' as HarnessType) && (full || opts.harness === 'n8n')) await planN8nDisconnect(files)
 
   const machine = new DisconnectPlan()
   if (full) {
@@ -247,6 +250,17 @@ export async function runDisconnect(opts: DisconnectOptions): Promise<void> {
     return
   }
   await files.apply()
+  // Before the credentials go: the control plane stops expecting this
+  // machine's gates, and does not alert on it going quiet.
+  const reported = await reportDisconnect({
+    scope: full ? 'machine' : 'harness',
+    harnesses: full ? (config?.harnesses ?? []) : [opts.harness!],
+  })
+  if (reported.reported) {
+    log.info('Told the control plane, so it no longer expects events from this machine.')
+  } else {
+    log.warn(`Could not tell the control plane (${reported.reason}). It may report this machine's gates as silent.`)
+  }
   await machine.apply()
   log.success(
     full

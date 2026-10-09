@@ -125,6 +125,110 @@ re-confirms or retires it, and enforcement never changes on its own in either
 direction. The product also never writes an edit back to a page while a live
 guardrail cites it.
 
+## Authoring guardrails directly <Badge type="tip" text="Cloud" />
+
+Not every rule has a sentence behind it. An owner or admin can write a
+guardrail directly, as code, in the same closed grammar a model is held to.
+An authored guardrail is a first-class guardrail: it is projected into the
+same enforcer as an extracted one, moves through the same review, and carries
+an **Authored** chip on the Review tab.
+
+**The same IR, the same checks.** The rule is a Guardrail IR object, the
+`kind` and its fields (`tools`, `argContains`, `first` and `then`, `limit`,
+`models`, `hosts` and so on), exactly as extraction produces it. The server
+runs the validator an extracted clause passes: the grammar, whether the tools
+are ones a harness in the workspace has called (or known harness tools, before
+anything has been observed), the render round trip, the catch-all and
+portability checks on a hook rule, the reserved-phrase check on the block
+message, and the credential check over everything that ships. Only the four
+checks that compare a model's output with a passage it was shown do not run,
+because an authored guardrail cites no passage: quote verbatim, tokens in the
+passage, roles in the passage and the document's injection flag. An IR one
+path refuses, the other refuses with the same check and the same words. The
+kind `none` is refused: an authored guardrail must enforce something.
+
+**What stands where the citation stood.** An authored guardrail has a name
+(one line, at most 80 characters) and an optional description (at most 480).
+The description takes the quote's place: a hook rule's block message is
+`<title> — policy: "<description>"`, and a front-matter guardrail is served
+titled by its name with the description as its body. Without a description,
+the name stands there. A WASM guardrail's rule candidate records the authored
+guardrail, not a citation, as its evidence.
+
+**The same lifecycle, with no bypass.** An authored guardrail starts
+**proposed**, the state an extracted one starts in: it enforces and measures
+nothing until an owner or admin approves it for shadow. Promotion is the same
+decision under the same rule: 200 shadow evaluations and the rest of the
+promotion rule above, taken by a named member through the review card,
+`intutic guardrails promote` or the promote route. Writing a guardrail never
+approves or promotes it, whoever writes it, and there is no "promote when
+ready" request: a promotion is a member's decision at the moment it takes
+effect, and some promotions need an acknowledgement only that member can give
+(a rule that never fired, an egress allow list). The one difference is that a
+promotion does not check a citation, because there is none to go stale.
+
+**Editing creates a version.** A name or description edit happens in place:
+the rule is the same, so its status and evidence stand, and the edit is an
+`UPDATED` event on its history. A change to the rule itself creates the next
+version under a new id, proposed, with no evidence, and retires the version it
+replaces in the same step; if that version was an enforcing allowed-models or
+egress guardrail, its setting write is undone as a retirement undoes it.
+A WASM version's rule candidate is retired with it, and the new version is
+handed a candidate of its own only when it is approved for shadow. Shadow
+evidence belongs to the rule that earned it, the way an edited SOP becomes a
+new draft. The retired version keeps its evidence and history and
+names its successor; the new one names the version it replaced.
+
+**Extracted guardrails are read-only here.** A guardrail extracted from a
+document changes when the document changes; the edit and delete routes refuse
+it. Its review actions are unchanged.
+
+**Deleting retires.** Deleting an authored guardrail retires it from any state
+but retired, undoes what an enforcing settings-class guardrail wrote, and
+retires a WASM guardrail's rule candidate. Its
+history stays readable.
+
+Authoring needs no paid plan. Extraction is the one step a plan gates,
+because it is the only one that spends model budget; writing a guardrail, and
+approving, promoting, rejecting or retiring it, work on every plan through the
+CLI, Terraform and the API. The dashboard's form is on the Policy Guardrails
+page, which every plan but Free includes.
+
+Four ways in, one API:
+
+- **Dashboard.** **Author a guardrail** on the Review tab takes a name, a
+  description and the rule as JSON; choosing a kind loads an example. **Edit**
+  on an authored card says before you save when a change creates a new
+  version.
+- **CLI.** `intutic guardrails create`, `update` and `delete`, from a YAML or
+  JSON file or from flags:
+
+  ```yaml
+  # guardrail.yaml
+  name: Reviewed terraform apply
+  description: Production applies need a reviewed plan.
+  ir:
+    kind: hook_rule
+    title: Reviewed plan before terraform apply
+    tools: [Bash]
+    argContains: [terraform apply]
+  ```
+
+  ```bash
+  intutic guardrails create --file guardrail.yaml
+  intutic guardrails approve-shadow <guardrailId>
+  ```
+
+- **Terraform.** [`intutic_guardrail`](/reference/terraform/resources/guardrail)
+  manages the rule and reads the lifecycle; see
+  [Manage Intutic with Terraform](/guide/terraform#how-the-provider-behaves).
+- **API.** `POST /api/v1/policy-guardrails/guardrails` with `name`,
+  `description` and `ir`; `PUT` and `DELETE` on
+  `/api/v1/policy-guardrails/guardrails/:guardrailId`; and
+  `POST /api/v1/policy-guardrails/guardrails/validate`, which runs the checks
+  without writing anything. A refusal is a 400 that names the check. See the
+  [route catalog](/reference/api#route-catalog).
+
 ## What this is not
 
 - **Not the agent graph.** [Agents](/guide/agents) shows which agents call
@@ -173,9 +277,11 @@ guardrail cites it.
   proxy that reads `.intutic/sops`; the two planes never merge.
 - **DLP rules are not generated.** A sentence about redacting or blocking
   credentials, card numbers or personal data is answered as "no enforceable
-  rule". Data-loss patterns live only in the proxy's own configuration file —
-  there is no workspace setting to write them to — and a generated regular
-  expression would need a ReDoS check nothing here performs.
+  rule". Credential and custom data-loss patterns live only in the proxy's own
+  configuration file, and a generated regular expression would need a ReDoS
+  check nothing here performs. The PII detectors' actions are the
+  [`piiDetectors`](/guide/policies#setting-detector-actions-for-a-workspace)
+  workspace setting, which an owner or admin sets directly.
 
 ## From the terminal
 
@@ -184,8 +290,9 @@ guardrail cites it.
 `search --text <words>` (full-text, stemmed, best match first),
 `impact --doc <id>` or `--passage <id>` (what a change reaches, at most five
 computed edges out), `duplicates` (overlapping passages with their Jaccard arithmetic, and the
-same rule cited twice), `list`, `show`, `approve-shadow`, `promote`, `reject`,
-`retire`, `reconfirm`, `replay`, `conflicts`, and `pull`.
+same rule cited twice), `list`, `show`, `create`, `update` and `delete` (authored
+guardrails), `approve-shadow`, `promote`, `reject`, `retire`, `reconfirm`,
+`replay`, `conflicts`, and `pull`.
 See the [CLI reference](/reference/cli).
 
 ## Related

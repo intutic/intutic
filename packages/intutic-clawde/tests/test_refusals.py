@@ -1,14 +1,23 @@
-"""PROXY_REFUSALS checked against the proxy's own source, so a refusal the
-proxy adds or renames fails here rather than turning back into a retried
-connection error."""
+"""PROXY_REFUSALS checked against the one shared list of refusal codes and
+against the proxy's own source, so a refusal the proxy adds or renames fails
+here rather than turning back into an allow or a retried connection error."""
 
 import json
 import re
 from pathlib import Path
 
-from intutic_clawde.refusals import PROXY_REFUSALS, REFUSAL_HEADER, parse_refusal
+from intutic_clawde.refusals import (
+    PROXY_REFUSALS,
+    REFUSAL_HEADER,
+    REFUSAL_RULE_HEADER,
+    STREAM_REFUSAL_MARKER,
+    parse_refusal,
+    stream_refusal,
+)
 
-PROXY_RS = Path(__file__).resolve().parents[2] / "proxy" / "src" / "proxy.rs"
+PACKAGES = Path(__file__).resolve().parents[2]
+PROXY_RS = PACKAGES / "proxy" / "src" / "proxy.rs"
+SHARED = json.loads((PACKAGES / "shared-types" / "fixtures" / "refusal-codes.json").read_text(encoding="utf-8"))["proxy"]
 
 STATUS = {
     "BAD_REQUEST": 400,
@@ -22,21 +31,6 @@ STATUS = {
     "SERVICE_UNAVAILABLE": 503,
 }
 
-#: 4xx errors the proxy returns that are not governance decisions: credentials,
-#: workspace binding, a malformed request or route. A new 4xx code in proxy.rs
-#: must land here or in PROXY_REFUSALS.
-NOT_REFUSALS = {
-    "missing_key",
-    "vk_required",
-    "unauthorized",
-    "workspace_mismatch",
-    "org_mismatch",
-    "invalid_body",
-    "unsupported_route",
-    "byok_required",
-    "no_upstream_credential",
-}
-
 
 def _proxy_errors():
     source = PROXY_RS.read_text(encoding="utf-8")
@@ -48,17 +42,27 @@ def _proxy_errors():
     return found
 
 
-def test_every_refusal_has_the_status_the_proxy_sends_it_with():
+def test_the_table_is_the_shared_list():
+    assert PROXY_REFUSALS == {r["code"]: (r["status"], r["verdict"]) for r in SHARED["refusals"]}
+    assert (REFUSAL_HEADER, REFUSAL_RULE_HEADER, STREAM_REFUSAL_MARKER) == (
+        SHARED["header"], SHARED["ruleHeader"], SHARED["streamMarker"],
+    )
+
+
+def test_every_error_body_refusal_has_the_status_the_proxy_sends_it_with():
     errors = _proxy_errors()
     for code, (status, _verdict) in PROXY_REFUSALS.items():
+        if status == 200:
+            continue
         assert {s for s, c in errors if c == code} == {status}, code
 
 
 def test_every_4xx_code_the_proxy_sends_is_classified():
+    not_refusals = set(SHARED["notRefusals"])
     unclassified = [
         f"{status} {code}"
         for status, code in _proxy_errors()
-        if status < 500 and code not in PROXY_REFUSALS and code not in NOT_REFUSALS
+        if status < 500 and code not in PROXY_REFUSALS and code not in not_refusals
     ]
     assert unclassified == []
 
@@ -72,9 +76,15 @@ def test_status_and_code_must_agree():
     assert parse_refusal(403, json.dumps(["policy_denied"])) is None
 
 
-def test_the_header_refusals_are_the_ones_the_proxy_sets():
-    source = PROXY_RS.read_text(encoding="utf-8")
-    assert f'REFUSAL_HEADER: &str = "{REFUSAL_HEADER}"' in source
-    named = re.findall(r'\.header\(REFUSAL_HEADER, "([A-Za-z_]+)"\)', source)
-    assert named == ["COST_GATE_EXCEEDED"]
-    assert all(code in PROXY_REFUSALS for code in named)
+def test_the_stream_marker_is_found_in_a_body_or_a_line():
+    line = STREAM_REFUSAL_MARKER + json.dumps({"code": "TOOL_DENIED", "rule": "deny_tools.Bash", "message": "no Bash"})
+    expected = {"verdict": "kill", "code": "TOOL_DENIED", "message": "no Bash", "rule_id": "deny_tools.Bash"}
+    assert stream_refusal(line) == expected
+    assert stream_refusal(f'data: {{"choices":[]}}\n\n{line}\n\ndata: [DONE]\n\n') == expected
+
+
+def test_the_stream_marker_ignores_every_other_line():
+    assert stream_refusal('data: {"choices":[]}\n\n: keep-alive\n\ndata: [DONE]\n\n') is None
+    assert stream_refusal(STREAM_REFUSAL_MARKER + "{not json") is None
+    assert stream_refusal(STREAM_REFUSAL_MARKER + '{"rule":"x"}') is None
+    assert stream_refusal(STREAM_REFUSAL_MARKER + '["TOOL_DENIED"]') is None

@@ -56,6 +56,8 @@ const SHARED = [
   'packages/proxy/scripts',
   'packages/proxy/tests',
   'packages/shared-types',
+  // The Terraform provider: open core so customers can read what it sends.
+  'packages/terraform-provider-intutic',
   'packages/theme',
   'packages/vscode-extension',
   'packages/wasm-sdk',
@@ -113,7 +115,9 @@ const ALLOWED_DIVERGENCE = new Map([
  */
 const IGNORED_DIRS = new Set(['node_modules', '.turbo', 'cache', 'cache_temp', 'dist', 'target', '.git', '.venv', '__pycache__', 'build'])
 
-const IGNORED_FILES = /\.tsbuildinfo$|\.log$|^\.DS_Store$/
+// `terraform-provider-intutic` is the binary `go build` leaves in the provider's
+// directory, which is otherwise source and compared like any shared tree.
+const IGNORED_FILES = /\.tsbuildinfo$|\.log$|^\.DS_Store$|^terraform-provider-intutic$/
 
 function walk(root, dir, out = []) {
   if (!existsSync(dir)) return out

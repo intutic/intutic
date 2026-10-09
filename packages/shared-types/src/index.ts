@@ -134,7 +134,7 @@ export type {
   SopProvenanceSource,
 } from './sop.js'
 
-export { SOURCE_PROVIDERS, DOCUMENT_PROVIDERS, PRIVILEGED_SOURCE_PROVIDERS, isSourceProvider, isDocumentProvider } from './sourceProviders.js'
+export { SOURCE_PROVIDERS, DOCUMENT_PROVIDERS, isSourceProvider, isDocumentProvider } from './sourceProviders.js'
 export type { SourceProvider, DocumentProvider } from './sourceProviders.js'
 
 export {
@@ -205,6 +205,11 @@ export {
   guardrailIdFromSopTitle,
   GUARDRAIL_TARGETS,
   GUARDRAIL_EVENT_TYPES,
+  GUARDRAIL_PROVENANCES,
+  AUTHORED_NAME_MAX_CHARS,
+  AUTHORED_DESCRIPTION_MAX_CHARS,
+  AuthoredGuardrailCreateSchema,
+  AuthoredGuardrailUpdateSchema,
   isCandidateCitationEvidence,
   LEDGER_OVERLAP_JACCARD,
   LEDGER_NEAR_IDENTICAL_JACCARD,
@@ -214,6 +219,14 @@ export {
 export type {
   GuardrailStatus,
   GuardrailTarget,
+  GuardrailProvenance,
+  AuthoredGuardrailCreate,
+  AuthoredGuardrailUpdate,
+  AuthoredGuardrailWriteResult,
+  GuardrailCheckResult,
+  GuardrailValidationResponse,
+  GuardrailValidationFailure,
+  AuthoredCandidateEvidence,
   GuardrailEventType,
   GuardrailThresholds,
   GuardrailThresholdsResponse,
@@ -386,7 +399,23 @@ export type {
   UsageEvent,
   ModelBreakdown,
   VirtualKeyBreakdown,
+  MemberUsage,
+  MemberUsageResponse,
+  TeamUsage,
+  TeamUsageResponse,
+  BranchUsage,
+  BranchUsageResponse,
+  CommitUsage,
+  CommitUsageResponse,
+  PullRequestState,
+  PullRequestUsage,
+  PullRequestSources,
+  PullRequestUsageResponse,
+  PullRequestRefreshResult,
+  GitHubWebhookInfo,
+  GitHubWebhookSecret,
 } from './usage.js'
+export { normalizeGitRemote } from './gitRemote.js'
 
 // WS2: Advanced Observability
 export {
@@ -423,12 +452,80 @@ export {
   SsoGroupPolicySchema,
   parseSsoGroupPolicy,
   evaluateSsoGroupClearance,
+  ssoGroupToolMatches,
   ssoGroupRuleId,
   encodeSsoGroupRecord,
   decodeSsoGroupRecord,
   SSO_GROUP_RECORD_TAG,
 } from './ssoGroupClearance.js'
 export type { SsoGroupDecision, SsoGroupRecord } from './ssoGroupClearance.js'
+export {
+  parseMcpRegistryRecord,
+  encodeMcpRegistryRecord,
+  decodeMcpRegistryRecord,
+  evaluateMcpRegistry,
+  isUnrestrictedMcpRegistry,
+  MCP_REGISTRY_RECORD_TAG,
+  MCP_REGISTRY_JS_SOURCE,
+  encodeMcpAllowlistRecord,
+  decodeMcpAllowlistRecord,
+  evaluateMcpAllowlist,
+  MCP_ALLOWLIST_RECORD_TAG,
+  MCP_ALLOWLIST_JS_SOURCE,
+  mcpSnapshotUnverifiedRefusal,
+  MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE,
+} from './mcpRegistryRecord.js'
+export type {
+  McpRegistryRecord,
+  McpRegistryRefusal,
+  McpAllowlistRecord,
+  McpAllowlistRefusal,
+  McpSnapshotUnverifiedRefusal,
+} from './mcpRegistryRecord.js'
+export { GEMINI_CLI_GATE_ID, gateIdentitiesOf, harnessOfGate } from './gateIdentity.js'
+
+// MCP governance: call budgets, tool-change risk, description poisoning
+export {
+  McpBudgetSettingsSchema,
+  parseMcpBudgetPolicy,
+  budgetsForCall,
+  budgetWindow,
+  budgetWarnAt,
+  describeMcpBudget,
+  MCP_BUDGET_DEFAULT_WARN_PCT,
+  MAX_MCP_BUDGETS,
+  MAX_MCP_BUDGET_LIMIT,
+  MCP_BUDGET_SCOPES,
+  MCP_BUDGET_PERIODS,
+} from './mcpBudgets.js'
+export type {
+  McpBudget,
+  McpBudgetScope,
+  McpBudgetPeriod,
+  McpBudgetPolicy,
+  McpBudgetSettings,
+  McpBudgetCall,
+  McpBudgetCharge,
+} from './mcpBudgets.js'
+export {
+  scoreToolSetChange,
+  normalizeToolDefinition,
+  riskLevelOf,
+  MAX_TOOL_DESCRIPTION_CHARS,
+  MAX_TOOL_SCHEMA_CHARS,
+  MCP_TOOL_RISK_HIGH,
+  MCP_TOOL_RISK_MEDIUM,
+  MCP_TOOL_CAPABILITY_POINTS,
+} from './mcpToolRisk.js'
+export type {
+  McpToolDefinition,
+  McpToolCapability,
+  McpToolRiskRule,
+  McpToolRiskLevel,
+  McpToolRiskReason,
+  McpToolSetChange,
+} from './mcpToolRisk.js'
+export { scanToolDescription } from './toolPoison.js'
 
 // WS4 + WS5 new error codes
 export {
@@ -518,6 +615,16 @@ export {
   type WasmHostImport,
 } from './wasmHost.js'
 
+// Rego policies compiled by OPA, run as rules (packages/proxy/src/wasm/opa.rs).
+export * from './regoRules.js'
+export {
+  REGO_HOST_BUILTINS,
+  REGO_HOST_BUILTIN_NAMES,
+  type RegoBuiltin,
+  type RegoBuiltinContext,
+  type RegoDigest,
+} from './regoBuiltins.js'
+
 export {
   FIELDS as RULE_DSL_FIELDS,
   OPERATORS as RULE_DSL_OPERATORS,
@@ -556,10 +663,37 @@ export {
 } from './posturePresets.js'
 
 export {
+  DESTRUCTIVE_SQL_STATEMENTS,
+  findDestructiveSql,
+  type DestructiveSqlStatement,
+} from './destructiveSql.js'
+
+export {
+  HOLD_APPROVAL_HINT_TEMPLATE,
+  HOLD_ID_PLACEHOLDER,
+  holdApprovalHint,
+} from './holdMessages.js'
+
+export {
   SECRET_VALUE_PATTERNS,
   secretPatternAlternation,
   type SecretValuePattern,
 } from './secretPatterns.js'
+
+export {
+  PII_ACTIONS,
+  PII_DEFINITION,
+  PII_DETECTOR_IDS,
+  PiiDetectorSettingsSchema,
+  effectivePiiActions,
+  parseWorkspacePiiDetectors,
+  type PiiAction,
+  type PiiDefinition,
+  type PiiDetectorDefinition,
+  type PiiDetectorId,
+  type PiiDetectorSettings,
+  type WorkspacePiiDetectors,
+} from './piiDetectors.js'
 
 export {
   SKILL_SCAN_PATTERNS,
@@ -596,8 +730,37 @@ export {
 } from './governanceCoverage.js'
 
 export {
+  DEVICE_INVENTORY_SCHEMA_VERSION,
+  REDACTED_PATH,
+  REDACTED_SEGMENT,
+  homeRelativePath,
+  sanitizeMcpEndpoint,
+  type DeviceInventory,
+  type InventoryDeviceIdentity,
+  type InventoryGateKind,
+  type InventoryGuardProbes,
+  type InventoryHarness,
+  type InventoryMcpServer,
+  type InventorySkill,
+} from './devInventory.js'
+
+export {
   DEFAULT_PROXY_HOST,
   proxyHost,
   anthropicBaseUrl,
   openaiBaseUrl,
 } from './proxyBaseUrls.js'
+export { HARNESS_RULES_FILES, rulesFileOf, harnessesReading, decisionsTargetOf, rulesFrontMatterOf } from './harnessRules.js'
+export type { HarnessRulesTarget } from './harnessRules.js'
+export { phraseText, hasPhrase, PHRASES_JS_SOURCE } from './phrases.js'
+export type { PhraseText } from './phrases.js'
+export { sequenceAlternatives, compileSequence, sequenceMatch, SEQUENCE_JS_SOURCE } from './sequence.js'
+export {
+  COMMAND_SIZE_LIMIT,
+  ARGUMENTS_SIZE_LIMIT,
+  HOOK_TIMEOUT_SECONDS,
+  GATE_DEADLINE_MARGIN_MS,
+  HOOK_GATE_TIMEOUTS,
+  gateDeadlineMs,
+} from './gateLimits.js'
+export type { HookGateHarness, HookGateTimeout, HookTimeoutSetBy } from './gateLimits.js'

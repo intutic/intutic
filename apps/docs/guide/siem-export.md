@@ -1,6 +1,6 @@
-# SIEM Export <Badge type="tip" text="Cloud" />
+# SIEM Export <Badge type="warning" text="Biz Org+" />
 
-Stream governance events — execution traces, incidents, detector findings, plan decisions, sign-ins, settings and policy changes, gate and integrity alerts, and optionally every gate decision — to your own SIEM or warehouse.
+Stream governance events — execution traces, incidents, detector findings, plan decisions, sign-ins, settings and policy changes, MCP registry decisions, SCIM changes, held-decision reviews, secret rotations, evidence downloads, gate and integrity alerts, and optionally every gate decision — to your own SIEM or warehouse, each naming the person behind it.
 
 ---
 
@@ -23,9 +23,23 @@ Six destination types are supported:
 
 From **Settings › Integrations › SIEM Export**, click **Add Destination**, choose a type, and provide its connection config as JSON. Each type's placeholder shows the fields it expects (a webhook URL, a Splunk HEC token, an S3 bucket + credentials, etc.).
 
-Credentials are encrypted at rest and are never returned unmasked after creation — only OWNER/ADMIN roles can create, edit, or deactivate a destination. Any workspace member can view the destination list and its health status.
+Credentials are encrypted at rest and are never returned unmasked after creation: a read shows `********` and, for a value longer than eight characters, its last four. When you edit a destination's `config`, a credential you leave out, or send back exactly as it was masked, keeps its stored value; any other value replaces it. Only OWNER/ADMIN roles can create, edit, or deactivate a destination. Any workspace member can view the destination list and its health status.
 
 Use **Test** to run a synchronous health check against a destination without waiting for a real event.
+
+## Plans {#plans}
+
+SIEM export comes with the Biz Org, Enterprise and Self-host plans and the trials. On another plan, creating, editing, testing and re-keying a destination answer `403` with `Upgrade required — SIEM export requires a Biz Org plan or higher`, and **Settings › Integrations › SIEM Export** says which plans include it.
+
+A workspace that moves to a plan without SIEM export keeps its destinations, and they send nothing from that moment:
+
+- Each active destination is listed as **Paused**. `GET /api/v1/siem/destinations` and `GET /api/v1/siem/destinations/:id` carry the reason in `pausedReason` (`null` while a destination streams).
+- Events from that point are not delivered, and none are queued for later.
+- The dead-letter queue is kept and not retried. It is delivered once the workspace is on a plan with SIEM export again.
+- The control plane logs `SIEM export paused: the workspace plan does not include it`, at most once an hour per workspace.
+- Owners and admins can still view, deactivate (`PUT` with only `{"isActive": false}`) and delete a destination.
+
+Moving back to a plan with SIEM export resumes streaming to every destination still active.
 
 ## What gets streamed
 
@@ -38,17 +52,51 @@ Every event carries a `sourceTable` naming its source:
 | `detector_findings` | Every finding from the proxy's anomaly detector pipeline, allowed or blocked |
 | `stored_plans` | Plan approve, reject and close decisions |
 | `enforcement_devices` | A device's firewall enforcement being disabled, and (emitter path only, see below) a device going stale |
-| `login_events` | Every sign-in — password, SSO (OIDC or SAML), magic link, GitHub, Google, and the sign-up that signs a new owner in — and every refused sign-in that belongs to a workspace: a wrong password, a deactivated member, an SSO identity the workspace does not admit, an IdP response that fails verification. Each carries the method, `outcome` (`success` or `failure`), `failure_reason`, the member (or, when none was resolved, the email presented), IP address and user agent. An attempt against an email no workspace knows is not recorded |
+| `login_events` | Every sign-in — password, SSO (OIDC or SAML), magic link, GitHub, Google, and the sign-up that signs a new owner in — and every refused sign-in that belongs to a workspace: a wrong password, a deactivated member, an SSO identity the workspace does not admit, an IdP response that fails verification. Each carries the method, `outcome` (`success` or `failure`), `failure_reason`, the member (or, when none was resolved, the email presented, which is cleared from the stored row if that person's data is erased), IP address and user agent. An attempt against an email no workspace knows is not recorded |
 | `workspace_settings_changes` | Every workspace settings change: who made it, which keys changed, and the before and after values with secrets redacted. Policy guardrails that set the model allowlist or egress allow list appear here too |
 | `sop_registry` | A guideline moving between lifecycle states (for example draft to validated, or validated to invalidated): which guideline, from and to, and who moved it |
-| `governance_alerts` | The alerts the notification hub sends: a gate that stopped reporting, the same gate reporting again, and a failed trace integrity check. `payload.alert_type` says which |
-| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
+| `governance_alerts` | The alerts the notification hub sends: a gate that stopped reporting, the same gate reporting again, a failed trace integrity check, and an ungoverned harness or MCP server first seen in a machine's [AI inventory](/guide/ai-inventory). `payload.alert_type` says which |
+| `device_disconnects` | A machine that ran `intutic disconnect`: its hostname and fingerprint, the member whose credentials reported it, `scope` (`machine` for everything, `harness` for `--harness`) and the harnesses |
+| `mcp_server_changes` | The [MCP server registry](/guide/mcp-governance#the-registry): an owner or admin approving, blocking or resetting a server (`action` `approved`, `blocked` or `candidate`, with `previous_status`), switching one of its tools (`tool_enabled`, `tool_disabled`, with `tool_name`), and every scored change to a server's tool set (`tools_changed`, with `risk_score`, `risk_level`, `risk_reasons`, the tools `added`, `removed` and `changed`, and `held` when the change returned the server to the approval queue). Every score is sent, low ones included; the notification hub hears only of high ones |
+| `scim_changes` | Your identity provider writing through [SCIM](/guide/scim): `resource_type` (`User` or `Group`), `action` (`provisioned`, `updated` or `deprovisioned` for a user, including a PATCH or PUT that sets `active: false`; `created`, `updated` or `deleted` for a group), the resource id, the user's `user_name` and `active` or the group's `display_name` and member count, the PATCH operations by `op` and `path` (never their values), and the SCIM token that pushed it |
+| `decision_reviews` | A [held decision](/guide/decisions#slack-interactive-reviews) approved or rejected, in Slack or with `intutic decision`: `status` (`APPROVED` or `REJECTED`), the reviewer, `via` (`API`, or the Slack account), the reviewer's reason, the decision summary, and whether a review-hold bypass was written |
+| `secret_rotations` | A signing secret replaced: `target` (`notification_rule`, `siem_destination` or `github_webhook`), its id and name, and who replaced it. Never the secret |
+| `evidence_exports` | A compliance evidence download: `kind` (`soc2_archive`, `framework_report` or `human_oversight`), `format`, the framework, the evidence run, the period, whether it was signed, and who downloaded it |
+| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also `TAMPER`: a governance file (a gate, a hook registration, the policy snapshot or a VS Code hook setting) changed outside the sync daemon, which the daemon put back. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
+
+### Who: the `actor` object {#the-actor}
+
+Every payload with a person behind it carries `actor`, shaped like the [OCSF](https://schema.ocsf.io/) Actor object of the API Activity class (6003), beside the fields it always had:
+
+```json
+"actor": {
+  "user": {
+    "uid": "mbr_1a2b3c",
+    "type": "User",
+    "email_addr": "ana@example.com",
+    "name": "Ana Ruiz",
+    "groups": [{ "name": "platform" }, { "name": "sre" }],
+    "credential_uid": "vk_3f9a"
+  },
+  "session": { "uid": "ses_7d1e" },
+  "process": { "user": { "name": "ana" } }
+}
+```
+
+- `actor.user` is the workspace member the control plane resolved from the authenticated key or session: their member id, email, display name and effective groups (their SCIM groups while SCIM provisioning is active, else the groups their last SSO sign-in carried). An id that is not a member of the workspace, such as `system:tool-risk` on a scored tool change, is `{ "uid": … }` alone.
+- `actor.user.credential_uid`, `actor.session` and `actor.process` are what the reporting process said about itself: the API key prefix, the harness session and the OS user the MCP proxy or gate ran as. They are reported, not verified.
+
+Which payloads carry it: `gate_decisions` and the `governance_incidents` filed from a gate's report (the caller of the call), `login_events`, `workspace_settings_changes`, `sop_registry`, `stored_plans`, `device_disconnects`, `mcp_server_changes`, `decision_reviews`, `secret_rotations` and `evidence_exports` (the member who acted). `scim_changes` names the SCIM token instead, because the identity provider made the change. Over syslog, the member is CEF's `suid` and `suser`. The Kafka/CDC path below delivers table rows as they are, without `actor`.
+
+Only what a SIEM needs to tie an event to your identity provider leaves: the member id, email, name and groups. An event held in the dead-letter queue is cleared of a person's identifiers when their data is erased, like the rest of the workspace's records.
 
 Delivery is in-process by default (no Kafka or Debezium dependency by default): the control plane's own domain event emitter drives it directly, so a destination configured today starts receiving events on the very next matching action. An optional Kafka/Debezium CDC ingestion path is also available — see "Delivery guarantees" below.
 
 ### Choosing sources
 
 A destination's `sourceTables` list selects what it receives. Leave it empty, as **Add Destination** does by default, to receive every source except `gate_decisions`; new low-volume sources reach such a destination as they are added. A non-empty list is exact: the destination receives those sources and nothing else. An unknown name is refused when you save, and `GET /api/v1/siem/destinations` returns the valid names (`sources.all`) and the default set (`sources.defaults`).
+
+To change an existing destination's sources, click **Sources** on its row: tick the sources it should receive and **Save sources**. Ticking exactly the default set saves an empty list, so the destination stays on the defaults and keeps receiving new sources as they are added. The **Sources** column says `Defaults` or how many it receives. Owners and admins see the button, on a plan with SIEM export; it sends `PUT /api/v1/siem/destinations/:id` with `sourceTables`.
 
 Gate decisions are opt-in because there is one per tool call, allows included. Tick **Also stream gate decisions** when adding a destination, or send a `sourceTables` list that includes `gate_decisions`:
 
@@ -66,11 +114,19 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 
 | Source | Event class | Severity |
 |---|---|---|
-| `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
+| `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block or a tamper, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
 | `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
 | `workspace_settings_changes` | `SETTINGS_CHANGE` | 5 |
 | `sop_registry` | `POLICY_CHANGE_UPDATE` | 4 |
-| `governance_alerts` | `GATE_SILENT`, `GATE_RECOVERED` or `INTEGRITY_FAILURE` | 7, 1 and 10 |
+| `governance_alerts` | `GATE_SILENT`, `GATE_RECOVERED`, `INTEGRITY_FAILURE` or `UNGOVERNED_AI_TOOL` | 7, 1, 10 and 5 |
+| `device_disconnects` | `DEVICE_DISCONNECT` | 4 |
+| `mcp_server_changes` | `MCP_SERVER_APPROVED`, `MCP_SERVER_BLOCKED`, `MCP_SERVER_RESET`, `MCP_TOOL_ENABLED`, `MCP_TOOL_DISABLED` or `MCP_TOOLS_CHANGED` | 3, 5, 3, 3, 4; a tool-set change 7, 5 or 3 for a high, medium or low score |
+| `scim_changes` | `SCIM_USER_<ACTION>` or `SCIM_GROUP_<ACTION>`, for example `SCIM_USER_DEPROVISIONED` | 5 for a deprovisioning or deletion, 3 otherwise |
+| `decision_reviews` | `DECISION_APPROVED` or `DECISION_REJECTED` | 5 and 3 |
+| `secret_rotations` | `SECRET_ROTATED` | 5 |
+| `evidence_exports` | `EVIDENCE_EXPORT` | 4 |
+
+Every class carries the member as `suid` (member id) and `suser` (email) when the event has an [actor](#the-actor).
 
 ### Bucket batching
 
@@ -117,7 +173,7 @@ def verify_intutic_webhook(raw_body: bytes, headers: dict, secret: str) -> bool:
 
 ## Delivery guarantees
 
-Every event, from either path, is retried up to 5 times per destination with exponential backoff. An event that still fails after retries is written to a dead-letter queue and retried automatically every 15 minutes. The DLQ count and a manual **Retry now** control are both visible on the SIEM Export panel. A destination that has been deactivated has its DLQ backlog dropped rather than retried forever — there's nowhere left to deliver it. Both paths share this exact retry + DLQ mechanism and the same dedup-key shape family for event ids.
+Every event, from either path, is retried up to 5 times per destination with exponential backoff. An event that still fails after retries is written to a dead-letter queue and retried automatically every 15 minutes. The DLQ count and a manual **Retry now** control are both visible on the SIEM Export panel; **Retry now** (`POST /api/v1/siem/dlq/retry`, owners and admins) retries your workspace's queue only. A destination that has been deactivated has its DLQ backlog dropped rather than retried forever — there's nowhere left to deliver it. Both paths share this exact retry + DLQ mechanism and the same dedup-key shape family for event ids.
 
 ### Emitter path (default)
 

@@ -271,3 +271,80 @@ export function unwrapOpenCodeServers(doc: JsonObject, original: JsonObject | nu
   if (changed) pruneEmpty(doc, ['mcp'], original)
   return changed
 }
+
+// ─── Gemini CLI, Antigravity ─────────────────────────────────────────────────
+
+/**
+ * How a product writes a remote server, from the URL and transport a wrapped
+ * entry's argv carries: Gemini CLI as `url` (with `type: "sse"` for SSE),
+ * Antigravity as `serverUrl`.
+ */
+export type RemoteShape = (url: string, transport: 'sse' | 'http') => JsonObject
+
+export const geminiRemoteShape: RemoteShape = (url, transport) => (transport === 'sse' ? { url, type: 'sse' } : { url })
+export const antigravityRemoteShape: RemoteShape = (url) => ({ serverUrl: url })
+
+/**
+ * A Gemini CLI or Antigravity entry rebuilt from a wrapped one, which carries
+ * no marker (mcpAutoWrite.ts's `isProxyFronted`); undefined when it is not a
+ * wrapped one. The keys the wrap kept (`cwd`, `trust`, `includeTools`, …) stay.
+ */
+export function unwrapUnmarkedEntry(entry: unknown, remoteShape: RemoteShape): JsonObject | undefined {
+  if (!isObject(entry) || entry.command !== 'node') return undefined
+  const argv = stringArray(entry.args)
+  if (!argv || argv.length === 0 || !PROXY_BIN_PATTERN.test(argv[0]!) || !argv.includes('--server-name')) return undefined
+  const derived = fromProxyArgv(argv.slice(1), entry.env)
+  if (derived === null) return undefined
+  const rest: JsonObject = { ...entry }
+  delete rest.command
+  delete rest.args
+  delete rest.env
+  if (typeof derived.command === 'string') {
+    return { command: derived.command, args: derived.args, ...(derived.env ? { env: derived.env } : {}), ...rest }
+  }
+  return {
+    ...remoteShape(derived.url as string, derived.type === 'sse' ? 'sse' : 'http'),
+    ...(derived.headers ? { headers: derived.headers } : {}),
+    ...(derived.env ? { env: derived.env } : {}),
+    ...rest,
+  }
+}
+
+/** Whether two entries run the same server: the same command line, or the same URL. */
+function sameServer(a: JsonObject, b: JsonObject): boolean {
+  if (typeof a.command === 'string') return a.command === b.command && isDeepStrictEqual(a.args ?? [], b.args ?? [])
+  const url = (e: JsonObject) => e.url ?? e.httpUrl ?? e.serverUrl
+  return url(a) !== undefined && url(a) === url(b)
+}
+
+/**
+ * The `mcpServers` map at `path` of a Gemini CLI or Antigravity file. A
+ * rebuilt entry is swapped for the original file's entry of the same name
+ * when both run the same server, which also brings back what the rebuild
+ * cannot know (Gemini CLI's `httpUrl` spelling, a `type: "http"`).
+ */
+export function unwrapUnmarkedServersAt(doc: JsonObject, path: string[], original: JsonObject | null, remoteShape: RemoteShape): boolean {
+  let map: unknown = doc
+  let was: unknown = original
+  for (const k of path) {
+    map = isObject(map) ? map[k] : undefined
+    was = isObject(was) ? was[k] : undefined
+  }
+  if (!isObject(map)) return false
+  const originals = isObject(was) ? was : {}
+  let changed = false
+  for (const [name, entry] of Object.entries(map)) {
+    if (name === 'intutic' && isIntuticServer(entry)) {
+      delete map[name]
+      changed = true
+      continue
+    }
+    const rebuilt = unwrapUnmarkedEntry(entry, remoteShape)
+    if (rebuilt === undefined) continue
+    const before = originals[name]
+    map[name] = isObject(before) && sameServer(rebuilt, before) ? structuredClone(before) : rebuilt
+    changed = true
+  }
+  if (changed) pruneEmpty(doc, path, original)
+  return changed
+}

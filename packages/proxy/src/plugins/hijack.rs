@@ -155,7 +155,7 @@ pub fn report_body(session_id: &str, trace_id: &str, calls: &[HijackedCall]) -> 
 pub async fn report(
     client: &reqwest::Client,
     control_plane_url: &str,
-    token: &str,
+    virtual_key: &crate::credential::VirtualKey,
     workspace_id: &str,
     session_id: &str,
     trace_id: &str,
@@ -166,9 +166,8 @@ pub async fn report(
         control_plane_url.trim_end_matches('/')
     );
     let tools: Vec<&str> = calls.iter().map(|c| c.tool.as_str()).collect();
-    match client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    match virtual_key
+        .authorize(client.post(&url))
         .json(&report_body(session_id, trace_id, calls))
         .send()
         .await

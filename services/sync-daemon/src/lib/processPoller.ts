@@ -61,6 +61,13 @@ const PROCESS_SIGNATURES: Array<{
     patterns: [/\bantigravity\b/i],
   },
   {
+    name: 'Gemini CLI',
+    // Anchored on the invoked command name like `grok`: `gemini` is a common
+    // word in arguments and paths. Also the npm package, which a node process
+    // running the CLI shows before the resolved binary name does.
+    patterns: [/(^|[/\\\s])gemini(\s|$)/, /@google\/gemini-cli\b/],
+  },
+  {
     name: 'Muse Code',
     patterns: [/\bmuse\b/],
   },

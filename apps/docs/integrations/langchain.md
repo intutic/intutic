@@ -59,7 +59,7 @@ from intutic_clawde.gate import guard_tools
 tools = guard_tools([shell_tool, write_file_tool, deploy_tool])
 ```
 
-Both paths funnel into the same `Gate.guard(tool_name, tool_input)` decision — the same four-tier evaluation (policy snapshot, SOP rules, image integrity, control-plane hook-gate) documented on the [LangGraph](/integrations/langgraph#3-gate-local-tool-execution-sdk) page.
+Both paths funnel into the same `Gate.guard(tool_name, tool_input)` decision — the same evaluation (policy snapshot, MCP server registry, SOP rules, image integrity, control-plane hook-gate) documented on the [LangGraph](/integrations/langgraph#3-gate-local-tool-execution-sdk) page.
 
 ### 4. Trace attribution
 

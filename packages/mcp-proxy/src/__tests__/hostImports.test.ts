@@ -10,6 +10,7 @@ import {
   ERR_BUDGET,
   ERR_BUFFER_TOO_SMALL,
   ERR_NOT_FOUND,
+  ERR_NOT_READ,
   ERR_REFUSED,
   MAX_READS_PER_EVALUATION,
 } from '../wasm/referencedFiles.js'
@@ -29,9 +30,9 @@ function harness(files: ReferencedFiles) {
   return { memory, state, read, put }
 }
 
-const table = (entries: Array<[string, string | number]>) =>
-  ReferencedFiles.fromTable(
-    entries.map(([t, v]) => [
+const table = (entries: Array<[string, string | number]>, pastLimits = false) =>
+  ReferencedFiles.fromTable({
+    entries: entries.map(([t, v]) => [
       t,
       typeof v === 'string'
         ? { kind: 'content', bytes: new TextEncoder().encode(v) }
@@ -39,7 +40,8 @@ const table = (entries: Array<[string, string | number]>) =>
           ? { kind: 'not_found' }
           : { kind: 'refused', why: 'test' },
     ]),
-  )
+    pastLimits,
+  })
 
 describe('read_referenced_file host import', () => {
   it('sizes with outCap=0, then copies the bytes', () => {
@@ -63,6 +65,12 @@ describe('read_referenced_file host import', () => {
     expect(read(0, len, 0, 0)).toBe(ERR_NOT_FOUND)
     len = put('other.yaml', 0)
     expect(read(0, len, 0, 0)).toBe(ERR_REFUSED)
+  })
+
+  it('answers ERR_NOT_READ for a path missing from a table the request overflowed', () => {
+    const { read, put } = harness(table([['d0.yaml', 'kind: ConfigMap']], true))
+    const len = put('prod.yaml', 0)
+    expect(read(0, len, 0, 0)).toBe(ERR_NOT_READ)
   })
 
   it('refuses everything with an empty table (no manifest root)', () => {

@@ -45,6 +45,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 
 const log = createLogger('sync-github-copilot-hooks')
@@ -94,6 +95,9 @@ function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
       // Passed through, not collapsed to two values: the advisory tier emits
       // 'tool_flagged', and a ternary here silently recorded it as an allow.
@@ -103,6 +107,7 @@ function logEvent(verdict, toolName, reason) {
       harnessType: 'github-copilot',
       timestamp: ts,
       incidentId,
+      eventId,
       ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
     fs.appendFileSync(${JSON.stringify(hookEventsLog)}, entry, { flag: 'a' });
@@ -177,7 +182,8 @@ function buildHookConfig(hookScriptPath: string) {
           // Catch-all: the gate decides from the arguments, so a tool name
           // nobody anticipated is still evaluated.
           matcher: '.*',
-          hooks: [{ type: 'command', command: `node "${hookScriptPath}"` }],
+          // \`timeout\` is VS Code's key and the Copilot CLI's alias for \`timeoutSec\`.
+          hooks: [{ type: 'command', command: `node "${hookScriptPath}"`, timeout: HOOK_TIMEOUT_SECONDS }],
         },
       ],
     },

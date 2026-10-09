@@ -85,6 +85,9 @@ async function compileSdkRule(slug: string, outDir: string): Promise<string> {
   return out
 }
 
+/** Never returns: the instruction budget stops it. */
+const INFINITE_LOOP = `export function allocate(size: i32): i32 {\n  return 1024;\n}\nexport function evaluate(offset: i32, len: i32): i32 {\n  while (true) {}\n}\n`
+
 const baseContext: WasmContextInput = {
   sessionId: 'ses_test',
   workspaceId: 'ws_test',
@@ -239,14 +242,10 @@ describe('WasmRunner + read_referenced_file (TD-441) and the memory ceiling (TD-
 })
 
 describe('WasmRunner + purpose-built fixtures', () => {
-  it('an infinite-loop rule is stopped by its instruction budget and fails open (ALLOW), without waiting out the deadline', async () => {
+  it('an infinite-loop rule is stopped by its instruction budget, without waiting out the deadline, and refuses the call', async () => {
     const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-loop-'))
     try {
-      const wasmPath = await compileScratchRule(
-        'infinite-loop',
-        `export function allocate(size: i32): i32 {\n  return 1024;\n}\nexport function evaluate(offset: i32, len: i32): i32 {\n  while (true) {}\n}\n`,
-        outDir,
-      )
+      const wasmPath = await compileScratchRule('infinite-loop', INFINITE_LOOP, outDir)
       copyFileSync(wasmPath, join(wasmDir, '10_infinite-loop.wasm'))
 
       const runner = new WasmRunner(wasmDir)
@@ -259,8 +258,10 @@ describe('WasmRunner + purpose-built fixtures', () => {
         // proves the budget stopped the loop, without a timing assertion.
         const respawn = vi.spyOn(runner as unknown as { respawnWorker: () => Promise<void> }, 'respawnWorker')
         const verdict: WasmVerdict = await runner.evaluate(baseContext)
-
-        expect(verdict).toEqual({ code: 'allow' })
+        expect(verdict).toMatchObject({ code: 'unavailable', stop: 'budget', ruleId: 'local:10_infinite-loop.wasm' })
+        if (verdict.code === 'unavailable') {
+          expect(verdict.reason).toContain('Custom rule local:10_infinite-loop.wasm reached no verdict (budget)')
+        }
         expect(respawn).not.toHaveBeenCalled()
       } finally {
         await runner.shutdown()
@@ -270,29 +271,61 @@ describe('WasmRunner + purpose-built fixtures', () => {
     }
   }, 30_000)
 
-  it('disables an infinite-loop rule after 3 consecutive budget exhaustions, and a later evaluate() skips it', async () => {
+  it('quarantines a rule after 3 runaways in a row, then refuses without evaluating it until the next rescan', async () => {
     const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-loop3-'))
     try {
-      const wasmPath = await compileScratchRule(
-        'infinite-loop-3x',
-        `export function allocate(size: i32): i32 {\n  return 1024;\n}\nexport function evaluate(offset: i32, len: i32): i32 {\n  while (true) {}\n}\n`,
-        outDir,
-      )
+      const wasmPath = await compileScratchRule('infinite-loop-3x', INFINITE_LOOP, outDir)
       copyFileSync(wasmPath, join(wasmDir, '10_loop3.wasm'))
 
       const runner = new WasmRunner(wasmDir)
       try {
         await runner.rescan()
-        for (let i = 0; i < 3; i++) {
-          const v = await runner.evaluate(baseContext)
-          expect(v).toEqual({ code: 'allow' })
-        }
-        // A 4th call: the rule is disabled now, so it is not run at all.
-        const started = Date.now()
-        const v4 = await runner.evaluate(baseContext)
-        const elapsed = Date.now() - started
-        expect(v4).toEqual({ code: 'allow' })
-        expect(elapsed).toBeLessThan(20)
+        const verdicts: WasmVerdict[] = []
+        for (let i = 0; i < 3; i++) verdicts.push(await runner.evaluate(baseContext))
+        expect(verdicts.map((v) => (v.code === 'unavailable' ? v.stop : v.code))).toEqual(['budget', 'budget', 'budget'])
+        // The third runaway is the one that quarantines it, and says so.
+        expect(verdicts[2]?.code === 'unavailable' && verdicts[2].reason).toContain('now quarantined')
+
+        // Quarantined: refused without running anything, so three padded
+        // calls cannot switch the rule off.
+        const evaluateOne = vi.spyOn(runner as unknown as { evaluateOne: () => Promise<unknown> }, 'evaluateOne')
+        const fourth = await runner.evaluate(baseContext)
+        expect(evaluateOne).not.toHaveBeenCalled()
+        expect(fourth).toMatchObject({ code: 'unavailable', stop: 'quarantined', ruleId: 'local:10_loop3.wasm' })
+        expect(fourth.code === 'unavailable' && fourth.reason).toContain('quarantined')
+
+        // The next rescan releases it: evaluated again, and stopped again.
+        await runner.rescan()
+        const released = await runner.evaluate(baseContext)
+        expect(evaluateOne).toHaveBeenCalledTimes(1)
+        expect(released).toMatchObject({ code: 'unavailable', stop: 'budget' })
+      } finally {
+        await runner.shutdown()
+      }
+    } finally {
+      rmSync(wasmDir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it.each([
+    { name: 'traps', source: 'export function evaluate(offset: i32, len: i32): i32 {\n  unreachable();\n  return 0;\n}\n', stop: 'error' },
+    { name: 'returns a code that is not a verdict', source: 'export function evaluate(offset: i32, len: i32): i32 {\n  return 7;\n}\n', stop: 'result' },
+  ])('a rule that $name reaches no verdict and refuses the call', async ({ name, source, stop }) => {
+    const wasmDir = mkdtempSync(join(tmpdir(), 'intutic-mcp-wasm-noverdict-'))
+    try {
+      const wasmPath = await compileScratchRule(
+        `no-verdict-${stop}`,
+        `export function allocate(size: i32): i32 {\n  return 1024;\n}\n${source}`,
+        outDir,
+      )
+      copyFileSync(wasmPath, join(wasmDir, '10_no-verdict.wasm'))
+
+      const runner = new WasmRunner(wasmDir)
+      try {
+        await runner.rescan()
+        const verdict = await runner.evaluate(baseContext)
+        expect(verdict, name).toMatchObject({ code: 'unavailable', stop, ruleId: 'local:10_no-verdict.wasm' })
+        expect(verdict.code === 'unavailable' && verdict.reason).toContain(`(${stop})`)
       } finally {
         await runner.shutdown()
       }

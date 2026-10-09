@@ -23,7 +23,7 @@
  * environment does not have (see TD-416/TD-417). Gate decisions come from
  * `FakeGate`-style stubs, per wrapTools.test.ts's pattern.
  */
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -65,6 +65,7 @@ import {
   type HarnessSessionLike,
   type HarnessToolApprovalContinuation,
 } from '../harness.js'
+import { rulesText } from './fixtures/rulesFile.js'
 
 class FakeGate extends Gate {
   calls: Array<{ toolName: string; toolInput: Record<string, unknown> }> = []
@@ -75,7 +76,7 @@ class FakeGate extends Gate {
   }
   override async guard(toolName: string, toolInput: Record<string, unknown>): Promise<void> {
     this.calls.push({ toolName, toolInput })
-    if (this.mode === 'refuse') throw new IntuticGateRefusal('nope', 'TEST')
+    if (this.mode === 'refuse') throw new IntuticGateRefusal('nope', 'SNAPSHOT')
     if (this.mode === 'crash') throw new TypeError('boom')
   }
 }
@@ -235,7 +236,7 @@ describe('intuticApprovalResponder: deny path', () => {
   it('evaluates each request independently — one denial does not poison the rest', async () => {
     class SelectiveGate extends Gate {
       override async guard(toolName: string): Promise<void> {
-        if (toolName === 'bad') throw new IntuticGateRefusal('nope', 'TEST')
+        if (toolName === 'bad') throw new IntuticGateRefusal('nope', 'SNAPSHOT')
       }
     }
     const respond = intuticApprovalResponder({ gate: new SelectiveGate({ enforce: true }) })
@@ -423,7 +424,7 @@ describe('TD-415: a builtin bash approval pause, answered by intuticApprovalResp
     override async guard(toolName: string, toolInput: Record<string, unknown>): Promise<void> {
       this.calls.push({ toolName, toolInput })
       if (String(toolInput['command'] ?? '').includes('rm -rf')) {
-        throw new IntuticGateRefusal('recursive delete', 'TEST')
+        throw new IntuticGateRefusal('recursive delete', 'SNAPSHOT')
       }
     }
   }
@@ -865,7 +866,7 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
   })
 
   function rulesLine(p: FixturePattern): string {
-    return [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', p.reason, p.source].join('\t')
+    return [p.id, p.severity, (p.ignoreCase ? 'i' : '') + (p.sequence ? 's' : '') || '-', p.subject ?? 'any', p.reason, p.source].join('\t')
   }
 
   /** Builds the stdin JSON envelope Claude Code's real PreToolUse hook sends,
@@ -879,15 +880,18 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
     return { tool_name: toolName, tool_input: { command, path } }
   }
 
-  function runGeneratedScript(p: FixturePattern, fixture: string): number | null {
-    writeFileSync(join(dir, 'policy-snapshot.rules'), rulesLine(p) + '\n', 'utf-8')
+  /** Async spawn, not spawnSync: a synchronous spawn per fixture blocks the
+   *  worker, which on a loaded machine starves its RPC with Vitest. */
+  function runGeneratedScript(p: FixturePattern, fixture: string): Promise<number | null> {
+    writeFileSync(join(dir, 'policy-snapshot.rules'), rulesText([rulesLine(p)]), 'utf-8')
     const scriptPath = join(dir, 'claude-code-check.js')
     writeFileSync(scriptPath, _internal.renderSandboxGateScript('policy-snapshot.rules'), 'utf-8')
-    const result = spawnSync(process.execPath, [scriptPath], {
-      input: JSON.stringify(ctxFor(p, fixture)),
-      encoding: 'utf-8',
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [scriptPath], { stdio: ['pipe', 'ignore', 'ignore'] })
+      child.on('error', reject)
+      child.on('close', (code) => resolve(code))
+      child.stdin.end(JSON.stringify(ctxFor(p, fixture)))
     })
-    return result.status
   }
 
   function severityConst(s: 'block' | 'warn' | 'shadow'): string {
@@ -904,7 +908,9 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
   })
 
   describe.each(fixtures.map((p) => [p.id, p] as const))('%s', (_id, p) => {
-    it('exits 2 (block) or 0 (warn/shadow), agreeing with snapshot.evaluate(), on every `matches` fixture', () => {
+    // One Node process per fixture, in turn: about a second each on a loaded
+    // machine, so the default 5 s is too little for a pattern with several.
+    it('exits 2 (block) or 0 (warn/shadow), agreeing with snapshot.evaluate(), on every `matches` fixture', async () => {
       const snap = loadSnapshot('', writeIsolatedRules(dir, p))
       for (const fixture of p.matches) {
         const subject = p.subject ?? 'any'
@@ -914,25 +920,54 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
         const decision = evaluate(toolName, target, command, snap)
         expect(decision.severity, `expected ${p.id} to match ${JSON.stringify(fixture)}`).toBe(severityConst(p.severity))
 
-        const exitCode = runGeneratedScript(p, fixture)
+        const exitCode = await runGeneratedScript(p, fixture)
         const expectedExit = decision.severity === SEV_BLOCK ? 2 : 0
         expect(exitCode, `generated script exit code for ${p.id} / ${JSON.stringify(fixture)}`).toBe(expectedExit)
       }
-    })
+    }, 60_000)
 
-    it('exits 0 on every `notMatches` fixture, agreeing with snapshot.evaluate()', () => {
+    it('exits 0 on every `notMatches` fixture, agreeing with snapshot.evaluate()', async () => {
       for (const fixture of p.notMatches) {
-        const exitCode = runGeneratedScript(p, fixture)
+        const exitCode = await runGeneratedScript(p, fixture)
         expect(exitCode, `generated script exit code for ${p.id} / ${JSON.stringify(fixture)} (notMatches)`).toBe(0)
       }
-    })
+    }, 60_000)
+  })
+})
+
+describe('intuticSandboxBootstrap: generated hook script and hold rules', () => {
+  // The sandbox has no route to the control plane, so a hold cannot be
+  // recorded or approved there. It used to fall through to an exit 0, letting
+  // the call a workspace asked to review run unreviewed.
+  it('refuses a call a hold rule matches, and lets others through', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'intutic-sandbox-gate-hold-'))
+    try {
+      writeFileSync(
+        join(dir, 'policy-snapshot.rules'),
+        rulesText([['sop.local.review_before.Deploy', 'hold', 'i', 'tool', 'Held for human review: Deploy', ' (Deploy) '].join('\t')]),
+        'utf-8',
+      )
+      const scriptPath = join(dir, 'claude-code-check.js')
+      writeFileSync(scriptPath, _internal.renderSandboxGateScript('policy-snapshot.rules'), 'utf-8')
+      const run = (toolName: string) =>
+        spawnSync(process.execPath, [scriptPath], {
+          input: JSON.stringify({ tool_name: toolName, tool_input: {} }),
+          encoding: 'utf-8',
+        })
+      const held = run('Deploy')
+      expect(held.status).toBe(2)
+      expect(held.stderr).toContain('HELD for approval: Held for human review: Deploy [sop.local.review_before.Deploy]')
+      expect(run('Read').status).toBe(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
 function writeIsolatedRules(dir: string, p: FixturePattern): string {
-  const line = [p.id, p.severity, p.ignoreCase ? 'i' : '-', p.subject ?? 'any', p.reason, p.source].join('\t')
+  const line = [p.id, p.severity, (p.ignoreCase ? 'i' : '') + (p.sequence ? 's' : '') || '-', p.subject ?? 'any', p.reason, p.source].join('\t')
   const file = join(dir, `isolated-${p.id.replace(/[^a-zA-Z0-9]/g, '_')}.rules`)
-  writeFileSync(file, line + '\n', 'utf-8')
+  writeFileSync(file, rulesText([line]), 'utf-8')
   return file
 }
 

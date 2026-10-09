@@ -8,6 +8,7 @@
  *   - `intutic gateway status <gateway_id> [--json]`
  *   - `intutic gateway rotate <gateway_id>`
  *   - `intutic gateway revoke <gateway_id> [--reason <text>]`
+ *   - `intutic gateway config get <gateway_id> [--json]`
  *   - `intutic gateway config set <gateway_id> [--require-vk <bool>] [--require-provisioned-key <bool>]`
  *   - `intutic gateway assign --gateway <gateway_id>|--clear [--org <org_id>]`
  *   - `intutic gateway resolve [--json]`
@@ -271,6 +272,44 @@ export async function runGatewayRevoke(
     }
   } catch (err) {
     log.error(`Failed to revoke gateway: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+interface GatewayConfigResponse {
+  config: { requireVk?: boolean; requireProvisionedKey?: boolean }
+  configVersion: number
+}
+
+/**
+ * One config flag for `gateway config get`. Unset means the gateway runs
+ * its deployment's own value (`INTUTIC_GATEWAY_REQUIRE_VK`,
+ * `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY`), which the control plane does
+ * not know.
+ */
+export function describeConfigFlag(value: boolean | undefined): string {
+  return value === undefined ? '— (not set here; the deployment\'s own value applies)' : String(value)
+}
+
+/** `intutic gateway config get <gateway_id>` */
+export async function runGatewayConfigGet(gatewayId: string, opts: GatewayCliOpts): Promise<void> {
+  const client = await getClient(opts)
+
+  try {
+    const res = await client.get<GatewayConfigResponse>(`/api/v1/gateways/${encodeURIComponent(gatewayId)}/config`)
+
+    if (opts.json) {
+      console.log(JSON.stringify(res, null, 2))
+      return
+    }
+
+    log.header('Intutic — Gateway Config')
+    log.field('Require vk_ keys', describeConfigFlag(res.config.requireVk))
+    log.field('Require provisioned key', describeConfigFlag(res.config.requireProvisionedKey))
+    log.field('Config version', String(res.configVersion))
+    log.dim(`  \`intutic gateway status ${gatewayId}\` shows whether the gateway runs this version.`)
+  } catch (err) {
+    log.error(`Failed to read gateway config: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
   }
 }

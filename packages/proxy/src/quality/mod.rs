@@ -32,13 +32,17 @@ impl RequestPreProcessor {
     /// Returns:
     /// - `Some(response_bytes)` if the request was intercepted
     /// - `None` if the request should proceed to the LLM normally
+    ///
+    /// The control plane answers commands only for a virtual key. A command in
+    /// a request made with a provider key is answered here, without asking, so
+    /// the provider key is never sent to the control plane.
     pub async fn process(
         &self,
         session_id: &str,
         workspace_id: &str,
         messages: &serde_json::Value,
         protocol: &crate::protocol::Protocol,
-        api_key: &str,
+        virtual_key: Option<&crate::credential::VirtualKey>,
     ) -> Option<Vec<u8>> {
         let last_message = get_last_user_message(messages)?;
 
@@ -53,6 +57,15 @@ impl RequestPreProcessor {
             let is_judge_with_args = cmd_1 == "judge" && parts.len() > 2;
             if !is_judge_with_args && !is_predict {
                 debug!(session_id, command = %command_line, "Intercepted slash command");
+                let Some(virtual_key) = virtual_key else {
+                    return Some(format_as_llm_response(
+                        "### ⚠️ Command Unavailable\n\n\
+                        `/intutic` commands are answered by the Intutic control plane, which \
+                        needs an Intutic virtual key. This request was made with a provider \
+                        key, so the command was not run and not forwarded to the LLM.",
+                        protocol,
+                    ));
+                };
                 return slash_interceptor::handle(
                     &self.http_client,
                     &self.control_plane_url,
@@ -60,7 +73,7 @@ impl RequestPreProcessor {
                     workspace_id,
                     command_line,
                     protocol,
-                    api_key,
+                    virtual_key,
                 )
                 .await;
             }

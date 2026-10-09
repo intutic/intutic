@@ -20,7 +20,7 @@ import pc from 'picocolors'
 const HARNESS_TO_PROCESS_NAME: Record<string, string[]> = {
   cursor: ['Cursor'],
   'claude-code': ['Claude Code'],
-  antigravity: ['Antigravity'],
+  antigravity: ['Antigravity', 'Gemini CLI'],
   n8n: ['n8n'],
   codex: ['Codex'],
   windsurf: ['Windsurf'],

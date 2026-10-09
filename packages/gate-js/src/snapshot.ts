@@ -29,41 +29,20 @@
  *   * Snapshot health is reported as an event — "snapshot missing on 400
  *     machines" must not look identical to "snapshot present and healthy".
  *
- * ## Two deliberate divergences from the Python SDK reader
+ * ## Padding and case
  *
- * Both were found empirically, by running `src/__tests__/fidelity.test.ts`
- * against a hand-port of `intutic_clawde/gate/snapshot.py`'s `_normalise()`
- * and watching real patterns from `protectedPaths.ts` fail to fire. Neither
- * is a stylistic choice; both are confirmed gaps in `intutic_clawde`'s
- * reader relative to the shipped contract it claims to port, carried here
- * only as a documented finding, not as behaviour to reproduce.
- *
- * 1. **No padding.** `_normalise()` lowercases and collapses whitespace but
- *    does not pad the result with a leading/trailing space. The actual
- *    shipped gate (`intuticNormalise` in gateBody.ts, emitted from
- *    `NORMALISE_CONTRACT.jsSource`) pads. Padding is what lets a
- *    floor/destructive pattern use a plain leading space as a stand-in for
- *    `^` (`' rm( +-[a-zA-Z-]+)+ +/( |\\*)'` requires a literal space before
- *    `rm`) — POSIX ERE has no `\b` and no reliable `^`/`$` inside the emitted
- *    shell gates, so the whole pattern table is authored against the padded
- *    contract. It is also why `policySnapshot.ts`'s `toGuardPattern` strips
- *    the `^`/`$` off an SOP `toolPattern` and re-wraps it as `' (name) '`
- *    before shipping it as a `subject: 'tool'` snapshot rule — that
- *    transformation only makes sense against a padded reader. Without
- *    padding, a command that BEGINS with the dangerous verb (`"rm -rf /"`,
- *    no leading space) never matches `' rm...'` at all, and the block
- *    silently never fires.
- * 2. **Forced lowercasing.** `_normalise()` lowercases unconditionally; the
- *    real `NORMALISE_CONTRACT.jsSource` does not — case sensitivity is
- *    governed entirely by each rule's own `ignoreCase`/`i`-flag column.
- *    `bypass.env_kill_switch` (` [A-Z][A-Z0-9_]*_HOOKS?=`) and
- *    `destructive.chmod_recursive_root`/`chown_recursive_root`
- *    (`[a-zA-Z]*R[a-zA-Z]*`, a literal uppercase `R` for the recursive flag)
- *    both key on case WITHOUT setting that flag; forcing the subject to
- *    lowercase first makes them never fire, on real production patterns.
- *
- * This reader pads and preserves case, matching the real shipped contract;
- * see the fidelity suite for the evidence.
+ * Normalisation pads the subject with a space at each end and collapses
+ * whitespace, and does not lowercase, as the shipped gates do
+ * (`NORMALISE_CONTRACT` in `protectedPaths.ts`). Padding is what lets a
+ * floor/destructive pattern use a plain leading space or non-word character as
+ * a stand-in for `^` (POSIX ERE has no `\b` and no reliable `^`/`$` inside the
+ * emitted shell gates), so without it a command that BEGINS with the dangerous
+ * verb (`"rm -rf /"`, `"DROP TABLE users"`) never matches. Case sensitivity is
+ * each rule's own `ignoreCase` flag: `bypass.env_kill_switch` and the
+ * recursive chmod/chown rules key on an uppercase letter without one. The
+ * Python SDK's reader once lowercased and did not pad, and missed both; it now
+ * follows the same contract, and `destructive-sql-vectors.json` in
+ * shared-types runs both readers over the same commands.
  *
  * The regex-dialect divergence the Python module documents (`.rules` patterns
  * are authored as JavaScript regexes; compiling them with a different engine
@@ -76,7 +55,18 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import {
+  decodeMcpAllowlistRecord,
+  decodeMcpRegistryRecord,
+  MCP_ALLOWLIST_RECORD_TAG,
+  MCP_REGISTRY_RECORD_TAG,
+  type McpAllowlistRecord,
+  type McpRegistryRecord,
+} from './mcpRegistryRecord.js'
 import { decodeSsoGroupRecord, SSO_GROUP_RECORD_TAG, type SsoGroupRecord } from './ssoGroups.js'
+import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
+import { classify } from './actions.js'
+import { compileSequence, sequenceMatch } from './sequence.js'
 
 export const SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -84,9 +74,20 @@ export const SNAPSHOT_STALE_AFTER_DAYS = 7
 export const SEV_SHADOW = 'shadow' as const
 export const SEV_WARN = 'warn' as const
 export const SEV_BLOCK = 'block' as const
+/**
+ * A hold rule (a `REQUIRE_APPROVAL:` SOP, or a local `review_before:` token):
+ * refuses like a block, but asks a person rather than denying — see hold.ts.
+ */
+export const SEV_HOLD = 'hold' as const
 
-export type Severity = typeof SEV_SHADOW | typeof SEV_WARN | typeof SEV_BLOCK
-export type RuleSubject = 'tool' | 'command' | 'target' | 'any'
+export type Severity = typeof SEV_SHADOW | typeof SEV_WARN | typeof SEV_BLOCK | typeof SEV_HOLD
+/**
+ * `phrase`: the source is `|`-separated phrases matched as words (phrases.ts),
+ * not a regex. `action`: the source is matched against the action tokens the
+ * command classifies to (`" action:deploy "`, actions.ts) — what a local
+ * `review_before: action:<name>` compiles to.
+ */
+export type RuleSubject = 'tool' | 'command' | 'target' | 'phrase' | 'action' | 'any'
 export type SnapshotState = 'ok' | 'absent' | 'invalid' | 'empty' | 'stale'
 
 export interface Rule {
@@ -95,6 +96,14 @@ export interface Rule {
   subject: RuleSubject
   reason: string
   pattern: RegExp
+  /**
+   * A sequence rule's compiled steps (flags `s`, sequence.ts), or null. The
+   * rule is matched by searching for its steps in order, in linear time,
+   * rather than by {@link pattern}, which a backtracking engine runs in time
+   * growing with the square of the text. Absent on a rule built by hand,
+   * which is matched by {@link pattern}.
+   */
+  steps?: RegExp[][] | null
 }
 
 export class Snapshot {
@@ -113,13 +122,27 @@ export class Snapshot {
    * edited group list in the file clears nothing.
    */
   ssoGroups: SsoGroupRecord | null = null
+  /**
+   * The workspace's MCP server registry decisions (the `@mcp_registry`
+   * record), or null when it made none. Null on a snapshot that fails its
+   * integrity check, on which the gate admits no MCP server at all
+   * (`mcpSnapshotUnverifiedRefusal`): a deleted record looks like one never
+   * set, so neither record can be vouched for.
+   */
+  mcpRegistry: McpRegistryRecord | null = null
+  /**
+   * The workspace's `mcpAllowedServers` list (the `@mcp_allowlist` record),
+   * or null when it set none. Null on a snapshot that fails its integrity
+   * check, as {@link mcpRegistry} is.
+   */
+  mcpAllowlist: McpAllowlistRecord | null = null
 
   get healthMessage(): string {
     switch (this.state) {
       case 'absent':
         return 'No policy snapshot — built-in protections only'
       case 'invalid':
-        return 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals'
+        return 'Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused'
       case 'empty':
         return 'Policy snapshot contains no rules — the compile produced nothing'
       case 'stale':
@@ -133,6 +156,7 @@ export class Snapshot {
 export interface Decision {
   /** `null` means allow. */
   severity: Severity | null
+  /** The rule's reason and `[id]`; for a hold, the reason alone, which the gate words as a hold. */
   reason: string
   ruleId: string
 }
@@ -151,8 +175,7 @@ export function snapshotPath(): string {
 /**
  * Collapse and pad whitespace, as the shipped gates do — case is
  * DELIBERATELY left untouched; a rule that wants case-insensitivity sets its
- * own `ignoreCase` flag. See the module doc comment for both ways the Python
- * SDK's reader diverges from this.
+ * own `ignoreCase` flag. See the module doc comment.
  */
 function normalise(value: unknown): string {
   const s = value === null || value === undefined ? '' : String(value)
@@ -189,17 +212,28 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
       snap.ssoGroups = decodeSsoGroupRecord(line)
       continue
     }
+    if (line.startsWith(`${MCP_REGISTRY_RECORD_TAG}\t`)) {
+      snap.mcpRegistry = decodeMcpRegistryRecord(line)
+      continue
+    }
+    if (line.startsWith(`${MCP_ALLOWLIST_RECORD_TAG}\t`)) {
+      snap.mcpAllowlist = decodeMcpAllowlistRecord(line)
+      continue
+    }
 
     const f = line.split('\t')
     // Column order: id, severity, flags, subject, reason, source(regex), [argPatternB64].
+    // Flags: i = case-insensitive, s = a sequence rule.
     if (f.length < 6 || !f[5]) continue
+    const ic = f[2]!.includes('i')
     try {
       snap.rules.push({
         id: f[0]!,
         severity: f[1]!,
         subject: (f[3] as RuleSubject) || 'any',
         reason: f[4]!,
-        pattern: new RegExp(f[5]!, f[2] === 'i' ? 'i' : ''),
+        pattern: new RegExp(f[5]!, ic ? 'i' : ''),
+        steps: f[2]!.includes('s') ? compileSequence(f[5]!, ic) : null,
       })
     } catch {
       snap.droppedRules += 1
@@ -214,7 +248,9 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
     .filter((l) => l && !l.startsWith('#'))
     .join('\n')
   const actual = createHash('sha256').update(body, 'utf-8').digest('hex').slice(0, 32)
-  if (snap.digest !== 'none' && actual !== snap.digest) {
+  // No digest line is unverified too: the sync daemon always writes one, so
+  // its absence means the file was edited.
+  if (actual !== snap.digest) {
     snap.state = 'invalid'
   }
 
@@ -233,6 +269,9 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
     // Except the group policy, which only ever refuses: it still applies, to a
     // member whose groups this gate can no longer vouch for.
     if (snap.ssoGroups) snap.ssoGroups = { ...snap.ssoGroups, member: null }
+    // Neither MCP record can be vouched for: the gate admits no MCP server.
+    snap.mcpRegistry = null
+    snap.mcpAllowlist = null
   }
 
   if (snap.state === 'ok' && snap.generatedAt) {
@@ -267,19 +306,37 @@ export function evaluate(
   const nTool = normalise(toolName)
   const nCommand = normalise(command)
   const nTarget = normalise(target)
+  let words: PhraseText | null = null
+  // The command's action tokens, space-padded as the hook gates write them, so
+  // a hold on `action:deploy` matches whole tokens. Classified with the same
+  // needles and phrase matcher as the hook gates and the proxy's actions.rs.
+  let actions: string | null = null
 
   for (const rule of rules) {
+    if (rule.subject === 'phrase') {
+      // The source is `|`-separated phrases matched as words against the raw
+      // command (phrases.ts), not a regex: a backtracking regex for "whatever
+      // separates the words" is super-linear on crafted input.
+      words ??= phraseText(command)
+      const w = words
+      if (!rule.pattern.source.split('|').some((p) => hasPhrase(w, p, true))) continue
+    }
+    if (rule.subject === 'action') actions ??= ' ' + classify(toolName, { command }).join(' ') + ' '
     const subjects =
-      rule.subject === 'tool'
-        ? [nTool]
-        : rule.subject === 'command'
-          ? [nCommand]
-          : rule.subject === 'target'
-            ? [nTarget]
-            : [nCommand, nTarget]
+      rule.subject === 'phrase'
+        ? [nCommand]
+        : rule.subject === 'action'
+          ? [actions!]
+          : rule.subject === 'tool'
+            ? [nTool]
+            : rule.subject === 'command'
+              ? [nCommand]
+              : rule.subject === 'target'
+                ? [nTarget]
+                : [nCommand, nTarget]
 
     for (const subject of subjects) {
-      if (!rule.pattern.test(subject)) continue
+      if (rule.subject !== 'phrase' && !(rule.steps ? sequenceMatch(rule.steps, subject) : rule.pattern.test(subject))) continue
       if (rule.severity === SEV_SHADOW) {
         return { severity: SEV_SHADOW, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id }
       }
@@ -291,7 +348,12 @@ export function evaluate(
           ruleId: rule.id,
         }
       }
-      // The rule's own reason, not a generic one — resolveSeverity reads it.
+      if (rule.severity === SEV_HOLD) {
+        return { severity: SEV_HOLD, reason: rule.reason, ruleId: rule.id }
+      }
+      // Any other severity blocks, as an unknown one does in the shipped
+      // gates: a severity this reader does not know must not allow. The
+      // rule's own reason, not a generic one — resolveSeverity reads it.
       return { severity: SEV_BLOCK, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id }
     }
   }

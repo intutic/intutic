@@ -48,7 +48,7 @@ Intutic auto-detects and configures these AI coding harnesses:
 | **Antigravity** | `~/.gemini/` directory | Environment variables |
 | **Codex** | `~/.codex/` directory | `codex.json` config |
 | **n8n** | Running n8n instance | Workflow JSON file |
-| **OpenClaw** | `~/.openclaw/` directory | `config.yaml` |
+| **OpenClaw** | `~/.openclaw/` directory | `AGENTS.md` section in its agent workspace + `~/.intutic/hooks/openclaw/intutic-governance.cjs` (plugin gate, listed in `~/.openclaw/openclaw.json`) |
 | **Hermes** | `~/.hermes/` directory | `config.toml` |
 | **OpenCode** | `.opencode/`, `opencode.json`, `~/.config/opencode/` or `opencode` on PATH | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` (plugin gate) |
 

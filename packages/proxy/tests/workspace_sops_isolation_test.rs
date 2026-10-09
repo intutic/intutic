@@ -3,6 +3,7 @@
 //! gateway process get two different, non-leaking SOP sets, fetched from a
 //! real HTTP server (not a mock trait) standing in for the control plane.
 
+use intutic_proxy::credential::RequestCredential;
 use intutic_proxy::gateway::{init_gateway_config, GatewayConfig};
 use intutic_proxy::sops::all_sops_for_workspace;
 use std::net::SocketAddr;
@@ -65,12 +66,14 @@ async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
     let addr = spawn_stand_in().await;
     let control_plane_url = format!("http://{addr}");
     let client = reqwest::Client::new();
+    let alpha_key = RequestCredential::classify("vk_alpha_deadbeef");
+    let beta_key = RequestCredential::classify("vk_beta_deadbeef");
 
     let alpha = all_sops_for_workspace(
         &client,
         Some(&control_plane_url),
         Some("ws_alpha"),
-        Some("vk_alpha_deadbeef"),
+        alpha_key.virtual_key(),
         None,
     )
     .await;
@@ -78,7 +81,7 @@ async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
         &client,
         Some(&control_plane_url),
         Some("ws_beta"),
-        Some("vk_beta_deadbeef"),
+        beta_key.virtual_key(),
         None,
     )
     .await;
@@ -122,7 +125,7 @@ async fn two_workspaces_on_one_gateway_process_get_isolated_sop_sets() {
         &client,
         Some(&control_plane_url),
         Some("ws_alpha"),
-        Some("vk_alpha_deadbeef"),
+        alpha_key.virtual_key(),
         None,
     )
     .await;

@@ -64,6 +64,8 @@ function recordRestore(entry: PreImageEntry, note: string): void {
         harnessType: 'cli',
         timestamp: ts,
         incidentId: crypto.createHash('sha1').update(ts + entry.id).digest('hex').slice(0, 16),
+        // Made once and resent with this line: processed once however often the drain retries.
+        eventId: crypto.randomBytes(16).toString('hex'),
       }) + '\n',
       { flag: 'a' },
     )

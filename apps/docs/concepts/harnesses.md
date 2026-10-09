@@ -82,7 +82,7 @@ Every request passes through these stages before reaching the LLM:
 
 1. **Virtual key validation** — verifies the `vk_*` workspace key
 2. **Budget gate** — checks session and workspace spend limits against Valkey (`v2:budget:hard_block:{workspace_id}`)
-3. **DLP scanner** — regex-based detection of secrets across ~20 high-precision patterns (AWS keys incl. temporary creds, GitHub classic + fine-grained tokens, Anthropic/OpenAI/GitLab/Slack/Google/Stripe/SendGrid/npm/PyPI/Hugging Face keys, Slack webhooks, DB connection credentials, JWTs, bearer tokens, private keys, SSNs) with `redact` or `block` actions — applied to request bodies and forwarded header values; responses are scanned on the way back too, with streaming output scrubbed per SSE line
+3. **DLP scanner** — regex-based detection of secrets across ~20 high-precision patterns (AWS keys incl. temporary creds, GitHub classic + fine-grained tokens, Anthropic/OpenAI/GitLab/Slack/Google/Stripe/SendGrid/npm/PyPI/Hugging Face keys, Slack webhooks, DB connection credentials, JWTs, bearer tokens, private keys) plus checksum-validated PII detectors (payment cards, IBANs, SSNs; email and phone when enabled), with `redact` or `block` actions — applied to request bodies and forwarded header values; responses are scanned on the way back too, with streaming output scrubbed per SSE line
 4. **SnipCompactor** — token compression: text repetition collapse, JSON array truncation, code skeleton extraction via tree-sitter
 5. **WASM plugin evaluation** — custom governance plugins compiled to WebAssembly
 6. **Policy check** — pre-request evaluation against the control plane (3s timeout, configurable fail-open or fail-closed)
@@ -114,7 +114,7 @@ The sync daemon keeps harness config files in sync with SOPs from the control pl
 3. **Compare configVersion** — if remote > local, write each recorded harness's files (see [What writes harness files](/integrations/#what-writes-harness-files)) and update the Claude Code hooks
 4. **Proxy-wrap MCP servers** — on every cycle, so a server added to a harness config after `connect` started is wrapped on the next one
 5. **Apply SkillOpt edits** — config edits the control plane queued for the workspace are written into the rules files and each outcome is acknowledged; when step 3 rewrote the files, every edit is applied again
-6. **Refresh the decisions log** — only when the workspace turned it on
+6. **Refresh the decisions log** — only when the workspace turned it on, into each harness's instructions file (see [Governed Decisions Log](/guide/decisions-log)); a decisions section an earlier version put in `CLAUDE.md` is taken out on every sync
 7. **Compute SHA-256 hashes** — hash each harness's config file
 8. **Report hashes** — `POST /api/v1/sync/sop-hash` for drift detection
 9. **Update integrity store** — `.intutic/integrity.json` in the workspace
@@ -143,16 +143,16 @@ All config writes are **atomic** — write to a temp file, then rename. With the
 
 ### Config file formats
 
-SOPs are written in each harness's native format:
+SOPs are written in each harness's native format. [Where rule sets go](/guide/how-it-works#where-rule-sets-go) lists the file for every harness:
 
 | Format | Harnesses | Example file |
 |---|---|---|
-| Markdown | Cursor, Claude Code, Windsurf, GitHub Copilot | `.cursorrules` |
-| JSON | Antigravity | `.gemini/settings.json` |
-| YAML | Aider | `.aider.conf.yml` |
-| TOML | OpenHands | `config.toml` |
-| Env | Codex | `.env.intutic` |
-| Native hooks | Claude Code, Cursor, Windsurf, Cline, Codex, GitHub Copilot (agent mode), Continue CLI, Antigravity, Goose, OpenHands, OpenClaw, Hermes, Pi, Muse Code, Grok Build, OpenCode (plugin), dsh (plugin), n8n (workflow hook) | Harness-specific — see the [coverage matrix](/reference/harness-security-matrix#coverage-matrix) |
+| Markdown file of Intutic's own | Claude Code, Cursor, Windsurf, Cline, Continue, OpenHands, Aider | `.cursor/rules/intutic-governance.mdc` |
+| Markdown section in your own file | Codex, Muse Code, Grok Build, OpenCode, Pi, Hermes, Roo Code, dsh, OpenClaw (`AGENTS.md`); Antigravity and Gemini CLI (`GEMINI.md`); GitHub Copilot (`.github/copilot-instructions.md`); Goose (`.goosehints`) | `AGENTS.md` |
+| YAML | Aider (the `read:` entry that loads its rules file) | `.aider.conf.yml` |
+| Env | Codex and the SDK frameworks (proxy URLs) | `.env.intutic` |
+| No instructions file | n8n, Claude Desktop, Open WebUI, Xirp, Agentic Orchestrator, AgentCore, the SDK frameworks | — |
+| Native hooks | Claude Code, Cursor, Windsurf, Cline, Codex, GitHub Copilot (agent mode), Antigravity, Goose, OpenHands, OpenClaw (plugin), Hermes, Pi (extension), Muse Code, Grok Build, OpenCode (plugin), dsh (plugin), n8n (workflow hook) | Harness-specific — see the [coverage matrix](/reference/harness-security-matrix#coverage-matrix) |
 
 → Source: [services/sync-daemon/](https://github.com/intutic/intutic/tree/main/services/sync-daemon)
 

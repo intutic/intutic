@@ -1,0 +1,98 @@
+{
+  "kinds": {
+    "hook_rule": {
+      "title": { "type": "string", "required": true, "item": "title" },
+      "tools": { "type": "list", "required": true, "item": "token", "minItems": 1, "maxItems": 8 },
+      "argContains": { "type": "list", "required": false, "item": "literal", "maxItems": 4 },
+      "argNotContains": { "type": "list", "required": false, "item": "literal", "maxItems": 4 },
+      "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
+    },
+    "deny_tools": {
+      "tools": { "type": "list", "required": true, "item": "token", "minItems": 1, "maxItems": 16 },
+      "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
+    },
+    "review_before": {
+      "tokens": { "type": "list", "required": true, "item": "token", "minItems": 1, "maxItems": 16 },
+      "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
+    },
+    "requires_before": {
+      "first": { "type": "string", "required": true, "item": "token" },
+      "then": { "type": "string", "required": true, "item": "token" },
+      "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
+    },
+    "forbid_after": {
+      "first": { "type": "string", "required": true, "item": "token" },
+      "then": { "type": "string", "required": true, "item": "token" },
+      "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
+    },
+    "max_calls": {
+      "token": { "type": "string", "required": true, "item": "token" },
+      "limit": { "type": "int", "required": true, "min": 1, "max": 1000 },
+      "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
+    },
+    "forbid_with": {
+      "taint": { "type": "string", "required": true, "item": "taint" },
+      "token": { "type": "string", "required": true, "item": "token" },
+      "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
+    },
+    "wasm_predicate": {
+      "title": { "type": "string", "required": true, "item": "title" },
+      "rationale": { "type": "string", "required": true, "item": "rationale" },
+      "predicate": { "type": "json", "required": true },
+      "verdict": { "type": "verdict", "required": true, "value": 3 },
+      "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
+    },
+    "allowed_models": {
+      "models": { "type": "list", "required": true, "item": "model", "minItems": 1, "maxItems": 32 }
+    },
+    "egress_allow": {
+      "hosts": { "type": "list", "required": true, "item": "host", "minItems": 1, "maxItems": 32 }
+    }
+  },
+  "actionTokens": [
+    "action:deploy",
+    "action:publish",
+    "action:release",
+    "action:db_write",
+    "action:secret_read",
+    "action:http_post",
+    "action:pii_export",
+    "action:run_tests"
+  ],
+  "knownHarnessTools": ["Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task", "NotebookEdit"],
+  "taints": ["secrets()", "pii()"],
+  "patterns": {
+    "token": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+    "role": "^[a-z][a-z0-9_-]{0,31}$",
+    "model": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+  },
+  "limits": {
+    "titleMaxChars": 80,
+    "rationaleMaxChars": 480,
+    "literalMaxChars": 64,
+    "hostMaxChars": 253,
+    "minEgressCidrPrefix": 8
+  },
+  "samples": {
+    "token": {
+      "valid": ["Bash", "mcp__github__create_issue", "developer__shell", "action:deploy", "ns.tool:v-1"],
+      "invalid": ["terraform apply", "1bash", "", "-flag", "a/b"]
+    },
+    "literal": {
+      "valid": ["terraform apply", "--force", "prod;", "a,b"],
+      "invalid": ["", "tab\there", "line\nbreak", "say \"hi\"", "back\\slash", "this literal is longer than sixty-four characters, which is the cap"]
+    },
+    "role": {
+      "valid": ["deployer", "on-call", "sre_team"],
+      "invalid": ["Deployer", "1st", "", "has space"]
+    },
+    "model": {
+      "valid": ["claude-sonnet-4-5", "gpt-4o", "openrouter/meta-llama/llama-3-70b", "Model:v1.2"],
+      "invalid": ["", "-model", "has space", "model!"]
+    },
+    "host": {
+      "valid": ["api.example.com", ".example.com", "API.Example.com", "10.0.0.0/8", "192.168.1.10", "10.1.0.0/16"],
+      "invalid": ["*", "com", ".com", "0.0.0.0/0", "10.0.0.0/7", "010.0.0.1", "256.1.1.1", " api.example.com", "example.123", "-bad.example.com"]
+    }
+  }
+}

@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { evaluate, loadSnapshot, SEV_BLOCK, SEV_SHADOW, SEV_WARN } from '../snapshot.js'
+import { expectLinearTime } from './linearTime.js'
 
 // Port of packages/intutic-clawde/tests/test_gate_snapshot.py.
 
@@ -91,6 +92,14 @@ describe('integrity', () => {
     expect(s.rules).toEqual([])
   })
 
+  it('a missing digest invalidates, as it does in every gate', () => {
+    const p = rulesFile([line('d', 'block', '-', 'command', 'r', 'rm')])
+    writeFileSync(p, readFileSync(p, 'utf-8').replace(/^#digest .*\n/m, ''), 'utf-8')
+    const s = loadSnapshot(WS, p)
+    expect(s.state).toBe('invalid')
+    expect(s.rules).toEqual([])
+  })
+
   it('a workspace mismatch invalidates', () => {
     const p = rulesFile([line('d', 'block', '-', 'command', 'r', 'rm')], { workspace: 'ws_someone_else' })
     const s = loadSnapshot(WS, p)
@@ -128,9 +137,7 @@ describe('evaluation', () => {
         // strips a SOP toolPattern's `^`/`$` and re-wraps it as `' (name) '`
         // specifically because the reader tests against a padded string —
         // see snapshot.ts's module doc comment for why. This fixture mirrors
-        // the real wire shape rather than the anchor-only form the ported
-        // Python test used (which only worked there because the Python
-        // reader does not pad).
+        // the real wire shape, as the Python reader's test now does too.
         line('tool.fetch', 'block', '-', 'tool', 'Tool not permitted', ' (webfetch) '),
       ]),
     )
@@ -175,5 +182,46 @@ describe('evaluation', () => {
     const s = snap()
     expect(evaluate('shell', '', 'rm -rf /', s, true).severity).toBeNull()
     expect(evaluate('write_file', '.intutic/x', '', s, true).severity).toBe(SEV_BLOCK)
+  })
+})
+
+// Port of TestPhraseRules: a `phrase` rule's source is phrases joined by |,
+// matched as words by the phrase matcher, never as a regex — the gap regex it
+// replaced backtracked for seconds on a few hundred kilobytes of crafted text.
+describe('phrase rules', () => {
+  const load = () =>
+    loadSnapshot(
+      WS,
+      rulesFile([
+        line('destructive.sql_drop', 'warn', 'i', 'phrase', 'Destructive SQL statement', 'drop table|drop database|drop schema|truncate table'),
+      ]),
+    )
+
+  it.each([
+    "psql -c 'DROP/**/TABLE users'",
+    "psql -c 'DROP -- why\nTABLE users'",
+    "psql -c 'DROP \\\nTABLE users'",
+    "printf 'DROP\\nTABLE users' | psql",
+  ])('matches %j whatever separates the words', (command) => {
+    const d = evaluate('shell', '', command, load())
+    expect(d.severity).toBe(SEV_WARN)
+    expect(d.ruleId).toBe('destructive.sql_drop')
+  })
+
+  it.each(['git stash drop && cat table.md', 'truncate --size 0 table.log', './drop_table.sh'])(
+    'needs the whole words: %j',
+    (command) => {
+      expect(evaluate('shell', '', command, load()).severity).toBeNull()
+    },
+  )
+
+  it.each([
+    ['drop -- ', 25000],
+    ['drop /* ', 25000],
+    ['\\ ', 100000],
+  ] as const)('stays linear on %j repeated up to %i times', (unit, times) => {
+    const s = load()
+    const commands = { 1: unit.repeat(times / 4), 4: unit.repeat(times) }
+    expectLinearTime(JSON.stringify(unit), (scale) => evaluate('shell', '', commands[scale], s))
   })
 })

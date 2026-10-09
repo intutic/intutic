@@ -57,6 +57,23 @@ function ruleId(kind: 'require_obo' | 'high_risk', toolName: string): string {
   return `sso_group.${kind}.${toolName.replace(/[^A-Za-z0-9_.:-]/g, '_')}`
 }
 
+/**
+ * Whether a call named `name` is the tool a policy entry names: exactly, or,
+ * for an entry that is an MCP tool's own name (not starting with `mcp__`), as
+ * the name a harness gives it on any server, `mcp__<server>__<entry>`.
+ */
+export function ssoGroupToolMatches(entry: string, name: string): boolean {
+  if (name === entry) return true
+  if (entry.startsWith('mcp__') || !name.startsWith('mcp__')) return false
+  const suffix = `__${entry}`
+  return name.length > 'mcp__'.length + suffix.length && name.endsWith(suffix)
+}
+
+function matchingEntry(list: readonly string[], toolName: string): string | undefined {
+  if (list.includes(toolName)) return toolName
+  return list.find((e) => ssoGroupToolMatches(e, toolName))
+}
+
 /** `memberGroups` null means the groups are unknown — a high-risk tool is then refused. */
 export function evaluateSsoGroupClearance(
   policy: SsoGroupPolicy | null,
@@ -64,24 +81,26 @@ export function evaluateSsoGroupClearance(
   memberGroups: readonly string[] | null,
 ): SsoGroupDecision {
   if (!policy) return { clearance: 'GRANTED', ruleId: null, reason: '' }
-  if (policy.requireOboFor.includes(toolName)) {
+  const obo = matchingEntry(policy.requireOboFor, toolName)
+  if (obo !== undefined) {
     return {
       clearance: 'REQUIRES_OBO',
-      ruleId: ruleId('require_obo', toolName),
-      reason: `SSO group policy: ${toolName} is on-behalf-of only, and a tool-call gate has no OBO token to present`,
+      ruleId: ruleId('require_obo', obo),
+      reason: `SSO group policy: ${obo} is on-behalf-of only, and a tool-call gate has no OBO token to present`,
     }
   }
-  if (!policy.highRiskTools.includes(toolName)) return { clearance: 'GRANTED', ruleId: null, reason: '' }
+  const risky = matchingEntry(policy.highRiskTools, toolName)
+  if (risky === undefined) return { clearance: 'GRANTED', ruleId: null, reason: '' }
   if (memberGroups && policy.requiredGroups.some((g) => memberGroups.includes(g))) {
     return { clearance: 'GRANTED', ruleId: null, reason: '' }
   }
   const groups = policy.requiredGroups.length > 0 ? policy.requiredGroups.join(', ') : '(none configured)'
   return {
     clearance: 'DENIED',
-    ruleId: ruleId('high_risk', toolName),
+    ruleId: ruleId('high_risk', risky),
     reason: memberGroups
-      ? `SSO group policy: ${toolName} requires one of the SSO groups ${groups}, and this member holds none of them`
-      : `SSO group policy: ${toolName} requires one of the SSO groups ${groups}, and this gate does not know the member's groups`,
+      ? `SSO group policy: ${risky} requires one of the SSO groups ${groups}, and this member holds none of them`
+      : `SSO group policy: ${risky} requires one of the SSO groups ${groups}, and this gate does not know the member's groups`,
   }
 }
 

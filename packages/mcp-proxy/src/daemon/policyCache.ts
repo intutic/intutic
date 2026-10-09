@@ -21,6 +21,7 @@ import {
   type McpRegistryPolicy,
   type SsoGroupPolicy,
 } from '../policy.js'
+import { parseMcpBudgetPolicy, type McpBudgetPolicy } from '@intutic/shared-types'
 
 const logger = createLogger('mcp-proxy.policyCache')
 
@@ -100,6 +101,16 @@ export interface ResolvedPolicy {
   ssoGroupPolicy?: SsoGroupPolicy
   /** The workspace's `mcpProxyFailBehavior`, when it has chosen one. */
   mcpProxyFailBehavior?: 'open' | 'closed'
+  /** The workspace's MCP call budgets; absent on an entry from before they existed, which reads as none. */
+  mcpBudgets?: McpBudgetPolicy
+  /**
+   * The control plane's `piiDetectors` field, carried as it was sent: absent
+   * from an older control plane and from the snapshot seed, `null` when the
+   * control plane could not read the setting. `PolicyClient` reads it with
+   * `parseWorkspacePiiDetectors`, the reader the per-session mode uses too,
+   * so the two modes cannot read one value differently.
+   */
+  piiDetectors?: unknown
   /**
    * True on the entry `seedFromSnapshot` built from the sync daemon's local
    * snapshot, which carries only part of the policy. A proxy that already
@@ -125,8 +136,8 @@ async function readConfigVersion(workspaceId: string): Promise<number | undefine
   // and rejects it after `maxRetriesPerRequest` reconnect attempts — hundreds
   // of milliseconds on every cache hit, on the tool-call path. Unknown version
   // means "serve the cached entry", which is what the cache did before the
-  // version existed. The miss path below still connects lazily, so a reachable
-  // Valkey reaches `ready` on the first fetch.
+  // version existed. The miss path below starts the connection, so a reachable
+  // Valkey is ready from the next call on.
   if (valkey.status !== 'ready') return undefined
   try {
     const raw = await valkey.get(configVersionKey(workspaceId))
@@ -136,6 +147,20 @@ async function readConfigVersion(workspaceId: string): Promise<number | undefine
   } catch {
     return undefined
   }
+}
+
+/**
+ * Whether Valkey can answer a command now, starting the connection on first
+ * use. With Valkey down, ioredis queues a command and rejects it only after
+ * `maxRetriesPerRequest` reconnect attempts, whose delays grow with the outage
+ * to two seconds each: a policy miss waited out a GET and then a SET before it
+ * returned, seconds on the tool-call path for every miss for as long as
+ * Valkey was down. A Valkey that is not ready is skipped, as an empty one
+ * would be, and the control plane answers.
+ */
+function valkeyReady(): boolean {
+  if (valkey.status === 'wait') valkey.connect().catch(() => {})
+  return valkey.status === 'ready'
 }
 
 // Simple LRU map (insertion-order eviction)
@@ -175,6 +200,8 @@ type PolicyResponseBody = Pick<
   | 'principal'
   | 'ssoGroupPolicy'
   | 'mcpProxyFailBehavior'
+  | 'mcpBudgets'
+  | 'piiDetectors'
 >
 
 /**
@@ -257,6 +284,8 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
       parsed['mcpProxyFailBehavior'] === 'open' || parsed['mcpProxyFailBehavior'] === 'closed'
         ? parsed['mcpProxyFailBehavior']
         : undefined,
+    mcpBudgets: parseMcpBudgetPolicy(parsed['mcpBudgets']),
+    piiDetectors: parsed['piiDetectors'],
   }
 }
 
@@ -317,6 +346,8 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             principal:        parsed.principal,
             ssoGroupPolicy:   parsed.ssoGroupPolicy,
             mcpProxyFailBehavior: parsed.mcpProxyFailBehavior,
+            mcpBudgets:       parsed.mcpBudgets,
+            piiDetectors:     parsed.piiDetectors,
             cachedAt:         Date.now(),
             configVersion:    versionAtFetch,
           })
@@ -337,7 +368,8 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
  * `resolvePolicy`'s cold path is a blocking HTTP GET with a 5s socket timeout,
  * taken on the daemon's first request for a workspace after every restart. The
  * sync daemon already writes the same policy to
- * `~/.intutic/hooks/policy-snapshot.json` every cycle, so on the machine's own
+ * `~/.intutic/hooks/policy-snapshot.json` every cycle, and a verified copy under
+ * `~/.intutic/hooks/verified/`, which this reads; so on the machine's own
  * workspace that round trip is avoidable.
  *
  * # Two things that make the obvious version wrong
@@ -369,10 +401,14 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
     const { readFile } = await import('node:fs/promises')
     const os = await import('node:os')
     const path = await import('node:path')
+    // The sync daemon's verified copy (VERIFIED_SNAPSHOT_DIR in
+    // services/sync-daemon/src/lib/policySnapshot.ts), not the live file next
+    // to it: the live JSON carries the server allowlist with no digest over
+    // it, so an edit to it would otherwise seed this cache until the refresh.
     const file =
       snapshotPath ??
       process.env['INTUTIC_POLICY_SNAPSHOT'] ??
-      path.join(os.homedir(), '.intutic', 'hooks', 'policy-snapshot.json')
+      path.join(os.homedir(), '.intutic', 'hooks', 'verified', 'policy-snapshot.json')
 
     const parsed: unknown = JSON.parse(await readFile(file, 'utf-8'))
     if (!isRecord(parsed)) return null
@@ -495,9 +531,9 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
     return cached
   }
 
-  // Cache miss in LRU — check Valkey
+  // Cache miss in LRU — check Valkey, when it can answer now
   try {
-    const valkeyCached = await valkey.get(`mcp_daemon:policy:${workspaceId}`)
+    const valkeyCached = valkeyReady() ? await valkey.get(`mcp_daemon:policy:${workspaceId}`) : null
     if (valkeyCached) {
       // Cast, not validated — this is our own prior write, not a network
       // boundary. But an entry written before this field existed is still a
@@ -531,13 +567,12 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
   if (fresh) {
     evictIfFull()
     lru.set(workspaceId, fresh)
-    try {
-      await valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs())
-    } catch {
-      // Valkey unreachable. Write-through to the shared tier is an
-      // optimisation, not a correctness step: `fresh` is already in the LRU
-      // and is returned below. Failing the caller's policy resolution because
-      // a cache write failed would take the daemon down with Valkey.
+    // Write-through to the shared tier is an optimisation, not a correctness
+    // step: `fresh` is already in the LRU and is returned now, without waiting
+    // on the write. A failed write is dropped; failing or holding the caller's
+    // policy resolution on it would take the daemon down with Valkey.
+    if (valkey.status === 'ready') {
+      valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs()).catch(() => {})
     }
   }
   return fresh

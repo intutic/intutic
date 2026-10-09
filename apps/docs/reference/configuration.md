@@ -36,7 +36,7 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `MISTRAL_UPSTREAM_URL` | `https://api.mistral.ai` | Where requests for Mistral models go |
 | `OPENROUTER_UPSTREAM_URL` | `https://openrouter.ai/api` | Where requests for OpenRouter models go |
 | `DEEPSEEK_UPSTREAM_URL` | `https://api.deepseek.com` | Where requests for DeepSeek models go |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY` | unset | The provider key the proxy uses when a caller authenticates with an Intutic key (`vk_…`) and the workspace has not provisioned its own key for that provider. A caller that sends its own provider key uses that key. A gateway with `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY` set refuses instead of falling back |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY` | unset | The provider key the proxy uses when a caller authenticates with an Intutic key (`vk_…`) and the workspace has not provisioned its own key for that provider. A caller that sends its own provider key uses that key, and the proxy sends it to that provider only, never to the control plane. A gateway with `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY` set refuses instead of falling back |
 
 The proxy picks the provider from the model name, so these are the only way to point a provider somewhere else; `model_list` in `config.yaml` does not route. For a single upstream used by every provider, see [Standalone](/integrations/standalone).
 
@@ -46,6 +46,7 @@ The proxy picks the provider from the model name, so these are the only way to p
 | :--- | :--- | :--- |
 | `INTUTIC_SOPS_DIR` | unset | Absolute path to a directory of `.md` SOP files. Overrides the default search, which walks up from the proxy's working directory looking for `.intutic/sops`. Set this when the proxy does not run beside a workspace — a container, or a shared gateway. A blank value counts as unset. A path that is set but is not a directory is **not** silently replaced by the walk: the proxy reports it and loads no SOPs, so a typo cannot be answered with policy from somewhere else. When the resolved SOP set is empty the proxy warns at startup, naming each control that is consequently inactive — including when the directory exists but is empty, which enforces exactly as much as no directory at all. The bundled Kubernetes manifests set this to `/etc/intutic-sops` and mount the `proxy-sops` ConfigMap there; see [SOPs → where the proxy looks](/guide/sops#where-the-proxy-looks-for-sops). |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | The local WASM rule directory; takes precedence over `intutic_settings.wasm_local_dir` |
+| `INTUTIC_DISABLE_REGO_RULES` | unset | `1`: refuse [Rego rules](/guide/rego-policies) (OPA builds) at load, from the rules directory and the control plane. Native WASM rules are unaffected. The MCP proxy reads it too |
 | `INTUTIC_WASM_MANIFEST_ROOT` | unset (off) | The directory WASM rules may read files from: when a tool call names a manifest (`kubectl apply -f k8s/deploy.yaml`), the proxy reads that file under this root and hands its contents to the rule. Unset, rules see only the path. `~/` is expanded |
 | `WASM_CONTEXT_SNAPSHOT_RATE` | `0.05` | The fraction of requests (0–1) whose rule-evaluation context is attached to the trace, so a new rule can be replayed against real traffic before it ships. The context holds the request's tool calls with their arguments, tool names and descriptions, DLP finding names and session counters, not the message text. Traces go to the control plane when one is connected, and to `~/.intutic/logs` otherwise. `0` turns it off |
 | `INTUTIC_LOCAL_BUDGET_ENFORCE` | on | `0`, `false` or `no`: keep counting spend against the [local daily cap](/guide/budgets#local-daily-cap) but stop refusing requests over it |
@@ -106,6 +107,7 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | Where the CLI writes the policy snapshot the hook gate reads |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | Where `intutic policy install` puts WASM rules |
+| `INTUTIC_OPA_BIN` | `opa` on the `PATH` | The OPA binary `intutic rules build` compiles Rego with |
 | `N8N_URL` | `http://localhost:5678` | The n8n instance `intutic connect` configures |
 | `N8N_API_TOKEN` | unset | Its API key |
 | `INTUTIC_FC_KERNEL` | none (required) | For `intutic exec --sandbox firecracker`: the guest kernel image |
@@ -287,12 +289,12 @@ Intutic's options live under `intutic_settings`:
 | Setting | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
 | `control_plane_url` | string | `CONTROL_PLANE_URL` | Where the pre-request policy check goes. `CONTROL_PLANE_URL` takes precedence |
-| `fail_closed` | boolean | `true` | Refuse the request (`403 policy_denied`) when the check fails or cannot be reached. `false` lets it through |
+| `fail_closed` | boolean | `true` | Refuse the request (`403 policy_denied`) when the check fails or cannot be reached. `false` lets it through. It does not cover a [custom rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict), which refuses with `403 GOVERNANCE_UNAVAILABLE` either way: an agent can cause that by padding its input |
 | `timeout_ms` | number | `3000` | How long the check may take |
 
 ### DLP (`intutic_settings.dlp`)
 
-`enabled`, `scan_input`, `scan_output`, `stream_holdback_bytes` and custom `patterns`: see [Policies › Enforcement](/guide/policies#enforcement).
+`enabled`, `scan_input`, `scan_output`, `stream_holdback_bytes`, custom `patterns` and the PII `detectors`: see [Policies › Enforcement](/guide/policies#enforcement).
 
 ### Egress (`intutic_settings.egress`)
 

@@ -1,0 +1,107 @@
+{
+  "_comment": "Approval-hold bypass keys: a call held by a hold rule is let through later only by an approval for the identical call, compared as sha256(canonical JSON of its arguments). The MCP proxy (approvalHold.ts), @intutic/gate (hold.ts) and intutic_clawde.gate (hold.py) each serialise these toolInputs to `canonical` and hash it to `targetHash`. Regenerate the expectations from the MCP proxy, never from one SDK.",
+  "vectors": [
+    {
+      "name": "empty arguments",
+      "toolInput": {},
+      "canonical": "{}",
+      "targetHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "keys in any order",
+      "toolInput": {
+        "b": 1,
+        "a": "x"
+      },
+      "canonical": "{\"a\":\"x\",\"b\":1}",
+      "targetHash": "cdab067e9f3beb32d1252cfd63e492592fecbf591b0d08cadb24bb17f3864246"
+    },
+    {
+      "name": "the same keys reordered",
+      "toolInput": {
+        "a": "x",
+        "b": 1
+      },
+      "canonical": "{\"a\":\"x\",\"b\":1}",
+      "targetHash": "cdab067e9f3beb32d1252cfd63e492592fecbf591b0d08cadb24bb17f3864246"
+    },
+    {
+      "name": "nested objects sort at every level",
+      "toolInput": {
+        "z": {
+          "y": [
+            3,
+            {
+              "d": 1,
+              "c": 2
+            }
+          ],
+          "x": null
+        },
+        "a": true
+      },
+      "canonical": "{\"a\":true,\"z\":{\"x\":null,\"y\":[3,{\"c\":2,\"d\":1}]}}",
+      "targetHash": "4d96b8bf6cef02f2a487d840834e40850b562c5a71f39725e8ff6abf3aafe842"
+    },
+    {
+      "name": "a different value is a different call",
+      "toolInput": {
+        "command": "kubectl apply -f prod.yaml"
+      },
+      "canonical": "{\"command\":\"kubectl apply -f prod.yaml\"}",
+      "targetHash": "1b91aa18b4d42817081df5a3a70d88200e2dadfc06c77a48966dac413660b637"
+    },
+    {
+      "name": "the same command",
+      "toolInput": {
+        "command": "kubectl apply -f staging.yaml"
+      },
+      "canonical": "{\"command\":\"kubectl apply -f staging.yaml\"}",
+      "targetHash": "b9aecfd84f31f22bb9fa833ed8726ba303f5216c88db7cd3898d60677acca951"
+    },
+    {
+      "name": "numbers as JavaScript writes them",
+      "toolInput": {
+        "int": 42,
+        "neg": -7,
+        "frac": 0.5,
+        "whole": 2,
+        "tiny": 1e-7,
+        "small": 0.00001,
+        "big": 1e+21,
+        "large": 100000000000000000000,
+        "zero": 0
+      },
+      "canonical": "{\"big\":1e+21,\"frac\":0.5,\"int\":42,\"large\":100000000000000000000,\"neg\":-7,\"small\":0.00001,\"tiny\":1e-7,\"whole\":2,\"zero\":0}",
+      "targetHash": "c53f32f5706efdb2cf42cc89cee010014df7c8d9a167be54458bbe5b24e337a0"
+    },
+    {
+      "name": "strings that need escaping",
+      "toolInput": {
+        "s": "quote \" backslash \\ newline \n tab \t bell \u0007"
+      },
+      "canonical": "{\"s\":\"quote \\\" backslash \\\\ newline \\n tab \\t bell \\u0007\"}",
+      "targetHash": "36f5a2f38429adaf7ee89413b0f4a0a1bf426c1f7e3400f7b82fd92ae79ffecc"
+    },
+    {
+      "name": "non-ASCII left as is",
+      "toolInput": {
+        "s": "héllo wörld ✓ 日本"
+      },
+      "canonical": "{\"s\":\"héllo wörld ✓ 日本\"}",
+      "targetHash": "752ef5db457709d55f0bbf98af32a5bb144124a1cd9c3eafe555858cabde622e"
+    },
+    {
+      "name": "booleans, null and empty containers",
+      "toolInput": {
+        "t": true,
+        "f": false,
+        "n": null,
+        "arr": [],
+        "obj": {}
+      },
+      "canonical": "{\"arr\":[],\"f\":false,\"n\":null,\"obj\":{},\"t\":true}",
+      "targetHash": "bcf170775bc0a35bb40712748c8fd302958eb04be017b772445d643064bfa03c"
+    }
+  ]
+}

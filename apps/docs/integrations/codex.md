@@ -4,7 +4,9 @@ Integrate Intutic governance with [OpenAI Codex](https://openai.com/codex) — O
 
 ## How it works
 
-`intutic connect` governs Codex in two ways:
+`intutic connect` governs Codex in three ways:
+
+- **Rules** — your SOPs in a marked section of the workspace's `AGENTS.md`, which Codex reads before any work. Your own text in `AGENTS.md` is kept. The section is shared with every other harness in the workspace that reads `AGENTS.md`, and holds the rule sets aimed at any of them (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Codex reads at most 32 KiB of `AGENTS.md` files in total.
 
 - **Proxy routing** — it sets `openai_base_url` in Codex's user config, `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`), so Codex's built-in OpenAI provider sends its requests through the proxy. It also writes a `.env.intutic` file with the same proxy URLs for shells and scripts that source it.
 - **A blocking gate** — a PreToolUse hook registered in `~/.codex/hooks.json` and the project's `.codex/hooks.json` (see [Pre-tool hooks](#pre-tool-hooks-blocking) below).
@@ -26,7 +28,7 @@ intutic init
 ```
 
 ```
-  ✔ codex → .env.intutic
+  ✔ codex → AGENTS.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
@@ -48,6 +50,22 @@ intutic start
 > Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
 
 ## What gets written
+
+The rule sets, between two markers in `AGENTS.md`, when at least one SOP targets Codex or another `AGENTS.md` reader in the workspace:
+
+```markdown
+# Your own instructions stay as they are
+
+<!-- INTUTIC:RULES:START -->
+# Intutic Governance Rules (auto-generated)
+# DO NOT EDIT this section — managed by intutic sync daemon; edit outside the INTUTIC:RULES markers
+
+> **Proxy URL:** `http://localhost:4000`
+
+## Code Review Requirements
+...
+<!-- INTUTIC:RULES:END -->
+```
 
 `openai_base_url` in Codex's user config. `intutic connect` adds or updates this one top-level line and keeps the rest of the file — MCP servers, profiles, model settings and comments — exactly as it was; a config that does not parse as TOML is left untouched:
 
@@ -79,7 +97,7 @@ INTUTIC_SOP_COUNT=5
 Add `source .env.intutic 2>/dev/null` to your shell profile or project's `.envrc` to auto-load on every session.
 :::
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness codex`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic connect` writes here, run `intutic disconnect --harness codex`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out. `AGENTS.md` and `.env.intutic` stay while another harness that writes them is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (blocking)
 
@@ -90,6 +108,8 @@ both `~/.codex/hooks.json` (user) and `<repo>/.codex/hooks.json` (project),
 merging non-destructively so your own hooks are preserved.
 
 Codex loads hooks by default (`[features] hooks = false` turns them off). It loads the project-level file only once you have trusted the project's `.codex/` folder; the user-level registration applies everywhere.
+
+An agent cannot remove the registration or turn hooks off: the Intutic gate refuses a tool call that names `.codex/hooks.json` or `.codex/config.toml`, reading them included, under Codex and under every other harness with a hook gate. If a `hooks.json` loses the gate anyway, the sync daemon puts the entry back while `intutic connect` runs. Change the Codex config yourself.
 
 Codex invokes the hook before each tool call with JSON on stdin
 (`{tool_name, tool_use_id, tool_input}`); the gate evaluates the compiled
@@ -103,6 +123,7 @@ with exit code 2, with the reason on stderr. Every decision is appended to
 | Property | Value |
 |----------|-------|
 | Harness type | `codex` |
+| Rules file | `AGENTS.md` (the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->`) |
 | Config file | `.env.intutic`, `~/.codex/config.toml` (`openai_base_url`) |
 | Hook files | `~/.codex/hooks.json`, `<repo>/.codex/hooks.json`, `.intutic/hooks/codex-check.js` |
 | Detection | `CODEX_HOME` env var or `codex` in `PATH` |

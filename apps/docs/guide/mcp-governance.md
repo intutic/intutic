@@ -1,6 +1,6 @@
 ---
 title: MCP Server Governance
-description: The MCP server registry with approvals and a default-deny option, per-tool switches, approval holds, per-call identity, the allowlists and server-level TOFU pinning that guard against a rogue or rug-pulled MCP server — and what these controls do not cover yet.
+description: The MCP server registry with approvals and a default-deny option, per-tool switches, approval holds, per-call identity, call budgets per server, member and tool, the allowlists, server-level TOFU pinning and tool-change risk scoring that guard against a rogue or rug-pulled MCP server — and what these controls do not cover yet.
 ---
 
 # MCP Server Governance <Badge type="tip" text="Open-Core" />
@@ -14,21 +14,34 @@ the controls built on top of the MCP proxy-wrapping mechanism described in
 - a **registry** of the servers each workspace's proxies have seen, where an
   owner or admin approves or blocks each one and switches single tools off,
   with a **default policy** that can refuse every server not yet approved;
-- **approval holds**: a `require_approval` rule holds the call until a person
-  approves it, and the identical retry then runs;
+- **approval holds**: a `require_approval` rule holds the call for a person
+  to approve; the identical retry then runs only while the workspace's
+  review-hold bypass is on;
 - **per-call identity**: every event and hold says which member's key, OS
-  user and session made the call, and the workspace's SSO group policy
-  applies to it;
+  user and session made the call, and on a plan with single sign-on the
+  workspace's SSO group policy applies to it;
+- **call budgets**: limits on MCP tool calls per hour or per day, per
+  server, per tool, per member, or per member on one server;
 - **per-workspace allowlists** of servers and tools;
 - **server-level TOFU pinning**, which detects a server's tool definitions
-  changing after a user has already trusted it.
+  changing after a user has already trusted it, and **tool-change risk
+  scoring**, which says how risky each change is and can send a server back
+  to the approval queue.
+
+The proxy and the checks it makes on its own run in open core, with no
+account: TOFU pinning, prompt-injection scanning, the remote-server bridge and
+the gate backstop. The registry, the allowlists, approval holds, the calling
+member, call budgets and tool-change risk scoring come from a connected
+workspace's control plane, on every plan; their sections are badged
+<Badge type="tip" text="Cloud" />.
 
 ## How a server gets here at all
 
 `intutic connect` and the sync daemon's continuous sync loop rewrite each
 stdio MCP server entry in a harness config (Claude Code's `~/.claude.json`,
 Claude Desktop, Cursor, Cline, Windsurf, Continue, Goose, OpenHands, Muse
-Code, Grok Build, OpenCode — fourteen config paths across eleven harnesses)
+Code, Grok Build, OpenCode, Gemini CLI and Google Antigravity — seventeen config
+paths across twelve harnesses)
 so that the
 `@intutic/mcp-governance-proxy` binary fronts it: the harness spawns the
 proxy, the proxy spawns the real server, and every `tools/call` and
@@ -117,7 +130,17 @@ that command, or takes them from the copy of the file connect kept. A remote ser
 is left unwrapped, and JSONC files are skipped rather than rewritten — see
 [the OpenCode page](/integrations/opencode#mcp-servers).
 
-**dsh is NOT yet in the fourteen config paths above.** dsh's MCP-client
+Gemini CLI (`mcpServers` in `~/.gemini/settings.json`, and in a project's
+`.gemini/settings.json`) and Google Antigravity (`~/.gemini/config/mcp_config.json`)
+are wrapped the same way, also without a marker: Gemini CLI warns about any key
+its settings schema does not declare. A remote Gemini CLI server is bridged over
+SSE when its `type` is `sse` and over streamable HTTP otherwise, and an
+Antigravity `serverUrl` server over SSE, the transport Antigravity documents. A
+Gemini CLI server that Gemini CLI authenticates itself (`oauth`, or a Google
+credential provider) is left unwrapped and reported as ungoverned — see
+[the Gemini CLI and Antigravity page](/integrations/antigravity#mcp-servers).
+
+**dsh is NOT yet in the seventeen config paths above.** dsh's MCP-client
 composition (whether an MCP server is a `cordis.patch.yml` plugin row, a
 separate config section, or something else) was not researched during dsh's
 onboarding phase — that phase's time budget went to the higher-priority
@@ -134,13 +157,14 @@ window, on the order of the loop's own interval, where a freshly-added server
 talks to the harness directly. During that window none of the controls on
 this page apply to it.
 
-## The registry {#the-registry}
+## The registry <Badge type="tip" text="Cloud" /> {#the-registry}
 
 **Policies › MCP Servers** lists every MCP server the workspace's proxies
 have seen. A server gets there two ways:
 
 - **The proxy reports it.** Each proxy reports the server it fronts (its
-  `--server-name`) when it starts, and again with the tool names whenever a
+  `--server-name`) when it starts, and again with its tools — names,
+  descriptions and input schemas, as the server declared them — whenever a
   `tools/list` response shows a different set
   (`POST /api/v1/mcp/servers/observe`).
 - **The MCP daemon reports it.** Its heartbeat carries every server it finds
@@ -150,7 +174,9 @@ The first sighting creates the server as **awaiting decision** (a candidate)
 and sends the `mcp.server.candidate` notification, which a
 [notification rule](/guide/settings#notifications) can route to Slack, email,
 PagerDuty or a webhook. Later sightings update when it was last seen, its
-harness, transport and tools; they never change a decision.
+harness, transport and tools; they never change a decision, with one opt-in
+exception: a workspace can have a [high-risk tool change](#tool-change-risk)
+return a server to the queue.
 
 An **owner or admin** decides; an engineering manager sees the page
 read-only:
@@ -184,7 +210,11 @@ waiting in the approval queue on the MCP Servers page for an owner or admin.
 ```
 
 Every decision is recorded with the member who made it and appears in
-**Settings › Audit Timeline**. Decisions reach the proxies through the policy
+**Settings › Audit Timeline**. Each one also sends a notification event —
+`mcp.server.decided` for approve, block and reset, `mcp.server.tool_toggled`
+for a tool switched on or off — and streams to
+[SIEM export](/guide/siem-export#what-gets-streamed) as `mcp_server_changes`.
+Decisions reach the proxies through the policy
 they already poll — `mcpRegistry` on `GET /api/v1/sop/rules` and
 `GET /api/v1/policy/resolve` — so a per-session proxy applies one within a
 minute. Proxies in `daemon` mode get it from the MCP daemon, which serves its
@@ -214,9 +244,11 @@ Which one applies is the workspace's `mcpProxyFailBehavior`
 (**Settings › AI Routing & Caching › MCP Proxy Enforcement**) once a proxy has loaded it,
 and the local `INTUTIC_MCP_FAIL_OPEN` (`false` for fail closed) before that or
 for a workspace that never chose. The same setting governs every other check
-that cannot complete, such as a failed DLP scan or an unreadable TOFU pin.
+that cannot complete, such as a failed DLP scan or an unreadable TOFU pin, but
+not a [custom rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict),
+which always refuses the call.
 
-## The allowlist: `mcpAllowedServers`
+## The allowlist: `mcpAllowedServers` <Badge type="tip" text="Cloud" /> {#the-allowlist-mcpallowedservers}
 
 A workspace can set `mcpAllowedServers` (an array of server names) in its
 settings. **Absent or empty means unrestricted** — the same convention every
@@ -238,7 +270,7 @@ This is enforced by the same proxy process that already enforces
 `mcpAllowedTools` (per-tool scoping) and DLP/SOP policy — one interception
 point, not a second one that could disagree with the first.
 
-## Approval holds {#approval-holds}
+## Approval holds <Badge type="tip" text="Cloud" /> {#approval-holds}
 
 An SOP rule whose action is `require_approval` (a `REQUIRE_APPROVAL:` SOP)
 holds the call instead of blocking it, the same way the harness hook gates
@@ -249,17 +281,21 @@ do, through the same decisions API:
    sends the `decision.pending` notification — including the Slack card with
    Approve and Reject buttons.
 2. The agent gets a JSON-RPC error naming the hold, with the id also in
-   `error.data` (`{"status": "pending_approval", "holdId": "…"}`):
+   `error.data` (`{"code": "HELD", "ruleId": "…", "status": "pending_approval", "holdId": "…"}`;
+   see [refusal codes](/integrations/mcp-proxy#refusal-codes)):
 
    ```
    [Intutic Governance] Tool call HELD for approval: Deploys need review
-   [sop_deploy]. Hold id: hold_m1x2y3_0a1b2c3d. An approver can run:
-   intutic decision approve hold_m1x2y3_0a1b2c3d (or reject it). Retry this
-   exact call after it is approved.
+   [sop_deploy]. Hold id: hold_m1x2y3_0a1b2c3d. An Owner, Admin or EM can
+   approve it with: intutic decision approve hold_m1x2y3_0a1b2c3d (or reject
+   it: intutic decision reject hold_m1x2y3_0a1b2c3d). Retrying this exact call
+   passes after approval only if the workspace has turned on the review-hold
+   bypass; otherwise it is held again.
    ```
 
-3. Someone approves it: `intutic decision approve <holdId>`, the Review
-   Queue, or Slack.
+3. An owner, admin or engineering manager approves it:
+   `intutic decision approve <holdId>`, the review API, or the Slack card's
+   **Approve** button. All three take the same path.
 4. The agent retries. When the workspace has `reviewHoldBypassEnabled` on,
    the approval lets **the identical call** through for
    `reviewHoldBypassTtlMinutes` (10 by default); the proxy finds it in
@@ -274,10 +310,11 @@ key order does not matter and any other value does. An approval never covers
 a different call.
 
 A hold needs the control plane both to find an approval and to ask for one.
-While it is unreachable the call stays held, whatever the fail setting, and
-the message says the hold could not be recorded.
+While it is unreachable the call stays held, whatever the fail setting, the
+message says the hold could not be recorded, and `holdId` is empty because
+there is nothing to approve yet.
 
-## Who made the call {#caller-identity}
+## Who made the call <Badge type="tip" text="Cloud" /> {#caller-identity}
 
 Every event the proxy sends and every hold it records carries the caller as
 the proxy sees it:
@@ -292,7 +329,10 @@ The control plane adds the workspace member the API key belongs to — the one
 part the proxy cannot claim for itself — and stores both: incidents filed from
 proxy events show them as **Caller** in the incident drawer, and holds show
 them as **Requested by** in the Review Queue. The OS user, session and server
-are what the proxy reported, recorded as such.
+are what the proxy reported, recorded as such. [SIEM export](/guide/siem-export#the-actor)
+carries the same caller on every gate decision and on those incidents, as the
+OCSF `actor` object: the member under `actor.user` with their email, name and
+groups, and the reported key prefix, session and OS user beside it.
 
 The member also carries into policy. The same policy responses that carry the
 registry carry the member's role and SSO groups (their SCIM groups while SCIM
@@ -301,12 +341,118 @@ policy (`sso_group_policy` in workspace settings, the one the server-side hook
 gate applies), and the proxy applies it to every MCP tool call: a tool on
 `highRiskTools` needs one of the `requiredGroups`, and a tool on
 `requireOboFor` is refused, since the proxy has no on-behalf-of token to
-present. A tool matches by its MCP name (`run_query`) or by the name the
-harness hooks see (`mcp__postgres__run_query`). With a group policy but no
+present. An entry naming a tool by its MCP name (`run_query`) matches it under
+that name here and under the name the harness hooks see on any server
+(`mcp__postgres__run_query`) at every other gate; an entry naming the harness
+form matches only that server's tool. With a group policy but no
 member resolved for the key, or once the control plane refuses the key (revoked,
 or its member deactivated), the member's groups are unknown and a high-risk
 tool is refused rather than allowed. The decision is the one the hook gate, the
 proxy's response gate and the local gates make; see [SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
+
+## Call budgets <Badge type="tip" text="Cloud" /> {#call-budgets}
+
+A budget limits how many MCP tool calls run per **hour** or per **day**.
+Each one counts one of four things:
+
+| Counts | Example | Fields |
+|---|---|---|
+| Calls to a server | 600 calls to `github` per hour | `scope: server`, `server` |
+| Calls to one tool on a server | 40 calls to `github` › `create_pull_request` per day | `scope: tool`, `server`, `tool` |
+| Calls by a member, across servers | 2,000 calls per member per day | `scope: member`, optional `memberId` |
+| Calls by a member to a server | 25 calls to `linear` per member per hour | `scope: member_server`, `server`, optional `memberId` |
+
+A member budget without a `memberId` gives every member their own allowance
+of that size; with one, it applies to that member only. The member is the
+one the proxy's API key belongs to ([Who made the call](#caller-identity));
+a key with no member is counted under its key prefix, then its OS user.
+
+Budgets count calls, not money. An MCP `tools/call` result carries content,
+structured content, an error flag and `_meta`, and nothing that reports a
+cost — the only cost field in the MCP specification, `costPriority`, is a
+client's model preference for sampling. So there is no per-call price to add
+up.
+
+An owner or admin sets them on **Policies › MCP Servers › Call budgets**:
+add budgets to the draft, set the warning percentage, and save. They are the
+`mcpBudgets` workspace setting (`PUT /api/v1/workspace/settings`), so the
+settings route's role check and change history apply:
+
+```json
+{
+  "mcpBudgets": {
+    "warnAtPct": 80,
+    "budgets": [
+      { "id": "github-hour", "scope": "server", "server": "github", "period": "hour", "limit": 600 },
+      { "id": "members-day", "scope": "member", "period": "day", "limit": 2000 }
+    ]
+  }
+}
+```
+
+A budget's `id` (letters, digits, `-` and `_`, unique in the workspace) names
+it in refusals and alerts, and keeps its count when you change its limit.
+Budgets reach every proxy with the rest of its policy — `mcpBudgets` on
+`GET /api/v1/sop/rules` and `GET /api/v1/policy/resolve` — within a minute.
+
+**How a call is counted.** After every other check has passed — the registry,
+the allowlists, DLP, policy rules, injection, anomaly and WASM checks — the
+proxy counts the call against every budget that covers it, so a call another
+check refuses spends nothing. The counters live in Valkey
+(`INTUTIC_VALKEY_URL`), keyed by workspace, budget, period and member, so
+every proxy using the same Valkey shares them: a developer's sibling proxies,
+or a whole team's proxies pointed at one Valkey. Proxies on different Valkeys
+count separately. One Lua script checks every counter the call draws on and,
+only if none is used up, increments them all, so two proxies racing for the
+last call cannot both get it, and a refused call does not count.
+
+Periods are fixed UTC windows: an hour starts on the hour, a day at 00:00
+UTC. A new period starts from zero, and each counter expires a minute after
+its period ends.
+
+**Over the limit**, the call is refused and the agent is told which budget
+and when it resets:
+
+```
+MCP call budget "github-hour" is used up (calls to github: 600 per hour):
+600 of 600 calls made this hour. It resets at 2026-10-08T15:00:00.000Z
+(in 23 min). An owner or admin can change MCP budgets on the MCP Servers page.
+```
+
+Each refusal is a `tool_blocked` event, like any refused call: it is in the
+local event file and, when SIEM export of gate decisions is on, in
+`gate_decisions`. Incidents are the exception. A used-up budget files **one**
+incident per period (per member, for a per-member budget), from its first
+refusal; each later refusal in the period adds one to the incident's count of
+refused calls, shown in the incident drawer, and the next period files a new
+one. Every other kind of refusal still files an incident each time. Once per
+budget per period, the first refusal also sends `mcp_budget_exceeded`, and a
+call that takes a budget to its warning percentage (80% unless you set
+`warnAtPct`, the same default as the [LLM budget alerts](/guide/budgets))
+sends `mcp_budget_threshold`. "Once per period" holds across every proxy on
+the same Valkey: the flag that claims each alert lives next to the counter
+and expires with it. The control plane files each as a detector finding
+(`mcp:budget`, category `BUDGET_BREACH`) — on the Findings page and in SIEM
+export as `anomaly.finding` — and sends `mcp.budget.threshold` or
+`mcp.budget.exceeded` to your [notification rules](/guide/settings#notifications).
+
+**Latency.** A call no budget covers does not touch Valkey. A covered call
+costs one Valkey round trip, however many budgets cover it, bounded by a
+200 ms timeout.
+
+**When Valkey cannot answer.** If a budget covers the call and the proxy has
+no Valkey configured, Valkey is unreachable, or it does not answer within
+the timeout, the count cannot be checked and the workspace's fail setting
+decides (`mcpProxyFailBehavior`, else `INTUTIC_MCP_FAIL_OPEN` — see
+[When the registry has not loaded](#when-the-registry-has-not-loaded)):
+
+- **Fail open**: the call runs, uncounted. The proxy logs this once.
+- **Fail closed**: the call is refused, and the message names the budgets
+  and the setting.
+
+So a budget needs a Valkey on every machine whose proxies it should limit:
+`intutic connect` and the sync daemon write `INTUTIC_VALKEY_URL` to
+`runtime.env` when their local Valkey runs.
 
 ## Server-level TOFU pinning
 
@@ -339,6 +485,59 @@ whatever arrives first. It cannot tell a benign tool definition from a
 malicious one — it can only tell you that *something changed* after you
 already trusted it. A server engineered to be poisoned from day one passes
 this control cleanly, every time.
+
+## Tool-change risk scoring <Badge type="tip" text="Cloud" /> {#tool-change-risk}
+
+TOFU says a server's tools changed; the registry says how much that change
+matters. Each proxy reports the tools a server declares — names,
+descriptions and input schemas, before any curation or description override
+— and the control plane compares them with the ones it stored last time.
+The first set it sees is the baseline. Every later difference is a **tool
+change**: a tool added or removed, or a description or input schema changed.
+
+Each change gets a risk score from 0 to 100, computed by fixed rules — no
+model is called, so the same two tool sets always give the same score and
+the same reasons:
+
+| Rule | Points | When |
+|---|---|---|
+| Description poisoned | 60 | A new or changed description matches one of the seven [tool-poisoning patterns](/concepts/circuit-breaker) (hidden instruction blocks, concealment from the user, credential side channels, …) it did not match before |
+| New tool with a capability | 20–40 each | A new tool's name or description implies command execution (40), credential access (40), network access (25) or writing data (20) |
+| Capability gained | 20–40 each | A changed tool now implies one of those capabilities and did not before |
+| Confirmation removed | 35 | A changed tool lost an argument such as `confirm` or `dry_run`, stopped requiring it, or it no longer defaults to `true` |
+| Schema widened | 15 | A changed tool accepts more than before: new arguments, fewer required ones, a lifted enum, pattern, length or range limit, or `additionalProperties` no longer `false` |
+| Tool added | 5 | A new tool none of the rules above flag |
+| Description changed | 5 | A changed description none of the rules above flag |
+
+The score is the sum, capped at 100: **high** from 50, **medium** from 20,
+**low** above 0. A removed tool adds nothing — it narrows what an agent can
+do. The rules are deliberately simple: a capability is read from words in the
+tool's name (`run`, `exec`, `delete`, `fetch`, `token`, …) and a few phrases
+in its description, so a score is a prompt to look, with its reasons stated,
+not a verdict.
+
+Each change is stored as a `tools_changed` record in the server's history,
+with the score, the reasons and which tools were added, removed or changed.
+The **Last tool change** column on **Policies › MCP Servers** shows the
+latest one's level and score, with the strongest reasons in its tooltip; the
+server's **Tools** drawer lists every reason. **Settings › Audit Timeline**
+shows each change.
+
+A **high** score sends `mcp.server.tool_change_risk` to your notification
+rules. Every score, low and medium included, streams to
+[SIEM export](/guide/siem-export#what-gets-streamed) as `mcp_server_changes`
+with the reasons and the tools that changed. What else happens is the **High-risk tool changes** setting
+(`mcpHighRiskToolChange`):
+
+| Setting | What a high-risk change does |
+|---|---|
+| **Record it and notify** (`notify`, the default) | The change is recorded and announced. The server keeps its status. |
+| **Return the server to the approval queue** (`hold`) | The server goes back to awaiting decision, marked **Held: risky tool change**, and every proxy refuses calls to it — under either default policy — until an owner or admin approves, blocks or resets it. A blocked server stays blocked. |
+
+A held server reaches the proxies as `heldServers` in `mcpRegistry`, within a
+minute. Scoring happens in the control plane when a proxy reports, so it
+needs the control plane reachable; the local TOFU pin keeps detecting
+changes offline.
 
 ## Remote (HTTP/SSE) MCP servers: the stdio→HTTP bridge {#remote-http-sse-mcp-servers-the-stdio-http-bridge}
 
@@ -537,20 +736,66 @@ tool-level granularity: it can refuse one `tools/call` while allowing the
 rest of that same server's tools. That is the PRIMARY enforcement point for
 MCP governance, and it stays that way.
 
-Phase M3 adds a second, deliberately smaller layer: the per-harness
-`PreToolUse` gate scripts every harness writer already generates (the same
-scripts that block a write to `.claude/settings.json` or an `rm -rf /`) now
-also recognise a `mcp__<server>__<tool>`-shaped tool name and can refuse one
-whose **server** is not on the workspace's `mcpAllowedServers` list — the
-same setting the proxy already reads (see [The allowlist](#the-allowlist-mcpallowedservers)
-above), delivered to the gate via the sync daemon's policy snapshot
-(`#mcpservers <severity> <comma-joined-server-names>` in `policy-snapshot.rules`).
+A second, deliberately smaller layer sits in the per-harness `PreToolUse`
+gate scripts every harness writer already generates (the same scripts that
+block a write to `.claude/settings.json` or an `rm -rf /`). They recognise a
+`mcp__<server>__<tool>`-shaped tool name and refuse it on two of the
+workspace's MCP settings, delivered through the sync daemon's policy snapshot:
+
+- **The registry.** A blocked or held server, a server the workspace has not
+  approved under `mcpDefaultPolicy: deny`, and a tool disabled on its server
+  are refused with the proxy's own codes (`SERVER_BLOCKED`, `SERVER_HELD`,
+  `SERVER_NOT_APPROVED`, `TOOL_DISABLED`), rule ids and reasons: the proxy
+  and the gates run one decision. The registry rides in `policy-snapshot.rules`
+  as an `@mcp_registry` record inside the snapshot's digest.
+- **The allowlist.** A server not on `mcpAllowedServers` (see
+  [The allowlist](#the-allowlist-mcpallowedservers) above) is refused with
+  `SERVER_NOT_ALLOWED` (rule `mcp_allowlist`), or reported as
+  `tool_would_block` in an observe-only (`SILENT_LOG`) workspace. The list
+  rides as an `@mcp_allowlist` record, also inside the digest.
+
+### A snapshot that fails verification
+
+A policy takes effect only when it verifies. A snapshot whose digest is broken
+or missing, or that was issued to another workspace, admits no MCP server: every
+gate refuses every `mcp__<server>__<tool>` call with `POLICY_SNAPSHOT_UNVERIFIED`
+(rule `policy_snapshot`), at block in an observe-only workspace too. Neither
+record can be trusted then, and a deleted record looks exactly like one the
+workspace never set, so changing a server's default policy, taking a server off
+the blocked list, adding one to the allowlist, setting the allowlist to shadow
+or deleting either record admits nothing. The gates also drop the snapshot's
+other rules except its SSO-group refusals, and report `snapshot_invalid`.
+
+The sync daemon keeps the last snapshot it wrote, and so verified, in
+`~/.intutic/hooks/verified/`. It watches the live snapshot, and when either
+file differs from that copy (edited, deleted, or an older snapshot copied back)
+it puts the verified copy back at once, or fetches a fresh snapshot if it has
+none. It reports each tamper as a `config_tamper` event: an incident on the
+[Audit Timeline](/guide/audit-timeline), and a `TAMPER` gate decision in the
+[SIEM export](/guide/siem-export). The gates allow again as soon as the copy is
+back.
+
+Under `mcpDefaultPolicy: deny` this reaches servers the proxy never sees, the
+harness's own included: Claude Code's IDE tools (`mcp__ide__…`) are refused
+until `ide` is approved. A server a gate refuses as unapproved joins the
+approval queue on the MCP Servers page, as one the proxy meets first does.
+A harness that reads a JSON decision from the gate gets the code in `code`
+([refusal codes](/reference/harness-security-matrix#hook-refusal-codes)).
+
+The [tool gate SDKs](/reference/gate-sdk) apply both records the same way, from
+the same snapshot, for agents built on a framework with no hook file, refuse
+every MCP call on a snapshot that fails verification, and report a server they
+refuse as unapproved for the approval queue too. The control plane's
+`POST /api/v1/hook-gate`, which the SDKs call when they have a client, applies
+the registry and then `mcpAllowedServers` from the workspace's own settings, with
+the same codes in `code`, in every intervention mode.
 
 **This is a backstop, not a second primary control.** It is:
 
-- **Server-level only**, never tool-level — the gate cannot express "allow
-  `github`'s `read_issue` but not its `delete_repo`"; that granularity is the
-  proxy's job and only the proxy's.
+- **Name-level only.** The gate decides from the server and tool names in the
+  call, never from what the server declares or returns: tool pinning, budgets,
+  argument and result scanning, and injection and anomaly detection stay the
+  proxy's job.
 - **A defense-in-depth layer that fires even if a harness bypasses or
   misconfigures the proxy** — a stdio server a developer added directly to a
   harness config during the window before the next sync cycle proxy-wraps it
@@ -584,14 +829,13 @@ apply to that gate's unit of evaluation at all.
 | Harness | MCP calls | Detail |
 |---|---|---|
 | Claude Code | ✅ yes | Dedicated `mcp__.*` `PreToolUse` matcher (M3). Claude Code's own MCP tool-naming convention IS `mcp__<server>__<tool>`. |
-| Claude Desktop | ✅ yes | Dedicated `mcp__.*` matcher (M3); shares Claude Code's hook format and tool-naming convention verbatim. |
 | Cursor | ✅ yes | M3 fix: `beforeMCPExecution`'s `tool_name` (bare tool name) and top-level `command`/`url` (server identifier) are now composed into `mcp__<server>__<tool>` — confirmed against Cursor's own hooks documentation and a live payload example. |
 | Windsurf | ✅ yes | Confirmed 2026-08-18 (M3's original composition fix targeted Cursor's shape by analogy and was wrong): Cascade's real hook system registers `pre_run_command`/`pre_write_code`/`pre_mcp_tool_use`, and `pre_mcp_tool_use`'s `tool_info.mcp_server_name`/`tool_info.mcp_tool_name` are now composed into `mcp__<server>__<tool>` — confirmed against docs.devin.ai/desktop/cascade/hooks (current authoritative source) and covered by `windsurfHooks.test.ts` against the real payload shape. |
 | Cline | ❌ no (unconfirmed dispatch) | `use_mcp_tool` envelope normalization added to the shared gate evaluator (fires if the payload arrives), but no `use_mcp_tool`/`access_mcp_resource` `PreToolUse` matcher was added — whether Cline's hook mechanism actually dispatches for these tool names could not be confirmed during M3. |
-| Roo Code | ⚠️ reachable | Already a `.*` catch-all matcher; a Cline fork, so likely inherits `use_mcp_tool`, but that inheritance is unconfirmed. |
 | Codex CLI, Continue, GitHub Copilot | ⚠️ reachable | Already `.*` catch-all matchers; each harness's own MCP tool-naming convention was not independently verified during M3. |
 | Muse Code | ⚠️ reachable | Already a `.*` catch-all matcher across both `PreToolUse` and `PermissionRequest`. The `muse` binary could not be installed to confirm its own MCP tool-naming convention, or that its `mcp_servers` `streamable_http` entry shape matches the `url`/`headers` convention this repo's wrapper assumes. |
-| Goose, OpenHands, Hermes, Antigravity, Pi | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified during M3. |
+| Goose, OpenHands, Hermes, Gemini CLI (Antigravity), Pi | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified during M3. |
+| Google Antigravity | ⚠️ reachable | Its `PreToolUse` registration uses matcher `*`, so the gate runs for every tool call; Antigravity's own MCP tool-naming convention is not documented and was not verified. |
 | Openclaw | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention unconfirmed. |
 | Grok Build | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention not independently verified (not installable in the environment this integration was built in). |
 | OpenCode | ✅ yes | The plugin hook fires for every tool id, MCP tools included (confirmed from `session/tools.ts`). OpenCode 1.x names MCP tools `sanitize(server)_sanitize(tool)` (its `mcp/catalog.ts`, read from source); the plugin composes that into `mcp__<server>__<tool>` against the server names in the OpenCode config files, longest name first, so the allowlist applies. OpenCode 2.x MCP ids are not verified. |
@@ -620,10 +864,16 @@ proxy by hand.
 | `--remote-transport sse\|http` | The remote transport; `http` by default. |
 
 With neither `--` nor `--remote-url` the proxy is the standalone `intutic` MCP
-server: three tools, `intutic_governance_status`, `intutic_list_sops` and
+server: `intutic_governance_status`, `intutic_list_sops` and
 `intutic_list_incidents`, the two list tools taking a `limit` from 1 to 50
-(10 by default). The control plane lists incidents only for the OWNER, ADMIN
-or EM role, and the tool says so to anyone else. It needs `INTUTIC_API_KEY`,
+(10 by default), and three tools an agent uses after a refusal:
+`intutic_hold_status` (has this hold been decided, and will the retry pass),
+`intutic_mcp_registry_status` (what the registry says about a server) and
+`intutic_mcp_budget_remaining` (what is left of each call budget, read from
+the Valkey the proxies count in). See [the MCP proxy
+reference](/integrations/mcp-proxy#execution-modes-standalone-vs-governed-proxy).
+The control plane lists incidents only for the OWNER, ADMIN or EM role, and
+the tool says so to anyone else. It needs `INTUTIC_API_KEY`,
 the control plane's address and a workspace id; with no address configured it
 talks to `http://localhost:3001`.
 
@@ -639,12 +889,16 @@ Settings are read from the environment first, then from
 | `INTUTIC_MCP_PROXY_MODE` | `per-session` | `daemon` asks the MCP daemon for policy and sends events through it, falling back to the control plane directly when the daemon does not answer. Read from runtime.env only. |
 | `INTUTIC_MCP_INJECTION_ACTION` | `warn` | `block` refuses a call whose arguments match a prompt-injection pattern, and withholds a result that does. The workspace's `mcpInjectionAction` wins once the proxy has loaded it. |
 | `INTUTIC_MCP_ANOMALY_MODE` | `enforce` | `warn` reports anomaly findings without blocking; `off` skips detection. The workspace's `mcpAnomalyMode` wins. |
+| `INTUTIC_MCP_DLP_DETECTORS` | none | A JSON object of PII detector id → `off`, `redact` or `block`, such as `{"pii.email":"redact"}`. Unlisted detectors keep their defaults: card, IBAN and SSN on, email and phone off (see [PII detectors](/guide/policies#pii-detectors)). Arguments with a match from an enabled detector are blocked and results are redacted, whichever of `redact` or `block` is set. An unknown id or action is logged and ignored. Environment only. The workspace's [`piiDetectors`](/guide/policies#setting-detector-actions-for-a-workspace) is the baseline once the proxy has loaded it, and this value may only make a detector stricter. |
 | `INTUTIC_MCP_ANOMALY_OVERRIDES` | none | A JSON object of detector id → `steer`, `reask`, `kill` or `off`, capped at each detector's own ceiling. Environment only. The workspace's `mcpAnomalyOverrides` wins, detector by detector. |
 | `INTUTIC_MCP_SESSION_SCOPE` | derived | Sets the shared session scope explicitly (see [the MCP proxy reference](/integrations/mcp-proxy#anomaly-detection-session-scope)). Environment only. |
-| `INTUTIC_VALKEY_URL` / `VALKEY_URL` | none | The Valkey sibling proxies share their anomaly window through. |
+| `INTUTIC_VALKEY_URL` / `VALKEY_URL` | none | The Valkey sibling proxies share their anomaly window and their [call budget](#call-budgets) counters through. Without it, a call a budget covers follows the fail setting. |
 | `INTUTIC_REMOTE_HEADERS` | none | A JSON object of headers for `--remote-url`, such as `Authorization`. Environment only, never a flag, so it stays out of `ps`. |
 | `INTUTIC_EVENTS_FILE` | `~/.intutic/events/hook-events.jsonl` | The local file every event is also appended to. |
 | `INTUTIC_WASM_LOCAL_DIR` | `~/.intutic/wasm` | Where the proxy loads custom WASM rules from. Read from runtime.env; `INTUTIC_WASM_DIR` in the environment takes precedence. |
+| `INTUTIC_DISABLE_REGO_RULES` | unset | `1` refuses [Rego rules](/guide/rego-policies) at load; native WASM rules still run. |
+
+An agent cannot change these settings in runtime.env: every Intutic hook gate refuses a tool call that names `.intutic/env`, reading it included. The hook gates read the workspace id from the same file and drop the policy snapshot's rules when it does not match the snapshot's.
 
 The MCP daemon (`intutic-mcp-daemon`) is not an MCP server. It listens on a
 Unix socket, caches policy and batches events for proxies in `daemon` mode:
@@ -656,7 +910,7 @@ Unix socket, caches policy and batches events for proxies in `daemon` mode:
 | `MCP_DAEMON_MAX_CACHE_ENTRIES` | `500` | Workspaces kept in the policy cache. |
 | `MCP_DAEMON_STATUS_REPORT_MS` | `60000` | How often it reports its status and the servers it found. |
 | `CONTROL_PLANE_URL` | `http://localhost:3001` | The control plane, for the daemon itself. |
-| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/policy-snapshot.json` | The sync daemon's snapshot the daemon seeds its cache from at start. It has the SOP rules and the server allowlist but no registry, so the registry follows the fail setting until the first fetch. A proxy that already loaded a policy keeps its allowlists and other settings through a daemon restart and takes only the snapshot's rules. |
+| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/verified/policy-snapshot.json` | The sync daemon's verified copy of its snapshot, which the daemon seeds its cache from at start. It reads the verified copy rather than the live file beside it, so an edit to the live file never seeds the cache. The daemon seeds the SOP rules and the server allowlist from it, not the registry, so the registry follows the fail setting until the first fetch. A proxy that already loaded a policy keeps its allowlists and other settings through a daemon restart and takes only the snapshot's rules. |
 
 The daemon also reads `INTUTIC_API_KEY` and `INTUTIC_WORKSPACE_ID` from its
 environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
@@ -682,10 +936,11 @@ environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
   does check the sha256 hash of skill-bundled *scripts*
   against VirusTotal; see [Skill Scanning](/guide/skill-scanning#virustotal-hash-lookup-opt-in-hash-only)
   for that feature and why it does not reverse this decline.
-- **No OAuth brokering and no per-tool budgets.** The proxy passes a remote
-  server's credentials through (`INTUTIC_REMOTE_HEADERS`) and does not obtain,
-  refresh or scope them, and it does not count or cap calls per tool or per
-  server. A remote server configured with OAuth in OpenCode is left unwrapped.
+- **No OAuth brokering.** The proxy passes a remote server's credentials
+  through (`INTUTIC_REMOTE_HEADERS`) and does not obtain, refresh or scope
+  them. A remote server configured with OAuth in OpenCode is left unwrapped.
+- **Budgets count calls, per Valkey.** They do not price calls (MCP reports
+  no cost), and proxies on different Valkeys keep separate counts.
 - **The registry knows servers by name.** Two different servers given the
   same `--server-name` share one row and one decision, and a server whose
   name changes is a new candidate. Pin the server's tools with TOFU, above,
@@ -695,7 +950,9 @@ environment, and caches in the Valkey at `VALKEY_URL` (or `REDIS_URL`;
   remote project server whose `url` or `headers` use `${VAR}`, and harnesses
   this page lists as unwrapped reach the harness directly. The registry may still
   list them, from the MCP daemon's report; approving or blocking them changes
-  nothing until a proxy fronts them, apart from the hook-gate backstop below.
+  nothing at a proxy until one fronts them. The [gate backstop](#the-gate-backstop)
+  applies blocks, holds, default-deny and disabled tools to their calls in
+  every harness with a hook gate.
 - **The OS user, session and server on an event are what the proxy
   reported.** The member is resolved from the API key; the rest is a claim by
   the process holding that key.

@@ -70,6 +70,7 @@ describe('MCP server registry (proxy side)', () => {
           defaultPolicy: 'deny',
           approvedServers: ['github'],
           blockedServers: ['evil'],
+          heldServers: ['changed'],
           disabledTools: { github: ['delete_repo'], empty: [] },
         },
         principal: { memberId: 'mem_1', email: 'dev@example.com', role: 'DEVELOPER', ssoGroups: ['eng'] },
@@ -81,10 +82,21 @@ describe('MCP server registry (proxy side)', () => {
         defaultPolicy: 'deny',
         approvedServers: ['github'],
         blockedServers: ['evil'],
+        heldServers: ['changed'],
         disabledTools: { github: ['delete_repo'] },
       })
       expect(client.getPrincipal()).toEqual({ memberId: 'mem_1', email: 'dev@example.com', role: 'DEVELOPER', ssoGroups: ['eng'] })
       expect(client.getSsoGroupPolicy()).toEqual({ highRiskTools: ['run_query'], requiredGroups: ['dba'], requireOboFor: [] })
+    })
+
+    it('absorbs the MCP call budgets, dropping a malformed one, and reads their absence as none', async () => {
+      const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
+      await client.refresh()
+      expect(client.getMcpBudgets()).toEqual({ budgets: [], warnAtPct: 80 })
+      const budget = { id: 'gh', scope: 'server', server: 'github', period: 'hour', limit: 10 }
+      rulesBody = { rules: [], mcpBudgets: { budgets: [budget, { id: 'bad', scope: 'tool' }], warnAtPct: 90 } }
+      await client.refresh()
+      expect(client.getMcpBudgets()).toEqual({ budgets: [budget], warnAtPct: 90 })
     })
 
     it("forgets the member's SSO groups when the control plane refuses the key, and keeps them on any other failure", async () => {
@@ -112,6 +124,32 @@ describe('MCP server registry (proxy side)', () => {
       rulesBody = { rules: [], mcpProxyFailBehavior: 'closed' }
       await client.refresh()
       expect(client.getFailOpen()).toBe(false)
+    })
+
+    it("reads the workspace's PII detector actions as the LLM proxy reads them from key-context", async () => {
+      const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
+      await client.refresh()
+      expect(client.getPiiDetectors(), 'an older control plane sends none').toEqual({ kind: 'none' })
+
+      rulesBody = { rules: [], piiDetectors: { 'pii.card': 'block', 'pii.passport': 'redact' } }
+      await client.refresh()
+      expect(client.getPiiDetectors()).toEqual({ kind: 'set', actions: { 'pii.card': 'block' } })
+
+      rulesStatus = 503
+      await expect(client.refresh()).rejects.toThrow('503')
+      expect(client.getPiiDetectors(), 'kept through an outage, like the rest of the policy').toEqual({
+        kind: 'set',
+        actions: { 'pii.card': 'block' },
+      })
+
+      rulesStatus = 200
+      rulesBody = { rules: [], piiDetectors: null }
+      await client.refresh()
+      expect(client.getPiiDetectors().kind).toBe('unreadable')
+
+      rulesBody = { rules: [], piiDetectors: {} }
+      await client.refresh()
+      expect(client.getPiiDetectors()).toEqual({ kind: 'none' })
     })
 
     it("absorbs the workspace's injection and anomaly dispositions, and leaves them unset when not sent", async () => {
@@ -182,6 +220,7 @@ describe('MCP server registry (proxy side)', () => {
         defaultPolicy: 'allow',
         approvedServers: ['a'],
         blockedServers: [],
+        heldServers: [],
         disabledTools: {},
       })
     })
@@ -198,7 +237,7 @@ describe('MCP server registry (proxy side)', () => {
       const forwarded = JSON.parse(out.line) as { result: { tools: Array<{ name: string }> } }
       expect(forwarded.result.tools.map((t) => t.name)).toEqual(['list_issues'])
       expect(out.curated).toEqual({ hidden: 1, overridden: 0 })
-      expect(out.toolsListUpstreamNames).toEqual(['list_issues', 'delete_repo'])
+      expect(out.toolsListUpstream?.map((t) => t.name)).toEqual(['list_issues', 'delete_repo'])
     })
 
     it('applies the allowlist and the disabled list together', () => {
@@ -207,28 +246,49 @@ describe('MCP server registry (proxy side)', () => {
       const forwarded = JSON.parse(out.line) as { result: { tools: Array<{ name: string }> } }
       expect(forwarded.result.tools.map((t) => t.name)).toEqual(['a'])
     })
+
+    it('reports the definitions as the server declared them, before an override rewrote one', () => {
+      const pending = new Map<string | number, PendingRequest>([[3, { method: 'tools/list' }]])
+      const line = JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        result: { tools: [{ name: 'search', description: 'Upstream text.', inputSchema: { type: 'object' } }, { description: 'no name' }] },
+      })
+      const out = processServerLine(line, pending, [], { search: 'Operator text.' })
+      expect((JSON.parse(out.line) as { result: { tools: Array<{ description: string }> } }).result.tools[0]!.description).toBe('Operator text.')
+      expect(out.toolsListUpstream).toEqual([{ name: 'search', description: 'Upstream text.', inputSchema: { type: 'object' } }])
+    })
   })
 
   describe('RegistryObserver', () => {
-    it('reports the server once at start, then whenever its tool names change', async () => {
+    const def = (name: string, description = name) => ({ name, description })
+
+    it('reports the server once at start, then whenever its tools change', async () => {
       const observer = new RegistryObserver(baseUrl, 'vk_test', 'github', 'stdio')
       await observer.observe()
-      await observer.observe(['b', 'a'])
-      await observer.observe(['a', 'b']) // same set: skipped
+      await observer.observe([def('b'), def('a')])
+      await observer.observe([def('a'), def('b')]) // same set: skipped
       await observer.observe() // nothing new to say: skipped
-      await observer.observe(['a', 'b', 'c'])
+      await observer.observe([def('a'), def('b', 'b, now different')]) // a description changed
+      await observer.observe([def('a'), def('b', 'b, now different'), def('c')])
       const reports = captured.filter((c) => c.url === '/api/v1/mcp/servers/observe')
       expect(reports.map((r) => r.body)).toEqual([
         { serverName: 'github', transport: 'stdio' },
-        { serverName: 'github', transport: 'stdio', tools: ['a', 'b'] },
-        { serverName: 'github', transport: 'stdio', tools: ['a', 'b', 'c'] },
+        { serverName: 'github', transport: 'stdio', tools: ['a', 'b'], toolDefinitions: [def('a'), def('b')] },
+        { serverName: 'github', transport: 'stdio', tools: ['a', 'b'], toolDefinitions: [def('a'), def('b', 'b, now different')] },
+        {
+          serverName: 'github',
+          transport: 'stdio',
+          tools: ['a', 'b', 'c'],
+          toolDefinitions: [def('a'), def('b', 'b, now different'), def('c')],
+        },
       ])
       expect(reports[0]!.auth).toBe('Bearer vk_test')
     })
 
     it('reports nothing without an API key or a server name', async () => {
-      await new RegistryObserver(baseUrl, '', 'github', 'stdio').observe(['a'])
-      await new RegistryObserver(baseUrl, 'vk_test', 'unknown', 'stdio').observe(['a'])
+      await new RegistryObserver(baseUrl, '', 'github', 'stdio').observe([def('a')])
+      await new RegistryObserver(baseUrl, 'vk_test', 'unknown', 'stdio').observe([def('a')])
       expect(captured).toHaveLength(0)
     })
 

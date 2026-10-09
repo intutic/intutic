@@ -14,6 +14,7 @@
 import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
+import { parse as parseYaml } from 'yaml'
 import { log } from '../lib/logger.js'
 import { parseSopFile, withContentHash } from '../lib/sopFrontMatter.js'
 import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
@@ -24,6 +25,9 @@ import {
   SOURCE_PROVIDERS,
   GUARDRAIL_STATUSES,
   GUARDRAIL_TARGETS,
+  GUARDRAIL_PROVENANCES,
+  AuthoredGuardrailCreateSchema,
+  AuthoredGuardrailUpdateSchema,
   guardrailIdFromSopTitle,
   guardrailFileStem,
   type ExtractDocumentResult,
@@ -32,6 +36,8 @@ import {
   type GuardrailReadiness,
   type GuardrailReplay,
   type GuardrailSummary,
+  type AuthoredGuardrailWriteResult,
+  type GuardrailCheckResult,
   type PolicyDocumentDetail,
   type PolicyDocumentSummary,
   type TokenCoverage,
@@ -432,7 +438,7 @@ export async function runGuardrailsDuplicates(opts: CommonOpts & { minJaccard?: 
 
 // ─── guardrails ─────────────────────────────────────────────────────
 
-export async function runGuardrailsList(opts: CommonOpts & { status?: string; target?: string; doc?: string; limit?: string }): Promise<void> {
+export async function runGuardrailsList(opts: CommonOpts & { status?: string; target?: string; provenance?: string; doc?: string; limit?: string }): Promise<void> {
   const params = new URLSearchParams()
   if (opts.status !== undefined) {
     if (!(GUARDRAIL_STATUSES as readonly string[]).includes(opts.status)) {
@@ -447,6 +453,13 @@ export async function runGuardrailsList(opts: CommonOpts & { status?: string; ta
       process.exit(1)
     }
     params.set('target', opts.target)
+  }
+  if (opts.provenance !== undefined) {
+    if (!(GUARDRAIL_PROVENANCES as readonly string[]).includes(opts.provenance)) {
+      log.error(`--provenance must be one of ${GUARDRAIL_PROVENANCES.join(', ')}.`)
+      process.exit(1)
+    }
+    params.set('provenance', opts.provenance)
   }
   if (opts.doc) params.set('docId', opts.doc)
   if (opts.limit !== undefined) {
@@ -479,10 +492,16 @@ export async function runGuardrailsList(opts: CommonOpts & { status?: string; ta
     const ir = g.ir as { kind: string; title?: string }
     const title = ir.title ?? ir.kind
     log.field(`${g.guardrailId} [${g.status}${g.sourceStale ? ', stale' : ''}]`, `${g.target} — ${title}`)
-    log.dim(`    "${g.clause.quote}" — ${g.document.title}${g.document.sourceUrl ? ` ${g.document.sourceUrl}` : ''}`)
+    log.dim(`    ${standsOn(g)}`)
     if (g.status === 'SHADOW') log.dim(`    shadow: ${g.shadowEvaluations} evaluation(s), ${g.shadowWouldAct} would-act`)
   }
   log.info(`${guardrails.length} guardrail(s).`)
+}
+
+/** What a guardrail stands on, in one line: its quote and document, or — authored — its name, description and version. */
+function standsOn(g: GuardrailSummary): string {
+  if (g.clause && g.document) return `"${g.clause.quote}" — ${g.document.title}${g.document.sourceUrl ? ` ${g.document.sourceUrl}` : ''}`
+  return `authored: ${g.name ?? g.guardrailId}${g.description ? ` — "${g.description}"` : ''}, version ${g.version}`
 }
 
 function printReadiness(r: GuardrailReadiness): void {
@@ -520,8 +539,14 @@ export async function runGuardrailsShow(guardrailId: string, opts: CommonOpts): 
   const ir = g.ir as { kind: string; title?: string }
   log.header(`Intutic — ${ir.title ?? ir.kind}`)
   log.field('Guardrail', `${g.guardrailId} [${g.status}${g.sourceStale ? ', stale citation' : ''}] ${g.target}`)
-  log.field('Cites', `"${g.clause.quote}"`)
-  log.field('From', `${g.document.title} (${g.document.provider})${g.document.sourceUrl ? ` ${g.document.sourceUrl}` : ''} — passage ${g.clause.passageHash.slice(0, 12)}`)
+  if (g.clause && g.document) {
+    log.field('Cites', `"${g.clause.quote}"`)
+    log.field('From', `${g.document.title} (${g.document.provider})${g.document.sourceUrl ? ` ${g.document.sourceUrl}` : ''} — passage ${g.clause.passageHash.slice(0, 12)}`)
+  } else {
+    log.field('Authored', `${g.name ?? g.guardrailId}, version ${g.version}${g.supersedes ? ` (replaced ${g.supersedes})` : ''}`)
+    if (g.description) log.field('Description', g.description)
+  }
+  if (g.supersededBy) log.field('Superseded by', `${g.supersededBy} — an IR edit created the next version`)
   const rendered = g.rendered as { toolPattern?: string; argPattern?: string; reason?: string; lines?: string; source?: string; key?: string; values?: string[] }
   if (g.target === 'hook_rule' && rendered.toolPattern) {
     log.field('Tool pattern', rendered.toolPattern)
@@ -616,6 +641,191 @@ export async function runGuardrailsRetire(guardrailId: string, opts: CommonOpts)
 
 export async function runGuardrailsReconfirm(guardrailId: string, opts: CommonOpts): Promise<void> {
   await transition(guardrailId, 'reconfirm', {}, opts, 'citation re-confirmed against a live passage.')
+}
+
+// ─── Authored guardrails ────────────────────────────────────────────
+//
+// A guardrail written directly instead of extracted from a document: the same
+// IR, refused by the same server-side checks, created PROPOSED and moved by
+// the same transitions above. The IR comes from a file (YAML or JSON: a bare
+// IR, or `{ name, description, ir }`) or from flags.
+
+export interface AuthorOpts extends CommonOpts {
+  file?: string
+  name?: string
+  description?: string
+  clearDescription?: boolean
+  kind?: string
+  title?: string
+  tools?: string
+  tokens?: string
+  argContains?: string[]
+  argNotContains?: string[]
+  first?: string
+  then?: string
+  token?: string
+  limit?: string
+  taint?: string
+  roles?: string
+  models?: string
+  hosts?: string
+  rationale?: string
+  predicate?: string
+}
+
+/** The IR flags, by the IR key each one sets. */
+const IR_FLAGS = ['title', 'tools', 'tokens', 'argContains', 'argNotContains', 'first', 'then', 'token', 'limit', 'taint', 'roles', 'models', 'hosts', 'rationale', 'predicate'] as const
+
+const list = (v: string) =>
+  v
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0)
+
+function fail(message: string): never {
+  log.error(message)
+  process.exit(1)
+}
+
+/** An IR from flags: `--kind` plus the keys that kind takes. The server's validator decides whether the result is a rule. */
+function irFromFlags(opts: AuthorOpts): Record<string, unknown> | null {
+  const given = IR_FLAGS.filter((f) => opts[f] !== undefined)
+  if (opts.kind === undefined) {
+    if (given.length > 0) fail(`--${given[0]!.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)} needs --kind.`)
+    return null
+  }
+  const ir: Record<string, unknown> = { kind: opts.kind }
+  if (opts.title !== undefined) ir.title = opts.title
+  if (opts.tools !== undefined) ir.tools = list(opts.tools)
+  if (opts.tokens !== undefined) ir.tokens = list(opts.tokens)
+  if (opts.argContains !== undefined) ir.argContains = opts.argContains
+  if (opts.argNotContains !== undefined) ir.argNotContains = opts.argNotContains
+  if (opts.first !== undefined) ir.first = opts.first
+  if (opts.then !== undefined) ir.then = opts.then
+  if (opts.token !== undefined) ir.token = opts.token
+  if (opts.limit !== undefined) {
+    const n = Number(opts.limit)
+    if (!Number.isInteger(n)) fail('--limit must be an integer.')
+    ir.limit = n
+  }
+  if (opts.taint !== undefined) ir.taint = opts.taint
+  if (opts.roles !== undefined) ir.roles = list(opts.roles)
+  if (opts.models !== undefined) ir.models = list(opts.models)
+  if (opts.hosts !== undefined) ir.hosts = list(opts.hosts)
+  if (opts.rationale !== undefined) ir.rationale = opts.rationale
+  if (opts.predicate !== undefined) {
+    try {
+      ir.predicate = JSON.parse(opts.predicate)
+    } catch (err) {
+      fail(`--predicate must be JSON: ${errMessage(err)}`)
+    }
+  }
+  // The schema pins a generated or authored predicate to re-ask; there is nothing to choose.
+  if (opts.kind === 'wasm_predicate') ir.verdict = 3
+  return ir
+}
+
+/** `--file`: YAML or JSON (YAML reads both). A top-level `kind` is a bare IR; otherwise `{ name?, description?, ir }`. */
+async function readAuthoredFile(file: string): Promise<{ name?: unknown; description?: unknown; ir?: unknown }> {
+  let parsed: unknown
+  try {
+    parsed = parseYaml(await readFile(file, 'utf8'))
+  } catch (err) {
+    fail(`Could not read ${file}: ${errMessage(err)}`)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail(`${file} must hold an object: an IR with a \`kind\`, or { name, description, ir }.`)
+  const obj = parsed as Record<string, unknown>
+  if ('kind' in obj) return { ir: obj }
+  const extra = Object.keys(obj).filter((k) => !['name', 'description', 'ir'].includes(k))
+  if (extra.length > 0) fail(`${file}: unknown key(s) ${extra.join(', ')}; a guardrail file holds name, description and ir.`)
+  return obj
+}
+
+/** The fields a create or an update sends: the file first, flags over it. */
+async function authoredFields(opts: AuthorOpts): Promise<Record<string, unknown>> {
+  const fromFile = opts.file ? await readAuthoredFile(opts.file) : {}
+  const flagIr = irFromFlags(opts)
+  if (flagIr && fromFile.ir !== undefined) fail('Give the IR with --file or with --kind and its flags, not both.')
+  if (opts.description !== undefined && opts.clearDescription) fail('--description and --clear-description contradict each other.')
+  const body: Record<string, unknown> = {}
+  const name = opts.name ?? fromFile.name
+  if (name !== undefined) body.name = typeof name === 'string' ? name.trim() : name
+  const description = opts.clearDescription ? null : (opts.description ?? fromFile.description)
+  if (description !== undefined) body.description = description
+  const ir = flagIr ?? fromFile.ir
+  if (ir !== undefined) body.ir = ir
+  return body
+}
+
+function zodMessage(error: { issues: Array<{ path: Array<string | number>; message: string }> }): string {
+  const first = error.issues[0]
+  return `${first?.path.length ? `${first.path.join('.')}: ` : ''}${first?.message ?? 'invalid'}`
+}
+
+function printChecks(checks: GuardrailCheckResult[]): void {
+  for (const c of checks) log.dim(`    ${c.passed ? '✓' : '✗'} ${c.name}${c.passed ? '' : ` — ${c.detail}`}`)
+}
+
+/** The answers an authored write shares: 400 with the refusing check, 403, 404, 409 with a code. */
+function reportWriteFailure(status: number, body: { error?: string; code?: string; validation?: GuardrailCheckResult[] }, guardrailId: string | null, action: string): never {
+  if (status === 400) {
+    log.error(body.error ?? `${action} refused (400).`)
+    if (body.validation) printChecks(body.validation)
+    process.exit(1)
+  }
+  if (status === 404 && guardrailId) fail(`Guardrail "${guardrailId}" not found in this workspace.`)
+  if (status === 403) fail(body.error ?? 'Refused: authoring guardrails needs an OWNER or ADMIN member of the workspace.')
+  if (status === 409) fail(body.error ?? `Refused (${body.code ?? 'conflict'}).`)
+  fail(`${action} failed (${status}): ${body.error ?? 'unknown error'}`)
+}
+
+export async function runGuardrailsCreate(opts: AuthorOpts): Promise<void> {
+  const body = await authoredFields(opts)
+  if (body.ir === undefined) fail('Give the IR with --file <path> or with --kind and its flags.')
+  const parsed = AuthoredGuardrailCreateSchema.safeParse(body)
+  if (!parsed.success) fail(`Not a guardrail the server would accept: ${zodMessage(parsed.error)}`)
+  const client = await getClient(opts.dev)
+  const { status, body: res } = await client.postWithStatus<Partial<AuthoredGuardrailWriteResult> & { error?: string; code?: string; validation?: GuardrailCheckResult[] }>(`${BASE}/guardrails`, parsed.data)
+  if (status !== 201 || !res.guardrail) reportWriteFailure(status, res, null, 'Create')
+  const g = res.guardrail
+  if (opts.json) {
+    emitJson(res)
+    return
+  }
+  log.success(`Created ${g.guardrailId} (${g.target}), PROPOSED: it enforces and measures nothing yet.`)
+  log.info(`Next: intutic guardrails approve-shadow ${g.guardrailId} — then promotion waits on shadow evidence, as for an extracted guardrail.`)
+}
+
+export async function runGuardrailsUpdate(guardrailId: string, opts: AuthorOpts): Promise<void> {
+  const body = await authoredFields(opts)
+  if (Object.keys(body).length === 0) fail('Nothing to update: give --name, --description, --clear-description, --file or --kind with its flags.')
+  const parsed = AuthoredGuardrailUpdateSchema.safeParse(body)
+  if (!parsed.success) fail(`Not an update the server would accept: ${zodMessage(parsed.error)}`)
+  const client = await getClient(opts.dev)
+  const { status, body: res } = await client.putWithStatus<Partial<AuthoredGuardrailWriteResult> & { error?: string; code?: string; validation?: GuardrailCheckResult[] }>(`${BASE}/guardrails/${enc(guardrailId)}`, parsed.data)
+  if (status !== 200 || !res.guardrail) reportWriteFailure(status, res, guardrailId, 'Update')
+  const g = res.guardrail
+  if (opts.json) {
+    emitJson(res)
+    return
+  }
+  if (res.forked) {
+    log.success(`The IR changed: version ${g.version} is ${g.guardrailId}, PROPOSED with no evidence. ${guardrailId} is retired.`)
+    log.info(`Shadow evidence belongs to the rule that earned it. Next: intutic guardrails approve-shadow ${g.guardrailId}`)
+  } else {
+    log.success(`${guardrailId}: updated in place (${g.status}); its evidence stands.`)
+  }
+}
+
+export async function runGuardrailsDelete(guardrailId: string, opts: CommonOpts): Promise<void> {
+  const client = await getClient(opts.dev)
+  const { status, body: res } = await client.delWithStatus<{ ok?: boolean; guardrail?: GuardrailDetail; error?: string; code?: string }>(`${BASE}/guardrails/${enc(guardrailId)}`)
+  if (status !== 200 || !res.guardrail) reportWriteFailure(status, res, guardrailId, 'Delete')
+  if (opts.json) {
+    emitJson(res)
+    return
+  }
+  log.success(`${guardrailId}: retired — gone from every rule endpoint on the next poll. Its history is kept.`)
 }
 
 const REPLAY_SOURCE_LABEL: Record<GuardrailReplay['source'], string> = {

@@ -45,6 +45,11 @@ describe('gateKindForHarness', () => {
     expect(gateKindForHarness(HarnessType.AIDER)).toBe('none')
   })
 
+  it("classifies Roo Code and Claude Desktop as 'none' — neither has a hook system to gate", () => {
+    expect(gateKindForHarness(HarnessType.ROO_CODE)).toBe('none')
+    expect(gateKindForHarness(HarnessType.CLAUDE_DESKTOP)).toBe('none')
+  })
+
   it("classifies xirp as 'delegated' — it wraps other already-gated harnesses", () => {
     expect(gateKindForHarness(HarnessType.XIRP)).toBe('delegated')
   })

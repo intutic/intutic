@@ -20,7 +20,8 @@ describe('Drift Filesystem Watcher', () => {
   it('correctly detects modifications and deletions on watched files', async () => {
     // 1. Setup a temporary workspace directory
     const tempDir = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-watch-test-'))
-    const cursorRulesPath = node_path.join(tempDir, '.cursorrules')
+    const cursorRulesPath = node_path.join(tempDir, '.cursor', 'rules', 'intutic-governance.mdc')
+    await node_fs.mkdir(node_path.dirname(cursorRulesPath), { recursive: true })
 
     // Write initial mock file
     await node_fs.writeFile(cursorRulesPath, 'governance: initial rules', 'utf-8')
@@ -44,9 +45,9 @@ describe('Drift Filesystem Watcher', () => {
 
     expect(changedFiles.length).toBeGreaterThanOrEqual(1)
     // Use .some() because the watcher also watches ~/.claude/settings.json
-    // (privilege escalation guard), which may fire before .cursorrules if
+    // (privilege escalation guard), which may fire before the rules file if
     // the global settings file already exists and gets a spurious event.
-    expect(changedFiles.some((f) => f.includes('.cursorrules'))).toBe(true)
+    expect(changedFiles.some((f) => f.includes('intutic-governance.mdc'))).toBe(true)
 
     // 4. Test delete / unlink detection
     changedFiles.length = 0 // clear
@@ -54,7 +55,7 @@ describe('Drift Filesystem Watcher', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 500))
     expect(changedFiles.length).toBeGreaterThanOrEqual(1)
-    expect(changedFiles.some((f) => f.includes('.cursorrules'))).toBe(true)
+    expect(changedFiles.some((f) => f.includes('intutic-governance.mdc'))).toBe(true)
 
     // Cleanup. Await the watcher's shutdown BEFORE removing the directory:
     // rm fires unlink events on every watched file, and if chokidar is still
@@ -106,7 +107,8 @@ describe('Drift Filesystem Watcher', () => {
   it('onDriftDetected fires within 1s and appends a config_tamper event to the JSONL log', async () => {
     // 1. Setup temporary workspace and events log path
     const tempDir = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-tamper-test-'))
-    const cursorRulesPath = node_path.join(tempDir, '.cursorrules')
+    const cursorRulesPath = node_path.join(tempDir, '.cursor', 'rules', 'intutic-governance.mdc')
+    await node_fs.mkdir(node_path.dirname(cursorRulesPath), { recursive: true })
     const testEventsLog = node_path.join(tempDir, '.intutic', 'events', 'hook-events.jsonl')
     await node_fs.mkdir(node_path.dirname(testEventsLog), { recursive: true })
     // Pre-create the log. Only the directory existed before, so any path where

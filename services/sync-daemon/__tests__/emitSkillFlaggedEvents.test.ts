@@ -97,6 +97,7 @@ describe('emitSkillFlaggedEvents', () => {
     expect(String(evt.reason)).toContain('2 finding(s)')
     expect(typeof evt.timestamp).toBe('string')
     expect(typeof evt.incidentId).toBe('string')
+    expect(evt.eventId, 'the id the control plane processes each event once by').toMatch(/^[0-9a-f]{32}$/)
   })
 
   it('is a valid JSON line the shared drain can parse (matches HookEventSchema field names)', async () => {
@@ -137,6 +138,7 @@ describe('emitSkillFlaggedEvents', () => {
     })
     const events = await readEvents()
     expect(events.map((e) => e.toolName).sort()).toEqual(['skill:a', 'skill:c'])
+    expect(new Set(events.map((e) => e.eventId)).size, 'two events shared an eventId').toBe(2)
   })
 
   it('never throws when the events directory does not exist (non-fatal by design)', async () => {

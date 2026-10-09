@@ -34,17 +34,20 @@
  * (`buildSnapshotRules` in `services/sync-daemon/src/lib/policySnapshot.ts`
  * only ships SOP-authored rules, the destructive tier, and the tier-promoted
  * skill-surface rules — never the floor's secret-content patterns). Copied
- * as of 2026-08-19, against the version of `protectedPaths.ts` this worktree
- * branched from.
+ * as of 2026-10-08, when the sequence rules (`sequence: true`) arrived.
+ * `UNIVERSAL_PROTECTED_PATHS` is held equal to the source by
+ * `services/sync-daemon/__tests__/harness/protectedPathCopies.test.ts`.
  */
 
-export type Subject = 'tool' | 'command' | 'target' | 'any'
+export type Subject = 'tool' | 'command' | 'target' | 'phrase' | 'any'
 export type Severity = 'block' | 'warn' | 'shadow'
 
 export interface FixturePattern {
   id: string
   source: string
   ignoreCase?: boolean
+  /** A sequence rule: flags column `s` (see sequence.ts). */
+  sequence?: boolean
   subject?: Subject
   severity: Severity
   reason: string
@@ -57,6 +60,7 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'bypass.chflags_nouchg',
     source: ' chflags .*nouchg',
+    sequence: true,
     severity: 'block',
     reason: 'Governance bypass pattern: clearing the macOS immutable flag on a governance file',
     matches: [' chflags nouchg .intutic/hooks ', ' sudo chflags -R nouchg /x ', ' chflags nouchg a b '],
@@ -65,6 +69,7 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'bypass.chattr_immutable',
     source: ' chattr .*-[a-zA-Z]*i',
+    sequence: true,
     severity: 'block',
     reason: 'Governance bypass pattern: clearing the Linux immutable attribute on a governance file',
     matches: [' chattr -i /x ', ' chattr -R -i /x ', ' sudo chattr -Ri /x '],
@@ -73,6 +78,7 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'bypass.chmod_governance',
     source: ' chmod .*(hooks|\\.intutic|\\.claude|\\.cursor)',
+    sequence: true,
     severity: 'block',
     reason: 'Governance bypass pattern: changing permissions on a governance file',
     matches: [' chmod 777 .intutic/hooks/x ', ' chmod -R 000 .claude ', ' chmod +x .cursor/hooks.json '],
@@ -140,13 +146,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
     subject: 'command',
     severity: 'block',
     reason: 'Recursive delete of the filesystem root',
-    matches: [
-      ' rm -rf / ',
-      ' rm -rf / --no-preserve-root ',
-      ' sudo rm -rf / ',
-      ' rm -rf /* ',
-      ' cd /tmp && rm -fr / ',
-    ],
+    matches: [' rm -rf / ', ' rm -rf / --no-preserve-root ', ' sudo rm -rf / ', ' rm -rf /* ', ' cd /tmp && rm -fr / '],
     notMatches: [
       ' rm -rf /home/me/project/build ',
       ' rm -rf ./dist ',
@@ -159,6 +159,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'destructive.mkfs_device',
     source: ' mkfs[a-z0-9.]* .*/dev/',
+    sequence: true,
     subject: 'command',
     severity: 'block',
     reason: 'Formatting a block device',
@@ -168,6 +169,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'destructive.dd_raw_device',
     source: ' dd .*of=/dev/',
+    sequence: true,
     subject: 'command',
     severity: 'block',
     reason: 'Writing a raw image over a block device',
@@ -177,6 +179,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'destructive.block_device_wipe',
     source: ' (shred|wipefs|blkdiscard) .*/dev/',
+    sequence: true,
     subject: 'command',
     severity: 'block',
     reason: 'Wiping a block device',
@@ -185,7 +188,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'destructive.chmod_recursive_root',
-    source: ' chmod +-[a-zA-Z]*R[a-zA-Z]* +[0-7]+ +/( |\\*)',
+    source: ' chmod +-[a-zA-QS-Z]*R[a-zA-Z]* +[0-7]+ +/( |\\*)',
     subject: 'command',
     severity: 'block',
     reason: 'Recursive permission change across the filesystem root',
@@ -194,7 +197,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'destructive.chown_recursive_root',
-    source: ' chown +-[a-zA-Z]*R[a-zA-Z]* +[a-zA-Z0-9_.:-]+ +/( |\\*)',
+    source: ' chown +-[a-zA-QS-Z]*R[a-zA-Z]* +[a-zA-Z0-9_.:-]+ +/( |\\*)',
     subject: 'command',
     severity: 'block',
     reason: 'Recursive ownership change across the filesystem root',
@@ -213,6 +216,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   {
     id: 'destructive.curl_pipe_shell',
     source: ' (curl|wget) .*\\| *(sudo )?(ba|z|k|d)?sh',
+    sequence: true,
     subject: 'command',
     severity: 'warn',
     reason: 'Piping a downloaded script straight into a shell',
@@ -221,17 +225,43 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'destructive.sql_drop',
-    source: ' (drop +(table|database|schema)|truncate +table) ',
+    source: 'drop table|drop database|drop schema|truncate table',
     ignoreCase: true,
-    subject: 'command',
+    subject: 'phrase',
     severity: 'warn',
     reason: 'Destructive SQL statement',
-    matches: [' DROP TABLE users ', ' drop database app ', ' TRUNCATE TABLE events '],
-    notMatches: [' SELECT * FROM users ', ' echo drop it ', ' git stash drop '],
+    matches: [
+      ' DROP TABLE users ',
+      ' drop database app ',
+      ' TRUNCATE TABLE events ',
+      ' psql -h db -c "DROP TABLE users" ',
+      ' psql -c "select 1;drop table users" ',
+      ' DROP\nTABLE users ',
+      ' DROP\tTABLE users ',
+      ' DROP/**/TABLE users ',
+      ' DROP /* why */ TABLE users ',
+      ' DROP -- why\nTABLE users ',
+      ' DROP--why\nTABLE users ',
+      ' dRoP tAbLe users ',
+      ' printf "DROP\\nTABLE users" | psql ',
+      ' printf "select 1;\\nDROP TABLE users" | psql ',
+      ' DROP SCHEMA analytics CASCADE ',
+    ],
+    notMatches: [
+      ' SELECT * FROM users ',
+      ' echo drop it ',
+      ' git stash drop ',
+      ' git stash drop --quiet && cat table.md ',
+      ' ./drop_table.sh ',
+      ' truncate -s 0 app.log ',
+      ' truncate --size 0 table.log ',
+      ' pg_dump --exclude-table=audit app ',
+    ],
   },
   {
     id: 'destructive.git_history_loss',
-    source: ' git .*(reset +--hard|clean +-[a-zA-Z]*f|push +.*--force)',
+    source: ' git .*reset +--hard| git .*clean +-[a-zA-Z]*f| git .*push +.*--force',
+    sequence: true,
     subject: 'command',
     severity: 'warn',
     reason: 'Git command that discards uncommitted or remote work',
@@ -245,16 +275,43 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.intutic/hooks',
   '.intutic/integrity.json',
   '.intutic/events',
+  '.intutic/env',
   '.claude/settings.json',
   '.claude/settings.local.json',
   '.cursor/hooks.json',
-  '.cline/hooks',
+  '/etc/cursor/hooks.json',
+  'Application Support/Cursor/hooks.json',
+  '.clinerules/hooks',
   '.codeium/windsurf/hooks.json',
   '.codeium/hooks.json',
   '.windsurf/hooks.json',
   '.openhands/hooks.json',
   '.gemini/settings.json',
+  '.gemini/config/hooks.json',
+  '.agents/hooks.json',
   '.agents/plugins/intutic-governance',
+  '.muse/hooks.json',
+  '.config/muse/settings.json',
+  '.config/muse/intutic-managed-hooks.json',
+  '.grok/hooks',
+  '.grok/config.toml',
+  '.grok/trusted_folders.toml',
+  '.dsh/profiles',
+  '.dsh/cordis.patch.yml',
+  '.dsh/settings.yaml',
+  '.opencode/plugins',
+  '.opencode/plugin',
+  '.config/opencode/plugins',
+  '.pi/agent/extensions',
+  '.openclaw/openclaw.json',
+  '.pi/extensions',
+  '.codex/hooks.json',
+  '.codex/config.toml',
+  '.github/hooks/intutic-governance.json',
+  '.copilot/hooks/intutic-governance.json',
+  '.hermes/config.yaml',
+  '.config/goose/config.yaml',
+  '.open-webui/intutic-governance-filter.py',
 ]
 
 /** Escapes a literal string for use inside a portable ERE — mirrors

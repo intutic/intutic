@@ -32,7 +32,7 @@
  *   object: `{"decision":"deny","reason":"..."}`. Grok Build's confirmed
  *   contract — kept distinct from `stdout-cancel` rather than folded into it
  *   because the field names do not overlap: Grok Build does not recognise
- *   `cancel`, and Cline/Roo Code do not recognise `decision`.
+ *   `cancel`, and Cline does not recognise `decision`.
  * - `none` — the gate cannot refuse at all. Recorded rather than omitted, so
  *   "we know it cannot block" is distinguishable from "nobody checked".
  * - `waterfall-reject` — dsh's own contract (CONFIRMED against a real
@@ -53,6 +53,8 @@
  *
  * @module
  */
+
+import type { HookGateHarness } from '@intutic/shared-types'
 
 /**
  * A dynamically imported harness writer module.
@@ -76,8 +78,15 @@ export type HarnessModule = Record<string, (...args: unknown[]) => Promise<void>
  * `'js-throw'`, whose unit is a whole n8n WORKFLOW: the suites below look
  * rows up by contract, and one value for both would let the workflow block
  * silently claim the per-call gate.
+ *
+ * `'plugin-block'` — the same in-process shape, refusing by RETURNING the
+ * host's block result instead: Pi's `tool_call` handler returns
+ * `{ block: true, reason }`, OpenClaw's `before_tool_call` hook
+ * `{ block: true, blockReason }`. Both hosts also block on a throw, but the
+ * returned reason is what the model reads, so a throw here is a defect the
+ * suite reports rather than a refusal it accepts.
  */
-export type GateContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'python-raise' | 'js-throw' | 'waterfall-reject' | 'plugin-throw'
+export type GateContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'python-raise' | 'js-throw' | 'waterfall-reject' | 'plugin-throw' | 'plugin-block'
 
 /** What runs the emitted artifact. */
 export type GateRunner = 'bash' | 'node' | 'python3'
@@ -107,8 +116,8 @@ export interface GateEntry {
   note?: string
   /**
    * Whether `mcp__<server>__<tool>`-shaped tool calls reach this gate's
-   * evaluator at all (M3 — the per-server MCP allowlist / `#mcpservers`
-   * header work). Three values, not two, because "the gate script runs for
+   * evaluator at all (the per-server MCP allowlist and the MCP server
+   * registry). Three values, not two, because "the gate script runs for
    * this call" and "this harness's own MCP tool names actually take that
    * shape" are separate facts and conflating them overclaims:
    *
@@ -184,15 +193,24 @@ export const GATES: readonly GateEntry[] = [
     mcpNote: 'bash-family: runs unconditionally. Antigravity (Gemini CLI)’s own MCP tool-naming convention was not independently verified during M3.',
   },
   {
-    name: 'pi',
-    module: '../../src/harness/piHooks.js',
-    invoke: (m, root) => m.writePiHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/pi-check.sh',
-    runner: 'bash',
-    contract: 'exit2',
+    // The antigravity harness's second gate. Google Antigravity (the app, the
+    // IDE and Antigravity CLI) reads ~/.gemini/config/hooks.json; the bash
+    // gate above is Gemini CLI's.
+    name: 'antigravityCli',
+    module: '../../src/harness/antigravityCliHooks.js',
+    invoke: (m, root) => m.writeAntigravityCliHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/antigravity-cli-check.js',
+    runner: 'node',
+    contract: 'stdout-decision-deny',
     migrated: true,
+    note:
+      'PreToolUse with matcher "*", refusing with {"decision":"deny","reason":"..."} on stdout, per ' +
+      'antigravity.google/docs/hooks. The gate reads Antigravity\'s {toolCall: {name, args}} payload ' +
+      '(driven with it in antigravityCliHooks.test.ts) and the Claude-Code shape this matrix sends. ' +
+      'Not verified against a running Antigravity: how it reads a result with no decision ({}), ' +
+      'which is what the gate prints on an allow.',
     mcpCalls: 'reachable',
-    mcpNote: 'bash-family (also carries its own ‘.*’ hooks.json matcher, belt-and-suspenders). Pi’s own MCP tool-naming convention was not independently verified during M3.',
+    mcpNote: 'Matcher "*" runs the gate for every tool call. Antigravity\'s own MCP tool-naming convention is not documented and was not verified.',
   },
 
   // ── JavaScript, exit-code contract ──────────────────────────────────────
@@ -208,17 +226,6 @@ export const GATES: readonly GateEntry[] = [
     note: 'the primary harness; shipped a ReferenceError that disabled it entirely',
     mcpCalls: 'yes',
     mcpNote: "M3 added an `hookEntry('mcp__.*')` PreToolUse matcher. Claude Code's own MCP tool-naming convention IS `mcp__<server>__<tool>` — this is the scheme every other harness's shape is measured against, not an assumption made for this phase.",
-  },
-  {
-    name: 'claudeDesktop',
-    module: '../../src/harness/claudeDesktopHooks.js',
-    invoke: (m, root) => m.writeClaudeDesktopHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/claude-desktop-check.js',
-    runner: 'node',
-    contract: 'exit2',
-    migrated: true,
-    mcpCalls: 'yes',
-    mcpNote: "M3 added `'mcp__.*'` to HOOK_MATCHERS. This harness shares Claude Code's PreToolUse hook format and MCP tool-naming convention verbatim (see this writer's own module doc).",
   },
   {
     name: 'cursor',
@@ -263,18 +270,6 @@ export const GATES: readonly GateEntry[] = [
       'reads `agent_action_name`/`tool_info.*` first, with the old Cursor-shaped fields kept only ' +
       'as a lower-priority fallback. See windsurfHooks.ts\'s module doc comment for the full ' +
       'correction record and windsurfHooks.test.ts for coverage against the confirmed real shape.',
-  },
-  {
-    name: 'openclaw',
-    module: '../../src/harness/openclawHooks.js',
-    invoke: (m, root) => m.writeOpenclawHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/openclaw-check.js',
-    runner: 'node',
-    contract: 'exit2',
-    migrated: true,
-    note: 'its writer shells out to an installed `openclaw` binary if present',
-    mcpCalls: 'reachable',
-    mcpNote: 'Its PreToolUse registration carries no matcher (runs for every tool call). Openclaw’s own MCP tool-naming convention was not independently verified during M3.',
   },
   {
     name: 'codex',
@@ -325,25 +320,6 @@ export const GATES: readonly GateEntry[] = [
     mcpCalls: 'reachable',
     mcpNote: "Already a `.*` catch-all matcher. GitHub Copilot's own MCP tool-naming convention was not independently verified during M3.",
   },
-  {
-    name: 'continue',
-    module: '../../src/harness/continueHooks.js',
-    invoke: (m, root) => m.writeContinueHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/continue-check.js',
-    runner: 'node',
-    contract: 'exit2',
-    migrated: true,
-    note:
-      'Continue CLI (cn) only — the IDE extension has no hook system. The CLI also ' +
-      'reads .claude/settings.json, so claude-code users may already run that gate; ' +
-      'the dedicated registration in .continue/settings.json covers users without it. ' +
-      'LIVE-VERIFIED LIMITS (cn 1.5.47): headless -p mode does not execute PreToolUse ' +
-      'hooks at all (marker-hook probe: tool ran, hook never fired) — interactive TUI ' +
-      'sessions are what this gate covers, headless runs are proxy-governed only; and ' +
-      "cn's dispatcher fails OPEN on hook errors ({blocked:false}) by its own design",
-    mcpCalls: 'reachable',
-    mcpNote: "Already a `.*` catch-all matcher (when the hook fires at all — see the headless-mode limit above). Continue's own MCP tool-naming convention was not independently verified during M3.",
-  },
 
   // ── JavaScript, stdout contract ─────────────────────────────────────────
   {
@@ -368,22 +344,6 @@ export const GATES: readonly GateEntry[] = [
       'extension\'s preToolUse shape). The SDK\'s MCP tool naming was not verified, hence ' +
       'reachable rather than yes.',
   },
-  {
-    name: 'rooCode',
-    module: '../../src/harness/rooCodeHooks.js',
-    invoke: (m, root) => m.writeRooCodeHooks(root, PROXY_URL, 'ws_test'),
-    artifact: '.intutic/hooks/roo-check.js',
-    runner: 'node',
-    contract: 'stdout-cancel',
-    migrated: true,
-    mcpCalls: 'reachable',
-    mcpNote:
-      "Already a `.*` catch-all matcher. Roo Code is a Cline fork and, to the extent it kept " +
-      "Cline's `use_mcp_tool` tool-call vocabulary, would also benefit from the shared " +
-      "intuticGate normalization above — but that inheritance was not independently verified " +
-      "during M3, so this is 'reachable', not 'yes'.",
-  },
-
   // ── JavaScript, stdout contract (Grok Build's OWN shape) ────────────────
   {
     name: 'grok',
@@ -398,7 +358,7 @@ export const GATES: readonly GateEntry[] = [
       '~/.grok/hooks/intutic-governance.json (user), PreToolUse with no matcher ' +
       '(applies to every tool call). Blocking contract CONFIRMED (not assumed): ' +
       'writes {"decision":"deny","reason":"..."} on stdout and exits 0 — a ' +
-      'DIFFERENT stdout shape from Cline/Roo Code\'s {"cancel":true}, hence its ' +
+      'DIFFERENT stdout shape from Cline\'s {"cancel":true}, hence its ' +
       'own contract value rather than reuse of stdout-cancel. Grok Build ALSO ' +
       'natively reads .claude/settings.json and .cursor/hooks.json if present ' +
       '(a compatibility feature), so a workspace with either of those gates ' +
@@ -478,7 +438,6 @@ export const GATES: readonly GateEntry[] = [
       'specifically) — hence reachable, not yes.',
   },
 
-  // ── refuses by throwing, at workflow granularity ────────────────────────
   // ── OpenCode — a plugin OpenCode loads into its own process (TD-397) ─────
   {
     name: 'opencode',
@@ -502,6 +461,46 @@ export const GATES: readonly GateEntry[] = [
       'openCodeHooks.test.ts. 2.x MCP ids are not verified; a 2.x id that is not ' +
       '<server>_<tool>-shaped passes through unchanged.',
   },
+  // ── Pi and OpenClaw — in-process hooks that return a block result ───────
+  {
+    name: 'pi',
+    module: '../../src/harness/piHooks.js',
+    invoke: (m, root) => m.writePiHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.pi/agent/extensions/intutic-governance.js',
+    runner: 'node',
+    contract: 'plugin-block',
+    migrated: true,
+    note:
+      'per-tool-call, in-process: Pi loads the file from ~/.pi/agent/extensions and awaits its ' +
+      'tool_call handler, with no timeout, before every tool call; { block: true, reason } refuses. ' +
+      'Driven by the "Pi and OpenClaw plugin gates" block. Earlier versions wrote ~/.pi/hooks.json, ' +
+      'which Pi never reads.',
+    mcpCalls: 'yes',
+    mcpNote:
+      'Pi registers each MCP tool as mcp__<server>__<tool> (docs/mcp.md at earendil-works/pi ' +
+      '6fb2e78) and runs tool_call handlers for every tool, nested ctx.executeTool() calls ' +
+      'included, so the allowlist reads the name as it arrives.',
+  },
+  {
+    name: 'openclaw',
+    module: '../../src/harness/openclawHooks.js',
+    invoke: (m, root) => m.writeOpenclawHooks(root, PROXY_URL, 'ws_test'),
+    artifact: '.intutic/hooks/openclaw/intutic-governance.cjs',
+    runner: 'node',
+    contract: 'plugin-block',
+    migrated: true,
+    note:
+      'per-tool-call, in-process: a standalone plugin listed in plugins.load.paths whose ' +
+      'before_tool_call hook returns { block: true, blockReason }; OpenClaw runs the hook ' +
+      'fail-closed. Driven by the "Pi and OpenClaw plugin gates" block. Earlier versions ' +
+      'registered an internal hook, which never sees a tool call.',
+    mcpCalls: 'yes',
+    mcpNote:
+      'OpenClaw names an MCP tool <server>__<tool> (src/agents/agent-bundle-mcp-names.ts, ' +
+      'TOOL_NAME_SEPARATOR, at openclaw/openclaw 59309cc); the plugin composes ' +
+      'mcp__<server>__<tool> for the allowlist. Pinned by the block\'s allowlist case.',
+  },
+  // ── refuses by throwing, at workflow granularity ────────────────────────
   {
     name: 'n8n',
     module: '../../src/harness/n8nHooks.js',
@@ -607,6 +606,31 @@ export const NO_GATE: ReadonlyArray<{
     why: 'reads a user-owned JSON config for the writers that merge into one; writes nothing itself',
   },
   {
+    file: 'gateArtifacts.ts',
+    harness: null,
+    why: 'lists where each writer above puts its gate, so the AI inventory can check the file is there; writes nothing',
+  },
+  {
+    file: 'antigravityProducts.ts',
+    harness: null,
+    why: 'reads which of Google Antigravity and Gemini CLI a machine has, for the agent report and the AI inventory; writes nothing',
+  },
+  {
+    file: 'gateSightings.ts',
+    harness: null,
+    why: 'records when each gate last wrote an event, from the logs the gates write; writes no config or gate',
+  },
+  {
+    file: 'rulesSection.ts',
+    harness: null,
+    why: 'writes the rule sets and the decisions log as marked sections of instruction files the user also writes (AGENTS.md, GEMINI.md, ...); instructions, not a tool-call gate',
+  },
+  {
+    file: 'claudeAgentsMd.ts',
+    harness: null,
+    why: 'reads whether Claude Code loads the workspace AGENTS.md, so its own rules and decisions files do not repeat it; writes nothing',
+  },
+  {
     file: 'codexConfigMerger.ts',
     harness: 'codex',
     why: 'sets openai_base_url in the Codex user config (LLM routing); codexHooks.ts is the gate',
@@ -614,7 +638,12 @@ export const NO_GATE: ReadonlyArray<{
   {
     file: 'continueConfigMerger.ts',
     harness: 'continue',
-    why: 'sets apiBase on Continue\'s OpenAI/Anthropic models (LLM routing); continueHooks.ts is the gate',
+    why:
+      'sets apiBase on Continue\'s OpenAI/Anthropic models, so the proxy governs its LLM traffic; ' +
+      'Continue has no tool-call gate. Its CLI (cn) loads PreToolUse hooks from settings.json but ' +
+      'never fires them: firePreToolUse has no caller outside tests at continuedev/continue main ' +
+      '5522c6f, and PR #11043, which would have wired it, was closed unmerged on 2026-03-24. The ' +
+      'IDE extension has no hook system. The gate Intutic used to register there never ran.',
   },
   {
     file: 'holdRedaction.ts',
@@ -625,6 +654,23 @@ export const NO_GATE: ReadonlyArray<{
     file: 'claudeProjectApproval.ts',
     harness: 'claude-code',
     why: 'decides which project MCP servers Claude Code would start, for mcpAutoWrite.ts; writes nothing itself',
+  },
+  {
+    file: null,
+    harness: 'claude-desktop',
+    why:
+      'no hook system: claude_desktop_config.json holds MCP servers, and the Code tab runs ' +
+      'Claude Code, which reads hooks from ~/.claude/settings.json (code.claude.com/docs/en/desktop) ' +
+      '— the claude-code gate already covers it. The Chat surface is governed by wrapping the ' +
+      'MCP servers in that file with the MCP governance proxy (mcpAutoWrite.ts).',
+  },
+  {
+    file: null,
+    harness: 'roo-code',
+    why:
+      'no hook system: Roo Code\'s final source (RooCodeInc/Roo-Code, archived 2026-05-15) runs no ' +
+      'pre-tool hook and reads no hooks file. Rules go to .roorules; enforcement is the proxy and ' +
+      'the MCP governance proxy.',
   },
   {
     file: null,
@@ -1125,3 +1171,14 @@ export const NO_GATE: ReadonlyArray<{
       'apps/docs/integrations/agentcore.md, not encoded here. See TD-430.',
   },
 ]
+
+/**
+ * The harness a generated gate was emitted for, read from its body's header
+ * (`Intutic gate body vN — harness: <id>`): the key its deadline is derived
+ * from (`gateDeadlineMs` in `@intutic/shared-types`).
+ */
+export function emittedHarness(artifactText: string): HookGateHarness {
+  const m = artifactText.match(/Intutic gate body v\d+ — harness: (\S+)/)
+  if (!m) throw new Error('no gate body header in the artifact')
+  return m[1] as HookGateHarness
+}

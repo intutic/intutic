@@ -22,7 +22,10 @@
  *
  * Names and groups match exactly — no case folding, no patterns — because
  * that is what the server has always done and a gate that matched more loosely
- * would refuse calls the server allows.
+ * would refuse calls the server allows. The one widening is MCP's two names
+ * for one tool ({@link ssoGroupToolMatches}): an entry naming the tool as its
+ * server declares it (`run_query`) also matches the name a harness hook sees
+ * (`mcp__postgres__run_query`), at every gate.
  *
  * @module
  */
@@ -87,9 +90,42 @@ export function ssoGroupRuleId(kind: 'require_obo' | 'high_risk', toolName: stri
 }
 
 /**
+ * Whether a call that goes by `name` is the tool a policy entry names.
+ *
+ * Exactly, or — for an entry that is an MCP tool's own name, not starting
+ * with `mcp__` — as the name a harness hook gives that tool on any server:
+ * `mcp__<server>__<entry>`, the server part non-empty. The MCP proxy sees
+ * `run_query` where Claude Code's hook sees `mcp__postgres__run_query`, so
+ * without this an entry written one way held at one gate and not the other.
+ * An entry that already names the harness form (`mcp__postgres__run_query`)
+ * matches only that server's tool.
+ */
+export function ssoGroupToolMatches(entry: string, name: string): boolean {
+  if (name === entry) return true
+  if (entry.startsWith('mcp__') || !name.startsWith('mcp__')) return false
+  const suffix = `__${entry}`
+  return name.length > 'mcp__'.length + suffix.length && name.endsWith(suffix)
+}
+
+/**
+ * The first entry of `list` a call matches: an exact match on any of its
+ * names first, then an MCP tool's own name matching a harness name.
+ */
+function matchingEntry(list: readonly string[], names: readonly string[]): string | undefined {
+  const exact = names.find((n) => list.includes(n))
+  if (exact !== undefined) return exact
+  for (const n of names) {
+    const entry = list.find((e) => ssoGroupToolMatches(e, n))
+    if (entry !== undefined) return entry
+  }
+  return undefined
+}
+
+/**
  * Decides one tool call. `toolNames` is every name the call goes by — the MCP
  * proxy sees `create_issue` where a harness hook sees
- * `mcp__github__create_issue` — and a policy entry naming any of them applies.
+ * `mcp__github__create_issue` — and a policy entry naming any of them applies
+ * ({@link ssoGroupToolMatches}). The rule id and reason name the entry.
  * `memberGroups` null means the caller does not know the member's groups.
  */
 export function evaluateSsoGroupClearance(
@@ -100,7 +136,7 @@ export function evaluateSsoGroupClearance(
   if (!policy) return { clearance: 'GRANTED', ruleId: null, reason: '' }
   const names = typeof toolNames === 'string' ? [toolNames] : toolNames
 
-  const obo = names.find((n) => policy.requireOboFor.includes(n))
+  const obo = matchingEntry(policy.requireOboFor, names)
   if (obo !== undefined) {
     return {
       clearance: 'REQUIRES_OBO',
@@ -109,7 +145,7 @@ export function evaluateSsoGroupClearance(
     }
   }
 
-  const risky = names.find((n) => policy.highRiskTools.includes(n))
+  const risky = matchingEntry(policy.highRiskTools, names)
   if (risky === undefined) return { clearance: 'GRANTED', ruleId: null, reason: '' }
   if (memberGroups && policy.requiredGroups.some((g) => memberGroups.includes(g))) {
     return { clearance: 'GRANTED', ruleId: null, reason: '' }

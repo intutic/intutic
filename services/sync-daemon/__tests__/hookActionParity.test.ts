@@ -24,6 +24,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ACTION_TOOL_NAMES } from '../src/harness/gateBody.js'
 
 const RUST = readFileSync(
   join(__dirname, '../../../packages/proxy/src/plugins/anomaly/actions.rs'),
@@ -69,6 +70,13 @@ describe('hook and proxy classify the same commands', () => {
       `the hook does not recognise ${missing.join(', ')} as ${action}, so a ` +
         `review_before SOP naming it cannot hold the call before it executes`,
     ).toEqual([])
+  })
+
+  it('reads the command of exactly the shell tools the proxy classifies', () => {
+    // The hook's list lacked Gemini CLI's `run_shell_command` and Cline's
+    // `execute_command`, so `review_before: action:deploy` never held a
+    // deploy either of them ran: the classifier returned no action for them.
+    expect([...ACTION_TOOL_NAMES]).toEqual(rustPatterns('SHELL_TOOLS'))
   })
 
   /**

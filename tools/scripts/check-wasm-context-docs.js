@@ -51,7 +51,15 @@ if (!struct) {
   )
 }
 
-const fields = [...struct[1].matchAll(/^\s*pub\s+(\w+)\s*:/gm)].map((m) => m[1])
+// A field marked `#[serde(skip)]` is never serialised, so a rule never sees it
+// (`turn_tool_calls`, which only the Rego host reads). Its attributes sit
+// between the previous field and its own declaration.
+const fields = []
+let previousEnd = 0
+for (const m of struct[1].matchAll(/^\s*pub\s+(\w+)\s*:/gm)) {
+  if (!/#\[serde\(skip\)\]/.test(struct[1].slice(previousEnd, m.index))) fields.push(m[1])
+  previousEnd = m.index + m[0].length
+}
 
 // A struct this small silently shrinking to nothing is the failure mode a
 // regex-based extractor has. Refuse to pass on a suspiciously short list.

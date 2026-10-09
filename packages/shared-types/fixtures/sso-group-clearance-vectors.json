@@ -22,6 +22,11 @@
       "requiredGroups": "sre-oncall",
       "requireOboFor": { "deploy_prod": true }
     },
+    "mcpNames": {
+      "highRiskTools": ["run_query", "mcp__github__delete_repo"],
+      "requiredGroups": ["dba"],
+      "requireOboFor": ["drop_database"]
+    },
     "none": null
   },
   "cases": [
@@ -46,6 +51,15 @@
     { "name": "an empty policy object restricts nothing", "policy": "emptyObject", "memberGroups": [], "toolName": "Bash", "clearance": "GRANTED", "ruleId": null },
     { "name": "a malformed list is read as empty and entries that are not strings are ignored", "policy": "malformed", "memberGroups": ["sre-oncall"], "toolName": "Bash", "clearance": "DENIED", "ruleId": "sso_group.high_risk.Bash" },
     { "name": "a malformed on-behalf-of list restricts nothing", "policy": "malformed", "memberGroups": ["sre-oncall"], "toolName": "deploy_prod", "clearance": "GRANTED", "ruleId": null },
-    { "name": "no policy restricts nothing", "policy": "none", "memberGroups": null, "toolName": "Bash", "clearance": "GRANTED", "ruleId": null }
+    { "name": "no policy restricts nothing", "policy": "none", "memberGroups": null, "toolName": "Bash", "clearance": "GRANTED", "ruleId": null },
+    { "name": "an MCP tool's own name matches itself", "policy": "mcpNames", "memberGroups": ["eng"], "toolName": "run_query", "clearance": "DENIED", "ruleId": "sso_group.high_risk.run_query" },
+    { "name": "an MCP tool's own name matches the harness name on any server", "policy": "mcpNames", "memberGroups": ["eng"], "toolName": "mcp__postgres__run_query", "clearance": "DENIED", "ruleId": "sso_group.high_risk.run_query" },
+    { "name": "an MCP tool's own name, cleared by group, under its harness name", "policy": "mcpNames", "memberGroups": ["dba"], "toolName": "mcp__postgres__run_query", "clearance": "GRANTED", "ruleId": null },
+    { "name": "an MCP tool's own name matches a harness name whose server part has a double underscore", "policy": "mcpNames", "memberGroups": ["eng"], "toolName": "mcp__pg__replica__run_query", "clearance": "DENIED", "ruleId": "sso_group.high_risk.run_query" },
+    { "name": "an MCP tool's own name is not the tail of a longer tool name", "policy": "mcpNames", "memberGroups": ["eng"], "toolName": "mcp__postgres__rerun_query", "clearance": "GRANTED", "ruleId": null },
+    { "name": "an MCP tool's own name is not a prefix of a longer harness name", "policy": "mcpNames", "memberGroups": ["eng"], "toolName": "mcp__postgres__run_query_v2", "clearance": "GRANTED", "ruleId": null },
+    { "name": "an on-behalf-of MCP tool by its harness name", "policy": "mcpNames", "memberGroups": ["dba"], "toolName": "mcp__postgres__drop_database", "clearance": "REQUIRES_OBO", "ruleId": "sso_group.require_obo.drop_database" },
+    { "name": "a harness-name entry matches its own server's tool", "policy": "mcpNames", "memberGroups": ["eng"], "toolName": "mcp__github__delete_repo", "clearance": "DENIED", "ruleId": "sso_group.high_risk.mcp__github__delete_repo" },
+    { "name": "a harness-name entry does not match the same tool on another server", "policy": "mcpNames", "memberGroups": ["eng"], "toolName": "mcp__gitlab__delete_repo", "clearance": "GRANTED", "ruleId": null }
   ]
 }

@@ -25,7 +25,10 @@
  *
  * Hook events:
  *   Every block/allow is appended to `.intutic/events/hook-events.jsonl`
- *   and drained to the control plane via FSEvents-driven drain.
+ *   and drained to the control plane via FSEvents-driven drain, under the
+ *   gate id `gemini-cli` rather than the harness id: the Antigravity gate
+ *   reports as `antigravity`, so liveness, the AI inventory and SIEM can tell
+ *   the two products apart (gateIdentity.ts in @intutic/shared-types).
  *
  * LLD #14 — Phase 3 cross-harness defence (Gap 3)
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
@@ -40,7 +43,8 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { GEMINI_CLI_GATE_ID, HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
+import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-antigravity-hooks')
@@ -62,7 +66,7 @@ function buildAntigravityCheckScript(
 # Generated: ${newIso()}
 # Workspace: ${workspaceId}
 set -euo pipefail
-${SHELL_FAIL_CLOSED}
+${emitShellFailClosed(GEMINI_CLI_GATE_ID)}
 INPUT="$(cat)"
 ${SHELL_EXTRACT}
 
@@ -102,7 +106,11 @@ log_event() {
   ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[\$'\\x01'-\$'\\x1f']/ }"
   local ts; ts="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local incident_id; incident_id="\$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo \"\$(date +%s)\")"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"antigravity\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\"}"
+  # The event's id: random, made once here, and resent with the line it is
+  # written into, so the control plane processes the event once.
+  local event_id; event_id="\$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
+  [ -n "\$event_id" ] || event_id="\$(date +%s)\$\$\${RANDOM}\${RANDOM}\${RANDOM}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"${GEMINI_CLI_GATE_ID}\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\"}"
   printf '%s\\n' "\$entry" >> "\$HOOK_EVENTS_LOG" 2>/dev/null || true
   if [ -n "\$INTUTIC_API_KEY" ]; then
     curl -s -o /dev/null --max-time 3 -X POST \\
@@ -113,10 +121,33 @@ log_event() {
   fi
 }
 
-${emitShellGate({ harness: "antigravity" })}
+${emitShellGate({ harness: GEMINI_CLI_GATE_ID })}
 log_event "tool_allowed" "$TOOL_NAME" ""
 exit 0
 `
+}
+
+/**
+ * The `BeforeTool` entry that registers the gate: a catch-all matcher, since
+ * the gate decides from the arguments and a tool name nobody anticipated is
+ * still evaluated. Shared with the MDM manifest, so the two cannot drift.
+ * Gemini CLI's \`timeout\` is in milliseconds (default 60 000), and it runs a
+ * call whose hook times out; the gate refuses at its own deadline inside it.
+ */
+export function buildGeminiBeforeToolEntry(hookScriptPath: string): Record<string, unknown> {
+  return {
+    matcher: '.*',
+    hooks: [{
+      name: 'intutic-governance',
+      type: 'command',
+      command: geminiGateCommand(hookScriptPath),
+      timeout: HOOK_TIMEOUT_SECONDS * 1000,
+    }],
+  }
+}
+
+function geminiGateCommand(hookScriptPath: string): string {
+  return `bash ${JSON.stringify(hookScriptPath)}`
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -177,7 +208,7 @@ export async function writeAntigravityHooks(
 
   // De-duplicated by command, so repeated syncs replace this entry rather than
   // stacking copies, and every hook the user registered is kept.
-  const intuticCmd = `bash ${JSON.stringify(hookScriptPath)}`
+  const intuticCmd = geminiGateCommand(hookScriptPath)
   const filtered = existingBeforeTool.filter((entry: unknown) => {
     if (typeof entry !== 'object' || entry === null) return true
     const inner = ((entry as Record<string, unknown>).hooks as unknown[]) ?? []
@@ -191,15 +222,7 @@ export async function writeAntigravityHooks(
     ...existingSettings,
     hooks: {
       ...keptHooks,
-      BeforeTool: [
-        ...filtered,
-        {
-          // Catch-all: the gate decides from the arguments, so a tool name
-          // nobody anticipated is still evaluated.
-          matcher: '.*',
-          hooks: [{ name: 'intutic-governance', type: 'command', command: intuticCmd }],
-        },
-      ],
+      BeforeTool: [...filtered, buildGeminiBeforeToolEntry(hookScriptPath)],
     },
   }
 

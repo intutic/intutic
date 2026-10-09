@@ -103,7 +103,7 @@ describe('connect runs the per-cycle sync work the docs promise', () => {
   it('write-protects the rules files when the workspace asks for it', async () => {
     const { applyBody } = await source()
     expect(applyBody).toMatch(/bypassEnforcementTier === 'immutable'/)
-    expect(applyBody.indexOf('await clearImmutable(file)')).toBeLessThan(applyBody.indexOf('const written = await adapter.writeConfig('))
+    expect(applyBody.indexOf('await clearImmutable(file)')).toBeLessThan(applyBody.indexOf('await writeHarnessConfigs('))
     expect(applyBody.lastIndexOf('await setImmutable(file)')).toBeGreaterThan(applyBody.indexOf('await refreshDecisionsDigest('))
   })
 
@@ -118,6 +118,13 @@ describe('connect runs the per-cycle sync work the docs promise', () => {
     const { src, pollBody } = await source()
     expect(pollBody).toMatch(/await reportHarnessAgents\(\{[\s\S]*?workspaceRoot: safeConfig\.workspaceRoot/)
     expect(src).toMatch(/await writeBundledSkills\(safeConfig\.workspaceRoot\)/)
+  })
+
+  it('reports the machine\'s AI inventory from the poll loop, every few polls, for the connected workspace', async () => {
+    const { pollBody } = await source()
+    expect(pollBody).toMatch(/if \(shouldReportInventoryThisIteration\(pollIteration\)\) \{\s*const inventory = await reportMachineInventory\(\{/)
+    const call = pollBody.slice(pollBody.indexOf('await reportMachineInventory({'))
+    expect(call).toMatch(/^await reportMachineInventory\(\{[\s\S]*?workspaceRoot: safeConfig\.workspaceRoot,\s*configured: safeConfig\.harnesses,/)
   })
 
   // Config content leaves the machine only with `configBodyUpload` on, read

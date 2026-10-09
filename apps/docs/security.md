@@ -42,7 +42,7 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
 ```
 
 1. Every LLM request from an AI agent is routed through the **local Intutic proxy** on port 4000
-2. The proxy evaluates tool calls against SOPs in the **WASM policy engine** (sandboxed, with an enforced 5 ms wasmtime timeout)
+2. The proxy evaluates tool calls against SOPs in the **WASM policy engine** (sandboxed, with an enforced instruction budget and a wasmtime deadline)
 3. Verdicts and telemetry stay **on the local machine**. Bandit routing state is written to your own Valkey; nothing is transmitted to Intutic or anyone else
 4. The proxy **never stores prompts or completions** — only structured telemetry (tool names, verdicts, token counts, timing)
 
@@ -124,7 +124,7 @@ Intutic provides enterprise-grade identity and access management:
 
 Intutic helps your organization meet regulatory requirements for AI governance:
 
-- **SOC 2 Probes** — Eleven compliance probes (workspace policy completeness, MFA enforcement, data-residency violations, audit-log integrity, API-key rotation, SOP coverage, auto-apply provenance, SOP git drift, guard liveness, guardrail authority and provider availability), each scored 0–100 with structured findings, run hourly and on demand — with a queryable probe history and a signed, hash-manifested SOC 2 evidence export built on top of them (see [Compliance Evidence](/guide/compliance-evidence)), mapped to the EU AI Act, ISO/IEC 42001 and NIST AI RMF (see [Framework Mapping](/guide/framework-mapping))
+- **SOC 2 Probes** — Eleven compliance probes (workspace policy completeness, MFA enforcement, data-residency violations, audit-log integrity, API-key rotation, SOP coverage, auto-apply provenance, SOP git drift, guard liveness, guardrail authority and provider availability), each scored 0–100 with structured findings, run hourly and on demand — with a queryable probe history and a hash-manifested SOC 2 evidence export built on top of them, signed when the deployment has a signing key (see [Compliance Evidence](/guide/compliance-evidence)), mapped to the EU AI Act, ISO/IEC 42001, NIST AI RMF and MITRE ATLAS (see [Framework Mapping](/guide/framework-mapping))
 - **GDPR** — Article 17 erasure, consent management, and data processing
   agreements. Erasure is fulfilled by our team on request rather than through a
   self-service endpoint, within the one-month window Article 12(3) allows.

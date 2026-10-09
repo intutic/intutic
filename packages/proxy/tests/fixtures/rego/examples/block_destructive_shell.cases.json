@@ -1,0 +1,9 @@
+[
+  { "name": "recursive delete of the root", "input": { "tool": "Bash", "args": { "command": "rm -rf /" } }, "expect": "deny" },
+  { "name": "recursive delete of home, flags split", "input": { "tool": "Bash", "args": { "command": "rm -r -f ~" } }, "expect": "deny" },
+  { "name": "format a disk", "input": { "tool": "Bash", "args": { "command": "mkfs.ext4 /dev/sdb1" } }, "expect": "deny" },
+  { "name": "force-push to main", "input": { "tool": "Bash", "args": { "command": "git push --force origin main" } }, "expect": "deny" },
+  { "name": "delete a build directory", "input": { "tool": "Bash", "args": { "command": "rm -rf ./build" } }, "expect": "allow" },
+  { "name": "plain push", "input": { "tool": "Bash", "args": { "command": "git push origin main" } }, "expect": "allow" },
+  { "name": "another tool", "input": { "tool": "Read", "args": { "file_path": "/" } }, "expect": "allow" }
+]

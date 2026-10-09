@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { keepOriginal, noteWritten, readOriginal, forgetOriginal, noteProxyUrl, ledgerDir, writeOwnedFile } from '../../src/disconnect/originals.js'
 import { planDisconnect } from '../../src/disconnect/index.js'
-import { unwrapEntry, unwrapServerMap, unwrapOpenCodeEntry, isIntuticServer } from '../../src/disconnect/mcp.js'
+import { unwrapEntry, unwrapServerMap, unwrapOpenCodeEntry, unwrapUnmarkedEntry, geminiRemoteShape, antigravityRemoteShape, isIntuticServer } from '../../src/disconnect/mcp.js'
 import { injectMcpServer } from '../../src/harness/mcpAutoWrite.js'
 import { guardSettingsFile } from '../../src/watcher/settingsGuard.js'
 
@@ -171,6 +171,59 @@ describe('unwrapping MCP entries', () => {
   })
 })
 
+describe('Gemini CLI and Antigravity MCP servers, which carry no marker', () => {
+  it('rebuilds each product\'s entry from the argv, keeping the keys the wrap kept', () => {
+    const stdio = {
+      command: 'node',
+      args: [BIN, '--workspace-id', 'w', '--server-name', 'gh', '--', 'npx', 'gh-mcp'],
+      env: { GITHUB_TOKEN: 'x', INTUTIC_WORKSPACE_ID: 'w' },
+      cwd: '/work',
+      trust: true,
+    }
+    expect(unwrapUnmarkedEntry(stdio, geminiRemoteShape)).toEqual({
+      command: 'npx', args: ['gh-mcp'], env: { GITHUB_TOKEN: 'x' }, cwd: '/work', trust: true,
+    })
+    const remote = {
+      command: 'node',
+      args: [BIN, '--workspace-id', 'w', '--server-name', 'r', '--remote-url', 'https://r.example/sse', '--remote-transport', 'sse'],
+      env: { INTUTIC_WORKSPACE_ID: 'w' },
+    }
+    expect(unwrapUnmarkedEntry(remote, geminiRemoteShape)).toEqual({ url: 'https://r.example/sse', type: 'sse' })
+    expect(unwrapUnmarkedEntry(remote, antigravityRemoteShape)).toEqual({ serverUrl: 'https://r.example/sse' })
+    expect(unwrapUnmarkedEntry({ command: 'npx', args: ['gh-mcp'] }, geminiRemoteShape)).toBeUndefined()
+  })
+
+  it('puts both files back as they were after connect wrapped them', async () => {
+    const prevPath = process.env.PATH
+    process.env.PATH = join(home, 'empty-bin')
+    try {
+      const gemini = join(home, '.gemini', 'settings.json')
+      const antigravity = join(home, '.gemini', 'config', 'mcp_config.json')
+      const geminiBefore = {
+        theme: 'Default',
+        mcpServers: {
+          gh: { command: 'npx', args: ['gh-mcp'], cwd: '/work' },
+          stream: { httpUrl: 'https://s.example/mcp', type: 'http', timeout: 5000 },
+        },
+      }
+      const antigravityBefore = { mcpServers: { remote: { serverUrl: 'https://m.example/sse' } } }
+      await put(gemini, geminiBefore)
+      await put(antigravity, antigravityBefore)
+      await fs.mkdir(join(home, '.gemini', 'antigravity'), { recursive: true })
+
+      await injectMcpServer(ws, 'ws_1')
+      expect((await readJson(gemini)).mcpServers.gh.command).toBe('node')
+      expect((await readJson(antigravity)).mcpServers.remote.command).toBe('node')
+
+      await disconnect({ harnesses: ['antigravity'], remaining: [] })
+      expect(await readJson(gemini)).toEqual(geminiBefore)
+      expect(await readJson(antigravity)).toEqual(antigravityBefore)
+    } finally {
+      process.env.PATH = prevPath
+    }
+  })
+})
+
 // ─── Files written before originals were kept ────────────────────────────────
 
 describe('files with no record', () => {
@@ -247,8 +300,12 @@ describe('files with no record', () => {
 
   it('learns the proxy URL from a generated file when connect predates the recorded list', async () => {
     await put(join(ws, '.env.intutic'), '# Intutic Governance Rules (auto-generated)\nexport INTUTIC_PROXY_URL="http://localhost:4100"\n')
-    await put(join(home, '.pi', 'models.json'), { providers: { openai: { baseUrl: 'http://localhost:4100/v1' }, google: { baseUrl: 'https://g' } } })
+    // Where Pi reads it, and where earlier versions wrote it.
+    for (const file of [join(home, '.pi', 'agent', 'models.json'), join(home, '.pi', 'models.json')]) {
+      await put(file, { providers: { openai: { baseUrl: 'http://localhost:4100/v1' }, google: { baseUrl: 'https://g' } } })
+    }
     await disconnect()
+    expect(await readJson(join(home, '.pi', 'agent', 'models.json'))).toEqual({ providers: { google: { baseUrl: 'https://g' } } })
     expect(await readJson(join(home, '.pi', 'models.json'))).toEqual({ providers: { google: { baseUrl: 'https://g' } } })
   })
 

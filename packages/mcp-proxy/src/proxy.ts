@@ -7,7 +7,8 @@
  *
  * Architecture (standalone mode — the `intutic` harness entry):
  *   Harness ↔ [McpGovernanceProxy as MCP Server] ↔ Control Plane REST API
- *   Exposes governance tools: intutic_governance_status, intutic_list_sops, intutic_list_incidents.
+ *   Exposes governance tools: intutic_governance_status, intutic_list_sops, intutic_list_incidents,
+ *   intutic_hold_status, intutic_mcp_registry_status, intutic_mcp_budget_remaining.
  *
  * Architecture (remote bridge mode — `--remote-url`, see remoteBridge.ts):
  *   Harness stdin → [McpGovernanceProxy] → remote MCP server (HTTP/SSE)
@@ -33,17 +34,22 @@ import { createStderrLogger as createLogger } from './stderrLog.js'
 import type { ProxyConfig } from './config.js'
 import { PolicyClient } from './policy.js'
 import { GovernanceEmitter, detectionFinding } from './emitter.js'
-import { ToolCallInterceptor } from './interceptor.js'
-import { redactText as redactMcpText } from './dlp.js'
+import { ToolCallInterceptor, type Block } from './interceptor.js'
+import { budgetRemaining, describeFailure, holdStatus, readControlPlane, registryStatus } from './agentTools.js'
+import type { RefusalData } from './refusals.js'
+import { redactText as redactMcpText, setWorkspacePii } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns, type InjectionSource } from './injection.js'
 import { toolPoisoning, dlpEscalation, type AnomalyFinding } from './anomaly/index.js'
 import { SessionState } from './session.js'
 import { ValkeySessionStore, type SharedSessionStore } from './sessionStore.js'
+import { GuardedValkey } from './guardedValkey.js'
+import { McpBudgetEnforcer, ValkeyBudgetStore } from './budget.js'
 import { WasmRunner } from './wasm/runner.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
-import { callerIdentity } from './identity.js'
+import { callerIdentity, type CallerIdentity } from './identity.js'
+import { normalizeToolDefinition, type McpToolDefinition } from '@intutic/shared-types'
 import { PACKAGE_VERSION } from './version.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -72,34 +78,53 @@ interface McpToolsCallParams {
 }
 
 /**
- * Build a JSON-RPC 2.0 error response for a blocked tool call.
+ * Build a JSON-RPC 2.0 error response for a blocked tool call. `data` names
+ * the refusal for a client that reads it programmatically (refusals.ts).
  */
-function buildBlockResponse(id: string | number | null, reason: string): JsonRpcResponse {
+function buildBlockResponse(id: string | number | null, reason: string, data: RefusalData): JsonRpcResponse {
   return {
     jsonrpc: '2.0',
     id,
     error: {
       code: -32603, // Internal error (closest standard code to "blocked")
       message: `[Intutic Governance] Tool call blocked: ${reason}`,
+      data,
     },
   }
+}
+
+/** The `error.data` of a block decision: its code, rule id and detail. */
+function blockData(decision: Block): RefusalData {
+  return { code: decision.code, ruleId: decision.ruleId, ...decision.detail }
 }
 
 /**
  * The JSON-RPC error for a call held for approval. Same code as a block (the
  * call did not run), a message that says "held" rather than "blocked", and
- * the hold id in `data` for a client that reads it programmatically.
+ * the hold id in `data` for a client that reads it programmatically — empty
+ * when the hold could not be recorded, so there is nothing to approve yet.
  */
-function buildHoldResponse(id: string | number | null, reason: string, holdId: string): JsonRpcResponse {
+function buildHoldResponse(id: string | number | null, reason: string, holdId: string, ruleId: string): JsonRpcResponse {
   return {
     jsonrpc: '2.0',
     id,
     error: {
       code: -32603,
       message: `[Intutic Governance] Tool call ${reason}`,
-      data: { status: 'pending_approval', holdId },
+      data: { code: 'HELD', ruleId, status: 'pending_approval', holdId } satisfies RefusalData,
     },
   }
+}
+
+/**
+ * Who a per-member MCP budget counts when the control plane has not named the
+ * member behind this proxy's key: the key's prefix, else the OS user. Callers
+ * with neither share one allowance.
+ */
+export function fallbackBudgetCaller(identity: CallerIdentity): string {
+  if (identity.apiKeyPrefix) return `key:${identity.apiKeyPrefix}`
+  if (identity.osUser) return `os:${identity.osUser}`
+  return 'unknown'
 }
 
 /**
@@ -132,8 +157,12 @@ export interface ServerLineOutcome {
    * other line.
    */
   toolsListTools?: Array<Record<string, unknown>>
-  /** Every tool name the upstream server declared, before curation. Set alongside `toolsListTools`. */
-  toolsListUpstreamNames?: string[]
+  /**
+   * Every tool the upstream server declared, as it declared them — before
+   * curation hid any or an override rewrote a description. Set alongside
+   * `toolsListTools`; the registry gets these.
+   */
+  toolsListUpstream?: McpToolDefinition[]
   /** The JSON-RPC id of the `tools/list` response, needed to build a block
    *  frame in the caller if TOFU refuses it. Set alongside `toolsListTools`. */
   toolsListMsgId?: string | number | null
@@ -259,6 +288,7 @@ export function processServerLine(
               `[Intutic Governance] Result withheld: it contained sensitive data ` +
               `whose redaction did not survive re-parsing. The tool ran; its output ` +
               `was not delivered. (${findings.map((f) => f.description).join('; ')})`,
+            data: { code: 'RESULT_WITHHELD_DLP', ruleId: `dlp.${findings[0]?.pattern ?? 'output'}` } satisfies RefusalData,
           },
         }
         return { line: JSON.stringify(withheld), redactedTool, redactions }
@@ -287,6 +317,7 @@ export function processServerLine(
               `[Intutic Governance] Result withheld: it triggered prompt-injection ` +
               `pattern(s) (${injectionPatterns.join(', ')}). The tool call already ran; ` +
               `its output was not delivered.`,
+            data: { code: 'RESULT_WITHHELD_INJECTION', ruleId: 'injection.tool_result' } satisfies RefusalData,
           },
         }
         return {
@@ -323,9 +354,10 @@ export function processServerLine(
     if (!Array.isArray(tools)) return { line: raw }
     let hidden = 0
     let overridden = 0
-    const upstreamNames = (tools as Array<Record<string, unknown>>)
-      .map((t) => t['name'])
-      .filter((n): n is string => typeof n === 'string')
+    // Copied before the overrides below rewrite descriptions in place.
+    const upstream = tools
+      .map(normalizeToolDefinition)
+      .filter((t): t is McpToolDefinition => t !== null)
     let kept = tools as Array<Record<string, unknown>>
     if (allowedTools.length > 0 || disabledTools.length > 0) {
       kept = kept.filter((t) => {
@@ -382,7 +414,7 @@ export function processServerLine(
       return {
         line: raw,
         toolsListTools: kept,
-        toolsListUpstreamNames: upstreamNames,
+        toolsListUpstream: upstream,
         toolsListMsgId: msg.id,
         injectionFindings,
         toolPoisoning: toolPoisoningFinding ?? undefined,
@@ -393,7 +425,7 @@ export function processServerLine(
       line: JSON.stringify(msg),
       curated: { hidden, overridden },
       toolsListTools: kept,
-      toolsListUpstreamNames: upstreamNames,
+      toolsListUpstream: upstream,
       toolsListMsgId: msg.id,
       injectionFindings,
       toolPoisoning: toolPoisoningFinding ?? undefined,
@@ -460,9 +492,9 @@ export function handleHarnessLine(
           { action: 'tool_blocked', toolName, reason: decision.reason },
           'Tool call blocked by governance proxy'
         )
-        writeFrame(buildBlockResponse(msg.id, decision.reason))
+        writeFrame(buildBlockResponse(msg.id, decision.reason, blockData(decision)))
       } else if (decision.action === 'hold') {
-        writeFrame(buildHoldResponse(msg.id, decision.reason, decision.holdId))
+        writeFrame(buildHoldResponse(msg.id, decision.reason, decision.holdId, decision.ruleId))
       } else {
         // Allow: the response now needs inspecting on the way back —
         // registered BEFORE forwarding, or a fast server could answer
@@ -504,7 +536,13 @@ export class McpGovernanceProxy {
    * session.ts's module doc.
    */
   private readonly session: SessionState
-  /** The Valkey-backed shared window, when `config.valkeyUrl` is set and this is not the standalone entry. */
+  /**
+   * The process's one Valkey connection, when `config.valkeyUrl` is set and
+   * this is not the standalone entry: the shared session window and the MCP
+   * call budgets both use it.
+   */
+  private readonly valkey: GuardedValkey | undefined
+  /** The Valkey-backed shared window, on {@link valkey}. */
   private readonly sessionStore: SharedSessionStore | undefined
   /**
    * Phase 3's WASM custom-rule runner — owns the one dedicated
@@ -536,10 +574,12 @@ export class McpGovernanceProxy {
       identity,
     )
 
+    this.valkey = config.valkeyUrl ? new GuardedValkey(config.valkeyUrl) : undefined
     // The standalone `intutic` entry fronts no real server and records no
-    // calls worth sharing; every wrapped server gets the shared window.
-    this.sessionStore =
-      config.valkeyUrl && !config.standalone ? new ValkeySessionStore(config.valkeyUrl) : undefined
+    // calls worth sharing; it reads Valkey only for the budget counters its
+    // `intutic_mcp_budget_remaining` tool reports. Every wrapped server gets
+    // the shared window.
+    this.sessionStore = this.valkey && !config.standalone ? new ValkeySessionStore(this.valkey) : undefined
     this.session = new SessionState({ scope: config.sessionScope, store: this.sessionStore })
     log.info(
       { action: 'session_scope', scope: config.sessionScope ?? null, shared: Boolean(this.sessionStore && config.sessionScope) },
@@ -564,6 +604,12 @@ export class McpGovernanceProxy {
       this.wasmRunner,
       config.workspaceId,
       new ApprovalHolds(config.controlPlaneUrl, config.apiKey, config.workspaceId, config.serverName, identity),
+      new McpBudgetEnforcer(
+        this.valkey ? new ValkeyBudgetStore(this.valkey) : undefined,
+        config.workspaceId,
+        config.serverName,
+        fallbackBudgetCaller(identity),
+      ),
     )
   }
 
@@ -624,7 +670,7 @@ export class McpGovernanceProxy {
     this.wasmWatch?.close()
     this.wasmWatch = null
     void this.wasmRunner.shutdown()
-    void this.sessionStore?.close()
+    void this.valkey?.close()
   }
 
   /**
@@ -659,46 +705,7 @@ export class McpGovernanceProxy {
     const apiKey = this.config.apiKey
     const workspaceId = this.config.workspaceId
 
-    /**
-     * Helper: call control plane REST API.
-     *
-     * Never throws — a failure here degrades a tool's answer, it does not crash
-     * the MCP server.
-     *
-     * 403 is reported separately from every other failure. Collapsing it into
-     * `null` told the agent "Could not reach control plane" when the control
-     * plane had answered clearly and immediately, which is the kind of message
-     * that sends someone debugging their network for an hour. It matters more
-     * now that the incident and anomaly reads are role-gated server-side: a
-     * DEVELOPER or VIEWER key reaches this path routinely and legitimately.
-     */
-    type ControlPlaneResult =
-      | { ok: true; data: unknown }
-      | { ok: false; reason: 'forbidden' | 'unreachable' }
-
-    async function callControlPlane(path: string): Promise<ControlPlaneResult> {
-      try {
-        const res = await fetch(`${cpUrl}${path}`, {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'x-workspace-id': workspaceId,
-          },
-          signal: AbortSignal.timeout(5000),
-        })
-        if (res.status === 403) return { ok: false, reason: 'forbidden' }
-        if (!res.ok) return { ok: false, reason: 'unreachable' }
-        return { ok: true, data: await res.json() }
-      } catch {
-        return { ok: false, reason: 'unreachable' }
-      }
-    }
-
-    /** Renders a failed call as text for the agent, naming the actual cause. */
-    function describeFailure(result: { reason: 'forbidden' | 'unreachable' }, what: string): string {
-      return result.reason === 'forbidden'
-        ? `Your Intutic role is not permitted to ${what}. This needs the OWNER, ADMIN or EM role.`
-        : `Could not reach control plane to ${what}.`
-    }
+    const callControlPlane = (path: string) => readControlPlane(cpUrl, apiKey, workspaceId, path)
 
     // Tool: intutic_governance_status
     server.tool(
@@ -763,6 +770,81 @@ export class McpGovernanceProxy {
       }
     )
 
+    // Tool: intutic_hold_status
+    server.tool(
+      'intutic_hold_status',
+      'Reports whether a held tool call (a refusal with code HELD and a hold id) has been approved or rejected, ' +
+        'and whether retrying the identical call will now pass. Pass the hold id the refusal gave (hold_…).',
+      { holdId: z.string().min(1).max(128).describe('The hold id from the refusal, hold_…') },
+      async ({ holdId }) => {
+        const decision = await callControlPlane(`/api/v1/decisions/${encodeURIComponent(holdId)}`)
+        let text: string
+        if (!decision.ok) {
+          text =
+            decision.reason === 'not_found'
+              ? `No hold ${holdId} was found in this workspace. Check the id the refusal gave; a hold that could not be recorded has none.`
+              : describeFailure(decision, `report hold ${holdId}`)
+        } else {
+          // Only an approval needs the bypasses, to say whether a retry passes.
+          const status = (decision.data as { status?: unknown }).status
+          const bypasses = status === 'APPROVED' ? await callControlPlane('/api/v1/decisions/approved-bypasses') : null
+          text = JSON.stringify(holdStatus(holdId, decision.data as { status?: unknown }, bypasses?.ok ? bypasses.data : null), null, 2)
+        }
+        return { content: [{ type: 'text' as const, text }] }
+      }
+    )
+
+    // Tool: intutic_mcp_registry_status
+    server.tool(
+      'intutic_mcp_registry_status',
+      "Reports what this workspace's MCP server registry says about each server: whether calls to it are allowed " +
+        'or refused (blocked, held after a risky tool change, or not approved under a deny default), and which of its ' +
+        'tools are switched off.',
+      { server: z.string().min(1).max(256).optional().describe('One server name; every server when omitted') },
+      async ({ server: name }) => {
+        const result = await callControlPlane('/api/v1/mcp/servers')
+        const text = result.ok
+          ? JSON.stringify(registryStatus(result.data, name), null, 2)
+          : describeFailure(result, 'read the MCP server registry')
+        return { content: [{ type: 'text' as const, text }] }
+      }
+    )
+
+    // Tool: intutic_mcp_budget_remaining
+    server.tool(
+      'intutic_mcp_budget_remaining',
+      "Lists this workspace's MCP call budgets that count your calls, with how many calls each has left this " +
+        'period and when it resets. Counts are read from the Valkey the MCP proxies on this machine count in.',
+      {},
+      async () => {
+        await this.policy.ready()
+        const identity = callerIdentity(apiKey, 'intutic', this.config.sessionScope)
+        const store = this.valkey ? new ValkeyBudgetStore(this.valkey) : undefined
+        const budgets = await budgetRemaining(
+          this.policy.getMcpBudgets(),
+          workspaceId,
+          { memberId: this.policy.getPrincipal()?.memberId ?? null, fallback: fallbackBudgetCaller(identity) },
+          async (keys) => store?.used(keys),
+        )
+        const unread = budgets.some((b) => b.used === null)
+        const text = JSON.stringify(
+          {
+            budgets,
+            ...(unread
+              ? {
+                  note:
+                    'Used counts are null: this server has no Valkey to read them from (INTUTIC_VALKEY_URL), or it ' +
+                    'did not answer. The limits still apply.',
+                }
+              : {}),
+          },
+          null,
+          2,
+        )
+        return { content: [{ type: 'text' as const, text }] }
+      }
+    )
+
     const transport = new StdioServerTransport()
     await server.connect(transport)
     log.info({ action: 'standalone_ready' }, 'Intutic MCP server ready')
@@ -804,6 +886,9 @@ export class McpGovernanceProxy {
     pending: Map<string | number, PendingRequest>,
   ): Promise<void> {
     const injectionAction = this.policy.getInjectionAction() ?? this.config.mcpInjectionAction
+    // Results are redacted with the workspace's PII detector actions too —
+    // a resources/read answer can arrive before any tools/call set them.
+    setWorkspacePii(this.policy.getPiiDetectors())
     const outcome = processServerLine(
       rawLine,
       pending,
@@ -906,7 +991,7 @@ export class McpGovernanceProxy {
     if (outcome.toolsListTools) {
       // The registry gets the server's own tool names, before curation:
       // per-tool toggles must be able to re-enable a tool curation hid.
-      void this.registryObserver?.observe(outcome.toolsListUpstreamNames ?? [])
+      void this.registryObserver?.observe(outcome.toolsListUpstream ?? [])
       // Cache the post-curation tools/list for Phase 2's tool_poisoning
       // detector (already applied above, from this same outcome) and for
       // Phase 3's WASM rule context (`tools` field) once that lands.
@@ -935,6 +1020,7 @@ export class McpGovernanceProxy {
               `TOFU pin check for MCP server "${serverName}" failed (could not read/write ` +
                 `~/.intutic/mcp-pins/). Blocked by workspace policy (fail-closed mode). ` +
                 `Contact your administrator or update mcpProxyFailBehavior to open.`,
+              { code: 'TOFU_UNAVAILABLE', ruleId: 'mcpProxyFailBehavior' },
             ),
           )
           return
@@ -975,7 +1061,9 @@ export class McpGovernanceProxy {
         this.emitter.emit('mcp_server_definition_changed', serverName, undefined, reason)
 
         if (action.block) {
-          writeFrame(buildBlockResponse(outcome.toolsListMsgId ?? null, reason))
+          writeFrame(
+            buildBlockResponse(outcome.toolsListMsgId ?? null, reason, { code: 'TOOL_DEFINITIONS_CHANGED', ruleId: `tofu.${serverName}` }),
+          )
           return
         }
       }

@@ -10,8 +10,8 @@ This document is the canonical reference for what Intutic enforces, how, and the
 
 | Vector | Mechanism | How it blocks | Scope |
 |---|---|---|---|
-| **A — Client Hook** | Pre-tool-use gate script; blocking contract varies by harness (exit code 2, `{"cancel":true}` on stdout, `{"decision":"deny"}` on stdout, a JS throw, a Python raise, or a Cordis waterfall `{kind:'deny'}` return) | Blocks before tool executes | The harnesses that write a **generated** on-disk hook file (as opposed to an SDK-side gate living in the developer's own process) — see the Hook (A) column of the [Coverage Matrix](#coverage-matrix) below for the current, authoritative list rather than a count repeated here: currently Claude Code, Cursor, Windsurf, Cline, OpenClaw, OpenHands, Goose, Antigravity, Hermes, Pi, Codex CLI, Muse Code, Grok Build, GitHub Copilot (agent hooks, Preview), Continue CLI, n8n (workflow-level, manual install), and Open-WebUI (prompt-level filter). All of these enforce ` WHERE ` (argPattern) rules against the serialized tool input. Everything else with a Hook (A) ✅/⚠️ mark — LangGraph, dsh, the 10-framework SDK-gated family (LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, Mastra, Vercel AI SDK), and TrueForge (embedded-library mode only) — gates in-process via `intutic-clawde` (Python) or `@intutic/gate` (TypeScript), not a generated file; dsh's plugin enforces the same argPattern rules via `@intutic/gate`'s own Tier A1/A3. TrueForge's own veto surface is an async batch-approval responder rather than a synchronous per-call callback — see row 41. TrueForge Server (row 42) carries a DIFFERENT, weaker Hook (A) mark again — its gate runs in a wholly SEPARATE process (the TrueForge bridge) reacting to a pull-only event stream, not co-resident with or embedded in the harness's own process the way every other Hook (A) mark on this page is; see row 42's own note. Xirp and Agentic Orchestrator carry no gate of their own — they delegate entirely to whichever harness they wrap (`GateKind: 'delegated'`); for Agentic Orchestrator specifically, that delegation is only complete for its Claude Code/Codex backends — its third backend, OpenCode, is gated by its own plugin (row 43) |
-| **B — Proxy Gate** | LLM request inspection at the API boundary | Blocks / audits before LLM sees the prompt | The 22 harnesses marked ✅ in the Proxy (B) column (Windsurf through TLS interception); see matrix. Cline, Roo Code, Cursor and Hermes are routed by a setting you make in the harness yourself; Antigravity's Gemini traffic is not served by the proxy. Muse Code is env-var/launcher-only (no persistent base-URL setting confirmed), dsh redirects its default route (`llm-deepseek`), Xirp/Agentic Orchestrator have no LLM egress of their own, and eve/AI SDK Workflow/Strands Agents (default Bedrock provider)/Microsoft Agent Framework (Azure OpenAI/Foundry clients)/Vercel AI SDK/TrueForge/TrueForge Server are each proxy-routable only in-code or only for a subset of providers — none of these is among the 22 |
+| **A — Client Hook** | Pre-tool-use gate script; blocking contract varies by harness (exit code 2, `{"cancel":true}` on stdout, `{"decision":"deny"}` on stdout, a JS throw, a returned `{block: true}` from an in-process hook (Pi, OpenClaw), a Python raise, or a Cordis waterfall `{kind:'deny'}` return) | Blocks before tool executes | The harnesses that write a **generated** on-disk hook file (as opposed to an SDK-side gate living in the developer's own process) — see the Hook (A) column of the [Coverage Matrix](#coverage-matrix) below for the current, authoritative list rather than a count repeated here: currently Claude Code, Cursor, Windsurf, Cline, OpenClaw, OpenHands, Goose, Antigravity (Google Antigravity and Gemini CLI), Hermes, Pi, Codex CLI, Muse Code, Grok Build, GitHub Copilot (agent hooks, Preview), n8n (workflow-level, manual install), and Open-WebUI (prompt-level filter). All of these enforce ` WHERE ` (argPattern) rules against the serialized tool input. Everything else with a Hook (A) ✅/⚠️ mark — LangGraph, dsh, the 10-framework SDK-gated family (LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, Mastra, Vercel AI SDK), and TrueForge (embedded-library mode only) — gates in-process via `intutic-clawde` (Python) or `@intutic/gate` (TypeScript), not a generated file; dsh's plugin enforces the same argPattern rules via `@intutic/gate`'s own Tier A1/A3. TrueForge's own veto surface is an async batch-approval responder rather than a synchronous per-call callback — see row 41. TrueForge Server (row 42) carries a DIFFERENT, weaker Hook (A) mark again — its gate runs in a wholly SEPARATE process (the TrueForge bridge) reacting to a pull-only event stream, not co-resident with or embedded in the harness's own process the way every other Hook (A) mark on this page is; see row 42's own note. Xirp and Agentic Orchestrator carry no gate of their own — they delegate entirely to whichever harness they wrap (`GateKind: 'delegated'`); for Agentic Orchestrator specifically, that delegation is only complete for its Claude Code/Codex backends — its third backend, OpenCode, is gated by its own plugin (row 43) |
+| **B — Proxy Gate** | LLM request inspection at the API boundary | Blocks / audits before LLM sees the prompt | The 21 harnesses marked ✅ in the Proxy (B) column (Windsurf through TLS interception); see matrix. Cline, Roo Code, Cursor, Hermes and OpenClaw are routed by a setting you make in the harness yourself; Antigravity's Gemini traffic is not served by the proxy. Muse Code is env-var/launcher-only (no persistent base-URL setting confirmed), dsh redirects its default route (`llm-deepseek`), Xirp/Agentic Orchestrator have no LLM egress of their own, and eve/AI SDK Workflow/Strands Agents (default Bedrock provider)/Microsoft Agent Framework (Azure OpenAI/Foundry clients)/Vercel AI SDK/TrueForge/TrueForge Server are each proxy-routable only in-code or only for a subset of providers — none of these is among the 21 |
 | **C — Drift Guard** | File watcher + 30s poll cycle | Detects and restores tampered governance configs | The governance files of every recorded harness, in the checkout `intutic connect` runs in — see [Worktree Coverage](#worktree-coverage) for other worktrees |
 | **D — Response Gate** | Proxy-side inspection of the LLM *response* before it is forwarded to the client | Withholds a model-emitted `tool_calls[]` naming a denied tool before the client's tool runner sees it | Every harness whose LLM traffic traverses the proxy (Vector B scope); harness-agnostic, no client hook required |
 
@@ -21,13 +21,49 @@ Every Vector A gate evaluates the same policy snapshot, and since gate body v8
 that includes the `hold` tier: a `review_before:` token or a
 `REQUIRE_APPROVAL:` SOP refuses the call through the harness's own blocking
 contract, records a hold for **Findings › Review Queue › Held Changes**, and lets the exact
-same call through once `intutic decision approve <holdId>` has run (workspace
-opt-in, short TTL). The n8n workflow hook and the Open WebUI prompt filter
-refuse a hold outright — neither runs in a workspace that could record one.
+same call through once it is approved (`intutic decision approve <holdId>` or
+Slack) while the workspace's review-hold bypass is on (short TTL); otherwise the
+approval records the decision. The n8n workflow hook and the Open WebUI prompt filter
+refuse a hold outright — neither runs in a workspace that could record one. The in-process
+SDK gates (`@intutic/gate`, `intutic_clawde.gate`) hold the call the same way, recording it
+through the decisions API themselves; see [Holds](/reference/gate-sdk#holds).
+
+### Refusal codes in a JSON decision {#hook-refusal-codes}
+
+Cline, Grok Build and Google Antigravity read a refusal from the hook's stdout
+rather than its exit code. The refusal carries a stable `code`, the deciding
+rule as `ruleId` (`null` when no rule decided), and for a hold the `holdId`:
+
+```json
+{"decision": "deny", "reason": "… [mcp_registry.pastebin]", "code": "SERVER_BLOCKED", "ruleId": "mcp_registry.pastebin"}
+```
+
+Cline's refusal is `{"cancel": true, "errorMessage": "…", "code": …, "ruleId": …}`.
+Google Antigravity's decision holds only the fields its hook contract documents,
+so its reason ends with the code instead, `(refusal code SERVER_BLOCKED)`. The
+harnesses that read the exit code get the refusal as text on stderr, with the
+rule id in brackets.
+
+| Code | Meaning |
+|---|---|
+| `BUILT_IN_RULE` | A rule built into the hook gate matched: a governance bypass, a write to a protected path or a skill directory, or a secret in written content |
+| `SNAPSHOT` | A block rule in the policy snapshot matched: an SOP, the destructive-command tier or a skill-content rule |
+| `SSO_GROUP` | The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown |
+| `HELD` | A hold rule matched: the call is held for a person's approval, and `holdId` names the hold |
+| `SERVER_BLOCKED` | The MCP server is blocked in the MCP server registry |
+| `SERVER_HELD` | The MCP server changed its tools in a way scored high risk and waits for an owner or admin to approve it again |
+| `SERVER_NOT_APPROVED` | The workspace refuses MCP servers it has not approved (`mcpDefaultPolicy: deny`), and this one is not approved |
+| `TOOL_DISABLED` | The tool is switched off on this MCP server in the registry |
+| `SERVER_NOT_ALLOWED` | The MCP server is not on the workspace's `mcpAllowedServers` list |
+| `POLICY_SNAPSHOT_UNVERIFIED` | The policy snapshot on this machine failed its integrity check, so it admits no MCP server; the sync daemon restores the last verified snapshot |
+| `COMMAND_TOO_LARGE` | The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls |
+| `GATE_DEADLINE` | The gate did not finish deciding within its deadline, a second under its harness's hook timeout and at most 9 seconds, and refuses rather than let the hook timeout allow the call |
+| `UNREADABLE_CALL` | The hook received no tool call it could read, and refuses rather than allow a call it cannot evaluate |
+| `GATE_CRASHED` | The gate failed while deciding, and refuses rather than allow an unevaluated call |
 
 ### Vector D — Response Gate {#vector-d--response-gate}
 
-The response gate (`response_gate.rs`, open-core, default-on) is the product's only harness-agnostic **pre-execution** tool gate: because every response byte passes through the proxy before the client sees it, a denied tool call is refused before it ever reaches the harness's tool runner — no per-harness hook, no harness cooperation. It understands the Anthropic (`tool_use` blocks), OpenAI chat-completions (`tool_calls[]`), and OpenAI Responses (`function_call` output items) wire shapes, on both streaming and non-streaming paths. When a call is withheld, the agent receives an explicit in-band message that the call never ran, so it does not blindly retry.
+The response gate (`response_gate.rs`, open-core, default-on) is the product's only harness-agnostic **pre-execution** tool gate: because every response byte passes through the proxy before the client sees it, a denied tool call is refused before it ever reaches the harness's tool runner — no per-harness hook, no harness cooperation. It understands the Anthropic (`tool_use` blocks), OpenAI chat-completions (`tool_calls[]`), and OpenAI Responses (`function_call` output items) wire shapes, on both streaming and non-streaming paths. When a call is withheld, the agent receives an explicit in-band message that the call never ran, so it does not blindly retry, and an SDK reads the refusal's code and rule from the `x-intutic-refusal` headers or, on a stream, a `: intutic-refusal` comment line (see [clawde SDK](/reference/clawde-sdk#_5-verdicts-and-errors)).
 
 It is fail-closed within a deliberate scope: the gate is inert unless the active role has a non-empty tool deny list; within that scope, a non-streaming body that will not parse as JSON is refused rather than forwarded (`fail_closed`, default `true`).
 
@@ -50,7 +86,7 @@ default.
 `intutic connect` writes project-tier files only into the workspace root it runs in. Other
 worktrees of the same repository are covered by the **user-level** registrations — the hooks in
 `~/.claude/settings.json`, `~/.cursor/hooks.json`, `~/.codex/hooks.json`, `~/.gemini/settings.json`,
-`~/.codeium/windsurf/hooks.json` and the like apply in every directory — but not by project-level
+`~/.gemini/config/hooks.json`, `~/.codeium/windsurf/hooks.json` and the like apply in every directory — but not by project-level
 files such as `.claude/settings.json`, `.opencode/plugins/` or the rules files. For a harness whose
 gate is project-level only (OpenCode, Cline, OpenHands), run that harness from the main checkout, or
 copy its generated files into the worktree.
@@ -65,19 +101,19 @@ copy its generated files into the worktree.
 | 2 | **Cursor** | ✅ hooks.json (project + user; machine-wide via `enterprise install`) | ⚠️ own API keys only (OpenAI base-URL override) | ✅ 3 paths | HIGH | Gate on `beforeShellExecution`, `beforeMCPExecution` and `preToolUse` (`Write\|Delete`), fail-closed; Cursor-hosted models are not proxy-routable — see §Gaps |
 | 3 | **Windsurf** | ✅ Shell/MCP hooks | ✅ TLS MITM | ✅ 3 paths | HIGH | Cascade traffic via TLS MITM proxy |
 | 4 | **Cline** | ✅ .clinerules/hooks/PreToolUse | ⚠️ manual (Cline settings panel) | ✅ .clinerules/ | HIGH | File hook, refuses via `{"cancel":true}` on stdout; VS Code extension needs "Enable Hooks" on |
-| 5 | **Roo Code** | ❌ No hook system | ⚠️ manual (Roo Code settings panel) | ✅ .roorules | HIGH | Rules file only; enforcement is the proxy and the MCP governance proxy |
+| 5 | **Roo Code** | ❌ No hook system | ⚠️ manual (Roo Code settings panel) | ✅ AGENTS.md section | HIGH | Rules (an `AGENTS.md` section) only; enforcement is the proxy and the MCP governance proxy |
 | 6 | **Aider** | ❌ No pre-edit hook | ✅ openai-api-base | ✅ .aider.conf.yml | HIGH | test-cmd/lint-cmd suppressed. The only native mechanism is the opt-in `--git-commit-verify` pre-commit hook — post-edit and blind to `/run`, so no gate is built on it |
-| 7 | **OpenHands** | ✅ .openhands/hooks.json | ✅ llm.base_url | ✅ hooks.json | HIGH | Shell script hook, fail-closed |
-| 8 | **Codex CLI** | ✅ codex-check.js | ✅ ~/.codex/config.toml (`openai_base_url`) | ✅ .env.intutic | Low | Blocking hook (exit 2) registered in `~/.codex/hooks.json` + `<repo>/.codex/hooks.json`; ` WHERE ` argPattern rules enforced against the serialized tool input. **Live-verified** (codex-cli 0.147.0, 2026-08-10): a real `codex exec` session fired the hook, the unpinned `kubectl apply` was refused before execution with the rule named, and the pinned/benign commands ran |
+| 7 | **OpenHands** | ✅ .openhands/hooks.json | ✅ llm.base_url | ✅ hooks.json | HIGH | Shell script hook (exit 2 blocks) in the SDK's `HookConfig` schema. OpenHands runs a call whose hook times out and has no setting to refuse instead, so the gate refuses at its own deadline. Earlier versions wrote a flat list the SDK cannot load |
+| 8 | **Codex CLI** | ✅ codex-check.js | ✅ ~/.codex/config.toml (`openai_base_url`) | ✅ AGENTS.md section | Low | Blocking hook (exit 2) registered in `~/.codex/hooks.json` + `<repo>/.codex/hooks.json`; ` WHERE ` argPattern rules enforced against the serialized tool input. **Live-verified** (codex-cli 0.147.0, 2026-08-10): a real `codex exec` session fired the hook, the unpinned `kubectl apply` was refused before execution with the rule named, and the pinned/benign commands ran |
 | 9 | **n8n** | ⚠️ Workflow-level gate | ✅ API-configurable | ✅ gatekeeper node | Medium | `n8n-governance-hook.js` via `EXTERNAL_HOOK_FILES` (manual, deployment-side): `workflow.preExecute` receives the full Workflow and **throws** to abort — genuinely blocking, but per workflow, not per tool call. Node type ≈ tool name; argPattern matches the serialized node parameters. **Live-verified** (official n8n image, 2026-08-10): a running server with `EXTERNAL_HOOK_FILES` aborted the offending workflow (HTTP 500, error naming node and rule) and passed the clean one — after two live-only bugs were found and fixed (the real `workflow.preExecute` passes `nodes` as an object keyed by name, not the documented array; and the product snapshot's space-padded patterns cannot match dot-namespaced node types) |
-| 10 | **Continue** | ⚠️ continue-check.js (CLI, interactive mode only) | ✅ apiBase in config.yaml | ✅ config.yaml | Low | Blocking hook (exit 2) in `.continue/settings.json` for the CLI (`cn`); the IDE extension has no hook system. The CLI also reads `.claude/settings.json`. **Live-verified limits (cn 1.5.47):** headless `-p` runs do not execute PreToolUse hooks at all — a headless `cn` is proxy-governed only — and cn's hook dispatcher fails open on hook errors by its own design. argPattern rules enforced when the hook runs |
-| 11 | **Goose** | ✅ Plugin PreToolUse | ✅ provider.host | ✅ Immutable plugin | HIGH | chmod 444 + OS immutable flags |
-| 12 | **Antigravity** | ✅ antigravity-check.sh | ❌ Gemini API not served by the proxy | ✅ .gemini/settings.json, ~/.gemini/settings.json | Medium | Blocking `BeforeTool` hook (exit 2) in `~/.gemini/settings.json`; drift guard |
+| 10 | **Continue** | ❌ no hook that runs | ✅ apiBase in config.yaml | ✅ config.yaml | Low | Governed by the proxy (`apiBase` on its OpenAI/Anthropic models) and the always-apply rules file. The IDE extension has no hook system, and the CLI (`cn`) loads `PreToolUse` hooks from `settings.json` but never fires them: `firePreToolUse` has no caller outside tests at continuedev/continue `main` `5522c6f`, and PR #11043, which would have wired it, was closed unmerged on 2026-03-24. Intutic no longer registers a gate there (`GateKind: 'none'`); disconnect removes the one earlier versions wrote |
+| 11 | **Goose** | ✅ Plugin PreToolUse | ✅ provider.host | ✅ Immutable plugin | HIGH | chmod 444 + OS immutable flags; `on_failure: "block"` on the gate's action. Earlier versions wrote a `hooks.json` shape Goose skips with a warning |
+| 12 | **Antigravity** (Google Antigravity and Gemini CLI) | ✅ antigravity-cli-check.js, antigravity-check.sh | ❌ Gemini API not served by the proxy | ✅ .gemini/settings.json, ~/.gemini/settings.json, ~/.gemini/config/hooks.json | Medium | Google Antigravity (app, IDE, CLI): blocking `PreToolUse` hook (`{"decision":"deny"}` on stdout) in `~/.gemini/config/hooks.json`. Gemini CLI: blocking `BeforeTool` hook (exit 2) in `~/.gemini/settings.json`. Drift guard restores both. The two gates report as `antigravity` and `gemini-cli`, so gate health and the AI inventory track each product found on the machine; it stays one harness |
 | 13 | **Claude Desktop** | ❌ No hook system | ❌ Locked to Anthropic | ✅ claude_desktop_config.json | Medium | MCP servers in `claude_desktop_config.json` wrapped by the MCP governance proxy; drift guard detects rogue MCP servers |
 | 14 | **Open-WebUI** | ⚠️ Prompt-level filter | ✅ Docker env | N/A | Low | intutic-governance-filter.py can refuse (Python raise), but filters see a prompt, not a tool call — only snapshot rules marked block refuse; the compiled floor flags |
-| 15 | **OpenClaw** | ✅ openclaw-check.js | ✅ | ✅ openclaw.json | Medium | Full coverage |
-| 16 | **Hermes** | ✅ hermes-check.sh | ⚠️ manual (not written) | ✅ ~/.hermes/config.yaml | Medium | `hooks.preToolUse` in `~/.hermes/config.yaml` runs `~/.intutic/hooks/hermes-check.sh` (exit 2 blocks) |
-| 17 | **Pi** | ✅ pre-tool hooks | ✅ ~/.pi/models.json (anthropic, openai) | ✅ ~/.pi/hooks.json | Medium | PreToolUse hooks in `~/.pi/hooks.json` (user level) |
+| 15 | **OpenClaw** | ✅ `before_tool_call` plugin (fail-closed) | ⚠️ manual (`models.providers.<id>.baseUrl`, not written) | ✅ the plugin + openclaw.json | Medium | Standalone plugin listed in `plugins.load.paths`; refuses with `{ block: true, blockReason }` |
+| 16 | **Hermes** | ✅ hermes-check.sh | ⚠️ manual (not written) | ✅ ~/.hermes/config.yaml | Medium | A `hooks.pre_tool_call` shell hook in `~/.hermes/config.yaml` runs `~/.intutic/hooks/hermes-check.sh` (exit 2 blocks) with `fail_closed: true`. Earlier versions wrote `hooks.preToolUse`, which Hermes skips as an unknown event |
+| 17 | **Pi** | ✅ `tool_call` extension | ✅ ~/.pi/agent/models.json (anthropic, openai) | ✅ the extension | Medium | Extension in `~/.pi/agent/extensions/` (user level); refuses with `{ block: true, reason }` |
 | 18 | **GitHub Copilot** | ⚠️ Preview hooks | ❌ | ✅ copilot-instructions.md | Low | `github-copilot-check.js` (exit 2) via VS Code agent hooks (`.github/hooks/*.json` + `~/.copilot/hooks`) — a **Preview** feature whose format may change; the gate refuses payloads it does not recognise, so a shift fails closed. Instructions file still merged. argPattern rules enforced. **Contract re-verified 2026-08-10** against the live VS Code docs (envelope, exit-2, both file locations, `chat.hookFilesLocations`); an end-to-end block inside a Copilot-subscribed agent session remains unverified — it needs an interactive editor with an entitlement |
 | 19 | **LangGraph** | ✅ SDK-side (Python raise) | ✅ base_url / `intutic exec` | ✅ .env.intutic | Medium | Gate lives in the developer's code via `intutic_clawde.gate` (`guard_tools` / `@guard`), not a generated hook file — it sees the tool call's full arguments, so argPattern rules apply; traces attributed via `x-intutic-harness` |
 | 20 | **Muse Code** | ⚠️ muse-check.js | ⚠️ env-var only | ✅ 3 paths | Medium | Blocking hook (exit 2, **ASSUMED contract**) registered in `<repo>/.muse/hooks.json` AND via the pre-approved `managed_hooks_path` tier (`~/.config/muse/intutic-managed-hooks.json`, referenced from `~/.config/muse/settings.json`); covers both `PreToolUse` and `PermissionRequest`. No persistent proxy base-URL setting was confirmed — routing is `META_API_KEY`/launcher-flag only. The `muse` binary could not be installed to live-verify any of this (beta product, no public release channel found) |
@@ -108,6 +144,66 @@ copy its generated files into the worktree.
 
 ---
 
+## Hook timeouts {#hook-timeouts}
+
+Most harnesses run a tool call whose `PreToolUse` hook outlives its timeout, or
+fails, as if the hook had allowed it. So a gate that is slow on a crafted call
+is no gate, and every gate bounds itself:
+
+- **A deadline.** A hook gate still deciding at its deadline refuses the call
+  with `GATE_DEADLINE` in its reason. Each gate's deadline is one second under
+  the hook timeout its harness applies, and at most 9 seconds, the table below.
+  The second covers starting the interpreter and getting the refusal read: on a
+  14-core machine running every package's test suite beside 100 busy threads,
+  a refusal reached the harness at most 260 ms after the deadline. The bash gates run a detached watchdog that
+  stops the gate's `grep` or `python3` and signals it; the JavaScript gates
+  run their rules under a `vm` timeout that interrupts even a regular
+  expression mid-match. The in-process gates (the OpenCode plugin, the Pi
+  extension, the OpenClaw plugin) measure it from the start of each call.
+- **A size limit.** A command over 256 KiB, or tool arguments over 1 MiB of
+  compact JSON (UTF-8 bytes), is refused as `COMMAND_TOO_LARGE` before any rule
+  runs, in the hook gates and both gate SDKs. Across 85,314 tool calls in real
+  coding-agent transcripts, the largest shell command was 38.5 KB, the largest
+  file write 120 KB and the largest arguments of any tool 418 KB.
+- **Linear rules.** Every built-in rule runs in time linear in the call: rules
+  shaped `A.*B` run as a sequence of steps (`s` in a `.rules` line's flags), a
+  static check refuses any rule a backtracking engine could take longer on, and
+  every rule carries 256 KiB adversarial cases each gate must decide in linear
+  time. Only a workspace's own ` WHERE ` pattern can be slow, and the deadline
+  covers it.
+
+A legitimate call stays well inside its deadline, even on a busy machine: on the
+same loaded machine, a call at the size limits took the bash gates (which start
+`python3`) at most 4.6 seconds against their 9, and the JavaScript gates at most
+1.2 seconds; the 4-second deadlines are all JavaScript gates'.
+
+Where a harness has a setting to refuse on a failed or timed-out hook, connect
+sets it; where it has a key for the hook's timeout, connect sets 10 seconds.
+
+| Harness | Default timeout | On timeout | What connect sets | Gate deadline |
+|---|---|---|---|---|
+| Claude Code | 600 s | runs the call | `timeout: 10` | 9 s |
+| Cursor | not documented | refuses (`failClosed`) | `timeout: 10`, `failClosed: true` | 9 s |
+| Windsurf | not documented | not documented; any exit but 2 runs the call | nothing to set | 4 s |
+| Codex CLI | 600 s | runs the call | `timeout: 10` | 9 s |
+| Gemini CLI | 60 s (`timeout` in ms) | runs the call | `timeout: 10000` | 9 s |
+| Antigravity | 30 s | not documented | `timeout: 10` | 9 s |
+| Cline | 30 s, fixed | runs the call | nothing to set | 9 s |
+| GitHub Copilot (VS Code agent hooks, CLI, cloud agent) | 30 s | runs the call, admin policy hooks included | `timeout: 10` (the CLI's alias for `timeoutSec`) | 9 s |
+| Goose | 30 s | runs the call; refuses with `on_failure: "block"` | `on_failure: "block"`, `timeout: 10` | 9 s |
+| OpenHands | 60 s | runs the call | `timeout: 10` | 9 s |
+| Hermes (shell hooks) | 60 s | runs the call; refuses with `fail_closed: true` | `fail_closed: true`, `timeout: 10` | 9 s |
+| Grok Build | 5 s | runs the call | `timeout: 10` | 9 s |
+| Muse Code | not documented | not documented | nothing to set | 4 s |
+| OpenClaw (plugin hook) | 15 s | refuses (the hook runner fails closed) | `timeoutMs: 10000` on the hook registration | 9 s |
+| Pi (extension) | none (in process) | waits | nothing to set | 9 s |
+| OpenCode (plugin) | none (in process) | waits | nothing to set | 9 s |
+| n8n, Open WebUI, dsh | none (in process) | waits | nothing to set | none |
+
+Windsurf and Muse Code document no hook timeout, so their gates assume the
+shortest default of any harness that runs a timed-out call, Grok Build's 5
+seconds.
+
 ## Per-Harness Onboarding Guide
 
 Every harness follows the same steps: `intutic init` detects the harness and records it in
@@ -120,25 +216,26 @@ reported in the `intutic connect` log.
 
 | Harness | What `intutic connect` writes |
 |---|---|
-| Claude Code (`claude-code`) | `CLAUDE.md`; `permissions.deny` and PreToolUse hooks merged into `.claude/settings.json` and `~/.claude/settings.json`; gate `.intutic/hooks/claude-code-check.js`; MCP servers in `~/.claude.json` wrapped. |
-| Cursor (`cursor`) | `.cursorrules`; hooks merged into `.cursor/hooks.json` and `~/.cursor/hooks.json`; gate `.intutic/hooks/cursor-check.js`; MCP servers in `.cursor/mcp.json` and Cursor's global settings wrapped. |
-| Windsurf (`windsurf`) | `.windsurfrules`; hooks merged into `~/.codeium/windsurf/hooks.json`, `~/.codeium/hooks.json` and `.windsurf/hooks.json`; `http.proxy`/`codeium.proxy` merged into Windsurf's user `settings.json`, pointing at the proxy's port (`PORT`, 4000 by default), which serves TLS interception on the same listener; the proxy's CA added to the trusted roots on macOS and Windows; the IDE proxy of JetBrains IDEs where the Windsurf plugin is set up. See the [Windsurf page](/integrations/windsurf#proxy-and-certificate). |
+| Claude Code (`claude-code`) | `.claude/rules/intutic-governance.md` (not `CLAUDE.md`); `permissions.deny` and PreToolUse hooks merged into `.claude/settings.json` and `~/.claude/settings.json`; gate `.intutic/hooks/claude-code-check.js`; MCP servers in `~/.claude.json` wrapped. |
+| Cursor (`cursor`) | `.cursor/rules/intutic-governance.mdc` (`alwaysApply: true`); hooks merged into `.cursor/hooks.json` and `~/.cursor/hooks.json`; gate `.intutic/hooks/cursor-check.js`; MCP servers in `.cursor/mcp.json` and Cursor's global settings wrapped. |
+| Windsurf (`windsurf`) | `.windsurf/rules/intutic-governance.md` (`trigger: always_on`); hooks merged into `~/.codeium/windsurf/hooks.json`, `~/.codeium/hooks.json` and `.windsurf/hooks.json`; `http.proxy`/`codeium.proxy` merged into Windsurf's user `settings.json`, pointing at the proxy's port (`PORT`, 4000 by default), which serves TLS interception on the same listener; the proxy's CA added to the trusted roots on macOS and Windows; the IDE proxy of JetBrains IDEs where the Windsurf plugin is set up. See the [Windsurf page](/integrations/windsurf#proxy-and-certificate). |
 | Cline (`cline`) | `.clinerules/intutic-governance.md`; the file hook `.clinerules/hooks/PreToolUse`. Route the LLM through the proxy in Cline's own settings. |
-| Roo Code (`roo-code`) | `.roorules`. No hook system; route the LLM in Roo Code's own settings. |
-| Aider (`aider`) | Merged into `.aider.conf.yml`: `openai-api-base`, an `ANTHROPIC_BASE_URL` `set-env` entry and a `read` entry for `.intutic/aider-sops.md`; `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint` removed (Aider runs them unprompted). |
-| OpenHands (`openhands`) | Merged into `config.toml`: `[llm] base_url` and an `[intutic]` table with the SOP text; `.openhands/hooks.json` PreToolUse hook (fail-closed). |
-| Goose (`goose`) | `~/.agents/plugins/intutic-governance/hooks/hooks.json` + `scripts/intutic-check.sh`, made immutable (`chmod 444` plus `chflags uchg` on macOS or `chattr +i` on Linux); `provider.host` merged into `~/.config/goose/config.yaml`. |
-| Codex (`codex`) | `.env.intutic`; `openai_base_url` merged into `~/.codex/config.toml`; PreToolUse hook merged into `~/.codex/hooks.json` and `.codex/hooks.json`; gate `.intutic/hooks/codex-check.js`. |
-| GitHub Copilot (`github-copilot`) | `.github/copilot-instructions.md`; agent-mode hook definitions `.github/hooks/intutic-governance.json` and `~/.copilot/hooks/intutic-governance.json` (Preview). |
-| Continue (`continue`) | `apiBase` on OpenAI/Anthropic models in `~/.continue/config.yaml`; CLI (`cn`) hook merged into `~/.continue/settings.json` and `.continue/settings.json`. |
-| Antigravity (`antigravity`) | `customInstructions` merged into `.gemini/settings.json`; `BeforeTool` hook merged into `~/.gemini/settings.json`. |
-| Muse Code (`muse-code`) | `AGENTS.md` (Muse falls back to `CLAUDE.md` if absent); the `PreToolUse`/`PermissionRequest` gate in `.muse/hooks.json` and in an Intutic-owned `~/.config/muse/intutic-managed-hooks.json` referenced from `~/.config/muse/settings.json` (`managed_hooks_path`); MCP servers under `mcp_servers` wrapped. The `muse` binary could not be installed to live-verify the hook contract. |
-| Grok Build (`grok`) | `AGENTS.md`; PreToolUse hook in `.grok/hooks/intutic-governance.json` and `~/.grok/hooks/intutic-governance.json`; `base_url` merged into each `[model.*]` table of the project and user `config.toml`; MCP servers under `[mcp_servers.*]` wrapped. Grok Build also runs `.claude/settings.json` and `.cursor/hooks.json` hooks if present, so a project governed for Claude Code or Cursor is double-gated — expected. |
-| OpenCode (`opencode`) | `AGENTS.md`; the in-process plugin `.opencode/plugins/intutic-governance.js` (1.x) and `.opencode/plugins/intutic-governance/index.js` (2.x); the `mcp` block of `opencode.json` and the global OpenCode config wrapped. Route model traffic yourself with `provider.<id>.options.baseURL`. |
-| dsh (`dsh`) <Badge type="warning" text="Preview" /> | An `intutic-governance` plugin row in every existing `$DSH_HOME/profiles/*/cordis.patch.yml`, `@intutic/gate` in that profile's `package.json`, and the `llm-deepseek` route pointed at the proxy. One manual `dsh plugin add` per profile remains — see the [dsh page](/integrations/dsh). |
-| Hermes (`hermes`) | `hooks.preToolUse.command` merged into `~/.hermes/config.yaml`; gate `~/.intutic/hooks/hermes-check.sh`; skill `~/.hermes/skills/intutic-governance/SKILL.md`. |
-| Pi (`pi`) | PreToolUse hooks merged into `~/.pi/hooks.json`; `anthropic`/`openai` provider `baseUrl` merged into `~/.pi/models.json`; gate `~/.intutic/hooks/pi-check.sh`. |
-| n8n (`n8n`) | Workflow variables through the n8n API; the external-hook gate `~/.intutic/hooks/n8n-governance-hook.js` and `~/.intutic/n8n/INSTALL.md` — the n8n operator sets `EXTERNAL_HOOK_FILES` once. |
+| Roo Code (`roo-code`) | A marked section of the workspace's `AGENTS.md`, shared with the other `AGENTS.md` readers (not `.roorules`). No hook system; route the LLM in Roo Code's own settings. |
+| Aider (`aider`) | Merged into `.aider.conf.yml`: `openai-api-base`, an `ANTHROPIC_BASE_URL` `set-env` entry and a `read` entry for `.intutic/aider-sops.md` by absolute path; `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint` removed (Aider runs them unprompted). |
+| OpenHands (`openhands`) | `.openhands/microagents/intutic-governance.md`, a microagent with no triggers, which OpenHands keeps active; `[llm] base_url` merged into `config.toml`; `.openhands/hooks.json` PreToolUse hook (fail-closed). |
+| Goose (`goose`) | A marked section of the workspace's `.goosehints`; `~/.agents/plugins/intutic-governance/plugin.json`, `hooks/hooks.json` (`on_failure: "block"`) + `scripts/intutic-check.sh`, made immutable (`chmod 444` plus `chflags uchg` on macOS or `chattr +i` on Linux); `provider.host` merged into `~/.config/goose/config.yaml`. |
+| Codex (`codex`) | A marked section of the workspace's `AGENTS.md`, shared with the other `AGENTS.md` readers; `.env.intutic`; `openai_base_url` merged into `~/.codex/config.toml`; PreToolUse hook merged into `~/.codex/hooks.json` and `.codex/hooks.json`; gate `.intutic/hooks/codex-check.js`. |
+| GitHub Copilot (`github-copilot`) | A marked section of `.github/copilot-instructions.md`; agent-mode hook definitions `.github/hooks/intutic-governance.json` and `~/.copilot/hooks/intutic-governance.json` (Preview). |
+| Continue (`continue`) | `.continue/rules/intutic-governance.md` (`alwaysApply: true`); `apiBase` on OpenAI/Anthropic models in `~/.continue/config.yaml`. No hook: `cn` never fires one. |
+| Antigravity (`antigravity`) | A marked section of the project's `GEMINI.md`, which Gemini CLI and Antigravity both load; the Antigravity `PreToolUse` hook under the `intutic-governance` key of `~/.gemini/config/hooks.json`; the Gemini CLI `BeforeTool` hook merged into `~/.gemini/settings.json`. |
+| Muse Code (`muse-code`) | A marked section of the workspace's `AGENTS.md`, shared with the other `AGENTS.md` readers (Muse falls back to `CLAUDE.md` if there is no `AGENTS.md`); the `PreToolUse`/`PermissionRequest` gate in `.muse/hooks.json` and in an Intutic-owned `~/.config/muse/intutic-managed-hooks.json` referenced from `~/.config/muse/settings.json` (`managed_hooks_path`); MCP servers under `mcp_servers` wrapped. The `muse` binary could not be installed to live-verify the hook contract. |
+| Grok Build (`grok`) | A marked section of the workspace's `AGENTS.md`, shared with the other `AGENTS.md` readers; PreToolUse hook in `.grok/hooks/intutic-governance.json` and `~/.grok/hooks/intutic-governance.json`; `base_url` merged into each `[model.*]` table of the project and user `config.toml`; MCP servers under `[mcp_servers.*]` wrapped. Grok Build also runs `.claude/settings.json` and `.cursor/hooks.json` hooks if present, so a project governed for Claude Code or Cursor is double-gated — expected. |
+| OpenCode (`opencode`) | A marked section of the workspace's `AGENTS.md`, shared with the other `AGENTS.md` readers; the in-process plugin `.opencode/plugins/intutic-governance.js` (1.x) and `.opencode/plugins/intutic-governance/index.js` (2.x); the `mcp` block of `opencode.json` and the global OpenCode config wrapped. Route model traffic yourself with `provider.<id>.options.baseURL`. |
+| dsh (`dsh`) <Badge type="warning" text="Preview" /> | A marked section of the workspace's `AGENTS.md`, shared with the other `AGENTS.md` readers; an `intutic-governance` plugin row in every existing `$DSH_HOME/profiles/*/cordis.patch.yml`, `@intutic/gate` in that profile's `package.json`, and the `llm-deepseek` route pointed at the proxy. One manual `dsh plugin add` per profile remains — see the [dsh page](/integrations/dsh). |
+| Hermes (`hermes`) | A marked section of the workspace's `AGENTS.md`, shared with the other `AGENTS.md` readers; a `hooks.pre_tool_call` entry (`fail_closed: true`) merged into `~/.hermes/config.yaml`; gate `~/.intutic/hooks/hermes-check.sh`; skill `~/.hermes/skills/intutic-governance/SKILL.md`. |
+| Pi (`pi`) | A marked section of the workspace's `AGENTS.md`, shared with the other `AGENTS.md` readers; the extension `~/.pi/agent/extensions/intutic-governance.js`; `anthropic`/`openai` provider `baseUrl` merged into `~/.pi/agent/models.json`. |
+| n8n (`n8n`) | No instructions file; the external-hook gate `~/.intutic/hooks/n8n-governance-hook.js` and `~/.intutic/n8n/INSTALL.md` — the n8n operator sets `EXTERNAL_HOOK_FILES` once. |
+| OpenClaw (`openclaw`) | A marked section of `AGENTS.md` in OpenClaw's own agent workspace (`agents.defaults.workspace`, else `OPENCLAW_WORKSPACE_DIR`, else `~/.openclaw/workspace`); the plugin `~/.intutic/hooks/openclaw/intutic-governance.cjs`, listed in `plugins.load.paths` (and `plugins.allow`, when that list is not empty) in `~/.openclaw/openclaw.json`. |
 | Open WebUI (`open-webui`) | `~/.open-webui/intutic-governance-filter.py`, which an Open WebUI admin adds as a Function once. Not auto-detected: add `open-webui` to `harnesses`. |
 | Claude Desktop (`claude-desktop`) | Nothing besides the MCP wrapping of `claude_desktop_config.json` and the drift guard on that file. |
 | SDK-gated frameworks (LangGraph, LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, Strands Agents, Microsoft Agent Framework, Mastra, Vercel AI SDK, eve, AI SDK Harness, AI SDK Workflow, TrueForge) | `.env.intutic` with `ANTHROPIC_BASE_URL` (proxy host), `OPENAI_BASE_URL` (proxy host + `/v1`) and a pointer at the SDK-side gate you install in your code — see each framework's page. |

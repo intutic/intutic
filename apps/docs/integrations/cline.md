@@ -4,7 +4,7 @@ Integrate Intutic governance with [Cline](https://github.com/cline/cline) — th
 
 ## How it works
 
-Cline runs *file hooks*: an executable named `PreToolUse` in a hooks directory runs before every tool call, with the call as JSON on stdin. Intutic installs its gate as `.clinerules/hooks/PreToolUse`. It refuses a call by printing `{"cancel": true, "errorMessage": "…"}` on stdout — Cline ignores the hook's exit code. The hook has no tool filter, so it sees every tool call, including MCP calls (`use_mcp_tool`). Governance rules are written next to it as `.clinerules/intutic-governance.md`, which Cline reads as a rules file.
+Cline runs *file hooks*: an executable named `PreToolUse` in a hooks directory runs before every tool call, with the call as JSON on stdin. Intutic installs its gate as `.clinerules/hooks/PreToolUse`. It refuses a call by printing `{"cancel": true, "errorMessage": "…"}` on stdout, with the refusal's `code` and `ruleId` ([refusal codes](/reference/harness-security-matrix#hook-refusal-codes)) — Cline ignores the hook's exit code. The hook has no tool filter, so it sees every tool call, including MCP calls (`use_mcp_tool`). Governance rules are written next to it as `.clinerules/intutic-governance.md`, which Cline reads as a rules file.
 
 The same file serves the VS Code extension and the Cline CLI, which read different payload shapes; the gate accepts both. In the VS Code extension, turn on **Enable Hooks** in Cline's feature settings — hooks do not run until you do.
 
@@ -38,6 +38,8 @@ intutic start
 * **Rules:** `.clinerules/intutic-governance.md` — your SOP text.
 
 `.clinerules` has to be a directory for both to fit. A flat `.clinerules` file that an earlier Intutic version wrote is converted automatically. A flat `.clinerules` file you wrote yourself is left alone, and no gate is installed until you move its content into a file inside a `.clinerules/` directory; the `intutic connect` log says so. A `PreToolUse` hook you wrote yourself is never overwritten.
+
+An agent cannot edit or remove the gate: the Intutic gate refuses a tool call that names `.clinerules/hooks`, reading it included, under Cline and under every other harness with a hook gate. If the gate is deleted, replaced or made non-executable anyway, the sync daemon writes it back while `intutic connect` runs. Cline runs the hooks in its other hook directories as well, and refuses a call when any of them does, so a hook added there cannot override the gate.
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness cline`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 

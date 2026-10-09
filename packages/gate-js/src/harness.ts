@@ -85,6 +85,10 @@
 import { createHash } from 'node:crypto'
 import { active as activeGate, type Gate, type ToolInput } from './gate.js'
 import { IntuticGateRefusal } from './errors.js'
+import { MCP_ALLOWLIST_JS_SOURCE, MCP_REGISTRY_JS_SOURCE, MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE } from './mcpRegistryRecord.js'
+import { PHRASES_JS_SOURCE } from './phrases.js'
+import { SEQUENCE_JS_SOURCE } from './sequence.js'
+import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MS, HOOK_TIMEOUT_SECONDS } from './limits.js'
 
 /** Structural copy of `ai`'s `ToolApprovalResponse` prompt part (re-exported
  *  from `@ai-sdk/provider-utils` — confirmed field-for-field on 5.0.27 and
@@ -615,7 +619,10 @@ export function recommendedHarnessSettings(
 // default anyway.
 //
 // What DOES port cleanly, with no live connection and no cross-package
-// import: Tier A1, the policy-snapshot evaluator. `snapshot.ts` in THIS
+// import: Tier A1, the policy-snapshot evaluator, and Tier M, the MCP server
+// registry and allowlist the snapshot carries (`mcpRegistryRecord.ts`,
+// emitted as source), with the snapshot's digest and workspace checked first
+// as every gate checks them. `snapshot.ts` in THIS
 // package already implements it (`normalise`/`evaluate`), tested for
 // fidelity against the real pattern tables in `fidelity.test.ts`. The hook
 // script below is a self-contained (zero-`require`) hand-port of that same
@@ -631,8 +638,9 @@ export function recommendedHarnessSettings(
 // Deliberately NOT reproduced here, and said so rather than silently
 // dropped: the SOP tier (A3), review-hold parking, and control-plane event
 // draining. A workspace relying on this bootstrap for sandbox coverage gets
-// the destructive-command floor and any SOP-authored rules already compiled
-// into the `.rules` text it supplies — a real but strict SUBSET of the
+// the destructive-command floor, any SOP-authored rules already compiled
+// into the `.rules` text it supplies, and that text's MCP registry and
+// allowlist — a real but strict SUBSET of the
 // laptop gate, the same kind of documented gap `gate.ts`'s own module doc
 // already calls out for this package's Tier A1 relative to a shipped
 // harness gate.
@@ -706,10 +714,10 @@ export interface IntuticSandboxBootstrapOptions {
    * inside the sandbox rather than a missing one.
    */
   policySnapshotRules?: string
-  /** Embedded in the recipe hash only (so a workspace switch invalidates a
-   *  cached snapshot) — this module does not otherwise use it, matching
-   *  `snapshot.ts`'s reader, which also treats workspace id as an integrity
-   *  check rather than a lookup key. */
+  /** Embedded in the recipe hash (so a workspace switch invalidates a cached
+   *  snapshot) and in the hook script, which treats rules issued to another
+   *  workspace as unverified — an integrity check, as `snapshot.ts`'s reader
+   *  makes it, not a lookup key. */
   workspaceId?: string
   /** Directory inside the sandbox (relative to `workDir`) the hook script
    *  and its rules file are written under. Defaults to `.intutic/hooks`,
@@ -723,11 +731,19 @@ function sandboxJoin(workDir: string, relative: string): string {
 }
 
 /**
- * Self-contained (zero-`require`) hand-port of `snapshot.ts`'s
- * `normalise`/`evaluate` — Tier A1 only. See the module-level comment above
- * for what this deliberately does and does not cover, and
- * `__tests__/harness.test.ts` for the behavioural-parity check against the
- * real `snapshot.evaluate()` this port is pinned to.
+ * Self-contained (built-ins only, no npm install) hand-port of `snapshot.ts`'s
+ * `loadSnapshot`/`normalise`/`evaluate` and of `gate.ts`'s Tier M — the
+ * policy-snapshot rules and the MCP server registry and allowlist. See the
+ * module-level comment above for what this deliberately does and does not
+ * cover, and `__tests__/harness.test.ts` for the behavioural-parity check
+ * against the real `snapshot.evaluate()` this port is pinned to and the
+ * shared MCP registry vectors.
+ *
+ * The rules text is checked as every gate checks it: a missing or broken
+ * `#digest`, or a `#workspace` other than `workspaceId`, leaves only its
+ * SSO-group refusals, and refuses every MCP call (`POLICY_SNAPSHOT_UNVERIFIED`)
+ * because neither MCP record can be vouched for. An empty rules text is no
+ * snapshot at all, as an absent file is.
  *
  * Contract matches the laptop's `claude-code-check.js`
  * (`services/sync-daemon/src/harness/claudeCodeHooks.ts`) deliberately:
@@ -737,11 +753,12 @@ function sandboxJoin(workDir: string, relative: string): string {
  * any parse/read error fails CLOSED (exit `2`), the same posture
  * `emitJsFailClosedPrelude` documents for the laptop's version.
  */
-function renderSandboxGateScript(rulesFileName: string): string {
+function renderSandboxGateScript(rulesFileName: string, workspaceId = ''): string {
   return `#!/usr/bin/env node
 'use strict';
 /**
- * Intutic sandbox PreToolUse gate (Tier A1 only — policy-snapshot rules).
+ * Intutic sandbox PreToolUse gate (policy-snapshot rules, and the MCP server
+ * registry and allowlist the snapshot carries).
  * Auto-generated by @intutic/gate's intuticSandboxBootstrap(). DO NOT EDIT.
  *
  * Unlike the laptop's claude-code-check.js, this script has no live
@@ -751,56 +768,148 @@ function renderSandboxGateScript(rulesFileName: string): string {
  */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const RULES_PATH = path.join(__dirname, ${JSON.stringify(rulesFileName)});
+const WORKSPACE_ID = ${JSON.stringify(workspaceId)};
 
 function normalise(v) {
   const s = v === null || v === undefined ? '' : String(v);
   return ' ' + s.replace(/\\s+/g, ' ').trim() + ' ';
 }
 
-function loadRules() {
+function stringList(v) {
+  return Array.isArray(v) ? v.filter(function (x) { return typeof x === 'string'; }) : [];
+}
+
+/** The snapshot: its rules, MCP records and whether it verified. */
+function loadSnapshot() {
+  const out = { rules: [], state: 'absent', mcpRegistry: null, mcpAllowlist: null };
   let text;
   try {
     text = fs.readFileSync(RULES_PATH, 'utf-8');
   } catch (e) {
-    return [];
+    return out;
   }
-  const rules = [];
+  // Written empty when the bootstrap was given no rules: no snapshot, not a
+  // damaged one.
+  if (!text.trim()) return out;
+  out.state = 'ok';
+  let digest = '', workspace = '';
+  const body = [];
   for (const line of text.split('\\n')) {
+    if (line.indexOf('#digest ') === 0) { digest = line.slice(8).trim(); continue; }
+    if (line.indexOf('#workspace ') === 0) { workspace = line.slice(11).trim(); continue; }
     if (!line || line.charAt(0) === '#') continue;
+    body.push(line);
     const f = line.split('\\t');
+    if (f[0] === '@mcp_registry' && f.length === 2) {
+      try {
+        const r = JSON.parse(Buffer.from(f[1], 'base64').toString('utf8'));
+        const disabled = {};
+        if (r.disabledTools && typeof r.disabledTools === 'object') {
+          for (const k of Object.keys(r.disabledTools)) disabled[k] = stringList(r.disabledTools[k]);
+        }
+        out.mcpRegistry = { defaultPolicy: r.defaultPolicy === 'deny' ? 'deny' : 'allow',
+          approvedServers: stringList(r.approvedServers), blockedServers: stringList(r.blockedServers),
+          heldServers: stringList(r.heldServers), disabledTools: disabled };
+      } catch (e) { /* a damaged record is no registry */ }
+      continue;
+    }
+    if (f[0] === '@mcp_allowlist' && f.length === 3) {
+      out.mcpAllowlist = { severity: f[1] === 'shadow' ? 'shadow' : 'block', servers: f[2].split(',').filter(Boolean) };
+      continue;
+    }
+    // Column order: id, severity, flags, subject, reason, source(regex).
     if (f.length < 6 || !f[5]) continue;
+    // Flags: i = case-insensitive, s = a sequence rule (sequence.ts).
+    const ic = f[2].indexOf('i') !== -1;
     try {
-      rules.push({
+      out.rules.push({
         id: f[0],
         severity: f[1],
         subject: f[3] || 'any',
         reason: f[4],
-        pattern: new RegExp(f[5], f[2] === 'i' ? 'i' : ''),
+        pattern: new RegExp(f[5], ic ? 'i' : ''),
+        steps: f[2].indexOf('s') !== -1 ? compileSequence(f[5], ic) : null,
       });
     } catch (e) {
       // Regex would not compile — dropped, not fatal. Matches snapshot.ts.
     }
   }
-  return rules;
+  // Integrity, as snapshot.ts checks it: the digest over the data lines (a
+  // missing one fails too), and the workspace the rules were issued to.
+  const actual = crypto.createHash('sha256').update(body.join('\\n'), 'utf-8').digest('hex').slice(0, 32);
+  if (actual !== digest || (workspace && WORKSPACE_ID && workspace !== WORKSPACE_ID)) {
+    out.state = 'invalid';
+    // Only the SSO-group refusals survive, and neither MCP record does.
+    out.rules = out.rules.filter(function (r) { return r.id.indexOf('sso_group.') === 0 && r.severity === 'block'; });
+    out.mcpRegistry = null;
+    out.mcpAllowlist = null;
+  }
+  return out;
 }
+
+// The phrase matcher snapshot.ts uses, emitted from phrases.ts: a \`phrase\`
+// rule's source is |-separated phrases matched as words, not a regex.
+${PHRASES_JS_SOURCE}
+
+// The sequence-rule matcher snapshot.ts uses, emitted from sequence.ts: a rule
+// flagged \`s\` has its steps searched for in order, in linear time.
+${SEQUENCE_JS_SOURCE}
+
+// The MCP server registry and allowlist decisions, and the refusal on an
+// unverified snapshot, emitted from mcpRegistryRecord.ts.
+${MCP_REGISTRY_JS_SOURCE}
+
+${MCP_ALLOWLIST_JS_SOURCE}
+
+${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}
 
 function evaluate(toolName, target, command, rules) {
   const nTool = normalise(toolName);
   const nCommand = normalise(command);
   const nTarget = normalise(target);
+  let words = null;
   for (const rule of rules) {
+    if (rule.subject === 'phrase') {
+      if (words === null) words = phraseText(command);
+      const w = words;
+      if (!rule.pattern.source.split('|').some(function (p) { return hasPhrase(w, p, true); })) continue;
+      return { severity: rule.severity, reason: rule.reason + ' [' + rule.id + ']' };
+    }
     const subjects =
       rule.subject === 'tool' ? [nTool] :
       rule.subject === 'command' ? [nCommand] :
       rule.subject === 'target' ? [nTarget] :
       [nCommand, nTarget];
     for (const subject of subjects) {
-      if (!rule.pattern.test(subject)) continue;
+      if (!(rule.steps ? sequenceMatch(rule.steps, subject) : rule.pattern.test(subject))) continue;
       return { severity: rule.severity, reason: rule.reason + ' [' + rule.id + ']' };
     }
   }
+  return null;
+}
+
+/**
+ * Tier M, for an mcp__<server>__<tool> call: on an unverified snapshot every
+ * call is refused; otherwise the registry, then the allowlist, whose refusal
+ * under shadow (an observe-only workspace) is reported and allowed.
+ */
+function evaluateMcp(toolName, snap) {
+  if (toolName.indexOf('mcp__') !== 0) return null;
+  const rest = toolName.slice('mcp__'.length);
+  const sep = rest.indexOf('__');
+  if (sep <= 0) return null;
+  const server = rest.slice(0, sep);
+  if (snap.state === 'invalid') {
+    const u = mcpSnapshotUnverifiedRefusal(server);
+    return { severity: 'block', reason: u.reason + ' [' + u.ruleId + ']', code: u.code };
+  }
+  const r = snap.mcpRegistry ? evaluateMcpRegistry(snap.mcpRegistry, server, rest.slice(sep + 2)) : null;
+  if (r) return { severity: 'block', reason: r.reason + ' [' + r.ruleId + ']', code: r.code };
+  const a = snap.mcpAllowlist ? evaluateMcpAllowlist(snap.mcpAllowlist, server) : null;
+  if (a) return { severity: snap.mcpAllowlist.severity === 'shadow' ? 'shadow' : 'block', reason: a.reason + ' [' + a.ruleId + ']', code: a.code };
   return null;
 }
 
@@ -809,19 +918,53 @@ process.stdin.on('data', (chunk) => { inputData += chunk; });
 process.stdin.on('end', () => {
   try {
     const ctx = JSON.parse(inputData || '{}');
-    const toolName = ctx.tool_name || ctx.toolName || '';
+    const toolName = String(ctx.tool_name || ctx.toolName || '');
     const toolInput = ctx.tool_input || ctx.toolInput || {};
     const target = toolInput.path || toolInput.file_path || toolInput.filePath ||
       toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
     const command = String(toolInput.command || toolInput.cmd || toolInput.script || '');
-    const rules = loadRules();
-    const decision = evaluate(toolName, target, command, rules);
-    if (decision && decision.severity === 'block') {
-      console.error('[Intutic Guardrail] BLOCKED: ' + decision.reason);
+    // Too large to evaluate inside the hook timeout: refused before any rule
+    // runs (limits.ts). Claude Code reads a hook that times out as an allow.
+    const commandBytes = Buffer.byteLength(command, 'utf8');
+    const argumentBytes = Buffer.byteLength(JSON.stringify(toolInput) || '', 'utf8');
+    if (commandBytes > ${COMMAND_SIZE_LIMIT} || argumentBytes > ${ARGUMENTS_SIZE_LIMIT}) {
+      console.error('[Intutic Guardrail] BLOCKED: COMMAND_TOO_LARGE: the ' +
+        (commandBytes > ${COMMAND_SIZE_LIMIT} ? 'command is ' + commandBytes : 'tool arguments are ' + argumentBytes) +
+        ' bytes, over the ' + (commandBytes > ${COMMAND_SIZE_LIMIT} ? ${COMMAND_SIZE_LIMIT} : ${ARGUMENTS_SIZE_LIMIT}) +
+        '-byte limit a gate evaluates; split the work into smaller calls');
+      process.exit(2);
+    }
+    const snap = loadSnapshot();
+    // The rules run under a deadline that interrupts even a regex mid-match,
+    // measured from process start, and a call still undecided then is refused:
+    // a snapshot rule written in a workspace need not be linear.
+    let decision;
+    globalThis.__intuticEvaluate = function () {
+      return evaluate(toolName, target, command, snap.rules) || evaluateMcp(toolName, snap);
+    };
+    try {
+      decision = require('vm').runInThisContext('__intuticEvaluate()', {
+        timeout: Math.max(1, ${GATE_DEADLINE_MS} - Math.round(process.uptime() * 1000)),
+      });
+    } catch (err) {
+      if (!err || err.code !== 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw err;
+      console.error('[Intutic Guardrail] BLOCKED: GATE_DEADLINE: the policy rules did not finish within ' +
+        ${GATE_DEADLINE_MS} + ' ms, so the call is refused rather than left to the hook timeout');
       process.exit(2);
     }
     if (decision && (decision.severity === 'warn' || decision.severity === 'shadow')) {
       console.error('[Intutic Guardrail] FLAGGED (' + decision.severity + '): ' + decision.reason);
+    } else if (decision && decision.severity === 'hold') {
+      // A hold asks a person first, and this script cannot reach the control
+      // plane to ask: it refuses, as every gate does with a hold it cannot record.
+      console.error('[Intutic Guardrail] HELD for approval: ' + decision.reason +
+        ' — approval cannot be requested from inside this sandbox, so the call is refused.');
+      process.exit(2);
+    } else if (decision) {
+      // block, or a severity this script does not know: never an allow. An
+      // MCP refusal names its code, as the other gates' refusals do.
+      console.error('[Intutic Guardrail] BLOCKED: ' + (decision.code ? decision.code + ': ' : '') + decision.reason);
+      process.exit(2);
     }
     process.exit(0);
   } catch (err) {
@@ -854,7 +997,7 @@ function sandboxClaudeSettings(hookScriptSandboxPath: string): {
       {
         type: 'command',
         command: `node ${hookScriptSandboxPath}`,
-        timeout: 10,
+        timeout: HOOK_TIMEOUT_SECONDS,
         statusMessage: 'Verifying tool execution against Intutic SOP policy...',
       },
     ],
@@ -956,7 +1099,7 @@ export function intuticSandboxBootstrap(opts: IntuticSandboxBootstrapOptions = {
   const scriptRelPath = `${bootstrapDir}/claude-code-check.js`
 
   const rulesContent = opts.policySnapshotRules ?? ''
-  const scriptContent = renderSandboxGateScript('policy-snapshot.rules')
+  const scriptContent = renderSandboxGateScript('policy-snapshot.rules', opts.workspaceId ?? '')
 
   // Same hashing convention `snapshot.ts` already uses for the policy
   // digest (`createHash('sha256')` from node:crypto) — not a new mechanism.
@@ -986,5 +1129,5 @@ export function intuticSandboxBootstrap(opts: IntuticSandboxBootstrapOptions = {
   }
 }
 
-// Exposed for the behavioural-parity test — not part of the public surface.
+// Exposed for the behavioural-parity tests — not part of the public surface.
 export const _internal = { renderSandboxGateScript, renderSandboxClaudeSettings, sandboxJoin }

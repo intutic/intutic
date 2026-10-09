@@ -35,12 +35,12 @@ Each member row has a role selector and **Deactivate** (or **Reactivate**). The 
 | Role | Access Level |
 |------|-------------|
 | **Owner** | Full control — billing, settings, member management |
-| **Admin** | Manage SOPs, members, budgets |
-| **EM** | View reports, manage budgets |
-| **Developer** | Use agents, view own traces |
+| **Admin** | Workspace policy and configuration — SOPs, custom filters, budgets, integrations |
+| **EM** | Run-time interventions and review — approve holds, kill runs, label findings |
+| **Developer** | Use agents; end or kill their own loop runs |
 | **Viewer** | Read-only dashboard access |
 
-The invite form offers Viewer, Developer, Engineering Manager and Admin. Which dashboard pages each role can open is listed in [Security & Identity](/guide/security#feature-access-by-role).
+The invite form offers Viewer, Developer, Engineering Manager and Admin. Which dashboard pages each role can open is listed in [Security & Identity](/guide/security#feature-access-by-role), and what each role can change in [What Each Role Can Change](/guide/security#what-each-role-can-change). Controls a role cannot use are disabled or hidden, with a note saying which roles can.
 
 ### Teams
 
@@ -58,23 +58,24 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 
 | Card | What it does |
 |------|--------------|
-| **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
-| **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. See [below](#group-policy-for-high-risk-tools). |
+| **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. On a plan without SSO the card says which plans include it, and SCIM, which needs the Enterprise or Self-host plan, does the same on Biz Org. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
+| **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. Needs a plan with SSO. See [below](#group-policy-for-high-risk-tools). |
 | **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy. See [below](#virtual-api-keys). |
 | **Attenuated API Keys** | Child keys minted from a parent key with fewer capabilities by `intutic attenuate`; open a chain to see each step. |
 | **On-Behalf-Of Tokens** | A short-lived token that lets an agent act for you with only the tools you pick. See [below](#on-behalf-of-obo-tokens). |
 | **Provider Keys** | This workspace's own provider credentials. See [below](#provider-keys). |
 | **Gateways** | Register a [self-hosted gateway](/external/self-hosted-gateway) to run the proxy in your own infrastructure. |
-| **Data Residency** | Pin the workspace's data to a region, and block requests that violate the pin. |
+| **Data Residency** | Pin the workspace's data to a region, and block requests that violate the pin. Needs the Enterprise or Self-host plan; on another plan the card says so, and a pin set before a downgrade can still be turned off. |
 | **Network Egress Control** | The egress mode and allow list every proxy in the workspace hot-reloads. |
 | **Sandboxed Execution** | Require agents to run in a sandbox; enforced by the CLI on `intutic exec`. See [Sandboxed Execution](/guide/sandboxed-execution). |
+| **PII Detectors** | The action the LLM proxy takes on card numbers, IBANs, Social Security numbers, email addresses and phone numbers in this workspace's traffic. A developer's own proxy config can only make a detector stricter. See [PII detectors](/guide/policies#setting-detector-actions-for-a-workspace). |
 | **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
 | **Repeat-Finding Enforcement** | Act on a sustained pattern of findings in one session, not only record it. |
 | **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |
-| **Gate health** | Whether each installed harness's gate is reporting. A gate reports every tool call, allowed ones included, so one that has sent nothing for 48 hours is **Silent**: its tool calls may not be governed. **Just installed** means the harness connected less than an hour ago. Owners, Admins and Engineering Managers can see it. |
+| **Gate health** | Whether each installed harness's gate is reporting. A gate reports every tool call, allowed ones included, so one that has sent nothing for 48 hours is **Silent**: its tool calls may not be governed. **Just installed** means the harness connected less than an hour ago. A harness is listed while a connected `intutic connect` reports it: a machine that ran `intutic disconnect`, or whose daemon has not reported for a day, is not waited on. Google Antigravity and Gemini CLI are listed apart. An **SDK gate** (`@intutic/gate`, `intutic_clawde.gate`) has no daemon; it is listed once its events have arrived on three different days within a week, and dropped after a week with none, so a script run once never alerts. Owners, Admins and Engineering Managers can see it. |
 | **Devices** | Enforcement posture each developer machine reports: visibility, not attestation. |
 
-### Group policy for high-risk tools
+### Group policy for high-risk tools <Badge type="warning" text="Biz Org+" />
 
 Three lists, one name per line, matched exactly including case: **High-risk tools**, **Groups
 that may run them** and **On-behalf-of only**. A member in one of the groups may run the
@@ -87,6 +88,11 @@ Owners and Admins can edit it; everyone else sees it read-only. It is stored as 
 every change is recorded in the [Audit Timeline](/guide/audit-timeline). Where a member's groups
 come from, and how fast a change reaches each gate, is in
 [SSO group clearance](/concepts/circuit-breaker#_3-sso-group-clearance).
+
+The policy needs single sign-on, where members' groups come from, so it is not enforced on Free
+or Self-serve. There the card says which plans include it. A policy saved before a downgrade is
+shown read-only, marked **Not enforced on this plan**; Owners and Admins can remove it with
+**Clear group policy**. Kept, it applies again after an upgrade.
 
 ### Virtual API Keys
 
@@ -189,8 +195,8 @@ through the same enforcement path:
 
 ### Harness Config History
 
-`intutic connect` records each harness rules file (`CLAUDE.md`, `.cursorrules`, `AGENTS.md` and
-the others listed under [Config content upload](/reference/cli#config-content-upload)) in the
+`intutic connect` records each harness rules file (`.claude/rules/intutic-governance.md`,
+`.cursor/rules/intutic-governance.mdc`, `AGENTS.md` and the others listed under [Config content upload](/reference/cli#config-content-upload)) in the
 workspace's config history. The **Upload config file content** switch decides what that record
 holds. It is off by default.
 
@@ -203,6 +209,9 @@ The control plane refuses text sent while the switch is off. A change reaches ea
 next sync and applies from its next capture, within a few minutes. Changing it needs the Owner or
 Admin role, and the change is recorded in the settings history like any other. The API key is
 `configBodyUpload` in `PUT /api/v1/workspace/settings`.
+
+Only owners, admins and engineering managers can open a diff, because it shows the file's text.
+Every member can see the history itself: paths, hashes, sizes and how many lines changed.
 
 ---
 
@@ -218,10 +227,12 @@ What the MCP governance proxy does when it cannot reach Intutic, and how firmly 
 
 | Setting | Behavior |
 |---------|----------|
-| **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard |
+| **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard. Custom rule failures are excluded: a [rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict) always refuses the call |
 | **Fail closed** | The tool call is blocked with "Governance check failed: Intutic control plane unreachable." The dashboard asks you to confirm before switching to it |
 
-The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). Which MCP servers and tools may run is set on **Policies › MCP Servers** ([the registry](/guide/mcp-governance#the-registry)).
+The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). It also decides what happens to a call an [MCP call budget](/guide/mcp-governance#call-budgets) covers when the proxy cannot reach Valkey to count it: fail open lets the call through uncounted, fail closed refuses it.
+
+Which MCP servers and tools may run, what a high-risk change to a server's tools does, and the MCP call budgets are set on **Policies › MCP Servers** ([the registry](/guide/mcp-governance#the-registry), [tool-change risk](/guide/mcp-governance#tool-change-risk), [call budgets](/guide/mcp-governance#call-budgets)). They are workspace settings too — `mcpDefaultPolicy`, `mcpHighRiskToolChange` and `mcpBudgets` on `PUT /api/v1/workspace/settings` — so only an owner or admin changes them, and each change is in the settings history on **Settings › Audit Timeline**.
 
 **When someone edits a harness config file by hand**
 
@@ -277,7 +288,7 @@ Usage against your plan, invoices, and the spend caps that stop a runaway agent.
 - **Enterprise trial** — for an Owner on an eligible workspace, a banner offers **Start 14-day enterprise trial**; during a trial it shows the days remaining and **Talk to Sales**.
 - **Governed Request Usage** — Governed Requests this month against the requests your plan includes (for an organization's plan, counted across all its workspaces), any overage and its charge, the rate per 1,000 Governed Requests your workspace is billed at, and a daily trend.
 - **Billing History & Invoices** — invoices Stripe issued to this workspace, newest first.
-- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits**; and **Budget alerts**, each with **Acknowledge**. See [Budgets & FinOps](/guide/budgets).
+- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits** (Owners and Admins; other roles see the caps read-only); and **Budget alerts**, each with **Acknowledge** (Owners, Admins and EMs). See [Budgets & FinOps](/guide/budgets).
 
 ### Changing plan {#changing-plan}
 
@@ -307,11 +318,11 @@ If agents are using stale governance rules, clear the policy cache from this tab
 
 ## Notifications {#notifications}
 
-Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity.
+Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity. Only an owner or admin can create, change or delete a rule or replace its signing secret, as for SIEM destinations; every member can see the rules and the delivery log.
 
 ### Channel Routing
 
-- **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack, so approvals you make from Slack are recorded against you rather than against whoever installed the app.
+- **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack. A review card's **Approve** and **Reject** buttons work only from a linked account, and the review is recorded against you.
 - **Email** — Send alerts to up to 20 addresses; each recipient gets their own message.
 - **PagerDuty** — Trigger incidents through an Events API v2 routing key.
 - **Webhooks** — Send JSON payloads to generic HTTPS endpoints. Every request is signed; see [below](#verifying-webhook-signatures).
@@ -386,6 +397,11 @@ The **Event Type** list offers only the events the control plane sends:
 | `guardrail.ready` | Policy Guardrail Ready to Enforce |
 | `guardrail.stale` | Policy Guardrail Citation Went Stale |
 | `mcp.server.candidate` | New MCP Server Awaiting Approval |
+| `mcp.server.tool_change_risk` | MCP Server Tool Change Scored High Risk |
+| `mcp.server.decided` | MCP Server Approved, Blocked or Reset: an owner or admin's decision in the [MCP server registry](/guide/mcp-governance#the-registry); MEDIUM for a block, INFO otherwise |
+| `mcp.server.tool_toggled` | MCP Server Tool Switched On or Off: MEDIUM when a tool is switched off, INFO when on |
+| `mcp.budget.threshold` | MCP Call Budget Threshold Reached: once per budget per period |
+| `mcp.budget.exceeded` | MCP Call Budget Exceeded: once per budget per period, on the first refused call |
 | `finops.budget.threshold` | Budget Threshold Reached |
 | `finops.budget.exceeded` | Budget Exceeded |
 | `plan.deviation.detected` | Plan Deviation Detected |
@@ -393,9 +409,17 @@ The **Event Type** list offers only the events the control plane sends:
 | `gateway.stale.detected` | Self-Hosted Gateway Unreachable |
 | `device.enforcement.stale` | Device Enforcement Stale |
 | `device.enforcement.disabled` | Device Firewall Disabled |
-| `governance.gate.silent` | Gate Stopped Reporting: an installed harness's gate has sent no event for 48 hours |
+| `governance.gate.silent` | Gate Stopped Reporting: an installed harness's gate, or an SDK gate in regular use, has sent no event for 48 hours |
 | `governance.gate.recovered` | Gate Reporting Again |
+| `inventory.ungoverned.detected` | Ungoverned AI Tool Found: a machine's [AI inventory](/guide/ai-inventory) listed an ungoverned harness or MCP server for the first time; once per machine and item |
 | `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature or an altered append-only guard. See [Trace Integrity](/concepts/trace-integrity#alerts) |
+| `decision.approved` | Held Decision Approved: an owner, admin or engineering manager approved a [held decision](/guide/decisions#slack-interactive-reviews), in Slack or with `intutic decision approve`; MEDIUM, because the held call can now run |
+| `decision.rejected` | Held Decision Rejected: the same, for a rejection; INFO |
+| `auth.login.failed` | Sign-in Refused: a sign-in to the workspace was refused (wrong password, deactivated member, an SSO identity the workspace does not admit, a response that failed verification). Names the member, or the email presented, the method, the reason and the address; repeats for the same identity and address within the cooldown send once |
+| `scim.user.changed` | User Changed via SCIM: your identity provider provisioned, changed or deprovisioned a user; MEDIUM for a deprovisioning, INFO otherwise |
+| `scim.group.changed` | Group Changed via SCIM: your identity provider created, changed or deleted a group; MEDIUM for a deletion, INFO otherwise |
+| `webhook.secret.rotated` | Webhook Signing Secret Replaced: an owner or admin replaced the signing secret of a notification webhook, a SIEM webhook destination or the GitHub pull-request webhook. Says whose and who, never the secret |
+| `evidence.exported` | Compliance Evidence Downloaded: a member downloaded the SOC 2 evidence archive, a framework coverage report as a file, or the human-oversight export; INFO. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
 
@@ -403,7 +427,7 @@ Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leav
 
 Prevent alert noise by setting a cooldown period (in minutes) for each rule. Consecutive identical alerts inside the cooldown window are suppressed.
 
-The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule. **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
+The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule; the same goes for the other events that can be INFO (registry approvals, SCIM changes, rejections, evidence downloads). **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
 
 **Show Delivery Log** lists each time a rule sent, failed or was filtered, with the event and channel.
 
@@ -411,12 +435,13 @@ The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Report
 
 ## Integrations {#integrations}
 
-Task trackers, memory providers, file scanning and SIEM export.
+Task trackers, memory providers, file scanning, the GitHub pull-request webhook and SIEM export.
 
 - **Task Management & Alerting** — connect Jira Cloud, PagerDuty, Linear, GitHub Issues or Asana to sync tickets and route governance alerts. **Add Connection** takes the provider, its base URL, an API token or auth secret, and a project key or routing key.
-- **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. See [Prompt Commands](/guide/agent-commands).
+- **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. Owners and admins add, test and remove providers; every member sees the list. See [Prompt Commands](/guide/agent-commands).
 - **VirusTotal Skill Scanning** — opt in to checking the sha256 hash of skill-bundled scripts against VirusTotal; file content is never uploaded. See [VirusTotal Integration](/guide/virustotal-scanning).
-- **SIEM Export** — stream governance events to Splunk, Datadog, a webhook, syslog/CEF, S3 or GCS; **Add Destination** creates one. See [SIEM Export](/guide/siem-export).
+- **GitHub Pull Request Webhook** — the payload URL and signing secret for GitHub's pull request events, which map branches to pull requests for cost per pull request without a GitHub token. **Create webhook** makes it; **Replace secret** makes a new secret and keeps the URL. The secret is shown once. Owners and admins, Biz Org and above. See [Cost per pull request](/guide/budgets#cost-per-pull-request).
+- **SIEM Export** — stream governance events to Splunk, Datadog, a webhook, syslog/CEF, S3 or GCS; **Add Destination** creates one, and **Sources** on a destination's row changes which events it receives. Biz Org and above: on another plan the card says so, and destinations kept from before a downgrade show as **Paused**. See [SIEM Export](/guide/siem-export#plans).
 
 ---
 

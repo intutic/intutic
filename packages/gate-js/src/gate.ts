@@ -9,13 +9,32 @@
  * PreToolUse hook for them. This package is that enforcement point: the
  * missing adapter, written against Intutic's own published gate contract.
  *
- * Five tiers, in order — identical precedence to the Python SDK:
+ * Six tiers, in order — identical precedence to the Python SDK:
  *
  *   A0  SSO group policy  from the policy snapshot       unknown groups refused
  *   A1  policy snapshot   port of intuticGate()          fails CLOSED
+ *   M   MCP registry      from the policy snapshot       unverified snapshot admits none
  *   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
  *   A2  image integrity   local check                    fails CLOSED
  *   B   POST /hook-gate   control-plane check             fail posture set by GateClient
+ *
+ * Tier M applies the workspace's MCP server registry and `mcpAllowedServers`
+ * list to an `mcp__<server>__<tool>` call, from the snapshot's
+ * `@mcp_registry` and `@mcp_allowlist` records, with the decision, codes,
+ * rule ids and reasons the hook gates and the MCP proxy use
+ * (`mcpRegistryRecord.ts`, a byte-identical copy of `@intutic/shared-types`'
+ * module). On a snapshot that fails its integrity check, Tier M refuses
+ * every MCP call with `POLICY_SNAPSHOT_UNVERIFIED`, observe-only or not: a
+ * deleted or edited record cannot be told from the workspace's own. A
+ * refusal of an unapproved server reaches the control plane as a
+ * `tool_blocked` event whose reason ends `[mcpDefaultPolicy]`, which puts the
+ * server in the approval queue, as a hook gate's refusal does.
+ *
+ * A hold rule in A1 or A3 (a `REQUIRE_APPROVAL:` SOP, or a local
+ * `review_before:` token) refuses with {@link IntuticGateHold} after
+ * recording the hold for review, unless an approved bypass lets this exact
+ * call through — the hook gates' and the MCP proxy's mechanism, through the
+ * same decisions API. See hold.ts.
  *
  * A1 and A2 are load-bearing and local. Tier B contributes the DLP regexes
  * and workspace policy from the control plane; whether an unreachable control
@@ -48,8 +67,11 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { isDeploy, touchesInfra } from './actions.js'
-import { IntuticGateRefusal } from './errors.js'
+import { IntuticGateHold, IntuticGateRefusal, type GateRefusalCode } from './errors.js'
+import { holdMessage, requestHold } from './hold.js'
+import { tooLargeReason } from './limits.js'
 import { GateClient } from './client.js'
+import { evaluateMcpAllowlist, evaluateMcpRegistry, mcpSnapshotUnverifiedRefusal } from './mcpRegistryRecord.js'
 import * as imagecheck from './imagecheck.js'
 import * as snapshot from './snapshot.js'
 import * as soprules from './soprules.js'
@@ -224,6 +246,17 @@ export class Gate {
     const target = String(toolInput.path ?? toolInput.file_path ?? '')
     const command = String(toolInput.command ?? '')
 
+    // ---- Size: refused before any tier reads the call ------------------
+    //
+    // Every built-in rule is linear, but a workspace's own WHERE patterns
+    // need not be, and the bound is what keeps a crafted call from holding
+    // the agent (or a harness hook) past its deadline. See limits.ts.
+    const tooLarge = tooLargeReason(command, toolInput)
+    if (tooLarge !== null) {
+      await this.emit('tool_blocked', toolName, tooLarge)
+      throw new IntuticGateRefusal(tooLarge, 'COMMAND_TOO_LARGE')
+    }
+
     await this.reportSnapshotHealthOnce(toolName)
 
     // ---- Tier A0: SSO group policy, from the snapshot ------------------
@@ -252,8 +285,14 @@ export class Gate {
       )
     }
 
+    // Hold rules an approved bypass let through on this call, so the register's
+    // copy of the same rule in Tier A3 does not hold it a second time.
+    const approved = new Set<string>()
     const d = snapshot.evaluate(toolName, target, command, this.getSnapshot(), disabled)
-    if (d.severity === snapshot.SEV_BLOCK) {
+    if (d.severity === snapshot.SEV_HOLD) {
+      await this.hold({ id: d.ruleId, reason: d.reason }, toolName, toolInput)
+      approved.add(d.ruleId)
+    } else if (d.severity === snapshot.SEV_BLOCK) {
       await this.emit('tool_blocked', toolName, d.reason, toolInput)
       throw new IntuticGateRefusal(d.reason, 'SNAPSHOT')
     }
@@ -262,6 +301,9 @@ export class Gate {
     } else if (d.severity === snapshot.SEV_SHADOW) {
       await this.emit('tool_would_block', toolName, d.reason, toolInput)
     }
+
+    // ---- Tier M: the MCP server registry and allowlist ----------------
+    await this.guardMcp(toolName, toolInput)
 
     // ---- Tier A3: SOP rules authored in the product --------------------
     //
@@ -277,17 +319,13 @@ export class Gate {
           throw new IntuticGateRefusal(reason, 'SOP_RULE')
         }
         if (rule.action === soprules.ACTION_APPROVAL) {
-          // No human is at the keyboard during an agent run, so an approval
-          // that cannot be granted is a block.
-          await this.emit(
-            'tool_blocked',
-            toolName,
-            `${reason} (approval required; no reviewer in an unattended run)`,
-            toolInput,
-          )
-          throw new IntuticGateRefusal(reason, 'SOP_RULE_APPROVAL')
+          // Held for a person, under the id the snapshot gives the same rule
+          // (`sop.<id>`), so one approval covers the call in either tier.
+          const id = `sop.${rule.id}`
+          if (!approved.has(id)) await this.hold({ id, reason: rule.reason }, toolName, toolInput)
+        } else {
+          await this.emit('tool_flagged', toolName, reason, toolInput)
         }
-        await this.emit('tool_flagged', toolName, reason, toolInput)
       }
     }
 
@@ -327,7 +365,10 @@ export class Gate {
       const resp = await this.client.hookGate(toolName, toolInput)
       if (!resp.allowed) {
         await this.emit('tool_blocked', toolName, resp.reason, toolInput, resp.incidentId)
-        throw new IntuticGateRefusal(resp.reason, 'HOOK_GATE', resp.incidentId)
+        // The hook gate names the MCP registry's own code when the registry
+        // refused; anything else it refuses is HOOK_GATE.
+        const code = MCP_CODES.has(resp.code ?? '') ? (resp.code as GateRefusalCode) : 'HOOK_GATE'
+        throw new IntuticGateRefusal(resp.reason, code, resp.incidentId)
       }
     }
 
@@ -335,7 +376,75 @@ export class Gate {
       await this.emit('tool_allowed', toolName, '', toolInput)
     }
   }
+
+  /**
+   * Throws when the workspace's MCP server registry or allowlist refuses an
+   * `mcp__<server>__<tool>` call: the registry first, as every gate orders
+   * them. An allowlist in `shadow` records the refusal and lets the call on.
+   * A snapshot that failed its integrity check admits no MCP server.
+   */
+  private async guardMcp(toolName: string, toolInput: ToolInput): Promise<void> {
+    if (!toolName.startsWith('mcp__')) return
+    const rest = toolName.slice('mcp__'.length)
+    const sep = rest.indexOf('__')
+    if (sep <= 0) return
+    const snap = this.getSnapshot()
+    const server = rest.slice(0, sep)
+    if (snap.state === 'invalid') {
+      const refusal = mcpSnapshotUnverifiedRefusal(server)
+      const reason = `${refusal.reason} [${refusal.ruleId}]`
+      await this.emit('tool_blocked', toolName, reason, toolInput)
+      throw new IntuticGateRefusal(reason, refusal.code)
+    }
+    const registry = snap.mcpRegistry ? evaluateMcpRegistry(snap.mcpRegistry, server, rest.slice(sep + 2)) : null
+    if (registry) {
+      const reason = `${registry.reason} [${registry.ruleId}]`
+      await this.emit('tool_blocked', toolName, reason, toolInput)
+      throw new IntuticGateRefusal(reason, registry.code)
+    }
+    const allowlist = snap.mcpAllowlist ? evaluateMcpAllowlist(snap.mcpAllowlist, server) : null
+    if (allowlist) {
+      const reason = `${allowlist.reason} [${allowlist.ruleId}]`
+      if (snap.mcpAllowlist!.severity === 'shadow') {
+        await this.emit('tool_would_block', toolName, reason, toolInput)
+        return
+      }
+      await this.emit('tool_blocked', toolName, reason, toolInput)
+      throw new IntuticGateRefusal(reason, allowlist.code)
+    }
+  }
+
+  /**
+   * A hold rule matched: resolves when an approved bypass lets this exact
+   * call through (the remaining tiers still apply), and otherwise throws
+   * {@link IntuticGateHold} after recording the hold.
+   */
+  private async hold(rule: { id: string; reason: string }, toolName: string, toolInput: ToolInput): Promise<void> {
+    const outcome = await requestHold(this.client, rule, toolName, toolInput)
+    if (outcome.kind === 'bypassed') {
+      // Let through, loudly: a bypass nobody can see used is no better than
+      // no review at all.
+      await this.emit(
+        'hold_approved_bypass_used',
+        toolName,
+        `Approved bypass for ${rule.id} — approved by ${outcome.decidedBy || 'an approver'} on hold ${outcome.holdId}`,
+        toolInput,
+      )
+      return
+    }
+    await this.emit('tool_held', toolName, `${rule.reason} [${rule.id}]`, toolInput)
+    throw new IntuticGateHold(holdMessage(rule.reason, rule.id, outcome), outcome.recorded ? outcome.holdId : undefined)
+  }
 }
+
+/** The refusal codes of the MCP registry and allowlist, which the hook gate may also return. */
+const MCP_CODES: ReadonlySet<string> = new Set<GateRefusalCode>([
+  'SERVER_BLOCKED',
+  'SERVER_HELD',
+  'SERVER_NOT_APPROVED',
+  'TOOL_DISABLED',
+  'SERVER_NOT_ALLOWED',
+])
 
 function isAbsolutePath(p: string): boolean {
   return p.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(p)

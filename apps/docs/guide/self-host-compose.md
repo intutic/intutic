@@ -88,6 +88,12 @@ Set `SMTP_URL` in `.env` (`smtp://host:25`, or `smtps://user:password@host:465`)
 and optionally `EMAIL_FROM` (default `noreply@<hostname>`), then
 `docker compose up -d`.
 
+Alerts and approvals go out through the notification hub, which is on with
+every channel: email through `SMTP_URL`, webhooks, Slack and PagerDuty, as your
+notification rules name them. To turn a channel off, set its flag to `false` in
+`.env` (`FF_SLACK_ADAPTER=false`). Webhooks and SIEM export refuse private
+addresses unless their hosts are in `INTUTIC_WEBHOOK_ALLOWED_HOSTS`.
+
 ## Your own changes
 
 Put changes to the stack in `/opt/intutic/docker-compose.override.yml`: an extra

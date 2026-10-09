@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { opencodeAdapter } from './opencode.js'
 import { ALL_ADAPTERS } from './detector.js'
-import { HARNESS_CONFIG_FILES } from './types.js'
+import { HARNESS_FILES } from '@intutic/sync-daemon'
 
 const PROXY_URL = 'http://127.0.0.1:4000/v1'
 
@@ -79,14 +79,15 @@ describe('opencode adapter', () => {
       await expect(readFile(join(root, 'AGENTS.md'), 'utf-8')).rejects.toThrow()
     })
 
-    it('installs the plugin even with zero SOPs — the plugin is the governance vehicle, not the rules file', async () => {
-      await opencodeAdapter.writeConfig(root, [], PROXY_URL)
+    it('installGate writes the plugin — the plugin is the governance vehicle, not the rules file', async () => {
+      await opencodeAdapter.installGate!(root, PROXY_URL)
       const plugin = await readFile(join(root, '.opencode', 'plugins', 'intutic-governance.js'), 'utf-8')
       expect(plugin).toContain("'tool.execute.before'")
       expect(plugin).toContain('Intutic gate body')
     })
 
     it('does not write opencode.json', async () => {
+      await opencodeAdapter.installGate!(root, PROXY_URL)
       await opencodeAdapter.writeConfig(root, [], PROXY_URL)
       await expect(readFile(join(root, 'opencode.json'), 'utf-8')).rejects.toThrow()
     })
@@ -106,8 +107,8 @@ describe('opencode adapter', () => {
       expect(ALL_ADAPTERS.some((a) => a.type === 'opencode')).toBe(true)
     })
 
-    it('is registered in HARNESS_CONFIG_FILES with its config file', () => {
-      expect(HARNESS_CONFIG_FILES['opencode']).toBe('AGENTS.md')
+    it('is registered in HARNESS_FILES with its config file', () => {
+      expect(HARNESS_FILES['opencode']).toBe('AGENTS.md')
     })
   })
 })

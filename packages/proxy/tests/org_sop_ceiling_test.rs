@@ -6,6 +6,7 @@
 //! response (not a mock trait) so the wire-format contract (the `scope`
 //! field, `#[serde(default)]`) is exercised too.
 
+use intutic_proxy::credential::RequestCredential;
 use intutic_proxy::gateway::{init_gateway_config, GatewayConfig};
 use intutic_proxy::sops::{all_sops_for_workspace, governance_fields_from};
 use std::net::SocketAddr;
@@ -87,7 +88,7 @@ async fn org_sop_applies_as_a_ceiling_through_the_full_fetch_parse_resolve_pipel
         &client,
         Some(&control_plane_url),
         Some("ws_ceiling"),
-        Some("vk_ceiling_deadbeef"),
+        RequestCredential::classify("vk_ceiling_deadbeef").virtual_key(),
         None,
     )
     .await;
@@ -131,7 +132,7 @@ async fn a_workspace_with_no_org_sop_at_all_is_unaffected_by_the_ceiling_logic()
         &client,
         Some(&control_plane_url),
         Some("ws_no_ceiling"),
-        Some("vk_no_ceiling_deadbeef"),
+        RequestCredential::classify("vk_no_ceiling_deadbeef").virtual_key(),
         None,
     )
     .await;

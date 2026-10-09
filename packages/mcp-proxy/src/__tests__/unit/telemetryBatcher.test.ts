@@ -125,8 +125,13 @@ describe('telemetryBatcher Unit Tests', () => {
 
     enqueueEvent(event)
 
-    // Wait for the 100ms flush timer to trigger
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    // Wait for the 100ms flush to reach the server, rather than a fixed time:
+    // a loaded machine delivers it late. Then one more flush interval, so a
+    // second batch would have landed.
+    for (let waited = 0; receivedBatches.length + malformedBodies.length === 0 && waited < 15_000; waited += 50) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150))
 
     expect(malformedBodies).toEqual([])
     expect(receivedBatches).toHaveLength(1)
@@ -134,5 +139,5 @@ describe('telemetryBatcher Unit Tests', () => {
     expect(receivedBatches[0].events[0].toolName).toBe('Bash')
     // The daemon's own credential reaches the control plane on the upload.
     expect(receivedBatches[0].authorization).toBe('Bearer test-telemetry-key')
-  })
+  }, 30_000)
 })

@@ -39,10 +39,10 @@ human-in-the-loop validation or in-process local interception:
 
 ### Comparison: Local Harness Rules vs. LLM-as-a-Judge
 
-| Feature | Local Harness Rules (`CLAUDE.md` / WASM) | LLM-as-a-Judge (LLMProbe) |
+| Feature | Local Harness Rules (rules files / WASM) | LLM-as-a-Judge (LLMProbe) |
 | :--- | :--- | :--- |
 | **Execution Timing** | **Pre-flight (Before execution)** | **Post-flight / Async (During/After execution)** |
-| **Latency** | **No model call and no network hop**: checked on the machine before the action runs (WASM rules are stopped at a 5 ms execution timeout) | **A model call**: seconds, while or after the response streams |
+| **Latency** | **No model call and no network hop**: checked on the machine before the action runs (WASM rules are stopped by an instruction budget) | **A model call**: seconds, while or after the response streams |
 | **Purpose** | **Hard Prevention**: Instantly blocks `rm -rf` and force pushes at the hook gate, blocks a `DROP TABLE` in an MCP tool call (at the hook gate it is flagged, not blocked; at the LLM proxy a SOP's [`sql_guard:`](/reference/sop-front-matter#destructive-sql) refuses one aimed at a database outside its allowlist), and redacts API keys before destruction occurs. | **Semantic Audit**: Evaluates whether the agent followed complex, subjective guidelines (e.g. *"Did the refactored code maintain proper architectural layering?"*). |
 
 *Without local harness rules, an agent would execute destructive commands before an LLM judge even finishes thinking!*
@@ -86,7 +86,7 @@ that are tested in both directions rather than examples that were never executab
 
 ### 1. Secret & Credential Redaction (Markdown SOP)
 
-Save as `CLAUDE.md`, `.cursorrules`, or `.windsurfrules`:
+Save under `.intutic/sops/` (for example `.intutic/sops/secrets-dlp/rules.md`); `intutic connect` writes it into each harness's rules file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)):
 
 ```markdown
 # SOP: Secrets DLP & Credential Protection

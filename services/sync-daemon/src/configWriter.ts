@@ -12,6 +12,7 @@ import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import { execFile as _execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { HarnessType as HarnessTypes, rulesFileOf } from '@intutic/shared-types'
 import type { HarnessType, SyncSopEntry, ConfigEdit } from '@intutic/shared-types'
 
 const execFile = promisify(_execFile)
@@ -38,62 +39,39 @@ export async function setImmutable(filePath: string): Promise<void> {
 
 // ─── Harness config file mapping ─────────────────────────────────────
 
+/** Every adapter that writes `.env.intutic`: Codex and the SDK-gated frameworks. */
+export const ENV_INTUTIC_WRITERS: readonly string[] = [
+  'codex',
+  'langgraph',
+  'langchain',
+  'crewai',
+  'autogen',
+  'ag2',
+  'google-adk',
+  'openai-agents',
+  'pydantic-ai',
+  'smolagents',
+  'strands',
+  'agent-framework',
+  'mastra',
+  'vercel-ai-sdk',
+  'eve',
+  'trueforge',
+  'ai-sdk-harness',
+  'ai-sdk-workflow',
+]
+
 /**
- * Each harness's rules file, relative to the workspace root: the file the
- * drift watcher watches, config capture uploads, and SkillOpt edits and the
- * decisions log write into. An empty string means the harness has no
- * workspace rules file: its governance lives elsewhere (dsh under $DSH_HOME),
- * or it writes no config of its own because it delegates to a wrapped
- * harness's gate (Xirp, Agentic Orchestrator, AgentCore Runtime) or is gated
- * by a service (TrueForge server). The SDK-gated frameworks share
- * `.env.intutic`, which carries the proxy variables.
+ * The workspace file captured, watched for drift and edited by SkillOpt for
+ * each harness: its rules file (`rulesFileOf`, from `HARNESS_RULES_FILES` in
+ * `@intutic/shared-types`), else `.env.intutic` for the SDK-gated frameworks,
+ * which carries their proxy variables. An empty string means nothing in the
+ * workspace: the harness's rule sets go elsewhere (OpenClaw's agent
+ * workspace) or nowhere (see the map's `none` entries).
  */
-export const HARNESS_FILES: Record<HarnessType, string> = {
-  cursor: '.cursorrules',
-  'claude-code': 'CLAUDE.md',
-  antigravity: '.gemini/settings.json',
-  windsurf: '.windsurfrules',
-  aider: '.aider.conf.yml',
-  openhands: 'config.toml',
-  codex: '.env.intutic',
-  n8n: '.intutic/n8n/governance-workflow.json',
-  openclaw: '.openclaw/openclaw.json',
-  hermes: '.hermes/config.yaml',
-  pi: '.pi/hooks.json',
-  'github-copilot': '.github/copilot-instructions.md',
-  cline: '.clinerules/intutic-governance.md',
-  'roo-code': '.roorules',
-  continue: '.continue/config.json',
-  'claude-desktop': 'claude_desktop_config.json',
-  goose: '.agents/plugins/intutic-governance/hooks/hooks.json',
-  'open-webui': '.open-webui/intutic-governance-filter.py',
-  langgraph: '.env.intutic',
-  // Muse Code, Grok Build and OpenCode all read AGENTS.md.
-  'muse-code': 'AGENTS.md',
-  grok: 'AGENTS.md',
-  opencode: 'AGENTS.md',
-  dsh: '',
-  xirp: '',
-  'agentic-orchestrator': '',
-  langchain: '.env.intutic',
-  crewai: '.env.intutic',
-  autogen: '.env.intutic',
-  ag2: '.env.intutic',
-  'google-adk': '.env.intutic',
-  'openai-agents': '.env.intutic',
-  'pydantic-ai': '.env.intutic',
-  smolagents: '.env.intutic',
-  strands: '.env.intutic',
-  'agent-framework': '.env.intutic',
-  mastra: '.env.intutic',
-  'vercel-ai-sdk': '.env.intutic',
-  eve: '.env.intutic',
-  trueforge: '.env.intutic',
-  'ai-sdk-harness': '.env.intutic',
-  'ai-sdk-workflow': '.env.intutic',
-  'agentcore-runtime': '',
-  'trueforge-server': '',
-}
+export const HARNESS_FILES: Record<HarnessType, string> = Object.fromEntries(
+  (Object.values(HarnessTypes) as HarnessType[]).map((h) => [h, rulesFileOf(h) ?? (ENV_INTUTIC_WRITERS.includes(h) ? '.env.intutic' : '')]),
+) as Record<HarnessType, string>
 
 /**
  * The workspace's local SOPs (`.intutic/sops/<dir>/*.md`, narrowed by
@@ -224,7 +202,9 @@ export async function applyConfigEdits(
   const outcomes: ConfigEditApplyOutcome[] = []
 
   for (const applied of appliedEdits) {
-    const filename = HARNESS_FILES[applied.harnessType as HarnessType] || applied.filePath
+    // The harness's rules file only: an edit is instruction text, and a file
+    // the product does not read as instructions (`.env.intutic`) is no place for it.
+    const filename = rulesFileOf(applied.harnessType as HarnessType)
     const editsList: ConfigEdit[] = typeof applied.edits === 'string'
       ? JSON.parse(applied.edits)
       : applied.edits
@@ -240,7 +220,7 @@ export async function applyConfigEdits(
           index,
           operation: edit.operation,
           applied: false,
-          reason: `No config file resolved for harness "${applied.harnessType}"`,
+          reason: `Harness "${applied.harnessType}" has no rules file in the workspace`,
         })),
       })
       continue

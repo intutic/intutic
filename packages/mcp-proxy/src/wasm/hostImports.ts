@@ -97,7 +97,8 @@ export function createHostImports(
     // Mirrors host.rs's `abort` import: log only, never throw/trap. A guest
     // unhandled-exception calling `abort` must not crash the evaluation —
     // the caller (worker.ts) still wraps the whole `evaluate` call so any
-    // resulting trap fails open, but this import itself is inert.
+    // resulting trap is a rule that reached no verdict, but this import itself
+    // is inert.
     abort: (msgPtr: number, filePtr: number, line: number, col: number): void => {
       log.warn(
         { action: 'wasm_abort', msgPtr, filePtr, line, col },
@@ -136,9 +137,9 @@ export function createHostImports(
 
     // Ported from host.rs's `read_referenced_file_impl`. Returns a length or
     // one of the negative codes; never throws — a host trap would unwind the
-    // guest, fail the whole evaluation and land in the runner's fail-open
-    // arm, so one malformed call would silently switch off every OTHER
-    // check the rule performs.
+    // guest and leave the whole evaluation without a verdict, so one malformed
+    // call would override every OTHER check the rule performs with the fail
+    // setting.
     read_referenced_file: (pathPtr: number, pathLen: number, outPtr: number, outCap: number): number => {
       // Charged before anything else, including argument validation, so a
       // guest cannot spin on cheap malformed calls any more than on

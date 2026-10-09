@@ -18,6 +18,7 @@
  * @module
  */
 
+import { REGO_INPUT_VERSION, boundedRegoInput } from '@intutic/shared-types'
 import type { ToolsListEntry } from '../session.js'
 
 export interface WasmContextInput {
@@ -48,6 +49,8 @@ export interface WasmContextInput {
   corroboratingDetectors: number
   /** `undefined` when no `tools/list` response has been TOFU-checked yet this session. */
   toolContractChanged: boolean | undefined
+  /** The MCP server this proxy fronts (`--server-name`); a Rego rule reads it as `input.server`. */
+  serverName?: string
 }
 
 /** `(tool, count)` pairs, wire-shaped as 2-element arrays — see context.ts's module doc. */
@@ -88,4 +91,31 @@ export function buildWasmContext(input: WasmContextInput): Record<string, unknow
     ctx['tool_contract_changed'] = input.toolContractChanged
   }
   return ctx
+}
+
+/**
+ * The `input` document a Rego rule is evaluated against — version 1, the shape
+ * `packages/proxy/src/wasm/opa.rs`'s `policy_input` builds for the LLM proxy,
+ * less the fields this proxy has no honest value for (`model`, `risk_tier`,
+ * the budget), plus `server`. Bounded and serialised by `boundedRegoInput`,
+ * which cuts long strings in `args` exactly as the Rust host does.
+ */
+export function buildRegoInput(input: WasmContextInput): string {
+  return boundedRegoInput({
+    v: REGO_INPUT_VERSION,
+    host: 'mcp',
+    tool: input.toolName,
+    args: input.toolArguments ?? {},
+    ...(input.serverName ? { server: input.serverName } : {}),
+    session: {
+      id: input.sessionId,
+      workspace_id: input.workspaceId,
+      tool_sequence: [...input.toolSequence],
+      calls_last_60s: input.callsLast60s,
+    },
+    request: {
+      dlp_findings: input.dlpFindingDescriptions.map((description) => ({ pattern_name: description })),
+      injection_findings: [...input.injectionFindings],
+    },
+  })
 }

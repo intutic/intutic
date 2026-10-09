@@ -88,6 +88,9 @@ uuid = { version = "1", features = ["v4"] }
 nanoid = "0.4"
 base64 = "0.22"
 sha2 = "0.10"
+# `crypto.sha1` for Rego policies (src/wasm/opa_builtins.rs). Already in the
+# lockfile transitively, so this adds no new crate to the tree.
+sha1 = "0.10"
 hex = "0.4"
 anyhow = "1"
 # Storage trait (src/store) — dyn-compatible async methods. Native AFIT is
@@ -149,6 +152,10 @@ harness = false
 
 [[bench]]
 name = "anomaly_bench"
+harness = false
+
+[[bench]]
+name = "rego_bench"
 harness = false
 
 [[bench]]

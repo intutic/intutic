@@ -117,6 +117,7 @@ if (!IS_OSS) {
       { text: 'Intelligence Engine (Cloud)', link: '/guide/intelligence' },
       { text: 'Activity Logs (Cloud)', link: '/guide/traces' },
       { text: 'Agents (Cloud)', link: '/guide/agents' },
+      { text: 'AI Inventory (Cloud)', link: '/guide/ai-inventory' },
       { text: 'Agent Guidelines (Cloud)', link: '/guide/sops' },
       { text: 'GitOps for SOPs (Cloud)', link: '/guide/gitops-sops' },
       { text: 'Review Queue (Cloud)', link: '/guide/decisions' },
@@ -126,12 +127,13 @@ if (!IS_OSS) {
       { text: 'Session Safety & Budgets (Cloud)', link: '/guide/loops' },
       { text: 'Trajectory Monitor (Cloud)', link: '/guide/trajectory-monitor' },
       { text: 'Settings & Config (Cloud)', link: '/guide/settings' },
+      { text: 'Manage with Terraform (Cloud)', link: '/guide/terraform' },
       { text: 'Audit Timeline (Cloud)', link: '/guide/audit-timeline' },
       { text: 'Organizations, Teams & Billing (Cloud)', link: '/guide/organizations' },
       { text: 'Intelligent Model Routing (Cloud)', link: '/guide/intelligent-routing' },
       { text: 'Pre-Adoption Report for Model Upgrades (Cloud)', link: '/guide/mirror-adoption-report' },
       { text: 'Runaway-Spend Counterfactual (Cloud)', link: '/guide/averted-spend' },
-      { text: 'Signed Provider-Downtime Evidence (Cloud)', link: '/guide/provider-incidents' },
+      { text: 'Provider-Downtime Evidence (Cloud)', link: '/guide/provider-incidents' },
       { text: 'Managed Gateway Cells (Self-serve+)', link: '/guide/managed-cells' },
       // Audit Timeline (Settings › Audit Timeline) is listed above and
       // Evaluator Sandbox (Labs › Evaluator Sandbox) under Advanced Features.
@@ -145,6 +147,7 @@ sidebarGuide.push({
   text: 'Advanced Features',
   items: [
     { text: 'Custom Filters (Open-Core)', link: '/guide/wasm-rules' },
+    { text: 'Rego Policies (Open-Core)', link: '/guide/rego-policies' },
     { text: 'Graph Guardrails (Open-Core)', link: '/guide/graph-guardrails' },
     { text: 'Sandboxed Execution (Open-Core)', link: '/guide/sandboxed-execution' },
     { text: 'Governance Controls Checklist (Open-Core)', link: '/guide/governance-controls' },
@@ -183,7 +186,7 @@ if (!IS_OSS) {
       { text: 'Security & Identity (Cloud)', link: '/guide/security' },
       { text: 'SCIM Provisioning (Enterprise)', link: '/guide/scim' },
       { text: 'Emergency Overrides (Cloud)', link: '/guide/break-glass' },
-      { text: 'SIEM Export (Cloud)', link: '/guide/siem-export' },
+      { text: 'SIEM Export (Biz Org+)', link: '/guide/siem-export' },
       { text: 'Compliance Evidence (Cloud)', link: '/guide/compliance-evidence' },
       { text: 'Framework Mapping (Cloud)', link: '/guide/framework-mapping' },
       { text: 'VirusTotal Integration (Cloud)', link: '/guide/virustotal-scanning' },
@@ -222,6 +225,17 @@ const sidebarReference = [
       ...(!IS_OSS ? [
         { text: 'REST API (Cloud)', link: '/reference/api' },
         { text: 'SOP Format (Cloud)', link: '/reference/sop-format' },
+        {
+          text: 'Terraform Provider (Cloud)',
+          collapsed: true,
+          items: [
+            { text: 'Provider', link: '/reference/terraform/' },
+            ...['sop', 'policy', 'guardrail', 'workspace_settings', 'virtual_key', 'gateway', 'notification_rule', 'mcp_server_decision', 'siem_destination', 'wasm_rule']
+              .map((r) => ({ text: `intutic_${r}`, link: `/reference/terraform/resources/${r}` })),
+            ...['workspace', 'members']
+              .map((d) => ({ text: `intutic_${d} (data)`, link: `/reference/terraform/data-sources/${d}` })),
+          ],
+        },
       ] : []),
       { text: 'clawde SDK (Open-Core)', link: '/reference/clawde-sdk' },
       { text: 'Tool Gate SDK (Open-Core)', link: '/reference/gate-sdk' },
@@ -389,7 +403,7 @@ export default defineConfig({
             { text: 'Cursor', link: '/integrations/cursor' },
             { text: 'Windsurf', link: '/integrations/windsurf' },
             { text: 'Aider', link: '/integrations/aider' },
-            { text: 'Antigravity', link: '/integrations/antigravity' },
+            { text: 'Antigravity and Gemini CLI', link: '/integrations/antigravity' },
             { text: 'Codex', link: '/integrations/codex' },
             { text: 'OpenHands', link: '/integrations/openhands' },
             { text: 'n8n', link: '/integrations/n8n' },

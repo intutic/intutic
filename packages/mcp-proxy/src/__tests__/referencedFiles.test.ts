@@ -15,6 +15,7 @@ import {
   MAX_REFERENCED_FILES,
   MAX_REFERENCED_FILE_BYTES,
   ERR_NOT_FOUND,
+  ERR_NOT_READ,
   ERR_REFUSED,
   ERR_TOO_LARGE,
 } from '../wasm/referencedFiles.js'
@@ -33,31 +34,56 @@ const bytes = (r: ReturnType<ReferencedFiles['lookup']>) => (r.ok ? Buffer.from(
 
 describe('candidateTokens', () => {
   it('a manifest named by a deploy command is a candidate', () => {
-    expect(candidateTokens(call('Bash', { command: 'kubectl apply -f k8s/deploy.yaml' }))).toEqual(['k8s/deploy.yaml'])
+    expect(candidateTokens(call('Bash', { command: 'kubectl apply -f k8s/deploy.yaml' })).tokens).toEqual(['k8s/deploy.yaml'])
   })
   it('structured path arguments are candidates too', () => {
-    expect(candidateTokens(call('Read', { file_path: 'infra/main.tf' }))).toEqual(['infra/main.tf'])
+    expect(candidateTokens(call('Read', { file_path: 'infra/main.tf' })).tokens).toEqual(['infra/main.tf'])
   })
   it('a flag with an equals sign still yields the path', () => {
-    expect(candidateTokens(call('Bash', { command: 'helm template --values=charts/prod.yaml .' }))).toEqual(['charts/prod.yaml'])
+    expect(candidateTokens(call('Bash', { command: 'helm template --values=charts/prod.yaml .' })).tokens).toEqual(['charts/prod.yaml'])
   })
   it('quotes and shell separators do not hide a path', () => {
-    expect(candidateTokens(call('Bash', { command: 'cd infra && kubectl apply -f "k8s/deploy.yaml"; echo done' }))).toEqual(['k8s/deploy.yaml'])
+    expect(candidateTokens(call('Bash', { command: 'cd infra && kubectl apply -f "k8s/deploy.yaml"; echo done' })).tokens).toEqual(['k8s/deploy.yaml'])
   })
   it('a path without a manifest extension is never a candidate', () => {
     for (const command of ['cat README.md', 'python3 deploy.py', 'kubectl apply -f manifest', 'sh run.sh']) {
-      expect(candidateTokens(call('Bash', { command })), command).toEqual([])
+      expect(candidateTokens(call('Bash', { command })).tokens, command).toEqual([])
     }
   })
   it('candidates are deduped and capped', () => {
     const many = Array.from({ length: MAX_REFERENCED_FILES + 4 }, (_, i) => `m${i}.yaml`)
-    const tokens = candidateTokens(call('Bash', { command: `kubectl apply -f ${many.join(' -f ')} -f ${many[0]}` }))
+    const candidates = candidateTokens(call('Bash', { command: `kubectl apply -f ${many.join(' -f ')} -f ${many[0]}` }))
+    expect(candidates.pastLimits).toBe(true)
+    const tokens = candidates.tokens
     expect(tokens).toHaveLength(MAX_REFERENCED_FILES)
     expect(new Set(tokens).size).toBe(tokens.length)
   })
   it('non-object arguments are ignored', () => {
-    expect(candidateTokens([{ name: 'x', arguments: 'kubectl apply -f a.yaml' }])).toEqual([])
-    expect(candidateTokens([{ name: 'x', arguments: null }])).toEqual([])
+    expect(candidateTokens([{ name: 'x', arguments: 'kubectl apply -f a.yaml' }]).tokens).toEqual([])
+    expect(candidateTokens([{ name: 'x', arguments: null }]).tokens).toEqual([])
+  })
+})
+
+describe('paths past the limits', () => {
+  it('eight decoys before the manifest that matters: it answers ERR_NOT_READ, not ERR_REFUSED', async () => {
+    const root = await scratch()
+    const decoys = Array.from({ length: MAX_REFERENCED_FILES }, (_, i) => `d${i}.yaml`)
+    for (const d of decoys) await fs.writeFile(path.join(root, d), 'kind: ConfigMap')
+    await fs.writeFile(path.join(root, 'prod.yaml'), 'image: app:latest')
+    const files = await prefetch(call('Bash', { command: `kubectl apply -f ${decoys.join(' -f ')} -f prod.yaml` }), root)
+    expect(bytes(files.lookup('d0.yaml'))).toBe('kind: ConfigMap')
+    expect(bytes(files.lookup('prod.yaml'))).toBe(ERR_NOT_READ)
+    // Within the limits, a path the call never named is still refused.
+    expect(bytes((await prefetch(call('Bash', { command: 'kubectl apply -f d0.yaml' }), root)).lookup('prod.yaml'))).toBe(ERR_REFUSED)
+  })
+  it('a manifest named after 64 KiB of padding answers ERR_NOT_READ, and the flag survives the trip to the worker', async () => {
+    const root = await scratch()
+    await fs.writeFile(path.join(root, 'prod.yaml'), 'image: app:latest')
+    const command = `echo ${'x'.repeat(64 * 1024)}; kubectl apply -f prod.yaml`
+    const candidates = candidateTokens(call('Bash', { command }))
+    expect(candidates).toEqual({ tokens: [], pastLimits: true })
+    const files = ReferencedFiles.fromTable(structuredClone((await prefetch(call('Bash', { command }), root)).toTable()))
+    expect(bytes(files.lookup('prod.yaml'))).toBe(ERR_NOT_READ)
   })
 })
 
@@ -91,7 +117,7 @@ describe('readTokens', () => {
     const outside = await scratch()
     await fs.writeFile(path.join(outside, 'secret.yaml'), 'nope')
     const token = `../${path.basename(outside)}/secret.yaml`
-    expect(candidateTokens(call('Bash', { command: `kubectl apply -f ${token}` }))).toEqual([token])
+    expect(candidateTokens(call('Bash', { command: `kubectl apply -f ${token}` })).tokens).toEqual([token])
     const files = await readTokens([token], root)
     expect(bytes(files.lookup(token))).toBe(ERR_REFUSED)
     expect(files.refusalReason(token)).toBe('contains a `..` component')

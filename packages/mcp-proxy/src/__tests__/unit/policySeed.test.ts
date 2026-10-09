@@ -11,7 +11,7 @@
  * directly rather than left to review.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import * as http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -26,6 +26,29 @@ function writeSnapshot(dir: string, body: Record<string, unknown>): string {
   writeFileSync(p, JSON.stringify(body, null, 2))
   return p
 }
+
+describe('seedFromSnapshot default path', () => {
+  it("reads the sync daemon's verified copy, not the live snapshot beside it", async () => {
+    const home = mkdtempSync(join(tmpdir(), 'intutic-seed-home-'))
+    const saved = { home: process.env['HOME'], snap: process.env['INTUTIC_POLICY_SNAPSHOT'] }
+    try {
+      process.env['HOME'] = home
+      delete process.env['INTUTIC_POLICY_SNAPSHOT']
+      const hooks = join(home, '.intutic', 'hooks')
+      mkdirSync(join(hooks, 'verified'), { recursive: true })
+      const body = (workspaceId: string) => JSON.stringify({ workspaceId, generatedAt: new Date().toISOString(), sopRules: [] })
+      writeFileSync(join(hooks, 'policy-snapshot.json'), body('ws_seed_live_edit'))
+      writeFileSync(join(hooks, 'verified', 'policy-snapshot.json'), body('ws_seed_verified'))
+      expect(await seedFromSnapshot()).toBe('ws_seed_verified')
+    } finally {
+      if (saved.home === undefined) delete process.env['HOME']
+      else process.env['HOME'] = saved.home
+      if (saved.snap !== undefined) process.env['INTUTIC_POLICY_SNAPSHOT'] = saved.snap
+      invalidatePolicy('ws_seed_verified')
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
 
 describe('seedFromSnapshot', () => {
   let dir: string
@@ -148,7 +171,7 @@ describe('seedFromSnapshot', () => {
         refreshed = await resolvePolicy(WS)
       }
       expect(refreshed!.mcpRegistry).toEqual({
-        defaultPolicy: 'deny', approvedServers: ['github'], blockedServers: [], disabledTools: {},
+        defaultPolicy: 'deny', approvedServers: ['github'], blockedServers: [], heldServers: [], disabledTools: {},
       })
     } finally {
       if (previous === undefined) delete process.env['CONTROL_PLANE_URL']

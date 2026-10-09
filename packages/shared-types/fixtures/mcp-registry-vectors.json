@@ -1,0 +1,374 @@
+{
+  "_comment": "MCP server registry vectors. Every implementation of the registry decision (evaluateMcpRegistry in shared-types, the MCP proxy, the control plane's hook gate, @intutic/gate, intutic-clawde, and the policy snapshot's @mcp_registry record through the JavaScript and bash hook gates) runs these cases and must reach the same code, rule id and reason. The allowlist cases do the same for evaluateMcpAllowlist and the @mcp_allowlist record (not the MCP proxy, which words its own allowlist refusal). toolName is the name a harness hook sees; the server is the part before the first '__' after 'mcp__', the tool the rest. Edit the cases, never one implementation's expectations. The unverified cases hold every gate that reads the policy snapshot (the JavaScript and bash hook gates, @intutic/gate, its sandbox gate, intutic-clawde) to one answer on a snapshot that fails its integrity check: each writes the named snapshot, applies the named tamper to the file, and must refuse every MCP call with POLICY_SNAPSHOT_UNVERIFIED at block, observe-only workspaces included, while leaving a call that is not an MCP call to its other rules. Tampers: registryDenyToAllow (the registry record rewritten with defaultPolicy allow), registryUnblock (a server taken off blockedServers), registryLineDeleted, allowlistLineDeleted, allowlistWidened (a server added to the allowlist), allowlistShadowed (the allowlist's severity set to shadow), digestLineDeleted (the #digest line removed and a server added to the allowlist).",
+  "registries": {
+    "unrestricted": {
+      "defaultPolicy": "allow",
+      "approvedServers": [],
+      "blockedServers": [],
+      "heldServers": [],
+      "disabledTools": {}
+    },
+    "allowWithDecisions": {
+      "defaultPolicy": "allow",
+      "approvedServers": [
+        "github"
+      ],
+      "blockedServers": [
+        "pastebin"
+      ],
+      "heldServers": [
+        "drifted"
+      ],
+      "disabledTools": {
+        "github": [
+          "delete_repo"
+        ],
+        "pg-prod": [
+          "drop__all"
+        ]
+      }
+    },
+    "deny": {
+      "defaultPolicy": "deny",
+      "approvedServers": [
+        "github",
+        "pg-prod"
+      ],
+      "blockedServers": [
+        "pastebin"
+      ],
+      "heldServers": [
+        "drifted"
+      ],
+      "disabledTools": {
+        "github": [
+          "delete_repo"
+        ],
+        "pg-prod": [
+          "drop__all"
+        ]
+      }
+    },
+    "denyNothingApproved": {
+      "defaultPolicy": "deny",
+      "approvedServers": [],
+      "blockedServers": [],
+      "heldServers": [],
+      "disabledTools": {}
+    }
+  },
+  "cases": [
+    {
+      "name": "an unrestricted registry refuses nothing",
+      "registry": "unrestricted",
+      "toolName": "mcp__anything__run",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a blocked server is refused under allow",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__pastebin__paste",
+      "code": "SERVER_BLOCKED",
+      "ruleId": "mcp_registry.pastebin",
+      "reason": "MCP server \"pastebin\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
+    },
+    {
+      "name": "a held server is refused under allow",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__drifted__query",
+      "code": "SERVER_HELD",
+      "ruleId": "mcp_registry.drifted",
+      "reason": "MCP server \"drifted\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "an undecided server passes under allow",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__newcomer__query",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "an approved server passes",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__github__create_issue",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a disabled tool is refused on an approved server",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__github__delete_repo",
+      "code": "TOOL_DISABLED",
+      "ruleId": "mcp_registry.github.delete_repo",
+      "reason": "Tool \"delete_repo\" is disabled on MCP server \"github\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
+    },
+    {
+      "name": "a tool disabled on one server is not disabled on another",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__gitlab__delete_repo",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a tool name after the server may carry a double underscore",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__pg-prod__drop__all",
+      "code": "TOOL_DISABLED",
+      "ruleId": "mcp_registry.pg-prod.drop__all",
+      "reason": "Tool \"drop__all\" is disabled on MCP server \"pg-prod\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
+    },
+    {
+      "name": "a disabled tool name is matched whole",
+      "registry": "allowWithDecisions",
+      "toolName": "mcp__pg-prod__drop",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "an unapproved server is refused under deny",
+      "registry": "deny",
+      "toolName": "mcp__newcomer__query",
+      "code": "SERVER_NOT_APPROVED",
+      "ruleId": "mcpDefaultPolicy",
+      "reason": "MCP server \"newcomer\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "an approved server passes under deny",
+      "registry": "deny",
+      "toolName": "mcp__github__create_issue",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a blocked server is refused as blocked under deny, not as unapproved",
+      "registry": "deny",
+      "toolName": "mcp__pastebin__paste",
+      "code": "SERVER_BLOCKED",
+      "ruleId": "mcp_registry.pastebin",
+      "reason": "MCP server \"pastebin\" is blocked in this workspace's MCP server registry. An owner or admin can change that on the MCP Servers page."
+    },
+    {
+      "name": "a held server is refused as held under deny",
+      "registry": "deny",
+      "toolName": "mcp__drifted__query",
+      "code": "SERVER_HELD",
+      "ruleId": "mcp_registry.drifted",
+      "reason": "MCP server \"drifted\" changed its tools in a way scored high risk, and this workspace holds such a server until it is approved again. It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "a disabled tool is refused under deny on an approved server",
+      "registry": "deny",
+      "toolName": "mcp__github__delete_repo",
+      "code": "TOOL_DISABLED",
+      "ruleId": "mcp_registry.github.delete_repo",
+      "reason": "Tool \"delete_repo\" is disabled on MCP server \"github\" in this workspace's MCP server registry. An owner or admin can re-enable it on the MCP Servers page."
+    },
+    {
+      "name": "server names match exactly, not case-insensitively",
+      "registry": "deny",
+      "toolName": "mcp__GitHub__create_issue",
+      "code": "SERVER_NOT_APPROVED",
+      "ruleId": "mcpDefaultPolicy",
+      "reason": "MCP server \"GitHub\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "deny with nothing approved refuses every server",
+      "registry": "denyNothingApproved",
+      "toolName": "mcp__github__create_issue",
+      "code": "SERVER_NOT_APPROVED",
+      "ruleId": "mcpDefaultPolicy",
+      "reason": "MCP server \"github\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    },
+    {
+      "name": "a server name is not a prefix match",
+      "registry": "deny",
+      "toolName": "mcp__github2__create_issue",
+      "code": "SERVER_NOT_APPROVED",
+      "ruleId": "mcpDefaultPolicy",
+      "reason": "MCP server \"github2\" is not approved in this workspace's MCP server registry, and the workspace refuses unapproved servers (mcpDefaultPolicy: deny). It is waiting in the approval queue on the MCP Servers page for an owner or admin."
+    }
+  ],
+  "allowlists": {
+    "githubAndPg": {
+      "severity": "block",
+      "servers": [
+        "github",
+        "pg-prod"
+      ]
+    },
+    "empty": {
+      "severity": "block",
+      "servers": []
+    }
+  },
+  "allowlistCases": [
+    {
+      "name": "a listed server passes",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__github__create_issue",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "a listed server passes whatever the tool name holds",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__pg-prod__drop__all",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    },
+    {
+      "name": "an unlisted server is refused",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__pastebin__paste",
+      "code": "SERVER_NOT_ALLOWED",
+      "ruleId": "mcp_allowlist",
+      "reason": "MCP server \"pastebin\" is not on the MCP server allowlist for this workspace"
+    },
+    {
+      "name": "allowlisted names match exactly, not case-insensitively",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__GitHub__create_issue",
+      "code": "SERVER_NOT_ALLOWED",
+      "ruleId": "mcp_allowlist",
+      "reason": "MCP server \"GitHub\" is not on the MCP server allowlist for this workspace"
+    },
+    {
+      "name": "an allowlisted name is not a prefix match",
+      "allowlist": "githubAndPg",
+      "toolName": "mcp__github2__create_issue",
+      "code": "SERVER_NOT_ALLOWED",
+      "ruleId": "mcp_allowlist",
+      "reason": "MCP server \"github2\" is not on the MCP server allowlist for this workspace"
+    },
+    {
+      "name": "an allowlist with no servers admits none",
+      "allowlist": "empty",
+      "toolName": "mcp__github__create_issue",
+      "code": "SERVER_NOT_ALLOWED",
+      "ruleId": "mcp_allowlist",
+      "reason": "MCP server \"github\" is not on the MCP server allowlist for this workspace"
+    }
+  ],
+  "unverifiedSnapshots": {
+    "enforced": {
+      "registry": "deny",
+      "allowlist": "githubAndPg",
+      "interventionMode": "TRANSPARENT"
+    },
+    "observeOnly": {
+      "registry": "deny",
+      "allowlist": "githubAndPg",
+      "interventionMode": "SILENT_LOG"
+    }
+  },
+  "unverifiedCases": [
+    {
+      "name": "a deny registry edited to allow admits nothing",
+      "snapshot": "enforced",
+      "tamper": "registryDenyToAllow",
+      "toolName": "mcp__newcomer__query",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"newcomer\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "a server taken off the blocked list stays refused",
+      "snapshot": "enforced",
+      "tamper": "registryUnblock",
+      "toolName": "mcp__pastebin__paste",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"pastebin\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "a deleted registry record admits nothing",
+      "snapshot": "enforced",
+      "tamper": "registryLineDeleted",
+      "toolName": "mcp__newcomer__query",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"newcomer\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "an approved and allowlisted server is refused too",
+      "snapshot": "enforced",
+      "tamper": "registryLineDeleted",
+      "toolName": "mcp__github__create_issue",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"github\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "a deleted allowlist record admits nothing",
+      "snapshot": "enforced",
+      "tamper": "allowlistLineDeleted",
+      "toolName": "mcp__newcomer__query",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"newcomer\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "a server added to the allowlist is refused",
+      "snapshot": "enforced",
+      "tamper": "allowlistWidened",
+      "toolName": "mcp__newcomer__query",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"newcomer\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "an allowlist edited to shadow still refuses",
+      "snapshot": "enforced",
+      "tamper": "allowlistShadowed",
+      "toolName": "mcp__newcomer__query",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"newcomer\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "a removed digest line verifies nothing",
+      "snapshot": "enforced",
+      "tamper": "digestLineDeleted",
+      "toolName": "mcp__newcomer__query",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"newcomer\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "an observe-only workspace refuses at block",
+      "snapshot": "observeOnly",
+      "tamper": "allowlistWidened",
+      "toolName": "mcp__newcomer__query",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"newcomer\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "an observe-only workspace refuses a listed server at block",
+      "snapshot": "observeOnly",
+      "tamper": "registryLineDeleted",
+      "toolName": "mcp__github__create_issue",
+      "code": "POLICY_SNAPSHOT_UNVERIFIED",
+      "ruleId": "policy_snapshot",
+      "reason": "MCP server \"github\" is refused because the policy snapshot on this machine failed its integrity check, so its MCP server registry and allowlist admit no server until the sync daemon restores a verified snapshot"
+    },
+    {
+      "name": "a call that is not an MCP call is left to the other rules",
+      "snapshot": "enforced",
+      "tamper": "allowlistWidened",
+      "toolName": "Read",
+      "code": null,
+      "ruleId": null,
+      "reason": null
+    }
+  ]
+}

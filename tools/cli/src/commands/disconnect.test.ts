@@ -28,23 +28,23 @@ const fake = vi.hoisted(() => {
 import * as fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import * as os from 'node:os'
-import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { join, dirname, relative, extname } from 'node:path'
-import type { SyncSopEntry } from '@intutic/shared-types'
+import type { HarnessType, SyncSopEntry } from '@intutic/shared-types'
 import {
-  DisconnectPlan,
   injectMcpServer,
+  keepOriginal,
   noteProxyUrl,
+  writeOwnedFile,
   planDisconnect,
   updatePreToolUseHooks,
-  writeClaudeDesktopHooks,
+  writeBundledSkills,
+  writeDecisionsTargets,
 } from '@intutic/sync-daemon'
 import { getAdapter } from '../harness/detector.js'
-import { planN8nDisconnect } from '../harness/n8n.js'
 import { runDisconnect } from './disconnect.js'
 
 const PROXY = 'http://localhost:4000'
+const LEGACY_DECISIONS = '<!-- INTUTIC:DECISIONS_LOG:START -->\n## Recent Governed Decisions\n\n- old entry\n<!-- INTUTIC:DECISIONS_LOG:END -->'
 const SOPS: SyncSopEntry[] = [
   { sopId: 'sop_1', title: 'No secrets', content: 'Never print a secret.', contentHash: '', harnessTargets: [] },
 ]
@@ -143,6 +143,7 @@ async function connectHarness(harness: string): Promise<void> {
   await noteProxyUrl(PROXY)
   const adapter = getAdapter(harness)
   if (!adapter) throw new Error(`no adapter for ${harness}`)
+  await adapter.installGate?.(ws, PROXY)
   await adapter.writeConfig(ws, SOPS, PROXY)
   await injectMcpServer(ws, 'ws_test')
 }
@@ -188,10 +189,6 @@ const CASES: Case[] = [
   {
     harness: 'claude-desktop',
     seed: () => put(appSupport('Claude', 'claude_desktop_config.json'), { globalShortcut: 'x', mcpServers: { fs: { command: 'npx', args: ['fs-mcp'] } } }),
-    connect: async () => {
-      await writeClaudeDesktopHooks(ws, PROXY, 'ws_test')
-      await injectMcpServer(ws, 'ws_test')
-    },
     edit: () => editJson(appSupport('Claude', 'claude_desktop_config.json'), (d) => { d.theme = 'dark' }),
   },
   {
@@ -296,6 +293,10 @@ const CASES: Case[] = [
     seed: () =>
       put(join(ws, 'config.toml'), '[llm]\nmodel = "anthropic/claude-sonnet"\nbase_url = "https://my.gateway/v1"\n\n[core]\nworkspace_base = "./"\n'),
     edit: () => editText(join(ws, 'config.toml'), 'workspace_base = "./"', 'workspace_base = "./src"'),
+    connected: async () => {
+      expect(await fs.readFile(join(ws, '.openhands', 'microagents', 'intutic-governance.md'), 'utf-8')).toContain('Never print a secret.')
+      expect(await fs.readFile(join(ws, 'config.toml'), 'utf-8')).not.toContain('[intutic]')
+    },
   },
   {
     // `base_url` is set in `[llm]` only: an earlier text edit rewrote the
@@ -324,6 +325,55 @@ const CASES: Case[] = [
       })
     },
     edit: () => editJson(join(home, '.gemini', 'settings.json'), (d) => { d.theme = 'light' }),
+    connected: async () => {
+      const hooks = JSON.parse(await fs.readFile(join(home, '.gemini', 'config', 'hooks.json'), 'utf-8'))
+      expect(hooks['intutic-governance'].PreToolUse[0].hooks[0].command).toContain('antigravity-cli-check.js')
+    },
+  },
+  {
+    harness: 'antigravity',
+    name: 'antigravity, with a GEMINI.md of the user\'s own',
+    seed: async () => {
+      await put(join(ws, 'GEMINI.md'), '# Project notes\n\nPrefer small diffs.\n')
+      await put(join(ws, '.gemini', 'settings.json'), { theme: 'dark' })
+    },
+    edit: () => editText(join(ws, 'GEMINI.md'), 'Prefer small diffs.', 'Prefer large diffs.'),
+    connected: async () => {
+      const gemini = await fs.readFile(join(ws, 'GEMINI.md'), 'utf-8')
+      expect(gemini).toMatch(/^# Project notes\n\nPrefer small diffs\.\n\n<!-- INTUTIC:RULES:START -->\n[\s\S]*Never print a secret\.[\s\S]*<!-- INTUTIC:RULES:END -->\n$/)
+      expect(JSON.parse(await fs.readFile(join(ws, '.gemini', 'settings.json'), 'utf-8'))).toEqual({ theme: 'dark' })
+    },
+  },
+  {
+    harness: 'antigravity',
+    name: 'antigravity, with a GEMINI.md that has no final line break',
+    seed: () => put(join(ws, 'GEMINI.md'), '# Project notes\n\nPrefer small diffs.'),
+    edit: () => editText(join(ws, 'GEMINI.md'), 'Prefer small diffs.', 'Prefer large diffs.'),
+  },
+  ...[true, false].map((recorded): Case => ({
+    // Earlier versions put the rules in `customInstructions`, which neither
+    // Gemini CLI nor Antigravity reads; disconnect still takes the key out.
+    harness: 'antigravity',
+    name: `antigravity, rules an earlier version left in .gemini/settings.json (${recorded ? 'with' : 'without'} the original kept)`,
+    seed: () => put(join(ws, '.gemini', 'settings.json'), { theme: 'dark' }),
+    connect: async () => {
+      const settings = join(ws, '.gemini', 'settings.json')
+      if (recorded) await keepOriginal(settings, ws)
+      await editJson(settings, (d) => { d.customInstructions = '# Intutic Governance Rules (auto-generated)\n\n## No secrets' })
+      await connectHarness('antigravity')
+    },
+    edit: () => editJson(join(ws, '.gemini', 'settings.json'), (d) => { d.theme = 'light' }),
+  })),
+  {
+    harness: 'antigravity',
+    name: 'antigravity, with hooks of the user\'s own in Antigravity\'s hooks file',
+    seed: () =>
+      put(join(home, '.gemini', 'config', 'hooks.json'), {
+        'my-linter': { PostToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: './lint.sh' }] }] },
+      }),
+    edit: () => editJson(join(home, '.gemini', 'config', 'hooks.json'), (d) => {
+      d.reminder = { PreInvocation: [{ type: 'command', command: './remind.sh' }] }
+    }),
   },
   {
     harness: 'continue',
@@ -370,13 +420,82 @@ const CASES: Case[] = [
   },
   {
     harness: 'pi',
-    seed: () => put(join(home, '.pi', 'models.json'), { providers: { anthropic: { apiKeyEnv: 'ANTHROPIC_API_KEY' }, google: { baseUrl: 'https://g.example' } } }),
-    edit: () => editJson(join(home, '.pi', 'models.json'), (d) => { d.providers.mistral = { apiKeyEnv: 'M' } }),
+    seed: async () => {
+      await put(join(home, '.pi', 'agent', 'models.json'), { providers: { anthropic: { apiKeyEnv: 'ANTHROPIC_API_KEY' }, google: { baseUrl: 'https://g.example' } } })
+      await put(join(home, '.pi', 'agent', 'extensions', 'mine.ts'), 'export default function (pi) {}\n')
+    },
+    edit: () => editJson(join(home, '.pi', 'agent', 'models.json'), (d) => { d.providers.mistral = { apiKeyEnv: 'M' } }),
+    connected: async () => {
+      expect(await fs.readFile(join(home, '.pi', 'agent', 'extensions', 'intutic-governance.js'), 'utf-8')).toContain("pi.on('tool_call', toolCall)")
+      expect(JSON.parse(await fs.readFile(join(home, '.pi', 'agent', 'models.json'), 'utf-8')).providers.anthropic.baseUrl).toBe(PROXY)
+    },
+  },
+  {
+    harness: 'pi',
+    name: 'pi, with no Pi config at all',
+    seed: () => put(join(ws, 'README.md'), '# project\n'),
+    edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+  },
+  {
+    // Earlier versions registered a PreToolUse hook in ~/.pi/hooks.json and
+    // routed ~/.pi/models.json, neither of which Pi reads.
+    harness: 'pi',
+    name: 'pi, with the hooks.json, models.json and gate script an earlier version wrote',
+    seed: async () => {
+      await put(join(home, '.pi', 'hooks.json'), { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: './mine.sh' }] }] } })
+      await put(join(home, '.pi', 'models.json'), { providers: { google: { baseUrl: 'https://g.example' } } })
+    },
+    connect: async () => {
+      const gate = join(home, '.intutic', 'hooks', 'pi-check.sh')
+      const hooks = join(home, '.pi', 'hooks.json')
+      const models = join(home, '.pi', 'models.json')
+      await keepOriginal(hooks, ws)
+      await keepOriginal(models, ws)
+      await put(gate, '#!/usr/bin/env bash\n# Intutic Pi (earendil-works/pi) PreToolUse governance gate.\nexit 0\n')
+      await editJson(hooks, (d) => { d.hooks.PreToolUse.push({ matcher: '.*', hooks: [{ type: 'command', command: gate }] }) })
+      await editJson(models, (d) => { d.providers.anthropic = { baseUrl: PROXY } })
+      await connectHarness('pi')
+    },
+    edit: () => editJson(join(home, '.pi', 'hooks.json'), (d) => { d.theme = 'dark' }),
   },
   {
     harness: 'openclaw',
     seed: () => put(join(home, '.openclaw', 'openclaw.json'), { agents: { default: 'x' } }),
     edit: () => editJson(join(home, '.openclaw', 'openclaw.json'), (d) => { d.agents.second = 'y' }),
+    connected: async () => {
+      const config = JSON.parse(await fs.readFile(join(home, '.openclaw', 'openclaw.json'), 'utf-8'))
+      expect(config.plugins.load.paths).toEqual([join(home, '.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')])
+    },
+  },
+  {
+    harness: 'openclaw',
+    name: 'openclaw, with plugins of the user\'s own and a restrictive allowlist',
+    seed: () =>
+      put(join(home, '.openclaw', 'openclaw.json'), {
+        plugins: { allow: ['mine'], load: { paths: ['~/plugins/mine.ts'] }, entries: { mine: { enabled: true } } },
+      }),
+    edit: () => editJson(join(home, '.openclaw', 'openclaw.json'), (d) => { d.plugins.allow.push('theirs') }),
+    connected: async () => {
+      const config = JSON.parse(await fs.readFile(join(home, '.openclaw', 'openclaw.json'), 'utf-8'))
+      expect(config.plugins.allow).toEqual(['mine', 'intutic-governance'])
+      expect(config.plugins.load.paths).toEqual(['~/plugins/mine.ts', join(home, '.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')])
+    },
+  },
+  {
+    // Earlier versions registered an internal hook entry, which never sees a
+    // tool call, and wrote openclaw-check.js.
+    harness: 'openclaw',
+    name: 'openclaw, with the internal hook entry and gate script an earlier version wrote',
+    seed: () => put(join(home, '.openclaw', 'openclaw.json'), { hooks: { internal: { entries: { 'session-memory': { enabled: true } } } } }),
+    connect: async () => {
+      const gate = join(home, '.intutic', 'hooks', 'openclaw-check.js')
+      const config = join(home, '.openclaw', 'openclaw.json')
+      await keepOriginal(config, ws)
+      await put(gate, '#!/usr/bin/env node\n// Intutic Openclaw PreToolUse execution gate.\n')
+      await editJson(config, (d) => { d.hooks.internal.entries['intutic-governance'] = { enabled: true, event: 'PreToolUse', command: gate } })
+      await connectHarness('openclaw')
+    },
+    edit: () => editJson(join(home, '.openclaw', 'openclaw.json'), (d) => { d.gateway = { port: 18789 } }),
   },
   {
     harness: 'n8n',
@@ -396,6 +515,103 @@ const CASES: Case[] = [
       await put(join(profile, 'cordis.patch.yml'), '- id: llm-deepseek\n  config:\n    apiKeyEnv: DEEPSEEK_KEY\n    baseURL: https://api.deepseek.com\n')
     },
     edit: () => editJson(join(home, '.dsh', 'profiles', 'main', 'package.json'), (d) => { d.dependencies.y = '2.0.0' }),
+  },
+  {
+    // Codex and OpenCode share AGENTS.md: one section, the team's text kept around it.
+    harness: 'codex',
+    name: 'codex and opencode, with an AGENTS.md of the team\'s own',
+    seed: () => put(join(ws, 'AGENTS.md'), '# Team\n\nRun the tests.\n'),
+    connect: async () => {
+      await connectHarness('codex')
+      await connectHarness('opencode')
+    },
+    edit: () => editText(join(ws, 'AGENTS.md'), 'Run the tests.', 'Run every test.'),
+    connected: async () => {
+      const text = await fs.readFile(join(ws, 'AGENTS.md'), 'utf-8')
+      expect(text).toMatch(/^# Team\n\nRun the tests\.\n\n<!-- INTUTIC:RULES:START -->\n[\s\S]*Never print a secret\.[\s\S]*<!-- INTUTIC:RULES:END -->\n$/)
+      expect(text.match(/INTUTIC:RULES:START/g)).toHaveLength(1)
+    },
+  },
+  ...(['muse-code', 'claude-code', 'cursor', 'windsurf', 'roo-code'] as const).map((harness): Case => {
+    // Earlier versions wrote these files whole. Connect gives the user's copy
+    // back (or turns AGENTS.md into the section), and disconnect still
+    // restores everything byte for byte.
+    const legacy = { 'muse-code': 'AGENTS.md', 'claude-code': 'CLAUDE.md', cursor: '.cursorrules', windsurf: '.windsurfrules', 'roo-code': '.roorules' }[harness]
+    return {
+      harness,
+      name: `${harness}, ${legacy} an earlier version wrote whole`,
+      seed: () => put(join(ws, legacy), 'The team\'s own rules.\n'),
+      connect: async () => {
+        const file = join(ws, legacy)
+        await keepOriginal(file, ws)
+        await writeOwnedFile(file, ws, '# Intutic Governance Rules (auto-generated)\n# DO NOT EDIT — managed by intutic sync daemon\n\n## Old rule\n')
+        await getAdapter(harness)!.writeConfig(ws, SOPS, PROXY)
+      },
+      edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+      connected: async () => {
+        const text = await fs.readFile(join(ws, legacy), 'utf-8')
+        expect(text).not.toContain('Old rule')
+        expect(text.startsWith('The team\'s own rules.\n')).toBe(true)
+      },
+    }
+  }),
+  ...(['claude-code', 'codex', 'cursor', 'aider', 'goose', 'continue'] as const).map((harness): Case => {
+    // The decisions log next to the rules: its own file, or its own section.
+    const seeds: Record<typeof harness, () => Promise<void>> = {
+      'claude-code': () => put(join(ws, 'CLAUDE.md'), '# Project rules\n\nUse tabs.\n'),
+      codex: () => put(join(ws, 'AGENTS.md'), '# Team\n\nRun the tests.\n'),
+      cursor: () => put(join(ws, '.cursor', 'rules', 'style.mdc'), '---\nalwaysApply: true\n---\nTabs.\n'),
+      aider: () => put(join(ws, '.aider.conf.yml'), 'model: gpt-4o\nread:\n  - CONVENTIONS.md\n'),
+      goose: () => put(join(ws, '.goosehints'), 'Prefer small diffs.\n'),
+      continue: () => put(join(ws, 'README.md'), '# project\n'),
+    }
+    return {
+      harness,
+      name: `${harness}, with the decisions log`,
+      seed: seeds[harness],
+      connect: async () => {
+        await connectHarness(harness)
+        await writeDecisionsTargets(ws, [harness as HarnessType], '## Recent Governed Decisions\n\n- 2026-10-09 — Decision: rollout approved')
+      },
+      edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+      connected: async () => {
+        // No harness's decisions log goes to CLAUDE.md.
+        if (harness === 'claude-code') expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toBe('# Project rules\n\nUse tabs.\n')
+        else expect(existsSync(join(ws, 'CLAUDE.md'))).toBe(false)
+      },
+    }
+  }),
+  {
+    // Earlier versions appended the decisions log to the team's CLAUDE.md.
+    harness: 'claude-code',
+    name: 'claude-code, the decisions section an earlier version appended to CLAUDE.md',
+    seed: () => put(join(ws, 'CLAUDE.md'), '# Project rules\n\nUse tabs.\n'),
+    connect: () => editText(join(ws, 'CLAUDE.md'), 'Use tabs.\n', `Use tabs.\n\n${LEGACY_DECISIONS}\n`),
+    edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+  },
+  {
+    // ... and to the CLAUDE.md they had created whole for the rules.
+    harness: 'claude-code',
+    name: 'claude-code, a CLAUDE.md an earlier version created, with the decisions section',
+    seed: () => put(join(ws, 'README.md'), '# project\n'),
+    connect: async () => {
+      await writeOwnedFile(join(ws, 'CLAUDE.md'), ws, '# Intutic Governance Rules (auto-generated)\n# DO NOT EDIT — managed by intutic sync daemon\n\n## Old rule\n')
+      await fs.appendFile(join(ws, 'CLAUDE.md'), `\n${LEGACY_DECISIONS}\n`)
+    },
+    edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+  },
+  {
+    harness: 'openclaw',
+    name: 'openclaw, with an AGENTS.md of the user\'s own in a configured agent workspace',
+    seed: async () => {
+      await put(join(home, '.openclaw', 'openclaw.json'), { agents: { defaults: { workspace: '~/assistant' } } })
+      await put(join(home, 'assistant', 'AGENTS.md'), '# How I work\n\nAsk first.\n')
+    },
+    edit: () => editText(join(home, 'assistant', 'AGENTS.md'), 'Ask first.', 'Ask twice.'),
+    connected: async () => {
+      expect(await fs.readFile(join(home, 'assistant', 'AGENTS.md'), 'utf-8')).toContain('Never print a secret.')
+      expect(existsSync(join(home, '.openclaw', 'workspace'))).toBe(false)
+    },
   },
 ]
 
@@ -477,12 +693,15 @@ describe('intutic disconnect, the command', () => {
     output = []
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { output.push(args.join(' ')) })
     vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { output.push(args.join(' ')) })
+    // A real run reports the disconnect; no control plane answers here.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 503 })))
   })
 
   afterEach(() => {
     process.env.PATH = prevPath
     process.exitCode = undefined
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   async function seedUser(): Promise<void> {
@@ -523,6 +742,32 @@ describe('intutic disconnect, the command', () => {
     expect(existsSync(credentials)).toBe(true)
   })
 
+  // connect writes the Kitkat and rule-author skills into the workspace when
+  // they are missing; disconnect takes back exactly those, and nothing the
+  // user wrote or changed.
+  it('removes the agent skills connect wrote, and keeps a skill the user had or edited', async () => {
+    const kitkat = join(ws, '.agents', 'skills', 'intutic-governance-kitkat', 'SKILL.md')
+    const ruleAuthor = join(ws, '.agents', 'skills', 'intutic-rule-author', 'SKILL.md')
+    await seedUser()
+    await put(kitkat, '# the copy I downloaded\n')
+    const before = await snapshot()
+    await connectAs(['cursor'])
+    expect(await writeBundledSkills(ws)).toEqual([ruleAuthor])
+    await runDisconnect({ keepLogin: true })
+    const after = await snapshot()
+    for (const path of [config, credentials, join(home, '.intutic')]) after.delete(relative(home, path))
+    expect(Object.fromEntries(after)).toEqual(Object.fromEntries(before))
+
+    await clear()
+    await seedUser()
+    await connectAs(['cursor'])
+    expect(await writeBundledSkills(ws)).toEqual([ruleAuthor, kitkat])
+    await fs.appendFile(kitkat, '\nOur team also asks you to name the ticket.\n')
+    await runDisconnect({ keepLogin: true })
+    expect(existsSync(ruleAuthor)).toBe(false)
+    expect(await fs.readFile(kitkat, 'utf-8')).toContain('Our team also asks you to name the ticket.')
+  })
+
   it('--harness takes one harness out and leaves the others connected', async () => {
     await seedUser()
     await connectAs(['claude-code', 'cursor'])
@@ -531,12 +776,53 @@ describe('intutic disconnect, the command', () => {
       version: 1,
       hooks: { beforeShellExecution: [{ command: './audit.sh' }] },
     })
-    expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toContain('Intutic Governance Rules')
+    expect(await fs.readFile(join(ws, '.claude', 'rules', 'intutic-governance.md'), 'utf-8')).toContain('Intutic Governance Rules')
+    expect(await fs.readFile(join(ws, 'CLAUDE.md'), 'utf-8')).toBe('team rules\n')
     expect(existsSync(join(ws, '.cursor', 'mcp.json'))).toBe(false)
     const saved = JSON.parse(await fs.readFile(config, 'utf-8'))
     expect(saved.harnesses).toEqual(['claude-code'])
     expect(saved.disconnectedHarnesses).toEqual(['cursor'])
     expect(existsSync(credentials)).toBe(true)
+  })
+
+  it('tells the control plane before it removes the credentials, and goes on when it cannot', async () => {
+    const calls: Array<{ url: string; auth: string; body: Record<string, unknown>; credentialsThere: boolean }> = []
+    let answer = 200
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({
+        url,
+        auth: String((init.headers as Record<string, string>).Authorization),
+        body: JSON.parse(String(init.body)),
+        credentialsThere: existsSync(credentials),
+      })
+      return new Response('{}', { status: answer })
+    }))
+    try {
+      await seedUser()
+      await connectAs(['claude-code', 'cursor'])
+      await runDisconnect({ harness: 'cursor', dryRun: true })
+      expect(calls).toEqual([])
+
+      await runDisconnect({ harness: 'cursor' })
+      await runDisconnect({})
+      expect(calls.map((c) => [c.url, c.auth, c.body.scope, c.body.harnesses, c.credentialsThere])).toEqual([
+        ['http://localhost:3001/api/v1/devices/disconnect', 'Bearer test-key', 'harness', ['cursor'], true],
+        ['http://localhost:3001/api/v1/devices/disconnect', 'Bearer test-key', 'machine', ['claude-code'], true],
+      ])
+      expect(calls[0]!.body.fingerprint).toMatch(/^[0-9a-f]{32}$/)
+      expect(existsSync(credentials)).toBe(false)
+      expect(output.join('\n')).toContain('Told the control plane')
+
+      // A control plane that refuses does not stop the disconnect.
+      answer = 503
+      await connectAs(['cursor'])
+      await runDisconnect({})
+      expect(process.exitCode).toBeUndefined()
+      expect(existsSync(credentials)).toBe(false)
+      expect(output.join('\n')).toContain('Could not tell the control plane (the control plane answered 503)')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('refuses while intutic connect is running, before changing anything', async () => {
@@ -553,44 +839,5 @@ describe('intutic disconnect, the command', () => {
   it('rejects a harness it does not know', async () => {
     await runDisconnect({ harness: 'no-such-harness' })
     expect(process.exitCode).toBe(1)
-  })
-})
-
-describe('n8n workflow variables', () => {
-  it('removes the two variables connect set and keeps the workflow\'s own', async () => {
-    const puts: unknown[] = []
-    const workflow = {
-      id: 'w1',
-      name: 'Flow',
-      nodes: [],
-      connections: {},
-      settings: { executionOrder: 'v1', variables: { intutic_proxy_url: PROXY, intutic_governance_rules: 'x', mine: 'keep' } },
-    }
-    const server = createServer((req, res) => {
-      let body = ''
-      req.on('data', (c) => { body += c })
-      req.on('end', () => {
-        res.setHeader('content-type', 'application/json')
-        if (req.method === 'PUT') {
-          puts.push(JSON.parse(body))
-          res.end('{}')
-        } else if (req.url === '/api/v1/workflows') res.end(JSON.stringify({ data: [{ id: 'w1', name: 'Flow' }] }))
-        else res.end(JSON.stringify(workflow))
-      })
-    })
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-    const prev = process.env.N8N_URL
-    process.env.N8N_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-    try {
-      const plan = new DisconnectPlan()
-      await planN8nDisconnect(plan)
-      expect(plan.visible()).toHaveLength(1)
-      expect(puts).toHaveLength(0)
-      await plan.apply()
-      expect(puts).toEqual([{ name: 'Flow', nodes: [], connections: {}, settings: { executionOrder: 'v1', variables: { mine: 'keep' } } }])
-    } finally {
-      process.env.N8N_URL = prev
-      server.close()
-    }
   })
 })

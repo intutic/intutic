@@ -70,6 +70,7 @@ fn test_ctx(workspace_id: &str) -> RequestContext {
         virtual_key_prefix: "vk_test".to_string(),
         model: "claude-3-5-sonnet".to_string(),
         tools: vec![],
+        turn_tool_calls: Vec::new(),
         tool_calls: vec![],
         estimated_input_tokens: 100,
         budget_remaining_usd: 10.0,

@@ -9,13 +9,17 @@ import {
   VerdictEvent,
 } from './types'
 import { ClawdeBlockedError, ClawdeConnectionError } from './errors'
-import { parseRefusal, headerRefusal, REFUSAL_HEADER } from './refusals'
+import { parseRefusal, headerRefusal, streamRefusal, REFUSAL_HEADER, REFUSAL_RULE_HEADER, type ProxyRefusal } from './refusals'
 import { normalizeRequest, normalizeResponse } from './schema-enforcer'
 import { resolveContext } from './context-resolver'
+import { resolveGitContext } from './git-context'
 import { BudgetChecker } from './budget-checker'
 import { CircuitBreaker } from './circuit-breaker'
 import { ClawdeEventEmitter } from './event-emitter'
 import { deriveIdentity, identityHeaders, type GraphIdentity } from './graph-identity'
+
+/** The harness a session this SDK registers is recorded under. */
+export const SDK_HARNESS = 'clawde_sdk'
 
 export class ClawdeClient {
   private apiKey: string
@@ -32,6 +36,9 @@ export class ClawdeClient {
   private budgetChecker: BudgetChecker
   private circuitBreakerWrapper: CircuitBreaker
   private eventEmitter: ClawdeEventEmitter
+
+  /** The session this client's requests are filed under, resolved once, on the first `chat()`. */
+  private session?: Promise<string | null>
 
   constructor(options: ClawdeClientOptions) {
     if (!options.apiKey) {
@@ -90,11 +97,14 @@ export class ClawdeClient {
    *
    * Resolves with `verdict: 'allow'` when the proxy let the request through. A
    * governance refusal, including one the proxy answers with a 200 and names in
-   * `x-intutic-refusal`, fires the matching event and rejects with
-   * `ClawdeBlockedError`, unretried. Transport failures, timeouts and 5xx
-   * answers are retried; anything else rejects with `ClawdeConnectionError`.
+   * `x-intutic-refusal` (or, on a stream, in its `: intutic-refusal` line),
+   * fires the matching event and rejects with `ClawdeBlockedError`, unretried.
+   * Transport failures, timeouts and 5xx answers are retried; anything else
+   * rejects with `ClawdeConnectionError`.
    */
   public async chat(params: ChatParams): Promise<ChatResponse> {
+    this.session ??= this.openSession()
+    const sessionId = await this.session
     const anthropic = this.provider === 'anthropic'
     // The proxy picks the wire format by route: an Anthropic Messages body
     // sent to /v1/chat/completions is parsed as an OpenAI one.
@@ -108,6 +118,9 @@ export class ClawdeClient {
       // request as a graph of one, and skips membership, fleet spend and
       // node counting entirely.
       ...identityHeaders(this.identity),
+      // The proxy files the trace under this session, and the control plane
+      // copies the session's repository, branch and commit onto it.
+      ...(sessionId ? { 'x-session-id': sessionId } : {}),
     }
     const body = JSON.stringify(normalizeRequest(params, this.provider))
 
@@ -127,10 +140,12 @@ export class ClawdeClient {
       let status: number
       let text: string
       let refusedBy: string | null
+      let refusedRule: string | null
       try {
         const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal })
         status = response.status
         refusedBy = response.headers.get(REFUSAL_HEADER)
+        refusedRule = response.headers.get(REFUSAL_RULE_HEADER)
         text = await response.text()
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
@@ -144,25 +159,25 @@ export class ClawdeClient {
         try {
           json = JSON.parse(text)
         } catch {
+          // A `stream: true` request comes back as an event stream, which
+          // `chat()` does not parse; it still must not pass off a refusal
+          // the stream names as a transport failure.
+          const streamed = streamRefusal(text)
+          if (streamed) this.refuse(streamed, status)
           throw new ClawdeConnectionError(`Proxy answered ${status} with a body that is not JSON: ${text}`)
         }
         const normalized = normalizeResponse(json, this.provider)
-        // A refusal answered as an assistant turn (the cost-prediction gate).
+        // A refusal answered as an assistant turn: a withheld tool call, a
+        // withheld body, or the cost-prediction gate.
         const content = normalized.choices?.[0]?.message?.content
-        const answered = headerRefusal(refusedBy, typeof content === 'string' ? content : '')
-        if (answered) {
-          this.eventEmitter.emit(answered.verdict, { ...answered, status })
-          throw new ClawdeBlockedError(answered.verdict, answered.code, status, answered.message)
-        }
+        const answered = headerRefusal(refusedBy, refusedRule, typeof content === 'string' ? content : '')
+        if (answered) this.refuse(answered, status)
         normalized.verdict = 'allow'
         return normalized
       }
 
       const refusal = parseRefusal(status, text)
-      if (refusal) {
-        this.eventEmitter.emit(refusal.verdict, { ...refusal, status })
-        throw new ClawdeBlockedError(refusal.verdict, refusal.code, status, refusal.message)
-      }
+      if (refusal) this.refuse(refusal, status)
 
       lastError = `HTTP error ${status}: ${text}`
       // A 4xx that is not a refusal (bad key, malformed body) fails the same
@@ -171,5 +186,60 @@ export class ClawdeClient {
     }
 
     throw new ClawdeConnectionError(`Request failed after ${maxAttempts} attempts. Last error: ${lastError}`)
+  }
+
+  /**
+   * The session to send as `x-session-id`, or null to send none.
+   *
+   * A session id from the environment (`INTUTIC_SESSION_ID`, or the sync
+   * daemon's config) is the session that started this process, and its owner
+   * reports its context, so it is used as is. Otherwise, when the working
+   * directory is a git repository, this registers a session carrying its
+   * repository, branch and commit (`POST /api/v1/sessions`, as the sync
+   * daemon does), so cost per branch, commit and pull request includes this
+   * client's calls. Only with an Intutic virtual key: any other key is a
+   * provider's, and it is never sent to the control plane. `autoContext:
+   * false` turns this off. Best effort: a control plane that cannot be
+   * reached or refuses costs the attribution, never the call.
+   */
+  private async openSession(): Promise<string | null> {
+    if (!this.autoContext) return null
+    const context = await resolveContext()
+    if (context.sessionId) return context.sessionId
+    if (!this.apiKey.startsWith('vk_')) return null
+    const git = await resolveGitContext(context.workingDirectory ?? process.cwd(), context.gitBranch)
+    if (Object.keys(git).length === 0) return null
+    try {
+      // whoami first: the repository goes only to a control plane that accepted the key.
+      const workspaceId = context.workspaceId ?? (await this.controlPlane<{ workspaceId: string }>('GET', '/api/v1/auth/me')).workspaceId
+      const session = await this.controlPlane<{ sessionId?: string }>('POST', '/api/v1/sessions', {
+        workspaceId,
+        harnessType: SDK_HARNESS,
+        ...git,
+      })
+      return session.sessionId ?? null
+    } catch (err) {
+      if (process.env.INTUTIC_DEBUG === 'true') {
+        console.warn(`[Clawde SDK] No session registered; calls carry no git context: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      return null
+    }
+  }
+
+  private async controlPlane<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const res = await fetch(`${this.controlPlaneUrl}${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!res.ok) throw new Error(`${method} ${path} answered ${res.status}`)
+    return (await res.json()) as T
+  }
+
+  /** Fires the refusal's event, then throws it. */
+  private refuse(refusal: ProxyRefusal, status: number): never {
+    this.eventEmitter.emit(refusal.verdict, { ...refusal, status })
+    throw new ClawdeBlockedError(refusal.verdict, refusal.code, status, refusal.message, refusal.ruleId)
   }
 }

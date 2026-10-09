@@ -32,20 +32,32 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
-import { GATES, NO_GATE, type GateEntry } from './gateRegistry.js'
-import { HarnessType } from '@intutic/shared-types'
+import { GATES, NO_GATE, type GateEntry, emittedHarness } from './gateRegistry.js'
+import {
+  ARGUMENTS_SIZE_LIMIT,
+  COMMAND_SIZE_LIMIT,
+  GATE_DEADLINE_MARGIN_MS,
+  HOOK_GATE_TIMEOUTS,
+  HarnessType,
+  gateDeadlineMs,
+  encodeMcpAllowlistRecord,
+  mcpSnapshotUnverifiedRefusal,
+  holdApprovalHint,
+} from '@intutic/shared-types'
 import {
   UNIVERSAL_PROTECTED_PATHS,
   GOVERNANCE_BYPASS_PATTERNS,
   DESTRUCTIVE_COMMAND_PATTERNS,
   SECRET_CONTENT_PATTERNS,
+  HOOK_SETTING_PATTERNS,
   SKILL_SURFACE_PATTERNS,
   SKILL_CONTENT_PATTERNS,
   NORMALISE_CONTRACT,
+  guardMatches,
   staticFloorPatterns,
   type GuardPattern,
 } from '../../src/harness/protectedPaths.js'
-import { toRulesLine, REVIEW_REQUESTS_LOG } from '../../src/harness/gateBody.js'
+import { toRulesLine, REVIEW_REQUESTS_LOG, GATE_PY_LIB } from '../../src/harness/gateBody.js'
 import { buildSnapshotRules } from '../../src/lib/policySnapshot.js'
 import { createHash } from 'node:crypto'
 
@@ -62,18 +74,17 @@ function writeRulesFixture(
   target: string,
   patterns: readonly GuardPattern[],
   workspaceId = '',
-  /** Extra `#`-prefixed header lines, e.g. the `#mcpservers` header
-   *  `writePolicySnapshot` emits. Metadata, so outside the digest. */
-  extraHeaders: readonly string[] = [],
+  /** Record lines ahead of the rules, e.g. the `@mcp_allowlist` record
+   *  `writePolicySnapshot` emits. Data lines, so inside the digest. */
+  records: readonly string[] = [],
 ): string {
-  const lines = patterns.map(toRulesLine)
+  const lines = [...records, ...patterns.map(toRulesLine)]
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
   writeFileSync(
     target,
     `#digest ${digest}\n` +
       (workspaceId ? `#workspace ${workspaceId}\n` : '') +
       `#generated ${new Date().toISOString()}\n` +
-      extraHeaders.map((h) => `${h}\n`).join('') +
       lines.join('\n') +
       '\n',
   )
@@ -83,9 +94,29 @@ function writeRulesFixture(
 const home = mkdtempSync(join(tmpdir(), 'intutic-gate-'))
 const roots = new Map<string, string>()
 
+/**
+ * A snapshot whose observe-only allowlist of github was widened by hand, so
+ * its digest fails: every gate must refuse every MCP call on it.
+ */
+function unverifiedAllowlistSnapshot(name: string): string {
+  const snap = writeRulesFixture(join(home, `unverified-${name}.rules`), [], '', [
+    encodeMcpAllowlistRecord({ severity: 'shadow', servers: ['github'] }),
+  ])
+  writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,newcomer\n'))
+  return snap
+}
+
 /** A snapshot carrying the destructive tier at `block`, so the dynamic path is
  *  exercised at full strength regardless of what ships by default. */
 const snapshotRules = join(home, 'policy-snapshot.rules')
+
+/** A workspace WHERE pattern that backtracks exponentially, in V8 and in
+ *  Python's re, on `'a'.repeat(48) + 'b'`: the call no gate may wait out. */
+const SLOW_WHERE_RULE: GuardPattern = {
+  id: 'sop.slow_where', source: ' (Bash|bash|exec) ', subject: 'tool', severity: 'block',
+  reason: 'Blocked by SOP slow_where', rationale: '', matches: [], notMatches: [],
+  argPattern: '(a+)+$',
+}
 
 /** A snapshot built the way the daemon actually builds one — via
  *  `buildSnapshotRules`, not hand-assembled — so this fixture cannot drift
@@ -238,6 +269,26 @@ async function mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => 
 /** How many gate invocations run at once inside one test. */
 const GATE_CONCURRENCY = 4
 
+/**
+ * Files that install, load or configure a gate, by absolute path: each one a
+ * way for an agent to switch a gate off. The rest of the surface was already
+ * refused; `gateSurfaces.ts` lists all of it.
+ */
+const GATE_LOADER_FILES = [
+  '/w/.clinerules/hooks/PreToolUse',
+  '/home/u/.intutic/env/runtime.env',
+  '/w/.codex/hooks.json',
+  '/home/u/.codex/config.toml',
+  '/w/.github/hooks/intutic-governance.json',
+  '/home/u/.copilot/hooks/intutic-governance.json',
+  '/home/u/.hermes/config.yaml',
+  '/home/u/.config/goose/config.yaml',
+  '/home/u/.open-webui/intutic-governance-filter.py',
+  '/w/.pi/extensions/other.ts',
+  '/etc/cursor/hooks.json',
+  '/Library/Application Support/Cursor/hooks.json',
+]
+
 /** Environment a gate runs under, isolated to its own root. */
 function gateEnv(g: GateEntry, snapshot?: boolean | string): NodeJS.ProcessEnv {
   const root = roots.get(g.name)!
@@ -275,9 +326,8 @@ async function runGate(
  *
  * Scans for any `.jsonl` under the root rather than naming one file: the writers
  * do not agree on where the log goes — `hook-events.jsonl` for most,
- * `claude-desktop-hook-events.jsonl`, `roo-hook-events.jsonl` and
- * `cline-hook-events.jsonl` for three others, and cline puts it under HOME
- * rather than the workspace.
+ * `cline-hook-events.jsonl` for Cline, which puts it under HOME rather than
+ * the workspace.
  */
 function auditLogText(g: GateEntry): string {
   const root = roots.get(g.name)!
@@ -299,6 +349,31 @@ function auditLogText(g: GateEntry): string {
   return out.join('\n')
 }
 
+/** The hook events (`{event, toolName, …}` lines) in a gate's audit logs. */
+function hookEvents(g: GateEntry): Array<Record<string, unknown>> {
+  return auditLogText(g)
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } })
+    .filter((e): e is Record<string, unknown> => !!e && typeof e['event'] === 'string' && 'toolName' in e)
+}
+
+/**
+ * Runs `act` and asserts every hook event it recorded carries an `eventId` of
+ * its own. The control plane processes each id once, so the id must be unique
+ * per event — the `incidentId` beside it hashes a timestamp, the tool and the
+ * workspace, and two calls in one second share it — and it must be in the
+ * line itself, which is what the daemon resends.
+ */
+async function expectEventIds(g: GateEntry, act: () => Promise<void>, atLeast: number): Promise<void> {
+  const before = new Set(hookEvents(g).map((e) => JSON.stringify(e)))
+  await act()
+  const added = hookEvents(g).filter((e) => !before.has(JSON.stringify(e)))
+  expect(added.length, `${g.name} recorded too few events`).toBeGreaterThanOrEqual(atLeast)
+  for (const e of added) expect(e['eventId'], `${g.name}: ${JSON.stringify(e)}`).toMatch(/^[0-9a-f]{16,64}$/)
+  expect(new Set(added.map((e) => e['eventId'])).size, `${g.name} reused an eventId`).toBe(added.length)
+}
+
 /** Reads a verdict out of a run according to the gate's declared contract. */
 function wasBlocked(g: GateEntry, r: RunResult): boolean {
   if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {
@@ -308,7 +383,7 @@ function wasBlocked(g: GateEntry, r: RunResult): boolean {
         const obj = JSON.parse(line)
         if (obj?.cancel === true) return true
         // Grok Build's confirmed shape — a DIFFERENT field name from
-        // Cline/Roo Code's `cancel`, see gateBody.ts's BlockContract doc.
+        // Cline's `cancel`, see gateBody.ts's BlockContract doc.
         if (obj?.decision === 'deny') return true
       } catch {
         // Not every stdout line is the verdict object.
@@ -506,12 +581,69 @@ for (const g of GATES) {
       })
       return
     }
+    if (g.contract === 'plugin-block') {
+      // In-process like OpenCode, refusing with a returned block result.
+      // Covered by the "Pi and OpenClaw plugin gates" block below, which
+      // loads each file the way its host does.
+      it('is covered by its own plugin block, not the tool-call matrix', () => {
+        expect(g.runner).toBe('node')
+      })
+      return
+    }
 
     it('allows an ordinary command', async () => {
       const r = await runGate(g, { command: 'npm run build' })
       assertCleanExit(g, r, 'an ordinary command')
       expect(wasBlocked(g, r), `${g.name} blocked \`npm run build\``).toBe(false)
     })
+
+    it('refuses a command over the size limit as COMMAND_TOO_LARGE, and evaluates one at it', async () => {
+      // A gate slower than its hook timeout is an allow under most harnesses,
+      // so a call too large to evaluate in time is refused before any rule
+      // runs (gateLimits.ts). Bytes, not characters: é is two.
+      const atLimit = 'echo ' + 'x'.repeat(COMMAND_SIZE_LIMIT - 5)
+      const over = 'echo ' + 'é'.repeat(COMMAND_SIZE_LIMIT / 2)
+      const ok = await runGate(g, { command: atLimit })
+      assertCleanExit(g, ok, 'a command at the size limit')
+      expect(wasBlocked(g, ok), `${g.name} refused a command of exactly ${COMMAND_SIZE_LIMIT} bytes`).toBe(false)
+      const r = await runGate(g, { command: over })
+      assertCleanExit(g, r, 'a command over the size limit')
+      expect(wasBlocked(g, r), `${g.name} evaluated a command over ${COMMAND_SIZE_LIMIT} bytes`).toBe(true)
+      expect(r.stdout + r.stderr).toMatch(/COMMAND_TOO_LARGE/)
+    }, 60_000)
+
+    it('refuses tool arguments over the size limit as COMMAND_TOO_LARGE', async () => {
+      const r = await runGate(g, { file_path: '/w/notes.md', content: 'x'.repeat(ARGUMENTS_SIZE_LIMIT) }, { tool: 'Write' })
+      assertCleanExit(g, r, 'arguments over the size limit')
+      expect(wasBlocked(g, r), `${g.name} evaluated arguments over ${ARGUMENTS_SIZE_LIMIT} bytes`).toBe(true)
+      expect(r.stdout + r.stderr).toMatch(/COMMAND_TOO_LARGE/)
+    }, 60_000)
+
+    it('refuses at its own deadline, before its harness timeout reads as an allow', async () => {
+      // A workspace's WHERE pattern is its own regex; this one backtracks
+      // exponentially on the call below in Python's re and in V8. Without the
+      // deadline the gate ran until the harness gave up — an allow under Grok
+      // Build, Copilot, VS Code, Goose, OpenHands and Hermes.
+      const snap = writeRulesFixture(join(home, `deadline-${g.name}.rules`), [{
+        id: 'sop.slow_where', source: ' (Bash) ', subject: 'tool', severity: 'block',
+        reason: 'Blocked by SOP slow_where', rationale: '', matches: [], notMatches: [],
+        argPattern: '(a+)+$',
+      }])
+      const started = Date.now()
+      const r = await runGate(g, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap })
+      const elapsed = Date.now() - started
+      assertCleanExit(g, r, 'a call whose WHERE pattern does not finish')
+      expect(wasBlocked(g, r), `${g.name} let a call through that its rules never decided`).toBe(true)
+      expect(r.stdout + r.stderr).toMatch(/GATE_DEADLINE/)
+      // Its own harness's deadline, not an earlier one, and refused inside the
+      // timeout that harness applies (hookEntryTimeouts.test.ts checks the
+      // deadlines themselves).
+      const harness = emittedHarness(readFileSync(join(roots.get(g.name)!, g.artifact), 'utf8'))
+      const deadline = gateDeadlineMs(harness)
+      expect(elapsed, `${g.name} refused before its ${deadline} ms deadline`).toBeGreaterThanOrEqual(deadline)
+      expect(elapsed, `${g.name} took ${elapsed} ms; ${harness} gives up at ${deadline + GATE_DEADLINE_MARGIN_MS}`)
+        .toBeLessThan(deadline + GATE_DEADLINE_MARGIN_MS)
+    }, 30_000)
 
 
     // Explicit budget, not the file's 15s default. Each case runs a real gate,
@@ -538,6 +670,17 @@ for (const g of GATES) {
       assertCleanExit(g, r, 'a Write to a protected path')
       expect(wasBlocked(g, r)).toBe(true)
     })
+
+    it('refuses a Write to, or a `sed -i` edit of, every file that loads or configures a gate', async () => {
+      await mapLimit(GATE_LOADER_FILES, GATE_CONCURRENCY, async (p) => {
+        const asWrite = await runGate(g, { file_path: p, content: '{}' }, { tool: 'Write' })
+        assertCleanExit(g, asWrite, `a Write to ${p}`)
+        expect(wasBlocked(g, asWrite), `${g.name} allowed a Write to ${p}`).toBe(true)
+        const asEdit = await runGate(g, { command: `sed -i 's/intutic//' '${p}'` })
+        assertCleanExit(g, asEdit, `sed -i on ${p}`)
+        expect(wasBlocked(g, asEdit), `${g.name} allowed \`sed -i\` on ${p}`).toBe(true)
+      })
+    }, FAN_OUT_TIMEOUT)
 
     it('enforces every governance-bypass pattern and spares its counter-examples', async () => {
       const cases = GOVERNANCE_BYPASS_PATTERNS.flatMap((pat) => [
@@ -577,6 +720,27 @@ for (const g of GATES) {
             ? `${g.name} allowed a Write carrying ${pat.id}`
             : `${g.name} wrongly blocked benign content via ${pat.id}. A false ` +
               `positive here teaches developers to disable the hook.`,
+        ).toBe(wantBlock)
+      })
+    }, FAN_OUT_TIMEOUT)
+
+    it('refuses an edit or a command that sets a VS Code hook setting, and spares the counter-examples', async () => {
+      // chat.useHooks and chat.hookFilesLocations can switch off the GitHub
+      // Copilot gate, which loads from a default location no policy locks.
+      const cases = HOOK_SETTING_PATTERNS.flatMap((pat) => [
+        ...pat.matches.map((m) => ({ pat, m, wantBlock: true })),
+        ...pat.notMatches.map((m) => ({ pat, m, wantBlock: false })),
+      ])
+      await mapLimit(cases, GATE_CONCURRENCY, async ({ pat, m, wantBlock }) => {
+        const input = pat.subject === 'content' ? (JSON.parse(m) as Record<string, string>) : { command: m }
+        const tool = pat.subject === 'content' ? ('new_string' in input ? 'Edit' : 'Write') : 'Bash'
+        const r = await runGate(g, input, { tool })
+        assertCleanExit(g, r, `hook setting ${pat.id}`)
+        expect(
+          wasBlocked(g, r),
+          wantBlock
+            ? `${g.name} allowed ${pat.id}: ${m}`
+            : `${g.name} wrongly blocked ${m} via ${pat.id}`,
         ).toBe(wantBlock)
       })
     }, FAN_OUT_TIMEOUT)
@@ -793,6 +957,10 @@ for (const g of GATES) {
       expect(record).toMatchObject({ v: 1, reason: 'sop.local.review_before.action:deploy', workspaceId: 'ws_test' })
       expect(record.holdId).toMatch(/^hold_/)
       expect(held.stderr).toContain(record.holdId)
+      // The whole hint, with the real id in both places: who can approve (a
+      // DEVELOPER whose call was held cannot), and that the retry passes only
+      // under the review-hold bypass, which is off by default.
+      expect(held.stderr.replace(/\s+/g, ' ')).toContain(holdApprovalHint(record.holdId))
       expect(record.toolNameNormalized).toBe(NORMALISE_CONTRACT.js('Bash'))
       expect(record.targetHash, 'the bypass key').toMatch(/^[0-9a-f]{64}$/)
       expect(() => new Date(record.at).toISOString()).not.toThrow()
@@ -802,21 +970,59 @@ for (const g of GATES) {
       expect(wasBlocked(g, unrelated), `${g.name} held \`make test\``).toBe(false)
     })
 
+    it('stamps every event it records with an id of its own, which the line carries when it is resent', async () => {
+      await expectEventIds(g, async () => {
+        for (const command of ['echo one', 'echo two']) assertCleanExit(g, await runGate(g, { command }), command)
+      }, 2)
+    })
+
+    it('holds a command whose words are split by a tab, a line continuation or a SQL comment (gate body v10)', async () => {
+      // The classifier matched plain substrings, so each of these ran under a
+      // hold that should have stopped it. The full table, in both dialects, is
+      // holdActionClassifier.test.ts; this proves every real gate carries it.
+      const hold = (token: string): GuardPattern => ({
+        id: `sop.local.review_before.${token}`, source: ` (${token}) `, subject: 'action', ignoreCase: true, severity: 'hold',
+        reason: `Held for human review: ${token} — declared in review_before:`, rationale: '', matches: [], notMatches: [],
+      })
+      const snap = writeRulesFixture(join(home, `hold-gap-${g.name}.rules`), [hold('action:deploy'), hold('action:db_write')], 'ws_test')
+      for (const command of ['git\tpush origin main', 'git \\\npush origin main', 'psql -c "DROP/**/TABLE users"']) {
+        const r = await runGate(g, { command }, { snapshot: snap })
+        assertCleanExit(g, r, `a held ${JSON.stringify(command)}`)
+        expect(wasBlocked(g, r), `${g.name} let ${JSON.stringify(command)} run under a hold`).toBe(true)
+      }
+      const unrelated = await runGate(g, { command: 'apt-get update' }, { snapshot: snap })
+      assertCleanExit(g, unrelated, 'apt-get update under a db_write hold')
+      expect(wasBlocked(g, unrelated), `${g.name} held \`apt-get update\` as a database write`).toBe(false)
+    })
+
+    it("holds a deploy run through Gemini CLI's shell tool, run_shell_command", async () => {
+      // The classifier only reads the command of a tool on ACTION_TOOL_NAMES,
+      // and Gemini CLI's shell tool was not on it: the deploy classified as no
+      // action, so `review_before: action:deploy` let it run.
+      const snap = writeRulesFixture(join(home, `hold-gemini-${g.name}.rules`), [{
+        id: 'sop.local.review_before.action:deploy', source: ' (action:deploy) ', subject: 'action', ignoreCase: true, severity: 'hold',
+        reason: 'Held for human review: action:deploy — declared in review_before:', rationale: '', matches: [], notMatches: [],
+      }], 'ws_test')
+      const held = await runGate(g, { command: 'git push origin main' }, { tool: 'run_shell_command', snapshot: snap })
+      assertCleanExit(g, held, 'a deploy through run_shell_command under a hold rule')
+      expect(wasBlocked(g, held), `${g.name} let a held deploy run through run_shell_command`).toBe(true)
+      expect(held.stderr).toMatch(/HELD/)
+    })
+
     if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {
       it('refuses an MCP server off the allowlist with a verdict that names the rule, not a crash (regression pin)', async () => {
-        // The M3 allowlist backstop sits after the rule loop, whose `reason`
+        // The allowlist backstop sits after the rule loop, whose `reason`
         // is block-scoped to that loop. The stdout contracts' `${refuse}`
-        // snippet reads `reason`, so before the `var reason = _mcpReason`
+        // snippet reads `reason`, so before the `var reason`
         // at that site the emitted gate threw a ReferenceError there: the
         // writer's outer catch still failed closed, but the verdict lost its
         // reason and the audit line said "crashed" instead of naming the
-        // rule. Same `#mcpservers <severity> <servers>` header
-        // `writePolicySnapshot` emits.
+        // rule. Same `@mcp_allowlist` record `writePolicySnapshot` emits.
         const snap = writeRulesFixture(
           join(home, `mcp-${g.name}.rules`),
           DESTRUCTIVE_COMMAND_PATTERNS,
           'ws_test',
-          ['#mcpservers block allowed-server'],
+          [encodeMcpAllowlistRecord({ severity: 'block', servers: ['allowed-server'] })],
         )
         const r = await runGate(g, {}, { tool: 'mcp__other__x', snapshot: snap })
         assertCleanExit(g, r, 'an MCP call to a server off the allowlist')
@@ -827,8 +1033,10 @@ for (const g of GATES) {
           .map((l) => { try { return JSON.parse(l) } catch { return null } })
           .find((o) => o && (o.cancel === true || o.decision === 'deny'))
         expect(verdict, `${g.name} printed no verdict object`).toBeTruthy()
-        expect(String(verdict.reason)).toContain('[mcp_allowlist]')
-        expect(String(verdict.reason)).not.toMatch(/crash|ReferenceError/i)
+        // Cline shows a cancel's errorMessage; the deny contracts carry reason.
+        const said = String(verdict.cancel === true ? verdict.errorMessage : verdict.reason)
+        expect(said).toContain('[mcp_allowlist]')
+        expect(said).not.toMatch(/crash|ReferenceError/i)
         expect(auditLogText(g)).toMatch(/tool_blocked.*mcp_allowlist|mcp_allowlist.*tool_blocked/)
 
         const allowed = await runGate(g, {}, { tool: 'mcp__allowed-server__x', snapshot: snap })
@@ -978,6 +1186,18 @@ for (const g of GATES) {
       expect(auditLogText(g), `${g.name} dropped the snapshot silently`).toMatch(/snapshot_invalid/)
     })
 
+    it('refuses an MCP call on a snapshot whose allowlist was edited, observe-only included, with its code', async () => {
+      // Every contract refuses with the rule id; the stdout contracts' JSON
+      // decisions carry the code too (Antigravity's in its reason).
+      const r = await runGate(g, {}, { tool: 'mcp__github__create_issue', snapshot: unverifiedAllowlistSnapshot(g.name) })
+      assertCleanExit(g, r, 'an MCP call on an unverified snapshot')
+      expect(wasBlocked(g, r), `${g.name} admitted an MCP server on a tampered snapshot`).toBe(true)
+      expect(r.stdout + r.stderr).toContain('[policy_snapshot]')
+      if (g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny') {
+        expect(r.stdout).toContain('POLICY_SNAPSHOT_UNVERIFIED')
+      }
+    })
+
     it('is not disarmed by whitespace', async () => {
       // grep is line-oriented and the portable pattern subset has no whitespace
       // class, so normalisation is the only thing standing between a tab and a
@@ -1106,6 +1326,16 @@ describe('Open WebUI prompt filter', () => {
     expect((await ask('here is a canary-string', snap)).refused).toBe(false)
   })
 
+  it('gives each event of one prompt its own eventId — they share an incidentId', async () => {
+    const snap = join(home, 'owui-warn-ids.rules')
+    writeRulesFixture(snap, [{
+      id: 'deny.canary', source: 'canary-string', subject: 'command', severity: 'warn',
+      reason: 'No canary', rationale: '', matches: [], notMatches: [],
+    }])
+    // A flag and an allow for the prompt.
+    await expectEventIds(gate, async () => { await ask('here is a canary-string', snap) }, 2)
+  })
+
   it('refuses when severity is hold — a prompt has no tool call to hold and no reviewer to wait for', async () => {
     // Also the v7 fail-open edge: the old mapping sent every unrecognised
     // severity to `flags`, so a hold rule reaching a v7 filter was ALLOWED.
@@ -1146,6 +1376,32 @@ describe('Open WebUI prompt filter', () => {
     }])
     const r = await ask('here is a canary-string', snap)
     expect(r.refused, 'an argPattern rule was applied to a prompt').toBe(false)
+  })
+
+  it('reads the MCP allowlist record as part of the digest', async () => {
+    // The filter applies no allowlist (a prompt names no MCP server), but the
+    // record is a data line: the digest covers it, so a snapshot carrying it
+    // keeps its rules, and one whose list was widened by hand loses them.
+    const rule: GuardPattern = {
+      id: 'deny.canary', source: 'canary-string', subject: 'command', severity: 'block',
+      reason: 'No canary', rationale: '', matches: [], notMatches: [],
+    }
+    const snap = writeRulesFixture(join(home, 'owui-allowlist.rules'), [rule], '', [
+      encodeMcpAllowlistRecord({ severity: 'block', servers: ['github'] }),
+    ])
+    expect((await ask('here is a canary-string', snap)).refused, 'a valid snapshot with the record lost its rules').toBe(true)
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
+    expect((await ask('here is a canary-string', snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
+  })
+
+  it('reads a snapshot with no digest line as unverified', async () => {
+    const rule: GuardPattern = {
+      id: 'deny.canary', source: 'canary-string', subject: 'command', severity: 'block',
+      reason: 'No canary', rationale: '', matches: [], notMatches: [],
+    }
+    const snap = writeRulesFixture(join(home, 'owui-nodigest.rules'), [rule])
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace(/^#digest .*\n/m, ''))
+    expect((await ask('here is a canary-string', snap)).refused, 'a snapshot without its digest was enforced as valid').toBe(false)
   })
 })
 
@@ -1232,6 +1488,34 @@ describe('n8n workflow gate', () => {
     }
   }, 120_000)
 
+  it('reads the MCP allowlist record as part of the digest', async () => {
+    // A workflow has no MCP tool calls to apply it to, but the record is a
+    // data line: a snapshot carrying it keeps its rules, and one whose list
+    // was widened by hand fails the digest and loses them.
+    const snap = writeRulesFixture(join(home, 'allowlist-n8n-wf.rules'), DESTRUCTIVE_COMMAND_PATTERNS.map((p) => ({ ...p, severity: 'block' as const })), '', [
+      encodeMcpAllowlistRecord({ severity: 'block', servers: ['github'] }),
+    ])
+    expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a valid snapshot with the record lost its rules').toBe(true)
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
+    expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
+  })
+
+  it('refuses a workflow with an MCP client node on an unverified snapshot, observe-only too', async () => {
+    // n8n's MCP Client Tool node calls tools on an MCP server, and a snapshot
+    // that failed its integrity check admits none.
+    const mcpNode = { name: 'Ask GitHub', type: '@n8n/n8n-nodes-langchain.mcpClientTool', typeVersion: 1, parameters: { endpointUrl: 'https://mcp.example/sse' } }
+    const snap = writeRulesFixture(join(home, 'unverified-n8n-wf.rules'), DESTRUCTIVE_COMMAND_PATTERNS.map((p) => ({ ...p, severity: 'shadow' as const })), '', [
+      encodeMcpAllowlistRecord({ severity: 'shadow', servers: ['github'] }),
+    ])
+    expect((await runWorkflow(wf([mcpNode]), snap)).refused, 'refused an MCP node on a verified snapshot').toBe(false)
+    writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
+    const r = await runWorkflow(wf([commandNode('npm run build'), mcpNode]), snap)
+    expect(r.refused, 'an MCP node ran on a tampered snapshot').toBe(true)
+    expect(r.stderr).toContain(mcpSnapshotUnverifiedRefusal('Ask GitHub').reason + ' [policy_snapshot]')
+    // A workflow without one is left to the other rules.
+    expect((await runWorkflow(wf([commandNode('npm run build')]), snap)).refused).toBe(false)
+  })
+
   it('applies destructive rules only when the snapshot supplies them', async () => {
     const withoutSnap = await runWorkflow(wf([commandNode('rm -rf /')]))
     expect(withoutSnap.refused, 'blocked from the floor — destructive ships via snapshot').toBe(false)
@@ -1298,7 +1582,7 @@ describe('n8n workflow gate', () => {
   })
 
   it('writes an audit line for a block', async () => {
-    await runWorkflow(wf([commandNode('chflags nouchg .intutic/hooks/x')]))
+    await expectEventIds(gate, async () => { await runWorkflow(wf([commandNode('chflags nouchg .intutic/hooks/x')])) }, 1)
     expect(
       auditLogText(gate),
       'the workflow gate aborted an execution without recording it — an unrecorded block is invisible to the control plane',
@@ -1478,8 +1762,14 @@ describe('OpenCode plugin gate', () => {
         expect(withSnap.refused, 'destructive command allowed with the snapshot present').toBe(true)
       })
 
-      it('records the verdict with harnessType opencode', async () => {
-        await runPlugin(shape, 'bash', { command: 'chflags nouchg .intutic/hooks/x' })
+      it('refuses an MCP call on a snapshot that fails its digest, observe-only included', async () => {
+        const r = await runPlugin(shape, 'mcp__github__create_issue', {}, unverifiedAllowlistSnapshot(`opencode-${shape}`))
+        expect(r.refused, 'an MCP server was admitted on a tampered snapshot').toBe(true)
+        expect(r.stderr).toContain('[policy_snapshot]')
+      })
+
+      it('records the verdict with harnessType opencode, under an eventId of its own', async () => {
+        await expectEventIds(gate, async () => { await runPlugin(shape, 'bash', { command: 'chflags nouchg .intutic/hooks/x' }) }, 1)
         const text = auditLogText(gate)
         expect(text).toContain('"harnessType":"opencode"')
         expect(text).toContain('"event":"tool_blocked"')
@@ -1501,7 +1791,7 @@ describe('OpenCode plugin gate', () => {
         '  }\n}\n',
     )
     const snap = writeRulesFixture(join(home, 'opencode-mcp.rules'), DESTRUCTIVE_COMMAND_PATTERNS, 'ws_test', [
-      '#mcpservers block github,my',
+      encodeMcpAllowlistRecord({ severity: 'block', servers: ['github', 'my'] }),
     ])
     try {
       for (const shape of ['server', 'setup'] as const) {
@@ -1550,6 +1840,18 @@ describe('OpenCode plugin gate', () => {
     expect(clean.refused).toBe(false)
   })
 
+  it('refuses at its own deadline, measured from the call: OpenCode awaits the hook with no time limit', async () => {
+    const snap = writeRulesFixture(join(home, 'deadline-opencode-plugin.rules'), [SLOW_WHERE_RULE])
+    const started = Date.now()
+    const r = await runPlugin('server', 'bash', { command: 'a'.repeat(48) + 'b' }, snap)
+    const elapsed = Date.now() - started
+    expect(r.refused, 'a call its rules never decided was allowed').toBe(true)
+    expect(r.stderr).toMatch(/GATE_DEADLINE/)
+    // Measured from the call; the bound adds starting the process that loads the plugin.
+    expect(elapsed, `took ${elapsed} ms`).toBeGreaterThanOrEqual(gateDeadlineMs('opencode'))
+    expect(elapsed, `took ${elapsed} ms`).toBeLessThan(gateDeadlineMs('opencode') + 2_000)
+  }, 30_000)
+
   it('applies a WHERE clause from the snapshot: kubectl apply unpinned is refused, pinned is allowed', async () => {
     const file = writeRulesFixture(
       join(home, 'opencode-where.rules'),
@@ -1575,6 +1877,231 @@ describe('OpenCode plugin gate', () => {
     // vacuously: at least one of the two outcomes has to be a refusal.
     expect(unpinned.refused || pinned.refused, 'neither call was refused — the WHERE rule never applied').toBe(true)
     expect(pinned.refused, `the pinned apply was refused:\n${pinned.stderr}`).toBe(false)
+  })
+})
+
+describe('Pi and OpenClaw plugin gates', () => {
+  /**
+   * Loads each file the way its host does and drives ONE tool call through
+   * the handler the host would call, with the payload the host builds:
+   *
+   * - Pi (earendil-works/pi 6fb2e78, core/extensions): jiti imports the file
+   *   with `{ default: true }` and calls the default export with the
+   *   ExtensionAPI; `pi.on('tool_call', h)`; the runner awaits
+   *   `h({ type: 'tool_call', toolName, toolCallId, input }, ctx)`, and a
+   *   result with `block: true` refuses, its `reason` going to the model.
+   *   A dynamic `import()` stands in for jiti, which loads natively on Node.
+   * - OpenClaw (openclaw/openclaw 59309cc, src/plugins): a standalone file in
+   *   `plugins.load.paths` exports `{ id, register(api) }`, the id matching
+   *   the basename; `api.on('before_tool_call', h, { timeoutMs })`; the
+   *   runner awaits `h({ toolName, params, toolCallId, runId, derivedPaths? },
+   *   ctx)`, and `{ block: true, blockReason }` refuses.
+   *
+   * Exit 3 is a refusal by block result. Exit 6 is a handler that threw:
+   * both hosts would block on it too, but the reason would not reach the
+   * model, so it fails the test. Exit 4 is a file the host could not load.
+   */
+  async function runPluginGate(
+    g: GateEntry,
+    tool: string,
+    args: unknown,
+    opts: { snapshot?: string; derivedPaths?: string[] } = {},
+  ): Promise<{ refused: boolean; stderr: string; timeoutMs?: number }> {
+    const root = roots.get(g.name)!
+    const driver = join(root, 'plugin-block-drv.mjs')
+    writeFileSync(
+      driver,
+      [
+        "import { pathToFileURL } from 'node:url';",
+        "import { createRequire } from 'node:module';",
+        'const [file, host, tool] = process.argv.slice(2);',
+        "let stdin = ''; for await (const chunk of process.stdin) stdin += chunk;",
+        'const { args, derivedPaths } = JSON.parse(stdin);',
+        'let handler, options, call;',
+        "if (host === 'pi') {",
+        '  const factory = (await import(pathToFileURL(file).href)).default;',
+        "  if (typeof factory !== 'function') { console.error('default export is not a function'); process.exit(4); }",
+        "  await factory({ on(name, fn) { if (name === 'tool_call') handler = fn; } });",
+        "  call = () => handler({ type: 'tool_call', toolName: tool, toolCallId: 'call_1', input: args },",
+        "    { cwd: process.cwd(), hasUI: false, sessionManager: { getSessionId: () => 'sess_test' } });",
+        '} else {',
+        '  const plugin = createRequire(import.meta.url)(file);',
+        "  if (!plugin || typeof plugin.register !== 'function') { console.error('no register()'); process.exit(4); }",
+        "  if (plugin.id + '.cjs' !== file.split('/').pop()) { console.error('id ' + plugin.id + ' is not the basename'); process.exit(4); }",
+        "  plugin.register({ on(name, fn, o) { if (name === 'before_tool_call') { handler = fn; options = o; } } });",
+        "  call = () => handler({ toolName: tool, params: args, toolCallId: 'call_1', runId: 'run_1', ...(derivedPaths.length ? { derivedPaths } : {}) },",
+        "    { agentId: 'main', sessionKey: 'agent:main:main', sessionId: 'sess_test', runId: 'run_1' });",
+        '}',
+        "if (typeof handler !== 'function') { console.error('no tool-call handler registered'); process.exit(4); }",
+        "if (options) console.error('timeoutMs=' + options.timeoutMs);",
+        'let res;',
+        'try { res = await call(); } catch (e) { console.error(String((e && e.message) || e)); process.exit(6); }',
+        "if (res && res.block === true) { console.error(String(res.reason || res.blockReason || '')); process.exit(3); }",
+        'process.exit(0);',
+      ].join('\n'),
+    )
+    const res = await runProcess(
+      'node',
+      [driver, join(root, g.artifact), g.name, tool],
+      {
+        // On stdin: an argument list over the size limit is too large for argv.
+        input: JSON.stringify({ args, derivedPaths: opts.derivedPaths ?? [] }),
+        env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: opts.snapshot ?? join(home, 'no-such.rules') },
+        timeoutMs: 20_000,
+      },
+    )
+    expect(res.status, `${g.name}: the host could not load the file: ${res.stderr}`).not.toBe(4)
+    expect(res.status, `${g.name}: the handler threw instead of returning a block result: ${res.stderr}`).not.toBe(6)
+    expect([0, 3], `${g.name} exited ${res.status} (${res.signal ?? 'no signal'}): ${res.stderr}`).toContain(res.status)
+    const t = /timeoutMs=(\d+)/.exec(res.stderr)
+    return { refused: res.status === 3, stderr: res.stderr, ...(t ? { timeoutMs: Number(t[1]) } : {}) }
+  }
+
+  const plugins = GATES.filter((g) => g.contract === 'plugin-block')
+
+  it('covers exactly the Pi extension and the OpenClaw plugin', () => {
+    expect(plugins.map((g) => g.name).sort()).toEqual(['openclaw', 'pi'])
+  })
+
+  for (const g of plugins) {
+    // The hosts' own tool ids: Pi's bash/write, OpenClaw's exec/write.
+    const shell = g.name === 'pi' ? 'bash' : 'exec'
+
+    describe(g.name, () => {
+      it('allows an ordinary command and an ordinary write', async () => {
+        const r = await runPluginGate(g, shell, { command: 'npm run build' })
+        expect(r.refused, `refused \`npm run build\`:\n${r.stderr}`).toBe(false)
+        const w = await runPluginGate(g, 'write', { path: 'src/index.ts', content: 'export {}' })
+        expect(w.refused, `refused an ordinary write:\n${w.stderr}`).toBe(false)
+      })
+
+      it('refuses a governance-bypass command, naming the rule', async () => {
+        const r = await runPluginGate(g, shell, { command: 'chflags nouchg .intutic/hooks/x' })
+        expect(r.refused, 'a governance-bypass command was allowed').toBe(true)
+        expect(r.stderr).toMatch(/\[Intutic Governance\] BLOCKED/)
+        expect(r.stderr).toMatch(/\[[a-z_.-]+\]/)
+      })
+
+      it('refuses every path in the shared protected constant, as a command and as a write target', async () => {
+        for (const p of UNIVERSAL_PROTECTED_PATHS) {
+          const asCommand = await runPluginGate(g, shell, { command: `cat ${p}` })
+          expect(asCommand.refused, `\`cat ${p}\` was allowed`).toBe(true)
+          const asWrite = await runPluginGate(g, 'write', { path: p, content: 'x' })
+          expect(asWrite.refused, `write to ${p} was allowed`).toBe(true)
+        }
+      }, 180_000)
+
+      it("refuses an edit to the Pi extensions directory, OpenClaw's config or any file that loads a gate, by absolute path", async () => {
+        for (const p of ['/home/u/.pi/agent/extensions/intutic-governance.js', '/home/u/.pi/agent/extensions/other.ts', '/home/u/.openclaw/openclaw.json', ...GATE_LOADER_FILES]) {
+          const asWrite = await runPluginGate(g, 'write', { path: p, content: 'export default function () {}' })
+          expect(asWrite.refused, `write to ${p} was allowed`).toBe(true)
+          const asCommand = await runPluginGate(g, shell, { command: `sed -i 's/intutic-governance//' ${p}` })
+          expect(asCommand.refused, `editing ${p} from the shell was allowed`).toBe(true)
+        }
+        // Two plugin runs per path, a process each: the same budget as the
+        // protected-paths case above, which a loaded machine needs.
+      }, 180_000)
+
+      it('refuses a destructive command only when the snapshot supplies the rule', async () => {
+        const without = await runPluginGate(g, shell, { command: 'rm -rf /' })
+        expect(without.refused, 'destructive tier fired with no snapshot').toBe(false)
+        const withSnap = await runPluginGate(g, shell, { command: 'rm -rf /' }, { snapshot: snapshotRules })
+        expect(withSnap.refused, 'destructive command allowed with the snapshot present').toBe(true)
+      })
+
+      it('refuses an MCP call on a snapshot that fails its digest, observe-only included', async () => {
+        // Pi names an MCP tool mcp__<server>__<tool>; OpenClaw <server>__<tool>.
+        const tool = g.name === 'pi' ? 'mcp__github__create_issue' : 'github__create_issue'
+        const r = await runPluginGate(g, tool, {}, { snapshot: unverifiedAllowlistSnapshot(g.name) })
+        expect(r.refused, 'an MCP server was admitted on a tampered snapshot').toBe(true)
+        expect(r.stderr).toContain('[policy_snapshot]')
+      })
+
+      it('refuses tool arguments over the size limit as COMMAND_TOO_LARGE', async () => {
+        const r = await runPluginGate(g, 'write', { path: 'notes.md', content: 'x'.repeat(ARGUMENTS_SIZE_LIMIT) })
+        expect(r.refused).toBe(true)
+        expect(r.stderr).toMatch(/COMMAND_TOO_LARGE/)
+      })
+
+      it('refuses arguments it cannot read rather than allowing the call', async () => {
+        const r = await runPluginGate(g, shell, null)
+        expect(r.refused, 'a call with null arguments was allowed').toBe(true)
+      })
+
+      it('refuses at its own deadline, measured from the call, rather than hanging the agent', async () => {
+        // Pi awaits the handler with no timeout, and OpenClaw's timeout cannot
+        // interrupt synchronous code: without the gate's own deadline this
+        // WHERE pattern holds the agent for as long as it backtracks.
+        const snap = writeRulesFixture(join(home, `deadline-${g.name}-plugin.rules`), [SLOW_WHERE_RULE])
+        const started = Date.now()
+        const r = await runPluginGate(g, shell, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap })
+        const elapsed = Date.now() - started
+        expect(r.refused, 'a call its rules never decided was allowed').toBe(true)
+        expect(r.stderr).toMatch(/GATE_DEADLINE/)
+        // Measured from the call; the bound adds starting the process that loads the plugin.
+        const deadline = gateDeadlineMs(g.name as 'pi' | 'openclaw')
+        expect(elapsed, `took ${elapsed} ms`).toBeGreaterThanOrEqual(deadline)
+        expect(elapsed, `took ${elapsed} ms`).toBeLessThan(deadline + 2_000)
+      }, 30_000)
+
+      it('records each verdict with its harnessType and session, under an eventId of its own', async () => {
+        await expectEventIds(g, async () => { await runPluginGate(g, shell, { command: 'chflags nouchg .intutic/hooks/x' }) }, 1)
+        const blocked = hookEvents(g).filter((e) => e['event'] === 'tool_blocked' && e['harnessType'] === g.name)
+        expect(blocked.length, `no tool_blocked event with harnessType ${g.name}`).toBeGreaterThan(0)
+        expect(blocked.at(-1)!['sessionId']).toBe('sess_test')
+        await expectEventIds(g, async () => { await runPluginGate(g, shell, { command: 'npm test' }) }, 1)
+        expect(hookEvents(g).some((e) => e['event'] === 'tool_allowed' && e['harnessType'] === g.name)).toBe(true)
+      })
+
+      it('holds a deploy under a local review_before rule and records it at the workspace path', async () => {
+        const file = writeRulesFixture(
+          join(home, `${g.name}-hold.rules`),
+          buildSnapshotRules(
+            { workspaceId: 'ws_test', interventionMode: 'ENFORCE', sopRules: [], mcpAllowedServers: [], sqlDropStrictBlock: false },
+            ['action:deploy'],
+          ),
+          'ws_test',
+        )
+        const holdFile = join(roots.get(g.name)!, REVIEW_REQUESTS_LOG)
+        const before = existsSync(holdFile) ? readFileSync(holdFile, 'utf8') : ''
+        const r = await runPluginGate(g, shell, { command: 'git push origin main' }, { snapshot: file })
+        expect(r.refused, `a held deploy ran. stderr: ${r.stderr.slice(0, 300)}`).toBe(true)
+        expect(r.stderr).toMatch(/HELD/)
+        const added = (existsSync(holdFile) ? readFileSync(holdFile, 'utf8') : '').slice(before.length).trim().split('\n').filter(Boolean)
+        expect(added, `no hold record at ${REVIEW_REQUESTS_LOG}`).toHaveLength(1)
+        expect(JSON.parse(added[0]!)).toMatchObject({ v: 1, reason: 'sop.local.review_before.action:deploy', workspaceId: 'ws_test' })
+      })
+
+      it("applies the MCP server allowlist to the host's MCP tool names", async () => {
+        const snap = writeRulesFixture(join(home, `${g.name}-mcp.rules`), DESTRUCTIVE_COMMAND_PATTERNS, 'ws_test', [
+          encodeMcpAllowlistRecord({ severity: 'block', servers: ['github'] }),
+        ])
+        // Pi names them mcp__<server>__<tool>; OpenClaw <server>__<tool>.
+        const name = (server: string, tool: string) => (g.name === 'pi' ? `mcp__${server}__${tool}` : `${server}__${tool}`)
+        const allowed = await runPluginGate(g, name('github', 'create_issue'), { title: 'x' }, { snapshot: snap })
+        expect(allowed.refused, `an allowlisted server was refused:\n${allowed.stderr}`).toBe(false)
+        const refused = await runPluginGate(g, name('pastebin', 'upload'), { text: 'x' }, { snapshot: snap })
+        expect(refused.refused, 'a server off the allowlist was allowed').toBe(true)
+        expect(refused.stderr).toContain('[mcp_allowlist]')
+      })
+    })
+  }
+
+  it('openclaw: registers its hook with the timeout its deadline sits inside', async () => {
+    const g = plugins.find((p) => p.name === 'openclaw')!
+    const r = await runPluginGate(g, 'exec', { command: 'ls' })
+    expect(r.timeoutMs, 'no timeoutMs on the before_tool_call registration').toBeDefined()
+    expect(r.timeoutMs!).toBe(HOOK_GATE_TIMEOUTS.openclaw.timeoutMs)
+    expect(r.timeoutMs!).toBeGreaterThanOrEqual(gateDeadlineMs('openclaw') + GATE_DEADLINE_MARGIN_MS)
+  })
+
+  it('openclaw: checks every path apply_patch names in derivedPaths', async () => {
+    const g = plugins.find((p) => p.name === 'openclaw')!
+    const patch = { input: '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-a\n+b\n*** End Patch' }
+    const ok = await runPluginGate(g, 'apply_patch', patch, { derivedPaths: ['src/a.ts', 'src/b.ts'] })
+    expect(ok.refused, `refused a patch to ordinary files:\n${ok.stderr}`).toBe(false)
+    const bad = await runPluginGate(g, 'apply_patch', patch, { derivedPaths: ['src/a.ts', '.claude/settings.json'] })
+    expect(bad.refused, 'a patch touching .claude/settings.json was allowed').toBe(true)
   })
 })
 
@@ -1615,7 +2142,35 @@ describe('pattern portability', () => {
     return res.status === 0
   }
 
-  for (const pat of all) {
+  /** A phrase rule as the bash gates and the Open WebUI filter run it: GATE_PY_LIB's Python. */
+  async function pythonPhraseMatches(source: string, raw: string): Promise<boolean> {
+    const res = await runProcess('python3', [
+      '-c',
+      'import os, sys\nlib = {}\nexec(os.environ["INTUTIC_PY_LIB"], lib)\n' +
+        'sys.exit(0 if lib["intutic_phrase_rule"](sys.argv[1], sys.argv[2]) else 1)',
+      source,
+      raw,
+    ], { env: { ...process.env, INTUTIC_PY_LIB: GATE_PY_LIB } })
+    return res.status === 0
+  }
+
+  for (const pat of all.filter((p) => p.subject === 'phrase')) {
+    it(`${pat.id} (a phrase rule) means the same thing to JavaScript and Python`, async () => {
+      const cases: Array<[string, boolean]> = [
+        ...pat.matches.map((m) => [m, true] as [string, boolean]),
+        ...pat.notMatches.map((m) => [m, false] as [string, boolean]),
+      ]
+      for (const [raw, expected] of cases) {
+        expect(guardMatches(pat, raw), `JS disagreed with the declared expectation for ${JSON.stringify(raw)}`).toBe(expected)
+        expect(
+          await pythonPhraseMatches(pat.source, raw),
+          `the bash gates' Python disagreed with JavaScript for ${pat.id} on ${JSON.stringify(raw)}`,
+        ).toBe(expected)
+      }
+    })
+  }
+
+  for (const pat of all.filter((p) => p.subject !== 'phrase')) {
     it(`${pat.id} means the same thing to grep, JavaScript and Python`, async () => {
       const re = new RegExp(pat.source, pat.ignoreCase ? 'i' : '')
       const cases: Array<[string, boolean]> = [

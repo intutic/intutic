@@ -15,110 +15,32 @@ import type { HarnessType, SyncSopEntry } from '@intutic/shared-types'
 export interface IHarnessAdapter {
   /** Harness type identifier. */
   readonly type: HarnessType
-  /** Config file name relative to workspace root. */
+  /**
+   * The file drift is tracked on, relative to the workspace root: the
+   * harness's rules file when it has one in the workspace (`rulesFileOf` in
+   * `@intutic/shared-types`), else the workspace file the adapter writes; ''
+   * for none.
+   */
   readonly configFileName: string
   /** Detect whether this harness is present in the workspace. */
   detect(workspaceRoot: string): Promise<boolean>
   /**
-   * Write governance config to the harness's native config file.
-   * Returns the absolute path written, or null if skipped.
+   * Install what governs this harness whatever rule sets the workspace has:
+   * its tool-call gate, and the proxy routing that rides with it. The gate
+   * enforces the built-in protections, the destructive-command tier, group
+   * rules and holds, none of which need a rule set, so `intutic connect` runs
+   * this for every configured harness. Absent when the harness has no gate
+   * Intutic installs.
+   */
+  installGate?(workspaceRoot: string, proxyUrl: string): Promise<void>
+  /**
+   * Write the rule sets into the file the harness reads as standing
+   * instructions — the one `HARNESS_RULES_FILES` names, and no other.
+   * `intutic connect` calls it only when a rule set targets the harness, or
+   * on a forced sync. Returns the absolute path written, or null if nothing
+   * was.
    */
   writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null>
   /** Read SHA-256 hash of current config file content. Returns null if file doesn't exist. */
   readCurrentHash(workspaceRoot: string): Promise<string | null>
-}
-
-/** Harness config file mapping for file-based harnesses. */
-export const HARNESS_CONFIG_FILES: Record<HarnessType, string> = {
-  'cursor': '.cursorrules',
-  'claude-code': 'CLAUDE.md',
-  'antigravity': '.gemini/settings.json',
-  'windsurf': '.windsurfrules',
-  'aider': '.aider.conf.yml',
-  'openhands': 'config.toml',
-  'codex': '.env.intutic',
-  'n8n': '', // Phase 2 — TD-037: API call, not file write
-  'openclaw': '.openclaw/openclaw.json',
-  'hermes': '.hermes/config.yaml',
-  'pi': '.pi/hooks.json',
-  'github-copilot': '.github/copilot-instructions.md',
-  'cline': '',
-  'roo-code': '',
-  'continue': '',
-  'claude-desktop': '',
-  'goose': '',
-  'open-webui': '',
-  'langgraph': '.env.intutic',
-  // Muse Code reads AGENTS.md (falling back to CLAUDE.md) — see muse.ts.
-  'muse-code': 'AGENTS.md',
-  // AGENTS.md is Grok Build's native rules file — the same cross-tool
-  // convention Codex/Amp read. Delivered via the generic markdown formatter
-  // (`buildMarkdownContent`) every `---`-separated rules
-  // file in this codebase already shares (Cursor, Claude Code, Windsurf,
-  // GitHub Copilot) — not a bespoke format.
-  'grok': 'AGENTS.md',
-  // OpenCode reads AGENTS.md (CLAUDE.md fallback) — see opencode.ts. The gate
-  // is the plugin `openCodeHooks.ts` generates, not this file.
-  'opencode': 'AGENTS.md',
-  // dsh has no workspace-relative rules file in the research this phase could
-  // verify — its config lives entirely under $DSH_HOME (profiles/*/cordis.patch.yml,
-  // settings.yaml), not the project workspace. Empty, matching goose/cline/
-  // continue/claude-desktop/open-webui's precedent for "no single canonical
-  // file" harnesses; dsh.ts's own adapter resolves its real paths directly.
-  'dsh': '',
-  // Xirp writes no config of its own — see xirp.ts's module doc. It
-  // orchestrates other already-gated harnesses (Claude Code, Codex,
-  // Antigravity/Gemini CLI), whose own adapters do the real writing.
-  'xirp': '',
-  // Agentic Orchestrator writes no config of its own — see
-  // agenticOrchestrator.ts's module doc. It orchestrates other CLI backends
-  // (Claude Code, Codex, OpenCode), whose own adapters do the real writing.
-  'agentic-orchestrator': '',
-  // Wave 1 SDK-gated frameworks — same rationale as langgraph above: no
-  // on-disk hook/config file exists to gate tool calls, so each of these
-  // writes .env.intutic (proxy base-URL vars + an SDK-gate pointer comment).
-  'langchain': '.env.intutic',
-  'crewai': '.env.intutic',
-  'autogen': '.env.intutic',
-  'ag2': '.env.intutic',
-  'google-adk': '.env.intutic',
-  'openai-agents': '.env.intutic',
-  'pydantic-ai': '.env.intutic',
-  'smolagents': '.env.intutic',
-  // A4: AWS Strands Agents — same Python SDK-gated rationale as the Wave 1
-  // family above (gate ships in intutic_clawde.gate.adapters.strands).
-  'strands': '.env.intutic',
-  // TD-375: Microsoft Agent Framework — same Python SDK-gated rationale
-  // (gate ships in intutic_clawde.gate.adapters.agent_framework).
-  'agent-framework': '.env.intutic',
-  // T2: JS/TS SDK-gated frameworks — same rationale as the Wave 1 Python
-  // family above, but the blocking gate ships in @intutic/gate
-  // (packages/gate-js) rather than intutic-clawde.
-  'mastra': '.env.intutic',
-  'vercel-ai-sdk': '.env.intutic',
-  // eve (Vercel, PREVIEW) — same JS/TS SDK-gated family; detection is a
-  // compound `eve` dep + `agent/` directory check — see eve.ts.
-  'eve': '.env.intutic',
-  // TrueForge (embedded-library mode only — see trueforge.ts's module doc
-  // and the HarnessType.TRUEFORGE doc comment); same JS/TS SDK-gated family.
-  'trueforge': '.env.intutic',
-  // A3: Vercel platform-agent runtimes — same @intutic/gate family. Note the
-  // env vars are weaker still for ai-sdk-harness (tool execution is
-  // server-side in Vercel Sandbox microVMs; see aiSdkHarness.ts's module doc
-  // and the envPreamble override it carries).
-  'ai-sdk-harness': '.env.intutic',
-  'ai-sdk-workflow': '.env.intutic',
-  // B2: AWS Bedrock AgentCore Runtime — hosts the customer's own framework
-  // code unchanged; the actual tool-call gate belongs to whichever
-  // already-supported framework adapter that code uses (Strands, LangGraph,
-  // ...), same 'delegated'/no-file-of-its-own shape as xirp/
-  // agentic-orchestrator above. See agentcore.ts's module doc.
-  'agentcore-runtime': '',
-  // B3: TrueForge, standalone/hosted server (see the HarnessType.TRUEFORGE_SERVER
-  // doc comment) — no CLI adapter exists for this row at all: it is an
-  // operator-configured deployment, not a package.json dependency of
-  // whatever repo `intutic init` runs against, so there is nothing for this
-  // detector to find and no config file to write. Governed entirely by
-  // services/trueforge-bridge instead (GateKind: 'bridge').
-  'trueforge-server': '',
 }

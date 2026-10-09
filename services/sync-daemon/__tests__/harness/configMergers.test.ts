@@ -21,7 +21,8 @@ import { setContinueApiBase } from '../../src/harness/continueConfigMerger.js'
 import { mergeAiderYaml, mergeAiderConfig, AIDER_SOPS_FILE } from '../../src/harness/aiderConfigMerger.js'
 import { writeAntigravityHooks } from '../../src/harness/antigravityHooks.js'
 import { writeCodexHooks } from '../../src/harness/codexHooks.js'
-import { mergePiModels } from '../../src/harness/piHooks.js'
+import { mergePiModels, writePiHooks } from '../../src/harness/piHooks.js'
+import { mergeOpenclawConfig, writeOpenclawHooks } from '../../src/harness/openclawHooks.js'
 import { mergeHermesYaml } from '../../src/harness/hermesHooks.js'
 import { mergeOpenHandsToml, mergeOpenHandsBaseUrl } from '../../src/harness/openhandsHooks.js'
 import { mergeGooseConfigYaml } from '../../src/harness/gooseHooks.js'
@@ -140,6 +141,7 @@ describe('Continue config.yaml — apiBase', () => {
 })
 
 describe('Aider .aider.conf.yml', () => {
+  const WS = path.join(path.sep, 'work', 'project')
   const userConfig = [
     '# team settings',
     'model: sonnet',
@@ -156,23 +158,32 @@ describe('Aider .aider.conf.yml', () => {
   ].join('\n')
 
   it('keeps lists and comments, strips auto-exec and invalid legacy keys, and writes only real Aider options', () => {
-    const { content, stripped } = mergeAiderYaml(userConfig, 'http://127.0.0.1:4000', true)
+    const { content, stripped } = mergeAiderYaml(userConfig, 'http://127.0.0.1:4000', WS, true)
     expect(stripped.sort()).toEqual(['lint-cmd', 'test-cmd'])
     expect(content).toContain('# team settings')
     const parsed = parseYaml(content!) as Record<string, unknown>
     expect(parsed).toEqual({
       model: 'sonnet',
-      read: ['CONVENTIONS.md', AIDER_SOPS_FILE],
+      read: ['CONVENTIONS.md', path.join(WS, AIDER_SOPS_FILE)],
       'set-env': ['FOO=bar', 'ANTHROPIC_BASE_URL=http://127.0.0.1:4000'],
       'openai-api-base': URL_V1,
     })
   })
 
   it('is idempotent and drops the SOP read entry when there are no SOPs', () => {
-    const once = mergeAiderYaml(userConfig, 'http://127.0.0.1:4000', true).content!
-    expect(mergeAiderYaml(once, 'http://127.0.0.1:4000', true).content).toBe(once)
-    const parsed = parseYaml(mergeAiderYaml(once, 'http://127.0.0.1:4000', false).content!) as Record<string, unknown>
+    const once = mergeAiderYaml(userConfig, 'http://127.0.0.1:4000', WS, true).content!
+    expect(mergeAiderYaml(once, 'http://127.0.0.1:4000', WS, true).content).toBe(once)
+    const parsed = parseYaml(mergeAiderYaml(once, 'http://127.0.0.1:4000', WS, false).content!) as Record<string, unknown>
     expect(parsed.read).toEqual(['CONVENTIONS.md'])
+  })
+
+  it('lists the SOP file by absolute path, since Aider resolves read entries against the directory it runs in', () => {
+    // Earlier versions wrote the workspace-relative path, which Aider missed
+    // when started from a subdirectory; it is replaced, not kept alongside.
+    const legacy = 'model: sonnet\nread:\n  - CONVENTIONS.md\n  - .intutic/aider-sops.md\n'
+    const parsed = parseYaml(mergeAiderYaml(legacy, 'http://127.0.0.1:4000', WS, true).content!) as Record<string, unknown>
+    expect(parsed.read).toEqual(['CONVENTIONS.md', path.join(WS, AIDER_SOPS_FILE)])
+    expect(path.isAbsolute((parsed.read as string[])[1]!)).toBe(true)
   })
 
   it('writes the SOP file next to the config and leaves an unparseable config untouched', async () => {
@@ -235,7 +246,92 @@ describe('Antigravity (Gemini CLI) ~/.gemini/settings.json', () => {
   })
 })
 
-describe('Pi ~/.pi/models.json', () => {
+describe('Pi ~/.pi/agent', () => {
+  let root: string
+  const prevHome = process.env.HOME
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-pi-'))
+    process.env.HOME = root
+  })
+
+  afterEach(async () => {
+    process.env.HOME = prevHome
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  it('writes the extension where Pi discovers it and routes models.json there, not under ~/.pi', async () => {
+    await writePiHooks(root, 'http://127.0.0.1:4000', 'ws_test')
+    const extension = await fs.readFile(path.join(root, '.pi', 'agent', 'extensions', 'intutic-governance.js'), 'utf-8')
+    expect(extension).toContain('export default function intuticGovernance(pi)')
+    expect(extension).toContain("pi.on('tool_call', toolCall)")
+    const models = JSON.parse(await fs.readFile(path.join(root, '.pi', 'agent', 'models.json'), 'utf-8'))
+    expect(models.providers.anthropic.baseUrl).toBe('http://127.0.0.1:4000')
+    for (const unread of ['hooks.json', 'models.json']) {
+      await expect(fs.access(path.join(root, '.pi', unread)), unread).rejects.toThrow()
+    }
+  })
+
+  it('leaves a models.json that is not plain JSON untouched', async () => {
+    const models = path.join(root, '.pi', 'agent', 'models.json')
+    await fs.mkdir(path.dirname(models), { recursive: true })
+    await fs.writeFile(models, '{ "providers": { // mine\n } }\n')
+    await writePiHooks(root, 'http://127.0.0.1:4000', 'ws_test')
+    expect(await fs.readFile(models, 'utf-8')).toBe('{ "providers": { // mine\n } }\n')
+  })
+})
+
+describe('OpenClaw ~/.openclaw/openclaw.json', () => {
+  const PLUGIN = '/home/u/.intutic/hooks/openclaw/intutic-governance.cjs'
+  let root: string
+  const prevHome = process.env.HOME
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'intutic-openclaw-'))
+    process.env.HOME = root
+  })
+
+  afterEach(async () => {
+    process.env.HOME = prevHome
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  it('lists the plugin in plugins.load.paths, keeping every other key, and does not stack', () => {
+    const user = { agents: { defaults: { workspace: '~/a' } }, plugins: { load: { paths: ['~/mine.ts'] }, entries: { mine: { enabled: true } } } }
+    const merged = mergeOpenclawConfig(user, PLUGIN)
+    expect(merged).toEqual({
+      agents: { defaults: { workspace: '~/a' } },
+      plugins: { load: { paths: ['~/mine.ts', PLUGIN] }, entries: { mine: { enabled: true } } },
+    })
+    expect(mergeOpenclawConfig(merged, PLUGIN)).toEqual(merged)
+  })
+
+  it('adds the plugin id to a restrictive allowlist, and leaves an empty or absent one alone', () => {
+    expect((mergeOpenclawConfig({ plugins: { allow: ['mine'] } }, PLUGIN).plugins as { allow: string[] }).allow).toEqual(['mine', 'intutic-governance'])
+    expect((mergeOpenclawConfig({ plugins: { allow: [] } }, PLUGIN).plugins as { allow: string[] }).allow).toEqual([])
+    expect((mergeOpenclawConfig({}, PLUGIN).plugins as Record<string, unknown>).allow).toBeUndefined()
+  })
+
+  it('writes the plugin and a JSON5 config with comments as JSON, the user keys kept', async () => {
+    const config = path.join(root, '.openclaw', 'openclaw.json')
+    await fs.mkdir(path.dirname(config), { recursive: true })
+    await fs.writeFile(config, '{\n  // mine\n  "gateway": { "port": 18789 },\n}\n')
+    await writeOpenclawHooks(root, 'http://127.0.0.1:4000', 'ws_test')
+    const plugin = path.join(root, '.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')
+    expect(await fs.readFile(plugin, 'utf-8')).toContain("api.on('before_tool_call', beforeToolCall, { timeoutMs: 10000 })")
+    expect(JSON.parse(await fs.readFile(config, 'utf-8'))).toEqual({ gateway: { port: 18789 }, plugins: { load: { paths: [plugin] } } })
+  })
+
+  it('leaves a config that does not parse untouched', async () => {
+    const config = path.join(root, '.openclaw', 'openclaw.json')
+    await fs.mkdir(path.dirname(config), { recursive: true })
+    await fs.writeFile(config, '{ gateway: { port: 18789 } }\n')
+    await writeOpenclawHooks(root, 'http://127.0.0.1:4000', 'ws_test')
+    expect(await fs.readFile(config, 'utf-8')).toBe('{ gateway: { port: 18789 } }\n')
+  })
+})
+
+describe('Pi ~/.pi/agent/models.json', () => {
   it('gives each provider the base URL its SDK expects, leaves Google and other keys alone', () => {
     const merged = mergePiModels({
       providers: {
@@ -252,15 +348,28 @@ describe('Pi ~/.pi/models.json', () => {
 })
 
 describe('Hermes ~/.hermes/config.yaml', () => {
-  it('sets hooks.preToolUse.command without touching other command keys or comments', () => {
+  it('registers a fail-closed pre_tool_call hook in place of the preToolUse key Hermes never read, keeping comments', () => {
     const config = '# mine\nmcp_servers:\n  fs:\n    command: mcp-fs\nhooks:\n  preToolUse:\n    command: /old/hermes-check.sh\n'
     const merged = mergeHermesYaml(config, '/home/u/.intutic/hooks/hermes-check.sh')!
     expect(merged).toContain('# mine')
     expect(parseYaml(merged)).toEqual({
       mcp_servers: { fs: { command: 'mcp-fs' } },
-      hooks: { preToolUse: { command: '/home/u/.intutic/hooks/hermes-check.sh' } },
+      hooks: { pre_tool_call: [{ command: '/home/u/.intutic/hooks/hermes-check.sh', timeout: 10, fail_closed: true }] },
     })
     expect(mergeHermesYaml(merged, '/home/u/.intutic/hooks/hermes-check.sh')).toBe(merged)
+  })
+
+  it('keeps the user\'s own pre_tool_call hooks and quotes a path with a space for shlex', () => {
+    const config = 'hooks:\n  pre_tool_call:\n    - command: ~/.hermes/agent-hooks/scan.sh\n      fail_closed: true\n'
+    const merged = parseYaml(mergeHermesYaml(config, '/home/my u/.intutic/hooks/hermes-check.sh')!)
+    expect(merged.hooks.pre_tool_call).toEqual([
+      { command: '~/.hermes/agent-hooks/scan.sh', fail_closed: true },
+      { command: "'/home/my u/.intutic/hooks/hermes-check.sh'", timeout: 10, fail_closed: true },
+    ])
+  })
+
+  it('leaves a pre_tool_call it would not know how to edit untouched', () => {
+    expect(mergeHermesYaml('hooks:\n  pre_tool_call: nope\n', '/x/hermes-check.sh')).toBeNull()
   })
 
   it('leaves a file that does not parse untouched', () => {
@@ -271,22 +380,27 @@ describe('Hermes ~/.hermes/config.yaml', () => {
 describe('OpenHands config.toml', () => {
   const user = '# my openhands\n[core]\nworkspace_base = "./ws"\n\n[llm]\nmodel = "anthropic/claude-sonnet"\napi_key = "env"\n'
 
-  it('sets [llm] base_url for the model\'s SDK and an [intutic] table, keeping everything else', () => {
-    const merged = mergeOpenHandsToml(user, 'http://127.0.0.1:4000', '## Rule\nNo """secrets"""')!
+  it('sets [llm] base_url for the model\'s SDK, keeping everything else', () => {
+    const merged = mergeOpenHandsToml(user, 'http://127.0.0.1:4000')!
     expect(merged.startsWith('# my openhands\n[core]')).toBe(true)
     const parsed = parseToml(merged) as Record<string, any>
     expect(parsed.core.workspace_base).toBe('./ws')
     expect(parsed.llm).toEqual({ base_url: 'http://127.0.0.1:4000', model: 'anthropic/claude-sonnet', api_key: 'env' })
-    expect(parsed.intutic.instructions).toBe('## Rule\nNo """secrets"""\n')
-    expect(mergeOpenHandsToml(merged, 'http://127.0.0.1:4000', '## Rule\nNo """secrets"""')).toBe(merged)
+    expect(Object.keys(parsed)).toEqual(['core', 'llm'])
+    expect(mergeOpenHandsToml(merged, 'http://127.0.0.1:4000')).toBe(merged)
+  })
+
+  it('drops the [intutic] table earlier versions put the rules in, which OpenHands never reads', () => {
+    const stale = `${user}\n[intutic]\nproxy_url = "http://127.0.0.1:4000"\ninstructions = """\n## Rule\n"""\n`
+    expect(mergeOpenHandsToml(stale, 'http://127.0.0.1:4000')).toBe(mergeOpenHandsToml(user, 'http://127.0.0.1:4000'))
   })
 
   it('uses the OpenAI-style base for other models, regenerates the old overwrite, and leaves invalid TOML alone', () => {
-    const openai = parseToml(mergeOpenHandsToml('[llm]\nmodel = "gpt-4o"\n', 'http://h:4000', 'x')!) as Record<string, any>
+    const openai = parseToml(mergeOpenHandsToml('[llm]\nmodel = "gpt-4o"\n', 'http://h:4000')!) as Record<string, any>
     expect(openai.llm.base_url).toBe('http://h:4000/v1')
     const legacy = '# Intutic Governance Rules (auto-generated)\n[intutic]\nproxy_url = "x"\n'
-    expect(Object.keys(parseToml(mergeOpenHandsToml(legacy, 'http://h:4000', 'x')!))).toEqual(['llm', 'intutic'])
-    expect(mergeOpenHandsToml('[llm\n', 'http://h:4000', 'x')).toBeNull()
+    expect(Object.keys(parseToml(mergeOpenHandsToml(legacy, 'http://h:4000')!))).toEqual(['llm'])
+    expect(mergeOpenHandsToml('[llm\n', 'http://h:4000')).toBeNull()
   })
 })
 
@@ -296,7 +410,7 @@ describe('OpenHands base_url outside [llm]', () => {
   const user = '[llm.draft]\nmodel = "gpt-4o-mini"\nbase_url = "https://draft.example/v1"\n\n[llm]\nmodel = "gpt-4o"\n'
 
   it('sets only [llm] base_url and leaves a named llm table\'s own', () => {
-    for (const merged of [mergeOpenHandsBaseUrl(user, 'http://h:4000')!, mergeOpenHandsToml(user, 'http://h:4000', 'x')!]) {
+    for (const merged of [mergeOpenHandsBaseUrl(user, 'http://h:4000')!, mergeOpenHandsToml(user, 'http://h:4000')!]) {
       const parsed = parseToml(merged) as Record<string, any>
       expect(parsed.llm.base_url).toBe('http://h:4000/v1')
       expect(parsed.llm.draft).toEqual({ model: 'gpt-4o-mini', base_url: 'https://draft.example/v1' })

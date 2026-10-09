@@ -19,12 +19,15 @@ import * as node_path from 'node:path'
 import * as node_os from 'node:os'
 import * as node_fs from 'node:fs/promises'
 import { isDeepStrictEqual } from 'node:util'
+import { harnessesReading } from '@intutic/shared-types'
 import { isSeq, parseDocument, type Document } from 'yaml'
 import { parse as parseToml } from 'smol-toml'
 import {
+  antigravityMcpConfigPath,
   claudeDesktopConfigPath,
   continueConfigPath,
   cursorGlobalConfigPath,
+  geminiSettingsPath,
   gooseConfigPath,
   grokUserConfigPath,
   museConfigPath,
@@ -33,13 +36,23 @@ import {
 } from '../harness/mcpAutoWrite.js'
 import { jetbrainsConfigRoot } from '../harness/windsurfJetBrainsProxy.js'
 import { windsurfSettingsPath } from '../harness/windsurfHooks.js'
-import { resolveClaudeDesktopConfigPath } from '../harness/claudeDesktopHooks.js'
+import { ANTIGRAVITY_CLI_GATE, ANTIGRAVITY_HOOK_NAME, antigravityHooksPath } from '../harness/antigravityCliHooks.js'
+import { DECISIONS_MARKERS, removeRulesSection, rulesSectionOf, RULES_SECTION_END } from '../harness/rulesSection.js'
+import { DECISIONS_FILE_HEADER } from '../lib/decisionsDigest.js'
 import { parseComponentOptions, serializeComponentOptions, type ComponentOptionsFile } from '../harness/jetbrainsXmlConfig.js'
 import { resolveDshHome, listDshProfileDirs } from '../harness/dshHooks.js'
-import { stripOwnHeader as stripAiderHeader, AIDER_SOPS_FILE } from '../harness/aiderConfigMerger.js'
-import { parseJson5Like } from '../harness/openclawHooks.js'
+import { stripOwnHeader as stripAiderHeader, AIDER_DECISIONS_FILE, AIDER_SOPS_FILE, isAiderIntuticEntry } from '../harness/aiderConfigMerger.js'
+import {
+  OPENCLAW_PLUGIN_FILE,
+  OPENCLAW_PLUGIN_ID,
+  OPENCLAW_PLUGIN_MARKER,
+  openclawAgentWorkspace,
+  parseJson5Like,
+} from '../harness/openclawHooks.js'
+import { PI_AGENT_DIR, PI_EXTENSION_FILE, PI_EXTENSION_MARKER } from '../harness/piHooks.js'
 import { unharden } from '../harness/gooseHardener.js'
-import { pruneLedger } from './originals.js'
+import { pruneLedger, readOriginal, sha256 } from './originals.js'
+import { ENV_INTUTIC_WRITERS } from '../configWriter.js'
 import {
   allEdits,
   deleteFile,
@@ -49,6 +62,7 @@ import {
   jsonFormat,
   orderLike,
   pruneEmpty,
+  readText,
   removeFromArray,
   restoreKey,
   restoreMatchingValues,
@@ -64,12 +78,15 @@ import {
   type StructuredFormat,
 } from './plan.js'
 import {
+  antigravityRemoteShape,
+  geminiRemoteShape,
   unwrapClaudeState,
   unwrapContinueServers,
   unwrapOpenCodeServers,
   unwrapServersAt,
+  unwrapUnmarkedServersAt,
 } from './mcp.js'
-import { contains, isGateCommandEntry, isGateEntry, runsGate, startsWithRulesHeader } from './recognise.js'
+import { contains, isGateCommandEntry, isGateEntry, runsGate, RULES_HEADER, startsWithRulesHeader } from './recognise.js'
 import { lineValue, removeEmptyTable, removeTable, restoreKeyLine, tomlSections } from './tomlLines.js'
 
 export interface DisconnectContext {
@@ -108,6 +125,22 @@ async function gateScripts(plan: DisconnectPlan, root: string, names: readonly s
 /** A rules file Intutic writes whole, with the generated header first. */
 async function rulesFile(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
   await reverseOwnedFile(plan, file, workspaceRoot, startsWithRulesHeader)
+}
+
+/** A rules file of Intutic's own that may open with the product's front matter (`alwaysApply: true`, ...). */
+async function ownRulesFile(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
+  await reverseOwnedFile(plan, file, workspaceRoot, contains(RULES_HEADER))
+}
+
+/**
+ * An instructions file the user also writes (`CLAUDE.md`, `AGENTS.md`, ...):
+ * the marked rules section comes out, or, in a file an earlier version wrote
+ * whole, the whole file is undone.
+ */
+async function instructionsFile(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
+  const text = await readText(file)
+  if (text !== null && (rulesSectionOf(text) !== null || rulesSectionOf(text, DECISIONS_MARKERS) !== null)) await rulesSection(plan, file, workspaceRoot)
+  else await rulesFile(plan, file, workspaceRoot)
 }
 
 async function json(
@@ -195,7 +228,10 @@ function claudeSettings(plan: DisconnectPlan, file: string, workspaceRoot: strin
 
 const claudeCode: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
-    await rulesFile(plan, join(root, 'CLAUDE.md'), root)
+    await ownRulesFile(plan, join(root, '.claude', 'rules', 'intutic-governance.md'), root)
+    await decisionsFile(plan, join(root, '.claude', 'rules', 'intutic-decisions.md'), root)
+    // Where earlier versions wrote the rules whole and appended the decisions log.
+    await legacyClaudeMd(plan, join(root, 'CLAUDE.md'), root)
     await claudeSettings(plan, join(root, '.claude', 'settings.json'), root, true)
     await gateScripts(plan, root, ['claude-code-check.js'])
     await sharedBy(ctx, ['claude-code', 'cursor'], () => gateScripts(plan, root, ['pre-tool-check.js']))
@@ -207,17 +243,8 @@ const claudeCode: HarnessReverser = async (plan, ctx) => {
 
 // ─── Claude Desktop ──────────────────────────────────────────────────────────
 
-const claudeDesktop: HarnessReverser = async (plan, ctx) => {
-  await forEachWorkspace(ctx, (root) => gateScripts(plan, root, ['claude-desktop-check.js']))
-  // The MCP writer and the hook writer agree on the path except on Windows.
-  for (const file of new Set([claudeDesktopConfigPath(), resolveClaudeDesktopConfigPath()])) {
-    await json(plan, file, home(), (doc, c) =>
-      allEdits(
-        unwrapServersAt(doc, ['mcpServers'], c.original),
-        removeGateEntries(doc, c, ['PreToolUse'], 'claude-desktop-check.js'),
-      ),
-    )
-  }
+const claudeDesktop: HarnessReverser = async (plan) => {
+  await json(plan, claudeDesktopConfigPath(), home(), (doc, c) => unwrapServersAt(doc, ['mcpServers'], c.original))
 }
 
 // ─── Cursor ──────────────────────────────────────────────────────────────────
@@ -245,6 +272,8 @@ function cursorHooks(plan: DisconnectPlan, file: string, workspaceRoot: string):
 
 const cursor: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
+    await ownRulesFile(plan, join(root, '.cursor', 'rules', 'intutic-governance.mdc'), root)
+    await decisionsFile(plan, join(root, '.cursor', 'rules', 'intutic-decisions.mdc'), root)
     await rulesFile(plan, join(root, '.cursorrules'), root)
     await gateScripts(plan, root, ['cursor-check.js'])
     await cursorHooks(plan, join(root, '.cursor', 'hooks.json'), root)
@@ -368,6 +397,8 @@ async function jetbrainsProxy(plan: DisconnectPlan, ctx: DisconnectContext, list
 
 const windsurf: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
+    await ownRulesFile(plan, join(root, '.windsurf', 'rules', 'intutic-governance.md'), root)
+    await decisionsFile(plan, join(root, '.windsurf', 'rules', 'intutic-decisions.md'), root)
     await rulesFile(plan, join(root, '.windsurfrules'), root)
     await gateScripts(plan, root, ['windsurf-check.js'])
     await cascadeHooks(plan, join(root, '.windsurf', 'hooks.json'), root)
@@ -385,19 +416,21 @@ const OWN_HOOK_FILE = contains('Intutic governance hook')
 
 const githubCopilot: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
-    await rulesFile(plan, join(root, '.github', 'copilot-instructions.md'), root)
+    await instructionsFile(plan, join(root, '.github', 'copilot-instructions.md'), root)
     await gateScripts(plan, root, ['github-copilot-check.js'])
     await reverseOwnedFile(plan, join(root, '.github', 'hooks', 'intutic-governance.json'), root, OWN_HOOK_FILE)
   })
   await reverseOwnedFile(plan, join(home(), '.copilot', 'hooks', 'intutic-governance.json'), home(), OWN_HOOK_FILE)
 }
 
-// ─── AGENTS.md writers: Muse Code, Grok Build, OpenCode ──────────────────────
+// ─── AGENTS.md readers ───────────────────────────────────────────────────────
 
-const AGENTS_MD_WRITERS = ['muse-code', 'grok', 'opencode']
+/** Every harness whose rule sets go into the workspace's `AGENTS.md`. */
+const AGENTS_MD_WRITERS = harnessesReading('AGENTS.md')
 
+/** The `AGENTS.md` section, once none of the harnesses that read it stays connected. */
 async function agentsMd(plan: DisconnectPlan, ctx: DisconnectContext): Promise<void> {
-  await sharedBy(ctx, AGENTS_MD_WRITERS, () => forEachWorkspace(ctx, (root) => rulesFile(plan, join(root, 'AGENTS.md'), root)))
+  await sharedBy(ctx, AGENTS_MD_WRITERS, () => forEachWorkspace(ctx, (root) => instructionsFile(plan, join(root, 'AGENTS.md'), root)))
 }
 
 const MUSE_EVENTS = ['PreToolUse', 'PermissionRequest']
@@ -469,27 +502,14 @@ const opencode: HarnessReverser = async (plan, ctx) => {
 // ─── Roo Code, Cline ─────────────────────────────────────────────────────────
 
 const rooCode: HarnessReverser = async (plan, ctx) => {
-  await forEachWorkspace(ctx, async (root) => {
-    const rules = join(root, '.roorules')
-    let isDir = false
-    try {
-      isDir = (await node_fs.stat(rules)).isDirectory()
-    } catch {
-      // Absent.
-    }
-    if (isDir) {
-      await rulesFile(plan, join(rules, 'README.md'), root)
-      await reverseOwnedFile(plan, join(rules, 'hooks', 'hooks.json'), root, contains('roo-check.js'))
-    } else {
-      await rulesFile(plan, rules, root)
-    }
-    await gateScripts(plan, root, ['roo-check.js'])
-  })
+  await agentsMd(plan, ctx)
+  await forEachWorkspace(ctx, (root) => rulesFile(plan, join(root, '.roorules'), root))
 }
 
 const cline: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await rulesFile(plan, join(root, '.clinerules', 'intutic-governance.md'), root)
+    await decisionsFile(plan, join(root, '.clinerules', 'intutic-decisions.md'), root)
     await reverseOwnedFile(plan, join(root, '.clinerules', 'hooks', 'PreToolUse'), root, contains('Intutic Cline PreToolUse governance gate.'))
     await json(plan, join(root, '.cline', 'mcp.json'), root, (doc, c) => unwrapServersAt(doc, ['mcpServers'], c.original), true)
   })
@@ -497,27 +517,6 @@ const cline: HarnessReverser = async (plan, ctx) => {
 
 // ─── Codex and the SDK adapters (.env.intutic) ───────────────────────────────
 
-/** Every adapter that writes `.env.intutic`. */
-export const ENV_INTUTIC_WRITERS = [
-  'codex',
-  'langgraph',
-  'langchain',
-  'crewai',
-  'autogen',
-  'ag2',
-  'google-adk',
-  'openai-agents',
-  'pydantic-ai',
-  'smolagents',
-  'strands',
-  'agent-framework',
-  'mastra',
-  'vercel-ai-sdk',
-  'eve',
-  'trueforge',
-  'ai-sdk-harness',
-  'ai-sdk-workflow',
-]
 
 async function envIntutic(plan: DisconnectPlan, ctx: DisconnectContext): Promise<void> {
   await sharedBy(ctx, ENV_INTUTIC_WRITERS, () => forEachWorkspace(ctx, (root) => rulesFile(plan, join(root, '.env.intutic'), root)))
@@ -560,6 +559,7 @@ function codexHooks(plan: DisconnectPlan, file: string, workspaceRoot: string): 
 }
 
 const codex: HarnessReverser = async (plan, ctx) => {
+  await agentsMd(plan, ctx)
   await envIntutic(plan, ctx)
   await forEachWorkspace(ctx, async (root) => {
     await gateScripts(plan, root, ['codex-check.js'])
@@ -604,7 +604,7 @@ function aiderConfig(plan: DisconnectPlan, root: string, ctx: DisconnectContext)
       hadHeader,
       restoreKey(doc, ['openai-api-base'], c, ctx.isProxyUrl),
       removeFromList(doc, 'set-env', envIsOurs, c),
-      removeFromList(doc, 'read', (v) => v === AIDER_SOPS_FILE, c),
+      removeFromList(doc, 'read', (v) => isAiderIntuticEntry(v, root), c),
     )
     if (!changed || c.original === null) return changed
     // The merger dropped the user's own ANTHROPIC_BASE_URL entry and the
@@ -633,15 +633,17 @@ const aider: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await aiderConfig(plan, root, ctx)
     await intuticFile(plan, join(root, AIDER_SOPS_FILE))
+    await decisionsFile(plan, join(root, AIDER_DECISIONS_FILE), root)
   })
 }
 
 // ─── OpenHands ───────────────────────────────────────────────────────────────
 
 /**
- * An OpenHands `config.toml`: the `[intutic]` table the adapter appends, and
- * every `base_url` the two writers pointed at the proxy (one of them replaced
- * the first `base_url` line in the file, whichever table held it).
+ * An OpenHands `config.toml`: the `[intutic]` table earlier versions
+ * appended (it held the rules, which OpenHands never read), and every
+ * `base_url` the two writers pointed at the proxy (one of them replaced the
+ * first `base_url` line in the file, whichever table held it).
  */
 function openHandsConfig(plan: DisconnectPlan, file: string, workspaceRoot: string, ctx: DisconnectContext): Promise<void> {
   return reverseTextFile(plan, file, workspaceRoot, parseToml, (text, c) => {
@@ -662,6 +664,8 @@ function openHandsConfig(plan: DisconnectPlan, file: string, workspaceRoot: stri
 
 const openhands: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
+    await rulesFile(plan, join(root, '.openhands', 'microagents', 'intutic-governance.md'), root)
+    await decisionsFile(plan, join(root, '.openhands', 'microagents', 'intutic-decisions.md'), root)
     await openHandsConfig(plan, join(root, 'config.toml'), root, ctx)
     await gateScripts(plan, root, ['openhands-check.sh'])
     await reverseOwnedFile(plan, join(root, '.openhands', 'hooks.json'), root, OWN_HOOK_FILE)
@@ -670,16 +674,73 @@ const openhands: HarnessReverser = async (plan, ctx) => {
   await openHandsConfig(plan, join(home(), '.openhands', 'config.toml'), home(), ctx)
 }
 
-// ─── Antigravity (Gemini CLI) ────────────────────────────────────────────────
+// ─── Antigravity and Gemini CLI ──────────────────────────────────────────────
+
+/** Antigravity's hooks file keys hooks by name; `intutic-governance` is Intutic's when it only runs the gate. */
+function isAntigravityGate(value: unknown): boolean {
+  return isObject(value) && Array.isArray(value.PreToolUse) && value.PreToolUse.length > 0 &&
+    value.PreToolUse.every(isGateEntry(ANTIGRAVITY_CLI_GATE))
+}
+
+/**
+ * A user's instructions file holding Intutic's marked rules section: the
+ * section goes, and the original bytes come back when nothing else changed.
+ * Trailing line breaks are compared loosely, since the section's removal
+ * cannot tell them apart; a file that had no final line break gets none back.
+ */
+function rulesSection(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
+  return reverseTextFile(plan, file, workspaceRoot, (text) => text.trimEnd(), (text, c) => {
+    const withoutRules = removeRulesSection(text) ?? text
+    const next = removeRulesSection(withoutRules, DECISIONS_MARKERS) ?? withoutRules
+    if (next === text) return null
+    if (c.originalText === null || c.originalText.endsWith('\n')) return next
+    const tail = text.trimEnd()
+    return tail.endsWith(RULES_SECTION_END) || tail.endsWith(DECISIONS_MARKERS.end) ? next.replace(/\r?\n$/, '') : next
+  })
+}
+
+/**
+ * A `CLAUDE.md` earlier versions wrote to: the decisions-log section they
+ * appended comes out, and a file they wrote whole underneath it is given
+ * back too. Without the section, the whole-file case is {@link rulesFile}.
+ */
+async function legacyClaudeMd(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
+  const text = await readText(file)
+  if (text === null || rulesSectionOf(text, DECISIONS_MARKERS) === null) return rulesFile(plan, file, workspaceRoot)
+  const record = await readOriginal(file, workspaceRoot)
+  await reverseTextFile(plan, file, workspaceRoot, (t) => t.trimEnd(), (t, c) => {
+    const next = removeRulesSection(t, DECISIONS_MARKERS)
+    if (next === null) return null
+    if (startsWithRulesHeader(next) && record?.writtenSha256 === sha256(next)) return c.originalText ?? ''
+    return next
+  })
+}
+
+/** The decisions log's own file next to a harness's rules file. */
+async function decisionsFile(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
+  await reverseOwnedFile(plan, file, workspaceRoot, contains(DECISIONS_FILE_HEADER))
+}
 
 const antigravity: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
-    await gateScripts(plan, root, ['antigravity-check.sh'])
+    await gateScripts(plan, root, ['antigravity-check.sh', ANTIGRAVITY_CLI_GATE])
+    await rulesSection(plan, join(root, 'GEMINI.md'), root)
+    // Where earlier versions put the rules (a key neither product reads), and
+    // the project's Gemini CLI MCP servers.
     await json(plan, join(root, '.gemini', 'settings.json'), root, (doc, c) =>
-      restoreKey(doc, ['customInstructions'], c, (v) => typeof v === 'string' && startsWithRulesHeader(v)),
+      allEdits(
+        restoreKey(doc, ['customInstructions'], c, (v) => typeof v === 'string' && startsWithRulesHeader(v)),
+        unwrapUnmarkedServersAt(doc, ['mcpServers'], c.original, geminiRemoteShape),
+      ),
     true)
   })
-  await json(plan, join(home(), '.gemini', 'settings.json'), home(), (doc, c) => removeGateEntries(doc, c, ['BeforeTool'], 'antigravity-check.sh'))
+  await json(plan, geminiSettingsPath(), home(), (doc, c) =>
+    allEdits(
+      removeGateEntries(doc, c, ['BeforeTool'], 'antigravity-check.sh'),
+      unwrapUnmarkedServersAt(doc, ['mcpServers'], c.original, geminiRemoteShape),
+    ))
+  await json(plan, antigravityHooksPath(), home(), (doc, c) => restoreKey(doc, [ANTIGRAVITY_HOOK_NAME], c, isAntigravityGate), true)
+  await json(plan, antigravityMcpConfigPath(), home(), (doc, c) => unwrapUnmarkedServersAt(doc, ['mcpServers'], c.original, antigravityRemoteShape), true)
 }
 
 // ─── Continue ────────────────────────────────────────────────────────────────
@@ -696,6 +757,8 @@ function continueSettings(plan: DisconnectPlan, file: string, workspaceRoot: str
 
 const continueHarness: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
+    await ownRulesFile(plan, join(root, '.continue', 'rules', 'intutic-governance.md'), root)
+    await decisionsFile(plan, join(root, '.continue', 'rules', 'intutic-decisions.md'), root)
     await gateScripts(plan, root, ['continue-check.js'])
     await continueSettings(plan, join(root, '.continue', 'settings.json'), root)
   })
@@ -709,7 +772,7 @@ const continueHarness: HarnessReverser = async (plan, ctx) => {
 
 async function goosePlugin(plan: DisconnectPlan): Promise<void> {
   const plugin = join(home(), '.agents', 'plugins', 'intutic-governance')
-  for (const file of [join(plugin, 'hooks', 'hooks.json'), join(plugin, 'scripts', 'intutic-check.sh')]) {
+  for (const file of [join(plugin, 'plugin.json'), join(plugin, 'hooks', 'hooks.json'), join(plugin, 'scripts', 'intutic-check.sh')]) {
     // Hardened read-only and immutable while connected: the flag comes off first.
     await reverseOwnedFile(plan, file, home(), contains('Intutic'), { beforeApply: () => unharden(file) })
     plan.removeIfEmpty(node_path.dirname(file))
@@ -718,6 +781,7 @@ async function goosePlugin(plan: DisconnectPlan): Promise<void> {
 }
 
 const goose: HarnessReverser = async (plan, ctx) => {
+  await forEachWorkspace(ctx, (root) => rulesSection(plan, join(root, '.goosehints'), root))
   await goosePlugin(plan)
   await reverseStructuredFile(plan, gooseConfigPath(), home(), yamlFormat, (doc, c) =>
     allEdits(
@@ -739,9 +803,14 @@ async function envSnippet(plan: DisconnectPlan, ctx: DisconnectContext, name: st
 }
 
 const hermes: HarnessReverser = async (plan, ctx) => {
+  await agentsMd(plan, ctx)
   await gateScripts(plan, home(), ['hermes-check.sh'])
   await reverseStructuredFile(plan, join(home(), '.hermes', 'config.yaml'), home(), yamlFormat, (doc, c) =>
-    restoreKey(doc, ['hooks', 'preToolUse', 'command'], c, (v) => runsGate(v, 'hermes-check.sh')),
+    allEdits(
+      removeFromArray(doc, ['hooks', 'pre_tool_call'], (e) => isObject(e) && runsGate(e.command, 'hermes-check.sh'), c.original),
+      // Where earlier versions put it.
+      restoreKey(doc, ['hooks', 'preToolUse', 'command'], c, (v) => runsGate(v, 'hermes-check.sh')),
+    ),
   )
   const skill = join(home(), '.hermes', 'skills', 'intutic-governance')
   await reverseOwnedFile(plan, join(skill, 'SKILL.md'), home(), contains('name: intutic-governance'))
@@ -750,30 +819,55 @@ const hermes: HarnessReverser = async (plan, ctx) => {
 }
 
 const pi: HarnessReverser = async (plan, ctx) => {
+  await agentsMd(plan, ctx)
+  await reverseOwnedFile(plan, join(home(), PI_EXTENSION_FILE), home(), contains(PI_EXTENSION_MARKER))
+  const piModels = (file: string) =>
+    json(plan, file, home(), (doc, c) =>
+      allEdits(
+        restoreKey(doc, ['providers', 'anthropic', 'baseUrl'], c, ctx.isProxyUrl),
+        restoreKey(doc, ['providers', 'openai', 'baseUrl'], c, ctx.isProxyUrl),
+      ),
+    true)
+  await piModels(join(home(), PI_AGENT_DIR, 'models.json'))
+  // Where earlier versions wrote, and Pi never read: a PreToolUse hook in
+  // ~/.pi/hooks.json and the routing in ~/.pi/models.json.
   await gateScripts(plan, home(), ['pi-check.sh'])
   await json(plan, join(home(), '.pi', 'hooks.json'), home(), (doc, c) => removeGateEntries(doc, c, ['PreToolUse'], 'pi-check.sh'), true)
-  await json(plan, join(home(), '.pi', 'models.json'), home(), (doc, c) =>
-    allEdits(
-      restoreKey(doc, ['providers', 'anthropic', 'baseUrl'], c, ctx.isProxyUrl),
-      restoreKey(doc, ['providers', 'openai', 'baseUrl'], c, ctx.isProxyUrl),
-    ),
-  true)
+  await piModels(join(home(), '.pi', 'models.json'))
   await envSnippet(plan, ctx, 'pi.env')
 }
 
 /** OpenClaw's config is JSON5-like; the writer re-serialises it as JSON, and so does this. */
 const json5LikeFormat: StructuredFormat<JsonObject> = { ...jsonFormat, parse: (raw) => (raw.trim() === '' ? {} : parseJson5Like(raw)) }
 
+/** The plugin's `plugins.load.paths` entry, and its id in `plugins.allow` unless the user had listed it before connect. */
+function removeOpenclawPlugin(doc: JsonObject, ctx: ReverseContext): boolean {
+  const originalAllow = ctx.original ? getPath(ctx.original, ['plugins', 'allow']) : undefined
+  const allowedBefore = Array.isArray(originalAllow) && originalAllow.includes(OPENCLAW_PLUGIN_ID)
+  return allEdits(
+    removeFromArray(doc, ['plugins', 'load', 'paths'], (v) => typeof v === 'string' && v.endsWith(OPENCLAW_PLUGIN_FILE), ctx.original),
+    !allowedBefore && removeFromArray(doc, ['plugins', 'allow'], (v) => v === OPENCLAW_PLUGIN_ID, ctx.original),
+  )
+}
+
+/** Where earlier versions registered the gate: an internal hook entry, which never sees a tool call. */
+function removeLegacyOpenclawHook(doc: JsonObject, ctx: ReverseContext): boolean {
+  const path = ['hooks', 'internal', 'entries', 'intutic-governance']
+  const entry = getPath(doc, path)
+  if (!isObject(entry) || !runsGate(entry.command, 'openclaw-check.js')) return false
+  deletePath(doc, path)
+  pruneEmpty(doc, path.slice(0, -1), ctx.original)
+  return true
+}
+
 const openclaw: HarnessReverser = async (plan, ctx) => {
+  // The rules section of its agent workspace's AGENTS.md.
+  await rulesSection(plan, join(await openclawAgentWorkspace(), 'AGENTS.md'), home())
+  await reverseOwnedFile(plan, join(home(), OPENCLAW_PLUGIN_FILE), home(), contains(OPENCLAW_PLUGIN_MARKER))
   await gateScripts(plan, home(), ['openclaw-check.js'])
-  await reverseStructuredFile(plan, join(home(), '.openclaw', 'openclaw.json'), home(), json5LikeFormat, (doc, c) => {
-    const path = ['hooks', 'internal', 'entries', 'intutic-governance']
-    const entry = getPath(doc, path)
-    if (!isObject(entry) || !runsGate(entry.command, 'openclaw-check.js')) return false
-    deletePath(doc, path)
-    pruneEmpty(doc, path.slice(0, -1), c.original)
-    return true
-  }, { deleteIfEmptyWithoutRecord: true })
+  await reverseStructuredFile(plan, join(home(), '.openclaw', 'openclaw.json'), home(), json5LikeFormat, (doc, c) =>
+    allEdits(removeOpenclawPlugin(doc, c), removeLegacyOpenclawHook(doc, c)),
+  { deleteIfEmptyWithoutRecord: true })
   await envSnippet(plan, ctx, 'openclaw.env')
 }
 
@@ -848,6 +942,7 @@ function dshPatch(plan: DisconnectPlan, file: string, dshHome: string, ctx: Disc
 const DSH_GATE_RANGE = '^2.0.0'
 
 const dsh: HarnessReverser = async (plan, ctx) => {
+  await agentsMd(plan, ctx)
   // dsh's files live under $DSH_HOME, and their records with them (see dshHooks.ts).
   const dshHome = resolveDshHome()
   for (const profile of await listDshProfileDirs(dshHome)) {

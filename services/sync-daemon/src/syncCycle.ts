@@ -34,6 +34,7 @@ import { refreshEgressPolicy } from './lib/egressPolicy.js'
 import type { GovernanceCoverageInputs } from './configReader.js'
 import { collectAgentReport, reportAgent, type AgentReport } from './agentReporter.js'
 import { startHarnessSession } from './sessionReporter.js'
+import { presentGateIdentities } from './harness/antigravityProducts.js'
 
 /** Narrow an unknown thrown value to a printable message. */
 function errorMessage(err: unknown): string {
@@ -99,6 +100,8 @@ export function emitSkillFlaggedEvents(opts: {
             .update(ts + skill.name + opts.workspaceId)
             .digest('hex')
             .slice(0, 16),
+          // Made once and resent with this line: processed once however often the drain retries.
+          eventId: crypto.randomBytes(16).toString('hex'),
           filePath: `${skill.source}/${skill.name}/SKILL.md`,
         }) + '\n'
       fs.mkdirSync(path.dirname(eventsLog), { recursive: true })
@@ -270,15 +273,23 @@ export async function reportHarnessAgents(opts: {
   const skillFlaggedThisCycle = new Set<string>()
   for (const harness of opts.harnesses) {
     try {
-      const report = await collectAgentReport({
-        workspaceRoot: opts.workspaceRoot,
-        harnessType: harness,
-        configSynced: true,
-        dlpEnabled: true,
-        policyEnforced: true,
-        allowLocalVaults: opts.allowLocalVaults,
-      })
-      await reportAgent(opts.controlPlaneUrl, opts.apiKey, opts.workspaceId, report)
+      // One agent per gate the harness has here: the silent-gate check expects
+      // a gate for each agent, so a product that is absent (Antigravity on a
+      // machine with only Gemini CLI) must not register one.
+      let report: AgentReport | undefined
+      for (const gateId of await presentGateIdentities(harness, opts.workspaceRoot)) {
+        report = await collectAgentReport({
+          workspaceRoot: opts.workspaceRoot,
+          harnessType: harness,
+          gateIdentity: gateId,
+          configSynced: true,
+          dlpEnabled: true,
+          policyEnforced: true,
+          allowLocalVaults: opts.allowLocalVaults,
+        })
+        await reportAgent(opts.controlPlaneUrl, opts.apiKey, opts.workspaceId, report)
+      }
+      if (!report) continue
       governanceInputs[harness] = deriveEnforcementInputs(report.facets)
       emitSkillFlaggedEvents({
         workspaceRoot: opts.workspaceRoot,

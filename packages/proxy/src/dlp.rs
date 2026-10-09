@@ -1,7 +1,19 @@
-//! DLP Scanner — bidirectional regex-based secret/PII detection.
+//! DLP Scanner — bidirectional detection of secrets, credentials and five
+//! kinds of PII.
 //!
 //! Uses Rust `regex` crate (linear-time, ReDoS-safe).
-//! Scans both input and output streams for secrets, PII, and credentials.
+//! Scans both input and output streams.
+//!
+//! PII coverage is exactly the detectors in `dlp/pii_detectors.json`: payment
+//! card numbers (IIN table + Luhn), IBANs (country length + mod-97), US SSNs
+//! (never-issued ranges rejected), email addresses and phone numbers. These
+//! are pattern-and-checksum detectors, not a model: names, postal addresses
+//! and free-text identifiers are not detected. See `dlp/pii.rs`.
+//!
+//! Each detector's action comes from this machine's config
+//! (`intutic_settings.dlp.detectors`), and, on a proxy connected to a
+//! workspace, from the workspace's `piiDetectors` setting, which is the
+//! baseline the machine's config may only tighten (`dlp/workspace.rs`).
 //!
 //! # Pattern doctrine
 //!
@@ -31,6 +43,9 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::wasm::context::DlpFinding;
+
+pub mod pii;
+pub mod workspace;
 
 /// DLP pattern categories
 static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
@@ -150,7 +165,6 @@ static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
             r"\bey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9/_-]{17,}\.[a-zA-Z0-9/_-]{10,}={0,2}",
             "redact",
         ),
-        ("ssn", "pii", r"\b\d{3}-\d{2}-\d{4}\b", "redact"),
         (
             "bearer_token",
             "credential",
@@ -176,6 +190,7 @@ static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
             category: category.into(),
             regex: Regex::new(regex).unwrap(),
             action: action.into(),
+            pii: None,
         })
         .collect();
 
@@ -224,6 +239,7 @@ static PATTERNS: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
         category: "credential".into(),
         regex: Regex::new(&honeytoken_regex).expect("honeytoken regex must compile"),
         action: "block".into(),
+        pii: None,
     });
 
     patterns
@@ -234,6 +250,178 @@ struct DlpPattern {
     category: String,
     regex: Regex,
     action: String,
+    /// Set for the PII detectors: the regex finds a candidate and this
+    /// detector's validator and boundary rule decide whether it is a finding.
+    pii: Option<&'static pii::Detector>,
+}
+
+/// The PII detectors at their configured actions, `off` ones left out.
+///
+/// A `OnceCell` for the same reason `CUSTOM` is one: the actions come from
+/// config, installed once at boot by `install_pii_actions`. Read before that
+/// (tests, or a probe that runs first) it holds the defaults from
+/// `pii_detectors.json`, and a later install is refused rather than silently
+/// ignored.
+static PII: once_cell::sync::OnceCell<Vec<DlpPattern>> = once_cell::sync::OnceCell::new();
+
+/// The actions this machine's config names, as written: the ones a workspace
+/// baseline is compared against (`workspace_pii_policy`). Detectors the config
+/// leaves out are not here, so they take the workspace's action when it names
+/// them. Set with `PII`; empty before that.
+static LOCAL_PII: once_cell::sync::OnceCell<std::collections::BTreeMap<String, String>> =
+    once_cell::sync::OnceCell::new();
+
+fn pii_patterns() -> &'static [DlpPattern] {
+    PII.get_or_init(|| {
+        build_pii_patterns(&std::collections::BTreeMap::new())
+            .expect("the shipped PII defaults are valid")
+    })
+}
+
+/// Refuses an unknown detector id or action, naming it and `source` (where
+/// the value came from), for the reason `install_custom_patterns` gives.
+fn validate_pii_actions(
+    actions: &std::collections::BTreeMap<String, String>,
+    source: &str,
+) -> Result<(), String> {
+    let dets = pii::detectors();
+    for (id, action) in actions {
+        if !dets.iter().any(|d| &d.id == id) {
+            let known: Vec<&str> = dets.iter().map(|d| d.id.as_str()).collect();
+            return Err(format!(
+                "{source} names '{id}', which is not a detector; known: {}",
+                known.join(", ")
+            ));
+        }
+        if pii_action_rank(action).is_none() {
+            return Err(format!(
+                "{source} sets '{id}' to '{action}'; only 'off', 'redact' and 'block' exist"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// How strict an action is: `off` < `redact` < `block`. `None` for anything
+/// else.
+fn pii_action_rank(action: &str) -> Option<u8> {
+    match action {
+        "off" => Some(0),
+        "redact" => Some(1),
+        "block" => Some(2),
+        _ => None,
+    }
+}
+
+/// Resolve each PII detector's action — the configured one, else its default —
+/// and keep the ones that are not `off`. An unknown id or action is an error
+/// naming it.
+fn build_pii_patterns(
+    actions: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<DlpPattern>, String> {
+    validate_pii_actions(actions, "dlp.detectors")?;
+    Ok(pii::detectors()
+        .iter()
+        .filter_map(|d| {
+            let action = actions.get(&d.id).unwrap_or(&d.default_action);
+            (action != "off").then(|| DlpPattern {
+                name: d.id.clone(),
+                category: d.category.clone(),
+                regex: d.regex.clone(),
+                action: action.clone(),
+                pii: Some(d),
+            })
+        })
+        .collect())
+}
+
+/// Install the configured PII detector actions. Call once, from main, before
+/// serving. Returns each detector's effective action, for the boot log.
+pub fn install_pii_actions(
+    actions: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<(String, String)>, String> {
+    let built = build_pii_patterns(actions)?;
+    let effective = action_table(&built);
+    PII.set(built)
+        .map_err(|_| "PII detector actions are already installed".to_string())?;
+    // Set after `PII`, so a refused second install cannot replace the
+    // actions the running scanner was built from.
+    let _ = LOCAL_PII.set(actions.clone());
+    Ok(effective)
+}
+
+/// Every detector with the action `patterns` gives it, `off` when it has none.
+fn action_table(patterns: &[DlpPattern]) -> Vec<(String, String)> {
+    pii::detectors()
+        .iter()
+        .map(|d| {
+            let action = patterns
+                .iter()
+                .find(|p| p.name == d.id)
+                .map_or("off", |p| p.action.as_str());
+            (d.id.clone(), action.to_string())
+        })
+        .collect()
+}
+
+/// The actions a workspace baseline and this machine's config give together.
+///
+/// The workspace setting is the baseline for every detector it names; the
+/// machine's config may only tighten it (`off` → `redact` → `block`), never
+/// loosen it, so a developer cannot switch off on their own machine what
+/// their workspace turned on. A detector the workspace does not name keeps
+/// the machine's action, or its default. Errors name an unknown id or action
+/// in the workspace's setting. The MCP proxy applies the same rule
+/// (`effectivePiiActions` in shared-types), and both run
+/// `packages/shared-types/fixtures/pii-precedence-vectors.json`.
+fn effective_pii_actions(
+    local: &std::collections::BTreeMap<String, String>,
+    workspace: &std::collections::BTreeMap<String, String>,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    validate_pii_actions(workspace, "the workspace's piiDetectors setting")?;
+    let mut effective = local.clone();
+    for (id, baseline) in workspace {
+        let tighter = local
+            .get(id)
+            .filter(|mine| pii_action_rank(mine) > pii_action_rank(baseline));
+        effective.insert(id.clone(), tighter.unwrap_or(baseline).clone());
+    }
+    Ok(effective)
+}
+
+/// The PII detectors at the actions one workspace's requests get: its
+/// `piiDetectors` setting tightened by this machine's config. Built per
+/// request from the cached key-context answer; scanned through `scan_with`,
+/// `scrub_stream_text` and `StreamScrubber::with_pii`.
+pub struct PiiPolicy {
+    patterns: Vec<DlpPattern>,
+}
+
+impl PiiPolicy {
+    /// The action `id` runs at, `None` when it is off.
+    pub fn action_of(&self, id: &str) -> Option<&str> {
+        self.patterns
+            .iter()
+            .find(|p| p.name == id)
+            .map(|p| p.action.as_str())
+    }
+
+    /// Every detector with its action, `off` included, for logs.
+    pub fn actions(&self) -> Vec<(String, String)> {
+        action_table(&self.patterns)
+    }
+}
+
+/// The policy for a workspace whose setting is `workspace`, against the
+/// actions this machine's config installed at boot.
+pub fn workspace_pii_policy(
+    workspace: &std::collections::BTreeMap<String, String>,
+) -> Result<PiiPolicy, String> {
+    let local = LOCAL_PII.get().cloned().unwrap_or_default();
+    let effective = effective_pii_actions(&local, workspace)?;
+    Ok(PiiPolicy {
+        patterns: build_pii_patterns(&effective)?,
+    })
 }
 
 /// Operator-supplied patterns, installed once at boot from config.
@@ -268,7 +456,9 @@ pub fn install_custom_patterns(defs: &[crate::config::CustomDlpPattern]) -> Resu
         if d.name.trim().is_empty() {
             return Err("a dlp pattern has an empty name".to_string());
         }
-        if PATTERNS.iter().any(|p| p.name == d.name) {
+        if PATTERNS.iter().any(|p| p.name == d.name)
+            || pii::detectors().iter().any(|p| p.id == d.name)
+        {
             return Err(format!(
                 "dlp pattern '{}' shadows a built-in of the same name; \
                  findings are counted by distinct pattern_name, so a duplicate \
@@ -283,6 +473,7 @@ pub fn install_custom_patterns(defs: &[crate::config::CustomDlpPattern]) -> Resu
             category: d.category.clone(),
             regex,
             action: d.action.clone(),
+            pii: None,
         });
     }
     let n = out.len();
@@ -292,10 +483,16 @@ pub fn install_custom_patterns(defs: &[crate::config::CustomDlpPattern]) -> Resu
     Ok(n)
 }
 
-/// Built-ins first, then operator patterns.
-fn all_patterns() -> impl Iterator<Item = &'static DlpPattern> {
+/// Built-ins first, then the enabled PII detectors — the workspace's when
+/// `pii` is given, else this machine's — then operator patterns.
+fn all_patterns(pii: Option<&PiiPolicy>) -> impl Iterator<Item = &DlpPattern> {
+    let pii = match pii {
+        Some(policy) => policy.patterns.as_slice(),
+        None => pii_patterns(),
+    };
     PATTERNS
         .iter()
+        .chain(pii.iter())
         .chain(CUSTOM.get().map(Vec::as_slice).unwrap_or(&[]).iter())
 }
 
@@ -331,9 +528,35 @@ fn all_patterns() -> impl Iterator<Item = &'static DlpPattern> {
 /// If this is ever revisited: measure it. `is_match` before `matches` was also
 /// tried and changed nothing (both engines are equally slow on this set) while
 /// making the dirty path ~20% worse by scanning twice.
+///
+/// # What the PII detectors cost
+///
+/// Card, IBAN and SSN (on by default) open with a character class, not a
+/// literal, so their regexes get no prefilter and each walks every byte;
+/// validators run only on candidates. Measured 2026-10-08 with the same
+/// benchmark: a 32 KB clean body went from 23 µs to 64 µs, a 128 KB one from
+/// about 0.2 ms to 0.32 ms — roughly 1.2 ns per byte, per direction.
 pub fn scan(text: &str) -> Vec<DlpFinding> {
+    scan_with(text, None)
+}
+
+/// [`scan`] with a workspace's PII detector actions in place of this
+/// machine's (`workspace_pii_policy`). `None` is exactly `scan`.
+pub fn scan_with(text: &str, pii: Option<&PiiPolicy>) -> Vec<DlpFinding> {
     let mut findings = Vec::new();
-    for pattern in all_patterns() {
+    for pattern in all_patterns(pii) {
+        if let Some(det) = pattern.pii {
+            for (start, end) in pii::find(det, text) {
+                findings.push(DlpFinding {
+                    category: pattern.category.clone(),
+                    pattern_name: pattern.name.clone(),
+                    action: pattern.action.clone(),
+                    offset: start,
+                    length: end - start,
+                });
+            }
+            continue;
+        }
         for mat in pattern.regex.find_iter(text) {
             findings.push(DlpFinding {
                 category: pattern.category.clone(),
@@ -389,8 +612,10 @@ pub fn scan(text: &str) -> Vec<DlpFinding> {
 /// exists to keep material from reaching the provider; on the output side
 /// the goal is containment — the private key never reaches the client — and
 /// redaction achieves that without killing a live stream.
-pub fn scrub_stream_text(text: &str) -> Option<(String, Vec<String>)> {
-    let findings = scan(text);
+///
+/// `pii` is the request's workspace PII policy, `None` for this machine's.
+pub fn scrub_stream_text(text: &str, pii: Option<&PiiPolicy>) -> Option<(String, Vec<String>)> {
+    let findings = scan_with(text, pii);
     if findings.is_empty() {
         return None;
     }
@@ -768,15 +993,22 @@ pub fn derive_holdback() -> &'static HoldbackDerivation {
         let mut bytes = 0usize;
         let mut set_by = String::from("none");
         let mut unbounded = Vec::new();
-        for p in all_patterns() {
-            match max_match_len(p.regex.as_str()) {
+        // Every PII detector counts, enabled here or not: a workspace's
+        // setting can switch one on for its requests, and the window must
+        // already cover it.
+        let every_pii = pii::detectors().iter().map(|d| (&d.id, &d.regex));
+        let installed = all_patterns(None)
+            .filter(|p| p.pii.is_none())
+            .map(|p| (&p.name, &p.regex));
+        for (name, regex) in installed.chain(every_pii) {
+            match max_match_len(regex.as_str()) {
                 Some(n) => {
                     if n > bytes {
                         bytes = n;
-                        set_by = p.name.clone();
+                        set_by = name.clone();
                     }
                 }
-                None => unbounded.push(p.name.clone()),
+                None => unbounded.push(name.clone()),
             }
         }
         HoldbackDerivation {
@@ -877,6 +1109,8 @@ pub struct StreamScrubber {
     holdback: usize,
     pending: String,
     redactions: Vec<String>,
+    /// The request's workspace PII policy; `None` scans with this machine's.
+    pii: Option<std::sync::Arc<PiiPolicy>>,
 }
 
 impl StreamScrubber {
@@ -885,7 +1119,14 @@ impl StreamScrubber {
             holdback,
             pending: String::new(),
             redactions: Vec::new(),
+            pii: None,
         }
+    }
+
+    /// Scan with a workspace's PII detector actions (`workspace_pii_policy`).
+    pub fn with_pii(mut self, pii: Option<std::sync::Arc<PiiPolicy>>) -> Self {
+        self.pii = pii;
+        self
     }
 
     /// Distinct pattern names this scrubber has redacted.
@@ -913,7 +1154,7 @@ impl StreamScrubber {
         if self.pending.is_empty() {
             return None;
         }
-        let findings = scan(&self.pending);
+        let findings = scan_with(&self.pending, self.pii.as_deref());
         self.note(&findings);
         let held = std::mem::take(&mut self.pending);
         Some(if findings.is_empty() {
@@ -935,7 +1176,7 @@ impl StreamScrubber {
         if self.pending.len() <= self.holdback {
             return String::new();
         }
-        let findings = scan(&self.pending);
+        let findings = scan_with(&self.pending, self.pii.as_deref());
         let mut cut = self.pending.len() - self.holdback;
 
         // The straddle clamp. A finding that starts before the cut and ends
@@ -1012,10 +1253,12 @@ mod tests {
 
     #[test]
     fn test_ssn_detection() {
-        let text = "SSN: 123-45-6789";
-        let findings = scan(text);
+        let text = format!("SSN: {}-{}-{}", "123", "45", "6789");
+        let findings = scan(&text);
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].pattern_name, "ssn");
+        assert_eq!(findings[0].pattern_name, "pii.ssn");
+        assert_eq!(findings[0].category, "pii");
+        assert_eq!(redact(&text, &findings), "SSN: [REDACTED_PII]");
     }
 
     #[test]
@@ -1134,9 +1377,9 @@ mod tests {
     fn custom_pattern_may_not_shadow_a_builtin_name() {
         // DlpEscalationDetector counts DISTINCT pattern_name values, so a
         // duplicate name would quietly make two findings count as one.
-        let err = install_custom_patterns(&[def("ssn", "phi", "abc", "redact")])
+        let err = install_custom_patterns(&[def("pii.ssn", "phi", "abc", "redact")])
             .expect_err("shadowing a built-in must be refused");
-        assert!(err.contains("ssn"), "{err}");
+        assert!(err.contains("pii.ssn"), "{err}");
     }
 
     #[test]
@@ -1334,8 +1577,11 @@ mod tests {
             }
         }
 
+        // The PII detectors are left out of the comparison: a validator
+        // decides each of their findings, which no `RegexSet` reproduces.
         let via_loop: Vec<_> = scan(&body)
             .into_iter()
+            .filter(|f| PATTERNS.iter().any(|p| p.name == f.pattern_name))
             .map(|f| (f.pattern_name, f.category, f.action, f.offset, f.length))
             .collect();
 
@@ -1405,7 +1651,7 @@ mod stream_scrub_tests {
 
     #[test]
     fn clean_line_returns_none_and_costs_nothing() {
-        assert!(scrub_stream_text(r#"data: {"delta":{"text":"hello world"}}"#).is_none());
+        assert!(scrub_stream_text(r#"data: {"delta":{"text":"hello world"}}"#, None).is_none());
     }
 
     #[test]
@@ -1414,7 +1660,7 @@ mod stream_scrub_tests {
             r#"data: {"delta":{"text":"key: AKIA"#,
             r#"IOSFODNN7EXAMPLE done"}}"#
         );
-        let (scrubbed, names) = scrub_stream_text(line).expect("must find the key");
+        let (scrubbed, names) = scrub_stream_text(line, None).expect("must find the key");
         assert!(!scrubbed.contains(concat!("AKIA", "IOSFODNN7EXAMPLE")));
         assert!(scrubbed.contains("[REDACTED_SECRET]"));
         assert_eq!(names, ["aws_access_key"]);
@@ -1430,7 +1676,7 @@ mod stream_scrub_tests {
             r#"data: {"delta":{"text":"-----BEGIN "#,
             r#"OPENSSH PRIVATE KEY----- b"}}"#
         );
-        let (scrubbed, names) = scrub_stream_text(line).unwrap();
+        let (scrubbed, names) = scrub_stream_text(line, None).unwrap();
         assert!(!scrubbed.contains("BEGIN OPENSSH"));
         assert!(names.contains(&"private_key".to_string()));
     }
@@ -1448,7 +1694,7 @@ mod stream_scrub_tests {
             "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvZSJ9",
             "S1gnATur3S1gnATur3"
         );
-        let (scrubbed, names) = scrub_stream_text(&line).expect("must find the token");
+        let (scrubbed, names) = scrub_stream_text(&line, None).expect("must find the token");
         assert!(!scrubbed.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"));
         assert!(!scrubbed.contains("S1gnATur3"));
         // Both patterns are still reported even though only the outer span is
@@ -1466,7 +1712,7 @@ mod stream_scrub_tests {
             concat!("AKIA", "IOSFODNN7EXAMPLE"),
             "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
         );
-        let (scrubbed, names) = scrub_stream_text(&line).unwrap();
+        let (scrubbed, names) = scrub_stream_text(&line, None).unwrap();
         assert!(!scrubbed.contains("AKIA"));
         assert!(!scrubbed.contains("ghp_"));
         assert!(!scrubbed.contains("123-45-6789"));
@@ -1602,12 +1848,12 @@ mod holdback_tests {
         let wire_head = format!(r#"data: {{"delta":{{"text":"{AWS_HEAD}"}}}}"#);
         let wire_tail = format!(r#"data: {{"delta":{{"text":"{AWS_TAIL}"}}}}"#);
         // The wire form of each half: the per-line scrub sees nothing.
-        assert!(scrub_stream_text(&wire_head).is_none());
-        assert!(scrub_stream_text(&wire_tail).is_none());
+        assert!(scrub_stream_text(&wire_head, None).is_none());
+        assert!(scrub_stream_text(&wire_tail, None).is_none());
         // Unsplit, on one line, it is caught — which is what made the hole
         // look closed.
         let whole = format!(r#"data: {{"delta":{{"text":"{AWS_KEY}"}}}}"#);
-        assert!(scrub_stream_text(&whole).is_some());
+        assert!(scrub_stream_text(&whole, None).is_some());
 
         let (client_sees, _) = stream(0, &[AWS_HEAD, AWS_TAIL]);
         assert_eq!(
@@ -1815,6 +2061,258 @@ mod holdback_tests {
         assert_eq!(sc.flush().as_deref(), Some("abcdefghij"));
     }
 
+    // ── PII detectors ─────────────────────────────────────────────────────
+    //
+    // Detection itself is pinned by the shared conformance vectors
+    // (tests/pii_conformance_test.rs); these cover how the detectors sit in
+    // the scanner: actions, configuration, redaction and streaming. Card
+    // numbers are the card brands' published test PANs, assembled at runtime.
+
+    fn visa_test_pan() -> String {
+        ["4111", "1111", "1111", "1111"].join(" ")
+    }
+
+    #[test]
+    fn a_valid_card_redacts_and_a_luhn_failure_is_not_a_card() {
+        let text = format!("card {} exp 12/29", visa_test_pan());
+        let findings = scan(&text);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].pattern_name, "pii.card");
+        assert_eq!(findings[0].action, "redact");
+        assert_eq!(redact(&text, &findings), "card [REDACTED_PII] exp 12/29");
+
+        let off_by_one = format!(
+            "card {} exp 12/29",
+            ["4111", "1111", "1111", "1112"].join(" ")
+        );
+        assert!(scan(&off_by_one).is_empty());
+    }
+
+    #[test]
+    fn email_and_phone_are_off_by_default_and_card_iban_ssn_redact() {
+        let defaults: Vec<(String, String)> = pii::detectors()
+            .iter()
+            .map(|d| (d.id.clone(), d.default_action.clone()))
+            .collect();
+        assert_eq!(
+            defaults,
+            [
+                ("pii.card", "redact"),
+                ("pii.iban", "redact"),
+                ("pii.ssn", "redact"),
+                ("pii.email", "off"),
+                ("pii.phone", "off"),
+            ]
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+        );
+        let text = format!(
+            "mail {}@{} or call +44 20 {} {}",
+            "jane.doe", "corp.io", "7946", "0958"
+        );
+        assert!(scan(&text).is_empty(), "off detectors must not scan");
+    }
+
+    #[test]
+    fn configured_actions_override_the_defaults() {
+        let cfg: std::collections::BTreeMap<String, String> = [
+            ("pii.email".to_string(), "redact".to_string()),
+            ("pii.card".to_string(), "block".to_string()),
+            ("pii.ssn".to_string(), "off".to_string()),
+        ]
+        .into();
+        let built = build_pii_patterns(&cfg).unwrap();
+        let got: Vec<(&str, &str)> = built
+            .iter()
+            .map(|p| (p.name.as_str(), p.action.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("pii.card", "block"),
+                ("pii.iban", "redact"),
+                ("pii.email", "redact")
+            ]
+        );
+    }
+
+    fn actions(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(id, a)| (id.to_string(), a.to_string()))
+            .collect()
+    }
+
+    /// The machine's config may raise a workspace's action, in every step.
+    #[test]
+    fn a_machine_may_tighten_the_workspace_baseline() {
+        let workspace = actions(&[
+            ("pii.card", "off"),
+            ("pii.iban", "redact"),
+            ("pii.email", "off"),
+        ]);
+        let local = actions(&[
+            ("pii.card", "redact"),
+            ("pii.iban", "block"),
+            ("pii.email", "block"),
+        ]);
+        let got = effective_pii_actions(&local, &workspace).unwrap();
+        assert_eq!(got["pii.card"], "redact", "off → redact");
+        assert_eq!(got["pii.iban"], "block", "redact → block");
+        assert_eq!(got["pii.email"], "block", "off → block");
+    }
+
+    /// And never lower it, in every step.
+    #[test]
+    fn a_machine_cannot_loosen_the_workspace_baseline() {
+        let workspace = actions(&[
+            ("pii.card", "block"),
+            ("pii.iban", "redact"),
+            ("pii.ssn", "block"),
+        ]);
+        let local = actions(&[
+            ("pii.card", "redact"),
+            ("pii.iban", "off"),
+            ("pii.ssn", "off"),
+        ]);
+        let got = effective_pii_actions(&local, &workspace).unwrap();
+        assert_eq!(got["pii.card"], "block", "block stays above redact");
+        assert_eq!(got["pii.iban"], "redact", "redact stays above off");
+        assert_eq!(got["pii.ssn"], "block", "block stays above off");
+    }
+
+    /// The workspace's action applies where the machine names none, below the
+    /// shipped default included; a detector the workspace leaves out keeps
+    /// the machine's action or its default.
+    #[test]
+    fn the_workspace_governs_only_the_detectors_it_names() {
+        let workspace = actions(&[("pii.card", "off"), ("pii.phone", "redact")]);
+        let local = actions(&[("pii.ssn", "off")]);
+        let built =
+            build_pii_patterns(&effective_pii_actions(&local, &workspace).unwrap()).unwrap();
+        assert_eq!(
+            action_table(&built),
+            [
+                ("pii.card", "off"),
+                ("pii.iban", "redact"),
+                ("pii.ssn", "off"),
+                ("pii.email", "off"),
+                ("pii.phone", "redact"),
+            ]
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+        );
+    }
+
+    #[test]
+    fn a_workspace_setting_with_an_unknown_action_is_refused_by_name() {
+        let err = effective_pii_actions(&actions(&[]), &actions(&[("pii.card", "warn")]))
+            .err()
+            .unwrap();
+        assert!(
+            err.contains("piiDetectors") && err.contains("warn"),
+            "{err}"
+        );
+    }
+
+    /// A workspace policy changes what the PII detectors do and nothing else:
+    /// credentials are found and acted on exactly as without one.
+    #[test]
+    fn a_workspace_policy_leaves_the_credential_patterns_alone() {
+        let policy = workspace_pii_policy(&actions(&[
+            ("pii.card", "off"),
+            ("pii.iban", "off"),
+            ("pii.ssn", "off"),
+        ]))
+        .unwrap();
+        let text = format!("key AKIA{} and {}", "IOSFODNN7EXAMPLE", visa_test_pan());
+        let names: Vec<String> = scan_with(&text, Some(&policy))
+            .into_iter()
+            .map(|f| f.pattern_name)
+            .collect();
+        assert_eq!(names, ["aws_access_key"]);
+        let ant = format!("sk-ant-api03-{}", "a".repeat(93));
+        let found = scan_with(&ant, Some(&policy));
+        assert!(
+            found.iter().any(|f| f.action == "block"),
+            "an Anthropic key still blocks: {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_stream_scrubber_with_a_workspace_policy_redacts_its_detectors() {
+        let policy = std::sync::Arc::new(
+            workspace_pii_policy(&actions(&[("pii.email", "redact")])).unwrap(),
+        );
+        let mut sc = StreamScrubber::new(derive_holdback().bytes).with_pii(Some(policy));
+        let mut out = sc.push(&format!("mail {}@{} ok", "jane.doe", "corp.io"));
+        out.push_str(&sc.flush().unwrap_or_default());
+        assert_eq!(out, "mail [REDACTED_PII] ok");
+        assert_eq!(sc.redactions(), ["pii.email"]);
+    }
+
+    #[test]
+    fn an_unknown_detector_or_action_is_refused_by_name() {
+        let unknown: std::collections::BTreeMap<String, String> =
+            [("pii.passport".to_string(), "redact".to_string())].into();
+        let err = build_pii_patterns(&unknown).err().unwrap();
+        assert!(
+            err.contains("pii.passport") && err.contains("pii.card"),
+            "{err}"
+        );
+
+        let bad: std::collections::BTreeMap<String, String> =
+            [("pii.email".to_string(), "warn".to_string())].into();
+        let err = build_pii_patterns(&bad).err().unwrap();
+        assert!(err.contains("warn"), "{err}");
+    }
+
+    #[test]
+    fn a_card_inside_a_json_body_redacts_to_valid_json() {
+        // The input path re-parses the redacted body and refuses the request
+        // if it no longer parses; a card value must survive that.
+        let body = serde_json::json!({
+            "messages": [{"role": "user", "content": format!("Refund\n{}\nplease", visa_test_pan())}]
+        })
+        .to_string();
+        let findings = scan(&body);
+        assert_eq!(findings.len(), 1, "after an escaped newline: {findings:?}");
+        let redacted = redact(&body, &findings);
+        let v: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(
+            v["messages"][0]["content"],
+            "Refund\n[REDACTED_PII]\nplease"
+        );
+    }
+
+    #[test]
+    fn a_card_split_across_deltas_is_redacted() {
+        let pan = visa_test_pan();
+        let (out, sc) = stream(
+            derive_holdback().bytes,
+            &["card ", &pan[..7], &pan[7..], " ok"],
+        );
+        assert_eq!(out, "card [REDACTED_PII] ok");
+        assert_eq!(sc.redactions(), ["pii.card"]);
+    }
+
+    #[test]
+    fn pii_bounds_leave_the_holdback_where_it_was() {
+        let bounds: Vec<(&str, Option<usize>)> = pii::detectors()
+            .iter()
+            .map(|d| (d.id.as_str(), max_match_len(d.regex.as_str())))
+            .collect();
+        assert_eq!(
+            bounds,
+            [
+                ("pii.card", Some(19)),
+                ("pii.iban", Some(64)),
+                ("pii.ssn", Some(11)),
+                ("pii.email", Some(640)),
+                ("pii.phone", Some(53)),
+            ]
+        );
+        assert_eq!(derive_holdback().set_by, "pypi_token");
+    }
+
     // ── the derivation ────────────────────────────────────────────────────
 
     /// Pins every built-in's computed bound.
@@ -1847,8 +2345,7 @@ mod holdback_tests {
             ("huggingface_token", Some(42)),
             // Two negated classes, 64 and 128 wide, at 4 bytes each.
             ("db_connection_string", Some(784)),
-            ("jwt", None), // {17,}
-            ("ssn", Some(38)),
+            ("jwt", None),          // {17,}
             ("bearer_token", None), // \s+ and +
             ("private_key", Some(132)),
             ("dev_env_honeytoken", Some(20)),

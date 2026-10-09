@@ -125,16 +125,17 @@ pub const MAX_GUEST_PATH_BYTES: usize = 4096;
 ///
 /// Tokenisation is linear, but the command string is agent-supplied and
 /// unbounded; a megabyte of it on the request path is not worth the two paths
-/// it might contain past this point.
-const MAX_COMMAND_SCAN_BYTES: usize = 64 * 1024;
+/// it might contain past this point. A longer command makes every path the
+/// table lacks answer [`ERR_NOT_READ`].
+pub const MAX_COMMAND_SCAN_BYTES: usize = 64 * 1024;
 
 // ── Guest-visible return codes ──────────────────────────────────────────────
 //
 // A negative return is always a refusal and never a trap. The host must not
 // abort the guest for asking a bad question: an abort would kill the whole
-// evaluation, and the runner converts a failed evaluation into `Bypass` — so a
-// rule that made one malformed call would silently stop enforcing everything
-// else it checks. Refusals are values, deliberately.
+// evaluation, which then reaches no verdict — so a rule that made one malformed
+// call would have everything else it checks replaced by a refusal.
+// Refusals are values, deliberately.
 
 /// The call itself was malformed: pointers outside guest memory, a negative
 /// length, a path that is not UTF-8, or no `memory` export to read from.
@@ -158,14 +159,21 @@ pub const ERR_BUFFER_TOO_SMALL: i32 = -5;
 /// This evaluation has used its allowance of host reads. See
 /// [`MAX_READS_PER_EVALUATION`].
 pub const ERR_BUDGET: i32 = -6;
+/// Not read, and not because the call never named it: the request's tool calls
+/// name more manifests than the host reads ([`MAX_REFERENCED_FILES`]), or carry
+/// a command longer than it scans ([`MAX_COMMAND_SCAN_BYTES`]), and this path
+/// is not among those read. Kept apart from [`ERR_REFUSED`] because padding a
+/// command with decoy paths must not make the manifest that matters look like
+/// one the call never named: a rule governing that path refuses on this code.
+pub const ERR_NOT_READ: i32 = -7;
 
 /// Host reads one evaluation may make.
 ///
-/// The 5 ms wall-clock timeout in the runner cannot preempt a synchronous
-/// guest call, so the real bound on guest work is fuel — and fuel counts
-/// instructions, not the bytes a host function copies on the guest's behalf. A
-/// tight loop calling this import would therefore buy an unbounded memcpy for a
-/// handful of fuel. This budget is the bound instead: at worst
+/// The runner's deadline interrupts guest code, not a host function in the
+/// middle of a copy, and fuel counts instructions, not the bytes a host
+/// function copies on the guest's behalf. A tight loop calling this import
+/// would therefore buy a memcpy per call for a handful of fuel, each one
+/// uninterruptible. This budget bounds the total: at worst
 /// 64 × 256 KiB ≈ 16 MiB of copying, which is a millisecond or two.
 ///
 /// A rule needs two calls per file (size query, then read), so this is eight
@@ -234,6 +242,9 @@ pub struct ReferencedFiles {
     /// there is no normalisation step for an attacker to disagree with the
     /// resolver about.
     entries: Vec<(String, Outcome)>,
+    /// The request named more than the host reads: a path missing from
+    /// `entries` answers [`ERR_NOT_READ`], not [`ERR_REFUSED`].
+    past_limits: bool,
 }
 
 /// Hand-written so a `{:?}` of the store state can never spill file contents
@@ -261,6 +272,7 @@ impl ReferencedFiles {
     pub fn empty() -> Self {
         Self {
             entries: Vec::new(),
+            past_limits: false,
         }
     }
 
@@ -287,6 +299,7 @@ impl ReferencedFiles {
             Some((_, Outcome::NotFound)) => Err(ERR_NOT_FOUND),
             Some((_, Outcome::TooLarge(_))) => Err(ERR_TOO_LARGE),
             Some((_, Outcome::Refused(_))) => Err(ERR_REFUSED),
+            None if self.past_limits => Err(ERR_NOT_READ),
             None => Err(ERR_REFUSED),
         }
     }
@@ -298,6 +311,9 @@ impl ReferencedFiles {
             Some((_, Outcome::NotFound)) => "does not exist",
             Some((_, Outcome::TooLarge(_))) => "exceeds the size cap",
             Some((_, Outcome::Content(_))) => "readable",
+            None if self.past_limits => {
+                "not read: the request names more files, or a longer command, than the host reads"
+            }
             None => "not referenced by this request's tool calls",
         }
     }
@@ -321,13 +337,24 @@ pub fn resolve_root() -> Option<PathBuf> {
     Some(PathBuf::from(raw))
 }
 
+/// The paths a request's tool calls name, and whether it named more than the
+/// host reads.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Candidates {
+    /// At most [`MAX_REFERENCED_FILES`], deduped, in first-seen order.
+    pub tokens: Vec<String>,
+    /// A manifest-shaped path past [`MAX_REFERENCED_FILES`], or a command
+    /// longer than [`MAX_COMMAND_SCAN_BYTES`]. See [`ERR_NOT_READ`].
+    pub past_limits: bool,
+}
+
 /// Paths this request's tool calls name, filtered to plausible manifests.
 ///
 /// Pure and cheap: string work over already-parsed JSON, no I/O. Split out from
 /// [`read_tokens`] so the caller can decide there is nothing to do without
 /// touching a blocking pool.
-pub fn candidate_tokens(ctx: &RequestContext) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+pub fn candidate_tokens(ctx: &RequestContext) -> Candidates {
+    let mut out = Candidates::default();
     for call in &ctx.tool_calls {
         let Some(map) = call.arguments.as_object() else {
             continue;
@@ -339,24 +366,24 @@ pub fn candidate_tokens(ctx: &RequestContext) -> Vec<String> {
         }
         for key in COMMAND_ARG_KEYS {
             if let Some(value) = map.get(*key).and_then(|v| v.as_str()) {
-                let scanned = &value[..value.len().min(MAX_COMMAND_SCAN_BYTES)];
-                for token in shell_tokens(scanned) {
+                let mut end = value.len().min(MAX_COMMAND_SCAN_BYTES);
+                // A byte offset inside a multi-byte character would panic.
+                while !value.is_char_boundary(end) {
+                    end -= 1;
+                }
+                out.past_limits |= end < value.len();
+                for token in shell_tokens(&value[..end]) {
                     consider(&token, &mut out);
                 }
             }
-        }
-        if out.len() >= MAX_REFERENCED_FILES {
-            break;
         }
     }
     out
 }
 
-/// Add `raw` to the candidate set if it looks like a manifest path.
-fn consider(raw: &str, out: &mut Vec<String>) {
-    if out.len() >= MAX_REFERENCED_FILES {
-        return;
-    }
+/// Add `raw` to the candidate set if it looks like a manifest path, or note
+/// that the set is full.
+fn consider(raw: &str, out: &mut Candidates) {
     let trimmed = raw.trim_matches(['"', '\'']);
     // `--values=charts/prod.yaml` is one shell word carrying one path. Only
     // option-shaped words are split, so a filename that legitimately contains
@@ -373,10 +400,14 @@ fn consider(raw: &str, out: &mut Vec<String>) {
     {
         return;
     }
-    if out.iter().any(|existing| existing == candidate) {
+    if out.tokens.iter().any(|existing| existing == candidate) {
         return;
     }
-    out.push(candidate.to_string());
+    if out.tokens.len() >= MAX_REFERENCED_FILES {
+        out.past_limits = true;
+        return;
+    }
+    out.tokens.push(candidate.to_string());
 }
 
 fn has_manifest_extension(token: &str) -> bool {
@@ -432,10 +463,11 @@ fn shell_tokens(command: &str) -> Vec<String> {
 ///
 /// # Why the read happens here and not behind a host call
 ///
-/// The runner gives a guest a 5 ms budget. A cold-cache read of a manifest is
-/// tens to hundreds of microseconds and, on a network filesystem, unbounded, so
-/// doing the I/O inside the sandbox would either blow that budget or make it
-/// meaningless. Pre-reading keeps the budget covering exactly what it was
+/// The runner bounds a guest by fuel, which a host call does not spend, and by
+/// a deadline. A cold-cache read of a manifest is tens to hundreds of
+/// microseconds and, on a network filesystem, unbounded, so doing the I/O
+/// inside the sandbox would spend the deadline on the disk rather than the
+/// guest. Pre-reading keeps the guest's limits covering exactly what they were
 /// written to cover — guest execution — and turns the host import into a memcpy
 /// out of a table that was already in memory.
 ///
@@ -470,6 +502,7 @@ pub fn read_tokens(tokens: Vec<String>, root: &Path) -> ReferencedFiles {
                         )
                     })
                     .collect(),
+                past_limits: false,
             };
         }
     };
@@ -503,13 +536,24 @@ pub fn read_tokens(tokens: Vec<String>, root: &Path) -> ReferencedFiles {
         })
         .collect();
 
-    ReferencedFiles { entries }
+    ReferencedFiles {
+        entries,
+        past_limits: false,
+    }
+}
+
+/// [`read_tokens`] for a request's [`Candidates`], keeping whether it named
+/// more than was read. Blocking, as [`read_tokens`] is.
+pub fn read_candidates(candidates: Candidates, root: &Path) -> ReferencedFiles {
+    let mut files = read_tokens(candidates.tokens, root);
+    files.past_limits = candidates.past_limits;
+    files
 }
 
 /// Convenience for callers that have a context in hand. Blocking, as
 /// [`read_tokens`] is.
 pub fn prefetch(ctx: &RequestContext, root: &Path) -> ReferencedFiles {
-    read_tokens(candidate_tokens(ctx), root)
+    read_candidates(candidate_tokens(ctx), root)
 }
 
 /// Apply guards 3–6 to one candidate and read it.
@@ -645,7 +689,10 @@ mod tests {
             "Bash",
             json!({ "command": "kubectl apply -f k8s/deploy.yaml" })
         )]));
-        assert_eq!(candidate_tokens(&ctx), vec!["k8s/deploy.yaml".to_string()]);
+        assert_eq!(
+            candidate_tokens(&ctx).tokens,
+            vec!["k8s/deploy.yaml".to_string()]
+        );
     }
 
     #[test]
@@ -654,7 +701,10 @@ mod tests {
             "Read",
             json!({ "file_path": "infra/main.tf" })
         )]));
-        assert_eq!(candidate_tokens(&ctx), vec!["infra/main.tf".to_string()]);
+        assert_eq!(
+            candidate_tokens(&ctx).tokens,
+            vec!["infra/main.tf".to_string()]
+        );
     }
 
     #[test]
@@ -663,7 +713,10 @@ mod tests {
             "Bash",
             json!({ "command": "helm template --values=charts/prod.yaml ." })
         )]));
-        assert_eq!(candidate_tokens(&ctx), vec!["charts/prod.yaml".to_string()]);
+        assert_eq!(
+            candidate_tokens(&ctx).tokens,
+            vec!["charts/prod.yaml".to_string()]
+        );
     }
 
     #[test]
@@ -672,7 +725,10 @@ mod tests {
             "Bash",
             json!({ "command": "cd infra && kubectl apply -f \"k8s/deploy.yaml\"; echo done" })
         )]));
-        assert_eq!(candidate_tokens(&ctx), vec!["k8s/deploy.yaml".to_string()]);
+        assert_eq!(
+            candidate_tokens(&ctx).tokens,
+            vec!["k8s/deploy.yaml".to_string()]
+        );
     }
 
     /// Guard 2. This is the check that keeps the import from becoming a
@@ -687,9 +743,9 @@ mod tests {
         ] {
             let ctx = ctx_with(json!([call("Bash", json!({ "command": command }))]));
             assert!(
-                candidate_tokens(&ctx).is_empty(),
+                candidate_tokens(&ctx).tokens.is_empty(),
                 "{command} produced candidates: {:?}",
-                candidate_tokens(&ctx)
+                candidate_tokens(&ctx).tokens
             );
         }
     }
@@ -701,12 +757,61 @@ mod tests {
             "Bash",
             json!({ "command": format!("kubectl apply -f {} -f {}", many.join(" -f "), many[0]) })
         )]));
-        let tokens = candidate_tokens(&ctx);
+        let candidates = candidate_tokens(&ctx);
+        assert!(candidates.past_limits, "40 paths is past the limit");
+        let tokens = candidates.tokens;
         assert_eq!(tokens.len(), MAX_REFERENCED_FILES);
         let mut sorted = tokens.clone();
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), tokens.len(), "candidates must be deduped");
+    }
+
+    /// Eight decoys before the manifest that matters: it is not read, and
+    /// the rule is told so with a code of its own, not the "never named" one.
+    #[test]
+    fn a_path_past_the_limits_answers_not_read_not_refused() {
+        let root = scratch("past-limits");
+        let decoys: Vec<String> = (0..MAX_REFERENCED_FILES)
+            .map(|i| format!("d{i}.yaml"))
+            .collect();
+        for d in &decoys {
+            std::fs::write(root.join(d), b"kind: ConfigMap").unwrap();
+        }
+        std::fs::write(root.join("prod.yaml"), b"image: app:latest").unwrap();
+        let ctx = ctx_with(json!([call(
+            "Bash",
+            json!({ "command": format!("kubectl apply -f {} -f prod.yaml", decoys.join(" -f ")) })
+        )]));
+        let files = prefetch(&ctx, &root);
+        assert!(files.lookup("d0.yaml").is_ok());
+        assert_eq!(files.lookup("prod.yaml"), Err(ERR_NOT_READ));
+
+        // Within the limits, a path the call never named is still refused.
+        let ctx = ctx_with(json!([call(
+            "Bash",
+            json!({ "command": "kubectl apply -f d0.yaml" })
+        )]));
+        assert_eq!(prefetch(&ctx, &root).lookup("prod.yaml"), Err(ERR_REFUSED));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The manifest named after 64 KiB of padding is not scanned; the cut
+    /// lands inside a multi-byte character without panicking.
+    #[test]
+    fn a_path_past_the_scanned_prefix_answers_not_read() {
+        let root = scratch("past-scan");
+        std::fs::write(root.join("prod.yaml"), b"image: app:latest").unwrap();
+        let padding = format!("echo {}", "é".repeat(MAX_COMMAND_SCAN_BYTES));
+        let ctx = ctx_with(json!([call(
+            "Bash",
+            json!({ "command": format!("{padding}; kubectl apply -f prod.yaml") })
+        )]));
+        let candidates = candidate_tokens(&ctx);
+        assert!(candidates.tokens.is_empty());
+        assert!(candidates.past_limits);
+        assert_eq!(prefetch(&ctx, &root).lookup("prod.yaml"), Err(ERR_NOT_READ));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Globs are not expanded, so a rule cannot use one to reach a file the
@@ -779,7 +884,7 @@ mod tests {
             json!({ "command": format!("kubectl apply -f {token}") })
         )]));
         assert_eq!(
-            candidate_tokens(&ctx),
+            candidate_tokens(&ctx).tokens,
             vec![token.clone()],
             "must be a candidate to be a real test"
         );

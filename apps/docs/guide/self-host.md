@@ -44,6 +44,13 @@ their deterministic versions.
   or GitHub Enterprise Server.
 - **Email goes through your relay** (`SMTP_URL`). Without one, no email is sent
   and owners share sign-in details themselves.
+- **Alerts reach your channels with no flag to set.** The notification hub sends
+  alerts (a silent gate, a failed integrity check) and approvals to the email
+  addresses, webhooks, Slack channels and PagerDuty services your notification
+  rules name. Every channel is on; set `FF_EMAIL_ADAPTER`, `FF_WEBHOOK_ADAPTER`,
+  `FF_SLACK_ADAPTER` or `FF_PAGERDUTY_ADAPTER` to `false` to turn one off. A
+  webhook or SIEM destination on your private network needs its host in
+  `INTUTIC_WEBHOOK_ALLOWED_HOSTS`.
 - **Model requests go where you send them.** Each provider's address is a
   setting (`OPENAI_UPSTREAM_URL`, `ANTHROPIC_UPSTREAM_URL` and so on): your
   private endpoint, your own model server, or an egress gateway.

@@ -7,17 +7,17 @@ description: Credo AI is a governance, risk and compliance system of record with
 
 *Last reviewed: 2026-10-08*
 
-Intutic enforces policy where agents act: a pre-execution gate decides each tool call across 43 harnesses, backed by a policy proxy, an MCP governance proxy, egress and sandbox containment, and a signed audit trail. Credo AI is an AI governance, risk and compliance (GRC) platform: an inventory of AI systems, risk assessments, and policy packs mapped to regulations. In July 2026 it added Agent Governor, a Research Preview that hooks Claude Code sessions and resolves each action to allow, block, escalate or advise. The two meet at the tool call, from opposite directions.
+Intutic enforces policy where agents act: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, backed by a policy proxy, an MCP governance proxy, egress and sandbox containment, and a signed audit trail. Credo AI is an AI governance, risk and compliance (GRC) platform: an inventory of AI systems, risk assessments, and policy packs mapped to regulations. In July 2026 it added Agent Governor, a Research Preview that hooks Claude Code sessions and resolves each action to allow, block, escalate or advise. The two meet at the tool call, from opposite directions.
 
 ## Comparison
 
 | | Intutic | Credo AI |
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | Governance system of record for AI systems |
-| **Runtime enforcement** | Production: hook gates in 19 of the 43 harnesses, request and response proxy, MCP governance proxy, egress firewall, sandboxed execution | Agent Governor, Research Preview, Claude Code only |
-| **Decisions at the tool call** | Allow, warn, require approval (held until approved), block, redact, re-ask, shadow | Allow, block, escalate, advise |
-| **Where policy lives** | Files in your repository (`.intutic/sops/*.md`), reviewed in git; policy documents in Notion, Confluence, GitHub or Google Docs can be turned into enforced controls with [Policy Guardrails](/guide/policy-guardrails) | Authored in the Credo AI platform |
-| **Regulatory mapping** | SOC 2 evidence pack, OWASP LLM and Agentic posture mapping, partial control mapping to the EU AI Act, ISO/IEC 42001 and NIST AI RMF, and a signed Article 14 human-oversight export | Policy packs for the EU AI Act, NIST AI RMF, ISO 42001 and SOC 2 |
+| **Runtime enforcement** | Production: native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks, request and response proxy, MCP governance proxy, egress firewall, sandboxed execution | Agent Governor, Research Preview, Claude Code only |
+| **Decisions at the tool call** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, shadow; on model traffic the proxy also redacts and re-asks | Allow, block, escalate, advise |
+| **Where policy lives** | Files in your repository (`.intutic/sops/*.md`), reviewed in git; policy documents in Notion, Confluence, GitHub or Google Docs, or an uploaded file, can be turned into enforced controls with [Policy Guardrails](/guide/policy-guardrails) | Authored in the Credo AI platform |
+| **Regulatory mapping** | SOC 2 evidence pack, OWASP LLM and Agentic posture mapping, partial control mapping to the EU AI Act, ISO/IEC 42001, NIST AI RMF and MITRE ATLAS exported as Markdown, CSV, PDF or JSON, and an Article 14 human-oversight export; the evidence pack and the oversight export are signed when a signing key is configured | Policy packs for the EU AI Act, NIST AI RMF, ISO 42001 and SOC 2 |
 | **Inventory and risk** | Agent registry with posture scoring and an agent graph, for the agents Intutic governs | AI registry with auto-discovery, risk assessments, Agent Cards and audit-ready reports |
 | **Continuous evidence** | Eleven hourly compliance probes against live workspace state | Assessment and reporting workflows |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, hash-chained and mirrored to your own bucket | Governance records and reports |

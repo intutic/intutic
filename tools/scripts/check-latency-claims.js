@@ -25,8 +25,8 @@
  *
  * Numbers that describe an **enforced ceiling** a reader can verify from
  * source, not a measured speed. The wasmtime sandbox's limits are the only ones
- * that qualify today: 16 MB, 1,000,000 fuel, 5 ms, checked at
- * `packages/proxy/src/wasm/runner.rs`. Those say "we stop it here", which is a
+ * that qualify today: 16 MB, 1,000,000 fuel, a 1 s deadline, checked at
+ * `packages/proxy/src/wasm/limits.rs`. Those say "we stop it here", which is a
  * property of the code; "it takes under 5ms" is a claim about a machine nobody
  * named running a workload nobody specified.
  *

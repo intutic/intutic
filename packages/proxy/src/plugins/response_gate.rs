@@ -109,6 +109,7 @@ use crate::commands::WireProvider;
 use crate::config::ResponseGateConfig;
 use crate::plugins::anomaly::AnomalyKind;
 use crate::plugins::sql_guard::{self, SqlGuardPolicy, SqlViolation};
+use crate::refusal::{tool_rule_id, Code, Refusal};
 use crate::sso_groups::{Clearance, SsoGroupDecision, SsoGroupGate};
 
 /// Why the gate refused a response.
@@ -153,6 +154,34 @@ impl Denial {
     pub fn at_block(mut self, index: u64) -> Self {
         self.block_index = index;
         self
+    }
+
+    /// The code and rule id that name this refusal to an SDK: in the
+    /// response headers on the non-streaming path, in the stream marker on
+    /// the streaming one (`crate::refusal`).
+    pub fn refusal(&self) -> Refusal {
+        match &self.reason {
+            DenialReason::Tools(t) => Refusal::new(
+                Code::ToolDenied,
+                tool_rule_id(
+                    "deny_tools",
+                    t.first().map(String::as_str).unwrap_or_default(),
+                ),
+            ),
+            DenialReason::SsoGroup { tool, decision } => Refusal::new(
+                Code::SsoGroup,
+                decision
+                    .rule_id
+                    .clone()
+                    .unwrap_or_else(|| tool_rule_id("sso_group", tool)),
+            ),
+            DenialReason::DestructiveSql(_) => {
+                Refusal::new(Code::SqlGuard, "sql_guard.sql_allow_dsns")
+            }
+            DenialReason::Unparseable => {
+                Refusal::new(Code::ResponseUnparseable, "response_gate.fail_closed")
+            }
+        }
     }
 
     /// Operator-facing one-liner. Deliberately the same vocabulary as the
@@ -424,6 +453,9 @@ pub fn refusal_body(provider: WireProvider, model: &str, denial: &Denial) -> Val
 
 /// The bytes to append instead of the withheld event, on the streaming path.
 ///
+/// They open with the SSE comment that names the refusal to an SDK
+/// ([`crate::refusal`]), which every client skips.
+///
 /// This closes the stream *coherently*: a client parsing `text/event-stream`
 /// still sees a terminal event, and the refusal arrives as ordinary assistant
 /// text at the index the tool call would have occupied.
@@ -438,8 +470,11 @@ pub fn refusal_body(provider: WireProvider, model: &str, denial: &Denial) -> Val
 pub fn refusal_tail(provider: WireProvider, denial: &Denial) -> String {
     let text = denial.agent_message();
     let idx = denial.block_index;
+    // First, so a client that stops reading at the terminal event has
+    // already passed it.
+    let marker = denial.refusal().stream_marker(&text);
 
-    match provider {
+    let events = match provider {
         WireProvider::Anthropic => {
             let start = serde_json::json!({
                 "type": "content_block_start",
@@ -501,7 +536,8 @@ pub fn refusal_tail(provider: WireProvider, denial: &Denial) -> String {
             });
             format!("data: {content}\n\ndata: {finish}\n\ndata: [DONE]\n\n")
         }
-    }
+    };
+    format!("{marker}{events}")
 }
 
 #[cfg(test)]
@@ -1421,6 +1457,85 @@ mod tests {
             "data: {not json",
         ] {
             assert!(gate_stream_line_sso_groups(&cfg(), line, Some(&gate)).is_none());
+        }
+    }
+
+    // ── Naming the refusal to an SDK ────────────────────────────────────
+
+    /// One denial of every reason, as the gate builds them.
+    fn one_of_each() -> Vec<Denial> {
+        use crate::plugins::sql_guard::SqlGuardSeverity::Refuse;
+        let tools = gate_response(
+            &cfg(),
+            Some(&openai_response("terraform_apply", "{}")),
+            &denied(),
+        )
+        .unwrap();
+        let sso = gate_response_sso_groups(
+            &cfg(),
+            Some(&openai_response("Bash", "{}")),
+            Some(&sso_gate(Some(&["eng"]))),
+        )
+        .unwrap();
+        let prod = openai_response(
+            "Bash",
+            r#"{"command":"psql -h db.prod -d app -c 'DROP TABLE users'"}"#,
+        );
+        let sql = gate_response_sql(&cfg(), Some(&prod), &sql_policy(Refuse, false))
+            .0
+            .unwrap();
+        let unparseable = gate_response(&cfg(), None, &denied()).unwrap();
+        vec![tools, sso, sql, unparseable]
+    }
+
+    #[test]
+    fn every_denial_names_its_code_and_deciding_rule() {
+        let named: Vec<(&str, String)> = one_of_each()
+            .iter()
+            .map(|d| {
+                let r = d.refusal();
+                (r.code.as_str(), r.rule)
+            })
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                ("TOOL_DENIED", "deny_tools.terraform_apply".to_string()),
+                ("SSO_GROUP", "sso_group.high_risk.Bash".to_string()),
+                ("SQL_GUARD", "sql_guard.sql_allow_dsns".to_string()),
+                (
+                    "RESPONSE_UNPARSEABLE",
+                    "response_gate.fail_closed".to_string()
+                ),
+            ]
+        );
+    }
+
+    /// The marker is the first thing in every tail, on every wire shape, and
+    /// carries the text the agent is shown — so an SDK reading the stream
+    /// raises with the same reason, and a client that stops at the terminal
+    /// event has already passed it.
+    #[test]
+    fn every_tail_opens_with_the_refusal_marker() {
+        for d in one_of_each() {
+            for provider in [
+                WireProvider::Anthropic,
+                WireProvider::OpenAI,
+                WireProvider::OpenAIResponses,
+                WireProvider::Gemini,
+            ] {
+                let tail = refusal_tail(provider, &d);
+                let first = tail.lines().next().unwrap();
+                let json = first
+                    .strip_prefix(crate::refusal::STREAM_MARKER)
+                    .unwrap_or_else(|| panic!("tail does not open with the marker: {tail}"));
+                let v: Value = serde_json::from_str(json).unwrap();
+                let r = d.refusal();
+                assert_eq!(v["code"], r.code.as_str());
+                assert_eq!(v["rule"], r.rule);
+                assert_eq!(v["message"], d.agent_message());
+                assert_payloads_parse(&tail);
+            }
         }
     }
 }

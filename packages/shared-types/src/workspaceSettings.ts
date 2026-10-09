@@ -13,6 +13,8 @@
 
 import type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier } from './enums.js'
 import type { SsoGroupPolicy } from './attenuation.js'
+import type { McpBudgetSettings } from './mcpBudgets.js'
+import type { PiiDetectorSettings } from './piiDetectors.js'
 
 // Re-export so callers only need one import
 export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
@@ -99,6 +101,16 @@ export interface WorkspaceSettings {
    * see `ssoGroupClearance.ts`.
    */
   sso_group_policy?: SsoGroupPolicy | null
+
+  /**
+   * The action (`off`, `redact`, `block`) of each PII detector this workspace
+   * governs centrally (`PiiDetectorSettingsSchema`). The LLM proxy and the
+   * MCP proxy apply it to the workspace's traffic as the baseline; a
+   * machine's own detector config may only tighten it (`effectivePiiActions`).
+   * Absent, or a detector left out: each machine's own config applies. `null`
+   * in a settings write clears it, and is never stored.
+   */
+  piiDetectors?: PiiDetectorSettings | null
 
   /**
    * Bring-your-own-cloud trace storage. Optional — absent means Intutic-managed
@@ -275,9 +287,10 @@ export interface WorkspaceSettings {
    * Whether an APPROVED `review_before` decision may let the *matching retried
    * call* through the local gate, instead of only recording the decision.
    *
-   * Off (undefined/false) by default. `POST /api/v1/decisions` and its Slack
-   * approve button have always recorded a decision — this flag governs a
-   * separate, additive effect: when true, approving a decision tied to a
+   * Off (undefined/false) by default. Approving a decision — `intutic decision
+   * approve`, `POST /api/v1/decisions/:id/review` or the Slack card, one code
+   * path — always records it; this flag governs a separate, additive effect:
+   * when true, approving a decision tied to a
    * `review_before` hold writes a short-lived, exact-match bypass entry
    * (workspace + SOP rule + normalised tool name + hashed target/command) to
    * Valkey, synced to `.intutic/hooks/approved-bypasses.jsonl` and consulted by
@@ -295,6 +308,20 @@ export interface WorkspaceSettings {
    * exemption.
    */
   reviewHoldBypassTtlMinutes?: number
+
+  /**
+   * Held loop runs (`review_before:` on a whole run, reviewed with `intutic
+   * loop review`). With `requireDistinctApprover` true, the member who started
+   * a run cannot approve or reject it; another OWNER, ADMIN or EM must. Off by
+   * default: the person who ran the agent is usually best placed to judge its
+   * change manifest, and a small team must not be locked out of its own
+   * deploys. Break-glass requests always need a second person, whatever this
+   * says. Stored under the snake_case key the reader
+   * (`requiresDistinctApprover` in loopGovernanceService.ts) uses.
+   */
+  loop_review?: {
+    requireDistinctApprover?: boolean
+  }
 
   /**
    * Central egress-enforcement posture, distributed to this workspace's proxies
@@ -387,6 +414,25 @@ export interface WorkspaceSettings {
    * Absent or empty means the floor alone.
    */
   mcpInjectionPatterns?: string[]
+
+  /**
+   * Limits on MCP tool calls per hour or per day — per server, per tool, per
+   * member, or per member on one server (`mcpBudgets.ts`). Delivered with the
+   * MCP policy; the MCP proxy counts calls in Valkey and refuses one that
+   * would go over a limit, naming the budget and when it resets. Absent means
+   * no limits.
+   */
+  mcpBudgets?: McpBudgetSettings
+
+  /**
+   * What happens when a server's tool set changes and the change scores high
+   * risk (`mcpToolRisk.ts`). `notify` (the default, and what an absent value
+   * means) records the change and sends `mcp.server.tool_change_risk`;
+   * `hold` also returns the server to the approval queue, where the MCP proxy
+   * refuses it under either default policy until an owner or admin approves
+   * it again.
+   */
+  mcpHighRiskToolChange?: 'notify' | 'hold'
 
   /**
    * Negotiated per-token rates, by model id, in USD per 1k tokens (TD-434).
@@ -681,6 +727,8 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // Only load-bearing once reviewHoldBypassEnabled is true; the value here is
   // what "enabled but unset" resolves to.
   reviewHoldBypassTtlMinutes: 10,
+  // Off by default, as the reader's fallback is: see the field doc.
+  loop_review: { requireDistinctApprover: false },
   // Off by default — see the field doc for why a growing auto-written
   // context file must be opt-in.
   decisionsLogEnabled: false,

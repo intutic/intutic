@@ -292,7 +292,7 @@ policyCmd
 
 policyCmd
   .command('install')
-  .description('Validate and install a compiled WASM rule into the local proxy rules dir')
+  .description('Validate and install a compiled WASM rule (native or Rego) into the local proxy rules dir')
   .requiredOption('--wasm <path>', 'Path to compiled WASM rule binary')
   .option('--name <name>', 'Rule name (defaults to the file name)')
   .option('--priority <NN>', 'Evaluation priority — lower runs first', '100')
@@ -321,6 +321,45 @@ policyCmd
   .action(async (ruleId, opts) => {
     const { runPolicyReplay } = await import('./commands/policy.js')
     await runPolicyReplay(ruleId, opts)
+  })
+
+// Rego policies as rules: compiled with OPA and packaged with the metadata
+// the proxies read (`intutic rules build`), tested through the same host
+// (`intutic rules test`). Installing and uploading are the same as for any rule.
+const rulesCmd = program
+  .command('rules')
+  .description('Build and test Rego policies as Intutic rules')
+
+rulesCmd
+  .command('build')
+  .description(
+    'Compile Rego to a rule with OPA (opa build -t wasm) and package it with its entrypoint and risk tier.\n' +
+    '\n' +
+    '  Needs the opa binary on the PATH, or INTUTIC_OPA_BIN. Refuses a policy that\n' +
+    '  needs a builtin Intutic does not provide, naming it.'
+  )
+  .requiredOption('--rego <path>', 'Rego file or directory')
+  .requiredOption('--entrypoint <package/rule>', 'The rule to evaluate, e.g. intutic/shell/deny')
+  .option('--risk-tier <tier>', 'Default risk tier for its decisions: low | medium | high | critical')
+  .option('--out <path>', 'Output .wasm path (default: build/<entrypoint>.wasm)')
+  .action(async (opts) => {
+    const { runRulesBuild } = await import('./commands/rules.js')
+    await runRulesBuild(opts)
+  })
+
+rulesCmd
+  .command('test <module>')
+  .description(
+    'Evaluate a Rego rule against sample inputs locally, through the same host the proxies use.\n' +
+    '\n' +
+    '  Each --input file holds one input document, or an array of\n' +
+    '  {"name", "input", "expect": "allow|deny|hold|reask"} cases. Exits 1 when a\n' +
+    '  case gets a decision other than the one it expects.'
+  )
+  .requiredOption('--input <file...>', 'JSON file(s) of inputs or cases')
+  .action(async (module, opts) => {
+    const { runRulesTest } = await import('./commands/rules.js')
+    await runRulesTest(module, opts)
   })
 
 // Policy Clause Ledger (LLD #71). `intutic policy` is the WASM loop and
@@ -419,6 +458,7 @@ guardrailsCmd
   .description('List guardrails with their status and shadow evidence')
   .option('--status <status>', 'PROPOSED | SHADOW | ENFORCING | REJECTED | RETIRED')
   .option('--target <target>', 'hook_rule | sop_front_matter | wasm_rule | workspace_setting')
+  .option('--provenance <provenance>', 'extracted | authored')
   .option('--doc <docId>', 'Only guardrails cited from this document')
   .option('--limit <n>', 'Max rows (default 50, capped at 200)')
   .option('--json', 'Output as JSON')
@@ -436,6 +476,59 @@ guardrailsCmd
   .action(async (guardrailId, opts) => {
     const { runGuardrailsShow } = await import('./commands/guardrails.js')
     await runGuardrailsShow(guardrailId, opts)
+  })
+
+/** The IR flags `guardrails create` and `guardrails update` share; a file (`--file`) is the alternative. */
+function guardrailIrOptions(cmd: Command): Command {
+  return cmd
+    .option('--file <path>', 'YAML or JSON: a bare IR, or { name, description, ir }')
+    .option('--name <name>', 'One-line label (at most 80 characters)')
+    .option('--description <text>', 'What the rule is for; shown where an extracted guardrail shows its quote')
+    .option('--kind <kind>', 'hook_rule | deny_tools | review_before | requires_before | forbid_after | max_calls | forbid_with | wasm_predicate | allowed_models | egress_allow')
+    .option('--title <title>', 'hook_rule, wasm_predicate: the title in the block message')
+    .option('--tools <list>', 'hook_rule, deny_tools: comma-separated tool names')
+    .option('--tokens <list>', 'review_before: comma-separated tool or action tokens')
+    .option('--arg-contains <literal>', 'hook_rule: fire only when the input contains this (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+    .option('--arg-not-contains <literal>', 'hook_rule: fire only when the input does not contain this (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+    .option('--first <token>', 'requires_before, forbid_after: the first token')
+    .option('--then <token>', 'requires_before, forbid_after: the second token')
+    .option('--token <token>', 'max_calls, forbid_with: the token')
+    .option('--limit <n>', 'max_calls: the most calls allowed')
+    .option('--taint <taint>', 'forbid_with: secrets() | pii()')
+    .option('--roles <list>', 'Comma-separated roles the rule applies to (default: everyone)')
+    .option('--models <list>', 'allowed_models: comma-separated model ids')
+    .option('--hosts <list>', 'egress_allow: comma-separated hosts, suffixes or IPv4 CIDRs')
+    .option('--rationale <text>', 'wasm_predicate: why it re-asks')
+    .option('--predicate <json>', 'wasm_predicate: the predicate as JSON')
+    .option('--json', 'Output as JSON')
+    .option('--dev', 'Use local control plane (http://localhost:3001)')
+}
+
+guardrailIrOptions(
+  guardrailsCmd.command('create').description('Author a guardrail directly: the same IR and checks as an extracted one, created PROPOSED'),
+).action(async (opts) => {
+  const { runGuardrailsCreate } = await import('./commands/guardrails.js')
+  await runGuardrailsCreate(opts)
+})
+
+guardrailIrOptions(
+  guardrailsCmd
+    .command('update <guardrailId>')
+    .description('Edit an authored guardrail: a name or description in place; a changed IR creates the next version, PROPOSED with no evidence')
+    .option('--clear-description', 'Remove the description'),
+).action(async (guardrailId, opts) => {
+  const { runGuardrailsUpdate } = await import('./commands/guardrails.js')
+  await runGuardrailsUpdate(guardrailId, opts)
+})
+
+guardrailsCmd
+  .command('delete <guardrailId>')
+  .description('Retire an authored guardrail and undo what it wrote; its history is kept')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (guardrailId, opts) => {
+    const { runGuardrailsDelete } = await import('./commands/guardrails.js')
+    await runGuardrailsDelete(guardrailId, opts)
   })
 
 guardrailsCmd
@@ -681,8 +774,8 @@ program
 program
   .command('decisions-log-refresh')
   .description(
-    'One-shot refresh of the governed decisions log (.intutic/DECISIONS.md + the claude-code ' +
-      'harness config section) — no-ops if decisionsLogEnabled is off. Invoked by the optional ' +
+    'One-shot refresh of the governed decisions log (.intutic/DECISIONS.md, and the recent ' +
+      'entries in each governed harness\'s instructions file) — no-ops if decisionsLogEnabled is off. Invoked by the optional ' +
       'post-merge Git hook `intutic init` installs; safe to run manually.',
   )
   .action(async () => {
@@ -1222,6 +1315,16 @@ const gatewayConfigCmd = gatewayCmd
   .description('Manage a gateway\'s remote config (requireVk, requireProvisionedKey)')
 
 gatewayConfigCmd
+  .command('get <gateway_id>')
+  .description('Show the config values set on a gateway and their version')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (gatewayId, opts) => {
+    const { runGatewayConfigGet } = await import('./commands/gateway.js')
+    await runGatewayConfigGet(gatewayId, opts)
+  })
+
+gatewayConfigCmd
   .command('set <gateway_id>')
   .description('Update one or both config flags on a gateway')
   .option('--require-vk <true|false>', 'Refuse non-vk_ bearer tokens at this gateway')
@@ -1385,6 +1488,410 @@ teamCmd
   .action(async (teamId, opts) => {
     const { runTeamCreateWorkspace } = await import('./commands/team.js')
     await runTeamCreateWorkspace(teamId, opts)
+  })
+
+// ── Operator commands ────────────────────────────────────────────────────
+//
+// Workspace settings, the MCP server registry, notification rules, SIEM
+// destinations and the fleet reports, each over its existing control-plane
+// route. Previously dashboard-only. See commands/apiCommand.ts for the shape
+// they share.
+const settingsCmd = program
+  .command('settings')
+  .description('Read and change workspace settings (MCP policy, budgets, group policy, config content upload, ...)')
+
+settingsCmd
+  .command('get [key]')
+  .description('Print every workspace setting, or one')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (key, opts) => {
+    const { runSettingsGet } = await import('./commands/settings.js')
+    await runSettingsGet(key, opts)
+  })
+
+settingsCmd
+  .command('set <key> [value]')
+  .description('Change one setting; the value is JSON when it parses as JSON, else a string')
+  .option('--file <path>', 'Read the value from a JSON file instead')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (key, value, opts) => {
+    const { runSettingsSet } = await import('./commands/settings.js')
+    await runSettingsSet(key, value, opts)
+  })
+
+const mcpCmd = program
+  .command('mcp')
+  .description('Review the MCP servers the workspace\'s MCP proxies have seen, and decide on them')
+
+mcpCmd
+  .command('list')
+  .description('Every MCP server seen, its status and tools, and the registry\'s default policy')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runMcpList } = await import('./commands/mcp.js')
+    await runMcpList(opts)
+  })
+
+for (const [action, desc] of [
+  ['approve', 'Approve an MCP server; MCP proxies let it run'],
+  ['block', 'Block an MCP server; MCP proxies refuse it'],
+  ['reset', 'Return an MCP server to the approval queue'],
+] as const) {
+  mcpCmd
+    .command(`${action} <server_id>`)
+    .description(desc)
+    .option('--json', 'Output as JSON')
+    .option('--dev', 'Use local control plane (http://localhost:3001)')
+    .action(async (serverId, opts) => {
+      const { runMcpDecide } = await import('./commands/mcp.js')
+      await runMcpDecide(action, serverId, opts)
+    })
+}
+
+for (const [action, enabled, desc] of [
+  ['enable-tool', true, 'Switch one tool of an MCP server back on'],
+  ['disable-tool', false, 'Switch one tool of an MCP server off; MCP proxies refuse calls to it'],
+] as const) {
+  mcpCmd
+    .command(`${action} <server_id> <tool>`)
+    .description(desc)
+    .option('--json', 'Output as JSON')
+    .option('--dev', 'Use local control plane (http://localhost:3001)')
+    .action(async (serverId, tool, opts) => {
+      const { runMcpTool } = await import('./commands/mcp.js')
+      await runMcpTool(serverId, tool, enabled, opts)
+    })
+}
+
+const notificationsCmd = program
+  .command('notifications')
+  .description('Manage notification rules: which events go to Slack, email, a webhook or PagerDuty')
+
+function ruleOptions(cmd: Command): Command {
+  return cmd
+    .option('--slack-channel <id>', 'Slack channel ID, for the slack channel')
+    .option('--email <addresses>', 'Comma-separated recipients (up to 20), for the email channel')
+    .option('--webhook-url <url>', 'HTTPS URL, for the webhook channel')
+    .option('--pagerduty-key <key>', 'Routing key, for the pagerduty channel')
+    .option('--severity <list>', 'Only events of these comma-separated severities')
+    .option('--harness <list>', 'Only events from these comma-separated harnesses')
+    .option('--user <ids>', 'Only events from these comma-separated user ids')
+    .option('--cooldown <minutes>', 'Minimum minutes between two notifications of this rule (1-1440)')
+    .option('--json', 'Output as JSON')
+    .option('--dev', 'Use local control plane (http://localhost:3001)')
+}
+
+notificationsCmd
+  .command('list')
+  .description('List notification rules')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runNotificationsList } = await import('./commands/notifications.js')
+    await runNotificationsList(opts)
+  })
+
+ruleOptions(
+  notificationsCmd
+    .command('create')
+    .description('Create a notification rule; a webhook rule prints its signing secret once')
+    .requiredOption('--event <type>', 'Event type, e.g. incident.created or mcp.server.candidate')
+    .requiredOption('--channel <channel>', 'slack, email, webhook or pagerduty')
+    .option('--disabled', 'Create the rule switched off'),
+).action(async (opts) => {
+  const { runNotificationsCreate } = await import('./commands/notifications.js')
+  await runNotificationsCreate(opts)
+})
+
+ruleOptions(
+  notificationsCmd
+    .command('update <rule_id>')
+    .description('Change a notification rule; only the fields given change')
+    .option('--event <type>', 'Event type')
+    .option('--channel <channel>', 'slack, email, webhook or pagerduty')
+    .option('--enable', 'Switch the rule on')
+    .option('--disable', 'Switch the rule off'),
+).action(async (ruleId, opts) => {
+  const { runNotificationsUpdate } = await import('./commands/notifications.js')
+  await runNotificationsUpdate(ruleId, opts)
+})
+
+notificationsCmd
+  .command('delete <rule_id>')
+  .description('Delete a notification rule')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (ruleId, opts) => {
+    const { runNotificationsDelete } = await import('./commands/notifications.js')
+    await runNotificationsDelete(ruleId, opts)
+  })
+
+notificationsCmd
+  .command('rotate-secret <rule_id>')
+  .description('Replace a webhook rule\'s signing secret and print the new one once')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (ruleId, opts) => {
+    const { runNotificationsRotateSecret } = await import('./commands/notifications.js')
+    await runNotificationsRotateSecret(ruleId, opts)
+  })
+
+const siemCmd = program
+  .command('siem')
+  .description('Manage SIEM export destinations and the event sources each receives')
+
+function destinationOptions(cmd: Command): Command {
+  return cmd
+    .option('--sources <list>', 'Comma-separated event sources this destination receives (see `intutic siem sources`)')
+    .option('--default-sources', 'Receive the default set: every source except the opt-in ones')
+    .option('--batch-size <n>', 'Events per delivery batch')
+    .option('--flush-interval-ms <ms>', 'Longest wait before a partial batch is sent')
+    .option('--json', 'Output as JSON')
+    .option('--dev', 'Use local control plane (http://localhost:3001)')
+}
+
+siemCmd
+  .command('list')
+  .description('List SIEM destinations (credentials masked)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runSiemList } = await import('./commands/siem.js')
+    await runSiemList(opts)
+  })
+
+siemCmd
+  .command('show <destination_id>')
+  .description('Show one SIEM destination (credentials masked)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (destinationId, opts) => {
+    const { runSiemShow } = await import('./commands/siem.js')
+    await runSiemShow(destinationId, opts)
+  })
+
+siemCmd
+  .command('sources')
+  .description('List the event sources a destination can receive, and which are opt-in')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runSiemSources } = await import('./commands/siem.js')
+    await runSiemSources(opts)
+  })
+
+destinationOptions(
+  siemCmd
+    .command('create')
+    .description('Create a SIEM destination; a webhook destination prints its signing secret once')
+    .requiredOption('--name <name>', 'Display name')
+    .requiredOption('--type <adapter>', 'syslog_cef, webhook_https, splunk_hec, datadog_logs, gcs or s3')
+    .requiredOption('--config <path>', 'JSON file with the adapter settings and credentials'),
+).action(async (opts) => {
+  const { runSiemCreate } = await import('./commands/siem.js')
+  await runSiemCreate(opts)
+})
+
+destinationOptions(
+  siemCmd
+    .command('update <destination_id>')
+    .description('Change a SIEM destination; only the fields given change')
+    .option('--name <name>', 'Display name')
+    .option('--config <path>', 'JSON file with the new adapter settings; masked secrets keep their stored value')
+    .option('--enable', 'Turn a deactivated destination back on'),
+).action(async (destinationId, opts) => {
+  const { runSiemUpdate } = await import('./commands/siem.js')
+  await runSiemUpdate(destinationId, opts)
+})
+
+siemCmd
+  .command('delete <destination_id>')
+  .description('Deactivate a SIEM destination; it stops receiving events and stays listed')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (destinationId, opts) => {
+    const { runSiemDelete } = await import('./commands/siem.js')
+    await runSiemDelete(destinationId, opts)
+  })
+
+siemCmd
+  .command('rotate-secret <destination_id>')
+  .description('Replace a webhook destination\'s signing secret and print the new one once')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (destinationId, opts) => {
+    const { runSiemRotateSecret } = await import('./commands/siem.js')
+    await runSiemRotateSecret(destinationId, opts)
+  })
+
+const complianceCmd = program
+  .command('compliance')
+  .description('Compliance framework reports and the evidence archive')
+
+complianceCmd
+  .command('coverage <framework_id>')
+  .description('Coverage of eu_ai_act, iso_42001, nist_ai_rmf or mitre_atlas from the latest probe results')
+  .option('--format <format>', 'Download the report: json, md, csv or pdf')
+  .option('--out <path>', 'Write the report to this file instead of stdout')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (frameworkId, opts) => {
+    const { runComplianceCoverage } = await import('./commands/compliance.js')
+    await runComplianceCoverage(frameworkId, opts)
+  })
+
+complianceCmd
+  .command('collect')
+  .description('Run a fresh evidence collection and seal it into an archive (OWNER, ADMIN)')
+  .option('--from <date>', 'Start of the evidence period, ISO 8601 (default: 90 days before --to)')
+  .option('--to <date>', 'End of the evidence period, ISO 8601 (default: now)')
+  .option('--out <path>', 'Also write the archive to this file')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runComplianceCollect } = await import('./commands/compliance.js')
+    await runComplianceCollect(opts)
+  })
+
+complianceCmd
+  .command('download <run_id>')
+  .description('Download a stored evidence archive (OWNER, ADMIN)')
+  .option('--out <path>', 'Write the archive to this file instead of stdout')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (runId, opts) => {
+    const { runComplianceDownload } = await import('./commands/compliance.js')
+    await runComplianceDownload(runId, opts)
+  })
+
+complianceCmd
+  .command('verify <file>')
+  .description('Check an evidence archive\'s hashes and signature offline')
+  .option('--jwks <path>', 'The published signing keys, saved from /.well-known/intutic-trace-signing.json (default: fetch them)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (file, opts) => {
+    const { runComplianceVerify } = await import('./commands/compliance.js')
+    await runComplianceVerify(file, opts)
+  })
+
+const usageCmd = program
+  .command('usage')
+  .description('LLM usage across the fleet, by member, team, branch, commit or pull request')
+
+for (const [view, handler, desc] of [
+  ['members', 'runUsageMembers', 'Usage per member'],
+  ['teams', 'runUsageTeams', 'Usage per team (SCIM group)'],
+  ['branches', 'runUsageBranches', 'Usage per repository and branch'],
+  ['commits', 'runUsageCommits', 'Usage per HEAD commit'],
+] as const) {
+  usageCmd
+    .command(view)
+    .description(desc)
+    .option('--period <period>', 'daily (today) or monthly (this month)', 'monthly')
+    .option('--json', 'Output as JSON')
+    .option('--dev', 'Use local control plane (http://localhost:3001)')
+    .action(async (opts) => {
+      const usage = await import('./commands/usage.js')
+      await usage[handler](opts)
+    })
+}
+
+usageCmd
+  .command('pull-requests')
+  .description('Usage per GitHub pull request')
+  .option('--period <period>', 'daily (today) or monthly (this month)', 'monthly')
+  .option('--refresh', 'Look the branches up on GitHub first (OWNER, ADMIN, EM)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runUsagePullRequests } = await import('./commands/usage.js')
+    await runUsagePullRequests(opts)
+  })
+
+const githubWebhookCmd = program
+  .command('github')
+  .description('GitHub integration for cost per pull request')
+  .command('webhook')
+  .description('The pull-request webhook: payload URL and signing secret')
+
+githubWebhookCmd
+  .command('show')
+  .description('Show the payload URL and when the secret was made')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGithubWebhookShow } = await import('./commands/github.js')
+    await runGithubWebhookShow(opts)
+  })
+
+githubWebhookCmd
+  .command('rotate-secret')
+  .description('Make the webhook, or replace its secret (printed once)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGithubWebhookRotateSecret } = await import('./commands/github.js')
+    await runGithubWebhookRotateSecret(opts)
+  })
+
+const inventoryCmd = program
+  .command('inventory')
+  .description('AI harnesses, MCP servers and skills on connected developer machines, governed or not')
+
+inventoryCmd
+  .command('summary')
+  .description('Counts of machines, harnesses, MCP servers and skills, and how many are ungoverned')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runInventorySummary } = await import('./commands/inventory.js')
+    await runInventorySummary(opts)
+  })
+
+for (const [view, handler, desc] of [
+  ['harnesses', 'runInventoryHarnesses', 'Harnesses by machine, with gate state and status'],
+  ['mcp-servers', 'runInventoryMcpServers', 'MCP servers by machine, wrapped by the MCP proxy or not'],
+] as const) {
+  inventoryCmd
+    .command(view)
+    .description(desc)
+    .option('--status <status>', 'Only rows with this status')
+    .option('--harness <harness>', 'Only rows for this harness')
+    .option('--device <device_id>', 'Only rows from this machine')
+    .option('--search <text>', 'Only rows whose name or hostname contains this text')
+    .option('--csv', 'Download as CSV, the same file the dashboard exports')
+    .option('--out <path>', 'With --csv: write to this file instead of stdout')
+    .option('--json', 'Output as JSON')
+    .option('--dev', 'Use local control plane (http://localhost:3001)')
+    .action(async (opts) => {
+      const inventory = await import('./commands/inventory.js')
+      await inventory[handler](opts)
+    })
+}
+
+inventoryCmd
+  .command('skills')
+  .description('Skill bundles by machine, with their content scan result')
+  .option('--device <device_id>', 'Only rows from this machine')
+  .option('--search <text>', 'Only rows whose name or hostname contains this text')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runInventorySkills } = await import('./commands/inventory.js')
+    await runInventorySkills(opts)
+  })
+
+program
+  .command('gate-liveness')
+  .description('Whether each installed harness\'s gate is reporting, and any open silent-gate alert')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGateLiveness } = await import('./commands/gateLiveness.js')
+    await runGateLiveness(opts)
   })
 
 program.parse()

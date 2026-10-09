@@ -44,6 +44,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from . import sso_groups as sso
+from . import actions
+from . import mcp_registry
+from .phrases import has_phrase, phrase_text
+from .sequence import compile_sequence, sequence_match
 
 SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -51,15 +55,22 @@ SNAPSHOT_STALE_AFTER_DAYS = 7
 SEV_SHADOW = "shadow"
 SEV_WARN = "warn"
 SEV_BLOCK = "block"
+# A hold rule (a REQUIRE_APPROVAL: SOP, or a local review_before: token):
+# refuses like a block, but asks a person rather than denying — see hold.py.
+SEV_HOLD = "hold"
 
 
 @dataclass
 class Rule:
     id: str
     severity: str
-    subject: str          # tool | command | target | any
+    subject: str          # tool | command | target | phrase | action | any
     reason: str
     pattern: re.Pattern
+    # A sequence rule's compiled steps (flags "s", sequence.py), or None. Its
+    # steps are searched for in order, in linear time, instead of `pattern`,
+    # which re runs in time growing with the square of crafted text.
+    steps: Optional[list] = None
 
 
 @dataclass
@@ -76,12 +87,20 @@ class Snapshot:
     # its integrity check the member's groups are None (unknown), so an edited
     # group list in the file clears nothing.
     sso_groups: Optional[sso.SsoGroupRecord] = None
+    # The workspace's MCP server registry decisions (the @mcp_registry record)
+    # and its mcpAllowedServers list (@mcp_allowlist), as mcp_registry.py
+    # reads them; None when there are none. None on a snapshot that fails its
+    # integrity check, on which the gate admits no MCP server at all
+    # (mcp_registry.unverified_refusal): a deleted record looks like one
+    # never set, so neither can be vouched for.
+    mcp_registry: Optional[dict] = None
+    mcp_allowlist: Optional[dict] = None
 
     @property
     def health_message(self) -> str:
         return {
             "absent": "No policy snapshot — built-in protections only",
-            "invalid": "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals",
+            "invalid": "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused",
             "empty": "Policy snapshot contains no rules — the compile produced nothing",
             "stale": f"Policy snapshot is {self.age_days} days old and still enforced",
         }.get(self.state, "")
@@ -90,6 +109,8 @@ class Snapshot:
 @dataclass
 class Decision:
     severity: str | None    # None == allow
+    # The rule's reason and [id]; for a hold, the reason alone, which the gate
+    # words as a hold.
     reason: str = ""
     rule_id: str = ""
 
@@ -102,8 +123,18 @@ def snapshot_path() -> str:
 
 
 def _normalise(value) -> str:
-    """Lowercase and collapse whitespace, as the shipped gates do."""
-    return " ".join(str(value or "").lower().split())
+    """The shipped gates' normalisation (NORMALISE_CONTRACT in protectedPaths.ts).
+
+    Whitespace collapses to one space, and the result is padded with a space at
+    each end: the rules use a plain space, or a non-word character, where they
+    mean the start or end of a word, because POSIX ERE has neither a word boundary nor a
+    usable ``^`` in the emitted shell gates. Without the padding a command that
+    starts with the dangerous verb (``DROP TABLE users``) matched nothing.
+
+    Case is left alone: each rule's own ``i`` flag decides it, and two floor
+    rules key on an uppercase letter without one.
+    """
+    return " " + re.sub(r"\s+", " ", str(value if value is not None else "")) + " "
 
 
 def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
@@ -128,14 +159,23 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
         if line.startswith(sso.SSO_GROUP_RECORD_TAG + "\t"):
             snap.sso_groups = sso.decode_record(line)
             continue
+        if line.startswith(mcp_registry.MCP_REGISTRY_RECORD_TAG + "\t"):
+            snap.mcp_registry = mcp_registry.decode_registry_record(line)
+            continue
+        if line.startswith(mcp_registry.MCP_ALLOWLIST_RECORD_TAG + "\t"):
+            snap.mcp_allowlist = mcp_registry.decode_allowlist_record(line)
+            continue
         f = line.split("\t")
         # Column order: id, severity, flags, subject, reason, source(regex).
+        # Flags: i = case-insensitive, s = a sequence rule.
         if len(f) < 6 or not f[5]:
             continue
+        flags = re.IGNORECASE if "i" in f[2] else 0
         try:
             snap.rules.append(Rule(
                 id=f[0], severity=f[1], subject=f[3] or "any", reason=f[4],
-                pattern=re.compile(f[5], re.IGNORECASE if f[2] == "i" else 0),
+                pattern=re.compile(f[5], flags),
+                steps=compile_sequence(f[5], flags) if "s" in f[2] else None,
             ))
         except re.error:
             snap.dropped_rules += 1
@@ -146,7 +186,9 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
     # events attribute A's policy to B.
     body = "\n".join(l for l in text.split("\n") if l and not l.startswith("#"))
     actual = hashlib.sha256(body.encode("utf-8")).hexdigest()[:32]
-    if snap.digest != "none" and actual != snap.digest:
+    # No digest line is unverified too: the sync daemon always writes one, so
+    # its absence means the file was edited.
+    if actual != snap.digest:
         snap.state = "invalid"
 
     if snap.state == "ok" and snap.workspace_id and workspace_id and snap.workspace_id != workspace_id:
@@ -163,6 +205,9 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
         # to a member whose groups this gate can no longer vouch for.
         if snap.sso_groups is not None:
             snap.sso_groups = sso.SsoGroupRecord(snap.sso_groups.policy, None, None, snap.sso_groups.issued_at)
+        # Neither MCP record can be vouched for: the gate admits no MCP server.
+        snap.mcp_registry = None
+        snap.mcp_allowlist = None
 
     if snap.state == "ok" and snap.generated_at:
         try:
@@ -187,9 +232,27 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
         rules = [r for r in rules if not r.id.startswith("destructive.")]
 
     n_tool, n_command, n_target = _normalise(tool_name), _normalise(command), _normalise(target)
+    words = None
+    # The command's action tokens, space-padded as the hook gates write them,
+    # so a review_before hold on action:deploy matches whole tokens. Classified
+    # with the same needles and phrase matcher as the hook gates and actions.rs.
+    action_tokens = None
 
     for rule in rules:
-        if rule.subject == "tool":
+        if rule.subject == "phrase":
+            # The source is `|`-separated phrases matched as words against the
+            # raw command (phrases.py), not a regex: a backtracking regex for
+            # "whatever separates the words" is super-linear on crafted input.
+            if words is None:
+                words = phrase_text(command)
+            subjects = [n_command] if any(
+                has_phrase(words, p, True) for p in rule.pattern.pattern.split("|")
+            ) else []
+        elif rule.subject == "action":
+            if action_tokens is None:
+                action_tokens = " " + " ".join(actions.classify(tool_name, {"command": command})) + " "
+            subjects = [action_tokens]
+        elif rule.subject == "tool":
             subjects = [n_tool]
         elif rule.subject == "command":
             subjects = [n_command]
@@ -199,14 +262,20 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
             subjects = [n_command, n_target]
 
         for subject in subjects:
-            if not rule.pattern.search(subject):
+            if rule.subject != "phrase" and not (
+                sequence_match(rule.steps, subject) if rule.steps is not None else rule.pattern.search(subject)
+            ):
                 continue
             if rule.severity == SEV_SHADOW:
                 return Decision(SEV_SHADOW, f"{rule.reason} [{rule.id}]", rule.id)
             if rule.severity == SEV_WARN:
                 verb = n_command.strip().split(" ")[0] if n_command else ""
                 return Decision(SEV_WARN, f"{rule.reason} [{rule.id}] verb={verb}", rule.id)
-            # The rule's own reason, not a generic one — resolveSeverity reads it.
+            if rule.severity == SEV_HOLD:
+                return Decision(SEV_HOLD, rule.reason, rule.id)
+            # Any other severity blocks, as an unknown one does in the shipped
+            # gates: a severity this reader does not know must not allow. The
+            # rule's own reason, not a generic one — resolveSeverity reads it.
             return Decision(SEV_BLOCK, f"{rule.reason} [{rule.id}]", rule.id)
 
     return Decision(None)

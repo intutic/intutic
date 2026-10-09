@@ -41,7 +41,7 @@ import {
   DESTRUCTIVE_COMMAND_PATTERNS,
 } from '../../src/harness/protectedPaths.js'
 import { toRulesLine } from '../../src/harness/gateBody.js'
-import { RULE_AUTHOR_SKILL } from '../../src/skillWriter.js'
+import { KITKAT_SKILL, RULE_AUTHOR_SKILL } from '../../src/skillWriter.js'
 import { SKILL_CONTENT_BLOCK_PATTERN_IDS, SKILL_SCAN_PATTERNS } from '@intutic/shared-types'
 import { execFile } from 'node:child_process'
 
@@ -513,8 +513,9 @@ describe('skill-content tier (TD-358 benign-corpus measurement)', () => {
     expect(fires({ path: '/w/.claude/skills', pattern: '<system>' })).toEqual([])
   })
 
-  it('stays silent on RULE_AUTHOR_SKILL and on every file of the benign corpus written as a skill', () => {
+  it('stays silent on the bundled skills and on every file of the benign corpus written as a skill', () => {
     expect(fires({ file_path: SKILL_PATH, content: RULE_AUTHOR_SKILL })).toEqual([])
+    expect(fires({ file_path: SKILL_PATH, content: KITKAT_SKILL })).toEqual([])
     const files = readFileSync(join(SKILL_CORPUS, 'MANIFEST.tsv'), 'utf8')
       .split('\n')
       .map((l) => l.split('\t')[0]!)
@@ -634,13 +635,16 @@ describe('writePolicySnapshot', () => {
     }
   })
 
-  describe('mcpAllowedServers — the #mcpservers header (M3)', () => {
-    it('omits the #mcpservers header entirely when the list is empty', async () => {
+  describe('mcpAllowedServers — the @mcp_allowlist record', () => {
+    const TAG = '@mcp_allowlist\t'
+    const dataLines = (dir: string) =>
+      readFileSync(join(dir, SNAPSHOT_RULES), 'utf8').split('\n').filter((l) => l && !l.startsWith('#'))
+
+    it('writes no record when the list is empty', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp1-'))
       try {
         await writePolicySnapshot(policy({ mcpAllowedServers: [] }), dir)
-        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
-        expect(rulesText).not.toContain('#mcpservers')
+        expect(readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')).not.toContain('@mcp_allowlist')
         const doc = JSON.parse(readFileSync(join(dir, SNAPSHOT_JSON), 'utf8'))
         expect(doc.mcpAllowedServers).toEqual([])
       } finally {
@@ -648,15 +652,14 @@ describe('writePolicySnapshot', () => {
       }
     })
 
-    it('emits #mcpservers block <csv> when servers are configured, enforcing mode', async () => {
+    it('writes block and the servers when they are configured, enforcing mode', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp2-'))
       try {
         await writePolicySnapshot(
           policy({ interventionMode: 'TRANSPARENT', mcpAllowedServers: ['github', 'filesystem'] }),
           dir,
         )
-        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
-        expect(rulesText).toContain('#mcpservers block github,filesystem')
+        expect(dataLines(dir)).toContain(`${TAG}block\tgithub,filesystem`)
         const doc = JSON.parse(readFileSync(join(dir, SNAPSHOT_JSON), 'utf8'))
         expect(doc.mcpAllowedServers).toEqual(['github', 'filesystem'])
       } finally {
@@ -664,21 +667,17 @@ describe('writePolicySnapshot', () => {
       }
     })
 
-    it('emits #mcpservers shadow <csv> in SILENT_LOG mode', async () => {
+    it('writes shadow in SILENT_LOG mode', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp3-'))
       try {
-        await writePolicySnapshot(
-          policy({ interventionMode: 'SILENT_LOG', mcpAllowedServers: ['github'] }),
-          dir,
-        )
-        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
-        expect(rulesText).toContain('#mcpservers shadow github')
+        await writePolicySnapshot(policy({ interventionMode: 'SILENT_LOG', mcpAllowedServers: ['github'] }), dir)
+        expect(dataLines(dir)).toContain(`${TAG}shadow\tgithub`)
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }
     })
 
-    it('drops a server name containing whitespace or a comma, rather than corrupting the header', async () => {
+    it('drops a server name containing whitespace or a comma, rather than corrupting the record', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp4-'))
       try {
         await writePolicySnapshot(
@@ -688,10 +687,9 @@ describe('writePolicySnapshot', () => {
           dir,
         )
         const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
-        // Only the two clean names survive, and the header line still has
-        // exactly one occurrence of each — a dropped name must not leave a
+        // Only the two clean names survive — a dropped name must not leave a
         // dangling comma or a corrupted line behind.
-        expect(rulesText).toContain('#mcpservers block github,filesystem')
+        expect(dataLines(dir)).toContain(`${TAG}block\tgithub,filesystem`)
         expect(rulesText).not.toContain('bad name')
         expect(rulesText).not.toContain('bad,name')
         expect(rulesText).not.toContain('bad\tname')
@@ -702,18 +700,17 @@ describe('writePolicySnapshot', () => {
       }
     })
 
-    it('drops every server name and omits the header when all names are unsafe', async () => {
+    it('drops every server name and writes no record when all names are unsafe', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp5-'))
       try {
         await writePolicySnapshot(policy({ mcpAllowedServers: ['bad name', '  ', 'a,b'] }), dir)
-        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
-        expect(rulesText).not.toContain('#mcpservers')
+        expect(readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')).not.toContain('@mcp_allowlist')
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }
     })
 
-    it('digest is unchanged by the #mcpservers header — it covers rule lines only', async () => {
+    it('covers the record with the digest, so a server added to it fails the check', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-mcp6-'))
       try {
         const sopRules = [{ id: 's1', toolPattern: 'Bash', action: 'block', reason: 'no shell' }]
@@ -722,11 +719,12 @@ describe('writePolicySnapshot', () => {
           policy({ sopRules, mcpAllowedServers: ['github', 'filesystem'] }),
           dir,
         )
-        expect(withServers.digest).toBe(without.digest)
-
-        const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
-        expect(rulesText).toContain('#mcpservers block github,filesystem')
-        expect(rulesText).toContain(`#digest ${without.digest}`)
+        expect(withServers.digest).not.toBe(without.digest)
+        const lines = dataLines(dir)
+        const digestOf = (l: string[]) => createHash('sha256').update(l.join('\n')).digest('hex').slice(0, 32)
+        expect(digestOf(lines)).toBe(withServers.digest)
+        const widened = lines.map((l) => (l.startsWith(TAG) ? `${l},pastebin` : l))
+        expect(digestOf(widened)).not.toBe(withServers.digest)
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }

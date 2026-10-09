@@ -19,11 +19,31 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
-import { emitShellGate, SHELL_EXTRACT, SHELL_FAIL_CLOSED } from './gateBody.js'
+import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed } from './gateBody.js'
 import { parse as parseToml } from 'smol-toml'
-import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
+import { anthropicBaseUrl, openaiBaseUrl, HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 
 const log = createLogger('sync-openhands-hooks')
+
+/**
+ * `.openhands/hooks.json` in the OpenHands SDK's schema (\`HookConfig\`): each
+ * event a list of matchers, each with its hook definitions. Earlier versions
+ * wrote a flat list of \`{type: 'PreToolUse', command, failClosed}\`, which the
+ * SDK cannot load, and had extra top-level keys beside \`hooks\`, which it
+ * drops with a warning; the marker that tells disconnect the file is ours is
+ * now each hook's \`name\`. OpenHands runs a call whose hook times out, and
+ * has no setting to refuse instead, so the gate refuses at its own deadline,
+ * inside the \`timeout\` set here (default 60 s).
+ */
+export function openHandsHooksConfig(hookScriptPath: string): Record<string, unknown> {
+  const hook = (command: string) => ({ type: 'command', name: 'Intutic governance hook', command, timeout: HOOK_TIMEOUT_SECONDS })
+  return {
+    hooks: {
+      PreToolUse: [{ matcher: '*', hooks: [hook(hookScriptPath)] }],
+      Stop: [{ matcher: '*', hooks: [hook(`${hookScriptPath} --event stop`)] }],
+    },
+  }
+}
 
 /**
  * Write .openhands/hooks.json and the pre-tool-check shell script.
@@ -62,7 +82,7 @@ export async function writeOpenHandsHooks(
 # Proxy: ${proxyUrl}
 # Generated: ${newIso()}
 set -euo pipefail
-${SHELL_FAIL_CLOSED}
+${emitShellFailClosed('openhands')}
 INPUT="$(cat)"
 ${SHELL_EXTRACT}
 
@@ -102,7 +122,11 @@ log_event() {
   ws="\${ws//\\\\/\\\\\\\\}"; ws="\${ws//\\"/\\\\\\"}"; ws="\${ws//[\$'\\x01'-\$'\\x1f']/ }"
   local ts; ts="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local incident_id; incident_id="\$(printf '%s' "\${ts}\${tool}\${INTUTIC_WORKSPACE_ID}" | sha1sum 2>/dev/null | cut -c1-16 || echo \"\$(date +%s)\")"
-  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"openhands\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\"}"
+  # The event's id: random, made once here, and resent with the line it is
+  # written into, so the control plane processes the event once.
+  local event_id; event_id="\$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \\n' || true)"
+  [ -n "\$event_id" ] || event_id="\$(date +%s)\$\$\${RANDOM}\${RANDOM}\${RANDOM}"
+  local entry="{\\"event\\":\\"\${verdict}\\",\\"toolName\\":\\"\${tool}\\",\\"reason\\":\\"\${reason}\\",\\"workspaceId\\":\\"\${ws}\\",\\"harnessType\\":\\"openhands\\",\\"timestamp\\":\\"\${ts}\\",\\"incidentId\\":\\"\${incident_id}\\",\\"eventId\\":\\"\${event_id}\\"}"
   # Path B: reliable file append
   printf '%s\\n' "\$entry" >> "\$HOOK_EVENTS_LOG" 2>/dev/null || true
   # Path A: fire-and-forget HTTP (non-blocking, near-real-time)
@@ -126,24 +150,7 @@ exit 0
   await fs.chmod(hookScriptPath, 0o755)
 
   // ── .openhands/hooks.json ──────────────────────────────────────────
-  const hooksConfig = {
-    _comment: 'Intutic governance hooks — auto-generated. DO NOT EDIT.',
-    _lastSync: newIso(),
-    hooks: [
-      {
-        type: 'PreToolUse',
-        command: hookScriptPath,
-        failClosed: true,
-      },
-      {
-        type: 'Stop',
-        command: `${hookScriptPath} --event stop`,
-        failClosed: false,
-      },
-    ],
-  }
-
-  const hooksJson = JSON.stringify(hooksConfig, null, 2) + '\n'
+  const hooksJson = JSON.stringify(openHandsHooksConfig(hookScriptPath), null, 2) + '\n'
   const tmpHooks = hooksPath + '.intutic-tmp'
   await fs.writeFile(tmpHooks, hooksJson, 'utf-8')
   await fs.rename(tmpHooks, hooksPath)
@@ -153,7 +160,7 @@ exit 0
 
   // ── user-level config.toml llm.base_url ───────────────────────────
   // The workspace config.toml is the adapter's: it merges `[llm] base_url`
-  // and the `[intutic]` table there (`mergeOpenHandsToml`).
+  // there (`mergeOpenHandsToml`).
   await mergeUserOpenHandsConfig(proxyUrl)
 }
 
@@ -273,37 +280,29 @@ export function mergeOpenHandsBaseUrl(raw: string, proxyUrl: string): string | n
 }
 
 /**
- * Merge Intutic's keys into an OpenHands `config.toml`:
- * - `[llm] base_url` — the proxy, in the form the configured model's SDK
- *   expects (LiteLLM appends `/v1/messages` to an Anthropic base and
- *   `/chat/completions` to an OpenAI-style one);
- * - an `[intutic]` table carrying the SOP text, replaced whole each sync.
+ * Point `[llm] base_url` in the workspace's OpenHands `config.toml` at the
+ * proxy, in the form the configured model's SDK expects (LiteLLM appends
+ * `/v1/messages` to an Anthropic base and `/chat/completions` to an
+ * OpenAI-style one), and keep the rest of the file.
+ *
+ * Earlier versions also wrote the rule sets into an `[intutic]` table, which
+ * OpenHands never reads (the rules now go into a microagent, see the
+ * adapter); that table is dropped. Earlier still, versions replaced the
+ * whole file, so a file starting with their header holds nothing of the
+ * user's and is regenerated.
  *
  * Edited line by line so the user's own settings and comments survive; the
- * result is parsed before it is returned. Earlier versions replaced the whole
- * file, so a file starting with their header holds nothing of the user's and
- * is regenerated. Returns `null` when the existing file is not valid TOML.
+ * result is parsed before it is returned. Returns `null` when the existing
+ * file is not valid TOML.
  */
-export function mergeOpenHandsToml(raw: string, proxyUrl: string, instructions: string): string | null {
+export function mergeOpenHandsToml(raw: string, proxyUrl: string): string | null {
   const source = raw.startsWith(LEGACY_HEADER) ? '' : raw
-  const parsed = parsesAsToml(source)
-  if (parsed === null) return null
-
-  const baseUrl = llmBaseUrl(parsed, proxyUrl)
-  let lines = source.split('\n')
-
-  // Drop the previous [intutic] table; it is rewritten whole below.
+  if (parsesAsToml(source) === null) return null
+  const lines = source.split('\n')
   const oldIntutic = tableStart(lines, 'intutic')
-  if (oldIntutic !== -1) lines.splice(oldIntutic, tableEnd(lines, oldIntutic) - oldIntutic)
-
-  setLlmBaseUrl(lines, baseUrl)
-
-  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
-  const escaped = instructions.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"')
-  lines = [...lines, '', '[intutic]', `proxy_url = ${JSON.stringify(proxyUrl)}`, `instructions = """\n${escaped}\n"""`, '']
-  const next = (lines[0] === '' ? lines.slice(1) : lines).join('\n')
-
-  const check = parsesAsToml(next)
-  if (check === null || (check['llm'] as Record<string, unknown> | undefined)?.['base_url'] !== baseUrl) return null
-  return next
+  if (oldIntutic !== -1) {
+    lines.splice(oldIntutic, tableEnd(lines, oldIntutic) - oldIntutic)
+    while (lines.length > 1 && lines[lines.length - 1].trim() === '' && lines[lines.length - 2].trim() === '') lines.pop()
+  }
+  return mergeOpenHandsBaseUrl(lines.join('\n'), proxyUrl)
 }

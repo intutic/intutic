@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { classify, isDeploy, isTest, touchesInfra } from '../actions.js'
+import { expectLinearTime } from './linearTime.js'
 
 describe('classify', () => {
   it('only classifies shell-shaped tools', () => {
@@ -29,6 +32,39 @@ describe('classify', () => {
 
   it('ignores numbers/booleans/null in nested input', () => {
     expect(classify('bash', { command: 'ls', n: 1, flag: true, x: null })).toEqual([])
+  })
+})
+
+describe('db_write, whatever separates the keywords', () => {
+  // The commands and answers are the shared destructive-SQL vectors, run by
+  // every classifier and text rule (destructiveSqlVectors.test.ts); this pins
+  // the gap they all depend on.
+  // The vectors every classifier shares (actions.rs, actions.py, the hook
+  // gates' hold classifier): `git\tpush`, a line continuation or a long option
+  // between the words used to classify as nothing here.
+  const vectors = JSON.parse(
+    readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8'),
+  ) as { held: Array<[string, string[]]>; notHeld: string[]; adversarial: Array<[string, number]> }
+
+  it.each(vectors.held)('classifies %j as %j', (command, tokens) => {
+    expect(classify('bash', { command })).toEqual(tokens)
+  })
+
+  it.each(vectors.notHeld)('classifies %j as nothing', (command) => {
+    expect(classify('bash', { command })).toEqual([])
+  })
+
+  // The proxy's regex (SQL_GAP in actions.rs) is safe in Rust's linear
+  // engine; here a backtracking one took seconds on text an agent can be talked
+  // into writing. The phrase matcher must stay linear on every one of these.
+  it.each(vectors.adversarial)('classifies %j repeated up to %i times in linear time', (unit, times) => {
+    const commands = { 1: unit.repeat(Math.ceil(times / 4)), 4: unit.repeat(Math.ceil(times / 4) * 4) }
+    expectLinearTime(JSON.stringify(unit), (scale) => classify('bash', { command: commands[scale] }))
+  })
+
+  it('carries a byte-identical copy of the shared phrase matcher', () => {
+    const shared = readFileSync(join(__dirname, '../../../shared-types/src/phrases.ts'), 'utf-8')
+    expect(readFileSync(join(__dirname, '../phrases.ts'), 'utf-8')).toBe(shared)
   })
 })
 

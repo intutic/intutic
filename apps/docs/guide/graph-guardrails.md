@@ -15,6 +15,11 @@ What changed is not the shape. It is that a node now *interprets* its task
 instead of following a fixed rule, which is what makes explicit budgets, vetoes
 and stop conditions necessary rather than optional.
 
+Everything here runs in the proxy and the gates on your machine, with no
+account, except the three sections badged <Badge type="tip" text="Cloud" />: a
+run budget, a hold for human review, and sandbox attestation each need a
+connected workspace's control plane.
+
 ## The problem a graph creates
 
 The failure mode most often raised about graph systems is that **agents checking
@@ -229,7 +234,7 @@ Three details that decide whether this actually works:
 To re-approve after a legitimate change, clear the pin: `~/.intutic/tool-pins.json`
 standalone, or `tools:pin:{workspace}` in Valkey.
 
-### 3. One budget for the whole graph
+### 3. One budget for the whole graph <Badge type="tip" text="Cloud" /> {#_3-one-budget-for-the-whole-graph}
 
 A per-node budget is not a budget: a graph that fans out to eight workers spends
 eight times what you capped. The ceiling is set on the run, so every hop,
@@ -315,11 +320,12 @@ Two outcomes, depending on the pattern:
 | Pattern | Behaviour |
 |---|---|
 | Private keys (RSA, EC, DSA, OpenSSH, PGP, PKCS#8), Anthropic API keys | request **refused** |
-| AWS access keys (incl. temporary `ASIA` creds), GitHub tokens (all five classic prefixes + fine-grained), OpenAI / GitLab / Slack / Google / Stripe / SendGrid / npm / PyPI / Hugging Face keys, Slack webhook URLs, database connection credentials, JWTs, bearer tokens, SSNs | **redacted before forwarding** — replaced with `[REDACTED_*]`, and the redacted body is what reaches your provider |
+| AWS access keys (incl. temporary `ASIA` creds), GitHub tokens (all five classic prefixes + fine-grained), OpenAI / GitLab / Slack / Google / Stripe / SendGrid / npm / PyPI / Hugging Face keys, Slack webhook URLs, database connection credentials, JWTs, bearer tokens; payment card numbers, IBANs and SSNs (each checksum- or range-validated) | **redacted before forwarding** — replaced with `[REDACTED_*]`, and the redacted body is what reaches your provider |
 
-Every pattern is prefix- or magic-substring-anchored — the tier the reference
+Every secret pattern is prefix- or magic-substring-anchored — the tier the reference
 scanners (gitleaks, TruffleHog) treat as high-confidence — so ordinary
-technical text does not trip it. Formats that are ambiguous without context
+technical text does not trip it. PII has no prefix, so each PII match is
+validated instead (see [PII detectors](/guide/policies#pii-detectors)). Formats that are ambiguous without context
 (bare 40-char AWS secrets, unprefixed hex tokens) are deliberately excluded
 rather than matched noisily.
 
@@ -503,7 +509,7 @@ This works because the proxy records a **change manifest** for every request —
 the files, URLs and commands its tool calls actually named, derived from the
 argument keys, not guessed. You can see it per request in the trace detail view.
 
-### Stop and ask me first
+### Stop and ask me first <Badge type="tip" text="Cloud" /> {#stop-and-ask-me-first}
 
 `deny_tools` refuses something forever. `review_before` does something different:
 it holds the whole run until a person looks.
@@ -517,17 +523,28 @@ review_before: action:deploy, action:publish
 ```
 
 The run moves to `PENDING_REVIEW`, every subsequent request is refused with
-`LOOP_RUN_PENDING_REVIEW`, and it stays that way until someone resolves it:
+`LOOP_RUN_PENDING_REVIEW`, and it stays that way until an owner, admin or
+engineering manager resolves it:
 
 ```bash
 intutic loop review <loop-run-id> --approve
 ```
 
 Or from **Findings › Review Queue › Held Changes**, which lists held runs with the change
-manifest inline, ranked by risk rather than by when they were held.
+manifest inline, ranked by risk rather than by when they were held. The member who started
+the run can resolve it too, unless the workspace requires a different approver
+(`loop_review.requireDistinctApprover`; see [`intutic loop review`](/reference/cli#intutic-loop-review)).
 
 Entries can be action tokens (`action:deploy`, `action:publish`,
 `action:release`, `action:db_write`) or raw tool names (`Write`, `Bash`).
+
+A hook gate, and the proxy after it, reads an action token off the shell
+command's words, whatever separates them: spaces, tabs, a line continuation, a
+`--` long option, a SQL comment or an escaped `\n`. `git push` with a tab
+between the words, `kubectl --context prod apply` and `DROP/**/TABLE users`
+are held like their plain spellings. Neither undoes shell quoting, variables
+or aliases, and a statement quoted inside another command (`echo "drop
+table"`) counts.
 
 **Nothing is ever held unless you declare it.** There is no heuristic here and
 no threshold — a run stops only because an SOP said this action needs a person.
@@ -538,15 +555,17 @@ Two gates enforce this, and they are not equivalent.
 **The harness hook** (every hook gate the daemon writes — Claude Code, Cursor,
 Goose, Cline and the rest of the [matrix](/reference/harness-security-matrix))
 blocks the tool call *before it runs*. The `git push` does not happen. The
-gate prints the hold id and how to resolve it:
+gate prints the hold id, who can resolve it and when a retry passes:
 
 ```
-[Intutic Guardrail] HELD: Held for human review: action:deploy — declared in review_before: [sop.local.review_before.action:deploy] Approve with: intutic decision approve hold_… (or: intutic decision reject hold_…)
+[Intutic Guardrail] HELD: Held for human review: action:deploy — declared in review_before: [sop.local.review_before.action:deploy] An Owner, Admin or EM can approve it with: intutic decision approve hold_… (or reject it: intutic decision reject hold_…). Retrying this exact call passes after approval only if the workspace has turned on the review-hold bypass; otherwise it is held again.
 ```
 
-`intutic decision approve <holdId>` lets that exact call — same tool, same
-command, same target — through once, for a short window, and only when the
-workspace has opted in with the `reviewHoldBypassEnabled` workspace setting
+Approving the hold — `intutic decision approve <holdId>`, the review API or
+the Slack card, which all take the same path and need the OWNER, ADMIN or EM
+role — lets that exact call (same
+tool, same command, same target) through once, for a short window, and only
+while the workspace has opted in with the `reviewHoldBypassEnabled` workspace setting
 (`PUT /api/v1/workspace/settings`; there is no dashboard toggle); a different command
 under the same rule is held again. Two hook gates cannot hold: the n8n
 workflow hook and the Open WebUI prompt filter refuse the call outright, since
@@ -716,7 +735,7 @@ a governance rule into a privilege-escalation path. Authorisation stays bound to
 the virtual key.
 :::
 
-## Sandbox attestation
+## Sandbox attestation <Badge type="tip" text="Cloud" /> {#sandbox-attestation}
 
 `node_id` and `agent_role` are unverifiable by design — see the warning above.
 Sandbox attestation is a different, narrower signal: a session's [sandbox](/guide/sandboxed-execution)

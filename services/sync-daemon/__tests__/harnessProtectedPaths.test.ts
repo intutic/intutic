@@ -22,9 +22,12 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   GOVERNANCE_BYPASS_PATTERNS,
+  UNIVERSAL_PROTECTED_PATHS,
   protectedPathShellPatterns,
 } from '../src/harness/protectedPaths.js'
+import { GATE_ARTIFACTS } from '../src/harness/gateArtifacts.js'
 import { GATES, NO_GATE } from './harness/gateRegistry.js'
+import { GATE_SURFACES, SHARED_GATE_INPUTS } from './harness/gateSurfaces.js'
 
 const HARNESS_DIR = join(__dirname, '../src/harness')
 
@@ -107,6 +110,37 @@ describe('harness protected paths', () => {
       missing,
       `These writers emit a gate that does not come from harness/gateBody.ts.`,
     ).toEqual([])
+  })
+
+  it('names what loads the gate of every harness that has one', () => {
+    // A new hook harness lands in GATE_ARTIFACTS; this makes it say what
+    // loads its gate before the test below can pass for it.
+    expect(Object.keys(GATE_SURFACES).sort()).toEqual([...Object.keys(GATE_ARTIFACTS), 'dsh'].sort())
+    for (const [harness, artifacts] of Object.entries(GATE_ARTIFACTS)) {
+      expect(GATE_SURFACES[harness]!.gate.map((p) => p.replace(/^~\//, '')), harness).toEqual(artifacts)
+    }
+  })
+
+  it('protects every gate and everything that loads or configures it, so an agent cannot remove its own gate', () => {
+    // A protected path refuses any call that mentions it, so a file is
+    // protected when one of the paths is part of its own.
+    const unprotected: string[] = []
+    for (const [harness, s] of Object.entries(GATE_SURFACES)) {
+      for (const file of [...s.gate, ...s.loaders, ...(s.refusedOnly ?? [])]) {
+        if (!UNIVERSAL_PROTECTED_PATHS.some((p) => file.includes(p))) unprotected.push(`${harness}: ${file}`)
+      }
+    }
+    for (const file of SHARED_GATE_INPUTS) {
+      if (!UNIVERSAL_PROTECTED_PATHS.some((p) => file.includes(p))) unprotected.push(file)
+    }
+    expect(unprotected).toEqual([])
+  })
+
+  it('protects no hook directory a harness no longer loads the gate from', () => {
+    // Cline's gate moved to `.clinerules/hooks`. A hook left in `.cline/hooks`
+    // runs beside it and cannot undo its refusal, and the cost of a stale
+    // entry is a refused `cat` of a file nothing reads.
+    expect(UNIVERSAL_PROTECTED_PATHS).not.toContain('.cline/hooks')
   })
 
   it('accounts for every harness writer in the registry', () => {

@@ -33,9 +33,9 @@ The proxy calls `evaluate(offset, len)` with a JSON-serialized `RequestContext`:
 
 Start from the `@intutic/wasm-sdk` template (`packages/wasm-sdk/` in the open-core repo). Add one function per business rule and call it from `runRules()` in `assembly/index.ts`.
 
-Sandbox constraints — violating them silently disables the rule (the proxy **fails open**):
+Sandbox constraints — a rule that breaks one reaches no verdict, and every call it could not judge is refused with `GOVERNANCE_UNAVAILABLE`, whatever the proxy's fail setting:
 
-- 5 ms wall-clock budget, 1,000,000 fuel, 16 MB memory.
+- 1,000,000 fuel (instructions), the limit to write against; a 1 s wall-clock backstop; 16 MB memory.
 - Keep logic simple: no unbounded loops over `arguments`, no recursion, no I/O (none exists in the sandbox).
 - Host imports are limited to `env.log_info`, `env.trace`, `env.abort` and `env.read_referenced_file` (reads the bytes of a file the host already resolved before the sandbox existed — not a filesystem import, and it cannot be used to browse). A rule importing anything else cannot link, so it is refused at `intutic policy install` and refused again when the proxy loads it.
 - **`Math.random()` is unavailable.** AssemblyScript compiles it to an `env.seed` import the proxy does not provide. This list previously named `env.seed`, and a rule using randomness installed clean and then failed to link on every request — enforcing nothing, silently. Beyond the missing import, a verdict that samples is not a verdict: the same request would get different answers, and the audit trail would not explain either.

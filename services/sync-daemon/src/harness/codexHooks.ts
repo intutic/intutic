@@ -31,10 +31,16 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
+import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 
 const log = createLogger('sync-codex-hooks')
+
+/** Codex's user config directory: `$CODEX_HOME`, else `~/.codex`. */
+export function codexUserDir(): string {
+  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+}
 
 /**
  * The pre-tool gate script — receives Codex's PreToolUse JSON on stdin,
@@ -76,6 +82,9 @@ function logEvent(verdict, toolName, reason) {
   try {
     const ts = new Date().toISOString();
     const incidentId = crypto.createHash('sha1').update(ts + toolName + _intuticWsId).digest('hex').slice(0, 16);
+    // The event's id: random, made once here, and resent with the line it is
+    // written into, so the control plane processes the event once.
+    const eventId = crypto.randomBytes(16).toString('hex');
     const entry = JSON.stringify({
       // Passed through, not collapsed to two values: the advisory tier emits
       // 'tool_flagged', and a ternary here silently recorded it as an allow.
@@ -85,6 +94,7 @@ function logEvent(verdict, toolName, reason) {
       harnessType: 'codex',
       timestamp: ts,
       incidentId,
+      eventId,
       ...(_intuticSessionId ? { sessionId: _intuticSessionId } : {}),
     }) + '\\n';
     fs.appendFileSync(${JSON.stringify(hookEventsLog)}, entry, { flag: 'a' });
@@ -194,7 +204,7 @@ async function mergeCodexHooksJson(configPath: string, hookScriptPath: string): 
           // decides from the arguments, so a tool name nobody anticipated is
           // still evaluated rather than silently unmatched.
           matcher: '.*',
-          hooks: [{ type: 'command', command: intuticCmd }],
+          hooks: [{ type: 'command', command: intuticCmd, timeout: HOOK_TIMEOUT_SECONDS }],
         },
       ],
     },
@@ -239,9 +249,8 @@ export async function writeCodexHooks(
   await mergeCodexHooksJson(path.join(projectCodexDir, 'hooks.json'), hookScriptPath)
   log.info({ action: 'codex_hooks_written', level: 'project', path: projectCodexDir }, 'Codex project-level hooks written')
 
-  // 2. User-level: $CODEX_HOME/hooks.json — Codex keeps its user config in
-  // CODEX_HOME when set, ~/.codex otherwise.
-  const userCodexDir = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+  // 2. User-level: $CODEX_HOME/hooks.json.
+  const userCodexDir = codexUserDir()
   await keepOriginal(path.join(userCodexDir, 'hooks.json'), workspaceRoot)
   await fs.mkdir(userCodexDir, { recursive: true })
   await mergeCodexHooksJson(path.join(userCodexDir, 'hooks.json'), hookScriptPath)

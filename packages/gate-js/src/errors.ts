@@ -35,6 +35,42 @@ export class GateConnectionError extends GateError {
 }
 
 /**
+ * Every `code` an {@link IntuticGateRefusal} can carry: the tier that refused,
+ * or for the image-integrity tier the specific failure. Held to
+ * `packages/shared-types/fixtures/refusal-codes.json` (`gate`) by a test, as
+ * the Python gate's list and the gate SDK reference are.
+ */
+export const GATE_REFUSAL_CODES = [
+  'SSO_GROUP',
+  'SNAPSHOT',
+  'HELD',
+  // The MCP server registry and allowlist, from the policy snapshot or the
+  // control plane's hook gate.
+  'SERVER_BLOCKED',
+  'SERVER_HELD',
+  'SERVER_NOT_APPROVED',
+  'TOOL_DISABLED',
+  'SERVER_NOT_ALLOWED',
+  // Any MCP call on a policy snapshot that failed its integrity check.
+  'POLICY_SNAPSHOT_UNVERIFIED',
+  'SOP_RULE',
+  'HOOK_GATE',
+  // The call is too large to evaluate (limits.ts), before any tier runs.
+  'COMMAND_TOO_LARGE',
+  'E_UNPINNED_LATEST',
+  'E_UNPINNED_TAG',
+  'E_UNKNOWN_REGISTRY',
+  'E_UNKNOWN_IMAGE',
+  'E_DIGEST_MISMATCH',
+  'E_MANIFEST_UNPARSEABLE',
+  // The Workflow DevKit adapter (workflow.ts), before any tier runs.
+  'WORKFLOW_SANDBOX',
+  'NO_GATE',
+] as const
+
+export type GateRefusalCode = (typeof GATE_REFUSAL_CODES)[number]
+
+/**
  * Raised when a tool call must not run.
  *
  * The structured fields (`reason`, `code`, `incidentId`) carry the
@@ -43,14 +79,36 @@ export class GateConnectionError extends GateError {
  */
 export class IntuticGateRefusal extends GateError {
   public readonly reason: string
-  public readonly code: string
+  public readonly code: GateRefusalCode
   public readonly incidentId: string | undefined
 
-  constructor(reason: string, code: string, incidentId?: string) {
+  constructor(reason: string, code: GateRefusalCode, incidentId?: string) {
     super(`[Intutic Governance] BLOCKED: ${reason}`)
     this.name = 'IntuticGateRefusal'
     this.reason = reason
     this.code = code
     this.incidentId = incidentId
+  }
+}
+
+/**
+ * Raised when a hold rule stopped the call to ask a person first (`code`
+ * `HELD`). A subclass, so a caller that stops on every refusal stops on this
+ * too; one that tells the user about holds catches it first.
+ *
+ * `holdId` names the hold in the review queue, and is `undefined` when the
+ * hold could not be recorded (no control plane to record it in), in which
+ * case there is nothing to approve yet. `.message` starts
+ * `[Intutic Governance] HELD:`, as the hook gates print a hold, and says who
+ * can approve it and when a retry passes. See hold.ts.
+ */
+export class IntuticGateHold extends IntuticGateRefusal {
+  public readonly holdId: string | undefined
+
+  constructor(reason: string, holdId: string | undefined) {
+    super(reason, 'HELD')
+    this.name = 'IntuticGateHold'
+    this.message = `[Intutic Governance] HELD: ${reason}`
+    this.holdId = holdId
   }
 }
