@@ -145,6 +145,16 @@ describe('intutic settings', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('sends PII detector actions, and refuses an unknown action naming the detector, before any request', async () => {
+    await expectFailure(() => runSettingsSet('piiDetectors', '{"pii.card":"warn"}', {}), 'piiDetectors.pii.card')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const actions = { 'pii.card': 'block', 'pii.email': 'redact' }
+    fetchMock.mockReturnValue(reply(200, { updated: true, workspaceId: 'ws_test', settings: { piiDetectors: actions } }))
+    await runSettingsSet('piiDetectors', JSON.stringify(actions), {})
+    expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { piiDetectors: actions } })
+  })
+
   it('refuses a value given both ways', async () => {
     await expectFailure(() => runSettingsSet('configBodyUpload', 'true', { file: 'x.json' }), 'not both')
   })

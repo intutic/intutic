@@ -425,16 +425,11 @@
       "id": "gateway-live-config",
       "title": "Live gateway config, bare metal, applied/desired version",
       "plan": "Enterprise",
-      "badgeGaps": {
-        "PATCH /api/v1/gateways/:id/config": "the route catalog shows gateways.ts's Cloud badge; only POST /api/v1/gateways checks the Enterprise plan",
-        "GET /api/v1/gateways/:id/status": "the route catalog shows gateways.ts's Cloud badge; only POST /api/v1/gateways checks the Enterprise plan",
-        "GET /api/v1/gateways/:id/config": "the route catalog shows gatewayHeartbeat.ts's Cloud badge; only POST /api/v1/gateways checks the Enterprise plan"
-      },
       "surfaces": {
         "api": [
           { "ref": "PATCH /api/v1/gateways/:id/config", "auth": "OWNER/ADMIN" },
-          { "ref": "GET /api/v1/gateways/:id/config", "auth": "Gateway token (`gwk_…`, its own gateway); Authenticated (a member of its org)" },
-          "GET /api/v1/gateways/:id/status"
+          { "ref": "GET /api/v1/gateways/:id/config", "badge": false, "auth": "Gateway token (`gwk_…`, its own gateway); Authenticated (a member of its org)" },
+          { "ref": "GET /api/v1/gateways/:id/status", "badge": false }
         ],
         "dashboard": [{ "file": "apps/dashboard/src/components/settings/GatewaysPanel.tsx", "contains": "bare_metal" }],
         "cli": [
@@ -618,18 +613,15 @@
         "mcpTools": { "none": "the intutic MCP server's tools are the same for every harness" },
         "kitkat": { "none": "the skill is harness-neutral" },
         "terraform": { "none": "local gates" },
-        "docs": ["integrations/antigravity.md#gemini-cli", "integrations/antigravity.md#google-antigravity"],
+        "docs": ["integrations/antigravity.md#gemini-cli", "integrations/antigravity.md#google-antigravity", "integrations/antigravity.md#mcp-servers"],
         "website": [{ "file": "index.html", "contains": "Gemini CLI" }],
         "events": [{ "file": "packages/shared-types/src/gateIdentity.ts" }],
-        "enforcement": {
-          "gap": "the MCP governance proxy is not wired into Gemini CLI's or Antigravity's MCP servers",
-          "want": [{ "file": "services/sync-daemon/src/harness/mcpAutoWrite.ts", "contains": "antigravity" }],
-          "have": [
-            { "file": "services/sync-daemon/src/harness/protectedPaths.ts", "contains": ".gemini/config/hooks.json" },
-            { "file": "services/sync-daemon/src/harness/antigravityCliHooks.ts" },
-            { "file": "services/sync-daemon/src/harness/antigravityHooks.ts" }
-          ]
-        }
+        "enforcement": [
+          { "file": "services/sync-daemon/src/harness/mcpAutoWrite.ts", "contains": "['antigravity', injectAntigravity]" },
+          { "file": "services/sync-daemon/src/harness/protectedPaths.ts", "contains": ".gemini/config/hooks.json" },
+          { "file": "services/sync-daemon/src/harness/antigravityCliHooks.ts" },
+          { "file": "services/sync-daemon/src/harness/antigravityHooks.ts" }
+        ]
       }
     },
     {
@@ -718,37 +710,33 @@
       "id": "pii-detectors",
       "title": "Checksum-validated PII detectors",
       "plan": "Open-Core",
-      "badgeGaps": {
-        "guide/policies.md#pii-detectors": "the detectors run in the open-core proxies, but their section sits on the Cloud-badged Policies page"
-      },
       "surfaces": {
-        "api": {
-          "gap": "detector actions are local proxy configuration; no workspace setting carries them (a product decision)",
-          "want": []
-        },
-        "dashboard": {
-          "gap": "no workspace setting for detector actions, so the dashboard cannot show or set them",
-          "want": []
-        },
-        "cli": {
-          "gap": "no workspace setting for detector actions, so `settings set` cannot set them",
-          "want": []
-        },
+        "api": [
+          { "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" },
+          { "file": "services/control-plane/src/routes/workspace.ts", "contains": "piiDetectors: PiiDetectorSettingsSchema" },
+          { "file": "services/control-plane/src/routes/auth.ts", "contains": "piiDetectors: await keyPiiDetectors(c, auth)" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/PiiDetectorsPanel.tsx", "contains": "piiDetectors" }],
+        "cli": [
+          { "ref": "settings set", "badge": false },
+          { "file": "tools/cli/src/commands/settings.ts", "contains": "PiiDetectorSettingsSchema" }
+        ],
         "gateSdk": { "none": "gates do not scan for PII by design (guide/policies.md, \"What each surface does with a match\")" },
         "clawdeSdk": ["dlp_policy_violation"],
         "mcpTools": { "none": "enforced on MCP calls, not exposed as a tool" },
         "kitkat": ["PII value"],
-        "terraform": {
-          "gap": "no workspace setting for detector actions, so Terraform cannot set them",
-          "want": []
-        },
-        "docs": ["guide/policies.md#pii-detectors"],
-        "website": [{ "file": "index.html", "contains": "checksum-validated card numbers, IBANs and US Social Security numbers" }],
+        "terraform": ["workspace_settings.piiDetectors"],
+        "docs": [
+          "guide/policies.md#pii-detectors",
+          { "ref": "guide/policies.md#setting-detector-actions-for-a-workspace", "badge": false }
+        ],
+        "website": [{ "file": "index.html", "contains": "checksum-validated card numbers, IBANs, US Social Security numbers" }],
         "events": { "none": "a PII match is a DLP finding and is recorded as one" },
         "enforcement": [
           { "file": "packages/shared-types/src/piiDetectors.json" },
           { "file": "packages/shared-types/fixtures/pii-detector-vectors.json" },
           { "file": "packages/proxy/src/dlp/pii.rs" },
+          { "file": "packages/proxy/src/dlp/workspace.rs" },
           { "file": "packages/mcp-proxy/src/dlp.ts", "contains": "INTUTIC_MCP_DLP_DETECTORS" }
         ]
       }
@@ -780,12 +768,6 @@
       "id": "authored-guardrails",
       "title": "Guardrails as code (authored guardrails)",
       "plan": "Cloud",
-      "badgeGaps": {
-        "guide/policy-guardrails.md#authoring-guardrails-directly": "the page's Self-serve+ badge is extraction's plan; authoring needs no plan check (routes/policyGuardrails.ts)",
-        "guardrails create": "the section's Self-serve+ badge is extraction's plan; authoring needs no plan check",
-        "guardrails update": "the section's Self-serve+ badge is extraction's plan; authoring needs no plan check",
-        "guardrails delete": "the section's Self-serve+ badge is extraction's plan; authoring needs no plan check"
-      },
       "surfaces": {
         "api": [
           { "ref": "POST /api/v1/policy-guardrails/guardrails", "auth": "OWNER/ADMIN" },

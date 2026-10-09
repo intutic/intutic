@@ -23,9 +23,11 @@ import { harnessesReading } from '@intutic/shared-types'
 import { isSeq, parseDocument, type Document } from 'yaml'
 import { parse as parseToml } from 'smol-toml'
 import {
+  antigravityMcpConfigPath,
   claudeDesktopConfigPath,
   continueConfigPath,
   cursorGlobalConfigPath,
+  geminiSettingsPath,
   gooseConfigPath,
   grokUserConfigPath,
   museConfigPath,
@@ -76,10 +78,13 @@ import {
   type StructuredFormat,
 } from './plan.js'
 import {
+  antigravityRemoteShape,
+  geminiRemoteShape,
   unwrapClaudeState,
   unwrapContinueServers,
   unwrapOpenCodeServers,
   unwrapServersAt,
+  unwrapUnmarkedServersAt,
 } from './mcp.js'
 import { contains, isGateCommandEntry, isGateEntry, runsGate, RULES_HEADER, startsWithRulesHeader } from './recognise.js'
 import { lineValue, removeEmptyTable, removeTable, restoreKeyLine, tomlSections } from './tomlLines.js'
@@ -720,13 +725,22 @@ const antigravity: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await gateScripts(plan, root, ['antigravity-check.sh', ANTIGRAVITY_CLI_GATE])
     await rulesSection(plan, join(root, 'GEMINI.md'), root)
-    // Where earlier versions put the rules: a key neither product reads.
+    // Where earlier versions put the rules (a key neither product reads), and
+    // the project's Gemini CLI MCP servers.
     await json(plan, join(root, '.gemini', 'settings.json'), root, (doc, c) =>
-      restoreKey(doc, ['customInstructions'], c, (v) => typeof v === 'string' && startsWithRulesHeader(v)),
+      allEdits(
+        restoreKey(doc, ['customInstructions'], c, (v) => typeof v === 'string' && startsWithRulesHeader(v)),
+        unwrapUnmarkedServersAt(doc, ['mcpServers'], c.original, geminiRemoteShape),
+      ),
     true)
   })
-  await json(plan, join(home(), '.gemini', 'settings.json'), home(), (doc, c) => removeGateEntries(doc, c, ['BeforeTool'], 'antigravity-check.sh'))
+  await json(plan, geminiSettingsPath(), home(), (doc, c) =>
+    allEdits(
+      removeGateEntries(doc, c, ['BeforeTool'], 'antigravity-check.sh'),
+      unwrapUnmarkedServersAt(doc, ['mcpServers'], c.original, geminiRemoteShape),
+    ))
   await json(plan, antigravityHooksPath(), home(), (doc, c) => restoreKey(doc, [ANTIGRAVITY_HOOK_NAME], c, isAntigravityGate), true)
+  await json(plan, antigravityMcpConfigPath(), home(), (doc, c) => unwrapUnmarkedServersAt(doc, ['mcpServers'], c.original, antigravityRemoteShape), true)
 }
 
 // ─── Continue ────────────────────────────────────────────────────────────────

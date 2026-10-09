@@ -157,9 +157,10 @@ pub struct MirrorOutcome {
 /// site that carries model text past a trust boundary (e.g.
 /// `injection::extract_scrubbed_snippet`, the output-DLP block in
 /// `proxy.rs`). A clean string is returned unchanged rather than round-tripped
-/// through `redact`, matching those call sites.
-pub fn dlp_scrub(text: &str) -> String {
-    let findings = crate::dlp::scan(text);
+/// through `redact`, matching those call sites. `pii` is the request's
+/// workspace PII policy, `None` for this machine's.
+pub fn dlp_scrub(text: &str, pii: Option<&crate::dlp::PiiPolicy>) -> String {
+    let findings = crate::dlp::scan_with(text, pii);
     if findings.is_empty() {
         text.to_string()
     } else {

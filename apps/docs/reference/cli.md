@@ -1864,7 +1864,7 @@ For a hook rule, prints the tool and input patterns and the exact stderr line a 
 
 ---
 
-## `intutic guardrails create` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails create` <Badge type="tip" text="Cloud" />
 
 Author a guardrail directly: the same IR and checks as an extracted one, created PROPOSED.
 
@@ -1916,7 +1916,7 @@ ir:
 
 ---
 
-## `intutic guardrails update <guardrailId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails update <guardrailId>` <Badge type="tip" text="Cloud" />
 
 Edit an authored guardrail: a name or description in place; a changed IR creates the next version, PROPOSED with no evidence.
 
@@ -1950,7 +1950,7 @@ Sends only what you give to `PUT /api/v1/policy-guardrails/guardrails/:guardrail
 
 ---
 
-## `intutic guardrails delete <guardrailId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails delete <guardrailId>` <Badge type="tip" text="Cloud" />
 
 Retire an authored guardrail and undo what it wrote; its history is kept.
 
@@ -1976,7 +1976,7 @@ Any state but RETIRED becomes RETIRED: the rule leaves every rule endpoint on th
 
 ---
 
-## `intutic guardrails approve-shadow <guardrailId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails approve-shadow <guardrailId>` <Badge type="tip" text="Cloud" />
 
 Ship a proposed guardrail in shadow: it reports, never blocks.
 
@@ -2002,7 +2002,7 @@ PROPOSED → SHADOW. A hook rule is distributed at severity `warn`; a front-matt
 
 ---
 
-## `intutic guardrails promote <guardrailId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails promote <guardrailId>` <Badge type="tip" text="Cloud" />
 
 Promote a shadow guardrail to enforcing once the server says it is ready (an egress allow list is applied from proposed).
 
@@ -2029,7 +2029,7 @@ SHADOW → ENFORCING under the [promotion rule](/concepts/enforcement-actions#th
 
 ---
 
-## `intutic guardrails reject <guardrailId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails reject <guardrailId>` <Badge type="tip" text="Cloud" />
 
 Reject a guardrail; the reason is recorded on its authority chain.
 
@@ -2056,7 +2056,7 @@ Any live state → REJECTED, with the reason on the event.
 
 ---
 
-## `intutic guardrails retire <guardrailId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails retire <guardrailId>` <Badge type="tip" text="Cloud" />
 
 Retire a shadow or enforcing guardrail; it stops being projected.
 
@@ -2914,7 +2914,7 @@ intutic settings set <key> (<value> | --file <path>) [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Sends `PUT /api/v1/workspace/settings` with only this key, so every other setting keeps its value, and prints the key's new value. You need the OWNER or ADMIN role, and the change is recorded in the settings history. The server refuses an unknown key or a bad value with a message naming it. `mcpBudgets` and `sso_group_policy` are also checked by the CLI before sending, and a mistake is reported with the path of the field at fault.
+Sends `PUT /api/v1/workspace/settings` with only this key, so every other setting keeps its value, and prints the key's new value. You need the OWNER or ADMIN role, and the change is recorded in the settings history. The server refuses an unknown key or a bad value with a message naming it. `mcpBudgets`, `sso_group_policy` and `piiDetectors` are also checked by the CLI before sending, and a mistake is reported with the path of the field at fault.
 
 Settings often changed this way:
 
@@ -2928,6 +2928,7 @@ Settings often changed this way:
 | `mcpAnomalyMode` | `enforce`, `warn` or `off` |
 | `mcpAnomalyOverrides` | A JSON object of detector id to `steer`, `reask`, `kill` or `off` |
 | `sso_group_policy` | The [group policy for high-risk tools](/guide/settings#security), as a JSON object of `highRiskTools`, `requiredGroups` and `requireOboFor`; `null` clears it. Setting one needs a <Badge type="warning" text="Biz Org+" /> plan |
+| `piiDetectors` | The [PII detector](/guide/policies#pii-detectors) actions for the workspace, as a JSON object of detector id to `off`, `redact` or `block`; each machine's proxy config may only tighten them. `null` clears it |
 | `configBodyUpload` | `true` or `false`: [config content upload](#config-content-upload) |
 
 **Examples:**
@@ -2936,6 +2937,7 @@ Settings often changed this way:
 intutic settings set mcpDefaultPolicy deny
 intutic settings set mcpBudgets --file mcp-budgets.json
 intutic settings set sso_group_policy null
+intutic settings set piiDetectors '{"pii.card":"block","pii.email":"redact"}'
 ```
 
 ---

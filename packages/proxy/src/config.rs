@@ -374,7 +374,9 @@ pub struct DlpConfig {
     /// `pii.ssn`, `pii.email`, `pii.phone`): `off`, `redact` or `block`.
     /// Unlisted detectors keep their defaults from `dlp/pii_detectors.json`;
     /// an unknown id or action stops the proxy at boot
-    /// (`dlp::install_pii_actions`).
+    /// (`dlp::install_pii_actions`). For a workspace that sets
+    /// `piiDetectors`, that setting is the baseline for its requests and
+    /// these may only tighten it (`dlp::workspace_pii_policy`).
     #[serde(default)]
     pub detectors: std::collections::BTreeMap<String, String>,
     /// How many bytes of decoded response text the streaming forward loop

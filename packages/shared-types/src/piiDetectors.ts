@@ -10,10 +10,27 @@
  * implemented in `packages/proxy/src/dlp/pii.rs` and
  * `packages/mcp-proxy/src/dlpPii.ts`.
  */
+import { z } from 'zod'
 import definition from './piiDetectors.json'
 
-/** What a detector does with a match. `off` detectors are not run. */
-export type PiiAction = 'off' | 'redact' | 'block'
+/** What a detector does with a match, least to most strict. `off` detectors are not run. */
+export const PII_ACTIONS = ['off', 'redact', 'block'] as const
+export type PiiAction = (typeof PII_ACTIONS)[number]
+
+/** Every detector's id, in `piiDetectors.json`'s order (a test holds the two equal). */
+export const PII_DETECTOR_IDS = ['pii.card', 'pii.iban', 'pii.ssn', 'pii.email', 'pii.phone'] as const
+export type PiiDetectorId = (typeof PII_DETECTOR_IDS)[number]
+
+/**
+ * The workspace setting `piiDetectors`: an action for each detector the
+ * workspace governs centrally. The LLM proxy reads it from
+ * `/api/v1/auth/key-context` and uses it as the baseline for the
+ * workspace's requests; a machine's own `dlp.detectors` config may only
+ * tighten it (`packages/proxy/src/dlp.rs`). A detector left out keeps each
+ * machine's action. Unknown ids and actions are refused.
+ */
+export const PiiDetectorSettingsSchema = z.record(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
+export type PiiDetectorSettings = Partial<Record<PiiDetectorId, PiiAction>>
 
 export interface PiiDetectorDefinition {
   /** Stable finding id, `pii.*`. */

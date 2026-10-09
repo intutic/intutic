@@ -100,3 +100,21 @@ func TestSettingsKeysFileIsWellFormed(t *testing.T) {
 		t.Fatalf("workspace_settings_keys.json must hold exactly keys and featureFlags: %v", err)
 	}
 }
+
+func TestPiiDetectorsIsOneSettingComparedWhole(t *testing.T) {
+	if p := validateSettingsKeys(obj(t, `{"piiDetectors": {"pii.card": "block"}}`)); len(p) != 0 {
+		t.Fatalf("piiDetectors must be a known key, got %v", p)
+	}
+	// The API replaces the object whole, so a changed detector sends the whole
+	// object, and a detector the server holds beyond the configured ones is a
+	// difference to correct.
+	prior := obj(t, `{"piiDetectors": {"pii.card": "redact", "pii.email": "redact"}}`)
+	next := obj(t, `{"piiDetectors": {"pii.card": "block", "pii.email": "redact"}}`)
+	if got := changedSettings(prior, next).String(); got != `{"piiDetectors":{"pii.card":"block","pii.email":"redact"}}` {
+		t.Fatalf("body = %s", got)
+	}
+	server := obj(t, `{"piiDetectors": {"pii.card": "block", "pii.email": "redact", "pii.ssn": "off"}}`)
+	if diff := differingKeys(projectSettings(server, next), next); !reflect.DeepEqual(diff, []string{"piiDetectors"}) {
+		t.Fatalf("differing = %v", diff)
+	}
+}

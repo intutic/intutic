@@ -2923,12 +2923,107 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // Check for break-glass override token in request headers.
+    //
+    // `has_break_glass` is the trace flag: true for any valid token, scoped
+    // or not, so a request that ran under an override is always attributable.
+    // `break_glass_scope` is what the token may skip — `Global` skips the
+    // anomaly detectors, the WASM rules and the control-plane pre-check
+    // wholesale (every token before scoping existed); `WasmRule` / `Detector`
+    // skip one named thing and leave everything else in force.
+    let mut has_break_glass = false;
+    let mut break_glass_request_id: Option<String> = None;
+    let mut break_glass_scope: Option<crate::store::BreakGlassScope> = None;
+    if let Some(bg_token) = headers
+        .get("x-intutic-break-glass")
+        .and_then(|v| v.to_str().ok())
+    {
+        match state
+            .control_plane
+            .break_glass_grant(bg_token, &workspace_id)
+            .await
+        {
+            Some(grant) => {
+                let scope = grant.scope();
+                tracing::info!(workspace_id = %workspace_id, request_id = %grant.request_id, scope = ?scope, "Active break-glass override token detected");
+                has_break_glass = true;
+                break_glass_request_id = Some(grant.request_id);
+                break_glass_scope = Some(scope);
+            }
+            None => {
+                // Never the raw token in the log — a truncated hash prefix
+                // instead, so a leaked log line cannot be replayed as a live
+                // credential the way the raw value could.
+                let token_hash = &crate::store::valkey::sha256_hex(bg_token)[..8];
+                tracing::warn!(workspace_id = %workspace_id, token_hash = %token_hash, "Expired, invalid, unscoped, or unreachable break-glass token header provided");
+            }
+        }
+    }
+
+    let bypass_everything = matches!(
+        break_glass_scope,
+        Some(crate::store::BreakGlassScope::Global)
+    );
+
     // ── Step 4: DLP scan — input ─────────────────────────────────────
-    // ── Step 4: DLP scan — input ─────────────────────────────────────
+    //
+    // The workspace's PII detector actions first: its `piiDetectors` setting,
+    // from the per-key `/auth/key-context` answer (cached per key for
+    // `key_context::CACHE_TTL`, refetched when the config version moves), is
+    // the baseline, and this machine's `dlp.detectors` may only tighten it
+    // (`dlp::workspace_pii_policy`). Every scan of this request and its
+    // response below uses it. Without a control plane or a virtual key there
+    // is no workspace setting, and the machine's config applies alone.
+    //
+    // A failed read follows the policy check's fail mode: closed refuses the
+    // request before any model spend; open scans with the machine's config.
+    // A global break-glass skips the refusal, as it skips the policy check,
+    // and the request is then scanned with the machine's config: break-glass
+    // never switches DLP itself off.
+    let pii_policy: Option<Arc<dlp::PiiPolicy>> = {
+        let dlp_cfg = &state.config.intutic_settings.dlp;
+        let policy_cfg = &state.config.intutic_settings.policy;
+        let scans = dlp_cfg.enabled && (dlp_cfg.scan_input || dlp_cfg.scan_output);
+        match policy_cfg
+            .control_plane_url
+            .as_deref()
+            .zip(credential.virtual_key())
+            .filter(|_| scans)
+        {
+            Some((cp_url, virtual_key)) => {
+                let policy_version = state.control_plane.policy_version(&workspace_id).await;
+                match dlp::workspace::resolve(
+                    &state.http_client,
+                    cp_url,
+                    virtual_key,
+                    std::time::Duration::from_millis(policy_cfg.timeout_ms),
+                    policy_version,
+                )
+                .await
+                {
+                    Ok(policy) => policy,
+                    Err(reason) if policy_cfg.fail_closed && !bypass_everything => {
+                        tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Workspace PII detector actions unavailable — blocking (fail-closed)");
+                        return json_error(
+                            StatusCode::FORBIDDEN,
+                            "policy_denied",
+                            &format!("Request blocked by Intutic governance policy: {reason}"),
+                        );
+                    }
+                    Err(reason) => {
+                        tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Workspace PII detector actions unavailable — scanning with this machine's (fail-open mode)");
+                        None
+                    }
+                }
+            }
+            None => None,
+        }
+    };
+
     let dlp_findings = if state.config.intutic_settings.dlp.enabled
         && state.config.intutic_settings.dlp.scan_input
     {
-        let findings = dlp::scan(&body_str);
+        let findings = dlp::scan_with(&body_str, pii_policy.as_deref());
         let has_block = findings.iter().any(|f| f.action == "block");
         if has_block {
             // Pattern names included — previously this logged only
@@ -3034,48 +3129,6 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             );
         }
     }
-
-    // Check for break-glass override token in request headers.
-    //
-    // `has_break_glass` is the trace flag: true for any valid token, scoped
-    // or not, so a request that ran under an override is always attributable.
-    // `break_glass_scope` is what the token may skip — `Global` skips the
-    // anomaly detectors, the WASM rules and the control-plane pre-check
-    // wholesale (every token before scoping existed); `WasmRule` / `Detector`
-    // skip one named thing and leave everything else in force.
-    let mut has_break_glass = false;
-    let mut break_glass_request_id: Option<String> = None;
-    let mut break_glass_scope: Option<crate::store::BreakGlassScope> = None;
-    if let Some(bg_token) = headers
-        .get("x-intutic-break-glass")
-        .and_then(|v| v.to_str().ok())
-    {
-        match state
-            .control_plane
-            .break_glass_grant(bg_token, &workspace_id)
-            .await
-        {
-            Some(grant) => {
-                let scope = grant.scope();
-                tracing::info!(workspace_id = %workspace_id, request_id = %grant.request_id, scope = ?scope, "Active break-glass override token detected");
-                has_break_glass = true;
-                break_glass_request_id = Some(grant.request_id);
-                break_glass_scope = Some(scope);
-            }
-            None => {
-                // Never the raw token in the log — a truncated hash prefix
-                // instead, so a leaked log line cannot be replayed as a live
-                // credential the way the raw value could.
-                let token_hash = &crate::store::valkey::sha256_hex(bg_token)[..8];
-                tracing::warn!(workspace_id = %workspace_id, token_hash = %token_hash, "Expired, invalid, unscoped, or unreachable break-glass token header provided");
-            }
-        }
-    }
-
-    let bypass_everything = matches!(
-        break_glass_scope,
-        Some(crate::store::BreakGlassScope::Global)
-    );
 
     // ── Step 4b: WASM custom rules ───────────────────────────────────
     let session_id = headers
@@ -4161,7 +4214,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     //
     // The workspace's `sso_group_policy` and the groups of the member this
     // virtual key belongs to, from the control plane's per-key
-    // `/auth/key-context` (cached per key for `sso_groups::CACHE_TTL`, and
+    // `/auth/key-context` (cached per key for `key_context::CACHE_TTL`, and
     // refetched early when the workspace's config version moves). Applied
     // to the tool calls in the model's response below, in both the streaming
     // and the non-streaming gate. Nothing to fetch without a control plane or
@@ -4700,7 +4753,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let header_findings = if state.config.intutic_settings.dlp.enabled
             && state.config.intutic_settings.dlp.scan_input
         {
-            dlp::scan(&value_str)
+            dlp::scan_with(&value_str, pii_policy.as_deref())
         } else {
             Vec::new()
         };
@@ -5472,6 +5525,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         } else {
             0
         };
+        let pii_policy_clone = pii_policy.clone();
         let loop_run_id_clone = loop_run_id_header.clone();
         let break_glass_request_id_clone = break_glass_request_id.clone();
         let tool_scope_id_clone = tool_scope_id.clone();
@@ -5543,7 +5597,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // exactly the code they ran before — no buffer, no rescan, no
             // added latency.
             let mut dlp_holdback = if dlp_holdback_bytes > 0 {
-                Some(crate::dlp::StreamScrubber::new(dlp_holdback_bytes))
+                Some(
+                    crate::dlp::StreamScrubber::new(dlp_holdback_bytes)
+                        .with_pii(pii_policy_clone.clone()),
+                )
             } else {
                 None
             };
@@ -5554,7 +5611,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // are covered whenever output scanning is on at all, because the
             // split-secret case this closes needs no holdback-size tuning.
             let mut arg_holdback = if dlp_scan_output {
-                Some(ArgHoldback::new())
+                Some(ArgHoldback::new(pii_policy_clone.clone()))
             } else {
                 None
             };
@@ -5708,9 +5765,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             // previously bypassed output DLP entirely — the
                             // branch returned before Step 7.
                             if dlp_scan_output && !replayed {
-                                if let Some((scrubbed, names)) =
-                                    crate::dlp::scrub_stream_text(&line)
-                                {
+                                if let Some((scrubbed, names)) = crate::dlp::scrub_stream_text(
+                                    &line,
+                                    pii_policy_clone.as_deref(),
+                                ) {
                                     line = scrubbed;
                                     for n in names {
                                         if !dlp_stream_redactions.contains(&n) {
@@ -7341,7 +7399,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         && state.config.intutic_settings.dlp.scan_output
     {
         let resp_str = String::from_utf8_lossy(&final_body_bytes);
-        let findings = dlp::scan(&resp_str);
+        let findings = dlp::scan_with(&resp_str, pii_policy.as_deref());
         if !findings.is_empty() {
             tracing::info!(workspace_id = %workspace_id, findings = findings.len(), "DLP findings in response — redacting");
             let redacted = dlp::redact(&resp_str, &findings);
@@ -7608,6 +7666,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let mirror_ws = ws.clone();
             let requested_model_for_mirror = model.clone();
             let original_response_bytes = resp_bytes.clone();
+            let mirror_pii = pii_policy.clone();
             // What the served call cost and how long its upstream took —
             // captured by value so the detached task owns its copy.
             let original_cost_for_mirror = actual_cost_usd;
@@ -7690,12 +7749,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             workspace_id: mirror_ws.clone(),
                             requested_model: requested_model_for_mirror,
                             candidate_model: o.candidate_model.clone(),
-                            request_text: crate::routing::mirror::dlp_scrub(&req_json.to_string()),
+                            request_text: crate::routing::mirror::dlp_scrub(
+                                &req_json.to_string(),
+                                mirror_pii.as_deref(),
+                            ),
                             original_response_text: crate::routing::mirror::dlp_scrub(
                                 &original_response_raw,
+                                mirror_pii.as_deref(),
                             ),
                             mirror_response_text: crate::routing::mirror::dlp_scrub(
                                 mirror_response_raw,
+                                mirror_pii.as_deref(),
                             ),
                             mirror_faulted: o.integrity.fault.is_some(),
                             mirror_latency_ms: o.latency_ms,
@@ -8497,9 +8561,10 @@ struct ArgHoldback {
 }
 
 impl ArgHoldback {
-    fn new() -> Self {
+    /// `pii` is the request's workspace PII policy, `None` for this machine's.
+    fn new(pii: Option<Arc<crate::dlp::PiiPolicy>>) -> Self {
         Self {
-            scrubber: crate::dlp::StreamScrubber::new(usize::MAX),
+            scrubber: crate::dlp::StreamScrubber::new(usize::MAX).with_pii(pii),
             index: 0,
             item_id: String::new(),
             active: false,
@@ -9089,7 +9154,7 @@ mod tests {
             let frag1 = format!("{{\"content\": \"key = {head}");
             let frag2 = format!("{tail}\"}}");
 
-            let mut ah = ArgHoldback::new();
+            let mut ah = ArgHoldback::new(None);
             let mut forwarded: Vec<String> = Vec::new();
 
             for frag in [frag1.as_str(), frag2.as_str()] {
@@ -9120,7 +9185,7 @@ mod tests {
 
         #[test]
         fn benign_arguments_assemble_byte_identical() {
-            let mut ah = ArgHoldback::new();
+            let mut ah = ArgHoldback::new(None);
             let mut forwarded: Vec<String> = Vec::new();
             for frag in ["{\"file\": \"a", ".ts\", \"content\": \"hello\"}"] {
                 let line = anthropic_arg_line(0, frag);
@@ -9151,7 +9216,7 @@ mod tests {
                     })
                 )
             };
-            let mut ah = ArgHoldback::new();
+            let mut ah = ArgHoldback::new(None);
             let shape = DeltaShape::OpenAIChatContent;
             let (f, _) = ah.process_line(&chunk(0, &format!("{{\"k\":\"{head}")), shape);
             assert!(f.is_none());
@@ -9183,7 +9248,7 @@ mod tests {
                     "delta": { "type": "text_delta", "text": "hello" },
                 })
             );
-            let mut ah = ArgHoldback::new();
+            let mut ah = ArgHoldback::new(None);
             let (f, rw) = ah.process_line(&line, DeltaShape::AnthropicText);
             assert!(f.is_none());
             assert!(rw.is_none(), "a text delta must pass through untouched");
@@ -9365,7 +9430,7 @@ mod tests {
                 break;
             }
             let mut line = raw.trim().to_string();
-            if let Some((scrubbed, _)) = crate::dlp::scrub_stream_text(&line) {
+            if let Some((scrubbed, _)) = crate::dlp::scrub_stream_text(&line, None) {
                 line = scrubbed;
             }
             if let Some(s) = sc.as_mut() {
