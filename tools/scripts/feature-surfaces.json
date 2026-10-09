@@ -200,7 +200,10 @@
         "kitkat": { "none": "not agent-facing" },
         "terraform": { "none": "the identity provider owns group membership" },
         "docs": ["guide/scim.md#groups-clear-high-risk-tools"],
-        "website": [{ "file": "index.html", "contains": "SSO and SCIM groups" }],
+        "website": [
+          { "file": "index.html", "contains": "SSO and SCIM groups" },
+          { "file": "saas/pricing-section.html", "contains": "SCIM provisioning, with cost per team" }
+        ],
         "events": {
           "gap": "SCIM user and group changes reach no notification event or SIEM source",
           "want": [{ "file": "services/control-plane/src/services/siem/eventSourceRegistry.ts", "contains": "scim" }]
@@ -228,7 +231,7 @@
         "kitkat": { "none": "an operator setting" },
         "terraform": ["workspace_settings.sso_group_policy"],
         "docs": ["guide/settings.md#group-policy-for-high-risk-tools"],
-        "website": { "none": "covered by the sso-group-gates copy; the pricing cards carry the plan" },
+        "website": [{ "file": "saas/pricing-section.html", "contains": "SSO group policy for high-risk tools" }],
         "events": ["siem:workspace_settings_changes"],
         "enforcement": [{ "file": "services/control-plane/src/lib/planSkuMap.ts", "contains": "planAllowsGroupPolicy" }]
       }
@@ -301,7 +304,10 @@
           "want": ["intutic_siem_destination"]
         },
         "docs": ["guide/siem-export.md#choosing-sources"],
-        "website": [{ "file": "index.html", "contains": "SIEM export streams traces, incidents, sign-ins, settings changes" }],
+        "website": [
+          { "file": "index.html", "contains": "SIEM export streams traces, incidents, sign-ins, settings changes" },
+          { "file": "saas/pricing-section.html", "contains": "<li><span>SIEM export</span></li>" }
+        ],
         "events": [
           "siem:gate_decisions",
           "siem:login_events",
@@ -475,7 +481,7 @@
           "external/self-hosted-gateway.md#bare-metal",
           "external/self-hosted-gateway.md#changing-a-gateway-s-config"
         ],
-        "website": { "none": "the site describes the self-hosted gateway as a deployment option, not its configuration" },
+        "website": [{ "file": "saas/pricing-section.html", "contains": "Self-hosted gateway" }],
         "events": ["gateway.stale.detected"],
         "enforcement": [{ "file": "packages/proxy/src/heartbeat.rs", "contains": "appliedConfigVersion" }]
       }
@@ -530,7 +536,10 @@
         "kitkat": { "none": "reporting" },
         "terraform": { "none": "reporting" },
         "docs": ["guide/budgets.md#cost-per-branch-and-commit"],
-        "website": [{ "file": "index.html", "contains": "Cost by developer, team, branch and pull request" }],
+        "website": [
+          { "file": "index.html", "contains": "Cost by developer, team, branch and pull request" },
+          { "file": "saas/pricing-section.html", "contains": "Cost per developer, branch and pull request" }
+        ],
         "events": { "none": "read-only analytics" },
         "enforcement": [
           { "file": "services/sync-daemon/src/sessionReporter.ts", "contains": "branch" },
