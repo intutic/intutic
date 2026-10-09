@@ -299,6 +299,8 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.opencode/plugins',
   '.opencode/plugin',
   '.config/opencode/plugins',
+  '.pi/agent/extensions',
+  '.openclaw/openclaw.json',
 ]
 
 /** Escapes a literal string for use inside a portable ERE — mirrors

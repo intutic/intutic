@@ -4704,6 +4704,156 @@
           "fill": "command"
         }
       ]
+    },
+    {
+      "id": "path.pi_agent_extensions",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.pi_agent_extensions\tblock\t-\tany\tShell command references the governance-protected path .pi/agent/extensions\t\\.pi/agent/extensions",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .pi/agent/extensions "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .pi/agent/extensions "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .pi/agent/extensions /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .pi/agent/extension",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .pi/agent/extensions",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.openclaw_openclaw_json",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.openclaw_openclaw_json\tblock\t-\tany\tShell command references the governance-protected path .openclaw/openclaw.json\t\\.openclaw/openclaw\\.json",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .openclaw/openclaw.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .openclaw/openclaw.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .openclaw/openclaw.json /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .openclaw/openclaw.jso",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .openclaw/openclaw.json",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
     }
   ]
 }
