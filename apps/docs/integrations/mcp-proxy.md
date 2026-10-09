@@ -232,8 +232,10 @@ SHA-256 its descriptor names (`GET /api/v1/wasm-rules/binaries/:sha256`), and
 loaded only if its bytes hash to it. A version whose module is missing, does
 not match its hash or cannot load is not loaded: the proxy raises an incident
 for the workspace, once per version, and the version of that rule it already
-runs, if any, stays in force. A rule in **Shadow** mode is evaluated and
-logged, and never decides a call.
+runs, if any, stays in force. A rule in **Shadow** mode is evaluated and never
+decides a call; what it would have done is reported for each call
+(`wasm_shadow_evaluated`) and counts toward its promotion, as the LLM proxy's
+shadow reports do.
 
 Until the uploaded rules have loaded — the control plane unreachable since the
 proxy started — whether one of them refuses a call is unknown, and the fail
