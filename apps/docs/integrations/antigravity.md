@@ -85,6 +85,39 @@ Gemini CLI runs command hooks registered under `hooks.BeforeTool` in `~/.gemini/
 
 Gemini CLI's shell tool is `run_shell_command`; a hold such as `review_before: action:deploy` applies to the commands it runs.
 
+## MCP servers
+
+`intutic connect` puts the [MCP governance proxy](/guide/mcp-governance) in front of each product's MCP servers on every sync, so a server you add later is wrapped on the next one. The registry, allowlists, call budgets, DLP on results, prompt-injection scanning and TOFU pinning then apply to every MCP call either product makes, in addition to the gates.
+
+| | Google Antigravity | Gemini CLI |
+|---|---|---|
+| File | `~/.gemini/config/mcp_config.json` | `~/.gemini/settings.json`, and the project's `.gemini/settings.json` when it exists |
+| Written when | Antigravity is on the machine (see [How it works](#how-it-works)) | Gemini CLI is on the machine |
+| A remote server | `serverUrl`, bridged over SSE, the transport Antigravity documents | `url` with `"type": "sse"`, bridged over SSE; `url` with no `type` or `"type": "http"`, and `httpUrl`, bridged over streamable HTTP |
+
+A local server's `command` becomes `node <proxy> --workspace-id <ws> --server-name <name> -- <command> <args…>`; its `env` is kept and the proxy adds `INTUTIC_WORKSPACE_ID`. A remote server becomes a local one that runs the proxy in bridge mode (`--remote-url <url> --remote-transport sse|http`), with its `headers` in the `INTUTIC_REMOTE_HEADERS` environment variable, so they never appear in the process list. Gemini CLI's other keys stay on the entry and mean the same behind the proxy, which passes each tool through under its own name: `cwd`, `timeout`, `trust`, `description`, `includeTools` and `excludeTools`. An `intutic` server is added to each user-level file; the project's `.gemini/settings.json` gets none, since Gemini CLI already loads the user's.
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "node",
+      "args": ["/path/to/@intutic/mcp-governance-proxy/dist/index.js", "--workspace-id", "ws_…", "--server-name", "github", "--", "npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "…", "INTUTIC_WORKSPACE_ID": "ws_…" },
+      "trust": true
+    }
+  }
+}
+```
+
+A wrapped entry is recognised by its command, not by a marker key: Gemini CLI warns at every start about a key its settings schema does not declare. Running the merge again on a wrapped file writes nothing. Left as they are:
+
+- a Gemini CLI server that Gemini CLI authenticates itself, with `oauth` or a Google credential provider in `authProviderType`. The bridge forwards static headers only, so behind it the server would stop authenticating. The [MCP Servers page](/guide/mcp-governance#the-registry) lists it as not governed, with the reason;
+- a Gemini CLI websocket server (`tcp`), which the bridge cannot carry;
+- servers an Antigravity plugin brings in `plugins/<name>/mcp_config.json`, which belong to the plugin.
+
+A remote server that only speaks SSE and is written as `url` with no `type` stops connecting once bridged: Gemini CLI falls back to SSE on its own, the bridge does not. Add `"type": "sse"` to it.
+
 ## Setup
 
 ### 1. Initialize Intutic
@@ -107,7 +140,7 @@ intutic start
 
 > Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
 
-Gemini model traffic is not served by the proxy, so for these agents the gates are the enforcement point.
+Gemini model traffic is not served by the proxy, so for these agents the gates, and the MCP governance proxy in front of their MCP servers, are the enforcement points.
 
 ::: tip Non-destructive merge
 Every file is read first and merged; all other settings and hooks are preserved. A file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
@@ -125,7 +158,7 @@ Every Intutic gate refuses an agent tool call that names `.gemini/settings.json`
 
 ## Disconnecting
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness antigravity`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `GEMINI.md` only the marked section is removed. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic connect` writes here, run `intutic disconnect --harness antigravity`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `GEMINI.md` only the marked section is removed, and each wrapped MCP server is rebuilt from its command, or taken from the copy of the file connect kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Config details
 
@@ -134,5 +167,6 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness an
 | Harness type | `antigravity` |
 | Rules file | `GEMINI.md` in the project (the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->`) |
 | Gates | `~/.gemini/config/hooks.json` (Antigravity), `~/.gemini/settings.json` (Gemini CLI) |
+| MCP servers | `~/.gemini/config/mcp_config.json` (Antigravity), `mcpServers` in `~/.gemini/settings.json` and the project's `.gemini/settings.json` (Gemini CLI), proxy-wrapped |
 | Detection | `.gemini/` or `.agents/hooks.json` in the project, or Antigravity's app-data directories |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

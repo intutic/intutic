@@ -21,11 +21,16 @@
  *                      ([mcp_servers.*] tables)
  * - OpenCode:         ~/.config/opencode/opencode.json + <workspaceRoot>/opencode.json
  *                      (`mcp` block — TD-487; see `injectOpenCode`)
+ * - Gemini CLI:       ~/.gemini/settings.json + <workspaceRoot>/.gemini/settings.json
+ *                      (`mcpServers`)
+ * - Antigravity:      ~/.gemini/config/mcp_config.json (`mcpServers`)
+ *                      (both under the `antigravity` harness; see `injectAntigravity`)
  *
- * That is 14 config paths across 11 `HarnessType` values (Cursor, Grok
+ * That is 17 config paths across 12 `HarnessType` values (Cursor, Grok
  * Build and OpenCode each own two paths — global/project for Cursor and
- * OpenCode, user/project for Grok Build). `discoverMcpServers` below reads
- * all fourteen read-only, for reporting, plus Claude Code's project
+ * OpenCode, user/project for Grok Build — and the `antigravity` harness
+ * three, for its two products). `discoverMcpServers` below reads all
+ * seventeen read-only, for reporting, plus Claude Code's project
  * `.mcp.json`; the injectors above are the only thing that writes.
  *
  * # Grok Build's compat-path overlap — dedup, not a bug
@@ -101,8 +106,9 @@ import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { projectServerApproval, type ProjectApproval } from './claudeProjectApproval.js'
 import { keepOriginal } from '../disconnect/originals.js'
 import { parseDocument, isMap } from 'yaml'
-import { sanitizeMcpEndpoint } from '@intutic/shared-types'
+import { GEMINI_CLI_GATE_ID, sanitizeMcpEndpoint } from '@intutic/shared-types'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
+import { antigravityGateIdentities } from './antigravityProducts.js'
 
 const log = createLogger('sync-mcp-autowrite')
 
@@ -293,6 +299,20 @@ export function openCodeGlobalConfigPath(): string {
 
 function openCodeProjectConfigPath(workspaceRoot: string): string {
   return node_path.join(workspaceRoot, 'opencode.json')
+}
+
+/** Gemini CLI's user settings, which also hold its `BeforeTool` gate (antigravityHooks.ts). */
+export function geminiSettingsPath(): string {
+  return node_path.join(node_os.homedir(), '.gemini', 'settings.json')
+}
+
+function geminiProjectSettingsPath(workspaceRoot: string): string {
+  return node_path.join(workspaceRoot, '.gemini', 'settings.json')
+}
+
+/** Google Antigravity's global MCP servers, next to its `hooks.json` (antigravityCliHooks.ts). */
+export function antigravityMcpConfigPath(): string {
+  return node_path.join(node_os.homedir(), '.gemini', 'config', 'mcp_config.json')
 }
 
 // ─── Proxy Wrapping ───────────────────────────────────────────────────────────
@@ -1241,6 +1261,172 @@ async function injectOpenCode(workspaceId: string, workspaceRoot: string): Promi
   await injectOpenCodeConfig(openCodeGlobalConfigPath(), workspaceId, workspaceRoot)
 }
 
+// ─── Target: Gemini CLI and Google Antigravity ──────────────────────────────
+
+/**
+ * Whether an entry is already fronted by the governance proxy, read from its
+ * argv (`node <proxy bin> --workspace-id …`). Gemini CLI and Antigravity
+ * entries carry no `__intutic_wrapped` marker: Gemini CLI's settings schema
+ * declares `mcpServers` entries with `additionalProperties: false` and warns
+ * about any other key on every start, and Antigravity documents a fixed set
+ * of keys too. So, as for OpenCode, the shape is the marker, and `intutic
+ * disconnect` rebuilds the original from the argv or the kept file.
+ */
+function isProxyFronted(entry: Record<string, unknown>): boolean {
+  const args = entry.args
+  return (
+    entry.command === 'node' &&
+    Array.isArray(args) &&
+    typeof args[0] === 'string' &&
+    PROXY_BIN_PATTERN.test(args[0]) &&
+    args.includes('--workspace-id')
+  )
+}
+
+/** One product's config format, as far as wrapping it differs between the two. */
+interface UnmarkedFormat {
+  /** The harness name discovery reports the file's servers under. */
+  harness: string
+  /** A remote server's URL and the bridge transport for it; `null` for an entry that is not remote. */
+  remote: (entry: Record<string, unknown>) => { url: string; transport: 'sse' | 'http' } | null
+  /** Why a server cannot be put behind the proxy, or `null` when it can. */
+  blocker: (entry: Record<string, unknown>) => string | null
+  /** The keys the bridge's argv and env take over from a remote entry. */
+  remoteKeys: readonly string[]
+}
+
+/**
+ * Gemini CLI: `url`, with `type` `sse` or `http` (with no `type`, Gemini CLI
+ * tries streamable HTTP first, which is what the bridge speaks), or
+ * `httpUrl` for streamable HTTP. A server Gemini CLI authenticates itself
+ * (`oauth`, or a Google credential provider in `authProviderType`) stays as
+ * it is: the bridge forwards static headers only, so behind it the server
+ * would stop authenticating. A websocket server (`tcp`) has no bridge.
+ */
+const GEMINI_FORMAT: UnmarkedFormat = {
+  harness: 'gemini-cli',
+  remote: (e) =>
+    typeof e.httpUrl === 'string'
+      ? { url: e.httpUrl, transport: 'http' }
+      : typeof e.url === 'string'
+        ? { url: e.url, transport: e.type === 'sse' ? 'sse' : 'http' }
+        : null,
+  blocker: (e) =>
+    typeof e.command === 'string'
+      ? null
+      : e.oauth !== undefined || e.authProviderType !== undefined
+        ? 'Gemini CLI authenticates this server itself (OAuth or a Google credential provider), which the proxy cannot do for it'
+        : typeof e.tcp === 'string'
+          ? 'a websocket (tcp) server, which the proxy cannot bridge'
+          : null,
+  remoteKeys: ['url', 'httpUrl', 'type', 'headers'],
+}
+
+/** Antigravity: a remote server is `serverUrl`, which Antigravity documents as SSE. */
+const ANTIGRAVITY_FORMAT: UnmarkedFormat = {
+  harness: 'antigravity',
+  remote: (e) => (typeof e.serverUrl === 'string' ? { url: e.serverUrl, transport: 'sse' } : null),
+  blocker: () => null,
+  remoteKeys: ['serverUrl', 'headers'],
+}
+
+function stringMap(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
+  const out: Record<string, string> = {}
+  for (const [k, x] of Object.entries(v)) if (typeof x === 'string') out[k] = x
+  return out
+}
+
+/**
+ * Wrap one Gemini CLI or Antigravity server. The proxy argv is built by
+ * `wrapWithProxy`, like every harness's, and only its `command`/`args`/`env`
+ * are kept. The entry's other keys stay: Gemini CLI's `cwd` (where the real
+ * command runs), `timeout`, `trust`, `description`, `includeTools` and
+ * `excludeTools` mean the same in front of the proxy, which passes the
+ * server's tools through under their own names.
+ */
+function wrapUnmarkedEntry(
+  entry: Record<string, unknown>,
+  format: UnmarkedFormat,
+  workspaceId: string,
+  workspaceRoot: string,
+  serverName: string,
+): Record<string, unknown> {
+  if (isProxyFronted(entry) || format.blocker(entry) !== null) return entry
+  const { command, args, env, ...rest } = entry
+  let wrapped: McpServerEntry
+  if (typeof command === 'string') {
+    const argv = Array.isArray(args) ? args.filter((a): a is string => typeof a === 'string') : []
+    wrapped = wrapWithProxy({ command, args: argv, env: stringMap(env) }, workspaceId, workspaceRoot, serverName)
+  } else {
+    const remote = format.remote(entry)
+    if (remote === null) return entry
+    const headers = stringMap(entry.headers)
+    wrapped = wrapWithProxy(
+      { url: remote.url, type: remote.transport, env: stringMap(env), ...(headers ? { headers } : {}) },
+      workspaceId,
+      workspaceRoot,
+      serverName,
+    )
+    for (const key of format.remoteKeys) delete rest[key]
+  }
+  return { ...rest, command: wrapped.command, args: wrapped.args, env: wrapped.env }
+}
+
+/**
+ * Wrap the `mcpServers` map of one Gemini CLI or Antigravity file, with the
+ * `intutic` server added when `addIntutic`. A file that is missing is created
+ * only when `addIntutic` (the product's user-level file, on a machine that has
+ * the product); a project file is only ever edited.
+ */
+async function injectUnmarkedConfig(
+  configPath: string,
+  format: UnmarkedFormat,
+  workspaceId: string,
+  workspaceRoot: string,
+  addIntutic: boolean,
+): Promise<void> {
+  if (!addIntutic && !existsSync(configPath)) return
+  const current = await readJsonForWrite<Record<string, unknown>>(configPath)
+  const existing =
+    current.mcpServers && typeof current.mcpServers === 'object' && !Array.isArray(current.mcpServers)
+      ? (current.mcpServers as Record<string, unknown>)
+      : {}
+  const servers = addIntutic ? { intutic: buildIntuticMcpEntry(workspaceRoot), ...existing } : existing
+  if (Object.keys(servers).length === 0) return
+
+  const next: Record<string, unknown> = {}
+  for (const [name, entry] of Object.entries(servers)) {
+    next[name] =
+      name === 'intutic' || !entry || typeof entry !== 'object' || Array.isArray(entry)
+        ? entry
+        : wrapUnmarkedEntry(entry as Record<string, unknown>, format, workspaceId, workspaceRoot, name)
+  }
+  current.mcpServers = next
+  await writeJsonFile(configPath, current, workspaceRoot)
+  log.info({ action: 'gemini_mcp_injected', harness: format.harness, path: configPath }, 'MCP servers wrapped')
+}
+
+/**
+ * The `antigravity` harness's two products, each where it is installed
+ * (`antigravityProducts.ts`): Gemini CLI's `mcpServers` in its user
+ * settings, and in the project's `.gemini/settings.json` when there is one
+ * (wrapped there, with no second `intutic` server); Antigravity's in
+ * `~/.gemini/config/mcp_config.json`. Servers an Antigravity plugin brings
+ * (`plugins/<name>/mcp_config.json`) belong to the plugin and are not
+ * rewritten.
+ */
+async function injectAntigravity(workspaceId: string, workspaceRoot: string): Promise<void> {
+  const products = await antigravityGateIdentities(workspaceRoot)
+  if (products.includes(GEMINI_CLI_GATE_ID)) {
+    await injectUnmarkedConfig(geminiSettingsPath(), GEMINI_FORMAT, workspaceId, workspaceRoot, true)
+    await injectUnmarkedConfig(geminiProjectSettingsPath(workspaceRoot), GEMINI_FORMAT, workspaceId, workspaceRoot, false)
+  }
+  if (products.includes('antigravity')) {
+    await injectUnmarkedConfig(antigravityMcpConfigPath(), ANTIGRAVITY_FORMAT, workspaceId, workspaceRoot, true)
+  }
+}
+
 // ─── Discovery (read-only — writes nothing) ───────────────────────────────────
 
 type EntryClass = Pick<DiscoveredMcpServer, 'transport' | 'wrapped' | 'endpoint'>
@@ -1505,9 +1691,50 @@ async function discoverOpenCode(workspaceRoot: string): Promise<DiscoveredMcpSer
   return [...project, ...global]
 }
 
+/** Classify a Gemini CLI or Antigravity entry. A wrapped one's true
+ *  transport is read back from its argv, since these entries carry no
+ *  `__intutic_original`. */
+function classifyUnmarkedEntry(entry: unknown, format: UnmarkedFormat): Omit<DiscoveredMcpServer, 'server' | 'harness'> {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return { transport: 'unknown', wrapped: false }
+  const e = entry as Record<string, unknown>
+  if (isProxyFronted(e)) {
+    const argv = e.args as string[]
+    if (!argv.includes('--remote-url')) return { transport: 'stdio', wrapped: true }
+    const t = argv[argv.indexOf('--remote-transport') + 1]
+    const url = argv[argv.indexOf('--remote-url') + 1]
+    const found: EntryClass = { transport: t === 'sse' ? 'sse' : 'http', wrapped: true }
+    return typeof url === 'string' ? withEndpoint(found, url) : found
+  }
+  const blocker = format.blocker(e)
+  const remote = format.remote(e)
+  const found: Omit<DiscoveredMcpServer, 'server' | 'harness'> =
+    typeof e.command === 'string'
+      ? { transport: 'stdio', wrapped: false }
+      : remote
+        ? withEndpoint({ transport: remote.transport, wrapped: false }, remote.url)
+        : { transport: 'unknown', wrapped: false }
+  return blocker ? { ...found, ungovernedReason: blocker } : found
+}
+
+async function discoverUnmarkedConfig(configPath: string, format: UnmarkedFormat): Promise<DiscoveredMcpServer[]> {
+  if (!existsSync(configPath)) return []
+  const current = await readJsonFile<{ mcpServers?: unknown }>(configPath, {})
+  const servers = current.mcpServers && typeof current.mcpServers === 'object' ? (current.mcpServers as Record<string, unknown>) : {}
+  return Object.entries(servers).map(([name, entry]) => ({ server: name, harness: format.harness, ...classifyUnmarkedEntry(entry, format) }))
+}
+
+async function discoverAntigravity(workspaceRoot: string): Promise<DiscoveredMcpServer[]> {
+  const results = await Promise.all([
+    discoverUnmarkedConfig(geminiSettingsPath(), GEMINI_FORMAT),
+    discoverUnmarkedConfig(geminiProjectSettingsPath(workspaceRoot), GEMINI_FORMAT),
+    discoverUnmarkedConfig(antigravityMcpConfigPath(), ANTIGRAVITY_FORMAT),
+  ])
+  return results.flat()
+}
+
 /**
  * Discover every MCP server declared in any harness config this daemon knows
- * how to parse — the same 14 config paths / 11 harnesses `injectMcpServer`
+ * how to parse — the same 17 config paths / 12 harnesses `injectMcpServer`
  * wraps — without writing anything. Used for reporting (agentReporter's
  * `mcp_tools` facet) so visibility does not silently lag behind whatever
  * `injectMcpServer` was last run against.
@@ -1538,6 +1765,7 @@ export async function discoverMcpServers(workspaceRoot: string): Promise<Discove
     discoverMuse(),
     discoverGrok(workspaceRoot),
     discoverOpenCode(workspaceRoot),
+    discoverAntigravity(workspaceRoot),
   ])
   return results.flat().filter((s) => s.server !== 'intutic')
 }
@@ -1579,6 +1807,7 @@ export async function injectMcpServer(
     ['muse-code', injectMuse],
     ['grok', injectGrok],
     ['opencode', injectOpenCode],
+    ['antigravity', injectAntigravity],
   ]
   const skip = new Set(options.skip ?? [])
   await Promise.allSettled(

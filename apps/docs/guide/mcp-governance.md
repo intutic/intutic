@@ -40,7 +40,8 @@ workspace's control plane, on every plan; their sections are badged
 `intutic connect` and the sync daemon's continuous sync loop rewrite each
 stdio MCP server entry in a harness config (Claude Code's `~/.claude.json`,
 Claude Desktop, Cursor, Cline, Windsurf, Continue, Goose, OpenHands, Muse
-Code, Grok Build, OpenCode — fourteen config paths across eleven harnesses)
+Code, Grok Build, OpenCode, Gemini CLI and Google Antigravity — seventeen config
+paths across twelve harnesses)
 so that the
 `@intutic/mcp-governance-proxy` binary fronts it: the harness spawns the
 proxy, the proxy spawns the real server, and every `tools/call` and
@@ -129,7 +130,17 @@ that command, or takes them from the copy of the file connect kept. A remote ser
 is left unwrapped, and JSONC files are skipped rather than rewritten — see
 [the OpenCode page](/integrations/opencode#mcp-servers).
 
-**dsh is NOT yet in the fourteen config paths above.** dsh's MCP-client
+Gemini CLI (`mcpServers` in `~/.gemini/settings.json`, and in a project's
+`.gemini/settings.json`) and Google Antigravity (`~/.gemini/config/mcp_config.json`)
+are wrapped the same way, also without a marker: Gemini CLI warns about any key
+its settings schema does not declare. A remote Gemini CLI server is bridged over
+SSE when its `type` is `sse` and over streamable HTTP otherwise, and an
+Antigravity `serverUrl` server over SSE, the transport Antigravity documents. A
+Gemini CLI server that Gemini CLI authenticates itself (`oauth`, or a Google
+credential provider) is left unwrapped and reported as ungoverned — see
+[the Gemini CLI and Antigravity page](/integrations/antigravity#mcp-servers).
+
+**dsh is NOT yet in the seventeen config paths above.** dsh's MCP-client
 composition (whether an MCP server is a `cordis.patch.yml` plugin row, a
 separate config section, or something else) was not researched during dsh's
 onboarding phase — that phase's time budget went to the higher-priority

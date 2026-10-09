@@ -5,6 +5,8 @@ pub mod credential;
 pub mod dlp;
 pub mod graph;
 pub mod injection;
+/// The per-key `/auth/key-context` answer the workspace policy rides on
+pub mod key_context;
 pub mod manifest;
 pub mod memory;
 pub mod metering;

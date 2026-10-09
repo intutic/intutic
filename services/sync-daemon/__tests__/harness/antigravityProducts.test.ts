@@ -54,6 +54,14 @@ describe('antigravityGateIdentities', () => {
     expect(await probe()).toEqual(['gemini-cli'])
   })
 
+  it('does not take the intutic MCP server Intutic adds there for Gemini CLI, but does a server of the user\'s', async () => {
+    const intutic = { command: 'node', args: ['/x/@intutic/mcp-governance-proxy/dist/index.js'] }
+    settings({ hooks: { BeforeTool: [] }, mcpServers: { intutic } })
+    expect(await probe()).toEqual([])
+    settings({ hooks: { BeforeTool: [] }, mcpServers: { intutic, github: { command: 'gh-mcp' } } })
+    expect(await probe()).toEqual(['gemini-cli'])
+  })
+
   it('finds Gemini CLI by a project .gemini directory', async () => {
     mkdirSync(join(ws, '.gemini'))
     expect(await probe()).toEqual(['gemini-cli'])

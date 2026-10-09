@@ -14,6 +14,7 @@
 import type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier } from './enums.js'
 import type { SsoGroupPolicy } from './attenuation.js'
 import type { McpBudgetSettings } from './mcpBudgets.js'
+import type { PiiDetectorSettings } from './piiDetectors.js'
 
 // Re-export so callers only need one import
 export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
@@ -100,6 +101,16 @@ export interface WorkspaceSettings {
    * see `ssoGroupClearance.ts`.
    */
   sso_group_policy?: SsoGroupPolicy | null
+
+  /**
+   * The action (`off`, `redact`, `block`) of each PII detector this workspace
+   * governs centrally (`PiiDetectorSettingsSchema`). The LLM proxy applies it
+   * to the workspace's requests as the baseline; a machine's own
+   * `dlp.detectors` config may only tighten it. Absent, or a detector left
+   * out: each machine's own config applies. `null` in a settings write clears
+   * it, and is never stored.
+   */
+  piiDetectors?: PiiDetectorSettings | null
 
   /**
    * Bring-your-own-cloud trace storage. Optional — absent means Intutic-managed

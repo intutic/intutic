@@ -169,6 +169,11 @@ intutic gateway config set <gateway_id> --require-provisioned-key true
 A gateway that stops heartbeating is reported `unreachable` once its heartbeat is older than
 the TTL window (~90s) — a self-healing status, not an error state that needs to be cleared.
 
+Registering a gateway and changing its config need the Enterprise or Self-host plan. After a
+move to another plan, a registered gateway keeps running with the config it has: `list`,
+`status`, `config get`, `rotate` and `revoke` still work, so you can always see it and take it
+down, and `config set` is refused until the plan includes self-hosted gateways again.
+
 ### Changing a gateway's config
 
 `intutic gateway config set` changes two settings of a running gateway: `--require-vk` and
