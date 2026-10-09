@@ -154,7 +154,19 @@ function routeCatalog() {
   return rows
 }
 
-/** cli.md sections: "cmd sub" -> { body, badge }. Placeholders (<id>, [x]) are dropped from the key. */
+/** The command words of a cli.md heading: placeholders (<id>, [x], nested too) dropped in one pass. */
+function commandKey(heading) {
+  let depth = 0
+  let out = ''
+  for (const ch of heading) {
+    if (ch === '<' || ch === '[') depth++
+    else if (ch === '>' || ch === ']') depth = Math.max(0, depth - 1)
+    else if (depth === 0) out += ch
+  }
+  return out.replace(/\s+/g, ' ').trim()
+}
+
+/** cli.md sections: "cmd sub" -> { body, badge }. */
 function cliSections() {
   const md = text('apps/docs/reference/cli.md') ?? ''
   const out = new Map()
@@ -162,7 +174,7 @@ function cliSections() {
   for (const line of md.split('\n')) {
     const m = /^#{2,3} `intutic ([^`]+)`(.*)$/.exec(line)
     if (m) {
-      cur = m[1].replace(/\s*<[^>]+>|\s*\[[^\]]+\]/g, '').trim()
+      cur = commandKey(m[1])
       out.set(cur, { body: '', badge: PLAN_BADGE.exec(m[2])?.[1] ?? null })
       continue
     }

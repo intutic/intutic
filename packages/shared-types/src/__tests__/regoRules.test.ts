@@ -14,7 +14,7 @@ import {
   withRegoMetadata,
   type RegoHostOptions,
 } from '../regoRules.js'
-import { REGO_HOST_BUILTIN_NAMES } from '../regoBuiltins.js'
+import { REGO_HOST_BUILTINS, REGO_HOST_BUILTIN_NAMES } from '../regoBuiltins.js'
 
 // The Rust host's fixtures: one set of policies and one `opa eval` oracle for
 // both hosts, so they cannot drift apart unnoticed.
@@ -73,6 +73,19 @@ describe('the TypeScript Rego host', () => {
       'strings.count',
       'time.now_ns',
     ])
+  })
+
+  it('json.patch stores a __proto__ key as a member, as OPA does, and leaves prototypes alone', () => {
+    const patch = (doc: unknown, ops: unknown[]) =>
+      REGO_HOST_BUILTINS['json.patch']!({} as never, [doc, ops]) as Record<string, unknown>
+    const added = patch({ a: 1 }, [{ op: 'add', path: '/__proto__', value: { polluted: true } }])
+    expect(Object.keys(added)).toEqual(['a', '__proto__'])
+    expect(Object.getPrototypeOf(added)).toBe(Object.prototype)
+    expect(JSON.stringify(added)).toBe('{"a":1,"__proto__":{"polluted":true}}')
+    const replaced = patch(JSON.parse('{"__proto__":{"x":1}}'), [{ op: 'replace', path: '/__proto__', value: 2 }])
+    expect(JSON.stringify(replaced)).toBe('{"__proto__":2}')
+    expect(patch(added, [{ op: 'remove', path: '/__proto__' }])).toEqual({ a: 1 })
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined()
   })
 
   it('refuses a policy needing a builtin it lacks, by name', () => {

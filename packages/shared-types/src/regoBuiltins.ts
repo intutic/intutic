@@ -202,13 +202,22 @@ function walk(doc: Json, path: string[]): Json {
   return cur
 }
 
+/**
+ * Sets an object member as an own data property. A plain assignment to
+ * `__proto__` would replace the object's prototype instead of storing the key,
+ * which a JSON document (and OPA's json.patch) treats as an ordinary member.
+ */
+function setMember(obj: { [k: string]: Json }, key: string, value: Json): void {
+  Object.defineProperty(obj, key, { value, writable: true, enumerable: true, configurable: true })
+}
+
 /** Returns the new document: `add` at the root replaces it. */
 function add(doc: Json, path: string[], value: Json): Json {
   if (path.length === 0) return value
   const parent = walk(doc, path.slice(0, -1))
   const last = path[path.length - 1] as string
   if (Array.isArray(parent)) parent.splice(arrayIndex(last, parent.length, true), 0, value)
-  else if (parent !== null && typeof parent === 'object') parent[last] = value
+  else if (parent !== null && typeof parent === 'object') setMember(parent, last, value)
   else fail('cannot add to a scalar')
   return doc
 }
@@ -221,7 +230,7 @@ function remove(doc: Json, path: string[]): Json {
   if (parent !== null && typeof parent === 'object') {
     if (!Object.prototype.hasOwnProperty.call(parent, last)) fail(`path segment ${last} not found`)
     const v = parent[last] as Json
-    delete parent[last]
+    Reflect.deleteProperty(parent, last)
     return v
   }
   return fail('cannot remove from a scalar')
@@ -265,7 +274,7 @@ function replaceAt(doc: Json, path: string[], value: Json): Json {
   const parent = walk(doc, path.slice(0, -1))
   const last = path[path.length - 1] as string
   if (Array.isArray(parent)) parent[arrayIndex(last, parent.length, false)] = value
-  else if (parent !== null && typeof parent === 'object') parent[last] = value
+  else if (parent !== null && typeof parent === 'object') setMember(parent, last, value)
   return doc
 }
 

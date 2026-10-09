@@ -125,7 +125,7 @@ mod tests {
         let credential = RequestCredential::classify(&token);
         let key = credential.virtual_key().expect("a virtual key");
         let request = key
-            .authorize(reqwest::Client::new().get("http://cp.invalid/"))
+            .authorize(reqwest::Client::new().get("https://cp.invalid/"))
             .build()
             .expect("request builds");
         assert_eq!(
