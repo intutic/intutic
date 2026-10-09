@@ -279,7 +279,7 @@ export async function guardPolicySnapshot(
     reason:
       outcome === 'restored'
         ? 'The policy snapshot was changed outside the sync daemon; the last verified snapshot was restored.'
-        : 'The policy snapshot failed its digest check and no verified copy was kept; a fresh one was fetched.',
+        : 'The policy snapshot failed its digest check and no verified copy was kept to restore; a fresh one was requested.',
   })
   return true
 }

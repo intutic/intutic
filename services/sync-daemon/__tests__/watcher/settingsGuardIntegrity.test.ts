@@ -189,7 +189,7 @@ describe('policy snapshot self-heal', () => {
     expect(snapshot.snapshotRulesVerify(await fs.readFile(liveRules(), 'utf8'))).toBe(true)
     const events = await tamperEvents()
     expect(events).toHaveLength(1)
-    expect(String(events[0]!.reason)).toContain('fresh one was fetched')
+    expect(String(events[0]!.reason)).toContain('a fresh one was requested')
   })
 
   it('rebuilds a refused key\'s snapshot from the verified copy, not an edited JSON', async () => {
