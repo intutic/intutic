@@ -78,6 +78,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { decodeSsoGroupRecord, SSO_GROUP_RECORD_TAG, type SsoGroupRecord } from './ssoGroups.js'
 import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
+import { classify } from './actions.js'
 
 export const SNAPSHOT_STALE_AFTER_DAYS = 7
 
@@ -92,8 +93,13 @@ export const SEV_BLOCK = 'block' as const
 export const SEV_HOLD = 'hold' as const
 
 export type Severity = typeof SEV_SHADOW | typeof SEV_WARN | typeof SEV_BLOCK | typeof SEV_HOLD
-/** `phrase`: the source is `|`-separated phrases matched as words (phrases.ts), not a regex. */
-export type RuleSubject = 'tool' | 'command' | 'target' | 'phrase' | 'any'
+/**
+ * `phrase`: the source is `|`-separated phrases matched as words (phrases.ts),
+ * not a regex. `action`: the source is matched against the action tokens the
+ * command classifies to (`" action:deploy "`, actions.ts) — what a local
+ * `review_before: action:<name>` compiles to.
+ */
+export type RuleSubject = 'tool' | 'command' | 'target' | 'phrase' | 'action' | 'any'
 export type SnapshotState = 'ok' | 'absent' | 'invalid' | 'empty' | 'stale'
 
 export interface Rule {
@@ -276,6 +282,10 @@ export function evaluate(
   const nCommand = normalise(command)
   const nTarget = normalise(target)
   let words: PhraseText | null = null
+  // The command's action tokens, space-padded as the hook gates write them, so
+  // a hold on `action:deploy` matches whole tokens. Classified with the same
+  // needles and phrase matcher as the hook gates and the proxy's actions.rs.
+  let actions: string | null = null
 
   for (const rule of rules) {
     if (rule.subject === 'phrase') {
@@ -286,16 +296,19 @@ export function evaluate(
       const w = words
       if (!rule.pattern.source.split('|').some((p) => hasPhrase(w, p, true))) continue
     }
+    if (rule.subject === 'action') actions ??= ' ' + classify(toolName, { command }).join(' ') + ' '
     const subjects =
       rule.subject === 'phrase'
         ? [nCommand]
-        : rule.subject === 'tool'
-        ? [nTool]
-        : rule.subject === 'command'
-          ? [nCommand]
-          : rule.subject === 'target'
-            ? [nTarget]
-            : [nCommand, nTarget]
+        : rule.subject === 'action'
+          ? [actions!]
+          : rule.subject === 'tool'
+            ? [nTool]
+            : rule.subject === 'command'
+              ? [nCommand]
+              : rule.subject === 'target'
+                ? [nTarget]
+                : [nCommand, nTarget]
 
     for (const subject of subjects) {
       if (rule.subject !== 'phrase' && !rule.pattern.test(subject)) continue

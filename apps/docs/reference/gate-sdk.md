@@ -80,6 +80,8 @@ A hold rule asks a person before the call runs: a `REQUIRE_APPROVAL:` SOP, which
 3. An owner, admin or engineering manager approves or rejects it with `intutic decision approve <holdId>` (or `reject`), the review API, or the Slack card. A developer cannot approve their own hold.
 4. With the workspace's `reviewHoldBypassEnabled` setting on, approval lets the identical call through for `reviewHoldBypassTtlMinutes` (10 by default). With it off, the default, approval records the decision only and a retry is held again.
 
+A `review_before:` entry can name a tool (`Write`) or an action (`action:deploy`, `action:publish`, `action:release`, `action:db_write`). For an action, the gate classifies the call's `command` with the same phrases as the hook gates and the proxy, whatever separates their words: `git push` with a tab or a line continuation between the words, `kubectl --context prod apply` and `DROP/**/TABLE users` are held like their plain spellings.
+
 A hold needs the control plane, to look for an approval and to record the request. Without a client, or when the control plane cannot be reached, the call stays held whatever `failClosed` says, and `holdId` is unset because there is nothing to approve yet.
 
 ### Without a client

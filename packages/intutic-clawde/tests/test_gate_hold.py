@@ -187,3 +187,63 @@ def test_one_approval_covers_a_rule_in_both_the_snapshot_and_the_register(monkey
     rule = {"id": "local.review_before.deploy", "toolPattern": "^deploy$", "action": "require_approval", "reason": "r"}
     holding_gate(monkeypatch, cp, sop_rules=[rule]).guard("deploy", DEPLOY)
     assert cp.holds() == []
+
+
+# review_before: action:<name> — the snapshot rule a local SOP compiles to
+# matches the command's action tokens. This reader used to fall through to
+# matching it against the command text, so an action hold never fired here
+# while it did in the hook gates and the proxy.
+ACTION_VECTORS = json.loads(
+    (ROOT / "packages" / "proxy" / "src" / "plugins" / "anomaly" / "action_vectors.json").read_text(encoding="utf-8")
+)
+HOLD_ACTIONS = ["action:deploy", "action:publish", "action:release", "action:db_write"]
+HELD_VECTORS = [
+    (command, next(a for a in HOLD_ACTIONS if a in tokens))
+    for command, tokens in ACTION_VECTORS["held"]
+    if any(a in tokens for a in HOLD_ACTIONS)
+]
+BENIGN_VECTORS = ACTION_VECTORS["notHeld"] + [
+    command for command, tokens in ACTION_VECTORS["held"] if not any(a in tokens for a in HOLD_ACTIONS)
+]
+
+
+def action_gate(monkeypatch, cp):
+    """A gate whose snapshot holds every action a review_before can name."""
+    client = GateClient(base_url="http://cp.test", api_key="k", workspace_id="ws_1",
+                        session_id="s_1", transport=cp.post, get_transport=cp.get)
+    snap = snapshot_mod.Snapshot(state="ok", workspace_id="ws_1", rules=[
+        snapshot_mod.Rule(
+            id=f"sop.local.review_before.{a}", severity="hold", subject="action",
+            reason=f"Held for human review: {a} — declared in review_before:",
+            pattern=re.compile(f" ({a}) ", re.IGNORECASE),
+        )
+        for a in HOLD_ACTIONS
+    ])
+    monkeypatch.setattr(gate_mod.snapshot, "load_snapshot", lambda _ws: snap)
+    return Gate(GateConfig(workspace_id="ws_1", use_hook_gate=False), client=client)
+
+
+@pytest.mark.parametrize("command,action", HELD_VECTORS)
+def test_holds_a_command_a_review_before_action_names(monkeypatch, command, action):
+    cp = FakeControlPlane()
+    with pytest.raises(IntuticGateHold) as e:
+        action_gate(monkeypatch, cp).guard("bash", {"command": command})
+    assert f"[sop.local.review_before.{action}]" in str(e.value)
+    assert len(cp.holds()) == 1
+
+
+@pytest.mark.parametrize("command", BENIGN_VECTORS)
+def test_does_not_hold_a_benign_command(monkeypatch, command):
+    cp = FakeControlPlane()
+    action_gate(monkeypatch, cp).guard("bash", {"command": command})
+    assert cp.holds() == []
+
+
+def test_lets_an_approved_action_hold_through_for_the_identical_call_only(monkeypatch):
+    dropped = {"command": 'psql -c "DROP/**/TABLE users"'}
+    name, target_hash = hold_key("bash", dropped)
+    cp = FakeControlPlane(bypasses=[bypass_for(dropped, sopRuleId="sop.local.review_before.action:db_write",
+                                               toolNameNormalized=name, targetHash=target_hash)])
+    action_gate(monkeypatch, cp).guard("bash", dropped)
+    with pytest.raises(IntuticGateHold):
+        action_gate(monkeypatch, cp).guard("bash", {"command": 'psql -c "DROP TABLE logs"'})

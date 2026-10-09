@@ -213,4 +213,58 @@ describe('Gate.guard: hold rules', () => {
     await expect(g.guard('deploy', DEPLOY)).resolves.toBeUndefined()
     expect(holds()).toEqual([])
   })
+
+  // review_before: action:<name> — the snapshot rule a local SOP compiles to
+  // matches the command's action tokens. This reader used to fall through to
+  // matching it against the command text, so an action hold never fired here
+  // while it did in the hook gates and the proxy.
+  const ACTION_VECTORS = JSON.parse(
+    readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8'),
+  ) as { held: Array<[string, string[]]>; notHeld: string[] }
+  const HOLD_ACTIONS = ['action:deploy', 'action:publish', 'action:release', 'action:db_write']
+
+  /** A gate whose snapshot holds every action a review_before can name. */
+  function actionGate(c: GateClient | null): Gate {
+    const g = new Gate({ workspaceId: 'ws_1', useHookGate: false }, c)
+    const snap = new snapshotMod.Snapshot()
+    snap.state = 'ok'
+    snap.workspaceId = 'ws_1'
+    snap.rules = HOLD_ACTIONS.map((a) => ({
+      id: `sop.local.review_before.${a}`,
+      severity: 'hold' as const,
+      subject: 'action' as const,
+      reason: `Held for human review: ${a} — declared in review_before:`,
+      pattern: new RegExp(` (${a}) `, 'i'),
+    }))
+    ;(g as unknown as { _snapshot: snapshotMod.Snapshot })._snapshot = snap
+    return g
+  }
+
+  const heldVectors = ACTION_VECTORS.held
+    .map(([command, tokens]) => [command, HOLD_ACTIONS.find((a) => tokens.includes(a))] as const)
+    .filter((v): v is readonly [string, string] => v[1] !== undefined)
+  const benignVectors = [
+    ...ACTION_VECTORS.notHeld,
+    ...ACTION_VECTORS.held.filter(([, tokens]) => !tokens.some((t) => HOLD_ACTIONS.includes(t))).map(([c]) => c),
+  ]
+
+  it.each(heldVectors)('holds %j under review_before: %s', async (command, action) => {
+    const err = await actionGate(client()).guard('bash', { command }).catch((e) => e)
+    expect(err).toBeInstanceOf(IntuticGateHold)
+    expect(err.message).toContain(`[sop.local.review_before.${action}]`)
+    expect(holds()).toHaveLength(1)
+  })
+
+  it.each(benignVectors)('does not hold %j', async (command) => {
+    await expect(actionGate(client()).guard('bash', { command })).resolves.toBeUndefined()
+    expect(holds()).toEqual([])
+  })
+
+  it('lets an approved action hold through for the identical call only', async () => {
+    const dropped = { command: 'psql -c "DROP/**/TABLE users"' }
+    bypasses = [{ ...bypassFor(dropped), sopRuleId: 'sop.local.review_before.action:db_write', ...holdKey('bash', dropped) }]
+    await expect(actionGate(client()).guard('bash', dropped)).resolves.toBeUndefined()
+    const other = await actionGate(client()).guard('bash', { command: 'psql -c "DROP TABLE logs"' }).catch((e) => e)
+    expect(other).toBeInstanceOf(IntuticGateHold)
+  })
 })
