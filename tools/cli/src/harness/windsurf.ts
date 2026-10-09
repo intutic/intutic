@@ -20,7 +20,7 @@
 import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { HarnessType } from '@intutic/shared-types'
+import { HarnessType, rulesFrontMatterOf } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { loadCredentials } from '../config/store.js'
@@ -53,7 +53,7 @@ export const windsurfAdapter: IHarnessAdapter = {
 
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
     await retireLegacyRulesFile(workspaceRoot, LEGACY_FILE)
-    return writeOwnRulesFile(workspaceRoot, CONFIG_FILE, sops, proxyUrl, 'trigger: always_on')
+    return writeOwnRulesFile(workspaceRoot, CONFIG_FILE, sops, proxyUrl, rulesFrontMatterOf(HarnessType.WINDSURF, 'Intutic governance rules'))
   },
 
   readCurrentHash(workspaceRoot: string): Promise<string | null> {

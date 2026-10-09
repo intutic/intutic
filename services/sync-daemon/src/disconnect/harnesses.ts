@@ -35,13 +35,14 @@ import {
 import { jetbrainsConfigRoot } from '../harness/windsurfJetBrainsProxy.js'
 import { windsurfSettingsPath } from '../harness/windsurfHooks.js'
 import { ANTIGRAVITY_CLI_GATE, ANTIGRAVITY_HOOK_NAME, antigravityHooksPath } from '../harness/antigravityCliHooks.js'
-import { removeRulesSection, rulesSectionOf, RULES_SECTION_END } from '../harness/rulesSection.js'
+import { DECISIONS_MARKERS, removeRulesSection, rulesSectionOf, RULES_SECTION_END } from '../harness/rulesSection.js'
+import { DECISIONS_FILE_HEADER } from '../lib/decisionsDigest.js'
 import { parseComponentOptions, serializeComponentOptions, type ComponentOptionsFile } from '../harness/jetbrainsXmlConfig.js'
 import { resolveDshHome, listDshProfileDirs } from '../harness/dshHooks.js'
-import { stripOwnHeader as stripAiderHeader, AIDER_SOPS_FILE, isAiderSopsEntry } from '../harness/aiderConfigMerger.js'
+import { stripOwnHeader as stripAiderHeader, AIDER_DECISIONS_FILE, AIDER_SOPS_FILE, isAiderIntuticEntry } from '../harness/aiderConfigMerger.js'
 import { openclawAgentWorkspace, parseJson5Like } from '../harness/openclawHooks.js'
 import { unharden } from '../harness/gooseHardener.js'
-import { pruneLedger } from './originals.js'
+import { pruneLedger, readOriginal, sha256 } from './originals.js'
 import { ENV_INTUTIC_WRITERS } from '../configWriter.js'
 import {
   allEdits,
@@ -126,7 +127,7 @@ async function ownRulesFile(plan: DisconnectPlan, file: string, workspaceRoot: s
  */
 async function instructionsFile(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
   const text = await readText(file)
-  if (text !== null && rulesSectionOf(text) !== null) await rulesSection(plan, file, workspaceRoot)
+  if (text !== null && (rulesSectionOf(text) !== null || rulesSectionOf(text, DECISIONS_MARKERS) !== null)) await rulesSection(plan, file, workspaceRoot)
   else await rulesFile(plan, file, workspaceRoot)
 }
 
@@ -216,8 +217,9 @@ function claudeSettings(plan: DisconnectPlan, file: string, workspaceRoot: strin
 const claudeCode: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await ownRulesFile(plan, join(root, '.claude', 'rules', 'intutic-governance.md'), root)
-    // Where earlier versions wrote the rules, whole.
-    await rulesFile(plan, join(root, 'CLAUDE.md'), root)
+    await decisionsFile(plan, join(root, '.claude', 'rules', 'intutic-decisions.md'), root)
+    // Where earlier versions wrote the rules whole and appended the decisions log.
+    await legacyClaudeMd(plan, join(root, 'CLAUDE.md'), root)
     await claudeSettings(plan, join(root, '.claude', 'settings.json'), root, true)
     await gateScripts(plan, root, ['claude-code-check.js'])
     await sharedBy(ctx, ['claude-code', 'cursor'], () => gateScripts(plan, root, ['pre-tool-check.js']))
@@ -259,6 +261,7 @@ function cursorHooks(plan: DisconnectPlan, file: string, workspaceRoot: string):
 const cursor: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await ownRulesFile(plan, join(root, '.cursor', 'rules', 'intutic-governance.mdc'), root)
+    await decisionsFile(plan, join(root, '.cursor', 'rules', 'intutic-decisions.mdc'), root)
     await rulesFile(plan, join(root, '.cursorrules'), root)
     await gateScripts(plan, root, ['cursor-check.js'])
     await cursorHooks(plan, join(root, '.cursor', 'hooks.json'), root)
@@ -383,6 +386,7 @@ async function jetbrainsProxy(plan: DisconnectPlan, ctx: DisconnectContext, list
 const windsurf: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await ownRulesFile(plan, join(root, '.windsurf', 'rules', 'intutic-governance.md'), root)
+    await decisionsFile(plan, join(root, '.windsurf', 'rules', 'intutic-decisions.md'), root)
     await rulesFile(plan, join(root, '.windsurfrules'), root)
     await gateScripts(plan, root, ['windsurf-check.js'])
     await cascadeHooks(plan, join(root, '.windsurf', 'hooks.json'), root)
@@ -493,6 +497,7 @@ const rooCode: HarnessReverser = async (plan, ctx) => {
 const cline: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await rulesFile(plan, join(root, '.clinerules', 'intutic-governance.md'), root)
+    await decisionsFile(plan, join(root, '.clinerules', 'intutic-decisions.md'), root)
     await reverseOwnedFile(plan, join(root, '.clinerules', 'hooks', 'PreToolUse'), root, contains('Intutic Cline PreToolUse governance gate.'))
     await json(plan, join(root, '.cline', 'mcp.json'), root, (doc, c) => unwrapServersAt(doc, ['mcpServers'], c.original), true)
   })
@@ -587,7 +592,7 @@ function aiderConfig(plan: DisconnectPlan, root: string, ctx: DisconnectContext)
       hadHeader,
       restoreKey(doc, ['openai-api-base'], c, ctx.isProxyUrl),
       removeFromList(doc, 'set-env', envIsOurs, c),
-      removeFromList(doc, 'read', (v) => isAiderSopsEntry(v, root), c),
+      removeFromList(doc, 'read', (v) => isAiderIntuticEntry(v, root), c),
     )
     if (!changed || c.original === null) return changed
     // The merger dropped the user's own ANTHROPIC_BASE_URL entry and the
@@ -616,6 +621,7 @@ const aider: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await aiderConfig(plan, root, ctx)
     await intuticFile(plan, join(root, AIDER_SOPS_FILE))
+    await decisionsFile(plan, join(root, AIDER_DECISIONS_FILE), root)
   })
 }
 
@@ -647,6 +653,7 @@ function openHandsConfig(plan: DisconnectPlan, file: string, workspaceRoot: stri
 const openhands: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await rulesFile(plan, join(root, '.openhands', 'microagents', 'intutic-governance.md'), root)
+    await decisionsFile(plan, join(root, '.openhands', 'microagents', 'intutic-decisions.md'), root)
     await openHandsConfig(plan, join(root, 'config.toml'), root, ctx)
     await gateScripts(plan, root, ['openhands-check.sh'])
     await reverseOwnedFile(plan, join(root, '.openhands', 'hooks.json'), root, OWN_HOOK_FILE)
@@ -671,10 +678,35 @@ function isAntigravityGate(value: unknown): boolean {
  */
 function rulesSection(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
   return reverseTextFile(plan, file, workspaceRoot, (text) => text.trimEnd(), (text, c) => {
-    const next = removeRulesSection(text)
-    if (next === null || c.originalText === null || c.originalText.endsWith('\n')) return next
-    return text.trimEnd().endsWith(RULES_SECTION_END) ? next.replace(/\r?\n$/, '') : next
+    const withoutRules = removeRulesSection(text) ?? text
+    const next = removeRulesSection(withoutRules, DECISIONS_MARKERS) ?? withoutRules
+    if (next === text) return null
+    if (c.originalText === null || c.originalText.endsWith('\n')) return next
+    const tail = text.trimEnd()
+    return tail.endsWith(RULES_SECTION_END) || tail.endsWith(DECISIONS_MARKERS.end) ? next.replace(/\r?\n$/, '') : next
   })
+}
+
+/**
+ * A `CLAUDE.md` earlier versions wrote to: the decisions-log section they
+ * appended comes out, and a file they wrote whole underneath it is given
+ * back too. Without the section, the whole-file case is {@link rulesFile}.
+ */
+async function legacyClaudeMd(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
+  const text = await readText(file)
+  if (text === null || rulesSectionOf(text, DECISIONS_MARKERS) === null) return rulesFile(plan, file, workspaceRoot)
+  const record = await readOriginal(file, workspaceRoot)
+  await reverseTextFile(plan, file, workspaceRoot, (t) => t.trimEnd(), (t, c) => {
+    const next = removeRulesSection(t, DECISIONS_MARKERS)
+    if (next === null) return null
+    if (startsWithRulesHeader(next) && record?.writtenSha256 === sha256(next)) return c.originalText ?? ''
+    return next
+  })
+}
+
+/** The decisions log's own file next to a harness's rules file. */
+async function decisionsFile(plan: DisconnectPlan, file: string, workspaceRoot: string): Promise<void> {
+  await reverseOwnedFile(plan, file, workspaceRoot, contains(DECISIONS_FILE_HEADER))
 }
 
 const antigravity: HarnessReverser = async (plan, ctx) => {
@@ -705,6 +737,7 @@ function continueSettings(plan: DisconnectPlan, file: string, workspaceRoot: str
 const continueHarness: HarnessReverser = async (plan, ctx) => {
   await forEachWorkspace(ctx, async (root) => {
     await ownRulesFile(plan, join(root, '.continue', 'rules', 'intutic-governance.md'), root)
+    await decisionsFile(plan, join(root, '.continue', 'rules', 'intutic-decisions.md'), root)
     await gateScripts(plan, root, ['continue-check.js'])
     await continueSettings(plan, join(root, '.continue', 'settings.json'), root)
   })

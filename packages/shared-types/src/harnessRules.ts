@@ -1,6 +1,7 @@
 /**
  * harnessRules.ts — where each harness reads standing instructions, and so
- * where `intutic connect` writes the rule sets aimed at it.
+ * where `intutic connect` writes the rule sets aimed at it and the governed
+ * decisions log.
  *
  * Every entry cites the product's own documentation or source. The CLI's
  * adapters write through this map, `rulesDelivery.test.ts` (tools/cli) checks
@@ -11,12 +12,17 @@
  *
  * Shapes:
  * - `section`: a file the user also writes. The rule sets go between the
- *   INTUTIC:RULES markers; the rest of the file is the user's.
+ *   INTUTIC:RULES markers and the decisions log between the
+ *   INTUTIC:DECISIONS_LOG markers; the rest of the file is the user's.
  * - `file`: a file of Intutic's own, in a directory the product reads every
- *   file of.
- * - `none`: the product reads no instructions file. The rule-set text does
- *   not reach the model; the rules the gate compiles from rule sets (if the
- *   harness has a gate) still apply.
+ *   file of; the decisions log gets a second file of its own there
+ *   (`decisionsPath`), opening with the same activation front matter.
+ * - `none`: the product reads no instructions file. Neither the rule-set text
+ *   nor the decisions log reaches the model; the rules the gate compiles from
+ *   rule sets (if the harness has a gate) still apply.
+ *
+ * No entry is `CLAUDE.md`: it is the team's own file, and under Claude Code's
+ * default setting a project `CLAUDE.md` stops Claude Code reading `AGENTS.md`.
  *
  * @module
  */
@@ -25,11 +31,22 @@ import { HarnessType } from './enums.js'
 
 export type HarnessRulesTarget =
   | {
-      kind: 'section' | 'file'
+      kind: 'section'
       /** Relative to the workspace root, or to the home directory when `scope` is `user`. */
       path: string
       scope: 'workspace' | 'user'
       /** The documentation or source that says the product loads it. */
+      source: string
+    }
+  | {
+      kind: 'file'
+      /** Relative to the workspace root. */
+      path: string
+      scope: 'workspace'
+      /** The decisions log's file, next to `path`. */
+      decisionsPath: string
+      /** The product's front matter that makes the file always apply, given the file's title; none when it needs none. */
+      frontMatter?: (title: string) => string
       source: string
     }
   | {
@@ -40,7 +57,12 @@ export type HarnessRulesTarget =
     }
 
 const section = (path: string, source: string): HarnessRulesTarget => ({ kind: 'section', path, scope: 'workspace', source })
-const file = (path: string, source: string): HarnessRulesTarget => ({ kind: 'file', path, scope: 'workspace', source })
+const file = (
+  path: string,
+  decisionsPath: string,
+  source: string,
+  frontMatter?: (title: string) => string,
+): HarnessRulesTarget => ({ kind: 'file', path, scope: 'workspace', decisionsPath, source, ...(frontMatter ? { frontMatter } : {}) })
 const none = (reason: string, source?: string): HarnessRulesTarget => ({ kind: 'none', reason, ...(source ? { source } : {}) })
 
 /**
@@ -59,18 +81,36 @@ export const HARNESS_RULES_FILES: Readonly<Record<HarnessType, HarnessRulesTarge
   // `.claude/rules/*.md` without `paths:` front matter load at launch like
   // `.claude/CLAUDE.md`. Not `CLAUDE.md` itself: a project `CLAUDE.md` stops
   // Claude Code reading `AGENTS.md` under its default setting.
-  [HarnessType.CLAUDE_CODE]: file('.claude/rules/intutic-governance.md', 'https://code.claude.com/docs/en/memory'),
+  [HarnessType.CLAUDE_CODE]: file(
+    '.claude/rules/intutic-governance.md',
+    '.claude/rules/intutic-decisions.md',
+    'https://code.claude.com/docs/en/memory',
+  ),
   // `.mdc` files with `alwaysApply: true`; `.cursorrules` is gone from the docs.
-  [HarnessType.CURSOR]: file('.cursor/rules/intutic-governance.mdc', 'https://cursor.com/docs/context/rules'),
+  [HarnessType.CURSOR]: file(
+    '.cursor/rules/intutic-governance.mdc',
+    '.cursor/rules/intutic-decisions.mdc',
+    'https://cursor.com/docs/context/rules',
+    (title) => `description: ${title}\nalwaysApply: true`,
+  ),
   // `trigger: always_on`; `.windsurfrules` is the legacy single file.
-  [HarnessType.WINDSURF]: file('.windsurf/rules/intutic-governance.md', 'https://docs.devin.ai/desktop/cascade/memories'),
+  [HarnessType.WINDSURF]: file(
+    '.windsurf/rules/intutic-governance.md',
+    '.windsurf/rules/intutic-decisions.md',
+    'https://docs.devin.ai/desktop/cascade/memories',
+    () => 'trigger: always_on',
+  ),
   // Gemini CLI reads `GEMINI.md` by default; Antigravity reads it and `AGENTS.md`.
   [HarnessType.ANTIGRAVITY]: section('GEMINI.md', 'https://antigravity.google/docs/rules'),
   // No file is loaded unless listed under `read:` in `.aider.conf.yml`, which
-  // connect does with this file's absolute path.
-  [HarnessType.AIDER]: file('.intutic/aider-sops.md', 'https://aider.chat/docs/usage/conventions.html'),
+  // connect does with each file's absolute path.
+  [HarnessType.AIDER]: file('.intutic/aider-sops.md', '.intutic/aider-decisions.md', 'https://aider.chat/docs/usage/conventions.html'),
   // A repository microagent with no triggers is always active.
-  [HarnessType.OPENHANDS]: file('.openhands/microagents/intutic-governance.md', 'https://docs.openhands.dev/overview/skills'),
+  [HarnessType.OPENHANDS]: file(
+    '.openhands/microagents/intutic-governance.md',
+    '.openhands/microagents/intutic-decisions.md',
+    'https://docs.openhands.dev/overview/skills',
+  ),
   [HarnessType.CODEX]: agentsMd('https://learn.chatgpt.com/docs/agent-configuration/agents-md'),
   [HarnessType.MUSE_CODE]: agentsMd('https://dev.meta.ai/docs/muse-code/configuration'),
   [HarnessType.GROK]: agentsMd(
@@ -99,14 +139,20 @@ export const HARNESS_RULES_FILES: Readonly<Record<HarnessType, HarnessRulesTarge
     'https://docs.github.com/en/copilot/how-tos/configure-custom-instructions/add-repository-instructions',
   ),
   // Every `.md` directly inside `.clinerules/`; no front matter means always active.
-  [HarnessType.CLINE]: file('.clinerules/intutic-governance.md', 
+  [HarnessType.CLINE]: file(
+    '.clinerules/intutic-governance.md',
+    '.clinerules/intutic-decisions.md',
     'https://github.com/cline/cline/blob/fa840c741c3fc2eb49e7e0a4484895a99dae5cc5/docs/customization/cline-rules.mdx',
   ),
   // `alwaysApply: true`: the IDE extension and the `cn` CLI both apply it.
-  [HarnessType.CONTINUE]: file('.continue/rules/intutic-governance.md', 
+  [HarnessType.CONTINUE]: file(
+    '.continue/rules/intutic-governance.md',
+    '.continue/rules/intutic-decisions.md',
     'https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/docs/customize/deep-dives/rules.mdx',
+    (title) => `name: ${title}\nalwaysApply: true`,
   ),
-  [HarnessType.GOOSE]: section('.goosehints', 
+  [HarnessType.GOOSE]: section(
+    '.goosehints',
     'https://github.com/block/goose/blob/0f4768025f517f5812f6d962a90aa52d509863cf/documentation/docs/guides/context-engineering/using-goosehints.md',
   ),
   // OpenClaw loads bootstrap files from its own agent workspace, never from
@@ -154,4 +200,24 @@ export function rulesFileOf(harness: HarnessType): string | null {
 /** Every harness whose rule sets go to the workspace file `path`. */
 export function harnessesReading(path: string): HarnessType[] {
   return (Object.keys(HARNESS_RULES_FILES) as HarnessType[]).filter((h) => rulesFileOf(h) === path)
+}
+
+/**
+ * Where the governed decisions log goes for a harness: its own marked
+ * section of a shared file, a file of its own next to the rules file, or
+ * nowhere (null) when the product reads no instructions file.
+ */
+export function decisionsTargetOf(
+  harness: HarnessType,
+): { kind: 'section'; path: string; scope: 'workspace' | 'user' } | { kind: 'file'; path: string; frontMatter?: (title: string) => string } | null {
+  const target = HARNESS_RULES_FILES[harness]
+  if (!target || target.kind === 'none') return null
+  if (target.kind === 'section') return { kind: 'section', path: target.path, scope: target.scope }
+  return { kind: 'file', path: target.decisionsPath, ...(target.frontMatter ? { frontMatter: target.frontMatter } : {}) }
+}
+
+/** The front matter a harness's own rules files open with, given the file's title; '' when it needs none. */
+export function rulesFrontMatterOf(harness: HarnessType, title: string): string {
+  const target = HARNESS_RULES_FILES[harness]
+  return target?.kind === 'file' && target.frontMatter ? target.frontMatter(title) : ''
 }
