@@ -39,10 +39,25 @@ export function normalizeGitRemote(remote: string): string | null {
     const scp = /^(?:[^@/]+@)?([^:/\s]+):([^\s]+)$/.exec(raw)
     if (!scp) return null
     host = scp[1]
-    path = scp[2].replace(/[?#].*$/, '')
+    path = cutAtQueryOrFragment(scp[2])
   }
 
-  path = path.replace(/\/+$/, '').replace(/\.git$/, '').replace(/^\/+|\/+$/g, '')
+  path = trimSlashes(trimSlashes(path).replace(/\.git$/, ''))
   if (!host || !path) return null
   return `${host.toLowerCase()}/${path}`
+}
+
+// String scans rather than regexes: a remote URL is input the developer
+// controls, and `[?#].*$` / `\/+$` backtrack quadratically on long runs.
+function cutAtQueryOrFragment(s: string): string {
+  for (let i = 0; i < s.length; i++) if (s[i] === '?' || s[i] === '#') return s.slice(0, i)
+  return s
+}
+
+function trimSlashes(s: string): string {
+  let start = 0
+  let end = s.length
+  while (start < end && s[start] === '/') start++
+  while (end > start && s[end - 1] === '/') end--
+  return s.slice(start, end)
 }
