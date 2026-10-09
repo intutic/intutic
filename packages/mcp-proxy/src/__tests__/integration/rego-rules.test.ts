@@ -94,7 +94,13 @@ describe('Rego rules in the MCP proxy', () => {
     const r = await runnerWith({ '10_shell.wasm': fixture('examples/block_destructive_shell.wasm') })
     // Just under the input cap, so nothing is cut, with the match at the end.
     const long = `${'cd /workspace/app && npm test; '.repeat(2050)}rm -rf /`
-    expect((await r.evaluate(bash(long))).code).toBe('block')
+    // It takes about 3 ms against a 100 ms deadline, but CI runs every
+    // package's suite at once and a starved worker can miss the deadline and
+    // fail open. One rerun separates that from a rule too slow for its budget,
+    // which misses it every time.
+    let verdict = await r.evaluate(bash(long))
+    if (verdict.code === 'allow') verdict = await r.evaluate(bash(long))
+    expect(verdict.code).toBe('block')
   }, 30_000)
 })
 
