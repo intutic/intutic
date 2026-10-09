@@ -115,7 +115,9 @@ const ALLOWED_DIVERGENCE = new Map([
  */
 const IGNORED_DIRS = new Set(['node_modules', '.turbo', 'cache', 'cache_temp', 'dist', 'target', '.git', '.venv', '__pycache__', 'build'])
 
-const IGNORED_FILES = /\.tsbuildinfo$|\.log$|^\.DS_Store$/
+// `terraform-provider-intutic` is the binary `go build` leaves in the provider's
+// directory, which is otherwise source and compared like any shared tree.
+const IGNORED_FILES = /\.tsbuildinfo$|\.log$|^\.DS_Store$|^terraform-provider-intutic$/
 
 function walk(root, dir, out = []) {
   if (!existsSync(dir)) return out

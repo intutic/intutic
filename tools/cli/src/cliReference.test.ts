@@ -32,6 +32,14 @@ function runnable(cmd: Command, prefix: string[] = []): Array<{ path: string; cm
   })
 }
 
+/** Every command path in the tree, groups included (`guardrails` as well as `guardrails list`). */
+function nodes(cmd: Command, prefix: string[] = []): string[][] {
+  return cmd.commands.flatMap((sub) => {
+    const path = [...prefix, sub.name()]
+    return [path, ...nodes(sub, path)]
+  })
+}
+
 /** The section text under each ``## `intutic <path>…` `` heading, keyed by the heading's code span. */
 function sections(): Map<string, string> {
   const out = new Map<string, string>()
@@ -72,6 +80,15 @@ describe('cli.md matches the registered command tree', async () => {
 
   it('finds the command tree', () => {
     expect(commands.length).toBeGreaterThan(50)
+  })
+
+  // The other direction: a section for a command the CLI no longer has (or
+  // never had) documents nothing. tools/scripts/check-feature-surfaces.js
+  // reads cli.md's sections as the CLI's command list, which is only true
+  // while both directions hold.
+  it.each([...all.keys()].map((heading) => [headingPath(heading)]))('`intutic %s` in cli.md is a registered command', (path) => {
+    const registered = new Set(nodes(program).map((n) => n.join(' ')))
+    expect(registered.has(path) || SHORTCUTS.has(path), `cli.md documents \`intutic ${path}\`, which cli.ts does not register`).toBe(true)
   })
 
   it.each(commands.map(({ path, cmd }) => [path, cmd] as const))('documents `intutic %s` and every option it takes', (path, cmd) => {

@@ -1,0 +1,886 @@
+{
+  "$comment": "Each feature's expected surfaces, read by tools/scripts/check-feature-surfaces.js, which documents the format. Built from the features shipped 2026-10-08 and 2026-10-09; a new feature adds its entry in the pull request that ships its first surface. A gap names what is missing; `unclaimed` lists surfaces that belong to no feature, each with the reason.",
+  "unclaimed": {
+    "routes": {
+      "GET /healthz": "liveness probe for the orchestrator, not a product surface",
+      "GET /readyz": "readiness probe for the orchestrator, not a product surface",
+      "GET /.well-known/intutic-trace-signing.json": "the public key verifiers fetch; documented under trace integrity, owned by no single feature",
+      "POST /v1/messages": "the proxy's provider pass-through: every feature that governs model traffic rides it",
+      "POST /v1/chat/completions": "the proxy's provider pass-through: every feature that governs model traffic rides it",
+      "POST /v1/responses": "the proxy's provider pass-through: every feature that governs model traffic rides it",
+      "GET /health": "the proxy's liveness probe",
+      "GET /": "the proxy's root banner",
+      "GET /intutic/egress": "loopback diagnostics of the local proxy",
+      "GET /intutic/spend": "loopback diagnostics of the local proxy",
+      "GET /intutic/instance": "loopback diagnostics of the local proxy",
+      "GET /intutic/probes": "loopback diagnostics of the local proxy",
+      "POST /intutic/attest-sandbox": "loopback endpoint the sandbox entrypoint calls; part of sandboxed execution, which predates this manifest"
+    }
+  },
+  "features": [
+    {
+      "id": "mcp-registry",
+      "title": "MCP server registry, default-deny, ungoverned servers",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          "GET /api/v1/mcp/servers",
+          { "ref": "POST /api/v1/mcp/servers/:serverId/status", "auth": "OWNER/ADMIN" },
+          { "ref": "POST /api/v1/mcp/servers/:serverId/tools", "auth": "OWNER/ADMIN" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/routes/McpServersPage.tsx", "contains": "ungovernedReason" }],
+        "cli": ["mcp list", "mcp approve", "mcp block", "mcp reset", "mcp enable-tool", "mcp disable-tool"],
+        "gateSdk": {
+          "gap": "the SDK gates do not read the registry from the policy snapshot, so a blocked or unapproved server's tools pass an SDK-gated agent",
+          "want": [
+            { "file": "packages/gate-js/src/snapshot.ts", "contains": "mcpRegistry" },
+            { "file": "packages/intutic-clawde/intutic_clawde/gate/snapshot.py", "contains": "mcpRegistry" }
+          ]
+        },
+        "clawdeSdk": { "none": "MCP tool calls never pass through the clawde chat client" },
+        "mcpTools": ["intutic_mcp_registry_status"],
+        "kitkat": ["SERVER_NOT_APPROVED", "intutic_mcp_registry_status"],
+        "terraform": ["intutic_mcp_server_decision", "workspace_settings.mcpDefaultPolicy"],
+        "docs": ["guide/mcp-governance.md#the-registry", { "ref": "guide/mcp-governance.md#the-gate-backstop", "badge": false }],
+        "website": [{ "file": "index.html", "contains": "How does Intutic govern MCP servers?" }],
+        "events": {
+          "gap": "approve, block, reset and tool switches reach the audit timeline but no notification event or SIEM source",
+          "want": [{ "file": "services/control-plane/src/services/siem/eventSourceRegistry.ts", "contains": "mcp_server_changes" }],
+          "have": ["mcp.server.candidate"]
+        },
+        "enforcement": [
+          "mcp:SERVER_BLOCKED",
+          "mcp:SERVER_NOT_APPROVED",
+          "mcp:TOOL_DISABLED",
+          "mcp:REGISTRY_UNAVAILABLE",
+          "hook:SERVER_BLOCKED",
+          "hook:SERVER_NOT_APPROVED",
+          "hook:TOOL_DISABLED",
+          { "file": "services/sync-daemon/src/lib/policySnapshot.ts", "contains": "mcpRegistry" },
+          { "file": "packages/shared-types/fixtures/mcp-registry-vectors.json" }
+        ]
+      }
+    },
+    {
+      "id": "mcp-approval-holds",
+      "title": "Approval holds in every gate",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          "POST /api/v1/decisions",
+          { "ref": "POST /api/v1/decisions/:entryId/review", "auth": "OWNER/ADMIN/EM" },
+          "GET /api/v1/decisions/approved-bypasses"
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/routes/DecisionsPage.tsx" }],
+        "cli": ["decision approve --reason", "decision reject"],
+        "gateSdk": ["HELD"],
+        "clawdeSdk": ["policy_held", "LOOP_RUN_PENDING_REVIEW"],
+        "mcpTools": ["intutic_hold_status"],
+        "kitkat": ["intutic decision approve", "reviewHoldBypassEnabled"],
+        "terraform": ["workspace_settings.reviewHoldBypassEnabled"],
+        "docs": [
+          "guide/mcp-governance.md#approval-holds",
+          "guide/graph-guardrails.md#stop-and-ask-me-first",
+          { "ref": "reference/gate-sdk.md#holds", "badge": false }
+        ],
+        "website": [{ "file": "index.html", "contains": "with the review-hold bypass on, the identical retry then passes" }],
+        "events": [{ "file": "services/control-plane/src/routes/decisions.ts", "contains": "'decision.pending'" }],
+        "enforcement": [
+          "hook:HELD",
+          "mcp:HELD",
+          "gate:HELD",
+          "proxy:policy_held",
+          { "file": "packages/mcp-proxy/src/approvalHold.ts" },
+          { "file": "packages/shared-types/fixtures/hold-key-vectors.json" }
+        ]
+      }
+    },
+    {
+      "id": "mcp-caller-identity",
+      "title": "Per-call identity on MCP calls",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [{ "ref": "POST /api/v1/decisions", "badge": false }],
+        "dashboard": [{ "file": "apps/dashboard/src/lib/callerIdentity.ts" }],
+        "cli": { "none": "identity is shown where calls are reviewed: the dashboard and the incident record" },
+        "gateSdk": { "none": "the SDK gates authenticate as the calling key; the control plane resolves the member" },
+        "clawdeSdk": { "none": "not an MCP path" },
+        "mcpTools": { "none": "an agent does not need its own identity echoed back" },
+        "kitkat": { "none": "nothing for an agent to act on" },
+        "terraform": { "none": "not configuration" },
+        "docs": ["guide/mcp-governance.md#caller-identity"],
+        "website": { "none": "detail below the level the site describes" },
+        "events": {
+          "gap": "the gate_decisions and incident payloads streamed to a SIEM drop the resolved caller",
+          "want": [{ "file": "services/control-plane/src/services/siem/adapters.ts", "contains": "callerIdentity" }]
+        },
+        "enforcement": [{ "file": "packages/mcp-proxy/src/identity.ts" }]
+      }
+    },
+    {
+      "id": "mcp-call-budgets",
+      "title": "MCP call budgets",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [{ "ref": "PUT /api/v1/workspace/settings", "badge": false }],
+        "dashboard": [{ "file": "apps/dashboard/src/components/policy/McpBudgetsCard.tsx" }],
+        "cli": ["settings set"],
+        "gateSdk": { "none": "budgets are counted at the MCP proxy, which the SDK gates do not front" },
+        "clawdeSdk": { "none": "not an MCP path" },
+        "mcpTools": ["intutic_mcp_budget_remaining"],
+        "kitkat": ["intutic_mcp_budget_remaining"],
+        "terraform": ["workspace_settings.mcpBudgets"],
+        "docs": ["guide/mcp-governance.md#call-budgets"],
+        "website": [{ "file": "index.html", "contains": "Call budgets cap calls per hour or per day" }],
+        "events": ["mcp.budget.threshold", "mcp.budget.exceeded"],
+        "enforcement": ["mcp:BUDGET_EXCEEDED", "mcp:BUDGET_UNAVAILABLE", { "file": "packages/mcp-proxy/src/budget.ts" }]
+      }
+    },
+    {
+      "id": "mcp-tool-change-risk",
+      "title": "Tool-change risk scoring",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [{ "ref": "GET /api/v1/mcp/servers", "badge": false }, "POST /api/v1/mcp/servers/observe"],
+        "dashboard": [{ "file": "apps/dashboard/src/routes/McpServersPage.tsx", "contains": "lastToolChange" }],
+        "cli": [{ "ref": "mcp list", "badge": false }],
+        "gateSdk": { "none": "scoring runs in the control plane" },
+        "clawdeSdk": { "none": "scoring runs in the control plane" },
+        "mcpTools": { "none": "a held server already refuses with its reason" },
+        "kitkat": ["SERVER_HELD"],
+        "terraform": ["workspace_settings.mcpHighRiskToolChange"],
+        "docs": ["guide/mcp-governance.md#tool-change-risk"],
+        "website": [{ "file": "index.html", "contains": "rule-based risk score" }],
+        "events": {
+          "gap": "only a high score notifies; no SIEM source carries any score",
+          "want": [{ "file": "services/control-plane/src/services/siem/eventSourceRegistry.ts", "contains": "mcp_server_changes" }],
+          "have": ["mcp.server.tool_change_risk"]
+        },
+        "enforcement": ["mcp:SERVER_HELD", "hook:SERVER_HELD", { "file": "packages/shared-types/src/mcpToolRisk.ts" }]
+      }
+    },
+    {
+      "id": "sso-group-gates",
+      "title": "SSO-group rules in every gate",
+      "plan": "Biz Org+",
+      "surfaces": {
+        "api": [{ "ref": "POST /api/v1/hook-gate", "badge": false }],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/SsoGroupPolicyPanel.tsx" }],
+        "cli": { "none": "configured as a workspace setting (see sso-group-policy); refusals reach developers through their gate" },
+        "gateSdk": ["SSO_GROUP"],
+        "clawdeSdk": ["SSO_GROUP"],
+        "mcpTools": { "none": "the refusal itself carries the reason" },
+        "kitkat": ["sso_group.high_risk."],
+        "terraform": { "none": "the policy is configured under sso-group-policy" },
+        "docs": ["concepts/circuit-breaker.md#_3-sso-group-clearance"],
+        "website": [{ "file": "index.html", "contains": "SSO and SCIM groups decide who may run high-risk tools, in every gate" }],
+        "events": [{ "file": "packages/proxy/src/telemetry.rs", "contains": "\"sso_group\"" }],
+        "enforcement": [
+          "hook:SSO_GROUP",
+          "mcp:SSO_GROUP",
+          "gate:SSO_GROUP",
+          "proxy:SSO_GROUP",
+          { "file": "packages/shared-types/fixtures/sso-group-clearance-vectors.json" },
+          { "file": "packages/proxy/src/sso_groups.rs" },
+          { "file": "packages/mcp-proxy/src/interceptor.ts", "contains": "evaluateSsoGroupClearance" }
+        ]
+      }
+    },
+    {
+      "id": "scim-groups",
+      "title": "SCIM groups as the source of member groups",
+      "plan": "Enterprise",
+      "surfaces": {
+        "api": ["POST /api/v1/scim/tokens", "PATCH /scim/v2/Groups/:id"],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/ScimProvisioningPanel.tsx", "contains": "useFeatureGate" }],
+        "cli": { "none": "the identity provider drives SCIM; there is nothing for an operator to script here" },
+        "gateSdk": { "none": "groups reach the gates through the policy snapshot" },
+        "clawdeSdk": { "none": "groups reach the gates through the policy snapshot" },
+        "mcpTools": { "none": "not agent-facing" },
+        "kitkat": { "none": "not agent-facing" },
+        "terraform": { "none": "the identity provider owns group membership" },
+        "docs": ["guide/scim.md#groups-clear-high-risk-tools"],
+        "website": [{ "file": "index.html", "contains": "SSO and SCIM groups" }],
+        "events": {
+          "gap": "SCIM user and group changes reach no notification event or SIEM source",
+          "want": [{ "file": "services/control-plane/src/services/siem/eventSourceRegistry.ts", "contains": "scim" }]
+        },
+        "enforcement": [{ "file": "services/control-plane/src/services/memberGroupsService.ts", "contains": "resolveMemberSsoGroups" }]
+      }
+    },
+    {
+      "id": "sso-group-policy",
+      "title": "Group policy setting with plan limits",
+      "plan": "Biz Org+",
+      "surfaces": {
+        "api": [{ "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" }],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/SsoGroupPolicyPanel.tsx", "contains": "PlanUpgradeNote" }],
+        "cli": [
+          { "ref": "settings get", "badge": false },
+          { "ref": "settings set", "badge": false }
+        ],
+        "gateSdk": { "none": "the SDK gates read the stored policy; they do not set it" },
+        "clawdeSdk": {
+          "gap": "the clawde ControlPlaneClient has no method to write workspace settings",
+          "want": [{ "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "updateWorkspaceSettings" }]
+        },
+        "mcpTools": { "none": "an operator setting" },
+        "kitkat": { "none": "an operator setting" },
+        "terraform": ["workspace_settings.sso_group_policy"],
+        "docs": ["guide/settings.md#group-policy-for-high-risk-tools"],
+        "website": { "none": "covered by the sso-group-gates copy; the pricing cards carry the plan" },
+        "events": ["siem:workspace_settings_changes"],
+        "enforcement": [{ "file": "services/control-plane/src/lib/planSkuMap.ts", "contains": "planAllowsGroupPolicy" }]
+      }
+    },
+    {
+      "id": "security-tab-plan-limits",
+      "title": "Security-tab plan limits",
+      "surfaces": {
+        "api": [{ "ref": "PUT /api/v1/workspace/settings", "badge": false }],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/settings/SsoPanel.tsx", "contains": "PlanUpgradeNote" },
+          { "file": "apps/dashboard/src/components/settings/RegionPanel.tsx", "contains": "PlanUpgradeNote" }
+        ],
+        "cli": { "none": "a dashboard presentation of the API's plan checks" },
+        "gateSdk": { "none": "dashboard-only" },
+        "clawdeSdk": { "none": "dashboard-only" },
+        "mcpTools": { "none": "dashboard-only" },
+        "kitkat": { "none": "dashboard-only" },
+        "terraform": { "none": "dashboard-only" },
+        "docs": ["guide/security.md#single-sign-on-sso", "guide/settings.md#security"],
+        "website": { "none": "the pricing cards carry plan limits" },
+        "events": { "none": "dashboard-only" },
+        "enforcement": { "none": "the API enforces the plans; this is how the dashboard shows them" }
+      }
+    },
+    {
+      "id": "gate-liveness-integrity-alerts",
+      "title": "Silent-gate and integrity alerts",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [{ "ref": "GET /api/v1/governance/gate-liveness", "auth": "OWNER/ADMIN/EM" }],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/GateHealthPanel.tsx" }],
+        "cli": ["gate-liveness"],
+        "gateSdk": [
+          { "file": "packages/gate-js/src/client.ts", "contains": "gateSource: 'sdk'" },
+          { "file": "packages/intutic-clawde/intutic_clawde/gate/client.py", "contains": "\"gateSource\": \"sdk\"" }
+        ],
+        "clawdeSdk": { "none": "alerts are for operators" },
+        "mcpTools": { "none": "alerts are for operators" },
+        "kitkat": { "none": "alerts are for operators" },
+        "terraform": ["intutic_notification_rule"],
+        "docs": ["concepts/trace-integrity.md#alerts"],
+        "website": [{ "file": "index.html", "contains": "a gate that has stopped reporting for 48 hours, a failed trace integrity check" }],
+        "events": ["governance.gate.silent", "governance.gate.recovered", "governance.integrity.failed", "siem:governance_alerts"],
+        "enforcement": [{ "file": "services/control-plane/src/services/gateLivenessService.ts" }]
+      }
+    },
+    {
+      "id": "siem-sources",
+      "title": "SIEM sources: gate decisions, sign-ins, settings",
+      "plan": "Biz Org+",
+      "surfaces": {
+        "api": [
+          { "ref": "GET /api/v1/siem/destinations", "badge": false },
+          { "ref": "POST /api/v1/siem/destinations", "auth": "OWNER/ADMIN" },
+          { "ref": "PUT /api/v1/siem/destinations/:id", "auth": "OWNER/ADMIN" }
+        ],
+        "dashboard": {
+          "gap": "the dashboard cannot change an existing destination's sources",
+          "want": [{ "file": "apps/dashboard/src/components/settings/SiemDestinationsPanel.tsx", "contains": "useUpdateSiemDestination" }],
+          "have": [{ "file": "apps/dashboard/src/components/settings/AddSiemDestinationModal.tsx", "contains": "gate_decisions" }]
+        },
+        "cli": ["siem list", "siem show", "siem sources", "siem create", "siem update", "siem delete"],
+        "gateSdk": { "none": "operator configuration" },
+        "clawdeSdk": { "none": "operator configuration" },
+        "mcpTools": { "none": "operator configuration" },
+        "kitkat": { "none": "operator configuration" },
+        "terraform": {
+          "gap": "no Terraform resource for a SIEM destination",
+          "want": ["intutic_siem_destination"]
+        },
+        "docs": ["guide/siem-export.md#choosing-sources"],
+        "website": [{ "file": "index.html", "contains": "SIEM export streams traces, incidents, sign-ins, settings changes" }],
+        "events": [
+          "siem:gate_decisions",
+          "siem:login_events",
+          "siem:workspace_settings_changes",
+          "siem:sop_registry",
+          "siem:device_disconnects"
+        ],
+        "enforcement": { "none": "export, not enforcement" }
+      }
+    },
+    {
+      "id": "signed-webhooks",
+      "title": "Always-signed webhooks and secret rotation",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "POST /api/v1/notifications/rules/:ruleId/signing-secret", "auth": "OWNER/ADMIN" },
+          { "ref": "POST /api/v1/siem/destinations/:id/signing-secret", "badge": false, "auth": "OWNER/ADMIN" }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx", "contains": "signing secret" },
+          { "file": "apps/dashboard/src/components/settings/SiemDestinationsPanel.tsx" }
+        ],
+        "cli": [
+          "notifications list",
+          "notifications create",
+          "notifications update",
+          "notifications delete",
+          "notifications rotate-secret",
+          { "ref": "siem rotate-secret", "badge": false }
+        ],
+        "gateSdk": { "none": "receivers verify; the docs give Node and Python snippets" },
+        "clawdeSdk": { "none": "receivers verify; the docs give Node and Python snippets" },
+        "mcpTools": { "none": "operator configuration" },
+        "kitkat": { "none": "operator configuration" },
+        "terraform": {
+          "gap": "the notification rule exposes its signing secret, but no SIEM destination resource exists and no resource rotates a secret",
+          "want": ["intutic_siem_destination"],
+          "have": [{ "file": "packages/terraform-provider-intutic/internal/provider/notification_rule_resource.go", "contains": "signing_secret" }]
+        },
+        "docs": ["guide/settings.md#verifying-webhook-signatures", { "ref": "guide/siem-export.md#verifying-webhook-signatures", "badge": false }],
+        "website": [{ "file": "index.html", "contains": "is signed with an HMAC-SHA256" }],
+        "events": {
+          "gap": "a secret rotation emits no notification event or SIEM record",
+          "want": []
+        },
+        "enforcement": [{ "file": "services/control-plane/src/lib/webhookSignature.ts" }]
+      }
+    },
+    {
+      "id": "login-events",
+      "title": "Login events for every sign-in method",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [{ "ref": "GET /api/v1/audit/timeline", "auth": "OWNER/ADMIN" }],
+        "dashboard": [{ "file": "apps/dashboard/src/routes/AuditTimelinePage.tsx" }],
+        "cli": { "none": "read through the audit timeline or a SIEM" },
+        "gateSdk": { "none": "not agent-facing" },
+        "clawdeSdk": { "none": "not agent-facing" },
+        "mcpTools": { "none": "not agent-facing" },
+        "kitkat": { "none": "not agent-facing" },
+        "terraform": { "none": "not configuration" },
+        "docs": ["guide/audit-timeline.md#what-it-shows"],
+        "website": [{ "file": "index.html", "contains": "sign-ins" }],
+        "events": {
+          "gap": "failed sign-ins reach SIEM only; the notification hub has no sign-in event",
+          "want": [{ "file": "packages/shared-types/src/notifications.ts", "contains": "'auth.login.failed'" }],
+          "have": [{ "ref": "siem:login_events", "badge": false }]
+        },
+        "enforcement": [{ "file": "services/control-plane/src/services/loginEventService.ts" }]
+      }
+    },
+    {
+      "id": "framework-mapping",
+      "title": "Framework mapping (EU AI Act, ISO 42001, NIST AI RMF, MITRE ATLAS) and exports",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          "GET /api/v1/compliance/frameworks/:frameworkId/coverage",
+          { "ref": "GET /api/v1/compliance/human-oversight-export", "auth": "OWNER/ADMIN" },
+          { "ref": "POST /api/v1/compliance/soc2-collect", "auth": "OWNER/ADMIN" }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/dashboard/FrameworkCoveragePanel.tsx", "contains": "MITRE ATLAS" },
+          { "file": "apps/dashboard/src/components/dashboard/ExportSigningNote.tsx" }
+        ],
+        "cli": {
+          "gap": "the CLI reads coverage but cannot collect, download or verify an evidence archive",
+          "want": ["compliance collect"],
+          "have": ["compliance coverage"]
+        },
+        "gateSdk": { "none": "auditor reporting" },
+        "clawdeSdk": { "none": "auditor reporting" },
+        "mcpTools": { "none": "auditor reporting" },
+        "kitkat": { "none": "auditor reporting" },
+        "terraform": { "none": "the mappings are versioned in code" },
+        "docs": [
+          "guide/framework-mapping.md#mitre-atlas",
+          "guide/framework-mapping.md#export-formats",
+          "guide/framework-mapping.md#human-oversight-export-eu-ai-act-article-14",
+          "guide/compliance-evidence.md#verifying-an-archive"
+        ],
+        "website": [{ "file": "index.html", "contains": "MITRE ATLAS, with coverage reports as JSON, Markdown, CSV or PDF" }],
+        "events": {
+          "gap": "no audit or SIEM record of who exported evidence",
+          "want": []
+        },
+        "enforcement": [
+          { "file": "services/control-plane/src/lib/rootSigner.ts", "contains": "X-Intutic-Export-Signed" },
+          { "file": "services/control-plane/src/lib/atlasCatalog.ts" }
+        ]
+      }
+    },
+    {
+      "id": "disconnect",
+      "title": "intutic disconnect",
+      "surfaces": {
+        "api": [{ "ref": "POST /api/v1/devices/disconnect", "auth": "OWNER/ADMIN/EM/DEVELOPER" }],
+        "dashboard": {
+          "gap": "the control plane records a disconnect, but no dashboard view shows which machines ran it",
+          "want": []
+        },
+        "cli": ["disconnect --harness --dry-run --keep-login"],
+        "gateSdk": { "none": "SDK gates install nothing to undo" },
+        "clawdeSdk": { "none": "the SDKs install nothing to undo" },
+        "mcpTools": { "none": "a local command" },
+        "kitkat": ["intutic disconnect"],
+        "terraform": { "none": "a machine-local command" },
+        "docs": ["guide/getting-started.md#disconnecting", "integrations/antigravity.md#disconnecting"],
+        "website": [{ "file": "index.html", "contains": "<code>intutic disconnect</code> undoes it" }],
+        "events": [{ "ref": "siem:device_disconnects", "badge": false }],
+        "enforcement": [
+          { "file": "services/sync-daemon/src/disconnect/plan.ts" },
+          { "file": "tools/cli/src/lib/deviceReport.ts" }
+        ]
+      }
+    },
+    {
+      "id": "gateway-live-config",
+      "title": "Live gateway config, bare metal, applied/desired version",
+      "plan": "Enterprise",
+      "badgeGaps": {
+        "PATCH /api/v1/gateways/:id/config": "the route catalog shows gateways.ts's Cloud badge; only POST /api/v1/gateways checks the Enterprise plan",
+        "GET /api/v1/gateways/:id/status": "the route catalog shows gateways.ts's Cloud badge; only POST /api/v1/gateways checks the Enterprise plan"
+      },
+      "surfaces": {
+        "api": [
+          { "ref": "PATCH /api/v1/gateways/:id/config", "auth": "OWNER/ADMIN" },
+          "GET /api/v1/gateways/:id/status"
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/GatewaysPanel.tsx", "contains": "bare_metal" }],
+        "cli": {
+          "gap": "a gateway's current config values cannot be read: no `gateway config get`, and the config read route takes only the gateway's own token",
+          "want": ["gateway config get"],
+          "have": [
+            "gateway register --target",
+            "gateway config set --require-vk --require-provisioned-key",
+            "gateway status"
+          ]
+        },
+        "gateSdk": { "none": "gateway administration" },
+        "clawdeSdk": {
+          "gap": "the SDK's GatewayStatus type has no applied or desired config version",
+          "want": [{ "file": "packages/clawde-sdk/src/types.ts", "contains": "appliedConfigVersion" }],
+          "have": [{ "file": "packages/clawde-sdk/src/types.ts", "contains": "bare_metal" }]
+        },
+        "mcpTools": { "none": "gateway administration" },
+        "kitkat": { "none": "gateway administration" },
+        "terraform": ["intutic_gateway"],
+        "docs": [
+          "external/self-hosted-gateway.md#bare-metal",
+          "external/self-hosted-gateway.md#changing-a-gateway-s-config"
+        ],
+        "website": { "none": "the site describes the self-hosted gateway as a deployment option, not its configuration" },
+        "events": ["gateway.stale.detected"],
+        "enforcement": [{ "file": "packages/proxy/src/heartbeat.rs", "contains": "appliedConfigVersion" }]
+      }
+    },
+    {
+      "id": "config-content-upload",
+      "title": "Opt-in config content upload",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/settings", "badge": false },
+          "POST /api/v1/config/capture",
+          { "ref": "GET /api/v1/workspaces/:workspaceId/config-snapshots/:snapshotId/diff", "auth": "OWNER/ADMIN/EM" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/ConfigContentUploadPanel.tsx" }],
+        "cli": [{ "ref": "settings set", "badge": false }],
+        "gateSdk": { "none": "connect captures the files, not the SDKs" },
+        "clawdeSdk": { "none": "connect captures the files, not the SDKs" },
+        "mcpTools": { "none": "operator setting" },
+        "kitkat": { "none": "operator setting" },
+        "terraform": ["workspace_settings.configBodyUpload"],
+        "docs": ["reference/cli.md#config-content-upload", "guide/settings.md#harness-config-history"],
+        "website": { "none": "detail below the level the site describes" },
+        "events": [{ "ref": "siem:workspace_settings_changes", "badge": false }],
+        "enforcement": [{ "file": "tools/cli/src/commands/connect.ts", "contains": "configBodyUpload" }]
+      }
+    },
+    {
+      "id": "fleet-analytics",
+      "title": "Cost by developer, team, branch and commit",
+      "plan": "Biz Org+",
+      "surfaces": {
+        "api": [
+          "GET /api/v1/usage/members",
+          { "ref": "GET /api/v1/usage/teams", "auth": "OWNER/ADMIN/EM" },
+          "GET /api/v1/usage/branches",
+          "GET /api/v1/usage/commits"
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/dashboard/MemberCostTable.tsx" },
+          { "file": "apps/dashboard/src/components/dashboard/TeamCostTable.tsx" },
+          { "file": "apps/dashboard/src/components/dashboard/BranchCostTable.tsx" },
+          { "file": "apps/dashboard/src/components/dashboard/FleetPlanNote.tsx" }
+        ],
+        "cli": ["usage members", "usage teams", "usage branches", "usage commits"],
+        "gateSdk": { "none": "attribution comes from the daemon's session report" },
+        "clawdeSdk": {
+          "gap": "the clawde SDKs resolve a git branch but never send it, so SDK traffic lands under \"No git context\"",
+          "want": [{ "file": "packages/clawde-sdk/src/client.ts", "contains": "gitBranch" }]
+        },
+        "mcpTools": { "none": "reporting" },
+        "kitkat": { "none": "reporting" },
+        "terraform": { "none": "reporting" },
+        "docs": ["guide/budgets.md#cost-per-branch-and-commit"],
+        "website": [{ "file": "index.html", "contains": "Cost by developer, team, branch and pull request" }],
+        "events": { "none": "read-only analytics" },
+        "enforcement": [
+          { "file": "services/sync-daemon/src/sessionReporter.ts", "contains": "branch" },
+          { "file": "services/control-plane/src/lib/planSkuMap.ts", "contains": "finopsEnabled" }
+        ]
+      }
+    },
+    {
+      "id": "cost-per-pull-request",
+      "title": "Cost per pull request",
+      "plan": "Biz Org+",
+      "surfaces": {
+        "api": [
+          "GET /api/v1/usage/pull-requests",
+          { "ref": "POST /api/v1/usage/pull-requests/refresh", "auth": "OWNER/ADMIN/EM" },
+          { "ref": "GET /api/v1/integrations/github/webhook", "auth": "OWNER/ADMIN" },
+          { "ref": "POST /api/v1/integrations/github/webhook/secret", "auth": "OWNER/ADMIN" },
+          "POST /api/v1/webhooks/github/:hookId"
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/dashboard/PullRequestCostTable.tsx" },
+          { "file": "apps/dashboard/src/components/settings/GitHubWebhookPanel.tsx" }
+        ],
+        "cli": ["usage pull-requests", "github webhook show", "github webhook rotate-secret"],
+        "gateSdk": { "none": "attribution comes from the branch the daemon reports" },
+        "clawdeSdk": { "none": "attribution comes from the branch the daemon reports (see fleet-analytics)" },
+        "mcpTools": { "none": "reporting" },
+        "kitkat": { "none": "reporting" },
+        "terraform": { "none": "the webhook secret is shown once and belongs in GitHub's settings, not in Terraform state" },
+        "docs": ["guide/budgets.md#cost-per-pull-request"],
+        "website": [{ "file": "index.html", "contains": "intutic usage pull-requests" }],
+        "events": { "none": "read-only analytics" },
+        "enforcement": [{ "file": "services/control-plane/src/services/pullRequestService.ts" }]
+      }
+    },
+    {
+      "id": "approval-roles-slack",
+      "title": "Slack approval and approver roles",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "POST /api/v1/decisions/:entryId/review", "auth": "OWNER/ADMIN/EM" },
+          { "ref": "POST /api/v1/loops/:loopRunId/review", "auth": "OWNER/ADMIN/EM" },
+          { "ref": "POST /api/v1/break-glass/approve", "auth": "OWNER/ADMIN/EM" }
+        ],
+        "dashboard": { "none": "decisions are approved in Slack or the CLI (guide/decisions.md)" },
+        "cli": ["decision approve", "decision reject", "loop review"],
+        "gateSdk": [{ "ref": "HELD", "badge": false }],
+        "clawdeSdk": { "none": "see mcp-approval-holds" },
+        "mcpTools": [{ "ref": "intutic_hold_status", "badge": false }],
+        "kitkat": ["Owner, Admin or Engineering Manager"],
+        "terraform": { "none": "approver roles are fixed in code" },
+        "docs": ["guide/decisions.md#role-requirements", "guide/decisions.md#slack-interactive-reviews"],
+        "website": [{ "file": "index.html", "contains": "an owner, admin or engineering manager approves in Slack or the CLI" }],
+        "events": {
+          "gap": "an approval or rejection emits no notification event",
+          "want": [{ "file": "packages/shared-types/src/notifications.ts", "contains": "'decision.approved'" }]
+        },
+        "enforcement": [{ "file": "services/control-plane/src/routes/slackInteractions.ts", "contains": "reviewDecision" }]
+      }
+    },
+    {
+      "id": "destructive-sql",
+      "title": "One destructive-SQL definition for every gate",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": [{ "file": "services/control-plane/src/routes/hookEvents.ts", "contains": "DESTRUCTIVE_SQL_STATEMENTS" }],
+        "dashboard": { "none": "enforcement only" },
+        "cli": { "none": "enforcement only" },
+        "gateSdk": [
+          { "file": "packages/gate-js/src/snapshot.ts", "contains": "destructive-sql-vectors" },
+          { "file": "packages/intutic-clawde/tests/test_destructive_sql_vectors.py" }
+        ],
+        "clawdeSdk": ["SQL_GUARD"],
+        "mcpTools": { "none": "enforced on MCP calls, not exposed as a tool" },
+        "kitkat": ["SQL_GUARD"],
+        "terraform": { "none": "enforcement only" },
+        "docs": ["reference/sop-front-matter.md#destructive-sql"],
+        "website": { "none": "detail below the level the site describes" },
+        "events": { "none": "reported as the gate's own decision" },
+        "enforcement": [
+          { "file": "packages/shared-types/src/destructiveSql.ts" },
+          { "file": "packages/shared-types/fixtures/destructive-sql-vectors.json" },
+          { "file": "packages/mcp-proxy/src/dlp.ts", "contains": "DESTRUCTIVE_SQL_STATEMENTS" },
+          { "file": "packages/proxy/src/plugins/response_gate.rs", "contains": "DestructiveSql" },
+          { "file": "services/sync-daemon/__tests__/harness/destructiveSqlVectors.test.ts" }
+        ]
+      }
+    },
+    {
+      "id": "gemini-antigravity",
+      "title": "Gemini CLI and Antigravity gates",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": { "none": "local gates" },
+        "dashboard": [{ "file": "apps/dashboard/src/lib/harnessNames.ts", "contains": "Gemini CLI" }],
+        "cli": [{ "file": "tools/cli/src/harness/antigravity.ts", "contains": "installGate" }],
+        "gateSdk": [{ "file": "packages/gate-js/src/actions.ts", "contains": "run_shell_command" }],
+        "clawdeSdk": { "none": "Gemini traffic does not go through the proxy" },
+        "mcpTools": { "none": "the intutic MCP server's tools are the same for every harness" },
+        "kitkat": { "none": "the skill is harness-neutral" },
+        "terraform": { "none": "local gates" },
+        "docs": ["integrations/antigravity.md#gemini-cli", "integrations/antigravity.md#google-antigravity"],
+        "website": [{ "file": "index.html", "contains": "Gemini CLI" }],
+        "events": [{ "file": "packages/shared-types/src/gateIdentity.ts" }],
+        "enforcement": {
+          "gap": "the MCP governance proxy is not wired into Gemini CLI's or Antigravity's MCP servers",
+          "want": [{ "file": "services/sync-daemon/src/harness/mcpAutoWrite.ts", "contains": "antigravity" }],
+          "have": [
+            { "file": "services/sync-daemon/src/harness/protectedPaths.ts", "contains": ".gemini/config/hooks.json" },
+            { "file": "services/sync-daemon/src/harness/antigravityCliHooks.ts" },
+            { "file": "services/sync-daemon/src/harness/antigravityHooks.ts" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "refusal-codes",
+      "title": "A refusal code on every surface",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": { "none": "codes travel in each gate's own refusal, not through a control-plane route" },
+        "dashboard": { "none": "operators read decisions, not refusal codes" },
+        "cli": { "none": "the CLI does not receive tool-call refusals" },
+        "gateSdk": ["SNAPSHOT", "SOP_RULE", "HOOK_GATE", "COMMAND_TOO_LARGE"],
+        "clawdeSdk": ["TOOL_DENIED", "RESPONSE_UNPARSEABLE", "OUTPUT_DLP", "policy_denied", "policy_reask"],
+        "mcpTools": ["intutic_hold_status", "intutic_mcp_registry_status", "intutic_mcp_budget_remaining"],
+        "kitkat": ["When a Call Is Refused or Held", "GATE_DEADLINE", "RESULT_WITHHELD_DLP"],
+        "terraform": { "none": "not configuration" },
+        "docs": [
+          "integrations/mcp-proxy.md#refusal-codes",
+          "reference/harness-security-matrix.md#hook-refusal-codes",
+          "reference/gate-sdk.md#refusals"
+        ],
+        "website": { "none": "detail below the level the site describes" },
+        "events": { "none": "a refusal is recorded as its gate's decision" },
+        "enforcement": [
+          "hook:BUILT_IN_RULE",
+          "hook:SNAPSHOT",
+          "hook:SERVER_NOT_ALLOWED",
+          "hook:COMMAND_TOO_LARGE",
+          "hook:GATE_DEADLINE",
+          "hook:UNREADABLE_CALL",
+          "hook:GATE_CRASHED",
+          "mcp:SERVER_NOT_ALLOWED",
+          "mcp:TOOL_NOT_ALLOWED",
+          "mcp:DLP",
+          "mcp:SOP_RULE",
+          "mcp:INJECTION",
+          "mcp:ANOMALY",
+          "mcp:WASM_RULE",
+          "mcp:REASK",
+          "mcp:REASK_EXHAUSTED",
+          "mcp:GOVERNANCE_UNAVAILABLE",
+          "mcp:TOFU_UNAVAILABLE",
+          "mcp:TOOL_DEFINITIONS_CHANGED",
+          "mcp:RESULT_WITHHELD_DLP",
+          "mcp:RESULT_WITHHELD_INJECTION",
+          "proxy:TOOL_DENIED",
+          "proxy:SQL_GUARD",
+          "proxy:RESPONSE_UNPARSEABLE",
+          "proxy:OUTPUT_DLP",
+          "gate:COMMAND_TOO_LARGE",
+          { "file": "packages/shared-types/fixtures/refusal-codes.json" }
+        ]
+      }
+    },
+    {
+      "id": "ai-inventory",
+      "title": "AI inventory of developer machines",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          "GET /api/v1/inventory/summary",
+          "GET /api/v1/inventory/devices",
+          "GET /api/v1/inventory/harnesses",
+          "GET /api/v1/inventory/mcp-servers",
+          "GET /api/v1/inventory/skills",
+          { "ref": "POST /api/v1/agents/report", "badge": false }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/routes/InventoryPage.tsx" }],
+        "cli": {
+          "gap": "the CLI lists harnesses and MCP servers but not skills",
+          "want": ["inventory skills"],
+          "have": ["inventory summary", "inventory harnesses", "inventory mcp-servers"]
+        },
+        "gateSdk": { "none": "the daemon collects the inventory; SDK gates report only their own events" },
+        "clawdeSdk": { "none": "the daemon collects the inventory" },
+        "mcpTools": { "none": "an operator report" },
+        "kitkat": { "none": "an operator report" },
+        "terraform": { "none": "an observation, not configuration" },
+        "docs": ["guide/ai-inventory.md#what-is-collected", "guide/ai-inventory.md#how-status-is-decided"],
+        "website": [{ "file": "index.html", "contains": "an AI inventory flags the harnesses and MCP servers" }],
+        "events": ["inventory.ungoverned.detected", { "ref": "siem:governance_alerts", "badge": false }],
+        "enforcement": [
+          { "file": "services/sync-daemon/src/inventory.ts" },
+          { "file": "tools/cli/src/lib/inventory.ts" },
+          { "file": "services/control-plane/src/services/devInventoryService.ts" }
+        ]
+      }
+    },
+    {
+      "id": "pii-detectors",
+      "title": "Checksum-validated PII detectors",
+      "plan": "Open-Core",
+      "badgeGaps": {
+        "guide/policies.md#pii-detectors": "the detectors run in the open-core proxies, but their section sits on the Cloud-badged Policies page"
+      },
+      "surfaces": {
+        "api": {
+          "gap": "detector actions are local proxy configuration; no workspace setting carries them (a product decision)",
+          "want": []
+        },
+        "dashboard": {
+          "gap": "no workspace setting for detector actions, so the dashboard cannot show or set them",
+          "want": []
+        },
+        "cli": {
+          "gap": "no workspace setting for detector actions, so `settings set` cannot set them",
+          "want": []
+        },
+        "gateSdk": { "none": "gates do not scan for PII by design (guide/policies.md, \"What each surface does with a match\")" },
+        "clawdeSdk": ["dlp_policy_violation"],
+        "mcpTools": { "none": "enforced on MCP calls, not exposed as a tool" },
+        "kitkat": ["PII value"],
+        "terraform": {
+          "gap": "no workspace setting for detector actions, so Terraform cannot set them",
+          "want": []
+        },
+        "docs": ["guide/policies.md#pii-detectors"],
+        "website": [{ "file": "index.html", "contains": "checksum-validated card numbers, IBANs and US Social Security numbers" }],
+        "events": { "none": "a PII match is a DLP finding and is recorded as one" },
+        "enforcement": [
+          { "file": "packages/shared-types/src/piiDetectors.json" },
+          { "file": "packages/shared-types/fixtures/pii-detector-vectors.json" },
+          { "file": "packages/proxy/src/dlp/pii.rs" },
+          { "file": "packages/mcp-proxy/src/dlp.ts", "contains": "INTUTIC_MCP_DLP_DETECTORS" }
+        ]
+      }
+    },
+    {
+      "id": "rego-policies",
+      "title": "Rego policies",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": [{ "ref": "POST /api/v1/wasm-rules", "badge": false, "auth": "OWNER/ADMIN" }],
+        "dashboard": [{ "file": "apps/dashboard/src/routes/WasmRulesPage.tsx" }],
+        "cli": ["rules build --rego --entrypoint --risk-tier", "rules test --input", "policy install --wasm"],
+        "gateSdk": { "none": "Rego rules run in the proxy and the MCP proxy; the SDK gates evaluate the policy snapshot" },
+        "clawdeSdk": [{ "ref": "policy_held", "badge": false }],
+        "mcpTools": { "none": "a rule's decision arrives as the MCP proxy's refusal" },
+        "kitkat": ["a Rego or WASM rule held the request"],
+        "terraform": {
+          "gap": "no Terraform resource uploads a custom filter (a WASM or Rego module)",
+          "want": []
+        },
+        "docs": ["guide/rego-policies.md#building", "guide/rego-policies.md#testing", "guide/rego-policies.md#deploying"],
+        "website": [{ "file": "index.html", "contains": "Rules can also be written in Rego" }],
+        "events": [{ "file": "services/control-plane/src/routes/decisions.ts", "contains": "'decision.pending'" }],
+        "enforcement": [
+          { "file": "packages/proxy/src/wasm/opa.rs" },
+          { "file": "packages/shared-types/src/regoRules.ts" },
+          "mcp:WASM_RULE"
+        ]
+      }
+    },
+    {
+      "id": "authored-guardrails",
+      "title": "Guardrails as code (authored guardrails)",
+      "plan": "Cloud",
+      "badgeGaps": {
+        "guide/policy-guardrails.md#authoring-guardrails-directly": "the page's Self-serve+ badge is extraction's plan; authoring needs no plan check (routes/policyGuardrails.ts)",
+        "guardrails create": "the section's Self-serve+ badge is extraction's plan; authoring needs no plan check",
+        "guardrails update": "the section's Self-serve+ badge is extraction's plan; authoring needs no plan check",
+        "guardrails delete": "the section's Self-serve+ badge is extraction's plan; authoring needs no plan check"
+      },
+      "surfaces": {
+        "api": [
+          { "ref": "POST /api/v1/policy-guardrails/guardrails", "auth": "OWNER/ADMIN" },
+          { "ref": "PUT /api/v1/policy-guardrails/guardrails/:guardrailId", "auth": "OWNER/ADMIN" },
+          { "ref": "DELETE /api/v1/policy-guardrails/guardrails/:guardrailId", "auth": "OWNER/ADMIN" },
+          "POST /api/v1/policy-guardrails/guardrails/validate"
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/policy/AuthoredGuardrailForm.tsx" }],
+        "cli": ["guardrails create", "guardrails update", "guardrails delete"],
+        "gateSdk": { "none": "a promoted guardrail reaches the SDK gates as a snapshot rule, like an extracted one" },
+        "clawdeSdk": { "none": "a promoted guardrail reaches the proxy like an extracted one" },
+        "mcpTools": { "none": "operator authoring" },
+        "kitkat": { "none": "operator authoring" },
+        "terraform": ["intutic_guardrail"],
+        "docs": ["guide/policy-guardrails.md#authoring-guardrails-directly"],
+        "website": { "none": "the site describes policy documents and SOPs, not the guardrail authoring surface" },
+        "events": ["guardrail.ready"],
+        "enforcement": [
+          { "file": "packages/terraform-provider-intutic/internal/provider/guardrail_ir_grammar.json" },
+          { "file": "packages/shared-types/fixtures/guardrail-ir/01-deny-and-review.md" }
+        ]
+      }
+    },
+    {
+      "id": "terraform-provider",
+      "title": "Terraform provider",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": { "none": "the provider is a client of the existing routes; each resource's feature lists them" },
+        "dashboard": { "none": "the provider manages what the dashboard edits" },
+        "cli": { "none": "terraform is the command line" },
+        "gateSdk": { "none": "not agent-facing" },
+        "clawdeSdk": { "none": "not agent-facing" },
+        "mcpTools": { "none": "not agent-facing" },
+        "kitkat": { "none": "not agent-facing" },
+        "terraform": [
+          "intutic_sop",
+          "intutic_policy",
+          "intutic_workspace_settings",
+          "intutic_virtual_key",
+          "intutic_workspace",
+          "intutic_members"
+        ],
+        "docs": ["guide/terraform.md#install", "guide/terraform.md#limits", "reference/terraform/index.md"],
+        "website": [{ "file": "index.html", "contains": "as code with the Terraform provider" }],
+        "events": { "none": "changes made through the provider are recorded as the API changes they are" },
+        "enforcement": { "none": "configuration management, not enforcement" }
+      }
+    },
+    {
+      "id": "role-tiers",
+      "title": "A decided role for every mutating route",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/budget", "auth": "OWNER/ADMIN" },
+          { "ref": "POST /api/v1/notifications/rules", "auth": "OWNER/ADMIN" },
+          { "ref": "PUT /api/v1/notifications/rules/:ruleId", "auth": "OWNER/ADMIN" },
+          { "ref": "DELETE /api/v1/notifications/rules/:ruleId", "auth": "OWNER/ADMIN" },
+          { "ref": "PUT /api/v1/wasm-rules/:ruleId", "auth": "OWNER/ADMIN" },
+          { "ref": "POST /api/v1/hook-events", "auth": "OWNER/ADMIN/EM/DEVELOPER" }
+        ],
+        "dashboard": { "none": "each control's role follows the route it calls" },
+        "cli": [{ "file": "tools/cli/src/lib/api.ts", "contains": "body.detail" }],
+        "gateSdk": { "none": "gates call routes open to every role but Viewer" },
+        "clawdeSdk": { "none": "the chat client calls the proxy, not role-guarded routes" },
+        "mcpTools": { "none": "not agent-facing" },
+        "kitkat": { "none": "not agent-facing" },
+        "terraform": [{ "file": "apps/docs/reference/terraform/index.md", "contains": "OWNER or ADMIN for most resources" }],
+        "docs": ["guide/security.md#what-each-role-can-change"],
+        "website": { "none": "detail below the level the site describes" },
+        "events": { "none": "a refused call is a 403, not an event" },
+        "enforcement": [{ "file": "services/control-plane/__tests__/unit/routeRoleGuards.test.ts" }]
+      }
+    }
+  ]
+}
