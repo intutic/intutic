@@ -304,7 +304,7 @@ Instead of manually entering and updating SOPs on the dashboard, you can connect
 
 - **Notion** — Sync Notion databases or specific page block trees.
 - **Confluence** — Sync Space wikis and page hierarchies.
-- **GitHub** — Sync markdown files from code repositories.
+- **GitHub** — Sync markdown files from code repositories, with a personal access token (`GITHUB_BASE_URL` points it at GitHub Enterprise Server). Reading needs Contents: Read on a fine-grained token, or the `repo` scope on a classic one for a private repository; writing an approved SOP back needs Contents: Read and write. The same token also maps branches to pull requests for [cost per pull request](/guide/budgets#cost-per-pull-request), which needs Pull requests: Read on a fine-grained token (a classic `repo` token already has it).
 - **Google Docs** — Sync the Google Docs in one Drive folder, read-only. Created by workspace owners and admins only, with a service-account key file (share the folder with the service account's email) or a short-lived access token. Google Drive is cloud-only and is unavailable in offline mode.
 - **Upload** — A one-off Markdown, plain-text or HTML document (up to 1 MB) with no connector behind it, from Policy Guardrails → Sources. The same file twice is one document; an edited copy re-binds the citations that still hold.
 

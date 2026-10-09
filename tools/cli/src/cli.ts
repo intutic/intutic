@@ -1640,7 +1640,7 @@ program
 
 const usageCmd = program
   .command('usage')
-  .description('LLM usage across the fleet, by member, team, branch or commit')
+  .description('LLM usage across the fleet, by member, team, branch, commit or pull request')
 
 for (const [view, handler, desc] of [
   ['members', 'runUsageMembers', 'Usage per member'],
@@ -1659,6 +1659,44 @@ for (const [view, handler, desc] of [
       await usage[handler](opts)
     })
 }
+
+usageCmd
+  .command('pull-requests')
+  .description('Usage per GitHub pull request')
+  .option('--period <period>', 'daily (today) or monthly (this month)', 'monthly')
+  .option('--refresh', 'Look the branches up on GitHub first (OWNER, ADMIN, EM)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runUsagePullRequests } = await import('./commands/usage.js')
+    await runUsagePullRequests(opts)
+  })
+
+const githubWebhookCmd = program
+  .command('github')
+  .description('GitHub integration for cost per pull request')
+  .command('webhook')
+  .description('The pull-request webhook: payload URL and signing secret')
+
+githubWebhookCmd
+  .command('show')
+  .description('Show the payload URL and when the secret was made')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGithubWebhookShow } = await import('./commands/github.js')
+    await runGithubWebhookShow(opts)
+  })
+
+githubWebhookCmd
+  .command('rotate-secret')
+  .description('Make the webhook, or replace its secret (printed once)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runGithubWebhookRotateSecret } = await import('./commands/github.js')
+    await runGithubWebhookRotateSecret(opts)
+  })
 
 const inventoryCmd = program
   .command('inventory')

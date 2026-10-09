@@ -24,7 +24,7 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 | **MCP** | MCP governance proxy: server and tool allowlists, SSO-group clearance, DLP, approval holds, pinned tool definitions | Traces MCP tool calls through AgentGateway or LiteLLM; enforcement at the MCP boundary is in early access |
 | **Containment** | Opt-in default-deny egress; sandboxed runs in a container or Firecracker microVM | None documented |
 | **Audit and export** | Signed Merkle roots you can check with `intutic integrity verify`; SIEM export to syslog (CEF), Splunk, Datadog, webhooks, S3 and GCS | Full traces with each verdict attached; OTel export |
-| **Cost** | Spend caps enforced before a request leaves; cost and token reporting by model, virtual key, developer, team (from SCIM groups), branch and commit | Cost, tokens and adoption by developer, team and model; cost per pull request and commit |
+| **Cost** | Spend caps enforced before a request leaves; cost and token reporting by model, virtual key, developer, team (from SCIM groups), branch, commit and GitHub pull request | Cost, tokens and adoption by developer, team and model; cost per pull request and commit |
 | **Model monitoring** | None | Drift, data integrity, performance and fairness for predictive models |
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | SaaS; VPC, on-premises and air-gapped on Enterprise |
 | **Pricing** | [Published plans](/guide/plans) | Guardrails free; Developer at $0.002 per trace; Enterprise by quote |
@@ -34,7 +34,6 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 
 - **Content judgement.** Trained models score safety, jailbreaks and faithfulness, and its secrets check knows more credential formats. Intutic's prompt-injection detection is pattern-based and steers rather than blocks, and its self-hosted judges review after the fact instead of gating the call.
 - **PII and PHI.** Model-based detection of names, addresses, phone numbers, card numbers, IBANs and health identifiers. Intutic's built-in detectors are patterns with checksums: payment cards, IBANs and US Social Security numbers, with email and phone opt-in. Names, addresses and health identifiers need a model, which Intutic does not have yet.
-- **Cost per pull request.** Intutic reports cost by developer, team, branch and commit, but has no GitHub integration to map branches to pull requests.
 - **Observability and evaluation.** Trace exploration, more than 80 evaluators and custom judges for LLM applications and agents.
 - **Model monitoring.** Drift, data integrity, performance and fairness monitoring for traditional ML models.
 - **Certifications.** Fiddler states SOC 2 Type II and HIPAA compliance for its own service.
