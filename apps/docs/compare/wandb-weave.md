@@ -7,14 +7,14 @@ description: W&B Weave traces and evaluates LLM applications, with scorers your 
 
 *Last reviewed: 2026-10-08*
 
-Intutic decides agent tool calls before they run, across 43 supported harnesses: native hook gates in 19 of them and in-process SDK gates in 17 allow or block the call (the other seven are governed through the proxies, a bridge or the harness they orchestrate), hook gates, SDK gates and the MCP governance proxy can hold it for human approval, and an opt-in default-deny egress firewall (`intutic enforce`) and sandboxed runs (`intutic exec --sandbox`) make sure the agent cannot route around it. W&B Weave, from Weights & Biases (part of CoreWeave), is a toolkit for tracing and evaluating LLM applications. Its scorers can act as guardrails: your code applies a scorer and decides whether to block or modify the response. Weave also traces MCP clients and servers. Weave helps you understand and improve an application; Intutic enforces what an agent is allowed to do.
+Intutic decides agent tool calls before they run, across 43 supported harnesses: native hook gates in 18 of them and in-process SDK gates in 17 allow or block the call (the other eight are governed through the proxies, a bridge or the harness they orchestrate), hook gates, SDK gates and the MCP governance proxy can hold it for human approval, and an opt-in default-deny egress firewall (`intutic enforce`) and sandboxed runs (`intutic exec --sandbox`) make sure the agent cannot route around it. W&B Weave, from Weights & Biases (part of CoreWeave), is a toolkit for tracing and evaluating LLM applications. Its scorers can act as guardrails: your code applies a scorer and decides whether to block or modify the response. Weave also traces MCP clients and servers. Weave helps you understand and improve an application; Intutic enforces what an agent is allowed to do.
 
 ## Comparison
 
 | | Intutic | W&B Weave |
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | Tracing and evaluation for LLM applications |
-| **Where it enforces** | Pre-execution gates inside the agent (native hook gates in 19 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Scorers your application code applies as guardrails |
+| **Where it enforces** | Pre-execution gates inside the agent (native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Scorers your application code applies as guardrails |
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Not a focus; it traces applications instrumented with its SDK |
 | **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Whatever your code does with a scorer's result |
 | **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | Traces MCP clients and servers |

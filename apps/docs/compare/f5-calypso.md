@@ -14,7 +14,7 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 | | Intutic | F5 AI Guardrails |
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | AI runtime security for models, applications and agents |
-| **Where it enforces** | Pre-execution gates inside the agent (native hook gates in 19 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Model inputs and outputs; agent actions and tool use for OpenAI- and Anthropic-format agents |
+| **Where it enforces** | Pre-execution gates inside the agent (native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Model inputs and outputs; agent actions and tool use for OpenAI- and Anthropic-format agents |
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Not named in its documentation |
 | **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Guardrail enforcement on prompts, responses and agent actions |
 | **Custom policy** | SOPs in git and WASM rules; policy documents turned into controls with Policy Guardrails | Custom guardrails written as natural-language policies |

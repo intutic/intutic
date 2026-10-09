@@ -15,7 +15,7 @@ The products on these pages start from other places: governance platforms that i
 
 | | Category | Where it enforces | Coding agents | Self-host | Source |
 |---|---|---|---|---|---|
-| **Intutic** | Agent enforcement point | The tool call (native hook gates in 19 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), model requests and responses, MCP calls, network egress, sandboxed runs | **43** supported harnesses | Yes, including air-gapped | Open core (MIT) |
+| **Intutic** | Agent enforcement point | The tool call (native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), model requests and responses, MCP calls, network egress, sandboxed runs | **43** supported harnesses | Yes, including air-gapped | Open core (MIT) |
 | [Forge](/compare/forge) | AI-agent governance platform | Its device agent, MCP gateway and LLM gateway, plus connected security tools | Six documented, including Claude Code, Codex and Cursor | Hosted; Resource Gateways run in your environment | Closed |
 | [Credo AI](/compare/credo-ai) | AI governance, risk and compliance | Agent Governor (Research Preview) hooks Claude Code tool calls | Claude Code | Private cloud (Kubernetes or VMs) | Closed |
 | [Fiddler AI](/compare/fiddler) | AI observability and guardrails | Model requests and responses at a third-party AI gateway, where it redacts or blocks PII and secrets | Any agent behind a supported gateway; telemetry for Claude Code and GitHub Copilot | SaaS, VPC, on-prem or air-gapped (Enterprise) | Closed |

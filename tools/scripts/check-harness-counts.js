@@ -26,10 +26,13 @@
  * Exit 1 on any mismatch or on any file it cannot read.
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+// The repo root: the first argument that is neither a flag nor --website's
+// path, else this checkout.
+const positional = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && all[i - 1] !== '--website')
+const ROOT = positional[0] ? resolve(positional[0]) : join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const ENUMS_TS = join(ROOT, 'packages/shared-types/src/enums.ts')
 const MATRIX = join(ROOT, 'apps/docs/reference/harness-security-matrix.md')
 
@@ -102,6 +105,38 @@ if (enumBackedRows !== realCount) {
       "\`HarnessType\`\" Notes-column phrasing the Anthropic Managed Agents row uses.",
   )
 }
+
+// ── Gate-kind counts ─────────────────────────────────────────────────────
+// How many harnesses each kind of gate covers is prose too: the docs said
+// "native hook gates in 19" for a day after Continue, whose hooks never fire,
+// moved to the proxy-governed set. gateKind.ts is where each harness's kind is
+// decided (gateKind.test.ts holds it to the gate registry): a harness in none
+// of its sets is hook-gated.
+const GATE_KIND = join(ROOT, 'services/sync-daemon/src/harness/gateKind.ts')
+if (!existsSync(GATE_KIND)) fail(`${GATE_KIND} is missing.`)
+const gateKindSrc = readFileSync(GATE_KIND, 'utf8')
+function gateSet(name) {
+  const m = new RegExp(`export const ${name}\\b[^=]*= new Set\\(\\[([\\s\\S]*?)\\]\\)`).exec(gateKindSrc)
+  if (!m) fail(`could not find ${name} in ${GATE_KIND}.`)
+  return new Set([...m[1].matchAll(/HarnessType\.([A-Z0-9_]+)/g)].map((x) => x[1]))
+}
+const sdkGated = gateSet('SDK_GATED_HARNESSES').size
+const otherKinds = new Set(
+  ['SDK_GATED_HARNESSES', 'NO_GATE_HARNESSES', 'DELEGATED_GATE_HARNESSES', 'BRIDGE_GATED_HARNESSES'].flatMap((n) => [...gateSet(n)]),
+)
+const hookGated = realCount - otherKinds.size
+const ungated = realCount - hookGated - sdkGated
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
+const asNumber = (s) => (/^\d+$/.test(s) ? Number(s) : NUMBER_WORDS.indexOf(s.toLowerCase()))
+// Each pattern only matches a phrasing that states the count of one kind.
+const GATE_KIND_PATTERNS = [
+  [/native (?:pre-execution )?hook gates in \*{0,2}(\d+)\b/gi, hookGated, 'hook-gated'],
+  [/\b(\d+) install as native hook gates\b/gi, hookGated, 'hook-gated'],
+  [/in-process SDK gates in \*{0,2}(\d+)\b/gi, sdkGated, 'SDK-gated'],
+  [/\b(\d+) SDK-gated frameworks\b/gi, sdkGated, 'SDK-gated'],
+  [/\bthe other (\w+) are governed through\b/gi, ungated, 'neither hook- nor SDK-gated'],
+  [/\bharness for the other (\w+)\b/gi, ungated, 'neither hook- nor SDK-gated'],
+]
 
 // ── Doc claims ───────────────────────────────────────────────────────────
 // Deliberately narrow patterns, not a generic "any number near the word
@@ -181,6 +216,17 @@ function checkClaim(file, claimed, quoted, expected) {
   }
 }
 
+function checkKindClaim(file, claimed, quoted, expected, kind) {
+  checked += 1
+  if (claimed !== expected) {
+    console.error(
+      `[FAIL] ${file}: says ${claimed} harnesses are ${kind} ("${quoted.trim()}"), but ` +
+        `services/sync-daemon/src/harness/gateKind.ts makes it ${expected}.`,
+    )
+    offences += 1
+  }
+}
+
 for (const file of TARGET_FILES) {
   if (!existsSync(file)) fail(`${file} is missing — this gate asserted nothing for it.`)
   const text = readFileSync(file, 'utf8')
@@ -191,6 +237,9 @@ for (const file of TARGET_FILES) {
   }
   for (const m of text.matchAll(OTHER_PATTERN)) {
     checkClaim(file, Number(m[1]), m[0], [realCount - 1, headlineCount - 1])
+  }
+  for (const [pattern, expected, kind] of GATE_KIND_PATTERNS) {
+    for (const m of text.matchAll(pattern)) checkKindClaim(file, asNumber(m[1]), m[0], expected, kind)
   }
 }
 
@@ -209,6 +258,14 @@ if (websiteFlag !== -1) {
   const markers = [...html.matchAll(/<!-- HARNESS_COUNT:sync -->\s*(\d+)[^<]*<!-- \/HARNESS_COUNT:sync -->/g)]
   if (markers.length === 0) fail(`${index} has no HARNESS_COUNT:sync markers — this mode asserted nothing.`)
   for (const m of markers) checkClaim(index, Number(m[1]), m[0], [headlineCount])
+  const WEBSITE_KINDS = [
+    [/<strong>Native hook gates<\/strong> \((\d+)/g, hookGated, 'hook-gated'],
+    [/<strong>SDK-gated frameworks<\/strong> \((\d+)/g, sdkGated, 'SDK-gated'],
+    [/\b(\d+) frameworks gated in-process\b/g, sdkGated, 'SDK-gated'],
+  ]
+  for (const [pattern, expected, kind] of WEBSITE_KINDS) {
+    for (const m of html.matchAll(pattern)) checkKindClaim(index, Number(m[1]), m[0], expected, kind)
+  }
   console.log(`[PASS] website: ${markers.length} HARNESS_COUNT:sync marker(s) in ${index} carry ${headlineCount}.`)
 }
 
@@ -225,6 +282,7 @@ if (offences > 0) {
 
 console.log(
   `[PASS] harness counts: HARNESS_COUNT=${realCount}, HARNESS_HEADLINE_COUNT=${headlineCount}, ` +
+    `${hookGated} hook-gated and ${sdkGated} SDK-gated, ` +
     `matrix has ${dataRows.length} row(s) (${documentedExceptions} documented no-HarnessType ` +
     `exception(s)), ${checked} doc claim(s) checked.`,
 )
