@@ -109,8 +109,9 @@ There is no in-place rotation: create a new key, move clients to it, then revoke
 ### Provider Keys
 
 Provision your workspace's own upstream API key for each model provider — Anthropic, OpenAI,
-Gemini, Mistral, OpenRouter, and DeepSeek today, with more providers pre-configurable ahead of their
-routing support (see below). Configuring your own key means requests bill against your
+Mistral, OpenRouter, and DeepSeek route today; Gemini and other providers can be configured ahead of
+their routing support (see below). A Gemini key saved now is the one the gateway uses once Gemini
+routing ships. Configuring your own key means requests bill against your
 provider account directly rather than Intutic's shared operator key.
 
 Each provider row shows a **Live** or **Not yet routable** badge. **Live** means the gateway
