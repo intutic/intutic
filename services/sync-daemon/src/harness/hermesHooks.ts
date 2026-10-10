@@ -11,7 +11,6 @@
  * 4. Writes `.intutic/env/hermes.env` — env snippet for IDE/shell integration.
  *
  * WS-C1 — Hermes harness (Phase 3 cross-harness defence)
- * LLD #14 — Phase 3 cross-harness defence (Gap 3)
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
  *
  * @module

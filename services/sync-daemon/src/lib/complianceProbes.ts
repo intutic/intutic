@@ -11,7 +11,6 @@
  * If the connection fails (connection refused/timed out) or succeeds with an
  * Intutic-signed certificate, containment is active and verified.
  *
- * LLD #14 — Phase 6 active compliance probes (6C-1)
  * @module
  */
 

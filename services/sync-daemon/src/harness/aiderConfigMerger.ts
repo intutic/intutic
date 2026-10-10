@@ -32,7 +32,6 @@
  * Each strip emits a governance_config_sanitized log entry visible in
  * the control plane audit feed.
  *
- * LLD #14 — Phase 3 cross-harness defence
  * HLD §3.14 — Three-Tier Defense Cascade
  *
  * @module

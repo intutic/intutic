@@ -1,5 +1,5 @@
 /**
- * The capture half of the rollback rung (TD-328), against the REAL emitted gate.
+ * The capture half of the rollback rung, against the REAL emitted gate.
  *
  * `emitPreImageCapture()` is executed exactly as the daemon writes it into a
  * generated hook, rather than reimplemented here: a test against a local copy

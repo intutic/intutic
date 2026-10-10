@@ -73,7 +73,7 @@ interface AgentFacets {
     /** How this harness's tool calls get gated — see `shared-types/src/gateKind.ts`. */
     gate_kind: GateKind
     pcas: boolean
-    /** Present when the local proxy answered GET /intutic/egress (LLD #63 §4). */
+    /** Present when the local proxy answered GET /intutic/egress. */
     egress?: EgressFacet
   }
   sops: Array<{ sop_id: string; name: string; enforced: boolean }>
@@ -95,7 +95,7 @@ interface AgentFacets {
      *  or when unscanned (there is nothing to count). */
     findingsCount: number
     /**
-     * Bundled-script enumeration for this skill (TD-356, Phase S2) — files
+     * Bundled-script enumeration for this skill (Phase S2) — files
      * alongside `SKILL.md` inside the same skill directory, discovered by
      * the same bounded, symlink-skipping walk `discoverSkillBundledFiles`
      * (`tools/cli/src/commands/skill.ts`) uses, and content-scanned via
@@ -103,13 +103,13 @@ interface AgentFacets {
      * `MAX_SCRIPT_SCAN_BYTES`. Omitted (not `{total: 0, ...}`) when the
      * skill has no bundled files at all — `agentPosture.ts`'s `skills`
      * scorer treats an absent facet as "nothing to say," not as a finding.
-     * Carries each readable file's sha256 (TD-486) — see
+     * Carries each readable file's sha256 — see
      * `SkillScriptsFacet` in `@intutic/shared-types`.
      */
     scripts?: SkillScriptsFacet
     /**
-     * sha256 of the `SKILL.md` content this row describes (Phase S5,
-     * TD-357) — lets `services/control-plane/src/routes/agents.ts` look up
+     * sha256 of the `SKILL.md` content this row describes (Phase S5) —
+     * lets `services/control-plane/src/routes/agents.ts` look up
      * a previously-judged semantic verdict
      * (`services/semanticSkillAnalysisService.ts`'s `skills:semantic:*`
      * Valkey entry) keyed by the exact content this cycle read, without this
@@ -155,7 +155,7 @@ async function exists(p: string): Promise<boolean> {
 }
 
 /**
- * Read the local proxy's egress-enforcement status (LLD #63 §4). The proxy
+ * Read the local proxy's egress-enforcement status. The proxy
  * exposes `{mode, denied, would_deny}` at `GET /intutic/egress`, but nothing
  * plumbed those counters off the machine — this is the wiring that carries them
  * up so an egress denial is visible in the dashboard, not just the proxy log.
@@ -218,7 +218,7 @@ export async function fetchGuardProbes(): Promise<GuardProbesFacet | null> {
 
 /**
  * Read the local proxy's process-lifetime instance id (`GET /intutic/instance`,
- * loopback-only like the two probes above; TD-231, Wave 5.6). The control
+ * loopback-only like the two probes above; Wave 5.6). The control
  * plane derives one `agent_sessions` row per (workspace, harness, instance)
  * for the traces that proxy publishes; knowing the id lets the daemon register
  * that same row with the workspace's git/task context instead of opening a
@@ -278,7 +278,7 @@ async function collectSops(workspaceRoot: string): Promise<AgentFacets['sops']> 
  * (siblings of `SKILL.md`), content-scanning each one via `scanScriptContent`
  * when its language is recognized and it is within `MAX_SCRIPT_SCAN_BYTES`.
  *
- * TD-356, Phase S2: mirrors `discoverSkillBundledFiles`
+ * Phase S2: mirrors `discoverSkillBundledFiles`
  * (`tools/cli/src/commands/skill.ts`) closely — the exact same caps
  * (`MAX_SKILL_DIR_DEPTH`, `MAX_FILES_PER_SKILL`) and symlink-skip discipline
  * (`Dirent.isSymbolicLink()` checked and skipped outright during `readdir`,
@@ -295,7 +295,7 @@ async function collectSops(workspaceRoot: string): Promise<AgentFacets['sops']> 
  * entirely for the common case of a skill that is only a `SKILL.md` — see
  * that field's own doc comment on the `AgentFacets['skills']` item type.
  *
- * TD-486: also sha256-hashes every bundled file it can read within
+ * Also sha256-hashes every bundled file it can read within
  * `MAX_SCRIPT_HASH_BYTES`, so the control plane can join VirusTotal
  * verdicts to this skill by hash instead of by name. Only the hashes are
  * reported — never file content.
@@ -365,7 +365,7 @@ async function readFileWithin(filePath: string, maxBytes: number): Promise<Buffe
 /**
  * Bundled skills under `<root>/.agents/skills/<name>/SKILL.md`, content-
  * scanned via `scanSkillContent` (`@intutic/shared-types`) on every cycle,
- * plus (TD-356, Phase S2) a bounded enumeration of each skill's bundled
+ * plus (Phase S2) a bounded enumeration of each skill's bundled
  * scripts via `collectSkillScripts`, attached as the `scripts` facet.
  *
  * Report-only, matching `scanSkillContent`'s own doc comment: this function

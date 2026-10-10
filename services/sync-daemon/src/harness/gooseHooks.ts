@@ -9,7 +9,6 @@
  * Also merges the Intutic proxy URL into ~/.config/goose/config.yaml.
  * After writing, calls gooseHardener to apply chmod 444 + immutable flags.
  *
- * LLD #14 — Phase 3 cross-harness defence
  * HLD §3.14 — Three-Tier Defense Cascade
  *
  * @module

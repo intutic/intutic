@@ -1,8 +1,8 @@
 /**
  * egressPolicy.ts — ships the workspace's central egress policy *to* the
  * machine, so an admin sets `enforce`/`monitor` + an allow list once in the
- * control plane rather than in every developer's local proxy config
- * (LLD #63 §4). Mirrors `policySnapshot.ts` / `approvedBypasses.ts`: fetch from
+ * control plane rather than in every developer's local proxy config.
+ * Mirrors `policySnapshot.ts` / `approvedBypasses.ts`: fetch from
  * the control plane, write a local artifact under `.intutic/hooks` with
  * integrity headers, and let the consumer (here the Rust proxy) read it.
  *

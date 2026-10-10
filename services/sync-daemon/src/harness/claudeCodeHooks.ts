@@ -5,7 +5,6 @@
  * settings.json configurations (both permissions.deny rules and PreToolUse hooks).
  * Writes configurations locally to the workspace and globally to ~/.claude/.
  *
- * LLD #14 — claudeCodeHooks.ts
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
  *
  * @module
@@ -61,9 +60,9 @@ export const REVIEW_REQUEST_VERSION = GATE_REVIEW_REQUEST_VERSION
  *
  * `z.array(z.string())` fails the WHOLE object on one bad element, and
  * `safeParse` failing here discards the entire block — every valid pattern and
- * every valid hold along with the one bad entry. That is TD-310's shape one
- * layer down: a batch rejected as a unit because of a single member, with the
- * loss silent.
+ * every valid hold along with the one bad entry. That is the log drain's old
+ * failure one layer down: a batch rejected as a unit because of a single member,
+ * with the loss silent.
  *
  * A malformed entry is dropped and the rest of the policy still compiles.
  */
@@ -403,7 +402,7 @@ function logEvent(verdict, toolName, reason, sessionId) {
       timestamp: ts,
       incidentId,
       eventId,
-      // TD-209: Claude Code's PreToolUse contract puts session_id on stdin;
+      // Claude Code's PreToolUse contract puts session_id on stdin;
       // it was parsed and dropped, so trust decay and enforcement logging fell
       // back to the synthetic per-workspace session and could never attribute
       // a block to the person whose agent made it.
@@ -633,8 +632,8 @@ function mergePreToolUse(existing: unknown, intutic: unknown[]): unknown[] {
  * Drains one append-only JSONL log to a control-plane endpoint.
  *
  * Extracted because there are two of these now — hook events and review holds —
- * and the delivery semantics below are the part that must not diverge. TD-310
- * was exactly that: a batch the control plane could never accept was retained
+ * and the delivery semantics below are the part that must not diverge. An earlier
+ * bug was exactly that: a batch the control plane could never accept was retained
  * and re-sent every cycle, so the log never drained again and every later event
  * behind it was lost, silently. A second hand-written copy of this logic is a
  * second chance to get that wrong.

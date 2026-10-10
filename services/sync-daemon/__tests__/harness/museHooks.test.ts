@@ -19,8 +19,8 @@
  *  - re-running the writer is idempotent (no duplicate hook entries, no
  *    duplicate `managed_hooks_path` churn).
  *
- * See museHooks.ts's own module doc comment, and TD-362, for why the exit-2
- * block/deny contract and the hooks.json schema itself are ASSUMED rather
+ * See museHooks.ts's own module doc comment for why the exit-2 block/deny
+ * contract and the hooks.json schema itself are ASSUMED rather
  * than confirmed against the real `muse` binary.
  *
  * @module
