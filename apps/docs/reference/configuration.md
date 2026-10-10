@@ -32,7 +32,7 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `UPSTREAM_URL` | unset | One upstream for every provider, such as a LiteLLM gateway. A provider's own variable below takes precedence. See [Standalone](/integrations/standalone) |
 | `ANTHROPIC_UPSTREAM_URL` | `https://api.anthropic.com` | Where requests for Anthropic models go |
 | `OPENAI_UPSTREAM_URL` | `https://api.openai.com` | Where requests for OpenAI models go |
-| `GEMINI_UPSTREAM_URL` | `https://generativelanguage.googleapis.com` | Where requests for Gemini models go |
+| `GEMINI_UPSTREAM_URL` | `https://generativelanguage.googleapis.com` | Where requests for Gemini models go. A `gemini-*` model asked for on `/v1/messages`, `/v1/chat/completions` or `/v1/responses` is translated to the Gemini API's `generateContent`, with the requested model and the Gemini key in `x-goog-api-key`. Requests on the Gemini API's own `/v1beta` route are not supported |
 | `MISTRAL_UPSTREAM_URL` | `https://api.mistral.ai` | Where requests for Mistral models go |
 | `OPENROUTER_UPSTREAM_URL` | `https://openrouter.ai/api` | Where requests for OpenRouter models go |
 | `DEEPSEEK_UPSTREAM_URL` | `https://api.deepseek.com` | Where requests for DeepSeek models go |
@@ -47,10 +47,10 @@ Models named `bedrock/…`, `vertex/…` and `azure/…` go to AWS Bedrock, Goog
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `AWS_REGION`, `AWS_DEFAULT_REGION` | unset | The Bedrock region. Required for Bedrock unless `providers.bedrock.region` is set |
-| `AWS_BEARER_TOKEN_BEDROCK` | unset | A Bedrock API key. Unset, requests are SigV4-signed with the AWS credential chain: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`, static keys in the shared credentials file (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`), web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` with `AWS_ROLE_ARN`), container credentials (ECS, EKS Pod Identity), then the EC2 instance role (`AWS_EC2_METADATA_DISABLED=true` skips it) |
+| `AWS_BEARER_TOKEN_BEDROCK` | unset | A Bedrock API key. Unset, requests are SigV4-signed with the AWS credential chain: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`, static keys in the shared credentials file (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`), an IAM Identity Center profile in the config file (`AWS_CONFIG_FILE`, the sign-in `aws sso login` cached), web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` with `AWS_ROLE_ARN`), container credentials (ECS, EKS Pod Identity), then the EC2 instance role (`AWS_EC2_METADATA_DISABLED=true` skips it) |
 | `GOOGLE_CLOUD_PROJECT`, `ANTHROPIC_VERTEX_PROJECT_ID` | unset | The Vertex AI project. Required for Vertex AI unless `providers.vertex.project` is set |
 | `GOOGLE_CLOUD_LOCATION`, `CLOUD_ML_REGION` | `global` | The Vertex AI location (`global`, `us`, `eu`, or a region such as `us-east5`) |
-| `GOOGLE_APPLICATION_CREDENTIALS` | unset | A service-account or `authorized_user` key file. Unset, Application Default Credentials continue with gcloud's `application-default` login, then the metadata server (Compute Engine, Google Kubernetes Engine Workload Identity, Cloud Run) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | unset | A service-account or `authorized_user` key file, or a workload identity federation configuration (`external_account`). Unset, Application Default Credentials continue with gcloud's `application-default` login, then the metadata server (Compute Engine, Google Kubernetes Engine Workload Identity, Cloud Run) |
 | `AZURE_OPENAI_ENDPOINT` | unset | The Azure OpenAI or Azure AI Foundry resource, `https://<resource>.openai.azure.com` or `https://<resource>.services.ai.azure.com` |
 | `AZURE_OPENAI_API_KEY` | unset | The resource's API key. Without one, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` sign in to Microsoft Entra ID with client credentials |
 | `GCE_METADATA_HOST` | `metadata.google.internal` | The Google metadata server Application Default Credentials ask for a token when no key file is found |

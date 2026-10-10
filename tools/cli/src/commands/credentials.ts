@@ -31,6 +31,13 @@ interface CredentialsCliOpts {
   dev?: boolean
 }
 
+/** POST /api/v1/workspace/provider-credentials/:provider/verify */
+interface VerifyResult {
+  status: 'valid' | 'invalid' | 'unknown' | 'unsupported' | 'not_provisioned'
+  httpStatus?: number
+  detail: string
+}
+
 interface CredentialStatusRow {
   provider: string
   routingLive: boolean
@@ -175,12 +182,29 @@ export async function runCredentialsSet(
       body,
     )
 
+    // Checked against the provider as soon as it is saved, server-side, so
+    // the operator learns now — not on the first failed request — whether
+    // the credential works. A failed check never undoes the save.
+    let verification: VerifyResult | null = null
+    try {
+      verification = await client.post<VerifyResult>(
+        `/api/v1/workspace/provider-credentials/${encodeURIComponent(provider)}/verify`,
+        {},
+      )
+    } catch {
+      verification = null
+    }
+
     if (opts.json) {
-      console.log(JSON.stringify(res, null, 2))
+      console.log(JSON.stringify({ ...res, verification }, null, 2))
       return
     }
 
     log.success(`${provider}: provisioned (…${res.lastFour ?? '????'}).`)
+    if (verification?.status === 'valid') log.success(`  Verified: ${verification.detail}`)
+    else if (verification?.status === 'invalid') {
+      log.warn(`  ${verification.detail}. Check the values and run this command again.`)
+    } else if (verification) log.dim(`  Not verified: ${verification.detail}`)
     if (def.usageHint) log.dim(`  ${def.usageHint}`)
     if (!res.routingLive) {
       log.warn(

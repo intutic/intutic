@@ -312,6 +312,46 @@ async fn cloud_upstreams_are_served_and_governed_end_to_end() {
         .mount(&up)
         .await;
 
+    // ── First-party Gemini off its own route, and Claude on Foundry ──
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/gemini-2.5-flash:generateContent"))
+        .and(header("x-goog-api-key", "gemini-cloud-test-key"))
+        .and(body_string_contains("gemini-openai"))
+        .and(body_string_contains("\"contents\""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "candidates": [{"content": {"role": "model", "parts": [{"text": "served by gemini api"}]}, "finishReason": "STOP"}],
+            "usageMetadata": {"promptTokenCount": 4, "candidatesTokenCount": 3}
+        })))
+        .expect(1)
+        .mount(&up)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/gemini-2.5-pro:streamGenerateContent"))
+        .and(query_param("alt", "sse"))
+        .and(body_string_contains("gemini-anthropic"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"served by gemini stream\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":4}}\r\n\r\n",
+            "text/event-stream",
+        ))
+        .expect(1)
+        .mount(&up)
+        .await;
+    for marker in ["foundry-anthropic", "foundry-openai"] {
+        Mock::given(method("POST"))
+            .and(path("/anthropic/v1/messages"))
+            .and(header("api-key", "azure-cloud-test-key"))
+            .and(header("anthropic-version", "2023-06-01"))
+            .and(body_string_contains(marker))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "msg_az", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
+                "content": [{"type": "text", "text": format!("served by foundry claude ({marker})")}],
+                "stop_reason": "end_turn", "stop_sequence": null, "usage": {"input_tokens": 6, "output_tokens": 4}
+            })))
+            .expect(1)
+            .mount(&up)
+            .await;
+    }
+
     // ── Process environment: nothing real is reachable ──
     let home = std::env::temp_dir().join(format!("intutic-cloud-e2e-{}", std::process::id()));
     let sops_dir = home.join("sops");
@@ -326,6 +366,8 @@ async fn cloud_upstreams_are_served_and_governed_end_to_end() {
     );
     std::env::set_var("GCE_METADATA_HOST", up.address().to_string());
     std::env::set_var("TEST_AZURE_KEY", "azure-cloud-test-key");
+    std::env::set_var("GEMINI_UPSTREAM_URL", up.uri());
+    std::env::set_var("GEMINI_API_KEY", "gemini-cloud-test-key");
     std::env::set_var("ANTHROPIC_UPSTREAM_URL", anthropic.uri());
     std::env::set_var(
         "ANTHROPIC_API_KEY",
@@ -491,13 +533,43 @@ intutic_settings:
             "Cleaning up.",
             Some("call_azdeny"),
         ),
+        // Anthropic's format to an Azure deployment, and an OpenAI-format
+        // request to a Claude-named one: Foundry's Messages API.
         (
-            "azure-wrong-wire",
+            "foundry-anthropic",
             "/v1/messages",
-            "azure/gpt4o-prod",
+            "azure/my-claude",
             false,
-            400,
-            "unsupported_route",
+            200,
+            "served by foundry claude (foundry-anthropic)",
+            None,
+        ),
+        (
+            "foundry-openai",
+            "/v1/chat/completions",
+            "azure/claude-opus-5-5",
+            false,
+            200,
+            "served by foundry claude (foundry-openai)",
+            None,
+        ),
+        // First-party Gemini asked for in OpenAI's and Anthropic's formats.
+        (
+            "gemini-openai",
+            "/v1/chat/completions",
+            "gemini-2.5-flash",
+            false,
+            200,
+            "served by gemini api",
+            None,
+        ),
+        (
+            "gemini-anthropic",
+            "/v1/messages",
+            "gemini/gemini-2.5-pro",
+            true,
+            200,
+            "served by gemini stream",
             None,
         ),
         (

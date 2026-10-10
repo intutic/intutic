@@ -2423,6 +2423,8 @@ intutic credentials set azure_openai \
   --field apiKey=<API_KEY>
 ```
 
+After saving, the command checks the credential against the provider (the same check as **Test** on the Provider Keys card) and prints whether it was verified, rejected, or could not be verified; `--json` includes it as `verification`. A rejected credential is still saved.
+
 Requests then name the provider's models as `bedrock/<model id>`, `vertex/<model>` or `azure/<deployment>`; see [AWS Bedrock](/integrations/aws-bedrock), [Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai).
 
 If BYO-key enforcement is on for your gateway, requests for a provider with no provisioned key

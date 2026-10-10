@@ -9,7 +9,8 @@
 //!
 //! - **AWS chain**: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`
 //!   (`AWS_SESSION_TOKEN`); static keys in the shared credentials file
-//!   (`AWS_PROFILE`); web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` +
+//!   (`AWS_PROFILE`); an IAM Identity Center profile in the config file
+//!   (`aws sso login`, `super::aws_sso`); web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` +
 //!   `AWS_ROLE_ARN`, EKS IRSA) via STS `AssumeRoleWithWebIdentity`; container
 //!   credentials (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` / `_FULL_URI`, ECS
 //!   and EKS Pod Identity); EC2 instance metadata (IMDSv2) unless
@@ -44,14 +45,14 @@ pub struct AuthError {
 }
 
 impl AuthError {
-    fn rejected(message: impl Into<String>) -> Self {
+    pub(crate) fn rejected(message: impl Into<String>) -> Self {
         AuthError {
             status: 401,
             kind: "authentication_error",
             message: message.into(),
         }
     }
-    fn unreachable(message: impl Into<String>) -> Self {
+    pub(crate) fn unreachable(message: impl Into<String>) -> Self {
         AuthError {
             status: 502,
             kind: "api_error",
@@ -63,7 +64,7 @@ impl AuthError {
 // ── Cache ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-enum Cached {
+pub(crate) enum Cached {
     Token(Secret),
     Aws(AwsCredentials),
 }
@@ -74,14 +75,14 @@ static CACHE: Lazy<Mutex<HashMap<String, (Cached, Instant)>>> =
 /// Refresh this long before the upstream's stated expiry.
 const EXPIRY_MARGIN: Duration = Duration::from_secs(300);
 
-fn cache_get(key: &str) -> Option<Cached> {
+pub(crate) fn cache_get(key: &str) -> Option<Cached> {
     let map = CACHE.lock().unwrap_or_else(|p| p.into_inner());
     map.get(key)
         .filter(|(_, until)| Instant::now() < *until)
         .map(|(c, _)| c.clone())
 }
 
-fn cache_put(key: String, value: Cached, lifetime: Duration) {
+pub(crate) fn cache_put(key: String, value: Cached, lifetime: Duration) {
     let Some(until) = Instant::now().checked_add(lifetime.saturating_sub(EXPIRY_MARGIN)) else {
         return;
     };
@@ -92,7 +93,7 @@ fn cache_put(key: String, value: Cached, lifetime: Duration) {
     map.insert(key, (value, until));
 }
 
-fn fingerprint(parts: &[&str]) -> String {
+pub(crate) fn fingerprint(parts: &[&str]) -> String {
     let mut h = Sha256::new();
     for p in parts {
         h.update(p.as_bytes());
@@ -136,6 +137,7 @@ struct AwsEndpoints {
     sts: Option<String>,
     container_host: String,
     imds: String,
+    sso: super::aws_sso::SsoEndpoints,
 }
 
 impl Default for AwsEndpoints {
@@ -144,6 +146,7 @@ impl Default for AwsEndpoints {
             sts: None,
             container_host: "http://169.254.170.2".into(),
             imds: "http://169.254.169.254".into(),
+            sso: Default::default(),
         }
     }
 }
@@ -164,6 +167,15 @@ async fn aws_chain(
     }
     if let Some(c) = profile_credentials(&env) {
         return Ok(c);
+    }
+    // An IAM Identity Center profile in the config file (`aws sso login`).
+    if let Some(profile) = super::aws_sso::sso_profile(&env) {
+        let profile = profile?;
+        let home = env("HOME")
+            .or_else(|| env("USERPROFILE"))
+            .unwrap_or_default();
+        let cache_dir = std::path::Path::new(&home).join(".aws/sso/cache");
+        return super::aws_sso::sso_credentials(client, &profile, &cache_dir, &ep.sso).await;
     }
     if let (Some(token_file), Some(role)) =
         (env("AWS_WEB_IDENTITY_TOKEN_FILE"), env("AWS_ROLE_ARN"))
@@ -291,8 +303,8 @@ async fn imds_credentials(
 }
 
 /// Static keys from the shared credentials file for `AWS_PROFILE` (default
-/// `default`). Profiles that need SSO or role assumption are not resolved
-/// here; the environment or a workload role covers servers.
+/// `default`). IAM Identity Center profiles are `aws_sso`'s; profiles that
+/// assume a role (`role_arn` + `source_profile`) are not resolved.
 fn profile_credentials(env: &impl Fn(&str) -> Option<String>) -> Option<AwsCredentials> {
     let path = env("AWS_SHARED_CREDENTIALS_FILE").or_else(|| {
         env("HOME")
@@ -359,7 +371,7 @@ fn sts_credentials(xml: &str) -> Option<(AwsCredentials, Duration)> {
     Some((creds, lifetime_until(tag("Expiration").as_deref())))
 }
 
-fn lifetime_until(expiration: Option<&str>) -> Duration {
+pub(crate) fn lifetime_until(expiration: Option<&str>) -> Duration {
     expiration
         .and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok())
         .and_then(|t| {
@@ -394,12 +406,15 @@ const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platfo
 
 pub async fn gcp_token(client: &reqwest::Client, auth: &GcpAuth) -> Result<Secret, AuthError> {
     match auth {
-        GcpAuth::Json(doc) => gcp_from_document(client, doc.expose(), GOOGLE_TOKEN_URI).await,
+        // A workspace-stored document: never `external_account`.
+        GcpAuth::Json(doc) => {
+            gcp_from_document(client, doc.expose(), GOOGLE_TOKEN_URI, false).await
+        }
         GcpAuth::File(path) => {
             let doc = std::fs::read_to_string(path).map_err(|_| {
                 AuthError::rejected("the Google credentials file could not be read")
             })?;
-            gcp_from_document(client, &doc, GOOGLE_TOKEN_URI).await
+            gcp_from_document(client, &doc, GOOGLE_TOKEN_URI, true).await
         }
         GcpAuth::Adc => {
             if let Some(path) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
@@ -411,12 +426,12 @@ pub async fn gcp_token(client: &reqwest::Client, auth: &GcpAuth) -> Result<Secre
                         "GOOGLE_APPLICATION_CREDENTIALS names a file that could not be read",
                     )
                 })?;
-                return gcp_from_document(client, &doc, GOOGLE_TOKEN_URI).await;
+                return gcp_from_document(client, &doc, GOOGLE_TOKEN_URI, true).await;
             }
             if let Some(doc) =
                 gcloud_well_known_file().and_then(|p| std::fs::read_to_string(p).ok())
             {
-                return gcp_from_document(client, &doc, GOOGLE_TOKEN_URI).await;
+                return gcp_from_document(client, &doc, GOOGLE_TOKEN_URI, true).await;
             }
             let host = std::env::var("GCE_METADATA_HOST")
                 .ok()
@@ -443,10 +458,15 @@ fn gcloud_well_known_file() -> Option<std::path::PathBuf> {
 /// are exchanged; a document's own `token_uri` is ignored, because a
 /// workspace-supplied document would otherwise choose where the gateway
 /// sends a signed assertion.
+///
+/// `operator` is true for the operator's own credential file, the only place
+/// an `external_account` (workload identity federation) document is taken
+/// from: it names files to read and URLs to call (`super::gcp_external`).
 async fn gcp_from_document(
     client: &reqwest::Client,
     doc: &str,
     token_uri: &str,
+    operator: bool,
 ) -> Result<Secret, AuthError> {
     let v: Value = serde_json::from_str(doc)
         .map_err(|_| AuthError::rejected("the Google credential is not JSON"))?;
@@ -495,9 +515,23 @@ async fn gcp_from_document(
             cache_put(key, Cached::Token(token.clone()), lifetime);
             Ok(token)
         }
+        "external_account" if operator => {
+            super::gcp_external::token(
+                client,
+                &v,
+                &super::gcp_external::Options::default(),
+                &|k: &str| std::env::var(k).ok(),
+            )
+            .await
+        }
+        "external_account" => Err(AuthError::rejected(
+            "an external_account (workload identity federation) credential is accepted only from \
+             the operator's credential file, not as a stored workspace credential",
+        )),
         other => Err(AuthError::rejected(format!(
             "Google credential type '{other}' is not supported; use a service-account key, \
-             `gcloud auth application-default login`, or the metadata server"
+             an external_account credential file, `gcloud auth application-default login`, \
+             or the metadata server"
         ))),
     }
 }
@@ -603,7 +637,7 @@ async fn gcp_metadata_token(client: &reqwest::Client, base: &str) -> Result<Secr
     Ok(token)
 }
 
-async fn oauth_exchange(
+pub(crate) async fn oauth_exchange(
     client: &reqwest::Client,
     url: &str,
     form: &[(&str, &str)],
@@ -621,7 +655,7 @@ async fn oauth_exchange(
 
 /// `{access_token, expires_in}` — the shape Google's token endpoint, its
 /// metadata server, Entra ID and Azure's managed-identity endpoints share.
-async fn token_response(
+pub(crate) async fn token_response(
     resp: reqwest::Response,
     what: &str,
 ) -> Result<(Secret, Duration), AuthError> {
@@ -651,14 +685,20 @@ async fn token_response(
 
 // ── Azure ────────────────────────────────────────────────────────────
 
-/// The resource Entra tokens are requested for (Azure OpenAI and Foundry).
-const AZURE_RESOURCE: &str = "https://cognitiveservices.azure.com";
+/// The resource Entra tokens are requested for on Azure OpenAI's and
+/// Foundry's OpenAI v1 API.
+pub const AZURE_OPENAI_RESOURCE: &str = "https://cognitiveservices.azure.com";
+
+/// The resource Entra tokens are requested for on Foundry's Claude endpoint
+/// (`/anthropic/v1/messages`), per Anthropic's Foundry guide.
+pub const AZURE_AI_RESOURCE: &str = "https://ai.azure.com";
 
 /// The header that authenticates an Azure call: `api-key`, or
-/// `authorization: Bearer <Entra token>`.
+/// `authorization: Bearer <Entra token>` for `resource`.
 pub async fn azure_header(
     client: &reqwest::Client,
     auth: &AzureAuth,
+    resource: &str,
 ) -> Result<(&'static str, Secret), AuthError> {
     match auth {
         AzureAuth::ApiKey(k) => Ok(("api-key", k.clone())),
@@ -676,7 +716,7 @@ pub async fn azure_header(
                 ));
             }
             let url = format!("https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token");
-            entra_client_credentials(client, &url, client_id, secret).await
+            entra_client_credentials(client, &url, client_id, secret, resource).await
         }
         AzureAuth::ManagedIdentity { client_id } => {
             let app_service = std::env::var("IDENTITY_ENDPOINT")
@@ -687,6 +727,7 @@ pub async fn azure_header(
                 client_id.as_deref(),
                 app_service,
                 "http://169.254.169.254",
+                resource,
             )
             .await
         }
@@ -702,15 +743,16 @@ async fn entra_client_credentials(
     url: &str,
     client_id: &str,
     secret: &Secret,
+    resource: &str,
 ) -> Result<(&'static str, Secret), AuthError> {
     let key = format!(
         "azure-sp:{}",
-        fingerprint(&[url, client_id, secret.expose()])
+        fingerprint(&[url, client_id, secret.expose(), resource])
     );
     if let Some(Cached::Token(t)) = cache_get(&key) {
         return Ok(("authorization", bearer(&t)));
     }
-    let scope = format!("{AZURE_RESOURCE}/.default");
+    let scope = format!("{resource}/.default");
     let form = [
         ("grant_type", "client_credentials"),
         ("client_id", client_id),
@@ -727,12 +769,13 @@ async fn managed_identity(
     client_id: Option<&str>,
     app_service: Option<(String, String)>,
     imds: &str,
+    resource: &str,
 ) -> Result<(&'static str, Secret), AuthError> {
-    let key = format!("azure-mi:{}", client_id.unwrap_or(""));
+    let key = format!("azure-mi:{}:{resource}", client_id.unwrap_or(""));
     if let Some(Cached::Token(t)) = cache_get(&key) {
         return Ok(("authorization", bearer(&t)));
     }
-    let mut query = vec![("resource", AZURE_RESOURCE.to_string())];
+    let mut query = vec![("resource", resource.to_string())];
     if let Some(id) = client_id {
         query.push(("client_id", id.to_string()));
     }
@@ -842,8 +885,8 @@ pub(crate) mod tests {
         .to_string();
         let client = reqwest::Client::new();
         let uri = format!("{}/token", server.uri());
-        let first = gcp_from_document(&client, &doc, &uri).await.unwrap();
-        let second = gcp_from_document(&client, &doc, &uri).await.unwrap();
+        let first = gcp_from_document(&client, &doc, &uri, false).await.unwrap();
+        let second = gcp_from_document(&client, &doc, &uri, false).await.unwrap();
         assert_eq!(first.expose(), "ya29.minted");
         assert_eq!(second.expose(), "ya29.minted");
     }
@@ -869,6 +912,7 @@ pub(crate) mod tests {
             &reqwest::Client::new(),
             &doc,
             &format!("{}/token", server.uri()),
+            false,
         )
         .await
         .unwrap_err();
@@ -877,15 +921,29 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn external_account_credentials_are_refused_with_the_supported_options() {
+    async fn external_account_credentials_are_taken_from_the_operator_only() {
         let err = gcp_from_document(
             &reqwest::Client::new(),
-            r#"{"type":"external_account"}"#,
+            r#"{"type":"external_account","credential_source":{"file":"/etc/passwd"}}"#,
             "http://unused",
+            false,
         )
         .await
         .unwrap_err();
-        assert!(err.message.contains("external_account"));
+        assert!(
+            err.message.contains("operator's credential file"),
+            "{}",
+            err.message
+        );
+        let err = gcp_from_document(
+            &reqwest::Client::new(),
+            r#"{"type":"impersonated_service_account"}"#,
+            "http://unused",
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.message.contains("external_account credential file"));
     }
 
     #[tokio::test]
@@ -1079,6 +1137,7 @@ pub(crate) mod tests {
             &format!("{}/tenant/oauth2/v2.0/token", server.uri()),
             "client-a",
             &Secret::new("secret-a"),
+            AZURE_OPENAI_RESOURCE,
         )
         .await
         .unwrap();
@@ -1092,6 +1151,10 @@ pub(crate) mod tests {
         Mock::given(method("GET"))
             .and(path("/metadata/identity/oauth2/token"))
             .and(header("metadata", "true"))
+            .and(wiremock::matchers::query_param(
+                "resource",
+                "https://ai.azure.com",
+            ))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(
                     serde_json::json!({"access_token":"mi-token","expires_in":"3599"}),
@@ -1099,10 +1162,15 @@ pub(crate) mod tests {
             )
             .mount(&server)
             .await;
-        let (_, value) =
-            managed_identity(&reqwest::Client::new(), Some("uami-1"), None, &server.uri())
-                .await
-                .unwrap();
+        let (_, value) = managed_identity(
+            &reqwest::Client::new(),
+            Some("uami-1"),
+            None,
+            &server.uri(),
+            AZURE_AI_RESOURCE,
+        )
+        .await
+        .unwrap();
         assert_eq!(value.expose(), "Bearer mi-token");
     }
 
@@ -1115,6 +1183,7 @@ pub(crate) mod tests {
                 client_id: "c".into(),
                 secret: Secret::new("s"),
             },
+            AZURE_OPENAI_RESOURCE,
         )
         .await
         .unwrap_err();

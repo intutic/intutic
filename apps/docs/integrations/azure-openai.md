@@ -1,6 +1,6 @@
 # Azure OpenAI <Badge type="tip" text="Open-Core" />
 
-The proxy serves Azure OpenAI and Azure AI Foundry deployments directly, through Azure's OpenAI v1 API, and applies the same governance it applies to OpenAI — DLP and PII scanning in both directions, SOP gates, WASM and Rego rules, the response gate, cost metering and budgets, traces and the response cache.
+The proxy serves Azure OpenAI and Azure AI Foundry deployments directly — OpenAI models through Azure's OpenAI v1 API, and Claude models on Foundry through the Messages API Foundry serves — and applies the same governance it applies to OpenAI — DLP and PII scanning in both directions, SOP gates, WASM and Rego rules, the response gate, cost metering and budgets, traces and the response cache.
 
 ## Naming a deployment
 
@@ -32,14 +32,30 @@ The endpoint must be an `https` address on `*.openai.azure.com`, `*.services.ai.
 2. Microsoft Entra ID client credentials: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` (or the matching `providers.azure` settings);
 3. the host's managed identity: `providers.azure.managed_identity: true`, with `client_id` for a user-assigned identity.
 
-Entra ID tokens are requested for `https://cognitiveservices.azure.com/.default` and cached until five minutes before they expire; the identity needs the Cognitive Services OpenAI User role on the resource.
+Entra ID tokens are requested for `https://cognitiveservices.azure.com/.default` (for Claude deployments, `https://ai.azure.com/.default`) and cached until five minutes before they expire; the identity needs the Cognitive Services OpenAI User role on the resource (Foundry User for Claude).
+
+A stored credential is checked as soon as it is saved, and again from **Test** on the Provider Keys card, by listing the resource's models with the key.
 
 ## What you can send
 
-Send Azure deployments through `/v1/chat/completions` or `/v1/responses` — the OpenAI formats Azure speaks. Requests and answers, streaming and tool calls included, pass through as OpenAI's; Azure's extra content-filter chunks are forwarded as they arrive. A request to `/v1/messages` naming an Azure deployment is refused with `400 unsupported_route`.
+Send OpenAI-model deployments through `/v1/chat/completions` or `/v1/responses` — the OpenAI formats Azure speaks. Requests and answers, streaming and tool calls included, pass through as OpenAI's; Azure's extra content-filter chunks are forwarded as they arrive.
+
+### Claude on Foundry
+
+Claude models deployed on a Foundry resource (`https://<resource>.services.ai.azure.com`) are served through the Messages API Foundry exposes at `<endpoint>/anthropic/v1/messages`: the request goes unchanged, with the deployment name as `model`, the key in `api-key` and `anthropic-version`, and the answer and stream come back as Anthropic's. The proxy uses this API when:
+
+- the request is in Anthropic's format (`/v1/messages`), whatever the deployment is called; or
+- the deployment's name starts with `claude` (Foundry's default deployment names are the model ids, such as `claude-opus-5-5`), in which case OpenAI-format requests are translated to it as for any Claude model.
+
+```bash
+curl http://localhost:4000/v1/messages -H "authorization: Bearer $INTUTIC_KEY" \
+  -d '{"model": "azure/claude-opus-5-5", "max_tokens": 1024, "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+An Azure OpenAI resource (`*.openai.azure.com`) cannot host Claude, so a Claude request for one is refused with `400` and the reason. Features Foundry does not offer for Claude (for example the Message Batches and Files APIs, or code execution on Azure-hosted deployments) are refused by Foundry itself.
 
 ## Errors, retries and cost
 
 Azure's errors are OpenAI's and reach the client unchanged. A `429` carries `retry-after-ms`, which the proxy's [retries](/guide/intelligent-routing#retries-and-fallbacks) honour; a `400 content_filter` refusal is final.
 
-Cost is priced by the deployment name, so `azure/gpt-4o` costs what `gpt-4o` costs. A deployment named after nothing in the price list is charged at the conservative estimate; name deployments after their model, or alias them as above, to price them exactly.
+Cost is priced by the deployment name, so `azure/gpt-4o` costs what `gpt-4o` costs and `azure/claude-opus-5-5` what `claude-opus-5-5` costs. A deployment named after nothing in the price list is charged at the conservative estimate; name deployments after their model, or alias them as above, to price them exactly.

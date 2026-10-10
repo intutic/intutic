@@ -67,6 +67,27 @@ describe('intutic credentials', () => {
     expect(JSON.parse(init.body)).toEqual({ apiKey: 'sk-ant-abcwxyz' })
   })
 
+  it('set checks the saved credential against the provider and says what came back', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ provider: 'bedrock', routingLive: true, provisioned: true, lastFour: 'WXYZ', updatedAt: '2026-10-09T00:00:00Z' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ provider: 'bedrock', status: 'invalid', httpStatus: 403, detail: 'AWS Bedrock rejected the credential (HTTP 403)' }),
+      })
+
+    await runCredentialsSet('bedrock', { field: ['awsRegion=us-east-1', 'apiKey=bedrock-key-12345'] })
+
+    const [url, init] = fetchMock.mock.calls[1]
+    expect(url).toBe('https://api.test.invalid/api/v1/workspace/provider-credentials/bedrock/verify')
+    expect(init.method).toBe('POST')
+    const printed = [...logSpy.mock.calls, ...errSpy.mock.calls].map((c: unknown[]) => String(c[0])).join('\n')
+    expect(printed).toContain('rejected the credential')
+    expect(printed).not.toContain('bedrock-key-12345')
+  })
+
   it('set hits PUT with multiple fields for a multi-field provider', async () => {
     fetchMock.mockResolvedValue({
       ok: true,

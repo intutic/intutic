@@ -388,6 +388,58 @@ impl Provider {
     }
 }
 
+/// The provider a request for `model` reaches, given the wire it arrived in
+/// (`inbound`). Two targets depend on it (`cloud::for_inbound`):
+///
+/// - a first-party Gemini model asked for on `/v1/messages`,
+///   `/v1/chat/completions` or `/v1/responses` goes through the Gemini
+///   translation (`Cloud(GoogleAi)`); on its own `/v1beta` route it is
+///   passed through untouched;
+/// - an Azure deployment takes Foundry's Messages API when the request is in
+///   Anthropic's format or the deployment is a Claude one.
+fn route_for_inbound(target: Provider, inbound: &Provider, model: &str) -> Provider {
+    use crate::cloud::CloudProvider;
+    match target {
+        Provider::Gemini if *inbound != Provider::Gemini => {
+            Provider::Cloud(CloudProvider::GoogleAi)
+        }
+        Provider::Cloud(c) => match crate::cloud::cloud_model_for(c, model) {
+            Some(cm) => Provider::Cloud(crate::cloud::for_inbound(
+                c,
+                *inbound == Provider::Anthropic,
+                &cm,
+            )),
+            None => Provider::Cloud(c),
+        },
+        other => other,
+    }
+}
+
+/// A first-party Gemini key for a request translated to the Gemini API: the
+/// same key, under the same rules, a request on the `/v1beta` route gets — a
+/// `vk_` request's workspace key (or, unless BYO-key is enforced, the
+/// operator's `GEMINI_API_KEY`); a raw caller's own `x-goog-api-key` first.
+async fn google_ai_config(
+    store: &Arc<dyn LocalStore>,
+    workspace_id: &str,
+    require_provisioned: bool,
+    caller_key: Option<&str>,
+) -> Option<crate::cloud::CloudConfig> {
+    let key = match caller_key.map(str::trim).filter(|k| !k.is_empty()) {
+        Some(k) => Some(k.to_string()),
+        None => {
+            fetch_provider_credential(store, workspace_id, &Provider::Gemini, require_provisioned)
+                .await
+        }
+    }?;
+    Some(crate::cloud::CloudConfig::GoogleAi(
+        crate::cloud::config::GoogleAiConfig {
+            base_url: Provider::Gemini.upstream_base_url(),
+            api_key: crate::cloud::config::Secret::new(key),
+        },
+    ))
+}
+
 /// The harness this request is attributed to in traces, sessions and the
 /// tool-pin key.
 ///
@@ -1708,23 +1760,41 @@ async fn try_fallbacks(
             },
             None => get_model_provider(&model),
         };
+        // First-party Gemini, off its own route, is the Gemini translation.
+        let mut provider = match provider {
+            Provider::Gemini if *req.inbound != Provider::Gemini => {
+                Provider::Cloud(crate::cloud::CloudProvider::GoogleAi)
+            }
+            other => other,
+        };
         // A cloud target needs its region, project or endpoint and credential
         // before anything else: the Bedrock id for "the same model" depends on
         // the region, and a cloud with nothing configured is skipped like any
         // provider without a credential.
         let cloud_config = match provider {
-            Provider::Cloud(cloud) => match crate::cloud::config::resolve(
-                cloud,
-                &req.state.store,
-                req.workspace_id,
-                req.virtual_key,
-                req.require_provisioned,
-                &req.state.config.intutic_settings.providers,
-            )
-            .await
-            {
+            Provider::Cloud(cloud) => match if cloud == crate::cloud::CloudProvider::GoogleAi {
+                google_ai_config(
+                    &req.state.store,
+                    req.workspace_id,
+                    req.require_provisioned,
+                    None,
+                )
+                .await
+                .ok_or(())
+            } else {
+                crate::cloud::config::resolve(
+                    cloud,
+                    &req.state.store,
+                    req.workspace_id,
+                    req.virtual_key,
+                    req.require_provisioned,
+                    &req.state.config.intutic_settings.providers,
+                )
+                .await
+                .map_err(|_| ())
+            } {
                 Ok(cfg) => Some((cloud, cfg)),
-                Err(_) => {
+                Err(()) => {
                     attempts.push(UpstreamAttempt::skipped(
                         &model,
                         &provider_wire_id(&provider),
@@ -1745,11 +1815,22 @@ async fn try_fallbacks(
             };
             model = crate::cloud::same_model_for(req.primary_model, into, region);
         }
-        // A target that pins a cloud model without its prefix still names it.
-        if let Some((cloud, _)) = &cloud_config {
-            if crate::cloud::parse_prefixed(&model).map(|m| m.provider) != Some(*cloud) {
+        // A target that pins a cloud model without its prefix still names it
+        // (first-party Gemini names carry none).
+        let mut cloud_config = cloud_config;
+        if let Some((cloud, _)) = cloud_config.as_mut() {
+            if *cloud != crate::cloud::CloudProvider::GoogleAi
+                && crate::cloud::parse_prefixed(&model).map(|m| m.provider) != Some(cloud.family())
+            {
                 model = format!("{}/{model}", cloud.prefix());
             }
+            // Now that the model is known: an Azure Claude deployment, or an
+            // Anthropic-format request, takes Foundry's Messages API.
+            let refined = route_for_inbound(Provider::Cloud(*cloud), req.inbound, &model);
+            if let Provider::Cloud(c) = refined {
+                *cloud = c;
+            }
+            provider = refined;
         }
         // The operator's Anthropic override rewrites every Anthropic-bound
         // model after routing; a fallback is no exception.
@@ -1825,12 +1906,12 @@ async fn try_fallbacks(
 
         let outcome = match &cloud_config {
             Some((cloud, cfg)) => {
-                let cloud_model = crate::cloud::CloudModel {
-                    provider: *cloud,
-                    model: crate::cloud::parse_prefixed(&model)
-                        .map(|m| m.model)
-                        .unwrap_or_else(|| model.clone()),
-                };
+                let cloud_model = crate::cloud::cloud_model_for(*cloud, &model).unwrap_or(
+                    crate::cloud::CloudModel {
+                        provider: *cloud,
+                        model: model.clone(),
+                    },
+                );
                 crate::routing::retry::send_with_retry(
                     req.retry,
                     req.deadline,
@@ -5050,7 +5131,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // `mut`, like `actual_model`: an upstream fallback that serves the request
     // moves the response onto the target that answered.
-    let mut target_provider = get_model_provider(&actual_model);
+    let mut target_provider =
+        route_for_inbound(get_model_provider(&actual_model), &provider, &actual_model);
     // Wire SHAPE, not upstream identity -- Mistral/OpenRouter are distinct
     // targets (own base URL, own credential) that happen to speak the exact
     // same OpenAI-compatible wire format `provider` (from_path, always
@@ -5251,7 +5333,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // by `crate::cloud::send`, per call, because SigV4 signs each request.
     let cloud_target: Option<(crate::cloud::CloudModel, crate::cloud::CloudConfig)> =
         if let Provider::Cloud(cloud) = target_provider {
-            let Some(cloud_model) = crate::cloud::resolve(&actual_model) else {
+            let Some(cloud_model) = crate::cloud::cloud_model_for(cloud, &actual_model) else {
                 return json_error(
                     StatusCode::BAD_REQUEST,
                     "unsupported_route",
@@ -5263,16 +5345,35 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 && crate::gateway::provisioned_key_required_for(
                     key_record.as_ref().and_then(|k| k.byok_required),
                 );
-            match crate::cloud::config::resolve(
-                cloud,
-                &state.store,
-                &workspace_id,
-                virtual_key,
-                require_provisioned,
-                &state.config.intutic_settings.providers,
-            )
-            .await
-            {
+            let resolved = if cloud == crate::cloud::CloudProvider::GoogleAi {
+                // A raw caller may name its own Gemini key; a `vk_` never
+                // leaves the proxy, so its request uses the workspace's.
+                let caller_key = (!virtual_key)
+                    .then(|| headers.get("x-goog-api-key").and_then(|v| v.to_str().ok()))
+                    .flatten();
+                match google_ai_config(&state.store, &workspace_id, require_provisioned, caller_key)
+                    .await
+                {
+                    Some(cfg) => Ok(cfg),
+                    None if require_provisioned => Err(
+                        crate::cloud::CredentialError::NotProvisioned(cloud.display_name()),
+                    ),
+                    None => Err(crate::cloud::CredentialError::NotConfigured(
+                        cloud.display_name(),
+                    )),
+                }
+            } else {
+                crate::cloud::config::resolve(
+                    cloud,
+                    &state.store,
+                    &workspace_id,
+                    virtual_key,
+                    require_provisioned,
+                    &state.config.intutic_settings.providers,
+                )
+                .await
+            };
+            match resolved {
                 Ok(cfg) => Some((cloud_model, cfg)),
                 Err(crate::cloud::CredentialError::NotProvisioned(name)) => {
                     return json_error(

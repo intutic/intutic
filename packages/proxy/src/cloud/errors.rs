@@ -182,6 +182,17 @@ pub fn from_vertex(
     headers: &reqwest::header::HeaderMap,
     body: &str,
 ) -> reqwest::Response {
+    from_google(status, headers, body, "Vertex AI")
+}
+
+/// A Google API error (Vertex AI or the Gemini API) as an Anthropic error,
+/// its message prefixed with `label`.
+pub fn from_google(
+    status: u16,
+    headers: &reqwest::header::HeaderMap,
+    body: &str,
+    label: &str,
+) -> reqwest::Response {
     let parsed: Value = serde_json::from_str(body).unwrap_or(Value::Null);
     if parsed.get("type").and_then(|t| t.as_str()) == Some("error") {
         return build(status, &retry_headers(headers), body.to_string());
@@ -199,7 +210,7 @@ pub fn from_vertex(
     build(
         mapped,
         &retry_headers(headers),
-        error_body(Wire::Anthropic, kind, &format!("Vertex AI: {message}")).to_string(),
+        error_body(Wire::Anthropic, kind, &format!("{label}: {message}")).to_string(),
     )
 }
 

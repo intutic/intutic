@@ -137,6 +137,13 @@ key; Google Vertex AI a project, an optional location and a service-account key;
 resource endpoint, which must be an Azure host over `https`, and its key. Requests name these
 providers' models as `bedrock/<model id>`, `vertex/<model>` and `azure/<deployment>`.
 
+A saved credential is checked against the provider straight away, and the card says what came back:
+verified, rejected (check the values and save again), or not verified when the provider could not
+be reached or the check cannot prove it. **Test** repeats the check for a provisioned credential, and
+`intutic credentials set` prints the same result. AWS Bedrock and Google Vertex AI are checked by a
+signed AWS call or a Google token request, which prove the credential but not the model permissions
+the first request uses.
+
 **Guided setup**, on the Provider Keys card, walks through provisioning a provider and verifying
 it against the provider's own API in one flow. See
 [the cohort wizard](/guide/cohort-wizard) for the full step-by-step (it's also available from

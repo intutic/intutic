@@ -149,6 +149,16 @@ pub enum CloudConfig {
     Bedrock(BedrockConfig),
     Vertex(VertexConfig),
     Azure(AzureConfig),
+    GoogleAi(GoogleAiConfig),
+}
+
+/// First-party Gemini API: the workspace's or operator's Gemini key, resolved
+/// by the proxy exactly as it is for a request on the `/v1beta` route.
+#[derive(Debug, Clone)]
+pub struct GoogleAiConfig {
+    /// `https://generativelanguage.googleapis.com`, or `GEMINI_UPSTREAM_URL`.
+    pub base_url: String,
+    pub api_key: Secret,
 }
 
 #[derive(Debug, Clone)]
@@ -228,6 +238,7 @@ pub async fn resolve(
     require_provisioned: bool,
     settings: &ProvidersConfig,
 ) -> Result<CloudConfig, CredentialError> {
+    let provider = provider.family();
     if virtual_key {
         let field = format!("{}_config", provider.registry_id());
         if let Some(blob) = store.workspace_credential(workspace_id, &[&field]).await {
@@ -243,6 +254,7 @@ pub async fn resolve(
 /// A workspace's stored credential blob — the field names are the
 /// `PROVIDER_REGISTRY` entry's field keys.
 pub fn from_workspace(provider: CloudProvider, blob: &str) -> Result<CloudConfig, CredentialError> {
+    let provider = provider.family();
     let name = provider.display_name();
     let v: serde_json::Value = serde_json::from_str(blob)
         .map_err(|_| CredentialError::Invalid(name, "stored credential is not JSON".into()))?;
@@ -312,7 +324,13 @@ pub fn from_workspace(provider: CloudProvider, blob: &str) -> Result<CloudConfig
                 auth: AzureAuth::ApiKey(Secret(key)),
             }))
         }
+        CloudProvider::AzureClaude | CloudProvider::GoogleAi => Err(not_here(name)),
     }
+}
+
+/// First-party Gemini keys are flat provider keys the proxy reads itself.
+fn not_here(name: &'static str) -> CredentialError {
+    CredentialError::Invalid(name, "this provider's key is resolved by the proxy".into())
 }
 
 /// Operator configuration: `config.yaml`, then environment variables.
@@ -321,6 +339,7 @@ pub fn from_operator(
     settings: &ProvidersConfig,
     env: impl Fn(&str) -> Option<String>,
 ) -> Result<CloudConfig, CredentialError> {
+    let provider = provider.family();
     let name = provider.display_name();
     let env = |k: &str| {
         env(k)
@@ -406,6 +425,7 @@ pub fn from_operator(
             };
             Ok(CloudConfig::Azure(AzureConfig { endpoint, auth }))
         }
+        CloudProvider::AzureClaude | CloudProvider::GoogleAi => Err(not_here(name)),
     }
 }
 
@@ -503,10 +523,16 @@ fn operator_endpoint(raw: &str) -> Option<String> {
         return None;
     }
     let s = url.as_str().trim_end_matches('/');
-    let s = s
-        .strip_suffix("/openai/v1")
-        .or_else(|| s.strip_suffix("/openai"))
-        .unwrap_or(s);
+    let s = [
+        "/openai/v1",
+        "/openai",
+        "/anthropic/v1/messages",
+        "/anthropic/v1",
+        "/anthropic",
+    ]
+    .iter()
+    .find_map(|sfx| s.strip_suffix(sfx))
+    .unwrap_or(s);
     Some(s.to_string())
 }
 

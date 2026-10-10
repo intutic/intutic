@@ -32,16 +32,19 @@ intutic credentials set bedrock --field awsRegion=us-east-1 \
 
 Requests made with an Intutic key (`vk_…`) use it. On a gateway that requires provisioned keys, a workspace without one is refused with `402 byok_required`.
 
+The credential is checked as soon as it is saved, and again from **Test** on the Provider Keys card: an access key pair with STS `GetCallerIdentity`, which proves the key but not its Bedrock permissions (the first model call checks those); a Bedrock API key with `ListFoundationModels`. A key AWS does not recognise is reported as rejected; a key that authenticates but may not list models is reported as not verified.
+
 **A self-hosted proxy's own credentials.** Set the region with `AWS_REGION` or `intutic_settings.providers.bedrock.region`. The proxy then authenticates with, in order:
 
 1. a Bedrock API key in `AWS_BEARER_TOKEN_BEDROCK` (or `providers.bedrock.api_key: os.environ/<NAME>`);
 2. `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, with `AWS_SESSION_TOKEN` for temporary credentials;
 3. static keys for `AWS_PROFILE` in the shared credentials file;
-4. web identity — `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_ARN`, as on EKS with IAM roles for service accounts;
-5. container credentials, as on ECS and EKS Pod Identity;
-6. the EC2 instance role (`AWS_EC2_METADATA_DISABLED=true` skips it).
+4. an IAM Identity Center (SSO) profile for `AWS_PROFILE` in the config file (`AWS_CONFIG_FILE`, default `~/.aws/config`), in either the `sso_session` form or the legacy `sso_start_url` form, using the sign-in `aws sso login` cached under `~/.aws/sso/cache`;
+5. web identity — `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_ARN`, as on EKS with IAM roles for service accounts;
+6. container credentials, as on ECS and EKS Pod Identity;
+7. the EC2 instance role (`AWS_EC2_METADATA_DISABLED=true` skips it).
 
-Temporary credentials are cached until five minutes before they expire. Profiles that need AWS IAM Identity Center sign-in are not read; export the credentials or use a role.
+Temporary credentials are cached until five minutes before they expire. When an SSO profile's cached sign-in has expired, the proxy renews it with the cached refresh token (`sso_session` profiles) without writing the cache back; when it cannot, the error says to run `aws sso login --profile <name>`. Profiles that assume a role (`role_arn` with `source_profile`) are not read; export the credentials or use a workload role.
 
 The credentials need `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on the models you use, and `bedrock-mantle:CreateInference` for Claude Opus 4.7 and later.
 
@@ -71,6 +74,13 @@ intutic_settings:
         - provider: bedrock
         - provider: vertex_ai
 ```
+
+## Behaviour not confirmed by AWS's documentation
+
+Two details are implemented from Anthropic's SDKs and issue reports rather than from AWS's documentation. If either is wrong for your account, the request fails with a clear error rather than being sent somewhere else:
+
+- **An error inside an `InvokeModel` or `ConverseStream` stream.** The proxy reads an exception frame's name from `:exception-type` and its text from a `message` field in the payload, and passes it on as an Anthropic SSE `error` event. AWS documents the exception names but not the payload's shape.
+- **A Bedrock API key on Claude Opus 4.7 and later.** The `bedrock-mantle` endpoint is sent the key in `x-api-key`, as Anthropic's documentation shows; Anthropic's SDK sends `Authorization: Bearer`. Access key pairs are SigV4-signed and unaffected.
 
 ## Cost
 

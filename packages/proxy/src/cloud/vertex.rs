@@ -180,23 +180,26 @@ pub async fn send(
         }
         (Family::Gemini, true) => sse::response(
             200,
-            sse::translate(
-                Box::pin(resp.bytes_stream()),
-                GeminiStream {
-                    lines: DataLines::default(),
-                    t: super::gemini::StreamTranslator::new(model),
-                },
-            ),
+            sse::translate(Box::pin(resp.bytes_stream()), GeminiStream::new(model)),
         ),
     })
 }
 
-struct GeminiStream {
+pub(crate) struct GeminiStream {
     lines: DataLines,
     t: super::gemini::StreamTranslator,
 }
 
 impl GeminiStream {
+    /// `streamGenerateContent?alt=sse` → Anthropic SSE, for Vertex and the
+    /// first-party Gemini API alike.
+    pub(crate) fn new(model: &str) -> Self {
+        GeminiStream {
+            lines: DataLines::default(),
+            t: super::gemini::StreamTranslator::new(model),
+        }
+    }
+
     fn chunk(&mut self, data: &str) -> String {
         match serde_json::from_str::<Value>(data) {
             Ok(v) => self.t.on_chunk(&v),

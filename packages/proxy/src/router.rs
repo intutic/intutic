@@ -118,7 +118,7 @@ async fn root_info() -> Json<serde_json::Value> {
         // leaving its absence to be read as an oversight. See
         // `proxy::DeltaShape::Unparsed` for the full chain.
         "protocols": ["anthropic", "openai", "openai-responses"],
-        "gemini_unsupported": "requests to /v1beta/ are routed but not translated; the model name is not read from the URL"
+        "gemini_unsupported": "requests to /v1beta/ are routed but not translated; the model name is not read from the URL. Gemini models are served on /v1/messages, /v1/chat/completions and /v1/responses"
     }))
 }
 

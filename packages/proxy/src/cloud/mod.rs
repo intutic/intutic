@@ -18,6 +18,8 @@
 //! | Vertex AI, Claude | Anthropic | `rawPredict` / `streamRawPredict`, OAuth bearer |
 //! | Vertex AI, Gemini | Anthropic | `generateContent`, translated both ways |
 //! | Azure OpenAI / Foundry | OpenAI | OpenAI v1 API on the resource, `api-key` or Entra |
+//! | Azure AI Foundry, Claude | Anthropic | `/anthropic/v1/messages` on the resource, unchanged |
+//! | Gemini API (first-party) | Anthropic | `generateContent`, translated both ways, `x-goog-api-key` |
 //!
 //! The request the proxy hands [`send`] is the body it would have sent to
 //! Anthropic (or OpenAI) — after DLP, SOP injection, compaction and
@@ -35,13 +37,16 @@
 //! only knows `claude-sonnet-4-5` can be served from Bedrock unchanged.
 
 pub mod auth;
+pub mod aws_sso;
 pub mod azure;
 pub mod bedrock;
 pub mod config;
 pub mod converse;
 pub mod errors;
 pub mod eventstream;
+pub mod gcp_external;
 pub mod gemini;
+pub mod google_ai;
 pub mod sigv4;
 pub mod sse;
 pub mod vertex;
@@ -57,6 +62,15 @@ pub enum CloudProvider {
     Bedrock,
     Vertex,
     Azure,
+    /// A Claude deployment on an Azure AI Foundry resource, called through
+    /// the Messages API Foundry serves at `/anthropic/v1/messages`. Named
+    /// `azure/<deployment>` like any Azure deployment; chosen per request by
+    /// [`for_inbound`].
+    AzureClaude,
+    /// Google's first-party Gemini API (`generativelanguage.googleapis.com`)
+    /// for a request that did not arrive on its own `/v1beta` route: an
+    /// Anthropic- or OpenAI-format request naming a `gemini-*` model.
+    GoogleAi,
 }
 
 /// The upstream wire shape a cloud provider is presented as.
@@ -74,16 +88,29 @@ impl CloudProvider {
         match self {
             CloudProvider::Bedrock => "bedrock",
             CloudProvider::Vertex => "vertex_ai",
-            CloudProvider::Azure => "azure_openai",
+            CloudProvider::Azure | CloudProvider::AzureClaude => "azure_openai",
+            CloudProvider::GoogleAi => "gemini",
+        }
+    }
+
+    /// The provider whose model names and stored credential this one shares:
+    /// a Foundry Claude deployment is an Azure deployment.
+    pub fn family(self) -> CloudProvider {
+        match self {
+            CloudProvider::AzureClaude => CloudProvider::Azure,
+            other => other,
         }
     }
 
     /// The model-name prefix that names this provider (`bedrock/…`).
+    /// First-party Gemini models carry none; `gemini/` (LiteLLM's) is
+    /// accepted and dropped.
     pub fn prefix(self) -> &'static str {
         match self {
             CloudProvider::Bedrock => "bedrock",
             CloudProvider::Vertex => "vertex",
-            CloudProvider::Azure => "azure",
+            CloudProvider::Azure | CloudProvider::AzureClaude => "azure",
+            CloudProvider::GoogleAi => "gemini",
         }
     }
 
@@ -92,12 +119,17 @@ impl CloudProvider {
             CloudProvider::Bedrock => "AWS Bedrock",
             CloudProvider::Vertex => "Google Vertex AI",
             CloudProvider::Azure => "Azure OpenAI",
+            CloudProvider::AzureClaude => "Azure AI Foundry",
+            CloudProvider::GoogleAi => "Gemini",
         }
     }
 
     pub fn wire(self) -> Wire {
         match self {
-            CloudProvider::Bedrock | CloudProvider::Vertex => Wire::Anthropic,
+            CloudProvider::Bedrock
+            | CloudProvider::Vertex
+            | CloudProvider::AzureClaude
+            | CloudProvider::GoogleAi => Wire::Anthropic,
             CloudProvider::Azure => Wire::OpenAI,
         }
     }
@@ -112,9 +144,66 @@ impl CloudProvider {
             CloudProvider::Vertex => {
                 "GOOGLE_CLOUD_PROJECT and Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS)"
             }
-            CloudProvider::Azure => "AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY",
+            CloudProvider::Azure | CloudProvider::AzureClaude => {
+                "AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY"
+            }
+            CloudProvider::GoogleAi => "GEMINI_API_KEY",
         }
     }
+}
+
+/// The provider a request to `provider` goes to, given the format it arrived
+/// in — `None` keeps the caller's own choice.
+///
+/// - An Azure deployment takes the Messages API, on Foundry's
+///   `/anthropic/v1/messages`, when the request is in Anthropic's format or
+///   the deployment is a Claude one (named `claude-…`, Foundry's default
+///   deployment names); otherwise the OpenAI v1 API.
+/// - A first-party Gemini model asked for in Anthropic's or OpenAI's format
+///   goes through the Gemini translation ([`CloudProvider::GoogleAi`]). On
+///   its own `/v1beta` route it is passed through untouched, as before.
+pub fn for_inbound(
+    provider: CloudProvider,
+    inbound_anthropic: bool,
+    model: &CloudModel,
+) -> CloudProvider {
+    match provider {
+        CloudProvider::Azure
+            if inbound_anthropic || model.model.to_ascii_lowercase().starts_with("claude") =>
+        {
+            CloudProvider::AzureClaude
+        }
+        other => other,
+    }
+}
+
+/// The upstream id for a first-party Gemini model name: LiteLLM's `gemini/`
+/// and the API's own `models/` prefix are dropped.
+pub fn google_ai_model(model: &str) -> CloudModel {
+    let m = model.trim();
+    let m = m
+        .strip_prefix("gemini/")
+        .or_else(|| m.strip_prefix("Gemini/"))
+        .unwrap_or(m);
+    let m = m.strip_prefix("models/").unwrap_or(m);
+    CloudModel {
+        provider: CloudProvider::GoogleAi,
+        model: m.to_string(),
+    }
+}
+
+/// `model` as a call to `provider`, if it names one: an explicit prefix or
+/// alias of `provider`'s family, or — for first-party Gemini — any name.
+pub fn cloud_model_for(provider: CloudProvider, model: &str) -> Option<CloudModel> {
+    if provider == CloudProvider::GoogleAi {
+        return Some(google_ai_model(model));
+    }
+    resolve(model)
+        .filter(|m| m.provider == provider.family())
+        .map(|m| CloudModel {
+            provider,
+            model: m.model,
+        })
 }
 
 /// A request's cloud destination: the provider and the model id that provider
@@ -201,7 +290,7 @@ pub fn pricing_name(model: &str) -> String {
     let Some(cm) = resolve(model) else {
         return model.to_string();
     };
-    if cm.provider == CloudProvider::Azure && parse_prefixed(model).is_none() {
+    if cm.provider.family() == CloudProvider::Azure && parse_prefixed(model).is_none() {
         return model.to_string();
     }
     let mut id = cm.model.to_lowercase();
@@ -233,7 +322,7 @@ pub fn pricing_name(model: &str) -> String {
             id
         }
         CloudProvider::Vertex => id.replace('@', "-"),
-        CloudProvider::Azure => id,
+        CloudProvider::Azure | CloudProvider::AzureClaude | CloudProvider::GoogleAi => id,
     }
 }
 
@@ -290,6 +379,7 @@ pub fn same_model_for(
             }
             None => format!("bedrock/anthropic.{name}"),
         },
+        Some(CloudProvider::GoogleAi) => name,
         Some(c) => format!("{}/{name}", c.prefix()),
     }
 }
@@ -385,6 +475,12 @@ pub async fn send(
         (CloudProvider::Azure, CloudConfig::Azure(cfg)) => {
             azure::send(client, &call, cfg, body).await
         }
+        (CloudProvider::AzureClaude, CloudConfig::Azure(cfg)) => {
+            azure::send_claude(client, &call, cfg, body).await
+        }
+        (CloudProvider::GoogleAi, CloudConfig::GoogleAi(cfg)) => {
+            google_ai::send(client, &call, cfg, body, stream).await
+        }
         _ => Ok(errors::synthesize(
             wire,
             500,
@@ -459,6 +555,52 @@ mod tests {
             .model,
             "arn:aws:bedrock:us-east-1:123:application-inference-profile/abc"
         );
+    }
+
+    #[test]
+    fn the_inbound_format_picks_azure_s_api_and_gemini_names_are_cleaned() {
+        let azure = |m: &str| CloudModel {
+            provider: CloudProvider::Azure,
+            model: m.into(),
+        };
+        assert_eq!(
+            for_inbound(CloudProvider::Azure, true, &azure("gpt4o-prod")),
+            CloudProvider::AzureClaude
+        );
+        assert_eq!(
+            for_inbound(CloudProvider::Azure, false, &azure("claude-opus-5-5")),
+            CloudProvider::AzureClaude
+        );
+        assert_eq!(
+            for_inbound(CloudProvider::Azure, false, &azure("gpt4o-prod")),
+            CloudProvider::Azure
+        );
+        assert_eq!(
+            for_inbound(CloudProvider::Bedrock, true, &azure("x")),
+            CloudProvider::Bedrock
+        );
+        assert_eq!(
+            google_ai_model("gemini/gemini-2.5-pro").model,
+            "gemini-2.5-pro"
+        );
+        assert_eq!(
+            google_ai_model("models/gemini-2.5-flash").model,
+            "gemini-2.5-flash"
+        );
+        assert_eq!(
+            cloud_model_for(CloudProvider::AzureClaude, "azure/claude-opus-5-5"),
+            Some(CloudModel {
+                provider: CloudProvider::AzureClaude,
+                model: "claude-opus-5-5".into()
+            })
+        );
+        assert_eq!(cloud_model_for(CloudProvider::Bedrock, "azure/x"), None);
+        assert_eq!(
+            same_model_for("claude-opus-4-7", Some(CloudProvider::GoogleAi), None),
+            "claude-opus-4-7"
+        );
+        assert_eq!(CloudProvider::AzureClaude.registry_id(), "azure_openai");
+        assert_eq!(CloudProvider::GoogleAi.registry_id(), "gemini");
     }
 
     #[test]
