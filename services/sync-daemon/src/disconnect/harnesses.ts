@@ -158,9 +158,15 @@ function removeGateEntries(doc: JsonObject, ctx: ReverseContext, events: readonl
   return allEdits(...events.map((event) => removeFromArray(doc, ['hooks', event], isGateEntry(script), ctx.original)))
 }
 
-/** A key Intutic adds when it is missing (a schema version, a format version): removed when the original lacked it. */
+/**
+ * A key Intutic adds when it is missing (a schema version, a format version):
+ * removed when the original lacked it, or when Intutic created the file, so a
+ * file connect created can end up empty and be deleted.
+ */
 function removeAddedKey(doc: JsonObject, path: string[], ctx: ReverseContext): boolean {
-  if (ctx.original === null || getPath(ctx.original, path) !== undefined || getPath(doc, path) === undefined) return false
+  if (getPath(doc, path) === undefined) return false
+  const createdByIntutic = ctx.record?.existed === false
+  if (!createdByIntutic && (ctx.original === null || getPath(ctx.original, path) !== undefined)) return false
   return deletePath(doc, path)
 }
 
