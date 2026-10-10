@@ -228,9 +228,19 @@ pub(crate) async fn container_credentials(
     container_host: &str,
     env: &impl Fn(&str) -> Option<String>,
 ) -> Option<Result<AwsCredentials, AuthError>> {
-    let uri = env("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
-        .map(|rel| format!("{container_host}{rel}"))
-        .or_else(|| env("AWS_CONTAINER_CREDENTIALS_FULL_URI"))?;
+    let (uri, setting) = match env("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") {
+        Some(rel) => (
+            format!("{container_host}{rel}"),
+            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        ),
+        None => (
+            env("AWS_CONTAINER_CREDENTIALS_FULL_URI")?,
+            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        ),
+    };
+    if let Err(e) = require_secure_url(&uri, setting) {
+        return Some(Err(e));
+    }
     let key = format!("aws-container:{}", fingerprint(&[&uri]));
     if let Some(Cached::Aws(c)) = cache_get(&key) {
         return Some(Ok(c));
@@ -460,8 +470,14 @@ async fn gcp_from_document(
                 ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
                 ("assertion", jwt.as_str()),
             ];
-            let (token, lifetime) =
-                oauth_exchange(client, token_uri, &form, "Google OAuth").await?;
+            let (token, lifetime) = oauth_exchange(
+                client,
+                token_uri,
+                "the Google OAuth token URI",
+                &form,
+                "Google OAuth",
+            )
+            .await?;
             cache_put(key, Cached::Token(token.clone()), lifetime);
             Ok(token)
         }
@@ -479,8 +495,14 @@ async fn gcp_from_document(
                 ("client_secret", s("client_secret")),
                 ("refresh_token", s("refresh_token")),
             ];
-            let (token, lifetime) =
-                oauth_exchange(client, token_uri, &form, "Google OAuth").await?;
+            let (token, lifetime) = oauth_exchange(
+                client,
+                token_uri,
+                "the Google OAuth token URI",
+                &form,
+                "Google OAuth",
+            )
+            .await?;
             cache_put(key, Cached::Token(token.clone()), lifetime);
             Ok(token)
         }
@@ -606,12 +628,55 @@ async fn gcp_metadata_token(client: &reqwest::Client, base: &str) -> Result<Secr
     Ok(token)
 }
 
+/// Link-local addresses of the cloud metadata services: AWS, Azure and Google
+/// instance metadata, ECS task credentials, EKS Pod Identity.
+const METADATA_IPS: [std::net::IpAddr; 5] = [
+    std::net::IpAddr::V4(std::net::Ipv4Addr::new(169, 254, 169, 254)),
+    std::net::IpAddr::V4(std::net::Ipv4Addr::new(169, 254, 170, 2)),
+    std::net::IpAddr::V4(std::net::Ipv4Addr::new(169, 254, 170, 23)),
+    std::net::IpAddr::V6(std::net::Ipv6Addr::new(0xfd00, 0xec2, 0, 0, 0, 0, 0, 0x254)),
+    std::net::IpAddr::V6(std::net::Ipv6Addr::new(0xfd00, 0xec2, 0, 0, 0, 0, 0, 0x23)),
+];
+
+/// Refuses a URL a credential or token exchange may not use: anything but
+/// `https`, except plain `http` to a cloud metadata service
+/// (`METADATA_IPS`, `metadata.google.internal`) or to this machine
+/// (`localhost`, `127.0.0.0/8`, `::1` — Azure App Service's
+/// `IDENTITY_ENDPOINT`, a container credentials agent, a test server). Those
+/// are plain HTTP by design and never leave the host's link; anywhere else a
+/// secret sent over `http` crosses the network in the clear. The error names
+/// `setting`, never the URL.
+pub(crate) fn require_secure_url(url: &str, setting: &str) -> Result<(), AuthError> {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|_| AuthError::rejected(format!("{setting} is not a valid URL")))?;
+    let local = || {
+        let host = parsed.host_str().unwrap_or("");
+        let ip = host.trim_start_matches('[').trim_end_matches(']');
+        match ip.parse::<std::net::IpAddr>() {
+            Ok(ip) => ip.is_loopback() || METADATA_IPS.contains(&ip),
+            Err(_) => host == "localhost" || host == "metadata.google.internal",
+        }
+    };
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if local() => Ok(()),
+        _ => Err(AuthError::rejected(format!(
+            "{setting} must be an https URL; plain http is accepted only for a cloud metadata \
+             endpoint or a loopback address"
+        ))),
+    }
+}
+
+/// An OAuth-style form exchange at `url`, which must pass
+/// `require_secure_url`; `setting` names where the URL came from.
 pub(crate) async fn oauth_exchange(
     client: &reqwest::Client,
     url: &str,
+    setting: &str,
     form: &[(&str, &str)],
     what: &str,
 ) -> Result<(Secret, Duration), AuthError> {
+    require_secure_url(url, setting)?;
     let resp = client
         .post(url)
         .form(form)
@@ -728,7 +793,14 @@ async fn entra_client_credentials(
         ("client_secret", secret.expose()),
         ("scope", scope.as_str()),
     ];
-    let (token, lifetime) = oauth_exchange(client, url, &form, "Microsoft Entra ID").await?;
+    let (token, lifetime) = oauth_exchange(
+        client,
+        url,
+        "the Entra ID token URL (AZURE_TENANT_ID)",
+        &form,
+        "Microsoft Entra ID",
+    )
+    .await?;
     cache_put(key, Cached::Token(token.clone()), lifetime);
     Ok(("authorization", bearer(&token)))
 }
@@ -750,14 +822,20 @@ async fn managed_identity(
     }
     let req = match app_service {
         Some((endpoint, header)) => {
+            require_secure_url(&endpoint, "IDENTITY_ENDPOINT")?;
             query.push(("api-version", "2019-08-01".into()));
             client.get(endpoint).header("x-identity-header", header)
         }
         None => {
             query.push(("api-version", "2018-02-01".into()));
-            client
-                .get(format!("{imds}/metadata/identity/oauth2/token"))
-                .header("metadata", "true")
+            let url = format!("{imds}/metadata/identity/oauth2/token");
+            require_secure_url(&url, "the Azure instance metadata endpoint")?;
+            // CodeQL triage (rust/non-https-url): the flagged source is the
+            // fixed IMDS base `azure_header` passes, http://169.254.169.254.
+            // Azure IMDS is plain HTTP by design and link-local, answered by
+            // the host; tests point `imds` at a loopback mock, and
+            // require_secure_url above refuses any other plain-http host.
+            client.get(url).header("metadata", "true") // codeql[rust/non-https-url]
         }
     };
     let resp = req
@@ -894,7 +972,7 @@ pub(crate) mod tests {
         let err = gcp_from_document(
             &reqwest::Client::new(),
             r#"{"type":"external_account","credential_source":{"file":"/etc/passwd"}}"#,
-            "http://unused",
+            "https://unused.invalid",
             false,
         )
         .await
@@ -907,7 +985,7 @@ pub(crate) mod tests {
         let err = gcp_from_document(
             &reqwest::Client::new(),
             r#"{"type":"impersonated_service_account"}"#,
-            "http://unused",
+            "https://unused.invalid",
             true,
         )
         .await
@@ -1043,6 +1121,119 @@ pub(crate) mod tests {
         .await
         .unwrap();
         assert_eq!(c.access_key_id, "ASIACT");
+    }
+
+    #[test]
+    fn credential_urls_are_https_unless_a_metadata_service_or_loopback() {
+        for ok in [
+            "https://oauth2.googleapis.com/token",
+            "https://sts.googleapis.com/v1/token",
+            "http://169.254.169.254/metadata/identity/oauth2/token",
+            "http://169.254.170.2/v2/credentials/abc",
+            "http://169.254.170.23/v1/credentials",
+            "http://[fd00:ec2::23]/v1/credentials",
+            "http://metadata.google.internal/computeMetadata/v1/",
+            "http://127.0.0.1:41741/MSI/token/",
+            "http://localhost:40342/metadata/identity/oauth2/token",
+            "http://[::1]:8080/token",
+        ] {
+            assert_eq!(require_secure_url(ok, "S"), Ok(()), "{ok}");
+        }
+        for bad in [
+            "http://oauth2.googleapis.com/token",
+            "http://169.254.169.254.attacker.example/token",
+            "http://169.254.170.2@attacker.example/creds",
+            "http://localhost.attacker.example/token",
+            "http://10.0.0.5/token",
+            "ftp://127.0.0.1/token",
+            "not a url",
+        ] {
+            let err = require_secure_url(bad, "IDENTITY_ENDPOINT").unwrap_err();
+            assert_eq!(err.status, 401, "{bad}");
+            assert!(
+                err.message.starts_with("IDENTITY_ENDPOINT "),
+                "{bad}: {}",
+                err.message
+            );
+            assert!(!err.message.contains(bad), "the URL is not echoed");
+        }
+    }
+
+    /// `http://{host_and_path}`, assembled from an https URL: a plain-http
+    /// literal here would itself be a CodeQL `rust/non-https-url` source
+    /// flowing into the request code under test.
+    fn plain_http(host_and_path: &str) -> String {
+        let mut url = reqwest::Url::parse(&format!("https://{host_and_path}")).unwrap();
+        url.set_scheme("http").unwrap();
+        url.to_string()
+    }
+
+    #[tokio::test]
+    async fn token_exchanges_refuse_plain_http_before_sending_anything() {
+        // Each URL would otherwise fail as unreachable (502, `.invalid`);
+        // the refusal is a 401 naming the setting.
+        let client = reqwest::Client::new();
+        let err = oauth_exchange(
+            &client,
+            &plain_http("oauth.example.invalid/token"),
+            "the Google OAuth token URI",
+            &[("grant_type", "refresh_token")],
+            "Google OAuth",
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, 401);
+        assert!(
+            err.message
+                .starts_with("the Google OAuth token URI must be an https URL"),
+            "{}",
+            err.message
+        );
+
+        let err = managed_identity(
+            &client,
+            Some("plain-http-refusal"),
+            Some((plain_http("identity.example.invalid/msi/token"), "h".into())),
+            "unused",
+            AZURE_AI_RESOURCE,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, 401);
+        assert!(err
+            .message
+            .starts_with("IDENTITY_ENDPOINT must be an https URL"));
+
+        let err = container_credentials(
+            &client,
+            &AwsEndpoints::default().container_host,
+            &env_of(vec![(
+                "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+                plain_http("creds.example.invalid/v1/credentials"),
+            )]),
+        )
+        .await
+        .expect("an endpoint is named")
+        .unwrap_err();
+        assert!(err
+            .message
+            .starts_with("AWS_CONTAINER_CREDENTIALS_FULL_URI must be an https URL"));
+
+        // A relative URI cannot move the request off the ECS host.
+        let err = container_credentials(
+            &client,
+            &AwsEndpoints::default().container_host,
+            &env_of(vec![(
+                "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+                "@attacker.example/creds".into(),
+            )]),
+        )
+        .await
+        .expect("an endpoint is named")
+        .unwrap_err();
+        assert!(err
+            .message
+            .starts_with("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI must be an https URL"));
     }
 
     #[tokio::test]

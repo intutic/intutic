@@ -2109,7 +2109,7 @@ async fn routing_pool(
         policy.inbound,
         requested_model,
     );
-    let mut arms: Vec<String> = Vec::with_capacity(configured.len());
+    let mut arms: Vec<String> = Vec::with_capacity(arms_capacity(configured.len()));
     for candidate in configured {
         if arms.contains(&candidate) {
             continue;
@@ -2132,6 +2132,22 @@ async fn routing_pool(
         requested_arm,
         arms,
     })
+}
+
+/// The most routing candidates a workspace's `routingCandidates` setting may
+/// list (its settings schema caps the array at 16).
+const MAX_ROUTING_CANDIDATES: usize = 16;
+
+/// Room to reserve for a pool built from `listed` candidates. The list is
+/// read from Valkey (or the operator's config), so its length is not trusted
+/// to size an allocation: the reservation stops at `MAX_ROUTING_CANDIDATES`,
+/// and a longer operator list simply grows the vector as it is filled.
+fn arms_capacity(listed: usize) -> usize {
+    if listed <= MAX_ROUTING_CANDIDATES {
+        listed
+    } else {
+        MAX_ROUTING_CANDIDATES
+    }
 }
 
 /// Why `candidate` may not serve this request in place of the requested
@@ -10469,6 +10485,17 @@ mod tests {
 
     use super::*;
     use axum::http::HeaderMap;
+
+    #[test]
+    fn the_routing_pool_reserves_at_most_the_settings_cap() {
+        assert_eq!(arms_capacity(0), 0);
+        assert_eq!(arms_capacity(3), 3);
+        assert_eq!(
+            arms_capacity(MAX_ROUTING_CANDIDATES),
+            MAX_ROUTING_CANDIDATES
+        );
+        assert_eq!(arms_capacity(usize::MAX), MAX_ROUTING_CANDIDATES);
+    }
 
     /// The workspace `upstreamRetry` setting may name exactly the providers
     /// in `UPSTREAM_PROVIDERS` (shared-types), the control plane's schema. A

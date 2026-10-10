@@ -27,7 +27,9 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::auth::{cache_get, cache_put, fingerprint, oauth_exchange, AuthError, Cached};
+use super::auth::{
+    cache_get, cache_put, fingerprint, oauth_exchange, require_secure_url, AuthError, Cached,
+};
 use super::config::Secret;
 use super::sigv4::{self, AwsCredentials};
 
@@ -85,6 +87,14 @@ pub(crate) async fn token(
              must be https Google API endpoints (*.googleapis.com)",
         ));
     }
+    const TOKEN_URL: &str = "the external_account credential's token_url";
+    require_secure_url(token_url, TOKEN_URL)?;
+    if !impersonation.is_empty() {
+        require_secure_url(
+            impersonation,
+            "the external_account credential's service_account_impersonation_url",
+        )?;
+    }
 
     let subject = subject_token(client, doc, env).await?;
 
@@ -121,7 +131,7 @@ pub(crate) async fn token(
             .map_err(|_| AuthError::unreachable("Google STS could not be reached"))?;
         super::auth::token_response(resp, "Google STS").await?
     } else {
-        oauth_exchange(client, token_url, &form_ref, "Google STS").await?
+        oauth_exchange(client, token_url, TOKEN_URL, &form_ref, "Google STS").await?
     };
 
     if impersonation.is_empty() {
