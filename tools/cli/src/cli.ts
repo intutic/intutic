@@ -145,8 +145,8 @@ const budgetCmd = program
 budgetCmd
   .command('set')
   .description("Set the workspace's daily and monthly caps, alert threshold and whether each cap refuses requests (OWNER, ADMIN)")
-  .option('--daily <usd>', 'Daily cap in USD (0: no daily cap)')
-  .option('--monthly <usd>', 'Monthly cap in USD (0: no monthly cap)')
+  .option('--daily <usd>', 'Daily cap in USD (0: no daily cap; default: back to the $100 default)')
+  .option('--monthly <usd>', 'Monthly cap in USD (0: no monthly cap; default: back to the $500 default)')
   .option('--threshold <pct>', 'Alert at this percentage of each cap')
   .option('--daily-enforcement <mode>', 'hard (refuse what the day does not cover) or soft (alert only)')
   .option('--monthly-enforcement <mode>', 'hard (refuse what the month does not cover) or soft (alert only)')

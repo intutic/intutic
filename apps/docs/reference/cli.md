@@ -989,23 +989,24 @@ intutic budget --watch --interval 2
 Set the workspace's daily and monthly caps, the alert threshold, and whether each cap refuses requests. OWNER or ADMIN.
 
 ```bash
-intutic budget set [--daily <usd>] [--monthly <usd>] [--threshold <pct>] [--daily-enforcement hard|soft] [--monthly-enforcement hard|soft]
+intutic budget set [--daily <usd|default>] [--monthly <usd|default>] [--threshold <pct>] [--daily-enforcement hard|soft] [--monthly-enforcement hard|soft]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--daily <usd>` | Daily cap in USD; `0` for no daily cap |
-| `--monthly <usd>` | Monthly cap in USD; `0` for no monthly cap |
+| `--daily <usd>` | Daily cap in USD; `0` for no daily cap; `default` returns a saved daily cap to the $100 default |
+| `--monthly <usd>` | Monthly cap in USD; `0` for no monthly cap; `default` returns it to the $500 default |
 | `--threshold <pct>` | Raise a budget alert at this percentage of each cap (1–100) |
 | `--daily-enforcement <mode>` | `hard`: the proxy refuses a request the rest of the day's cap does not cover. `soft`: alerts only. A new workspace's daily cap is `hard` |
 | `--monthly-enforcement <mode>` | The same for the month. A new workspace's monthly cap is `soft` |
 | `--json` | Print the budget after the change as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
-What you leave out stays as it is. See [Budgets](/guide/budgets#workspace-caps).
+Only the options you give are sent; everything else stays as it is, so `--monthly` alone leaves a daily cap that was never saved on the $100 default. See [Budgets](/guide/budgets#workspace-caps).
 
 ```bash
 intutic budget set --monthly 1000 --monthly-enforcement hard
+intutic budget set --daily default
 ```
 
 ---

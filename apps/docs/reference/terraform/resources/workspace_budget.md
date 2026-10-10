@@ -24,12 +24,12 @@ resource "intutic_workspace_budget" "this" {
 
 ### Required
 
-- `daily_budget_usd` (Number) Daily cap in USD (0–100,000); 0 is no daily cap. A UTC day. A workspace that never saved its caps is held to $100 a day until this resource sets one.
 - `monthly_budget_usd` (Number) Monthly cap in USD (0–1,000,000); 0 is no monthly cap. A UTC calendar month.
 
 ### Optional
 
 - `alert_threshold_pct` (Number) Raise a budget alert at this percentage of each cap, and of every key and member budget (1–100).
+- `daily_budget_usd` (Number) Daily cap in USD (0–100,000); 0 is no daily cap. A UTC day. Omit it to hold the workspace to the $100 default daily cap; removing it from a configuration returns a saved cap to that default.
 - `daily_enforcement` (String) `hard`: the proxy refuses a request the rest of the day's cap does not cover, with `429 BUDGET_EXCEEDED`. `soft`: the cap only raises alerts. Defaults to `hard`.
 - `monthly_enforcement` (String) `hard`: the proxy refuses a request the rest of the month's cap does not cover, with `429 BUDGET_EXCEEDED`. `soft`: the cap only raises alerts. Defaults to `soft`.
 

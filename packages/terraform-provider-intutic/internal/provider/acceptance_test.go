@@ -427,6 +427,20 @@ resource "intutic_workspace_budget" "this" {
 		},
 		clean(cfg),
 		imported("intutic_workspace_budget.this"),
+		// Without a daily cap the workspace returns to the default, which stays unsaved.
+		resource.TestStep{
+			Config: `
+resource "intutic_workspace_budget" "this" {
+  monthly_budget_usd  = 1000
+  monthly_enforcement = "hard"
+}`,
+			Check: resource.TestCheckNoResourceAttr("intutic_workspace_budget.this", "daily_budget_usd"),
+		},
+		clean(`
+resource "intutic_workspace_budget" "this" {
+  monthly_budget_usd  = 1000
+  monthly_enforcement = "hard"
+}`),
 	)
 }
 

@@ -36,6 +36,7 @@ type workspaceBudgetModel struct {
 type apiWorkspaceBudget struct {
 	WorkspaceID        string  `json:"workspace_id"`
 	DailyBudgetUsd     float64 `json:"daily_budget_usd"`
+	DailyIsDefault     bool    `json:"daily_budget_is_default"`
 	MonthlyBudgetUsd   float64 `json:"monthly_budget_usd"`
 	AlertThresholdPct  int64   `json:"alert_threshold_pct"`
 	DailyEnforcement   string  `json:"daily_enforcement"`
@@ -72,9 +73,9 @@ func (r *workspaceBudgetResource) Schema(_ context.Context, _ resource.SchemaReq
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"daily_budget_usd": schema.Float64Attribute{
-				Required:    true,
-				Description: "Daily cap in USD (0–100,000); 0 is no daily cap. A UTC day. A workspace that never saved its " +
-					"caps is held to $100 a day until this resource sets one.",
+				Optional: true,
+				Description: "Daily cap in USD (0–100,000); 0 is no daily cap. A UTC day. Omit it to hold the workspace to " +
+					"the $100 default daily cap; removing it from a configuration returns a saved cap to that default.",
 				Validators:  []validator.Float64{float64validator.Between(0, 100_000)},
 			},
 			"monthly_budget_usd": schema.Float64Attribute{
@@ -101,7 +102,11 @@ func (r *workspaceBudgetResource) Configure(_ context.Context, req resource.Conf
 
 func (b *apiWorkspaceBudget) applyTo(m *workspaceBudgetModel) {
 	m.ID = types.StringValue(b.WorkspaceID)
-	m.DailyBudgetUsd = types.Float64Value(b.DailyBudgetUsd)
+	if b.DailyIsDefault {
+		m.DailyBudgetUsd = types.Float64Null()
+	} else {
+		m.DailyBudgetUsd = types.Float64Value(b.DailyBudgetUsd)
+	}
 	m.MonthlyBudgetUsd = types.Float64Value(b.MonthlyBudgetUsd)
 	m.AlertThresholdPct = types.Int64Value(b.AlertThresholdPct)
 	m.DailyEnforcement = types.StringValue(b.DailyEnforcement)
@@ -109,8 +114,14 @@ func (b *apiWorkspaceBudget) applyTo(m *workspaceBudgetModel) {
 }
 
 func (r *workspaceBudgetResource) write(ctx context.Context, m *workspaceBudgetModel) error {
+	// A null daily cap is sent as null: the workspace stays on, or returns
+	// to, the default rather than saving it as its own.
+	var daily any
+	if !m.DailyBudgetUsd.IsNull() && !m.DailyBudgetUsd.IsUnknown() {
+		daily = m.DailyBudgetUsd.ValueFloat64()
+	}
 	body := map[string]any{
-		"daily_budget_usd":    m.DailyBudgetUsd.ValueFloat64(),
+		"daily_budget_usd":    daily,
 		"monthly_budget_usd":  m.MonthlyBudgetUsd.ValueFloat64(),
 		"alert_threshold_pct": m.AlertThresholdPct.ValueInt64(),
 		"daily_enforcement":   m.DailyEnforcement.ValueString(),

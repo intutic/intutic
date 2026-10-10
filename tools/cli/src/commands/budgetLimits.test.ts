@@ -17,6 +17,7 @@ vi.mock('../config/paths.js', () => ({
 
 import {
   applyBudgetFlags,
+  budgetSetBody,
   describeBudgets,
   runBudgetKey,
   runBudgetKeys,
@@ -196,23 +197,23 @@ describe('intutic budget member', () => {
 })
 
 describe('intutic budget set', () => {
-  it('keeps the caps it was not given and sends the enforcement it was', async () => {
-    const now = { daily_budget_usd: 40, monthly_budget_usd: 800, alert_threshold_pct: 80, daily_enforcement: 'hard', monthly_enforcement: 'soft' }
-    fetchMock
-      .mockReturnValueOnce(reply(200, now))
-      .mockReturnValueOnce(reply(200, { updated: true }))
-      .mockReturnValueOnce(reply(200, { ...now, monthly_enforcement: 'hard' }))
-    await runBudgetSet({ monthlyEnforcement: 'hard' })
-    expect(sent(1)).toEqual({
-      url: `${BASE}/api/v1/budget`,
-      method: 'PUT',
-      body: { daily_budget_usd: 40, monthly_budget_usd: 800, alert_threshold_pct: 80, monthly_enforcement: 'hard' },
-    })
+  it('sends only the flags given, so a daily cap nobody named stays on its default', async () => {
+    const after = { daily_budget_usd: 100, daily_budget_is_default: true, monthly_budget_usd: 800, alert_threshold_pct: 80, daily_enforcement: 'hard', monthly_enforcement: 'hard' }
+    fetchMock.mockReturnValueOnce(reply(200, { updated: true })).mockReturnValueOnce(reply(200, after))
+    await runBudgetSet({ monthly: '800', monthlyEnforcement: 'hard' })
+    expect(sent(0)).toEqual({ url: `${BASE}/api/v1/budget`, method: 'PUT', body: { monthly_budget_usd: 800, monthly_enforcement: 'hard' } })
+    expect(printed()).toContain('$100.00 (hard), the default')
     expect(printed()).toContain('$800.00 (hard)')
   })
 
-  it('fails before any request with nothing to change or a bad threshold', async () => {
+  it('sends null for default, which returns a saved cap to the default', () => {
+    expect(budgetSetBody({ daily: 'default' })).toEqual({ daily_budget_usd: null })
+    expect(budgetSetBody({ daily: '0', threshold: '75' })).toEqual({ daily_budget_usd: 0, alert_threshold_pct: 75 })
+  })
+
+  it('fails before any request with nothing to change, a bad amount or a bad threshold', async () => {
     await expect(runBudgetSet({})).rejects.toThrow('process.exit(1)')
+    await expect(runBudgetSet({ daily: 'lots' })).rejects.toThrow('process.exit(1)')
     await expect(runBudgetSet({ threshold: '120' })).rejects.toThrow('process.exit(1)')
     expect(fetchMock).not.toHaveBeenCalled()
   })

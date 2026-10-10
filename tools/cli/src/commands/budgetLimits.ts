@@ -3,7 +3,7 @@
  * spend budgets and rate limits on virtual keys and members.
  *
  * Subcommands:
- *   - `intutic budget set [--daily <usd>] [--monthly <usd>] [--threshold <pct>]
+ *   - `intutic budget set [--daily <usd|default>] [--monthly <usd|default>] [--threshold <pct>]
  *      [--daily-enforcement hard|soft] [--monthly-enforcement hard|soft]`
  *   - `intutic budget keys [--json]`
  *   - `intutic budget key <keyId> [--daily <usd|none>] [--monthly <usd|none>]
@@ -20,9 +20,10 @@
  * writes need OWNER or ADMIN, and member budgets a plan with them; the
  * server's refusal is printed as it says it.
  *
- * Every write here changes only what its flags name: the others are read
- * first and sent back unchanged, because the routes replace a subject's
- * budgets whole.
+ * Every write here changes only what its flags name. `budget set` sends only
+ * those fields (the route is a partial update); the key and member writes
+ * read the subject's budgets first and send them back with the change,
+ * because those routes replace a subject's budgets whole.
  *
  * @module
  */
@@ -87,6 +88,8 @@ interface MembersResponse {
 
 interface WorkspaceBudget {
   daily_budget_usd: number
+  /** True when no daily cap was saved and the workspace is on the default. */
+  daily_budget_is_default?: boolean
   monthly_budget_usd: number
   alert_threshold_pct: number
   daily_enforcement: SpendBudgetEnforcement
@@ -158,39 +161,53 @@ function hasBudgetFlags(flags: BudgetFlags): boolean {
   return [flags.daily, flags.monthly, flags.dailyEnforcement, flags.monthlyEnforcement].some((v) => v !== undefined)
 }
 
-export async function runBudgetSet(opts: SetFlags): Promise<void> {
-  if ([opts.daily, opts.monthly, opts.threshold, opts.dailyEnforcement, opts.monthlyEnforcement].every((v) => v === undefined)) {
-    fail('Nothing to change: pass --daily, --monthly, --threshold, --daily-enforcement or --monthly-enforcement')
-  }
-  const daily = opts.daily === undefined ? undefined : Number(opts.daily)
-  const monthly = opts.monthly === undefined ? undefined : Number(opts.monthly)
-  const threshold = opts.threshold === undefined ? undefined : Number(opts.threshold)
-  if (daily !== undefined && !(daily >= 0)) fail(`--daily must be a dollar amount, 0 for no daily cap, got "${opts.daily}"`)
-  if (monthly !== undefined && !(monthly >= 0)) fail(`--monthly must be a dollar amount, 0 for no monthly cap, got "${opts.monthly}"`)
-  if (threshold !== undefined && !(Number.isInteger(threshold) && threshold >= 1 && threshold <= 100)) {
-    fail(`--threshold must be a whole percentage from 1 to 100, got "${opts.threshold}"`)
+/** A cap flag: a dollar amount (0 is no cap), or `default` (sent as `null`) to return to the default. */
+function capOrDefault(value: string | undefined, flag: string): number | null | undefined {
+  if (value === undefined) return undefined
+  if (value.trim().toLowerCase() === 'default') return null
+  const n = Number(value)
+  if (!(n >= 0)) fail(`${flag} must be a dollar amount (0 for no cap) or "default", got "${value}"`)
+  return n
+}
+
+/**
+ * The `PUT /api/v1/budget` body for the flags given: only those, so a cap
+ * nobody named stays as it is — in particular a daily cap that was never
+ * saved stays on the default.
+ */
+export function budgetSetBody(opts: SetFlags): Record<string, unknown> {
+  const body: Record<string, unknown> = {}
+  const daily = capOrDefault(opts.daily, '--daily')
+  const monthly = capOrDefault(opts.monthly, '--monthly')
+  if (daily !== undefined) body.daily_budget_usd = daily
+  if (monthly !== undefined) body.monthly_budget_usd = monthly
+  if (opts.threshold !== undefined) {
+    const t = Number(opts.threshold)
+    if (!(Number.isInteger(t) && t >= 1 && t <= 100)) fail(`--threshold must be a whole percentage from 1 to 100, got "${opts.threshold}"`)
+    body.alert_threshold_pct = t
   }
   const dailyEnforcement = enforcement(opts.dailyEnforcement, '--daily-enforcement')
   const monthlyEnforcement = enforcement(opts.monthlyEnforcement, '--monthly-enforcement')
+  if (dailyEnforcement) body.daily_enforcement = dailyEnforcement
+  if (monthlyEnforcement) body.monthly_enforcement = monthlyEnforcement
+  if (Object.keys(body).length === 0) {
+    fail('Nothing to change: pass --daily, --monthly, --threshold, --daily-enforcement or --monthly-enforcement')
+  }
+  return body
+}
 
+export async function runBudgetSet(opts: SetFlags): Promise<void> {
+  const body = budgetSetBody(opts)
   await runApiCommand(
     opts,
     'Failed to update the workspace budget',
     async (client) => {
-      const now = await client.get<WorkspaceBudget>('/api/v1/budget')
-      const body = {
-        daily_budget_usd: daily ?? now.daily_budget_usd,
-        monthly_budget_usd: monthly ?? now.monthly_budget_usd,
-        alert_threshold_pct: threshold ?? now.alert_threshold_pct,
-        ...(dailyEnforcement ? { daily_enforcement: dailyEnforcement } : {}),
-        ...(monthlyEnforcement ? { monthly_enforcement: monthlyEnforcement } : {}),
-      }
       await client.put('/api/v1/budget', body)
       return client.get<WorkspaceBudget>('/api/v1/budget')
     },
     (b) => {
       log.success('Workspace budget updated')
-      log.field('Daily cap', `${usd(b.daily_budget_usd)} (${b.daily_enforcement})`)
+      log.field('Daily cap', `${usd(b.daily_budget_usd)} (${b.daily_enforcement})${b.daily_budget_is_default ? ', the default' : ''}`)
       log.field('Monthly cap', `${usd(b.monthly_budget_usd)} (${b.monthly_enforcement})`)
       log.field('Alert at', `${b.alert_threshold_pct}%`)
     },
