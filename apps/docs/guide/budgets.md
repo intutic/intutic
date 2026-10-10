@@ -40,7 +40,7 @@ Set the workspace's daily and monthly caps, the alert threshold, and whether eac
 - **The daily cap is hard** unless you set `daily_enforcement` to `soft`.
 - **The monthly cap is soft** unless you set `monthly_enforcement` to `hard`. Then a request the rest of the month's cap does not cover is refused like one over the daily cap.
 - A cap of `0` is no cap.
-- A workspace that has never saved its caps has a monthly cap of $500 and a daily cap of a thirtieth of its monthly cap: the figures Settings › Billing shows are the ones enforced and alerted on.
+- A workspace that has never saved caps has a **daily cap of $100**, hard like any other, and a monthly cap of $500 that only raises alerts. Settings › Billing and `intutic budget` say when the daily cap is that default, and `GET /api/v1/budget` answers `daily_budget_is_default: true`. Saving your own caps replaces the default at once.
 
 The caps belong to the workspace: every member and every virtual key in it draws on the same amount. A change applies from each key's next request.
 
@@ -137,7 +137,7 @@ The spend a budget is checked against is what the control plane records as each 
 
 A connected proxy that cannot read Valkey (the in-memory cache that holds virtual keys and budget counters) cannot verify the caller's key or the spend against a hard budget, so it **refuses** the request rather than admit spend it cannot check:
 
-*   **Retryable refusals:** the proxy answers `503` with `AUTH_UNVERIFIABLE` (the key could not be checked) or `BUDGET_UNVERIFIABLE` (the spend could not be checked). The key may well be valid, so clients should retry rather than treat it as an authentication failure.
+*   **Retryable refusals:** the proxy answers `503` with `AUTH_UNVERIFIABLE` (the key could not be checked) or `BUDGET_UNVERIFIABLE` (the spend, or the workspace's daily cap, could not be checked: a proxy whose copy of the cap is missing asks the control plane for it and refuses only if it cannot get it; it never falls back to a default cap). The key may well be valid, so clients should retry rather than treat it as an authentication failure.
 *   **Automatic recovery:** once Valkey is reachable again, requests are admitted and checked as usual.
 *   **Rate limits fail open:** a key's per-minute limits are not checked while Valkey cannot be read.
 

@@ -178,7 +178,7 @@ This returns a real-time markdown card showing the active session cost, active s
 Intutic enforces financial controls differently based on connection state to ensure zero-latency routing and fail-safe cost management:
 
 #### Connected / SaaS Mode (Active Centralized Enforcement)
-*   **Central Workspace Limits:** Daily monitored LLM volume limits and active budget thresholds are managed at the workspace level.
+*   **Central Workspace Limits:** Daily monitored LLM volume limits and active budget thresholds are managed at the workspace level. A workspace that has not saved a daily cap is held to $100 a day; save your own on Settings › Billing › Budget Limits or with `PUT /api/v1/budget`.
 *   **Valkey Fast-Path Interception:** The corporate control plane caches live billing limits and cumulative usage counters in Valkey. On every request, the proxy does a cache precheck (`check_workspace_hard_block`) — a single Valkey GET.
 *   **Fail-Closed Protection:** If the cache layer is unreachable, spend cannot be verified, and the budget gate fails closed — the request is rejected with `503 BUDGET_UNVERIFIABLE` rather than admitted on an unverifiable budget. This is deliberately the opposite of the usual rate-limiter convention: a spend cap is a financial control that you explicitly opted into, so the cost of wrongly allowing is unbounded, while the cost of wrongly denying is a retry. Note this applies only to control-plane-managed workspaces; standalone has no central cap to verify and is bounded by the local daily cap instead.
 *   **Real-time Ledger Rollups:** Once upstream completions finish, actual token costs are recorded centrally, and cumulative workspace counters are updated to maintain global enforcement.

@@ -17,6 +17,22 @@ import type {
   TokenUtility,
 } from './enums.js'
 
+// ─── Workspace spend caps ────────────────────────────────────────────
+
+/**
+ * The daily spend cap, in USD, of a workspace that has never saved one. A
+ * hard cap: the proxy refuses a request that would take the day's spend over
+ * it (`429 BUDGET_EXCEEDED`). An owner or admin changes it on Settings ›
+ * Billing › Budget Limits or with `PUT /api/v1/budget`.
+ */
+export const DEFAULT_DAILY_BUDGET_USD = 100
+
+/**
+ * The monthly cap, in USD, of a workspace that has never saved one. Alerts
+ * only: reaching it raises budget alerts and refuses nothing.
+ */
+export const DEFAULT_MONTHLY_BUDGET_USD = 500
+
 // ─── Trace Entry ─────────────────────────────────────────────────────
 
 /**

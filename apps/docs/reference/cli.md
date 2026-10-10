@@ -952,7 +952,7 @@ intutic budget --watch [--interval <seconds>]
 
 Without `--watch`:
 
-- When you are logged in, prints the workspace's budget from the control plane: daily and monthly spend against their budgets with percentages, remaining budget, and an alert line when the alert threshold is exceeded.
+- When you are logged in, prints the workspace's budget from the control plane: daily and monthly spend against their budgets with percentages, the daily cap and whether it is the workspace's own or the $100-a-day default of a workspace that never saved one, remaining budget, and an alert line when the alert threshold is exceeded.
 - Prints the local spending cap from `~/.intutic/config.json` (`maxDailyBudgetUsd`, or `max_daily_budget_usd`; default `$10.00`).
 - Prints today's machine-local spend from the local proxy at `http://127.0.0.1:4000` (or the port of `INTUTIC_PROXY_URL`), or a dash when the proxy is not running.
 - When you are logged in, lists every `ACTIVE` loop run with its token spend and budget limit.
@@ -1731,7 +1731,7 @@ intutic rules test <module> --input <file...>
 |--------|-------------|
 | `--input <file...>` | JSON file(s), each holding one [input document](/guide/rego-policies#the-input-document) or an array of `{"name", "input", "expect"}` cases (required) |
 
-Prints each case's decision (`ALLOW`, `DENY`, `HOLD` or `REASK`), reason and risk tier. `expect` is optional; the command exits 1 when a case gets a decision other than the one it expects, or when evaluation fails. A native rule is refused, with a pointer to [`intutic policy test`](#intutic-policy-test).
+Prints each case's decision (`ALLOW`, `DENY`, `HOLD` or `REASK`), reason and risk tier. `expect` is optional; the command exits 1 when a case gets a decision other than the one it expects, or when evaluation fails. The rule runs under the proxies' instruction budget, so a rule that would run out of it in the proxy fails here too. A native rule is refused, with a pointer to [`intutic policy test`](#intutic-policy-test).
 
 ---
 
