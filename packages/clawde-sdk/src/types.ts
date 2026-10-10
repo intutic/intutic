@@ -1133,6 +1133,60 @@ export interface ResponseEchoReport {
   }>
 }
 
+// Governance incidents
+
+export interface IncidentFilters {
+  /** `OPEN`, `RESOLVED` or `AUTO_RESOLVED`. */
+  status?: string
+  /** `CRITICAL`, `HIGH`, `MEDIUM` or `LOW`. */
+  severity?: string
+  /**
+   * An anomaly category such as `SCOPE_VIOLATION`, or a system incident type:
+   * `WASM_RULE_REFUSED` or `SYSTEM_ANOMALY`. The control plane refuses one it
+   * does not know with a 400.
+   */
+  type?: string
+  /** From 1; default 1. */
+  page?: number
+  /** 1 to 100; default 20. */
+  limit?: number
+}
+
+/** One governance incident, with the route's snake_case keys. */
+export interface Incident {
+  incident_id: string
+  workspace_id: string
+  trace_id: string | null
+  session_id: string | null
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+  /** The incident type: an anomaly category or a system incident type. */
+  anomaly_type: string
+  description: string
+  resolution_status: string | null
+  resolved_by: string | null
+  resolved_at: string | null
+  escalation_chain: Record<string, unknown> | null
+  created_at: string | null
+  /** In a list only: how far up the review queue the incident ranks. */
+  review_priority?: number
+}
+
+export interface IncidentList extends ListEnvelope {
+  /**
+   * Ranked by review priority, not time. A list of 20 or more arrives
+   * TOON-encoded and is decoded here, with each cell cut at 120 characters:
+   * `getIncident` has the whole description.
+   */
+  data: Incident[]
+  meta: {
+    total: number
+    page: number
+    limit: number
+    /** The review budget: how many of the matching incidents the ranked queue covers. */
+    audit: { budget: number; matched: number; withheld: number; overBudget: boolean }
+  }
+}
+
 // Traces
 
 export interface TraceFilters {

@@ -871,7 +871,8 @@ proxy by hand.
 With neither `--` nor `--remote-url` the proxy is the standalone `intutic` MCP
 server: `intutic_governance_status`, `intutic_list_sops` and
 `intutic_list_incidents`, the two list tools taking a `limit` from 1 to 50
-(10 by default), and three tools an agent uses after a refusal:
+(10 by default) and `intutic_list_incidents` an optional `type`, one of the
+[incident types](/guide/concepts#incident-types), and three tools an agent uses after a refusal:
 `intutic_hold_status` (has this hold been decided, and will the retry pass),
 `intutic_mcp_registry_status` (what the registry says about a server) and
 `intutic_mcp_budget_remaining` (what is left of each call budget, read from

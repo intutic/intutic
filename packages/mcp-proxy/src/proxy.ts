@@ -35,7 +35,15 @@ import type { ProxyConfig } from './config.js'
 import { PolicyClient } from './policy.js'
 import { GovernanceEmitter, detectionFinding } from './emitter.js'
 import { ToolCallInterceptor, type Block } from './interceptor.js'
-import { budgetRemaining, describeFailure, holdStatus, readControlPlane, registryStatus } from './agentTools.js'
+import {
+  LIST_INCIDENTS_ARGS,
+  budgetRemaining,
+  describeFailure,
+  holdStatus,
+  incidentListPath,
+  readControlPlane,
+  registryStatus,
+} from './agentTools.js'
 import type { RefusalData } from './refusals.js'
 import { redactText as redactMcpText, setWorkspacePii } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns, type InjectionSource } from './injection.js'
@@ -765,12 +773,10 @@ export class McpGovernanceProxy {
     // Tool: intutic_list_incidents
     server.tool(
       'intutic_list_incidents',
-      'Lists recent governance incidents (policy violations, blocked tool calls) in this workspace.',
-      { limit: z.number().int().min(1).max(50).default(10).describe('Number of incidents to return (1–50)') },
-      async ({ limit }) => {
-        const result = await callControlPlane(
-          `/api/v1/incidents?workspaceId=${workspaceId}&limit=${limit}`
-        )
+      'Lists governance incidents (policy violations, blocked tool calls, refused custom rules, unreachable dependencies) in this workspace, most in need of review first, optionally of one type.',
+      LIST_INCIDENTS_ARGS,
+      async (args) => {
+        const result = await callControlPlane(incidentListPath(workspaceId, args))
         const text = result.ok
           ? JSON.stringify(result.data, null, 2)
           : describeFailure(result, 'list incidents')

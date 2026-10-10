@@ -386,6 +386,37 @@ class ResponseEchoReport(TypedDict):
     patterns: List[Dict[str, Any]]
 
 
+class Incident(TypedDict, total=False):
+    """One governance incident, with the route's snake_case keys.
+    ``anomaly_type`` is the incident type: an anomaly category or a system
+    incident type (``WASM_RULE_REFUSED``, ``SYSTEM_ANOMALY``).
+    ``review_priority`` is in a list only."""
+    incident_id: str
+    workspace_id: str
+    trace_id: Optional[str]
+    session_id: Optional[str]
+    severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+    anomaly_type: str
+    description: str
+    resolution_status: Optional[str]
+    resolved_by: Optional[str]
+    resolved_at: Optional[str]
+    escalation_chain: Optional[Dict[str, Any]]
+    created_at: Optional[str]
+    review_priority: float
+
+
+class IncidentList(TypedDict, total=False):
+    """Ranked by review priority, not time. A list of 20 or more arrives
+    TOON-encoded and is decoded, with each cell cut at 120 characters:
+    ``get_incident`` has the whole description. ``meta`` carries ``total``,
+    ``page``, ``limit`` and ``audit``, the review budget."""
+    listProperty: str
+    rowCase: str
+    data: List[Incident]
+    meta: Dict[str, Any]
+
+
 class TraceList(TypedDict, total=False):
     traces: List[Dict[str, Any]]
     total: int

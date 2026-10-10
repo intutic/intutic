@@ -4583,6 +4583,154 @@
       }
     },
     {
+      "ts": "listIncidents",
+      "py": "list_incidents",
+      "cli": "incidents list",
+      "args": [],
+      "options": {
+        "status": "OPEN",
+        "severity": "HIGH",
+        "type": "WASM_RULE_REFUSED",
+        "limit": 20
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/incidents?status=OPEN&severity=HIGH&type=WASM_RULE_REFUSED&limit=20"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "data",
+          "rowCase": "snake",
+          "data": [
+            {
+              "review_priority": 0.83,
+              "incident_id": "gi_1",
+              "workspace_id": "ws_1",
+              "trace_id": null,
+              "session_id": null,
+              "severity": "HIGH",
+              "anomaly_type": "WASM_RULE_REFUSED",
+              "description": "WASM rule 'no-shell' (wasm_1) was refused: its binary is missing.",
+              "resolution_status": "OPEN",
+              "resolved_by": null,
+              "resolved_at": null,
+              "escalation_chain": {
+                "kind": "wasm_rule_refused",
+                "source": "proxy",
+                "reason": "missing",
+                "occurrences": 2
+              },
+              "created_at": "2026-10-10T09:00:00.000Z"
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "limit": 20,
+            "audit": {
+              "budget": 25,
+              "matched": 1,
+              "withheld": 0,
+              "overBudget": false
+            }
+          }
+        }
+      },
+      "returns": {
+        "listProperty": "data",
+        "rowCase": "snake",
+        "data": [
+          {
+            "review_priority": 0.83,
+            "incident_id": "gi_1",
+            "workspace_id": "ws_1",
+            "trace_id": null,
+            "session_id": null,
+            "severity": "HIGH",
+            "anomaly_type": "WASM_RULE_REFUSED",
+            "description": "WASM rule 'no-shell' (wasm_1) was refused: its binary is missing.",
+            "resolution_status": "OPEN",
+            "resolved_by": null,
+            "resolved_at": null,
+            "escalation_chain": {
+              "kind": "wasm_rule_refused",
+              "source": "proxy",
+              "reason": "missing",
+              "occurrences": 2
+            },
+            "created_at": "2026-10-10T09:00:00.000Z"
+          }
+        ],
+        "meta": {
+          "total": 1,
+          "page": 1,
+          "limit": 20,
+          "audit": {
+            "budget": 25,
+            "matched": 1,
+            "withheld": 0,
+            "overBudget": false
+          }
+        }
+      }
+    },
+    {
+      "ts": "getIncident",
+      "py": "get_incident",
+      "cli": "incidents show",
+      "args": [
+        "gi_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/incidents/gi_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "incident_id": "gi_1",
+            "workspace_id": "ws_1",
+            "trace_id": null,
+            "session_id": null,
+            "severity": "HIGH",
+            "anomaly_type": "WASM_RULE_REFUSED",
+            "description": "WASM rule 'no-shell' (wasm_1) was refused: its binary is missing.",
+            "resolution_status": "OPEN",
+            "resolved_by": null,
+            "resolved_at": null,
+            "escalation_chain": {
+              "kind": "wasm_rule_refused",
+              "source": "proxy",
+              "reason": "missing",
+              "occurrences": 2
+            },
+            "created_at": "2026-10-10T09:00:00.000Z"
+          }
+        }
+      },
+      "returns": {
+        "incident_id": "gi_1",
+        "workspace_id": "ws_1",
+        "trace_id": null,
+        "session_id": null,
+        "severity": "HIGH",
+        "anomaly_type": "WASM_RULE_REFUSED",
+        "description": "WASM rule 'no-shell' (wasm_1) was refused: its binary is missing.",
+        "resolution_status": "OPEN",
+        "resolved_by": null,
+        "resolved_at": null,
+        "escalation_chain": {
+          "kind": "wasm_rule_refused",
+          "source": "proxy",
+          "reason": "missing",
+          "occurrences": 2
+        },
+        "created_at": "2026-10-10T09:00:00.000Z"
+      }
+    },
+    {
       "ts": "listTraces",
       "py": "list_traces",
       "cli": "traces list",
@@ -5612,6 +5760,20 @@
         }
       },
       "message": "The served source hashes to d67e2e944994496c8d8ec76eed0cf9f09679448d584b532bebf941852a37f5ed, not the 27ffb1a548d3c658b9dc6076ebd1890853d5da7c37ee32c06ecb183a4b021aa2 the control plane states."
+    },
+    {
+      "$comment": "An incident another workspace filed, or none, is not found.",
+      "ts": "getIncident",
+      "args": [
+        "gi_other"
+      ],
+      "response": {
+        "status": 404,
+        "body": {
+          "error": "Incident not found"
+        }
+      },
+      "message": "Control plane GET /api/v1/incidents/gi_other failed (404): {\"error\":\"Incident not found\"}"
     }
   ],
   "excluded": {

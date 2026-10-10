@@ -787,6 +787,57 @@ intutic findings echo-report --since 2026-09-01 --until 2026-10-01
 
 ---
 
+## `intutic incidents list` <Badge type="tip" text="Cloud" />
+
+List the workspace's governance incidents, as on **Findings › Incidents**. Needs the OWNER, ADMIN or EM role.
+
+```bash
+intutic incidents list [options]
+```
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--status <status>` | Only incidents with this status: `OPEN`, `RESOLVED` or `AUTO_RESOLVED` | _(every status)_ |
+| `--severity <severity>` | Only incidents of this severity: `CRITICAL`, `HIGH`, `MEDIUM` or `LOW` | _(every severity)_ |
+| `--type <type>` | Only incidents of this [type](/guide/concepts#incident-types): an anomaly type such as `SCOPE_VIOLATION`, or `WASM_RULE_REFUSED` or `SYSTEM_ANOMALY` | _(every type)_ |
+| `--page <n>` | The page to show | `1` |
+| `--limit <n>` | Incidents per page (at most 100) | `20` |
+| `--json` | Output as JSON instead of table | — |
+| `--dev` | Use local control plane (`http://localhost:3001`) | — |
+
+**What it does:**
+Prints each incident's id, severity, type, status and time, with its description below. The list is ranked by review priority (severity, detector confidence and age), not by time, and the review queue is bounded: when the budget leaves incidents out, the CLI says how many. A severity or type that does not exist is refused before any request. A list of 20 or more arrives compressed, with each description cut at 120 characters; `intutic incidents show` prints the whole incident.
+
+**Example:**
+
+```bash
+intutic incidents list --status OPEN --type SYSTEM_ANOMALY
+```
+
+---
+
+## `intutic incidents show <incidentId>` <Badge type="tip" text="Cloud" />
+
+Print one governance incident in full.
+
+```bash
+intutic incidents show <incidentId> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON instead of table |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints the incident's type, severity, status, when it was filed and resolved and by whom, its session and trace, its whole description, and its escalation details: for a refused custom filter, the rule, the version, the reason and how many times it was reported.
+
+---
+
 ## `intutic integrity roots` <Badge type="tip" text="Cloud" />
 
 List the sealed Merkle roots for the workspace, newest first. Roots are sealed by the control

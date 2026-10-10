@@ -952,15 +952,20 @@
           { "file": "apps/dashboard/src/routes/IncidentsPage.tsx", "contains": "id=\"incidents-type-filter\"" },
           { "file": "apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx", "contains": "An incident is sent at its own severity" }
         ],
-        "cli": { "gap": "list incidents, by type, from the CLI: no incidents command exists", "want": [], "have": [] },
+        "cli": ["incidents list --status --severity --type --page --limit", "incidents show"],
         "gateSdk": { "none": "gates file incidents; they do not read them" },
-        "clawdeSdk": { "gap": "list incidents, by type, from the operator SDKs: neither has incident listing", "want": [], "have": [] },
-        "mcpTools": { "gap": "a type filter on intutic_list_incidents", "want": [], "have": ["intutic_list_incidents"] },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "public async listIncidents(filters: IncidentFilters = {})" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "def list_incidents(" },
+          { "file": "packages/shared-types/fixtures/control-plane-operations.json", "contains": "\"ts\": \"getIncident\"" }
+        ],
+        "mcpTools": ["intutic_list_incidents", { "file": "packages/mcp-proxy/src/agentTools.ts", "contains": ".enum(INCIDENT_TYPES)" }],
         "kitkat": { "none": "incidents are for reviewers, not the agent" },
         "terraform": { "none": "incidents are records, not configuration" },
         "docs": [
           { "ref": "guide/concepts.md#incident-types", "badge": false },
-          { "ref": "guide/settings.md#rule-filters", "badge": false }
+          { "ref": "guide/settings.md#rule-filters", "badge": false },
+          { "ref": "reference/cli.md#intutic-incidents-list", "badge": false }
         ],
         "website": { "none": "an operational detail of the incident queue" },
         "events": [{ "ref": "incident.created", "badge": false }],

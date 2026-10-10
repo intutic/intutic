@@ -968,6 +968,37 @@ findings
     await runFindingsEchoReport(opts)
   })
 
+// ── Governance incidents ───────────────────────────────────────────────────
+
+const incidentsCmd = program
+  .command('incidents')
+  .description('Governance incidents, as on Findings › Incidents (OWNER, ADMIN, EM)')
+
+incidentsCmd
+  .command('list')
+  .description('Incidents ranked by review priority, filtered by status, severity and type')
+  .option('--status <status>', 'Only incidents with this status: OPEN, RESOLVED or AUTO_RESOLVED')
+  .option('--severity <severity>', 'Only incidents of this severity: CRITICAL, HIGH, MEDIUM or LOW')
+  .option('--type <type>', 'Only incidents of this type, e.g. SCOPE_VIOLATION, WASM_RULE_REFUSED or SYSTEM_ANOMALY')
+  .option('--page <n>', 'The page to show (default 1)')
+  .option('--limit <n>', 'Incidents per page (default 20, at most 100)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runIncidentsList } = await import('./commands/incidents.js')
+    await runIncidentsList(opts)
+  })
+
+incidentsCmd
+  .command('show <incidentId>')
+  .description('One incident in full, with its escalation details')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (incidentId: string, opts) => {
+    const { runIncidentsShow } = await import('./commands/incidents.js')
+    await runIncidentsShow(incidentId, opts)
+  })
+
 // ── Trace integrity ────────────────────────────────────────────────────────
 
 const integrity = program

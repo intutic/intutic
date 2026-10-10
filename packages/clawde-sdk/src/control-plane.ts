@@ -100,6 +100,9 @@ import type {
   ResponseEchoReport,
   TraceFilters,
   TraceList,
+  IncidentFilters,
+  Incident,
+  IncidentList,
   TraceDetail,
   IntegrityRootList,
   IntegrityRootDetail,
@@ -884,6 +887,27 @@ export class ControlPlaneClient {
   /** GET /api/v1/findings/response-echo/report */
   public async getResponseEchoReport(options: ResponseEchoReportOptions = {}): Promise<ResponseEchoReport> {
     return this.request('GET', `/api/v1/findings/response-echo/report${query({ since: options.since, until: options.until })}`)
+  }
+
+  // ─── Governance incidents (`intutic incidents`) ───
+  //
+  // OWNER, ADMIN and EM only: incidents carry tool arguments and DLP reasons.
+
+  /** GET /api/v1/incidents — ranked by review priority; filter by status, severity and type. */
+  public async listIncidents(filters: IncidentFilters = {}): Promise<IncidentList> {
+    const path = `/api/v1/incidents${query({
+      status: filters.status,
+      severity: filters.severity,
+      type: filters.type,
+      page: filters.page,
+      limit: filters.limit,
+    })}`
+    return this.request('GET', path)
+  }
+
+  /** GET /api/v1/incidents/:incidentId */
+  public async getIncident(incidentId: string): Promise<Incident> {
+    return (await this.request<{ data: Incident }>('GET', `/api/v1/incidents/${seg(incidentId)}`)).data
   }
 
   // ─── Traces (`intutic traces`) ───

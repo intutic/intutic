@@ -72,6 +72,8 @@ from .types import (
     GitHubWebhookSecret,
     GuardrailReplay,
     GuardrailTransitionResult,
+    Incident,
+    IncidentList,
     IntegrityChain,
     IntegrityRecompute,
     IntegrityRootDetail,
@@ -833,6 +835,27 @@ class ControlPlaneClient:
         ))
 
     # ─── Traces (intutic traces) ───
+
+    def list_incidents(
+        self,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        type: Optional[str] = None,
+        page: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> IncidentList:
+        """GET /api/v1/incidents (OWNER, ADMIN, EM) -- ranked by review
+        priority. ``status`` is OPEN, RESOLVED or AUTO_RESOLVED; ``severity``
+        CRITICAL, HIGH, MEDIUM or LOW; ``type`` an anomaly category such as
+        SCOPE_VIOLATION, or WASM_RULE_REFUSED or SYSTEM_ANOMALY, and the
+        control plane refuses one it does not know. ``limit`` is 1 to 100
+        (default 20)."""
+        query = _query(status=status, severity=severity, type=type, page=page, limit=limit)
+        return cast(IncidentList, self._request("GET", f"/api/v1/incidents{query}"))
+
+    def get_incident(self, incident_id: str) -> Incident:
+        """GET /api/v1/incidents/:incidentId"""
+        return cast(Incident, self._request("GET", f"/api/v1/incidents/{_quote(incident_id)}")["data"])
 
     def list_traces(
         self,

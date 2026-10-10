@@ -176,7 +176,7 @@ except ClawdeConnectionError as e:
 
 ## Control-Plane Management (`ControlPlaneClient`)
 
-Everything above (`ClawdeClient`) is a **data-plane** client: it wraps the local proxy for chat calls. `ControlPlaneClient` is a separate, optional class for the **operator** APIs the [CLI](/reference/cli) exposes: org and workspace setup, gateways, settings and provider credentials, the MCP registry, notification rules, SIEM destinations, usage, the AI inventory, compliance evidence, policy guardrails, held decisions and loop runs, findings, traces, trace integrity, policies and SOPs. Both SDKs have the same methods, camelCase in TypeScript and snake_case in Python, so the same work can run from code (infra-as-code, a secrets-manager sync job, a nightly compliance export, provisioning a workspace per tenant in your own product built on Intutic).
+Everything above (`ClawdeClient`) is a **data-plane** client: it wraps the local proxy for chat calls. `ControlPlaneClient` is a separate, optional class for the **operator** APIs the [CLI](/reference/cli) exposes: org and workspace setup, gateways, settings and provider credentials, the MCP registry, notification rules, SIEM destinations, usage, the AI inventory, compliance evidence, policy guardrails, held decisions and loop runs, incidents, findings, traces, trace integrity, policies and SOPs. Both SDKs have the same methods, camelCase in TypeScript and snake_case in Python, so the same work can run from code (infra-as-code, a secrets-manager sync job, a nightly compliance export, provisioning a workspace per tenant in your own product built on Intutic).
 
 It talks to the **control plane** — Intutic's hosted one by default, or your own self-hosted `CONTROL_PLANE_URL` — not the proxy: a different origin from `ClawdeClient`'s `baseUrl`, so it takes its own `baseUrl` (`base_url`). Every method is a direct HTTP call with no hosted-vs-self-hosted branching, so it works unmodified against either. It needs a control plane to talk to, same as `intutic whoami` does: an open-core deployment with no control plane configured simply won't have anything to call.
 
@@ -346,6 +346,8 @@ In Python both signature checks need the `cryptography` package: `pip install 'i
 |  | `killLoopRun` | `kill_loop_run` | `POST /api/v1/loops/:loopRunId/kill` | `intutic loop kill` |
 |  | `approveLoopRun` | `approve_loop_run` | `POST /api/v1/loops/:loopRunId/review` | `intutic loop review --approve` |
 |  | `rejectLoopRun` | `reject_loop_run` | `POST /api/v1/loops/:loopRunId/review` | `intutic loop review --reject` |
+| Incidents | `listIncidents` | `list_incidents` | `GET /api/v1/incidents` | `intutic incidents list` |
+|  | `getIncident` | `get_incident` | `GET /api/v1/incidents/:incidentId` | `intutic incidents show` |
 | Findings and traces | `listFindings` | `list_findings` | `GET /api/v1/findings` | `intutic findings list` |
 |  | `adjudicateFinding` | `adjudicate_finding` | `POST /api/v1/findings/:findingId/adjudicate` | `intutic findings adjudicate` |
 |  | `getFindingStats` | `get_finding_stats` | `GET /api/v1/findings/stats` | `intutic findings stats` |
@@ -397,7 +399,7 @@ A chat call then names the model with the provider's prefix — `bedrock/anthrop
 
 `signupOrg` is unauthenticated; a self-hosted control plane always refuses it, and the hosted one only accepts it with `INTUTIC_PUBLIC_ORG_SIGNUP=true`, so create orgs with `startDomainVerification`, `checkDomainVerification` and `createOrg`: publish the returned TXT record, poll until `status` is `verified`, then create the org with that `verificationId`.
 
-`listTraces` takes `since` as an ISO 8601 time or a duration such as `24h`; a page of 20 traces or more arrives TOON-encoded and is decoded before it is returned, with any cell longer than 120 characters cut short as the control plane sent it. `getRuleCandidateSource` refuses a source that does not hash to the `sourceSha256` served with it.
+`listIncidents` filters by `status`, `severity`, `type` (an [incident type](/guide/concepts#incident-types); the control plane refuses one it does not know), `page` and `limit`, and returns the page ranked by review priority with `meta` (the total and the review budget). A page of 20 incidents or more arrives TOON-encoded and is decoded before it is returned, with each cell cut at 120 characters: `getIncident` returns a long description whole. `listTraces` takes `since` as an ISO 8601 time or a duration such as `24h`; a page of 20 traces or more arrives TOON-encoded and is decoded before it is returned, with any cell longer than 120 characters cut short as the control plane sent it. `getRuleCandidateSource` refuses a source that does not hash to the `sourceSha256` served with it.
 
 Not covered, on purpose: session establishment (`intutic login`/`logout` — supply `apiKey` directly; `ClawdeClient` registers its own session), the workspace budget (`checkBudget()` above), and commands that act on the machine they run on: `init`, `setup`, `doctor`, `install-daemon`, `connect`, `disconnect`, `exec`, `start`, `sync-context`, `rollback`, `enforce`, `rules`, `judge`, `skill` (its loop commands are covered), `sops status`, `guardrails pull` and `policy compile`, `install`, `list-local` and `snapshot`.
 
