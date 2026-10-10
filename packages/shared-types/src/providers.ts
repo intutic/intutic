@@ -95,7 +95,12 @@ export const PROVIDER_REGISTRY: ProviderDefinition[] = [
     displayName: 'Google Gemini',
     docsUrl: 'https://aistudio.google.com/app/apikey',
     fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true }],
-    routingLive: true,
+    // The proxy resolves gemini-* models but forwards the request without
+    // translating it to Gemini's generateContent format, so no request
+    // succeeds. The key keeps its flat-field storage
+    // (LIVE_ROUTING_PROVIDER_IDS), so a key saved now is the one the proxy
+    // reads once Gemini routing ships.
+    routingLive: false,
   },
   {
     id: 'azure_openai',
