@@ -34,11 +34,15 @@ GET /api/v1/compliance/probes/history?from=<ISO>&to=<ISO>&probeType=<type>&limit
 
 Any authenticated workspace member can read it (it is the same data the probes panel already shows, extended backwards in time). `from`/`to` default to the trailing 90 days, `limit` defaults to 500 (max 1000), and the response carries `total` alongside `rows` so a truncated page is distinguishable from a complete one.
 
+Each history row covers a run of identical results rather than a single run. When a probe reports exactly what it reported last time, the stored result is extended instead of repeated: `observedSince` is the first run that produced it, `probedAt` the most recent, and `observations` how many runs it covers. A row ends at midnight UTC, and after a gap of more than two hours with no run, so every probe has at least one row per day and an outage shows as a gap between rows. A row falls in the `from`/`to` window when its first run does.
+
+Probe history is kept for 400 days: a twelve-month audit period, plus a month to collect its evidence. Older rows are deleted by a daily retention sweep.
+
 ## Evidence runs
 
 An evidence run maps a **fresh probe run** onto the five SOC 2 trust categories — security, availability, processing integrity, confidentiality, privacy — and seals the result into a downloadable archive:
 
-- `POST /api/v1/compliance/soc2-collect` (OWNER/ADMIN) — collect a run for a period (`periodStart`/`periodEnd` ISO strings, default trailing 90 days). Also runs automatically once a day on the Enterprise and Self-host plans. The response says whether the archive is signed: `signed: true` with the `signingKeyId`, or `signed: false` with an `unsignedReason` naming what to configure.
+- `POST /api/v1/compliance/soc2-collect` (OWNER/ADMIN) — collect a run for a period (`periodStart`/`periodEnd` ISO strings, default trailing 90 days). The period can start at most 400 days back, the probe history's retention; an earlier `periodStart` is refused with a 400 rather than producing an archive with a short history digest. Also runs automatically once a day on the Enterprise and Self-host plans. The response says whether the archive is signed: `signed: true` with the `signingKeyId`, or `signed: false` with an `unsignedReason` naming what to configure.
 - `GET /api/v1/compliance/soc2-status` (any member) — latest probe results rolled up by trust category.
 - `GET /api/v1/compliance/soc2-export/:runId` (OWNER/ADMIN) — download the stored archive as JSON. The `X-Intutic-Export-Signed` header is `true` or `false`.
 
@@ -53,7 +57,7 @@ The **Active Compliance Probes** panel on **Policies › Compliance Scope** has 
 - Per-category probe results (the same `ProbeResult` objects the dashboard shows), with the category score as the **mean of its mapped probes' scores**
 - Per-category row counts from the underlying governance tables, grouped by enum columns — incidents by severity, enforcement decisions by verdict, break-glass requests by status, active SOPs, active API keys, residency violations, sessions
 - Capped id samples: the first 100 ids per table, so an auditor can request specific records
-- A digest of the probe-result history for the period (row counts, first/last timestamps, status tallies per probe)
+- A digest of the probe-result history for the period: per probe, how many runs, the first and last, and how many runs reported each status. Runs are counted by the history rows that start inside the period, so a period that ends before the collection can also count runs from the rest of its last day
 - Coverage of the EU AI Act, ISO/IEC 42001, NIST AI RMF and MITRE ATLAS, computed from the same probe run, as JSON and as a readable report (archives with `formatVersion` 2), and as CSV and PDF (`formatVersion` 3; see [Framework Mapping](/guide/framework-mapping#in-the-evidence-pack))
 - A sha256 manifest and, when signing is configured, a detached Ed25519 signature
 
