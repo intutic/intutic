@@ -424,7 +424,7 @@ The **Event Type** list offers only the events the control plane sends:
 
 | Event type | Label in the dashboard |
 |------------|------------------------|
-| `incident.created` | Incident Created |
+| `incident.created` | Incident Created: sent at the incident's own severity, so ticking HIGH and CRITICAL leaves out MEDIUM and LOW incidents. Before 2.4.0 every incident was sent at CRITICAL. See [incident types](/guide/concepts#incident-types) |
 | `judge.review.queued` | Judge Review Waiting |
 | `anomaly.detected` | Anomaly Detected |
 | `anomaly.finding` | Detector Finding (incl. advisory): every detector finding, allowed or blocked; pair it with a severity filter |

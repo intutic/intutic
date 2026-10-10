@@ -128,7 +128,18 @@ The **Autonomous Reasoning Engine** runs on the control plane over the traces an
 
 When the ARE flags an anomaly it records the finding and can open a governance incident. A finding blocks nothing on its own; it reaches enforcement only through the [promotion rule](/concepts/enforcement-actions#the-promotion-rule).
 
-A governance incident's type is one of these twelve, or `WASM_RULE_REFUSED`: a proxy refused to load a version of a [custom filter](/guide/wasm-rules#when-a-rule-cannot-load). That one is not an anomaly. No agent caused it, nothing detects it on the request path, and it never reaches enforcement.
+### Incident types
+
+A governance incident's type is one of the twelve anomaly types above, or one of two system incident types. A system incident is not an anomaly: no agent caused it, nothing detects it on the request path, and it never reaches enforcement.
+
+| Type | What it records |
+|------|-----------------|
+| `WASM_RULE_REFUSED` | A proxy refused to load a version of a [custom filter](/guide/wasm-rules#when-a-rule-cannot-load) |
+| `SYSTEM_ANOMALY` | A proxy could not reach something it depends on: the LLM provider, or the semantic cache's embedding service or vector store |
+
+Before 2.4.0 both were filed as `SCOPE_VIOLATION`, and those incidents keep that type. A refused filter filed then still carries `escalation_chain.kind` `wasm_rule_refused`; a system anomaly filed then has no `escalation_chain`.
+
+**Findings › Incidents** filters the list by type, as `GET /api/v1/incidents` does with `?type=` (for example `?type=SYSTEM_ANOMALY`); an unknown type is refused with `400`. The `incident.created` notification is sent at the incident's own severity, so a rule's [severity filter](/guide/settings#rule-filters) applies to incidents.
 
 ## Trust Scores
 

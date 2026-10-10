@@ -133,7 +133,7 @@ The Autonomous Reasoning Engine detects 12 categories of runtime anomalies. It r
 | `WORKFLOW_BUDGET_BREACH` | Multi-step workflow over budget |
 | `WORKFLOW_GOAL_DRIFT` | Workflow deviating from stated objective |
 
-An incident can also have the type `WASM_RULE_REFUSED`, which is not an anomaly: a proxy refused to load a version of a [custom filter](/guide/wasm-rules#when-a-rule-cannot-load).
+An incident can also have a [system incident type](/guide/concepts#incident-types), which is not an anomaly: `WASM_RULE_REFUSED` when a proxy refused to load a version of a custom filter, and `SYSTEM_ANOMALY` when a proxy could not reach the LLM provider or a semantic cache dependency.
 
 ## FinOps Ledger
 

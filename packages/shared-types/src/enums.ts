@@ -521,11 +521,18 @@ export type IncidentStatus = typeof IncidentStatus[keyof typeof IncidentStatus]
  * Incidents that are not an agent misbehaving, so they are not anomaly
  * categories: nothing on the hot path detects them, no corrective card
  * answers them, and enforcement cannot be promoted on them. They share the
- * `anomaly_type` column (Postgres enum, migration 218) with the taxonomy.
+ * `anomaly_type` column (Postgres enum, migrations 218 and 219) with the
+ * taxonomy.
  */
 export const SystemIncidentType = {
   /** A proxy refused to load a custom WASM or Rego rule version (`ruleLoadFailures.ts`). */
   WASM_RULE_REFUSED: 'WASM_RULE_REFUSED',
+  /**
+   * Anything else a proxy reports on `intutic:system_anomalies`: a
+   * dependency it could not reach, such as the LLM provider or the semantic
+   * cache's embedding service or vector store.
+   */
+  SYSTEM_ANOMALY: 'SYSTEM_ANOMALY',
 } as const
 
 /** Union of the system incident types. */
@@ -536,6 +543,14 @@ export const IncidentType = { ...AnomalyTypeValues, ...SystemIncidentType } as c
 
 /** Union of every incident type, as `governance_incidents.anomaly_type` holds it. */
 export type IncidentType = typeof IncidentType[keyof typeof IncidentType]
+
+/** Every incident type, for validating a filter or listing the choices. */
+export const INCIDENT_TYPES = Object.values(IncidentType) as [IncidentType, ...IncidentType[]]
+
+/** Whether an arbitrary string is an incident type. */
+export function isIncidentType(value: unknown): value is IncidentType {
+  return (INCIDENT_TYPES as readonly unknown[]).includes(value)
+}
 
 // ─── Plan Lifecycle State ────────────────────────────────────────────
 // HLD §3.4.1 — Stored plan compliance trail lifecycle

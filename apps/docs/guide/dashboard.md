@@ -57,7 +57,7 @@ The other areas carry what used to sit on the dashboard itself:
 
 - **Traces** — **Activity › Traces** (page heading **Activity Logs**). See [Activity Logs](/guide/traces).
 - **Agent Guidelines** — **Policies › Agent Guidelines**. See [Agent Guidelines](/guide/sops).
-- **Anomalies and incidents** — **Findings › Incidents**, whose tabs include **Anomalies** and **Drift Alerts**. Incidents move through `OPEN`, `RESOLVED` and `AUTO_RESOLVED`.
+- **Anomalies and incidents** — **Findings › Incidents**, whose tabs include **Anomalies** and **Drift Alerts**. Incidents move through `OPEN`, `RESOLVED` and `AUTO_RESOLVED`, and the list filters by status, severity and [type](/guide/concepts#incident-types).
 - **Trust scores** — **Developer Trust Scores**, per developer, on **Activity › Developer Sessions**. See [Developer Sessions](/guide/agent-top).
 
 ### Trace Integrity

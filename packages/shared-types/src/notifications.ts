@@ -326,14 +326,41 @@ export interface NotificationLogEntry {
   createdAt: string
 }
 
+/** The severity a notification is sent at, which a rule's severity filter matches on. */
+export type NotificationSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO'
+
 export interface GovernanceEvent {
   type: NotificationEventType
   workspaceId: string
   sessionId?: string
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO'
+  severity: NotificationSeverity
   summary: string
   description: string
   metadata: Record<string, unknown>
+}
+
+/**
+ * The severity `incident.created` is sent at, from the incident's own
+ * (`governance_incidents.severity`). Until 2.4.0 every incident was sent at
+ * CRITICAL whatever its severity, so a rule filtered on CRITICAL received a
+ * MEDIUM incident and a rule filtered on HIGH received none.
+ */
+export const INCIDENT_NOTIFICATION_SEVERITY: Readonly<Record<'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW', NotificationSeverity>> = {
+  CRITICAL: 'CRITICAL',
+  HIGH: 'HIGH',
+  MEDIUM: 'MEDIUM',
+  LOW: 'LOW',
+}
+
+/**
+ * {@link INCIDENT_NOTIFICATION_SEVERITY} for an incident event's `severity`.
+ * One the map does not name (absent, or from an emitter that sent something
+ * else) is sent at CRITICAL: a malformed event must not quieten an alert.
+ */
+export function incidentNotificationSeverity(severity: unknown): NotificationSeverity {
+  return typeof severity === 'string' && Object.hasOwn(INCIDENT_NOTIFICATION_SEVERITY, severity)
+    ? INCIDENT_NOTIFICATION_SEVERITY[severity as keyof typeof INCIDENT_NOTIFICATION_SEVERITY]
+    : 'CRITICAL'
 }
 
 export interface DispatchResult {

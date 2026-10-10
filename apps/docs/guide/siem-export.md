@@ -118,7 +118,7 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 
 | Source | Event class | Severity |
 |---|---|---|
-| `governance_incidents` | `GOVERNANCE_VIOLATION` for a HIGH or CRITICAL incident, `GOVERNANCE_NOTICE` otherwise; `WASM_RULE_REFUSED` for a [custom filter a proxy refused to load](/guide/wasm-rules#when-a-rule-cannot-load) (one filed before 2.4.0 is a `GOVERNANCE_VIOLATION`) | 10, 7, 4 or 1 for CRITICAL, HIGH, MEDIUM or LOW; a refused filter is HIGH, 7 |
+| `governance_incidents` | `GOVERNANCE_VIOLATION` for a HIGH or CRITICAL incident, `GOVERNANCE_NOTICE` otherwise; `WASM_RULE_REFUSED` for a [custom filter a proxy refused to load](/guide/wasm-rules#when-a-rule-cannot-load) and `SYSTEM_ANOMALY` for a dependency a proxy could not reach (see [incident types](/guide/concepts#incident-types); one filed before 2.4.0 is a `GOVERNANCE_VIOLATION`) | 10, 7, 4 or 1 for CRITICAL, HIGH, MEDIUM or LOW; both system types are filed HIGH, 7 |
 | `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block or a tamper, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
 | `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
 | `workspace_settings_changes` | `SETTINGS_CHANGE` | 5 |

@@ -21,6 +21,8 @@ export {
   ExecutionMode,
   IncidentStatus,
   IncidentType,
+  INCIDENT_TYPES,
+  isIncidentType,
   SystemIncidentType,
   PlanLifecycleState,
   PlanExecutionOutcome,
