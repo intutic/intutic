@@ -50,7 +50,9 @@ func (r *workspaceSettingsResource) Schema(_ context.Context, _ resource.SchemaR
 			"and written whole (the API replaces it whole), except `featureFlags`, which is managed flag by flag. " +
 			"Keys you do not set are never sent, so values set in the dashboard or by another tool are left alone. " +
 			"Removing a key from the configuration stops managing it and leaves its value in place; destroying the " +
-			"resource changes nothing in the workspace. Needs an OWNER or ADMIN key.",
+			"resource changes nothing in the workspace. Spend caps are not settings and are not managed here: a " +
+			"workspace that has not saved a daily cap is held to $100 a day; set caps on Settings › Billing › Budget " +
+			"Limits or with `PUT /api/v1/budget`. Needs an OWNER or ADMIN key.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,

@@ -298,7 +298,7 @@ Usage against your plan, invoices, and the spend caps that stop a runaway agent.
 - **Enterprise trial** — for an Owner on an eligible workspace, a banner offers **Start 14-day enterprise trial**; during a trial it shows the days remaining and **Talk to Sales**.
 - **Governed Request Usage** — Governed Requests this month against the requests your plan includes (for an organization's plan, counted across all its workspaces), any overage and its charge, the rate per 1,000 Governed Requests your workspace is billed at, and a daily trend.
 - **Billing History & Invoices** — invoices Stripe issued to this workspace, newest first.
-- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits** (Owners and Admins; other roles see the caps read-only); and **Budget alerts**, each with **Acknowledge** (Owners, Admins and EMs). See [Budgets & FinOps](/guide/budgets).
+- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits** (Owners and Admins; other roles see the caps read-only); and **Budget alerts**, each with **Acknowledge** (Owners, Admins and EMs). A workspace that has not saved a daily cap shows the $100 default under the field, which the proxy enforces until you save your own. See [Budgets & FinOps](/guide/budgets).
 
 ### Changing plan {#changing-plan}
 
