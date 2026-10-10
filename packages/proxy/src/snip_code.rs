@@ -397,7 +397,7 @@ impl LanguageCache {
 
 static LANG_CACHE: Lazy<LanguageCache> = Lazy::new(LanguageCache::init);
 
-// ─── TD-009: Public grammar status API ───────────────────────────────────────
+// ─── Public grammar status API ───────────────────────────────────────────────
 
 /// Runtime WASM load status for a single grammar.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -413,7 +413,7 @@ pub enum GrammarStatus {
 ///
 /// Call this at startup (e.g., in the health-check route) to surface
 /// which languages have WASM active vs regex fallback. Also useful in
-/// the TD-003 smoke test and observability dashboards.
+/// the grammar smoke test and observability dashboards.
 ///
 /// # Example
 /// ```no_run
@@ -468,7 +468,7 @@ pub fn grammar_load_status() -> Vec<(&'static str, GrammarStatus)> {
     ]
 }
 
-// ─── TD-007: Per-thread Parser pool ──────────────────────────────────────────
+// ─── Per-thread Parser pool ──────────────────────────────────────────────────
 // tree_sitter::Parser is !Send + !Sync, so we store one per thread.
 // RefCell gives exclusive borrow within the closure — no deadlock risk because
 // parse calls never recurse. This eliminates per-request Parser allocation under
@@ -478,13 +478,13 @@ thread_local! {
         std::cell::RefCell::new(tree_sitter::Parser::new());
 }
 
-// ─── TD-008: Optional incremental parse tree cache ────────────────────────────
+// ─── Optional incremental parse tree cache ────────────────────────────────────
 // When enabled (SnipCompactorConfig::code_skeleton_incremental_cache), we cache
 // the last tree-sitter parse result per thread, keyed on (CodeLanguage, hash(code)).
 // This avoids re-parsing identical code blocks — e.g., the same file returned by
 // multiple consecutive tool calls in one LLM turn.
 //
-// Activation criteria (activate after 30-day telemetry review, TD-008):
+// Activation criteria (activate after 30-day telemetry review):
 //   - p99 code input > 50 KB  AND
 //   - same-content hit rate > 20% of skeleton-extraction calls
 //
@@ -521,7 +521,7 @@ fn lang_cache_key(lang: CodeLanguage) -> u8 {
 /// FNV-1a 64-bit hash of a string — fast, zero-allocation, no deps.
 ///
 /// Exposed to `snip` so every `snip.compacted` line can carry a content
-/// identity. Without it the "same-content hit rate" half of TD-160 could not
+/// identity. Without it the "same-content hit rate" activation criterion could not
 /// be measured at all: the only hash previously computed was inside the cache
 /// path, gated on `use_cache` — the very flag the measurement is supposed to
 /// decide. Non-reversible and 64-bit; it links identical chunks to each other
@@ -754,7 +754,7 @@ pub fn compact_code(text: &str) -> (String, f64) {
     compact_code_cached(text, false)
 }
 
-/// Variant of `compact_code` with optional incremental parse cache (TD-008).
+/// Variant of `compact_code` with optional incremental parse cache.
 ///
 /// When `use_cache` is true, the skeleton for identical code blocks is returned
 /// from a per-thread LRU cache instead of re-running tree-sitter. Enable only
@@ -765,7 +765,7 @@ pub fn compact_code_cached(text: &str, use_cache: bool) -> (String, f64) {
         return (text.to_string(), 0.0);
     }
 
-    // TD-008: Cache lookup before any parsing work
+    // Cache lookup before any parsing work
     let hash = if use_cache { fnv1a_hash(text) } else { 0 };
     if use_cache {
         if let Some(cached) = cache_get(lang, hash) {
@@ -803,7 +803,7 @@ pub fn compact_code_cached(text: &str, use_cache: bool) -> (String, f64) {
         0.0
     };
 
-    // TD-008: Populate cache on miss
+    // Populate cache on miss
     if use_cache && ratio > 0.0 {
         tracing::debug!(
             snip.cache = "miss",

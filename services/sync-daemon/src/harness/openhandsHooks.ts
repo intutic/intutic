@@ -7,7 +7,6 @@
  * The hooks file lives within the agent's sandbox working directory,
  * so we also register it with the drift watcher.
  *
- * LLD #14 — Phase 3 cross-harness defence
  * HLD §3.14 — Three-Tier Defense Cascade
  *
  * @module

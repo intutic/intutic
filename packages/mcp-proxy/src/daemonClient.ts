@@ -1,6 +1,5 @@
 /**
  * daemonClient.ts — IPC socket client helper for communicating with mcp-daemon.
- * LLD #28: MCP Daemon Mode, WS-5MCP
  *
  * @module
  */

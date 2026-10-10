@@ -75,7 +75,7 @@ const PATTERNS: readonly InjectionPattern[] = [
 const KILL_THRESHOLD = 2
 
 /**
- * Workspace-supplied patterns, compiled (TD-436). Same contract as
+ * Workspace-supplied patterns, compiled. Same contract as
  * `dlp.ts`'s `setDynamicPatterns`: sources come from the control plane's
  * `mcpInjectionPatterns`, an invalid one is dropped and counted, and the
  * hardcoded floor above applies regardless — an unreachable control plane

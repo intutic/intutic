@@ -44,12 +44,12 @@ describe('resolveProxyAssetName', () => {
   })
 })
 
-// TD-488: the connect loop used to refresh the policy snapshot once, at
+// The connect loop used to refresh the policy snapshot once, at
 // startup, and never again. The refresh now rides every applySyncConfig
 // (each poll and each pushed config_update). A source pin, because
 // `connect()` runs a full daemon (WebSocket, watcher, drain timers) that no
 // unit test should start; the helper itself is tested in the sync daemon.
-describe('connect refreshes the gate caches on every sync (TD-488)', () => {
+describe('connect refreshes the gate caches on every sync', () => {
   it('applySyncConfig calls the shared refresh helper before anything version-gated', async () => {
     const { readFileSync } = await import('node:fs')
     const { fileURLToPath } = await import('node:url')

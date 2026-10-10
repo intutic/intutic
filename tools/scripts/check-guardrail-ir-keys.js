@@ -3,7 +3,7 @@
  * The Guardrail IR may not name a front-matter key the proxy cannot read.
  *
  * `IR_KINDS` in `packages/shared-types/src/guardrailIr.ts` is the closed set
- * of clauses a policy compiler may emit (LLD #71). Six of them render to SOP
+ * of clauses a policy compiler may emit. Six of them render to SOP
  * front-matter lines that `packages/proxy/src/sops.rs` parses. A kind the
  * parser does not read would render to a line the proxy ignores — a rule that
  * loads, is listed, and never fires. The inert control, generated
@@ -14,8 +14,8 @@
  * direction is not checked: the IR deliberately omits the three allowlist keys
  * (`allow_harnesses`, `plan_steps`, `scope_paths`), and says so.
  *
- * The two settings-class kinds (`allowed_models`, `egress_allow`; TD-474
- * item 2) render to a workspace setting, not a front-matter line. Their
+ * The two settings-class kinds (`allowed_models`, `egress_allow`) render to a
+ * workspace setting, not a front-matter line. Their
  * enforcer is the setting the proxy already reads, so the check is that each
  * key in `SETTING_KIND_KEYS` is a field `WorkspaceSettings` declares — a key
  * the type does not have would be written into the settings JSON and read by

@@ -448,7 +448,7 @@ describe('runPolicyReplay end to end', () => {
 })
 
 /**
- * `intutic policy compile --candidate` (LLD #71, Wave 7): the source of
+ * `intutic policy compile --candidate`: the source of
  * record is fetched, hash-checked and written where its SDK import resolves;
  * the upload carries the hash the server recomputes. Nothing here reaches
  * `asc` — every case stops before the compiler or exercises the two helpers

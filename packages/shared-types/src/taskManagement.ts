@@ -1,8 +1,6 @@
 /**
  * Task Management Adapter — Generic interface for external task/issue trackers.
  *
- * TD-022 item 3.9: TaskManagementAdapter interface
- *
  * Provides a unified abstraction over external task management tools
  * (Jira, Linear, GitHub Issues, etc.) so the control plane can
  * create/update tasks based on governance events.

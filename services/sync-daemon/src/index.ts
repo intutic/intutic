@@ -6,7 +6,6 @@
  * syncCycle.ts; the harness writers live under harness/.
  *
  * HLD §3.14 — Real-Time State Mirroring
- * LLD #8 — Sync Daemon / CLI
  *
  * @module
  */

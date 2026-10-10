@@ -13,7 +13,6 @@
  *
  * Uses a real tmpdir and a real in-process HTTP server (no vi.mock).
  *
- * LLD #14 — Dual-path hook telemetry drain
  * HLD §3.14 — Hook event drain cycle
  *
  * @module

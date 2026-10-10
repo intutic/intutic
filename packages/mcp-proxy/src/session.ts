@@ -8,7 +8,7 @@
  * process (`mcpAutoWrite.ts`'s `wrapWithProxy`, in both `per-session` and
  * `daemon` mode), so one harness session runs one proxy per wrapped server.
  * This class holds the tool-call sequence and the per-detector reask counters
- * the anomaly detectors read. Until Wave 5.3 (TD-437) that state was
+ * the anomaly detectors read. Until Wave 5.3 that state was
  * per-process only — a cross-server ping-pong was invisible, a reask budget
  * reset per server and per restart — and the module doc claimed there was
  * "no second instance to share state with", which was never true of the

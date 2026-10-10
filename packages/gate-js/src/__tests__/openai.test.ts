@@ -19,7 +19,7 @@
  *      refusal, the BLOCKED message becomes the model-visible tool output,
  *      and (the MCP gotcha) that `wrapAgent` gates tools materialized from
  *      `agent.mcpServers`, which never appear in `agent.tools` at all.
- *   4. TD-408: a REAL `RealtimeSession` (`@openai/agents-realtime`) fed a
+ *   4. A REAL `RealtimeSession` (`@openai/agents-realtime`) fed a
  *      `function_call` by a stand-in transport, and the real Runner +
  *      `OpenAIResponsesModel` + `openai` HTTP client routed by
  *      `OPENAI_BASE_URL` to a local `node:http` Responses API stub —
@@ -681,7 +681,7 @@ describe('real @openai/agents runner integration', () => {
 })
 
 // ------------------------------------------------------------------------
-// REAL @openai/agents runner integration — computerTool (TD-407 closer).
+// REAL @openai/agents runner integration — computerTool.
 //
 // computerTool exposes NO inputGuardrails and NO onApproval (see openai.ts's
 // module doc + intuticComputerNeedsApproval's doc comment) — its only
@@ -727,7 +727,7 @@ function stubComputer(onClick: () => void): Computer {
   }
 }
 
-describe('real @openai/agents runner integration: computerTool (TD-407)', () => {
+describe('real @openai/agents runner integration: computerTool', () => {
   it('a gate-refused computer action never runs, surfaces as a pending interruption, and state.reject round-trips', async () => {
     const gate = new FakeGate('refuse')
     let clicked = false
@@ -743,7 +743,7 @@ describe('real @openai/agents runner integration: computerTool (TD-407)', () => 
 
     // The gate's refusal forced the SDK's own approval interruption — this
     // adapter cannot auto-reject a computer action with a message the way
-    // the guardrail path can (module doc / TD-407).
+    // the guardrail path can (see the module doc).
     expect(result.interruptions).toHaveLength(1)
     expect(clicked).toBe(false)
     expect(gate.calls).toEqual([
@@ -798,7 +798,7 @@ describe('installOpenAiGate', () => {
     })
   })
 
-  it("leaves tracing on with tracingExport: 'intutic' and names the governed endpoint (TD-405)", () => {
+  it("leaves tracing on with tracingExport: 'intutic' and names the governed endpoint", () => {
     delete process.env.OPENAI_AGENTS_DISABLE_TRACING
     installOpenAiGate({ enforce: false, tracingExport: 'intutic', sessionId: 's' })
     expect(process.env.OPENAI_AGENTS_DISABLE_TRACING).toBeUndefined()
@@ -821,7 +821,7 @@ describe('installOpenAiGate', () => {
 })
 
 // ------------------------------------------------------------------------
-// TD-408 item 2: REAL @openai/agents-realtime RealtimeSession.
+// REAL @openai/agents-realtime RealtimeSession.
 //
 // The realtime session dispatches tool calls itself (realtimeSession.js:
 // `transport.on('function_call')` -> #handleFunctionCall ->
@@ -894,7 +894,7 @@ async function driveRealtimeFunctionCall(gate: Gate, args: Record<string, unknow
   return { executed, outputs: transport.outputs, errors }
 }
 
-describe('real @openai/agents-realtime RealtimeSession (TD-408 item 2)', () => {
+describe('real @openai/agents-realtime RealtimeSession', () => {
   it('a gate-refused realtime function_call never executes; the BLOCKED message is sent back as the call output', async () => {
     const gate = new FakeGate('refuse')
 
@@ -920,7 +920,7 @@ describe('real @openai/agents-realtime RealtimeSession (TD-408 item 2)', () => {
 })
 
 // ------------------------------------------------------------------------
-// TD-408 item 4 (partial): the REAL Runner + REAL OpenAIResponsesModel + the
+// The REAL Runner + REAL OpenAIResponsesModel + the
 // real `openai` HTTP client, pointed via OPENAI_BASE_URL (the env-only
 // routing openai.ts's module doc describes) at a local node:http stub of the
 // Responses API. Optionally through the built Rust proxy in standalone mode
@@ -1048,7 +1048,7 @@ function functionCallOutputsSent(requests: StubRequest[]): string[] {
   return outputs
 }
 
-describe('real Runner over HTTP against a local Responses API stub (TD-408)', () => {
+describe('real Runner over HTTP against a local Responses API stub', () => {
   it('a gate-refused tool call from a real /v1/responses round trip never executes; the BLOCKED output goes back on the wire', async () => {
     const stub = await startResponsesStub()
     try {

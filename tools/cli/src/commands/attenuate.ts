@@ -18,7 +18,7 @@
 import { log } from '../lib/logger.js'
 import { getClient } from './skill.js'
 
-/** `POST /api/v1/attenuate`'s response shape (LLD #19 §2.1). */
+/** `POST /api/v1/attenuate`'s response shape. */
 interface AttenuationResult {
   /** Plaintext `vk_*` child key — returned ONCE and never stored. */
   childKey: string

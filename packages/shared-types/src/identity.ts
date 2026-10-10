@@ -1,5 +1,5 @@
 /**
- * Identity Federation types — LLD #11
+ * Identity Federation types
  *
  * Cross-workspace user identity, SSO/OIDC provider configuration,
  * and offboarding cascade types.
@@ -42,7 +42,7 @@ export interface SsoProvider {
   providerId: string
   workspaceId: string
   name: string
-  // TD-115: Added ping_identity. google and custom_oidc align with route validation.
+  // ping_identity added as an OIDC adapter. google and custom_oidc align with route validation.
   type: 'okta' | 'entra_id' | 'google' | 'custom_oidc' | 'ping_identity'
   issuer: string
   clientId: string
@@ -56,7 +56,7 @@ export interface SsoProvider {
 
 export const CreateSsoProviderSchema = z.object({
   name: z.string().min(1).max(255),
-  // TD-115: Added 'ping_identity' as the third standard OIDC adapter.
+  // 'ping_identity' is the third standard OIDC adapter.
   type: z.enum(['okta', 'entra_id', 'google', 'custom_oidc', 'ping_identity']),
   issuer: z.string().url(),
   clientId: z.string().min(1),

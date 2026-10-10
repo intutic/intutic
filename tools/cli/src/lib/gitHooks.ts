@@ -4,7 +4,6 @@
  * Installs post-commit and post-checkout hooks into the workspace's
  * `.git/hooks/` directory to trigger real-time branch/commit tracking.
  *
- * LLD #14 — gitHooks.ts
  * HLD §3.14 — Real-Time State Mirroring (Git hooks context integration)
  *
  * @module
@@ -25,8 +24,8 @@ const PRE_COMMIT_MARKER = '# Intutic Pre-Commit Secret Scan'
 const POST_MERGE_MARKER = '# Intutic Post-Merge Decisions Log Refresh'
 
 /**
- * Git-context tracking hook content, shared by post-commit and post-checkout
- * (TD-351): both fire the same best-effort branch/commit sync, backgrounded
+ * Git-context tracking hook content, shared by post-commit and post-checkout:
+ * both fire the same best-effort branch/commit sync, backgrounded
  * and output-suppressed so it never adds latency to the Git command that
  * triggered it.
  */
@@ -95,7 +94,7 @@ if [ -n "$findings" ]; then
   exit 1
 fi
 
-# TD-358: warn-only skill-content scan of staged skill-surface additions
+# Warn-only skill-content scan of staged skill-surface additions
 # (.agents/skills/**, .claude/skills/**). Advisory only — this NEVER
 # refuses the commit, unlike the secret scan above. See skillScan.ts's
 # module doc comment for why: the pattern table's false-positive rate
@@ -114,7 +113,7 @@ exit 0
  * Writes one hook file at `<hooksDir>/<name>` unless a foreign (non-Intutic)
  * hook already occupies that path — the shared never-clobber-a-foreign-hook,
  * marker-based-idempotent-rerun behavior every hook `installGitHooks` manages
- * now follows (TD-351; previously only pre-commit and post-merge had it).
+ * now follows (previously only pre-commit and post-merge had it).
  *
  * Reads the existing file first: absent, or already carrying `marker` (a
  * previous install of this same hook, safe to overwrite with the current
@@ -179,7 +178,7 @@ export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
     await node_fs.mkdir(hooksDir, { recursive: true })
 
     // Git-context tracking hooks (post-commit, post-checkout). Marker-
-    // disciplined the same way pre-commit and post-merge are below (TD-351):
+    // disciplined the same way pre-commit and post-merge are below:
     // never clobber a hook that isn't ours. Until this fix these two
     // overwrote whatever was already at their paths unconditionally — a
     // team's own post-commit/post-checkout script (a notification hook, a
@@ -224,7 +223,7 @@ export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
     // Optional post-merge hook (governed decisions log refresh). Marker-
     // disciplined the same way pre-commit is above — never clobber a
     // post-merge hook that isn't ours. Post-commit/post-checkout above now
-    // follow this exact same pattern too (TD-351 — previously they did not:
+    // follow this exact same pattern too (previously they did not:
     // they unconditionally overwrote whatever was already at those paths,
     // noted as a latent overreach rather than fixed alongside this hook's
     // original addition, since changing existing-install behavior needed its

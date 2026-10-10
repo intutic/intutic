@@ -11,8 +11,9 @@
  * with `instructions.md`, `agent/tools/*.ts`, `agent/connections/*.ts`,
  * `agent/hooks/*.ts`, ...) that eve builds by walking the tree. It is a
  * pre-1.0 PREVIEW product (integrated at 0.39.1, re-verified at 0.71.0; very active) —
- * see docs/TECH_DEBT.md TD-410 for the churn shield this adapter carries,
- * the same posture the dsh integration established.
+ * this adapter carries a churn shield (structural copies of eve's types,
+ * re-checked against the real ones on every eve upgrade), the same posture
+ * the dsh integration established.
  *
  * ## The veto mechanism — CONFIRMED against a real install, not assumed
  *
@@ -94,7 +95,7 @@
  * `requestId`/`responderPrincipalId`/`turnId`/`stepIndex` but NOT the tool
  * name or input.
  *
- * TD-411 half 2, revisited: `intuticApproval()` and `intuticAuditHooks()` are
+ * Recovering the tool name: `intuticApproval()` and `intuticAuditHooks()` are
  * both plain functions exported from this one module and cannot be assumed to
  * run in the same process at settlement time — eve's own docs state a parked
  * approval survives a process restart verbatim ("the process can restart and
@@ -124,11 +125,10 @@
  * name too WHEN this cache is still warm (same-process, or a short-lived
  * pause). When it is not — a genuinely long-parked, cross-restart approval —
  * settlement still falls back to the synthetic {@link EVE_APPROVAL_TOOL_NAME},
- * exactly the pre-existing behaviour, never worse. See TD-411 for the full
- * reasoning and what a persistent (non-memory) correlation store would take
- * to close that residual gap.
+ * exactly the pre-existing behaviour, never worse. Closing that residual gap
+ * would take a persistent (non-memory) correlation store.
  *
- * TD-498: a live `eve start` run showed that `approval.candidate`/
+ * A live `eve start` run showed that `approval.candidate`/
  * `approval.settled` fire ONLY for the `approval: { request, response }`
  * form. The bare form this adapter documents (`approval: intuticApproval()`)
  * settles through a fourth hookable event, `input.resolved` (`HookEventMap`,
@@ -147,7 +147,7 @@
  * `VERCEL_OIDC_TOKEN` credentials — confirmed in `docs/agent-config.md` and
  * `docs/getting-started.mdx`). The AI Gateway wire protocol is NOT something
  * the Intutic proxy parses, so gateway-routed egress is ungoverned by the
- * proxy — full stop, and TD-412 tracks it. The governable path is eve's
+ * proxy — full stop. The governable path is eve's
  * other documented option: passing a provider-authored `LanguageModel`
  * (`createOpenAI(...)` etc.) to `defineAgent({ model })`, where the
  * `withIntuticProxy()` helper — implemented once in `vercel.ts` and
@@ -402,7 +402,7 @@ export interface EveApprovalSettledEvent {
  * read from the shipped zod schema, not just its `.d.ts`) — narrowed to the
  * fields this module reads. Unlike {@link EveApprovalCandidateEvent} /
  * {@link EveApprovalSettledEvent}, this DOES carry the real tool name
- * (`action.toolName`) alongside `requestId`, in the same object. See TD-411.
+ * (`action.toolName`) alongside `requestId`, in the same object.
  */
 export interface EveInputRequest {
   readonly requestId: string
@@ -455,7 +455,7 @@ export interface EveInputResolution {
  *  human-input requests. It is how a BARE approval policy
  *  (`approval: intuticApproval(...)`) settles: eve emits `approval.candidate`/
  *  `approval.settled` only for the `{ request, response }` form (observed on
- *  a live `eve start` server, TD-498). */
+ *  a live `eve start` server). */
 export interface EveInputResolvedEvent {
   readonly type: 'input.resolved'
   readonly data: {
@@ -528,7 +528,7 @@ export interface IntuticAuditHooksOptions {
  * - `input.requested`, one `kind: 'tool-approval'` request → `tool_flagged`,
  *   under the REAL tool name (`request.action.toolName`) — a genuinely new
  *   signal this adapter did not emit before: a call is now pending human
- *   approval. See the module doc (TD-411) for why this event, not a
+ *   approval. See the module doc for why this event, not a
  *   process-memory map, is what closes "no tool identity" here.
  * - `approval.settled` `outcome: 'approved'` → `tool_allowed` — a human
  *   explicitly approved the parked call.
@@ -577,7 +577,7 @@ export function intuticAuditHooks(opts: IntuticAuditHooksOptions = {}): EveAudit
   // settlement (eve's own docs say this is expected and safe for eve itself
   // — "the process can restart and the parked turn survives") simply finds
   // this map empty and falls back to EVE_APPROVAL_TOOL_NAME, exactly this
-  // function's behaviour before this cache existed. See TD-411.
+  // function's behaviour before this cache existed.
   const requestIdToToolName = new Map<string, string>()
 
   // A `{ request, response }` approval settles through BOTH `approval.settled`

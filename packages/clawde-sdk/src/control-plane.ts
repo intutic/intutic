@@ -24,7 +24,7 @@ import type {
 } from './types'
 
 /**
- * Control-plane management client (LLD #69) — org/team/gateway/credentials
+ * Control-plane management client — org/team/gateway/credentials
  * administration, as distinct from `ClawdeClient`'s data-plane chat calls.
  *
  * Deliberately a separate class, not new methods on `ClawdeClient`:

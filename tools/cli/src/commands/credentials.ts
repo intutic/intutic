@@ -1,6 +1,6 @@
 /**
  * `intutic credentials` — provision a workspace's own upstream provider
- * keys (LLD #64 §4 Enforced BYO-key, LLD #67 multi-provider wizard).
+ * keys (enforced BYO-key, multi-provider wizard).
  *
  * Subcommands:
  *   - `intutic credentials list [--json]`

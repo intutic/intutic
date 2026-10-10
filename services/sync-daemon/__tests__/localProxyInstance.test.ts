@@ -1,6 +1,6 @@
 /**
  * `fetchLocalProxyInstanceId` — the daemon's read of the local proxy's
- * process-lifetime id (`GET /intutic/instance`, TD-231 Wave 5.6). The id is
+ * process-lifetime id (`GET /intutic/instance`, Wave 5.6). The id is
  * what lets the daemon register the proxy's OWN session row with git/task
  * context; every refusal below is a case where doing so would be wrong, so
  * each must come back `null` (→ the `ses_` fallback), never a value.

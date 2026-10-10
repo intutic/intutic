@@ -1,4 +1,4 @@
-"""Tests for the in-process AutoGen adapter (`IntuticWorkbench`, TD-374).
+"""Tests for the in-process AutoGen adapter (`IntuticWorkbench`).
 
 Drives a real `autogen_agentchat.agents.AssistantAgent` with a real
 `StaticWorkbench` and `autogen_ext`'s `ReplayChatCompletionClient` scripted to

@@ -1,4 +1,4 @@
-//! Integration tests for session-scoped SOP advisory pinning (TD-348).
+//! Integration tests for session-scoped SOP advisory pinning.
 //!
 //! `sops::resolve_injection_block` is what keeps the injected governance
 //! block's bytes stable across a session's requests — even when the

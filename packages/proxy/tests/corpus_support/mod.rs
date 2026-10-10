@@ -59,7 +59,7 @@ pub const BFCL_FILES: &[(&str, &str)] = &[
 
 pub const NOTINJECT: &str = include_str!("../corpus/notinject/notinject.jsonl");
 
-/// Benign tool and parameter descriptions — the corpus `TD-274` was held open
+/// Benign tool and parameter descriptions — the corpus the tool-poisoning gap was held open
 /// for, on the claim that no public set of them existed.
 ///
 /// 2,711 tool descriptions and 8,042 parameter descriptions, deduplicated, from

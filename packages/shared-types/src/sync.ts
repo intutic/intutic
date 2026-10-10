@@ -1,7 +1,6 @@
 /**
  * Sync Daemon & CLI Types — Shared across control plane + CLI + daemon.
  *
- * LLD #8 — Sync Daemon / CLI
  * HLD §3.14 — Real-Time State Mirroring
  *
  * @module
@@ -188,7 +187,7 @@ export interface IntegrityStore {
 }
 
 // ─── Config Capture (Daemon → Control Plane) ────────────────────────
-// LLD #51 — Harness Config Capture + SkillOpt Pipeline
+// Harness Config Capture + SkillOpt Pipeline
 
 /**
  * A single harness config file captured by the daemon.

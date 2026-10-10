@@ -378,7 +378,7 @@ mod break_glass_scope_tests {
     }
 }
 
-/// A pinned, session-stable SOP advisory block (TD-348).
+/// A pinned, session-stable SOP advisory block.
 ///
 /// `block` and `fingerprint` are the render `sops::render` produced when this
 /// pin was written — `fingerprint` (from `sops::fingerprint_sop_set`) is
@@ -399,7 +399,7 @@ pub struct PinnedSopBlock {
     pub pinned_at: i64,
 }
 
-/// Identity a pinned SOP advisory block is keyed on (TD-348).
+/// Identity a pinned SOP advisory block is keyed on.
 ///
 /// `agent_scope` MUST be `proxy::tool_history_scope`'s output
 /// (`{workspace_id}:{agent}`) — that function's doc comment records that
@@ -511,7 +511,7 @@ pub trait LocalStore: Send + Sync + 'static {
     /// (`original_cost_usd`, `original_latency_ms`, plus the candidate's) and
     /// land in the control plane's mirror adoption report — so the individual
     /// samples ARE consumed downstream, just not from here. C6/C7 automatic
-    /// enforcement on a fault-rate delta stays unbuilt by decision (TD-352):
+    /// enforcement on a fault-rate delta stays unbuilt by decision:
     /// the report supersedes it; a human promotes.
     ///
     /// A counter hash rather than a row per call: the question this store
@@ -900,7 +900,7 @@ pub trait LocalStore: Send + Sync + 'static {
     /// `scope` MUST be `proxy::tool_history_scope`'s output — the
     /// workspace-qualified key — never the raw `x-session-id` header. No
     /// harness sets that header, so it was "unknown" for all traffic and the
-    /// ladder was one budget shared by every tenant (TD-489).
+    /// ladder was one budget shared by every tenant.
     async fn incr_reask_attempt(&self, scope: &str, detector_id: &str) -> u32;
 
     /// A loop run's cost so far, and the ceiling it was started with.
@@ -932,7 +932,7 @@ pub trait LocalStore: Send + Sync + 'static {
         ttl_secs: Option<u64>,
     ) -> anyhow::Result<()>;
 
-    // ── SOP advisory pinning (TD-348) ──────────────────────────────────
+    // ── SOP advisory pinning ───────────────────────────────────────────
 
     /// The still-unexpired pinned SOP advisory block for `scope`, if one
     /// exists. `None` covers both "never pinned" and "pin's TTL elapsed" —
@@ -976,7 +976,7 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
 
     /// The workspace's policy/config version — `v2:sync:config_version:{ws}`,
     /// the counter the control plane bumps on every guardrail promote/retire
-    /// and config push (TD-474 item 5). `None` when there is no control plane,
+    /// and config push. `None` when there is no control plane,
     /// the key is unset, or the read failed: the caller then falls back to
     /// its TTL, exactly as before the version existed. Never a reason to
     /// refuse anything — it only decides whether a cached SOP set is refetched

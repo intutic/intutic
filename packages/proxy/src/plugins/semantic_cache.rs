@@ -2,8 +2,6 @@
 //!
 //! Handles exact-match cache hits via SHA-256 prompt hashing and
 //! semantic-match cache hits via TurboVec cosine-similarity.
-//!
-//! LLD #26 §4.2 — Semantic Cache Filter
 
 use crate::protocol::Protocol;
 use crate::store::LocalStore;

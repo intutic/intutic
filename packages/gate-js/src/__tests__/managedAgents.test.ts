@@ -116,7 +116,7 @@ function _typeCheckOnly(anthropic: Anthropic): void {
   const client: ManagedAgentsClientLike = anthropic
   void client
 
-  // ---- 0.131 additions (TD-429) ----
+  // ---- 0.131 additions ----
   // The new `auto` permission policy exists with this exact shape.
   const autoPolicy: BetaManagedAgentsAutoPolicy = { type: 'auto' }
   void autoPolicy
@@ -146,7 +146,7 @@ function _typeCheckOnly(anthropic: Anthropic): void {
 void _typeCheckOnly
 
 // ------------------------------------------------------------------------
-// 0.131 fixtures (TD-429), checked against the real SDK types above.
+// 0.131 fixtures, checked against the real SDK types above.
 // ------------------------------------------------------------------------
 
 /** `auto` policy, server reached no judgement -> held for client approval. */
@@ -378,7 +378,7 @@ describe('confirmationForEvent', () => {
     expect(confirmation).toEqual({ type: 'user.tool_confirmation', tool_use_id: 'evt_1', result: 'allow' })
   })
 
-  // ---- 0.131: the `auto` permission policy (TD-429) ----
+  // ---- 0.131: the `auto` permission policy ----
 
   it('answers an auto-produced ask exactly like an always_ask pause (gate verdict on the arguments)', async () => {
     const gate = gateFor(BLOCKED_COMMAND)
@@ -516,7 +516,7 @@ describe('IntuticSessionConfirmer', () => {
     expect(sent.map((c) => c.tool_use_id)).toEqual(['t1', 't2'])
   })
 
-  it('answers a cross-posted subagent pause exactly once, even when seen on both list() and the stream (TD-429)', async () => {
+  it('answers a cross-posted subagent pause exactly once, even when seen on both list() and the stream', async () => {
     const gate = new FakeGate('allow')
     const { client, events } = fakeClient(
       [asEvent(CROSS_POSTED_SUBAGENT_EVENT)],
@@ -536,7 +536,7 @@ describe('IntuticSessionConfirmer', () => {
     expect(sent).toEqual(events.sent)
   })
 
-  // ── TD-428: reconnect ──────────────────────────────────────────────
+  // ── reconnect ──────────────────────────────────────────────────────
 
   /** A stream client whose `stream()` hands out one scripted segment per call: an
    *  array of events (ends cleanly) or an Error (the stream dies). */
@@ -572,7 +572,7 @@ describe('IntuticSessionConfirmer', () => {
     return { client, events }
   }
 
-  it('watch() reopens a stream that ends without a terminal event and confirms each tool_use_id exactly once (TD-428)', async () => {
+  it('watch() reopens a stream that ends without a terminal event and confirms each tool_use_id exactly once', async () => {
     const gate = new FakeGate('allow')
     const { client, events } = flakyClient(
       [],

@@ -5,7 +5,6 @@
  * the control plane. When a `config_update` event is received, it
  * immediately applies the new configuration, bypassing HTTP polling latency.
  *
- * LLD #14 — wsClient.ts
  * HLD §3.14 — Real-Time State Mirroring (WebSocket push)
  *
  * @module

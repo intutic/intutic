@@ -182,7 +182,7 @@ export class PolicyClient {
    * wired to nothing.
    */
   private dlpPatterns: string[] = []
-  /** Workspace injection-pattern sources (`mcpInjectionPatterns`, TD-436); empty = floor only. */
+  /** Workspace injection-pattern sources (`mcpInjectionPatterns`); empty = floor only. */
   private injectionPatterns: string[] = []
   /**
    * Additive tool scoping: when non-empty, ONLY these tools may be called

@@ -42,7 +42,7 @@
  *     `{kind:'cancel'}` exists); this listener never produces those, but a
  *     later listener's `next()` result may be one, so the type below says so.
  *
- * ## Re-verified against dsh 0.2.0-rc.2 (2026-10-03, TD-370)
+ * ## Re-verified against dsh 0.2.0-rc.2 (2026-10-03)
  *
  * Read from `@deepseek-ai/dsh-tools@0.2.0-rc.2`'s shipped `lib/index.js`, not
  * only its types: the registry runs the `tools/pre-execute` waterfall with

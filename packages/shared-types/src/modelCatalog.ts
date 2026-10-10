@@ -1,5 +1,5 @@
 /**
- * Model catalog (LLD #70, model catalog & cohort wizard).
+ * Model catalog (model catalog & cohort wizard).
  *
  * `packages/shared-types/src/providers.ts` describes what a provider's
  * CREDENTIAL looks like — field names, types, docs URL. It says nothing about
@@ -104,7 +104,7 @@ export function findCatalogModel(input: string): ModelCatalogEntry | undefined {
 /**
  * Providers whose models run on infrastructure the operator controls. Every
  * other registry provider is a hosted API. Judges are self-hosted only (owner
- * rule, 2026-10-03; LLD #72), so these are the only providers a judge model
+ * rule, 2026-10-03), so these are the only providers a judge model
  * may come from.
  */
 export const SELF_HOSTED_MODEL_PROVIDER_IDS: ReadonlySet<string> = new Set(['ollama'])

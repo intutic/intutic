@@ -11,7 +11,7 @@
  * is this adapter's own functions against a `FakeGate`, matching
  * `wrapTools.test.ts`'s style.
  *
- * TD-381 closer: the "real ai generateText() integration" block below drives
+ * The "real ai generateText() integration" block below drives
  * the REAL `generateText()` — the `ai` package's actual dispatch loop, not a
  * mocked-out one — with a stub `LanguageModelV4` (`MockLanguageModelV4` from
  * `ai/test`, also a real devDependency) that emits a tool call. No API key,
@@ -154,8 +154,8 @@ describe('withIntuticProxy', () => {
 // REAL `ai` generateText() integration — no API key, no network: a stub
 // LanguageModelV4 (MockLanguageModelV4 from `ai/test`) replays a canned tool
 // call and the real `generateText()` dispatch loop does everything else
-// (tool resolution, toolApproval resolution, tool execution). Closes
-// TD-381's "what would close this" gap for the Vercel AI SDK half.
+// (tool resolution, toolApproval resolution, tool execution), so the Vercel
+// AI SDK adapter is verified by a real agent run, not only structural typing.
 // ------------------------------------------------------------------------
 
 const USAGE = {

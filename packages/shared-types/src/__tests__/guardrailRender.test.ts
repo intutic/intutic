@@ -1,5 +1,5 @@
 /**
- * The Guardrail IR's renderers and their parser mirror (LLD #71).
+ * The Guardrail IR's renderers and their parser mirror.
  *
  * What is pinned: `parse(render(ir))` is the IR, over thousands of seeded
  * random IRs; the render is byte-stable; the parser never throws on any

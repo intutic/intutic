@@ -7,7 +7,7 @@
 //
 // See packages/shared-types/src/modelCatalog.ts for the ModelCatalogEntry type
 // and the helpers (findCatalogModel, normalizeModelRef, selfHostedJudgeModelChoices) that
-// consume this data. LLD #70.
+// consume this data.
 
 export const MODEL_CATALOG_GENERATED = [
   { ref: "anthropic/claude-fable-5", id: "claude-fable-5", provider: "anthropic", displayName: "claude-fable-5", contextWindow: 1000000, maxOutputTokens: 128000, inputCostPer1k: 0.01, outputCostPer1k: 0.05, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },

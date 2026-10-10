@@ -7,7 +7,7 @@
  * compile-time narrowing without Drizzle or Postgres dependencies.
  *
  * These mirror the Postgres enum types defined in
- * LLD 01-data-architecture §3.1.
+ * the data-architecture schema.
  *
  * @module
  */
@@ -213,8 +213,8 @@ export const HarnessType = {
    * (`GateKind: 'delegated'`, same as Xirp).
    *
    * All three wrapped backends are themselves supported harnesses: Claude
-   * Code and Codex through their hook files, and OpenCode (since TD-397
-   * closed, 2026-09-23) through the plugin `openCodeHooks.ts` generates —
+   * Code and Codex through their hook files, and OpenCode (since its gate
+   * landed, 2026-09-23) through the plugin `openCodeHooks.ts` generates —
    * the worktree propagation re-runs every backend's writer per worktree,
    * so a feature run against any `--providers` value is governed.
    */
@@ -260,7 +260,7 @@ export const HarnessType = {
   STRANDS: 'strands',
   /** Microsoft Agent Framework (`agent-framework` / `agent-framework-core` on
    *  PyPI, imported as `agent_framework` — the AutoGen + Semantic Kernel
-   *  successor; a separate framework from AUTOGEN, see TD-375). Detected via
+   *  successor; a separate framework from AUTOGEN). Detected via
    *  `agent-framework`/`agent_framework` in Python dependency manifests. Gate:
    *  `intutic_clawde.gate.adapters.agent_framework`'s
    *  `IntuticFunctionMiddleware`, a `FunctionMiddleware` that short-circuits
@@ -289,7 +289,7 @@ export const HarnessType = {
    *  check — either alone is too generic; see tools/cli/src/harness/eve.ts).
    *  Gate: `@intutic/gate/eve`'s `intuticApproval()` on eve's per-tool /
    *  per-connection `approval` policy surface — see gateRegistry.ts's `eve`
-   *  row and TD-410 for the preview-churn shield. */
+   *  row for the preview-churn shield. */
   EVE: 'eve',
   /**
    * TrueFoundry's "TrueForge" (github.com/truefoundry/trueforge, MIT,
@@ -335,7 +335,7 @@ export const HarnessType = {
    *  `toolApproval` setting is a STATIC record without callback support, so
    *  per-call gating routes through the tool-approval flow; built-in sandbox
    *  tools are governed only by `permissionMode`, which DEFAULTS to
-   *  'allow-all'. See gateRegistry.ts's NO_GATE row and TD-415..417. */
+   *  'allow-all'. See gateRegistry.ts's NO_GATE row. */
   AI_SDK_HARNESS: 'ai-sdk-harness',
   /** Vercel `@ai-sdk/workflow` (WorkflowAgent — durable workflow agents on
    *  the Workflow DevKit). Detected via `@ai-sdk/workflow` in `package.json`
@@ -344,8 +344,7 @@ export const HarnessType = {
    *  too generic). Gate: `@intutic/gate/workflow`'s `intuticNeedsApproval()`
    *  on each tool — WorkflowAgent itself has zero approval fields; refusals
    *  are FatalError-compatible so the durable runtime aborts rather than
-   *  retry-looping a governance denial. See gateRegistry.ts's NO_GATE row
-   *  and TD-418..419. */
+   *  retry-looping a governance denial. See gateRegistry.ts's NO_GATE row. */
   AI_SDK_WORKFLOW: 'ai-sdk-workflow',
   // ─── B2: AWS Bedrock AgentCore ───────────────────────────────────────────
   /**
@@ -373,24 +372,24 @@ export const HarnessType = {
    * framework-SDK code as the deployment target, so if that code uses no
    * framework this registry supports (raw boto3, a hand-rolled tool loop),
    * coverage is genuinely zero — the same honest gap AGENTIC_ORCHESTRATOR's
-   * OpenCode backend has (TD-397). Deployment-target constraints that are
+   * OpenCode backend has. Deployment-target constraints that are
    * NOT a gate concern (environment-variable caps, VPC/NAT egress topology,
    * SigV4 traffic not being proxyable) are documented in
    * apps/docs/integrations/agentcore.md rather than encoded here.
    *
    * AgentCore **Gateway** (the MCP-tool-call interceptor path) deliberately
-   * has NO enum entry here — same precedent QM set (see TD-400): it is a
+   * has NO enum entry here — same precedent QM set: it is a
    * deployed AWS resource (a Lambda attached to a Gateway), never something
    * `intutic init`/`intutic connect` finds on a developer's laptop. Its
    * coverage is the `tools/agentcore-interceptor` Lambda calling
-   * `POST /api/v1/integrations/agentcore/gateway-check` — see TD-430.
+   * `POST /api/v1/integrations/agentcore/gateway-check`.
    *
    * AgentCore **Policy** (Cedar/"Dogwood") has NO third-party HTTP policy
    * backend at all (confirmed against `GatewayPolicyEngineConfiguration`'s
    * real API reference: `arn` only ever names an AWS-native
    * `policy-engine/...` resource) — not integrable by design, not a gap.
    *
-   * See apps/docs/integrations/agentcore.md and TD-430..432.
+   * See apps/docs/integrations/agentcore.md.
    */
   AGENTCORE_RUNTIME: 'agentcore-runtime',
   // ─── B3: TrueForge, standalone/hosted server (bridge-gated) ─────────────
@@ -463,19 +462,19 @@ export const HARNESS_COUNT = Object.keys(HarnessType).length
  * `HARNESS_COUNT` minus the harnesses with a confirmed, currently-open
  * support gap — the number safe to use in headline/marketing copy
  * ("works with N coding agents") without overclaiming. Each exclusion must
- * be a harness with its own `docs/TECH_DEBT.md` entry describing a REAL,
+ * be a harness with its own recorded gap describing a REAL,
  * currently-unactionable gap (not a caveat, not a "documented, not a
  * defect" note). The list is EMPTY since 2026-09-23 and the mechanism is
  * kept so the next real gap goes here and nowhere else:
  *
- * - `agentic-orchestrator` was excluded under TD-397 while its OpenCode
+ * - `agentic-orchestrator` was excluded while its OpenCode
  *   backend had no gate; OpenCode is a harness of its own now.
- * - `autogen` was excluded under TD-374 while `InterventionHandler.on_send`
+ * - `autogen` was excluded while `InterventionHandler.on_send`
  *   was blind to `AssistantAgent`'s own tool calls; `IntuticWorkbench`
  *   (2026-09-22) governs them.
  *
- * Deliberately does NOT exclude `mastra` — TD-380 is explicitly marked
- * "🟢 Documented, not a defect" in TECH_DEBT.md, a caveat about a call-site
+ * Deliberately does NOT exclude `mastra` — its gap is explicitly recorded
+ * as "documented, not a defect", a caveat about a call-site
  * hook override, not a coverage gap, so excluding it here would be the
  * exact overclaim-avoidance discipline applied backwards. Also does NOT
  * exclude `continue` over its headless-mode limitation (`cn -p` skips
@@ -545,7 +544,7 @@ export const PlanExecutionOutcome = {
 export type PlanExecutionOutcome = typeof PlanExecutionOutcome[keyof typeof PlanExecutionOutcome]
 
 // ─── SOP Lifecycle State ─────────────────────────────────────────────
-// HLD §3.4, LLD #6 §4.2 — 7-state FSM: DRAFT → PENDING_REVIEW → GENERATED
+// HLD §3.4 — 7-state FSM: DRAFT → PENDING_REVIEW → GENERATED
 //   → HYPOTHESIZED → REFINED → VALIDATED → INVALIDATED
 
 /** Lifecycle state for SOPs in the registry. */
@@ -563,7 +562,7 @@ export const SopLifecycleState = {
 export type SopLifecycleState = typeof SopLifecycleState[keyof typeof SopLifecycleState]
 
 // ─── SOP Type ────────────────────────────────────────────────────────
-// TD-022 item 0.4 — SOP classification for hook pipeline
+// SOP classification for hook pipeline
 
 /** SOP type: standard markdown or executable V8 hook. */
 export const SopType = {
@@ -577,7 +576,7 @@ export const SopType = {
 export type SopType = typeof SopType[keyof typeof SopType]
 
 // ─── Hook Phase ──────────────────────────────────────────────────────
-// TD-022 item 0.4 — Pipeline phase for hook-type SOPs
+// Pipeline phase for hook-type SOPs
 
 /** Pipeline phase where a hook-type SOP fires. */
 export const HookPhase = {
@@ -608,7 +607,7 @@ export const RoutingTier = {
 export type RoutingTier = typeof RoutingTier[keyof typeof RoutingTier]
 
 // ─── Workspace Role ──────────────────────────────────────────────────
-// HLD §5.1, LLD #7 — RBAC role hierarchy
+// HLD §5.1 — RBAC role hierarchy
 
 /** Workspace member role for RBAC. OWNER > ADMIN > EM > DEVELOPER > VIEWER. */
 export const WorkspaceRole = {
@@ -624,7 +623,6 @@ export type WorkspaceRole = typeof WorkspaceRole[keyof typeof WorkspaceRole]
 
 // ─── MCP Proxy Settings ──────────────────────────────────────────────
 // WS-5 — Q1 fail behavior, Q2 deployment model, Q3 bypass enforcement
-// TD-151, TD-152, TD-153, TD-154, TD-155
 
 /**
  * MCP proxy fail behavior when the Intutic control plane is unreachable.
@@ -634,7 +632,7 @@ export type WorkspaceRole = typeof WorkspaceRole[keyof typeof WorkspaceRole]
  * Note: `closed` only affects harnesses with MCP proxy injection (9/20 —
  * 10 config paths across 9 harnesses, see sync-daemon mcpAutoWrite.ts).
  * For harnesses without MCP proxy injection (e.g. n8n, pi, codex,
- * open-webui), see TD-151.
+ * open-webui) there is no MCP proxy to fail, so this has no effect.
  */
 export const McpProxyFailBehavior = {
   OPEN:   'open',
@@ -647,7 +645,7 @@ export type McpProxyFailBehavior = typeof McpProxyFailBehavior[keyof typeof McpP
  * - `per-session` (default, Phase 4): new proxy process per MCP connection
  * - `daemon`      (Phase 5): long-lived daemon, per-session shims delegate via Unix socket
  *
- * See TD-153 — daemon requires macOS notarization. Both modes are active: the
+ * Daemon mode requires macOS notarization. Both modes are active: the
  * mcp-proxy honours `daemon` by answering policy lookups over the daemon socket.
  */
 export const McpProxyMode = {
@@ -662,8 +660,6 @@ export type McpProxyMode = typeof McpProxyMode[keyof typeof McpProxyMode]
  * - `rewrite`    (default): drift watcher detects edits → immediate config rewrite (~1s)
  * - `immutable`  (opt-in):  after each write, sets macOS `chflags uchg` (user-immutable flag)
  * - `alert-only`: no rewrite; drift creates a governance incident only (audit mode)
- *
- * See TD-154 for immutable-flag UX risk notes.
  */
 export const BypassEnforcementTier = {
   REWRITE:    'rewrite',
@@ -673,7 +669,7 @@ export const BypassEnforcementTier = {
 export type BypassEnforcementTier = typeof BypassEnforcementTier[keyof typeof BypassEnforcementTier]
 
 // ─── Phase 5 Enums ───────────────────────────────────────────────────
-// LLD #27: Production Hardening & SOC 2
+// Production Hardening & SOC 2
 
 /** TurboVec behavioral drift classification. @see HLD §7.7 */
 export const DriftClassification = {

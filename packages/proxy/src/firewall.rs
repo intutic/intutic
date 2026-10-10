@@ -9,8 +9,6 @@
 // An earlier set of generators here wrote rules that *redirected* port 443 to
 // the proxy. Nothing called them, and they assumed a transparent proxy, which
 // the CONNECT proxy is not; they were deleted.
-//
-// WS-6NC LLD #33 §3.3
 
 use std::fmt::Write as FmtWrite;
 use std::process::Command;
@@ -38,7 +36,7 @@ impl Platform {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Default-deny egress enforcement (LLD #63 §5 — the L2 layer).
+// Default-deny egress enforcement (the L2 layer).
 //
 // A default-DROP egress policy that permits outbound only to
 //   (a) loopback (so a client can reach a proxy on 127.0.0.1),
@@ -52,7 +50,7 @@ impl Platform {
 //
 // Honesty note: allowing DNS broadly leaves DNS tunnelling as a residual
 // exfil channel, and the proxy-uid exemption trusts that uid. Both are
-// documented limitations, not closed holes (see the LLD non-goals + TECH_DEBT).
+// documented limitations, not closed holes.
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Inputs for a default-deny egress ruleset.
@@ -96,7 +94,7 @@ pub fn generate_egress_nftables(cfg: &EgressEnforceConfig) -> String {
     writeln!(out, "#!/usr/sbin/nft -f").unwrap();
     writeln!(
         out,
-        "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT."
+        "# Intutic egress enforcement — default-deny. Generated; DO NOT EDIT."
     )
     .unwrap();
     writeln!(out, "add table inet intutic_egress").unwrap();
@@ -134,7 +132,7 @@ pub fn generate_egress_iptables(cfg: &EgressEnforceConfig) -> String {
     writeln!(out, "#!/bin/sh").unwrap();
     writeln!(
         out,
-        "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT."
+        "# Intutic egress enforcement — default-deny. Generated; DO NOT EDIT."
     )
     .unwrap();
     writeln!(out, "set -e").unwrap();
@@ -188,7 +186,7 @@ pub fn generate_egress_pf(cfg: &EgressEnforceConfig) -> String {
     let mut out = String::new();
     writeln!(
         out,
-        "# Intutic egress enforcement — default-deny (LLD #63 §5). Generated; DO NOT EDIT."
+        "# Intutic egress enforcement — default-deny. Generated; DO NOT EDIT."
     )
     .unwrap();
     writeln!(out, "block drop out all").unwrap();
@@ -215,9 +213,7 @@ pub fn generate_egress_enforcement(cfg: &EgressEnforceConfig) -> String {
         Platform::Linux => generate_egress_nftables(cfg),
         Platform::MacOs => generate_egress_pf(cfg),
         // Windows egress enforcement is not implemented.
-        Platform::Windows => {
-            String::from("# Windows default-deny egress is not implemented — see LLD #63 §7.\n")
-        }
+        Platform::Windows => String::from("# Windows default-deny egress is not implemented.\n"),
     }
 }
 

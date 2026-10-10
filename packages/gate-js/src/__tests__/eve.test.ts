@@ -10,7 +10,7 @@
  * for real, and eve's own shipped `once()`/`always()`/`never()` helpers run
  * inside the documented composition pattern. No live `eve dev` session or
  * model call is exercised (that needs a running durable runtime and a model
- * credential — see docs/TECH_DEBT.md TD-411); the enforcement behaviour under
+ * credential); the enforcement behaviour under
  * test is this adapter's own functions against a `FakeGate`, matching
  * vercel.test.ts / dsh.test.ts's style.
  */
@@ -101,13 +101,13 @@ function _typeCheckOnly(): void {
   const _helpers: Approval[] = [always(), never(), once()]
   void _helpers
 
-  // TD-411: the real 'input.requested' event (from eve's own HookEventMap)
+  // The real 'input.requested' event (from eve's own HookEventMap)
   // is assignable to our structural EveInputRequestedEvent copy — i.e. our
   // handler can be handed the real thing.
   const acceptsRealInputRequested = (real: HookEventMap['input.requested']): EveInputRequestedEvent => real
   void acceptsRealInputRequested
 
-  // TD-498: same for 'input.resolved', the event a bare approval policy
+  // Same for 'input.resolved', the event a bare approval policy
   // settles through.
   const acceptsRealInputResolved = (real: HookEventMap['input.resolved']): EveInputResolvedEvent => real
   void acceptsRealInputResolved
@@ -334,7 +334,7 @@ describe('intuticAuditHooks: event mapping', () => {
   )
 })
 
-// TD-411 half 2: `input.requested` carries requestId AND the real tool name
+// `input.requested` carries requestId AND the real tool name
 // together (confirmed against eve's shipped `inputRequestSchema`), so
 // intuticAuditHooks() emits under the real name at request time
 // unconditionally, and best-effort enriches the LATER approval.candidate/
@@ -475,7 +475,7 @@ describe('intuticAuditHooks: input.requested and requestId -> toolName correlati
   })
 })
 
-// TD-498: a BARE approval policy (`approval: intuticApproval(...)`) settles
+// A BARE approval policy (`approval: intuticApproval(...)`) settles
 // through `input.resolved` only — eve emits approval.candidate/settled just
 // for the `{ request, response }` form, which fires both (settled first).
 describe('intuticAuditHooks: input.resolved (bare-policy settlements) and de-duplication', () => {

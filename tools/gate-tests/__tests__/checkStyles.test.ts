@@ -75,7 +75,7 @@ describe('TS literal scanning', () => {
 describe('CSS scanning', () => {
   it('ignores comments, var() fallbacks and token-built colours', () => {
     const css = [
-      '/* LLD #40, #135, rgb(1,2,3) */',
+      '/* see #40, #135, rgb(1,2,3) */',
       '.a { color: var(--x, rgb(1, 2, 3)); border-color: var(--y, #0f172a); }',
       '.b { background: rgba(var(--color-accent-rgb), 0.1); }',
       '.c { background: color-mix(in srgb, var(--color-bg-primary) 60%, transparent); }',

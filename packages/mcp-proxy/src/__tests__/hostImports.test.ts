@@ -1,6 +1,6 @@
 /**
- * hostImports.test.ts — `read_referenced_file` against a fake guest memory
- * (TD-441): the code-for-code port of `host.rs`'s `read_referenced_file_impl`.
+ * hostImports.test.ts — `read_referenced_file` against a fake guest memory:
+ * the code-for-code port of `host.rs`'s `read_referenced_file_impl`.
  */
 import { describe, it, expect } from 'vitest'
 import { createHostImports, newHostImportState } from '../wasm/hostImports.js'

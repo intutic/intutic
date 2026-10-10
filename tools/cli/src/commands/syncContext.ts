@@ -4,7 +4,6 @@
  * Saves current Git status details locally to `.intutic/git-context.json`
  * which is picked up by the sync daemon and reported to the control plane.
  *
- * LLD #14 — gitHooks.ts & syncContext.ts
  * HLD §3.14 — Real-Time State Mirroring (Git hooks context integration)
  *
  * @module

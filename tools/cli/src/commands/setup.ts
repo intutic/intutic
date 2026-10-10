@@ -1,5 +1,5 @@
 /**
- * `intutic setup` — the cohort setup wizard (LLD #70, model catalog & cohort
+ * `intutic setup` — the cohort setup wizard (model catalog & cohort
  * wizard): codescan → provider → credentials → verify → persist → summary. Mirrors the dashboard's `SetupWizard.tsx` step order
  * (minus the parts that need a browser) and, wherever a step corresponds to
  * an existing flag-driven command, calls exactly what that command calls —

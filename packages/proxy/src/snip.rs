@@ -2,7 +2,6 @@
 //!
 //! Phase 2 compression layer. Ported algorithms from Headroom (masks.py,
 //! json_handler.py) via snip_json.rs and snip_code.rs.
-//! See LLD §7 and HLD §3.20.
 
 use crate::config::SnipCompactorConfig;
 use crate::snip_code::{compact_code_cached, detect_language, CodeLanguage};
@@ -69,7 +68,7 @@ pub fn compact(text: &str, config: &SnipCompactorConfig) -> (String, f64) {
             0.0
         };
         let ratio = final_ratio.max(0.0);
-        // Content identity for the cache-hit-rate audit (TD-160). Computed on
+        // Content identity for the cache-hit-rate audit. Computed on
         // the compaction path itself, not inside the cache, so the rate is
         // measurable before anyone decides whether to turn the cache on.
         let input_hash = crate::snip_code::fnv1a_hash(text);

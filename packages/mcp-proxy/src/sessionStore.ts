@@ -1,6 +1,6 @@
 /**
  * sessionStore.ts — the Valkey-backed session window the sibling proxy
- * processes of one harness session share (TD-437, Wave 5.3).
+ * processes of one harness session share (Wave 5.3).
  *
  * The Rust LLM proxy keeps a session's tool-call history in Valkey
  * (`store/valkey.rs`: a capped LIST for the sequence, a ZSET for the 60 s

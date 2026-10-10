@@ -880,7 +880,7 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
  * Writes and edits targeting the agent-skill surface — `.agents/skills/**`
  * and `.claude/skills/**`.
  *
- * TD-358 (updated 2026-08-18): these two entries stay `warn` and stay
+ * Updated 2026-08-18: these two entries stay `warn` and stay
  * compiled into {@link staticFloorPatterns} — that part of the original
  * decision is unchanged. What changed is what that tier assignment now
  * *means*: it is the DEGRADED-MODE baseline, not the intended steady state.
@@ -922,8 +922,8 @@ export const SECRET_CONTENT_PATTERNS: readonly GuardPattern[] = assertGuardTable
  * rule on purpose, since that rule blocks and this one only advises.
  *
  * Blocking on skill CONTENT (not path) is a separate table,
- * {@link SKILL_CONTENT_PATTERNS}, licensed by the benign-corpus measurement
- * TD-358 asked for and shipped only through the policy snapshot.
+ * {@link SKILL_CONTENT_PATTERNS}, licensed by a benign-corpus false-positive
+ * measurement and shipped only through the policy snapshot.
  */
 export const SKILL_SURFACE_PATTERNS: readonly GuardPattern[] = assertGuardTableSane([
   {
@@ -933,7 +933,7 @@ export const SKILL_SURFACE_PATTERNS: readonly GuardPattern[] = assertGuardTableS
     severity: 'warn',
     reason:
       'Write or edit targets a .agents/skills/** skill file — advisory only, pending a ' +
-      'false-positive measurement of scanSkillContent against real skill markdown (TD-358)',
+      'false-positive measurement of scanSkillContent against real skill markdown',
     rationale:
       'Deterministic path match, not a content judgement — see the pattern-set doc comment ' +
       'above. Does not catch a write reached through a shell redirect (subject is `target`, ' +
@@ -961,7 +961,7 @@ export const SKILL_SURFACE_PATTERNS: readonly GuardPattern[] = assertGuardTableS
     severity: 'warn',
     reason:
       'Write or edit targets a .claude/skills/** skill file — advisory only, pending a ' +
-      'false-positive measurement of scanSkillContent against real skill markdown (TD-358)',
+      'false-positive measurement of scanSkillContent against real skill markdown',
     rationale:
       'The Claude Code counterpart to skill_surface.agents_skills_write; same limits.',
     matches: [
@@ -1048,7 +1048,7 @@ export function caseFoldedArgSource(source: string): string {
 const WRITTEN_CONTENT_KEYS = ['content', 'new_string', 'newString', 'new_str', 'file_text']
 
 /**
- * Skill-CONTENT block tier (TD-358): a write into a skill directory whose
+ * Skill-CONTENT block tier: a write into a skill directory whose
  * written text matches one of the `skillScan.ts` patterns measured at zero
  * false positives on the benign-skill corpus (`SKILL_CONTENT_BLOCK_PATTERN_IDS`;
  * `packages/shared-types/src/__tests__/corpus/skills/`, 350 real skills).
@@ -1061,7 +1061,7 @@ const WRITTEN_CONTENT_KEYS = ['content', 'new_string', 'newString', 'new_str', '
  * pattern inside the value of a {@link WRITTEN_CONTENT_KEYS} key of the
  * serialized tool input.
  *
- * **Snapshot-only, never in `staticFloorPatterns()`**, as TD-358 required: a
+ * **Snapshot-only, never in `staticFloorPatterns()`**, by design: a
  * content judgement ships where one sync cycle retracts it
  * (`SKILL_CONTENT_TIER_SEVERITY` in `lib/policySnapshot.ts`). The table's own
  * `warn` is a placeholder the snapshot builder always overrides.
@@ -1153,9 +1153,9 @@ function assertSkillContentArgSane(
 /**
  * Commands that destroy the machine or its data irrecoverably.
  *
- * TD-309: none of these were blocked by any harness. They are shipped through
- * the policy snapshot rather than compiled into the gate, and at `warn` before
- * `block` — see the note on `severity` below.
+ * None of these were blocked by any harness before this table. They are
+ * shipped through the policy snapshot rather than compiled into the gate, and
+ * at `warn` before `block` — see the note on `severity` below.
  *
  * ## What is deliberately allowed
  *
@@ -1187,7 +1187,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
     reason: 'Recursive delete of the filesystem root',
     rationale:
       'The trailing `( |\\*)` after the root slash is what separates this from ' +
-      'TD-309\'s false positive: `rm -rf /home/me/build` has a character other ' +
+      'an earlier version\'s false positive: `rm -rf /home/me/build` has a character other ' +
       'than a space or a star after the slash and is allowed. Requires at least ' +
       'one flag, so a bare `rm /` (which fails anyway) does not match.',
     matches: [
@@ -1467,7 +1467,7 @@ export function protectedPathShellPatterns(): readonly GuardPattern[] {
  *  without a release. `SKILL_SURFACE_PATTERNS` IS here, deliberately, despite
  *  also being new: unlike the destructive tier it is a deterministic path
  *  match with no content judgement to get wrong, so there is no measurement
- *  risk to hold it back from — see its own doc comment. As of TD-358's
+ *  risk to hold it back from — see its own doc comment. As of the skill-surface
  *  block-tier promotion these two entries are the DEGRADED-MODE baseline
  *  only: the steady state is `block`, delivered through the policy snapshot
  *  (`SKILL_SURFACE_TIER_SEVERITY` in `lib/policySnapshot.ts`) and additive on

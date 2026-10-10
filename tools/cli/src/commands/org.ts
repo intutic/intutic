@@ -1,9 +1,9 @@
 /**
  * `intutic org create` — create a real org from an already-authenticated
- * session (tenancy phase 4/7, LLD #65).
+ * session.
  *
- * Real org creation now requires DNS domain-ownership verification (LLD #71
- * follow-up): creating an org auto-provisions a real managed gateway cell,
+ * Real org creation now requires DNS domain-ownership verification:
+ * creating an org auto-provisions a real managed gateway cell,
  * so an org's claimed domain must be proven before `POST /api/v1/orgs` will
  * create it. There's no anonymous-compatible verification flow (no session
  * exists yet to own a verification attempt against), so the old anonymous

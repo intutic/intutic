@@ -5,7 +5,7 @@
  * command-pipeline taint analysis, and (with `--use-behavioral`) full
  * AST/dataflow analysis of skill content — genuinely deeper than this
  * codebase's own regex-genre scanning (`packages/shared-types/src/scriptScan.ts`,
- * Phase S2). TD-356 (`docs/TECH_DEBT.md`) named this integration as the
+ * Phase S2). This integration is the
  * follow-up to that phase's deliberately-scoped pattern matching.
  *
  * # Why a shell-out, not a dependency

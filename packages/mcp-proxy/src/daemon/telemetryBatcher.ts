@@ -4,7 +4,6 @@
  * Accumulates hook events and batches them for upload.
  * Fallback: Valkey event buffer, followed by disk buffer at ~/.intutic/telemetry-buffer.ndjson on flush failure.
  *
- * LLD #28: MCP Daemon Mode, WS-5MCP
  * @module
  */
 import https from 'node:https'

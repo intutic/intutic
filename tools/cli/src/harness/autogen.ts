@@ -15,7 +15,7 @@
  * calls never go through the runtime at all, so for `AssistantAgent`-based
  * code the framework-agnostic `@guard`/`guard_tools` helpers (governing the
  * tool objects directly) remain the applicable coverage, same as before this
- * adapter existed (see TD-374).
+ * adapter existed.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -31,7 +31,7 @@ export const autogenAdapter = makeSdkGatedAdapter({
   pipInstall: 'intutic-clawde[autogen]',
   importLine: 'from intutic_clawde.gate.adapters.autogen import IntuticInterventionHandler',
   usageSummary:
-    'IntuticInterventionHandler vetoes a runtime-routed FunctionCall via on_send (see TD-374: ' +
+    'IntuticInterventionHandler vetoes a runtime-routed FunctionCall via on_send (' +
     'invisible to AssistantAgent\'s own tool calls — wrap those tools with @guard/guard_tools ' +
     'instead).',
   docsSlug: 'autogen',

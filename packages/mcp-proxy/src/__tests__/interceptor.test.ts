@@ -263,7 +263,7 @@ describe('ToolCallInterceptor', () => {
   })
 
   describe('SOP policy rules', () => {
-    it('a warn rule allows the call and reports tool_flagged with the rule id, then the allow (LLD #71)', async () => {
+    it('a warn rule allows the call and reports tool_flagged with the rule id, then the allow', async () => {
       const rules: SopRule[] = [{
         id: 'guardrail.pgr_shadow',
         toolPattern: '^Bash$',

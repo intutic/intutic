@@ -346,7 +346,7 @@ describe('generated hook scripts', () => {
 
       it('protects every path in the shared constant', () => {
         // `UNIVERSAL_PROTECTED_PATHS` exists because eleven harnesses each kept
-        // their own list and they disagreed (TD-298). That unification reached
+        // their own list and they disagreed. That unification reached
         // the TypeScript constant but not every *generated* script: goose emitted
         // a hand-written seven-entry bash array that omitted
         // `.claude/settings.local.json` — which loads at higher precedence than

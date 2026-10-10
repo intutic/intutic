@@ -5,7 +5,6 @@
  * corrective prompt card system, trust scoring, and ARE probe battery.
  *
  * HLD §3.5 (Anomaly Detection), HLD §7.7 (Drift Detector)
- * LLD #5 — Anomaly Detection + ARE
  *
  * @module
  */
@@ -39,7 +38,7 @@ export interface AnomalyEvent {
  * Full classification result from the anomaly detector.
  * Includes severity mapping and whether an incident was created.
  *
- * LLD #5 §2.2 — classifyAnomaly() return type
+ * classifyAnomaly() return type
  */
 export interface AnomalyClassification {
   /** Whether an anomaly was detected. */
@@ -80,7 +79,6 @@ export type { AnomalySeverity }
  * Static mapping from anomaly type to default severity.
  *
  * HLD §3.5 — 12-category table, Alert Route column
- * LLD #5 Appendix B
  */
 /**
  * Severity per anomaly category.
@@ -139,7 +137,7 @@ export type ProbeType = 'PATTERN' | 'SCHEMA' | 'LLM'
 /**
  * Result from an individual ARE probe execution.
  *
- * LLD #5 §2.2 — runProbes() return type
+ * runProbes() return type
  */
 export interface ProbeResult {
   /** Probe tier. */
@@ -172,7 +170,7 @@ export interface ProbeResult {
 /**
  * Trust score for a user/agent within a workspace.
  *
- * LLD #5 §4.4 — Trust Score Algorithm
+ * Trust Score Algorithm
  * Decay: score * 0.85 per anomaly
  * Boost: score * 1.02 per clean session
  * Clamped to [0, 100]. Initial: 80.
@@ -206,7 +204,7 @@ export interface TrustScoreResult {
 /**
  * Result of a trust score update operation.
  *
- * LLD #5 §2.2 — updateTrustScore() return type
+ * updateTrustScore() return type
  */
 export interface TrustScoreUpdate {
   /** Previous score before update. */
@@ -224,8 +222,6 @@ export interface TrustScoreUpdate {
 
 /**
  * Events that can modify a trust score.
- *
- * LLD #5 §4.4
  */
 export interface TrustEvent {
   type: 'ANOMALY_DETECTED' | 'CLEAN_SESSION'
@@ -280,7 +276,7 @@ export interface CapabilityMissEvent {
 /**
  * Input for recording a capability miss.
  *
- * LLD #5 §2.2 — recordCapabilityMiss() parameter
+ * recordCapabilityMiss() parameter
  */
 export interface CapabilityMissInput {
   workspaceId: string
@@ -304,7 +300,7 @@ export type DriftDirection = 'POSITIVE_DRIFT' | 'NEGATIVE_DRIFT' | 'NEUTRAL_DRIF
 /**
  * Drift detection event payload.
  *
- * LLD #5 §2.3 — anomaly.drift.detected event
+ * anomaly.drift.detected event
  */
 export interface DriftEvent {
   workspaceId: string

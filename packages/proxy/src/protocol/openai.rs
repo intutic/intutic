@@ -4,8 +4,6 @@
 //! responses API payloads to canonical Anthropic formats and back.
 //! Includes support for multimodal content translation, structured outputs,
 //! tool use mapping, streamingSSE, and thinking block stripping.
-//!
-//! LLD #26 §4.4 — Rust-Native Protocol Normalization (LLM-Bridge Pattern)
 
 use serde_json::{json, Value};
 

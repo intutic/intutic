@@ -2,7 +2,7 @@
 //!
 //! Scans individual SSE data lines for the *start* of a tool invocation.
 //! Only detects the initial `content_block_start` / `tool_calls` delta —
-//! full argument accumulation is tracked as TD-TOOLUSE-001 for Phase 5.
+//! full argument accumulation is not implemented yet.
 //!
 //! # Now wired — and the reason it was not is corrected here
 //!
@@ -29,7 +29,7 @@
 //! - Only this module can act *before* the call reaches the tool runner. The
 //!   request path sees it one turn after it ran.
 //!
-//! Full argument accumulation across chunks is still TD-TOOLUSE-001.
+//! Full argument accumulation across chunks is still unimplemented.
 //!
 //! # Supported providers
 //!

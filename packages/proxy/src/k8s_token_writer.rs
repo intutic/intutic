@@ -1,4 +1,4 @@
-//! Self-hosted gateway token persistence for Kubernetes (TD-341).
+//! Self-hosted gateway token persistence for Kubernetes.
 //!
 //! `heartbeat.rs`'s `INTUTIC_GATEWAY_TOKEN_STATE_FILE` mechanism closes the
 //! "self-rotated token lost on restart" gap for bare-metal (a persistent

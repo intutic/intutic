@@ -14,7 +14,6 @@
  * - OPENAI_API_KEY      (all OpenAI-compatible tools) — only when logged in
  * - INTUTIC_API_KEY     (Intutic-native tools)        — only when logged in
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 
@@ -37,7 +36,7 @@ import { selectBackend, type SandboxKind, type SandboxSpec } from '../lib/sandbo
 import pc from 'picocolors'
 import { localProxyPort } from '../lib/localProxy.js'
 
-/** Workspace requirement for whether agents must run sandboxed (LLD #63 §6). */
+/** Workspace requirement for whether agents must run sandboxed. */
 export type SandboxRequirement = 'off' | 'warn' | 'require'
 
 /**
@@ -180,7 +179,7 @@ export function buildProxyEnv(
  *
  * @param commandAndArgs - Array of command + arguments (e.g. ['claude'] or ['python', 'main.py'])
  * @param sandbox - when set, run the command inside an isolated runtime whose
- *   only egress is the proxy (LLD #63 §6) instead of directly on the host.
+ *   only egress is the proxy instead of directly on the host.
  */
 export async function runExec(
   commandAndArgs: string[],
@@ -211,7 +210,7 @@ export async function runExec(
     return
   }
 
-  // Not sandboxed — honour the workspace's sandbox requirement (LLD #63 §6).
+  // Not sandboxed — honour the workspace's sandbox requirement.
   // Without a login there is no workspace to have one.
   const requirement = creds ? await resolveSandboxRequirement(creds) : 'off'
   if (requirement === 'require') {
@@ -316,7 +315,7 @@ async function runSandboxed(
 
   const health = await backend.health()
   if (!health.available) {
-    // Honesty rule (LLD #63 §6): never silently fall back to running the agent
+    // Honesty rule: never silently fall back to running the agent
     // ungoverned on the host — say what is unavailable and stop.
     log.error(`Sandbox backend '${backend.name}' is not available: ${health.detail}`)
     log.dim('Start Docker (or Podman), or drop --sandbox to run on the host.')
@@ -344,7 +343,7 @@ async function runSandboxed(
   //
   // Opened before `spec` so the session id can ride into the container as
   // INTUTIC_SESSION_ID — the entrypoint uses it to attest itself server-side
-  // (LLD #63 §6, TD-333) once its own firewall + capability drop are in
+  // once its own firewall + capability drop are in
   // effect, closing the gap where this executionMode:'SANDBOX' record was
   // the entire, self-reported, host-side claim.
   const sessionId = creds ? await openSandboxSession(creds, identity, backend.name) : null

@@ -1,5 +1,5 @@
 /**
- * Sandbox runtime abstraction (LLD #63 §6).
+ * Sandbox runtime abstraction.
  *
  * A `SandboxBackend` launches an agent command inside an isolated runtime whose
  * *only* egress is the governing proxy — unifying "isolate the process" with
