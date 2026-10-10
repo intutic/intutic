@@ -60,6 +60,8 @@ export type {
   EvaluationCascadeResult,
 } from './policy.js'
 
+export { DEFAULT_DAILY_BUDGET_USD, DEFAULT_MONTHLY_BUDGET_USD } from './finops.js'
+
 export type {
   TraceEntry,
   CostBreakdown,

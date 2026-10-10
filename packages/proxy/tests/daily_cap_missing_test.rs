@@ -2,7 +2,9 @@
 //! control plane writes to Valkey is missing, the proxy reads the cap from
 //! `/auth/key-context` (`budget.dailyUsd`) and enforces it; when that answer
 //! carries none or cannot be had, the request is refused as
-//! `BUDGET_UNVERIFIABLE`. The proxy used to fall back to $100 a day.
+//! `BUDGET_UNVERIFIABLE`. It used to fall back to $100 a day whatever the
+//! workspace had saved; $100 is now the control plane's default for a
+//! workspace that never saved a cap, stated on key-context like any other.
 //!
 //! ONE `#[tokio::test]`, for the reason `judge_stream_test.rs` gives: the
 //! upstream URL and control-plane URL are process-global env.
@@ -17,7 +19,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 // Runtime-assembled virtual keys, per the repo's fixture rule; the suffix
 // after the hex is the workspace.
 const TINY_CAP: &str = concat!("vk_", "0123456789abcdef0123456789abcd01", "_ws_tiny");
-const AMPLE_CAP: &str = concat!("vk_", "0123456789abcdef0123456789abcd02", "_ws_ample");
+const DEFAULT_CAP: &str = concat!("vk_", "0123456789abcdef0123456789abcd02", "_ws_default");
+/// The same default cap, with the day's spend already at it.
+const DEFAULT_CAP_SPENT: &str = concat!("vk_", "0123456789abcdef0123456789abcd05", "_ws_spent");
 const NO_CAP: &str = concat!("vk_", "0123456789abcdef0123456789abcd03", "_ws_none");
 const DOWN: &str = concat!("vk_", "0123456789abcdef0123456789abcd04", "_ws_down");
 
@@ -37,7 +41,11 @@ impl ControlPlaneCache for KnowsKeysNotCaps {
             team_id: Some(workspace.to_string()),
             user_id: Some("mbr_1".to_string()),
             max_budget: None,
-            spend: 0.0,
+            spend: if workspace == "ws_spent" {
+                99.999_999
+            } else {
+                0.0
+            },
             models: Vec::new(),
             expires: None,
             org_id: None,
@@ -146,8 +154,14 @@ async fn a_missing_daily_cap_is_read_from_the_control_plane_never_invented() {
             serde_json::json!({ "dailyUsd": 0.000001, "monthlyUsd": 0.00003 }),
         ),
         (
-            AMPLE_CAP,
-            serde_json::json!({ "dailyUsd": 1000.0, "monthlyUsd": 30000.0 }),
+            DEFAULT_CAP,
+            // A workspace that never saved a cap: the control plane states its
+            // $100 default (DEFAULT_DAILY_BUDGET_USD in shared-types).
+            serde_json::json!({ "dailyUsd": 100.0, "monthlyUsd": 500.0 }),
+        ),
+        (
+            DEFAULT_CAP_SPENT,
+            serde_json::json!({ "dailyUsd": 100.0, "monthlyUsd": 500.0 }),
         ),
         (NO_CAP, serde_json::Value::Null),
     ] {
@@ -222,9 +236,13 @@ async fn a_missing_daily_cap_is_read_from_the_control_plane_never_invented() {
     assert_eq!(status, reqwest::StatusCode::TOO_MANY_REQUESTS, "{body}");
     assert!(body.contains("BUDGET_EXCEEDED"), "{body}");
 
-    // A cap that covers the request lets it through.
-    let (status, body) = send(AMPLE_CAP).await;
+    // The $100 default covers a small request, and refuses one once the
+    // day's spend has reached it.
+    let (status, body) = send(DEFAULT_CAP).await;
     assert!(status.is_success(), "{status}: {body}");
+    let (status, body) = send(DEFAULT_CAP_SPENT).await;
+    assert_eq!(status, reqwest::StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert!(body.contains("BUDGET_EXCEEDED"), "{body}");
 
     // No cap stated, or no answer: refused, never admitted under a made-up cap.
     for key in [NO_CAP, DOWN] {

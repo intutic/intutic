@@ -183,4 +183,5 @@ The API cannot change an uploaded rule's bytes, so a rebuilt file replaces the r
 - `intutic_guardrail` manages guardrails you author. A guardrail extracted from a policy document cannot be managed or imported: it changes when its document does, and you move it through the [guardrail review](/guide/policy-guardrails).
 - Approving a guardrail for shadow and promoting it are review decisions, not Terraform actions.
 - Org-wide SOPs, members and roles, SSO and SCIM are managed in the dashboard.
+- Spend caps are not managed by the provider. A workspace that has not saved a daily cap is held to $100 a day; set caps on Settings › Billing › Budget Limits or with `PUT /api/v1/budget` (see [Budgets](/guide/budgets#per-workspace-budgets)).
 - A virtual key belongs to the member whose key runs Terraform, and Terraform sees only that member's keys.

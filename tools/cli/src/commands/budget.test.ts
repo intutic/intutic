@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 import {
+  dailyCapNote,
   fetchLocalSpend,
   printWatchTick,
   type LocalSpendResponse,
@@ -132,5 +133,20 @@ describe('printWatchTick', () => {
     const line = printed()
     expect(line).toContain('machine-local')
     expect(line).toContain('workspace: — (not connected)')
+  })
+})
+
+describe('dailyCapNote', () => {
+  it('names the $100 default for a workspace that saved no daily cap, and how to change it', () => {
+    expect(dailyCapNote({ daily_budget_usd: 100, daily_budget_is_default: true })).toBe(
+      'the default $100.00 a day (none saved); requests over it are refused. ' +
+        'Set your own on Settings › Billing › Budget Limits, or with PUT /api/v1/budget.',
+    )
+  })
+
+  it('names a saved cap as the workspace\'s own', () => {
+    expect(dailyCapNote({ daily_budget_usd: 35, daily_budget_is_default: false })).toBe(
+      '$35.00 a day, saved for this workspace; requests over it are refused.',
+    )
   })
 })

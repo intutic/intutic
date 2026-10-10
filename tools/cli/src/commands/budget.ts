@@ -22,6 +22,8 @@ export interface BudgetStatusResponse {
   monthly_budget_usd: number
   monthly_spend_usd: number
   daily_budget_usd: number
+  /** True when the workspace never saved a daily cap and is held to the default. */
+  daily_budget_is_default?: boolean
   daily_spend_usd: number
   pct_monthly_used: number
   pct_daily_used: number
@@ -92,6 +94,14 @@ export async function fetchLocalSpend(
   }
 }
 
+/** What the workspace's daily cap is, for the line under Daily Spend. */
+export function dailyCapNote(res: Pick<BudgetStatusResponse, 'daily_budget_usd' | 'daily_budget_is_default'>): string {
+  return res.daily_budget_is_default
+    ? `the default $${res.daily_budget_usd.toFixed(2)} a day (none saved); requests over it are refused. ` +
+        'Set your own on Settings › Billing › Budget Limits, or with PUT /api/v1/budget.'
+    : `$${res.daily_budget_usd.toFixed(2)} a day, saved for this workspace; requests over it are refused.`
+}
+
 export async function runBudget(opts: { dev?: boolean }): Promise<void> {
   log.header('Intutic — Budget & Loop Status')
 
@@ -110,6 +120,7 @@ export async function runBudget(opts: { dev?: boolean }): Promise<void> {
         log.info('Cloud Budget Status:')
         log.field('Workspace ID', budgetRes.workspace_id)
         log.field('Daily Spend', `$${budgetRes.daily_spend_usd.toFixed(4)} / $${budgetRes.daily_budget_usd.toFixed(2)} (${budgetRes.pct_daily_used}%)`)
+        log.field('Daily Cap', dailyCapNote(budgetRes))
         log.field('Monthly Spend', `$${budgetRes.monthly_spend_usd.toFixed(2)} / $${budgetRes.monthly_budget_usd.toFixed(2)} (${budgetRes.pct_monthly_used}%)`)
         log.field('Remaining Budget', `$${budgetRes.budget_remaining_usd.toFixed(2)}`)
         if (budgetRes.alert_triggered) {

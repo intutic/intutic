@@ -23,6 +23,8 @@ What each cap does:
 - **The daily cap is enforced.** Before forwarding a request, the proxy estimates its cost and refuses it with `429 BUDGET_EXCEEDED` when the estimate plus a 20% margin is more than what is left of the day's cap. The cap belongs to the workspace: every member and every virtual key in it draws on the same amount.
 - **The monthly cap raises alerts.** Reaching its alert threshold or the cap itself raises the [budget alerts](#budget-alerts) below; requests are not refused.
 
+A workspace that has never saved caps has a **daily cap of $100**, enforced like any other, and a monthly cap of $500 that only raises alerts. Settings › Billing and `intutic budget` say when the daily cap is that default. To change it, save your own caps on **Settings › Billing › Budget Limits** or with `PUT /api/v1/budget`; the saved value replaces the default at once.
+
 There are no per-developer or per-virtual-key budgets. To see who spends what, use **Cost by Developer** and **Cost by Virtual Key** (see [Dashboard Widgets](#dashboard-widgets)) or `intutic usage members`.
 
 ::: tip

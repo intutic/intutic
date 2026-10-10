@@ -25,7 +25,7 @@ curl -X PUT "$INTUTIC_CONTROL_PLANE_URL/api/v1/workspace/settings" \
 ```
 
 - **Who:** the OWNER or ADMIN role. Any other role gets `403`.
-- **Strict:** a top-level key not listed on this page is refused with `400` naming it, and nothing is stored. So is a value outside the bounds below. Inside `loop_review`, `mcpBudgets` and `sso_group_policy` an unknown field is refused the same way; the other objects, `featureFlags` among them, drop a field they do not define without an error, so check the spelling of a flag. `managedJudgeModel`, `typedJudgeBackend` and `typedJudgeBackendAck` are no longer settings; a body carrying one is refused with a `400` that says why.
+- **Strict:** a top-level key not listed on this page is refused with `400` naming it, and nothing is stored. So is a value outside the bounds below. Inside every object (`featureFlags`, `imageProvenance`, `anomaly_enforcement`, `banditKeywords`, `byocStorage`, `loop_review`, `mcpBudgets`, `sso_group_policy`) an unknown field is refused the same way, named. `managedJudgeModel`, `typedJudgeBackend` and `typedJudgeBackendAck` are no longer settings; a body carrying one is refused with a `400` that says why.
 - **At least one key.** An empty body is refused.
 - **Only the keys you send change.** Each top-level key you send replaces its stored value whole: send all of an object's fields, or the ones you leave out are gone. The exceptions:
   - `featureFlags` merges flag by flag, so `{"featureFlags": {"ff_shadow_enforcement": true}}` leaves every other flag as it was.
@@ -83,6 +83,8 @@ Types are JSON types. "Absent" is what an unset key with no default means. Lengt
 | `byocStorage` | object: `provider` (`gcs` \| `s3` \| `disabled`, required), `bucketName` (1–255), `prefix` (at most 255), `projectId` (at most 128), `region` (at most 64), `accessKeyId` (at most 256), `secretAccessKey` (at most 1024), `credentials` (at most 8192), `mode` (`mirror` \| `primary`) | absent | Trace storage in a bucket you own: traces are copied to it (`mirror`) or kept only there (`primary`). The secrets are encrypted at rest and never returned. See [General](/guide/settings#general) |
 
 ### Routing and cost
+
+The workspace's spend caps are not settings on this page: set them on **Settings › Billing › Budget Limits** or with `PUT /api/v1/budget`, not with `intutic settings` or `intutic_workspace_settings`. A workspace that has not saved a daily cap is held to $100 a day. See [Budgets](/guide/budgets#per-workspace-budgets).
 
 | Key | Type and bounds | Default | What it does |
 |-----|-----------------|---------|--------------|
