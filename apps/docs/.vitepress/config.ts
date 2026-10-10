@@ -460,9 +460,13 @@ export default defineConfig({
           items: [
             { text: 'Overview & Capability Matrix', link: '/compare/' },
             { text: 'Intutic vs Portkey', link: '/compare/portkey' },
+            { text: 'Intutic vs Palo Alto Networks', link: '/compare/palo-alto-networks' },
             { text: 'Intutic vs Credo AI', link: '/compare/credo-ai' },
             { text: 'Intutic vs Arize AX', link: '/compare/arize-ax' },
             { text: 'Intutic vs Forge', link: '/compare/forge' },
+            { text: 'Intutic vs Zenity', link: '/compare/zenity' },
+            { text: 'Intutic vs Noma Security', link: '/compare/noma' },
+            { text: 'Intutic vs Pillar Security', link: '/compare/pillar-security' },
             { text: 'Intutic vs F5 AI Guardrails', link: '/compare/f5-calypso' },
             { text: 'Intutic vs LangSmith', link: '/compare/langsmith' },
             { text: 'Intutic vs Fiddler AI', link: '/compare/fiddler' },
