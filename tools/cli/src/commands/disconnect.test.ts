@@ -237,6 +237,17 @@ const CASES: Case[] = [
     edit: () => editJson(join(home, '.config', 'muse', 'settings.json'), (d) => { d.theme = 'y' }),
   },
   {
+    harness: 'muse-code',
+    // Connect creates the settings file with a `schema_version` of its own;
+    // disconnect must take the whole file away, not leave that key behind.
+    name: 'muse-code, with no settings file of the user\'s own',
+    seed: () => put(join(ws, 'AGENTS.md'), '# Agents\n\nBe brief.\n'),
+    edit: () => put(join(ws, 'NOTES.md'), 'unrelated\n'),
+    connected: async () => {
+      expect(existsSync(join(home, '.config', 'muse', 'settings.json'))).toBe(true)
+    },
+  },
+  {
     harness: 'grok',
     // Laid out the way smol-toml writes it: connect rewrites this file through
     // it, so after an edit the restored file comes back in that layout.
