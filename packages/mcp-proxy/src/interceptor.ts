@@ -22,7 +22,7 @@ import { scanText, injectionSeverity, setDynamicInjectionPatterns } from './inje
 import { evaluateSequenceDetectors, resolveEffectiveDisposition, REASK_MAX_ATTEMPTS } from './anomaly/index.js'
 import type { AnomalyMode, Disposition } from './anomaly/index.js'
 import { SessionState } from './session.js'
-import type { WasmRunner } from './wasm/runner.js'
+import type { ShadowReport, WasmRunner } from './wasm/runner.js'
 import type { PolicyClient, SopRule } from './policy.js'
 import { detectionFinding, type GovernanceEmitter } from './emitter.js'
 import type { ApprovalHolds } from './approvalHold.js'
@@ -262,6 +262,29 @@ export class ToolCallInterceptor {
     log.warn({ action: 'registry_block', serverName: this.serverName, toolName }, refusal.reason)
     this.emitter.emit('tool_blocked', toolName, toolInput, refusal.reason)
     return refusal
+  }
+
+  /**
+   * Brings the workspace's control-plane rules up to date with the policy, and
+   * refuses the call when they have never loaded and the proxy fails closed.
+   *
+   * Never loaded means no policy from the control plane yet, or one whose rule
+   * binaries could not be fetched: whether one of those rules refuses this
+   * call is unknown. Fail-open judges the call by the rules that are loaded —
+   * this machine's — as a workspace with no uploaded rules would be;
+   * fail-closed refuses it, as it does an unknown registry. Once loaded, the
+   * set is kept for as long as the process runs, through any later outage.
+   */
+  private async checkCloudRulesLoaded(runner: WasmRunner, toolName: string, toolInput: unknown): Promise<Decision | null> {
+    await runner.syncCloudRules(this.policy.getWasmRules())
+    if (runner.cloudRulesLoaded() || this.failOpen) return null
+    const reason =
+      `This workspace's custom rules have not loaded (Intutic control plane unreachable since this ` +
+      `proxy started), so whether one of them refuses this call is unknown. Tool call blocked ` +
+      `(fail-closed mode: mcpProxyFailBehavior or INTUTIC_MCP_FAIL_OPEN=false).`
+    log.warn({ action: 'wasm_cloud_unknown_block', toolName }, reason)
+    this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+    return block('GOVERNANCE_UNAVAILABLE', 'mcpProxyFailBehavior', reason)
   }
 
   /**
@@ -540,14 +563,18 @@ export class ToolCallInterceptor {
       }
     }
 
-    // 5. WASM custom rules (Phase 3) — operator-authored, compiled
-    // AssemblyScript rules dropped into `~/.intutic/wasm/`. Position: after
-    // every built-in check, immediately before allow — this is deliberately
-    // the LAST gate, so a WASM rule's `RequestContext` carries
+    // 5. WASM custom rules (Phase 3) — operator-authored rules, native or
+    // Rego: the workspace's, uploaded to the control plane, and this
+    // machine's, dropped into `~/.intutic/wasm/`. Position: after every
+    // built-in check, immediately before allow — this is deliberately the
+    // LAST gate, so a WASM rule's `RequestContext` carries
     // `injection_findings`/`corroborating_detectors`/etc. already populated
     // by the steps above it (see `wasm/context.ts`'s module doc).
     if (this.wasmRunner) {
+      const unloaded = await this.checkCloudRulesLoaded(this.wasmRunner, toolName, toolInput)
+      if (unloaded) return unloaded
       try {
+        const shadow: ShadowReport[] = []
         const verdict = await this.wasmRunner.evaluate({
           sessionId: this.session.sessionId,
           workspaceId: this.workspaceId,
@@ -563,7 +590,12 @@ export class ToolCallInterceptor {
           corroboratingDetectors: corroboratingDetectorsForContext,
           toolContractChanged: this.session.getToolContractChanged(),
           serverName: this.serverName,
-        })
+        }, shadow)
+        // Whatever the call's outcome: the shadowed rules' evaluations are
+        // promotion evidence whether or not another rule refused the call.
+        if (shadow.length > 0) {
+          this.emitter.emit('wasm_shadow_evaluated', toolName, toolInput, undefined, undefined, undefined, { wasmShadowReports: shadow })
+        }
 
         if (verdict.code === 'unavailable') {
           // A rule reached no verdict: refused whatever `failOpen` says (see

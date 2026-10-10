@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 404 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 405 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -1345,6 +1345,7 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 | GET | `/api/v1/wasm-rules/:ruleId` | Authenticated |  |
 | PUT | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN |  |
 | POST | `/api/v1/wasm-rules/:ruleId/replay` | OWNER/ADMIN/EM |  |
+| GET | `/api/v1/wasm-rules/binaries/:sha256` | Authenticated |  |
 
 ### `workspace.ts` <Badge type="tip" text="Cloud" />
 

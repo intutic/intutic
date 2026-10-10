@@ -430,16 +430,16 @@ The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority n
 
 ### 2. Hot-Reload
 
-Filters are hot-reloaded into the proxy without requiring a service restart:
+Filters are hot-reloaded into both proxies, the LLM proxy and the MCP governance proxy, without a restart:
 
-1. The compiled WASM binary is stored in the database and the workspace's active rule set is published to Valkey
-2. Each connected proxy polls that rule set every 5 seconds (there is no push channel)
-3. A new WebAssembly module is instantiated on the fly when the descriptor changes, once its bytes match the SHA-256 the descriptor names
+1. The compiled WASM binary is stored in the database, and the workspace's active rule set is published to Valkey and delivered with the MCP proxy's workspace policy
+2. The LLM proxy polls the rule set every 5 seconds; the MCP proxy receives it at its next policy refresh, within 60 seconds (there is no push channel)
+3. A new WebAssembly module is instantiated when the descriptor changes, once its bytes match the SHA-256 the descriptor names; the MCP proxy fetches each module by that hash, once
 4. The filter is active on the request path within one poll interval
 
-A module whose bytes do not match its SHA-256 is not loaded. The proxy logs it and raises an incident for the workspace, and the version of that filter it already runs, if any, stays in force.
+A module that is missing, does not match its SHA-256 or cannot load is not loaded. The proxy logs it and raises an incident for the workspace, once per version, and the version of that filter it already runs, if any, stays in force.
 
-Uploaded filters reach the LLM proxy. The MCP governance proxy runs only the rules in the local rules directory (`~/.intutic/wasm/`, or `INTUTIC_WASM_DIR`), so a filter meant for MCP tool calls is installed there with `intutic policy install` as well.
+Both proxies run uploaded filters together with the rules in their local rules directory, as one list: lower priority first, and on equal priority the uploaded filter first. A filter in **Shadow** mode is evaluated and never decides a request or call. Both proxies record what it would have done, allows included: the LLM proxy on each request's trace, the MCP proxy as an event per tool call. Those counts are the evidence a promotion to **Enforce** is judged on. Until the MCP proxy has loaded the workspace's filters, its [fail setting](/integrations/mcp-proxy#custom-rules) decides whether a call goes ahead on the local rules alone.
 
 ---
 
@@ -479,7 +479,7 @@ From there the candidate takes the same three human steps as a mined one, with t
 1. **Mocks come from captured traffic, not denials.** A policy rule has no reason to correlate with anything a person denied, so *Attach mocks* looks for a captured context the predicate fires on and the nearest one it does not. If nothing in history exercises the rule yet, the candidate stays *Proposed* with that reason and can be re-run later; it is not rejected.
 2. **The bundle must be compiled from the source of record.** `intutic policy compile --candidate <id> --upload` fetches `GET /api/v1/rule-candidates/<id>/source`, verifies its hash, compiles it, and uploads the bundle together with that hash. `/bundle` recomputes the hash from the candidate row and refuses a bundle built from anything else. The dashboard's upload control is disabled for these candidates for the same reason.
 
-Promotion is unchanged — at least 200 shadow evaluations, at most 1 % would-block, by a named member — and it moves the originating guardrail to *Enforcing* with the same member on its authority chain. A gate rejection moves it to *Rejected* with the gate's reason. The guardrail row itself is never promoted directly; its Review card says so and points at the candidate.
+Promotion is unchanged — at least 200 shadow evaluations, counted in both proxies, at most 1 % would-block, by a named member — and it moves the originating guardrail to *Enforcing* with the same member on its authority chain. A gate rejection moves it to *Rejected* with the gate's reason. The guardrail row itself is never promoted directly; its Review card says so and points at the candidate.
 
 The candidate also ends with its guardrail. Retiring or rejecting the guardrail, deleting an authored one, or editing an authored one's rule (which creates a new version) retires the candidate in the same step: it shows as *Retired*, it can no longer be promoted, and its bundle, if it has one, stops being distributed to the proxy. A new version of an authored guardrail gets a candidate of its own only when it is approved for shadow.
 <!-- ENTERPRISE_ONLY_END -->

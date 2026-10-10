@@ -45,6 +45,7 @@ import { ValkeySessionStore, type SharedSessionStore } from './sessionStore.js'
 import { GuardedValkey } from './guardedValkey.js'
 import { McpBudgetEnforcer, ValkeyBudgetStore } from './budget.js'
 import { WasmRunner } from './wasm/runner.js'
+import { CloudRuleSet, fetchRuleBinaryFrom, refusalDetail } from './wasm/cloudRules.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
@@ -546,9 +547,11 @@ export class McpGovernanceProxy {
   private readonly sessionStore: SharedSessionStore | undefined
   /**
    * Phase 3's WASM custom-rule runner — owns the one dedicated
-   * `worker_threads` Worker and the `~/.intutic/wasm/` directory loader.
-   * Rescanned on the SAME 60s policy-tick timer `PolicyClient.start` already
-   * runs, not a second one (see `policy.ts`'s `start(onTick)`).
+   * `worker_threads` Worker, the `~/.intutic/wasm/` directory loader and the
+   * workspace's control-plane rules. The directory is rescanned on the SAME
+   * 60s policy-tick timer `PolicyClient.start` already runs, not a second one
+   * (see `policy.ts`'s `start(onTick)`); the control-plane rules follow the
+   * policy itself (the interceptor syncs them before each evaluation).
    */
   private readonly wasmRunner: WasmRunner
   /** Reports this proxy's server to the registry; absent for the standalone `intutic` entry, which fronts none. */
@@ -587,7 +590,15 @@ export class McpGovernanceProxy {
         ? 'Anomaly session window shared with sibling proxies through Valkey'
         : 'Anomaly session window is per-process',
     )
-    this.wasmRunner = new WasmRunner(config.mcpWasmDir)
+    this.wasmRunner = new WasmRunner(
+      config.mcpWasmDir,
+      new CloudRuleSet(fetchRuleBinaryFrom(config.controlPlaneUrl, config.apiKey), (report) => {
+        // The hook-event ingest caps `reason` at 512 characters; an unloadable
+        // rule's compile error can run longer.
+        const reason = report.description.slice(0, 512)
+        this.emitter.emit('wasm_rule_refused', report.descriptor.ruleId, undefined, reason, undefined, undefined, { wasmRule: refusalDetail(report) })
+      }),
+    )
     this.registryObserver = config.standalone
       ? undefined
       : new RegistryObserver(config.controlPlaneUrl, config.apiKey, config.serverName, config.remoteTransport ?? 'stdio')

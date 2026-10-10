@@ -619,6 +619,12 @@ export {
   explainWasmImport,
   type WasmHostImport,
 } from './wasmHost.js'
+export {
+  parseWasmRuleDescriptors,
+  type WasmRuleDescriptor,
+  type WasmRuleDescriptorsParse,
+  type WasmRuleMode,
+} from './wasmRuleDescriptor.js'
 
 // Rego policies compiled by OPA, run as rules (packages/proxy/src/wasm/opa.rs).
 export * from './regoRules.js'

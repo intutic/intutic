@@ -179,6 +179,8 @@ describe('approval holds', () => {
   it("a Rego rule's hold takes the same path, keyed on the rule id", async () => {
     const runner = {
       evaluate: async () => ({ code: 'hold', reason: 'release needs approval', ruleId: 'local:20_release.wasm', riskTier: 'high' }),
+      syncCloudRules: async () => {},
+      cloudRulesLoaded: () => true,
     } as unknown as WasmRunner
     const emitter = new Emitter()
     const interceptor = new ToolCallInterceptor(

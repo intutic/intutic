@@ -22,7 +22,7 @@ use std::sync::Arc;
 use super::{
     BreakGlassGrant, CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache,
     FeatureFlags, HardCapStatus, JudgeScope, LocalStore, NotifyScope, Ownership, PinScope,
-    PinnedSopBlock, RuleRefusalReport, SessionRouting, TokenBaseline,
+    PinnedSopBlock, SessionRouting, TokenBaseline,
 };
 use crate::credential_crypto::{self, CredentialKeyring};
 use crate::metering::VirtualKeyRecord;
@@ -800,7 +800,7 @@ impl LocalStore for ValkeyStore {
     }
 
     async fn publish_system_anomaly(&self, workspace_id: &str, description: &str) {
-        publish_anomaly(self.conn(), workspace_id, description).await;
+        publish_anomaly(self.conn(), workspace_id, description, None).await;
     }
 
     async fn publish_notification(&self, scope: NotifyScope, id: &str, payload: &str) {
@@ -1123,17 +1123,36 @@ impl LocalStore for ValkeyStore {
 
 /// One message on `intutic:system_anomalies`, which the control plane's
 /// subscriber records as an incident. Both halves of the store publish it.
-async fn publish_anomaly(mut conn: ConnectionManager, workspace_id: &str, description: &str) {
-    let payload = serde_json::json!({
+async fn publish_anomaly(
+    mut conn: ConnectionManager,
+    workspace_id: &str,
+    description: &str,
+    rule: Option<&super::RuleRefusalWire>,
+) {
+    let payload = anomaly_payload(workspace_id, description, rule);
+    let _: Result<(), redis::RedisError> = conn
+        .publish("intutic:system_anomalies", payload.to_string())
+        .await;
+}
+
+/// The message itself: the fields every anomaly has, plus `wasm_rule` for a
+/// refused rule version, which the control plane files under its reason, once
+/// per version and reason, rather than as a generic incident.
+fn anomaly_payload(
+    workspace_id: &str,
+    description: &str,
+    rule: Option<&super::RuleRefusalWire>,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
         "workspace_id": workspace_id,
         "description": description,
         "severity": "HIGH",
         "timestamp": chrono::Utc::now().to_rfc3339()
     });
-    if let Ok(payload_str) = serde_json::to_string(&payload) {
-        let _: Result<(), redis::RedisError> =
-            conn.publish("intutic:system_anomalies", &payload_str).await;
+    if let Some(rule) = rule {
+        payload["wasm_rule"] = serde_json::json!(rule);
     }
+    payload
 }
 
 pub struct ValkeyControlPlaneCache {
@@ -1616,30 +1635,14 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         let _: Result<(), redis::RedisError> = conn.expire(&key, DELIVERED_MARKER_TTL_SECS).await;
     }
 
-    async fn publish_rule_refusal(&self, workspace_id: &str, refusal: &RuleRefusalReport<'_>) {
-        let payload = rule_refusal_payload(workspace_id, refusal);
-        let mut conn = self.conn();
-        let _: Result<(), redis::RedisError> = conn
-            .publish("intutic:system_anomalies", payload.to_string())
-            .await;
+    async fn publish_rule_refusal(
+        &self,
+        workspace_id: &str,
+        description: &str,
+        rule: &super::RuleRefusalWire,
+    ) {
+        publish_anomaly(self.conn(), workspace_id, description, Some(rule)).await;
     }
-}
-
-/// The system anomaly a refused rule version is published as: the generic
-/// fields every anomaly has, plus `kind` and the rule, so the control plane
-/// files it under its reason rather than as a generic incident.
-fn rule_refusal_payload(workspace_id: &str, refusal: &RuleRefusalReport<'_>) -> serde_json::Value {
-    serde_json::json!({
-        "workspace_id": workspace_id,
-        "description": refusal.description,
-        "severity": "HIGH",
-        "timestamp": chrono::Utc::now().to_rfc3339(),
-        "kind": "wasm_rule_refused",
-        "reason": refusal.reason,
-        "rule_id": refusal.rule_id,
-        "rule_name": refusal.rule_name,
-        "sha256": refusal.sha256,
-    })
 }
 
 /// `HMGET count sum reasoning_sum` on a baseline hash. `None` when the hash is
@@ -1850,29 +1853,41 @@ mod loop_key_contract {
         assert_eq!(active_loop_key("ws_1", None), "intutic:active_loop:ws_1");
     }
 
-    /// The control plane files a refused rule under `reason`, from these fields.
+    /// The control plane files a refused rule under its reason, from these
+    /// fields (`ruleRefusalFromWire` in the control plane).
     #[test]
     fn a_rule_refusal_carries_its_reason_and_rule() {
-        let payload = rule_refusal_payload(
+        let payload = anomaly_payload(
             "ws_1",
-            &RuleRefusalReport {
-                rule_id: "wasm_1",
-                rule_name: "no-shell",
-                sha256: "ab12",
-                reason: "hash_mismatch",
-                description: "WASM rule 'no-shell' (wasm_1) was refused",
-            },
+            "WASM rule 'no-shell' (wasm_1) was refused",
+            Some(&crate::store::RuleRefusalWire {
+                rule_id: "wasm_1".into(),
+                name: "no-shell".into(),
+                sha256: "ab12".into(),
+                refusal: "hash_mismatch",
+                actual_sha256: Some("cd34".into()),
+                previous_in_force: true,
+            }),
         );
-        assert_eq!(payload["kind"], "wasm_rule_refused");
-        assert_eq!(payload["reason"], "hash_mismatch");
         assert_eq!(payload["workspace_id"], "ws_1");
-        assert_eq!(payload["rule_id"], "wasm_1");
-        assert_eq!(payload["rule_name"], "no-shell");
-        assert_eq!(payload["sha256"], "ab12");
         assert_eq!(
             payload["description"],
             "WASM rule 'no-shell' (wasm_1) was refused"
         );
+        assert_eq!(payload["wasm_rule"]["refusal"], "hash_mismatch");
+        assert_eq!(payload["wasm_rule"]["rule_id"], "wasm_1");
+        assert_eq!(payload["wasm_rule"]["name"], "no-shell");
+        assert_eq!(payload["wasm_rule"]["sha256"], "ab12");
+        assert_eq!(payload["wasm_rule"]["actual_sha256"], "cd34");
+        assert_eq!(payload["wasm_rule"]["previous_in_force"], true);
+    }
+
+    /// Any other anomaly carries no rule, and is filed as a generic incident.
+    #[test]
+    fn a_plain_anomaly_carries_no_rule() {
+        let payload = anomaly_payload("ws_1", "disk full", None);
+        assert!(payload.get("wasm_rule").is_none());
+        assert_eq!(payload["severity"], "HIGH");
     }
 
     /// The state key must not collide with its own scalars — a prefix bug here

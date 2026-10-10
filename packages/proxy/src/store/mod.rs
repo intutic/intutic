@@ -39,6 +39,25 @@ use crate::routing::bandit::BanditArmState;
 use crate::routing::mirror::MirrorPairEvent;
 use crate::telemetry::ExecutionTrace;
 
+/// A control-plane rule version a proxy refused to load, as the control plane
+/// reads it: the fields the MCP proxy's `wasm_rule_refused` event carries, in
+/// this channel's snake case.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RuleRefusalWire {
+    pub rule_id: String,
+    pub name: String,
+    pub sha256: String,
+    /// Why, as one of `RULE_LOAD_FAILURE_REASONS` in shared-types:
+    /// `missing`, `hash_mismatch`, `compile_error`, `unsupported_import` or
+    /// `load_error`. The control plane files the incident under it.
+    pub refusal: &'static str,
+    /// What the binary hashed to, on a hash mismatch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_sha256: Option<String>,
+    /// Whether an earlier version of the rule stays in force on this proxy.
+    pub previous_in_force: bool,
+}
+
 pub mod memory;
 pub mod valkey;
 
@@ -269,20 +288,6 @@ pub struct TokenBaseline {
 pub enum JudgeScope {
     Session,
     Loop,
-}
-
-/// A control-plane rule version a proxy refused to load, as the control plane
-/// files it: an incident whose reason is one of `RULE_LOAD_FAILURE_REASONS`
-/// in shared-types (`missing`, `hash_mismatch`, `compile_error`,
-/// `unsupported_import`, `load_error`).
-#[derive(Debug, Clone, Copy)]
-pub struct RuleRefusalReport<'a> {
-    pub rule_id: &'a str,
-    pub rule_name: &'a str,
-    pub sha256: &'a str,
-    pub reason: &'a str,
-    /// The incident's text: what was refused, why, and what still enforces.
-    pub description: &'a str,
 }
 
 /// A break-glass override token validated for a SPECIFIC workspace.
@@ -1081,12 +1086,20 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
 
     /// Raise a control-plane rule version this proxy refused to load on
     /// `intutic:system_anomalies`, the channel `LocalStore::publish_system_anomaly`
-    /// writes and the control plane turns into an incident, with the reason
-    /// it files the incident under. Here for the rule registry, which reads
-    /// rules through this trait and holds no `LocalStore`. The default does
-    /// nothing: standalone has no control plane to raise it with, and no
-    /// control-plane rules to raise it about.
-    async fn publish_rule_refusal(&self, _workspace_id: &str, _refusal: &RuleRefusalReport<'_>) {}
+    /// writes and the control plane turns into an incident, with the version
+    /// and the reason, so the control plane files one incident per version and
+    /// reason however many proxies refuse it — this proxy's replicas and the
+    /// MCP proxy, which reports the same refusal as a hook event. Here for the
+    /// rule registry, which reads rules through this trait and holds no
+    /// `LocalStore`. The default does nothing: standalone has no control plane
+    /// to raise it with, and no control-plane rules to raise it about.
+    async fn publish_rule_refusal(
+        &self,
+        _workspace_id: &str,
+        _description: &str,
+        _rule: &RuleRefusalWire,
+    ) {
+    }
 
     // ── Token intelligence ───────────────────────────────────────────
 

@@ -57,6 +57,36 @@ describe('MCP server registry (proxy side)', () => {
     rulesBody = { rules: [] }
   })
 
+  describe("PolicyClient and the workspace's custom rules", () => {
+    const RULE = { ruleId: 'wasm_1', name: 'no-prod', sha256: 'a'.repeat(64), priority: 10, mode: 'SHADOW' }
+
+    it('has none before a policy loads, and takes wasmRules from GET /api/v1/sop/rules', async () => {
+      const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
+      expect(client.getWasmRules()).toBeUndefined()
+      rulesBody = { rules: [], wasmRules: [RULE] }
+      await client.refresh()
+      expect(client.getWasmRules()).toEqual([RULE])
+    })
+
+    it('reads a control plane that sends no wasmRules as having none', async () => {
+      const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
+      await client.refresh()
+      expect(client.getWasmRules()).toEqual([])
+    })
+
+    it('keeps the loaded list when a later one cannot be read, and through a failed refresh', async () => {
+      const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
+      rulesBody = { rules: [], wasmRules: [RULE] }
+      await client.refresh()
+      rulesBody = { rules: [], wasmRules: [RULE, { ruleId: 'wasm_2', name: 'bad', sha256: 'b'.repeat(64), priority: 1, mode: 'MAYBE' }] }
+      await client.refresh()
+      expect(client.getWasmRules()).toEqual([RULE])
+      rulesStatus = 503
+      await expect(client.refresh()).rejects.toThrow('503')
+      expect(client.getWasmRules()).toEqual([RULE])
+    })
+  })
+
   describe('PolicyClient', () => {
     it('has no registry before any policy loads', () => {
       const client = new PolicyClient(baseUrl, 'vk_test', 'ws_1')
