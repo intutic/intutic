@@ -138,7 +138,7 @@ Each trace receives a **compliance score** indicating how closely the request al
 
 ## Budget Tiers
 
-Each session carries a budget tier label (`JUNIOR`, `SENIOR`, `STAFF` or `PRINCIPAL`, `JUNIOR` unless set), shown with the session in the dashboard. The tier sets no spending limit: spend is capped per workspace, by a daily cap the proxy enforces on every request, and a monthly cap that raises alerts. See [Budgets](/guide/budgets#per-workspace-budgets).
+Each session carries a budget tier label (`JUNIOR`, `SENIOR`, `STAFF` or `PRINCIPAL`, `JUNIOR` unless set), shown with the session in the dashboard. The tier sets no spending limit: spend is limited by the workspace's caps and by budgets on virtual keys and members. See [Budgets](/guide/budgets#setting-up-budget-limits).
 
 <!-- ENTERPRISE_ONLY_START -->
 ## RBAC Roles

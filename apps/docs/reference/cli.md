@@ -933,7 +933,7 @@ intact window is not an intact history.
 
 ## `intutic budget`
 
-Check remaining daily/monthly budget and list active loops, or watch spend live.
+Check remaining daily/monthly budget and list active loops, or watch spend live. The subcommands below set the workspace's caps and the budgets and rate limits on keys and members.
 
 ```bash
 intutic budget [options]
@@ -980,6 +980,117 @@ intutic budget --watch
 
 # Every 2 seconds
 intutic budget --watch --interval 2
+```
+
+---
+
+## `intutic budget set` <Badge type="tip" text="Cloud" />
+
+Set the workspace's daily and monthly caps, the alert threshold, and whether each cap refuses requests. OWNER or ADMIN.
+
+```bash
+intutic budget set [--daily <usd|default>] [--monthly <usd|default>] [--threshold <pct>] [--daily-enforcement hard|soft] [--monthly-enforcement hard|soft]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--daily <usd>` | Daily cap in USD; `0` for no daily cap; `default` returns a saved daily cap to the $100 default |
+| `--monthly <usd>` | Monthly cap in USD; `0` for no monthly cap; `default` returns it to the $500 default |
+| `--threshold <pct>` | Raise a budget alert at this percentage of each cap (1–100) |
+| `--daily-enforcement <mode>` | `hard`: the proxy refuses a request the rest of the day's cap does not cover. `soft`: alerts only. A new workspace's daily cap is `hard` |
+| `--monthly-enforcement <mode>` | The same for the month. A new workspace's monthly cap is `soft` |
+| `--json` | Print the budget after the change as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+Only the options you give are sent; everything else stays as it is, so `--monthly` alone leaves a daily cap that was never saved on the $100 default. See [Budgets](/guide/budgets#workspace-caps).
+
+```bash
+intutic budget set --monthly 1000 --monthly-enforcement hard
+intutic budget set --daily default
+```
+
+---
+
+## `intutic budget keys` <Badge type="tip" text="Cloud" />
+
+Every live virtual key with its owner, its spend budgets, its rate limit, and what it has spent today and this month (UTC). OWNER, ADMIN and EM see every key; anyone else sees their own.
+
+```bash
+intutic budget keys [--json] [--dev]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+---
+
+## `intutic budget key <keyId>` <Badge type="tip" text="Cloud" />
+
+Set a virtual key's spend budgets and rate limit. OWNER or ADMIN, for any key in the workspace.
+
+```bash
+intutic budget key <keyId> [--daily <usd|none>] [--monthly <usd|none>] [--daily-enforcement hard|soft] [--monthly-enforcement hard|soft] [--rpm <n|none>] [--tpm <n|none>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--daily <usd>` | The key's day budget in USD, or `none` to remove it |
+| `--monthly <usd>` | The key's month budget in USD, or `none` to remove it |
+| `--daily-enforcement <mode>` | `hard` (the default for a new budget): refuse requests the budget does not cover. `soft`: alert only |
+| `--monthly-enforcement <mode>` | The same for the month budget |
+| `--rpm <n>` | Requests per minute, or `none` to remove the limit |
+| `--tpm <n>` | Tokens per minute, or `none` to remove the limit |
+| `--json` | Print the key after the change as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+Only what you name changes. Find key ids with `intutic budget keys`. See [Key budgets](/guide/budgets#key-budgets) and [Rate limits](/guide/budgets#key-rate-limits).
+
+```bash
+intutic budget key key_abc123 --daily 5 --monthly 100 --monthly-enforcement soft --rpm 60
+intutic budget key key_abc123 --tpm none
+```
+
+---
+
+## `intutic budget members` <Badge type="warning" text="Biz Org+" />
+
+The default member budget, and each active member with their own budgets, the budgets that apply to them, and their spend today and this month across the keys they own. OWNER, ADMIN and EM see every member; anyone else sees themselves.
+
+```bash
+intutic budget members [--json] [--dev]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+---
+
+## `intutic budget member <memberId>` <Badge type="warning" text="Biz Org+" />
+
+Set a member's spend budgets, or with `default` the budget every member without their own gets. OWNER or ADMIN.
+
+```bash
+intutic budget member <memberId|default> [--daily <usd|none>] [--monthly <usd|none>] [--daily-enforcement hard|soft] [--monthly-enforcement hard|soft]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--daily <usd>` | Day budget in USD, or `none` to remove it |
+| `--monthly <usd>` | Month budget in USD, or `none` to remove it |
+| `--daily-enforcement <mode>` | `hard` (the default for a new budget) or `soft` |
+| `--monthly-enforcement <mode>` | `hard` (the default for a new budget) or `soft` |
+| `--json` | Print the member's budgets after the change as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+A member's own budget for a period replaces the default's for that period. See [Member budgets](/guide/budgets#member-budgets).
+
+```bash
+intutic budget member default --daily 20 --monthly 300 --monthly-enforcement soft
+intutic budget member mem_abc123 --monthly 1000
 ```
 
 ---

@@ -84,13 +84,15 @@ Types are JSON types. "Absent" is what an unset key with no default means. Lengt
 
 ### Routing and cost
 
-The workspace's spend caps are not settings on this page: set them on **Settings › Billing › Budget Limits** or with `PUT /api/v1/budget`, not with `intutic settings` or `intutic_workspace_settings`. A workspace that has not saved a daily cap is held to $100 a day. See [Budgets](/guide/budgets#per-workspace-budgets).
+The workspace's spend caps are not settings on this page: set them on **Settings › Billing › Budget Limits** or with `PUT /api/v1/budget`, not with `intutic settings` or `intutic_workspace_settings`. A workspace that has not saved a daily cap is held to $100 a day. See [Budgets](/guide/budgets#workspace-caps).
 
 | Key | Type and bounds | Default | What it does |
 |-----|-----------------|---------|--------------|
 | `featureFlags` | object of the flags below, each a boolean | every flag off | Switches for routing, caching and automatic changes. Merged flag by flag on write. See [Feature flags](#feature-flags) |
 | `banditKeywords` | object of `testing`, `deployment`, `review`, `debugging`, each an array of keywords. A keyword is trimmed and lower-cased, then must be 2–19 letters and digits, or `ci/cd` | built-in lists | The trigger words the proxy uses to classify a prompt's task type for routing. See [Configure Custom Task Trigger Words](/guide/intelligent-routing#step-2-configure-custom-task-trigger-words) |
 | `contractedRates` | object of model id (1–128) → `{ "inputCostPer1k": number, "outputCostPer1k": number }`, each 0–1000 | absent | Your negotiated prices in USD per 1,000 tokens. The routing shadow-savings report prices a listed model at these rates; other models stay at list price. See [Contracted Model Rates](/guide/settings#contracted-model-rates) |
+| `enforcement_mode` | `soft` \| `hard` | absent (`soft`) | With `workspace_hard_cap_enabled: true`, `hard` turns the plan's daily spend cap into a block: once the day's spend is over it, the proxy refuses every request with `429 OVERAGE_HARD_CAP_EXCEEDED` until midnight UTC. The control plane checks every five minutes. See [Plan daily cap](/guide/budgets#plan-daily-cap) |
+| `workspace_hard_cap_enabled` | boolean | absent (`false`) | The second half of the plan daily cap's block: it blocks only when this is `true` and `enforcement_mode` is `hard` |
 
 ### Identity and review
 

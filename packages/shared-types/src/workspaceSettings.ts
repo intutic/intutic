@@ -436,6 +436,18 @@ export interface WorkspaceSettings {
   mcpBudgets?: McpBudgetSettings
 
   /**
+   * The plan's daily spend cap (`workspaces.daily_spend_cap_usd`, set from the
+   * plan) as a hard block: with `enforcement_mode: 'hard'` AND
+   * `workspace_hard_cap_enabled: true`, the control plane checks the day's
+   * spend every five minutes and, once it is over the cap, the proxy refuses
+   * every request with `OVERAGE_HARD_CAP_EXCEEDED` until midnight UTC
+   * (`billingService.enforceOverageCap`). Either one absent or off: no block.
+   * Separate from the workspace budget caps (`PUT /api/v1/budget`).
+   */
+  enforcement_mode?: 'soft' | 'hard'
+  workspace_hard_cap_enabled?: boolean
+
+  /**
    * What happens when a server's tool set changes and the change scores high
    * risk (`mcpToolRisk.ts`). `notify` (the default, and what an absent value
    * means) records the change and sends `mcp.server.tool_change_risk`;

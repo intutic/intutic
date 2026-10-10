@@ -65,6 +65,7 @@ Every event carries a `sourceTable` naming its source:
 | `secret_rotations` | A signing secret replaced: `target` (`notification_rule`, `siem_destination` or `github_webhook`), `target_id` (the rule's or destination's id; `null` for the GitHub webhook, which a workspace has one of), `target_name` (the destination's name for a SIEM destination, `null` otherwise), and who replaced it. Never the secret |
 | `evidence_exports` | A compliance evidence download: `kind` (`soc2_archive`, `framework_report` or `human_oversight`), `format`, the framework, the evidence run, the period, whether it was signed, and who downloaded it |
 | `credential_changes` | A credential created, rotated, updated, revoked or deleted: `credential_type` (`api_key`, `gateway_token`, `scim_token` or `provider_credential`), `credential_id` (the key, gateway or token id, or the provider), `label`, `action`, and who made the change: a member, or with `actor_type` `system`, `system:offboarding` for keys revoked when a member is offboarded and `system:gateway-rotation` for a gateway token rotated on its schedule. Never the credential |
+| `budget_alerts` | A [budget alert](/guide/budgets#budget-alerts): a workspace cap, virtual key budget or member budget reaching its alert threshold or its limit, once per budget per day or month. `alert_type` (`THRESHOLD` or `EXCEEDED`), `scope` (`workspace`, `key` or `member`), `subject_id` (the key's or member's id) and `key_prefix` for a key, `enforcement` (`hard` or `soft`), `period` (`daily` or `monthly`), `spend_usd`, `limit_usd` and `pct_used` |
 | `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also `TAMPER`: a governance file (a gate, a hook registration, the policy snapshot or a VS Code hook setting) changed outside the sync daemon, which the daemon put back. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
 
 ### Who: the `actor` object {#the-actor}
@@ -129,6 +130,7 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 | `secret_rotations` | `SECRET_ROTATED` | 5 |
 | `evidence_exports` | `EVIDENCE_EXPORT` | 4 |
 | `credential_changes` | `CREDENTIAL_CHANGE` | 5 |
+| `budget_alerts` | `BUDGET_THRESHOLD` or `BUDGET_EXCEEDED` | 4; an exceeded budget 7 when it is hard, 5 when soft |
 
 Every class carries the member as `suid` (member id) and `suser` (email) when the event has an [actor](#the-actor).
 

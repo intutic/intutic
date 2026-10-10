@@ -126,9 +126,9 @@ program
     await runRollback(opts)
   })
 
-program
+const budgetCmd = program
   .command('budget')
-  .description('Check remaining daily/monthly budget and list active loops')
+  .description('Check remaining daily/monthly budget and list active loops; set workspace, key and member budgets')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .option('--watch', 'Continuously print machine-local and workspace spend, one line per tick')
   .option('--interval <seconds>', 'Tick interval in seconds for --watch', String(5))
@@ -140,6 +140,73 @@ program
     }
     const { runBudget } = await import('./commands/budget.js')
     await runBudget(opts)
+  })
+
+budgetCmd
+  .command('set')
+  .description("Set the workspace's daily and monthly caps, alert threshold and whether each cap refuses requests (OWNER, ADMIN)")
+  .option('--daily <usd>', 'Daily cap in USD (0: no daily cap; default: back to the $100 default)')
+  .option('--monthly <usd>', 'Monthly cap in USD (0: no monthly cap; default: back to the $500 default)')
+  .option('--threshold <pct>', 'Alert at this percentage of each cap')
+  .option('--daily-enforcement <mode>', 'hard (refuse what the day does not cover) or soft (alert only)')
+  .option('--monthly-enforcement <mode>', 'hard (refuse what the month does not cover) or soft (alert only)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (_opts, cmd: Command) => {
+    // optsWithGlobals: `budget` declares --dev too, and Commander gives a
+    // parent's option to the parent wherever it appears on the line.
+    const { runBudgetSet } = await import('./commands/budgetLimits.js')
+    await runBudgetSet(cmd.optsWithGlobals())
+  })
+
+budgetCmd
+  .command('keys')
+  .description("Every virtual key's spend budgets, rate limit and spend today and this month")
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (_opts, cmd: Command) => {
+    const { runBudgetKeys } = await import('./commands/budgetLimits.js')
+    await runBudgetKeys(cmd.optsWithGlobals())
+  })
+
+budgetCmd
+  .command('key <keyId>')
+  .description("Set a virtual key's spend budgets and rate limit (OWNER, ADMIN)")
+  .option('--daily <usd>', 'Day budget in USD, or none to remove it')
+  .option('--monthly <usd>', 'Month budget in USD, or none to remove it')
+  .option('--daily-enforcement <mode>', 'hard (refuse) or soft (alert only) for the day budget')
+  .option('--monthly-enforcement <mode>', 'hard (refuse) or soft (alert only) for the month budget')
+  .option('--rpm <n>', 'Requests per minute, or none to remove the limit')
+  .option('--tpm <n>', 'Tokens per minute, or none to remove the limit')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (keyId: string, _opts, cmd: Command) => {
+    const { runBudgetKey } = await import('./commands/budgetLimits.js')
+    await runBudgetKey(keyId, cmd.optsWithGlobals())
+  })
+
+budgetCmd
+  .command('members')
+  .description("The default member budget, and each member's budgets and spend (Biz Org+)")
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (_opts, cmd: Command) => {
+    const { runBudgetMembers } = await import('./commands/budgetLimits.js')
+    await runBudgetMembers(cmd.optsWithGlobals())
+  })
+
+budgetCmd
+  .command('member <memberId>')
+  .description("Set a member's spend budgets, or the default member budget with `default` (OWNER, ADMIN; Biz Org+)")
+  .option('--daily <usd>', 'Day budget in USD, or none to remove it')
+  .option('--monthly <usd>', 'Month budget in USD, or none to remove it')
+  .option('--daily-enforcement <mode>', 'hard (refuse) or soft (alert only) for the day budget')
+  .option('--monthly-enforcement <mode>', 'hard (refuse) or soft (alert only) for the month budget')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (memberId: string, _opts, cmd: Command) => {
+    const { runBudgetMember } = await import('./commands/budgetLimits.js')
+    await runBudgetMember(memberId, cmd.optsWithGlobals())
   })
 
 program

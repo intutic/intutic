@@ -144,12 +144,14 @@ export class ClawdeClient {
       let refusedBy: string | null
       let refusedRule: string | null
       let upstream: UpstreamCalls | undefined
+      let retryAfter: string | null
       try {
         const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal })
         status = response.status
         refusedBy = response.headers.get(REFUSAL_HEADER)
         refusedRule = response.headers.get(REFUSAL_RULE_HEADER)
         upstream = upstreamCalls(response.headers)
+        retryAfter = response.headers.get('retry-after')
         text = await response.text()
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
@@ -182,7 +184,7 @@ export class ClawdeClient {
       }
 
       const refusal = parseRefusal(status, text)
-      if (refusal) this.refuse(refusal, status)
+      if (refusal) this.refuse(refusal, status, retryAfter)
 
       lastError = `HTTP error ${status}: ${text}`
       // A 4xx that is not a refusal (bad key, malformed body) fails the same
@@ -250,8 +252,9 @@ export class ClawdeClient {
   }
 
   /** Fires the refusal's event, then throws it. */
-  private refuse(refusal: ProxyRefusal, status: number): never {
-    this.eventEmitter.emit(refusal.verdict, { ...refusal, status })
-    throw new ClawdeBlockedError(refusal.verdict, refusal.code, status, refusal.message, refusal.ruleId)
+  private refuse(refusal: ProxyRefusal, status: number, retryAfter: string | null = null): never {
+    const seconds = retryAfter !== null && /^\d+$/.test(retryAfter.trim()) ? Number(retryAfter.trim()) : undefined
+    this.eventEmitter.emit(refusal.verdict, { ...refusal, status, ...(seconds !== undefined ? { retryAfterSeconds: seconds } : {}) })
+    throw new ClawdeBlockedError(refusal.verdict, refusal.code, status, refusal.message, refusal.ruleId, seconds)
   }
 }

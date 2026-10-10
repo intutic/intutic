@@ -862,6 +862,21 @@ pub trait LocalStore: Send + Sync + 'static {
     /// measured against.
     async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64>;
 
+    /// Checks one request against a virtual key's per-minute limits and, when
+    /// it is within them, counts it — atomically, so replicas sharing this
+    /// store cannot both take a minute's last request. A request refused here
+    /// is not counted. See `crate::key_limits` for what RPM and TPM count.
+    async fn admit_rate(
+        &self,
+        key_id: &str,
+        limit: crate::key_limits::RateLimit,
+        minute: i64,
+    ) -> crate::key_limits::RateDecision;
+
+    /// Adds a completed call's tokens to its key's tokens-per-minute counter
+    /// for `minute`. Best effort: a failed write under-counts one call.
+    async fn add_rate_tokens(&self, key_id: &str, tokens: u64, minute: i64);
+
     /// Hold a loop run for human review, recording why.
     ///
     /// On `LocalStore` rather than `ControlPlaneCache` because the proxy is the
@@ -1029,6 +1044,19 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// requests that took the fallback. Returns `None` when unknown, which the
     /// caller must treat as "no pre-flight opinion", not "no limit".
     async fn daily_budget(&self, workspace_id: &str) -> Option<(f64, Option<f64>)>;
+
+    /// The current values of spend counters the control plane writes
+    /// (`crate::key_limits::spend_counter_key`), in order, in one round trip;
+    /// a counter not yet written reads 0.
+    ///
+    /// `None` when they could not be read, which the caller must treat as
+    /// unverifiable spend and refuse — they back hard budgets, a financial
+    /// control (see [`HardCapStatus`]). That is also the default, so an
+    /// implementation that never learned to read them fails closed rather than
+    /// waving every hard budget through.
+    async fn spend_counters(&self, _keys: &[String]) -> Option<Vec<f64>> {
+        None
+    }
 
     /// Status of a governed loop run, if the control plane is tracking it.
     async fn loop_status(&self, loop_run_id: &str) -> Option<String>;

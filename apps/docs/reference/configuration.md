@@ -244,7 +244,7 @@ Hierarchy: `OWNER` > `ADMIN` > `EM` > `DEVELOPER` > `VIEWER`
 
 ## Budget Tiers
 
-Each session carries a budget tier label: `JUNIOR` (the default), `SENIOR`, `STAFF` or `PRINCIPAL`. It is shown with the session and sets no spending limit; spend is capped per workspace (see [Budgets](/guide/budgets#per-workspace-budgets)).
+Each session carries a budget tier label: `JUNIOR` (the default), `SENIOR`, `STAFF` or `PRINCIPAL`. It is shown with the session and sets no spending limit; spend is limited by the workspace caps and by budgets on virtual keys and members (see [Budgets](/guide/budgets#setting-up-budget-limits)).
 
 ## Model Routing Tiers
 

@@ -326,7 +326,9 @@ Usage against your plan, invoices, and the spend caps that stop a runaway agent.
 - **Enterprise trial** — for an Owner on an eligible workspace, a banner offers **Start 14-day enterprise trial**; during a trial it shows the days remaining and **Talk to Sales**.
 - **Governed Request Usage** — Governed Requests this month against the requests your plan includes (for an organization's plan, counted across all its workspaces), any overage and its charge, the rate per 1,000 Governed Requests your workspace is billed at, and a daily trend.
 - **Billing History & Invoices** — invoices Stripe issued to this workspace, newest first.
-- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits** (Owners and Admins; other roles see the caps read-only); and **Budget alerts**, each with **Acknowledge** (Owners, Admins and EMs). A workspace that has not saved a daily cap shows the $100 default under the field, which the proxy enforces until you save your own. See [Budgets & FinOps](/guide/budgets).
+- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)**, **Over the daily cap** and **Over the monthly cap** (refuse requests, or alert only) and **Alert at (% of cap)** fields, saved with **Save limits**, which saves only the fields you changed, and **Use the $100.00 default daily cap** once a daily cap is saved (Owners and Admins; other roles see the caps read-only); **Block at the plan's daily cap**; and **Budget alerts**, each naming the workspace cap, key or member it is about, with **Acknowledge** (Owners, Admins and EMs). See [Budgets & FinOps](/guide/budgets). A workspace that has not saved a daily cap shows the $100 default under the field, which the proxy enforces until you save your own. See [Budgets & FinOps](/guide/budgets).
+- **Key budgets and rate limits** — every live virtual key with its owner, its spend today and this month against its own budgets, and its requests and tokens per minute; **Edit** sets them (Owners and Admins). EMs see every key, other roles their own. See [Key budgets](/guide/budgets#key-budgets).
+- **Member budgets** <Badge type="warning" text="Biz Org+" /> — the default member budget and each member's spend against the budgets that apply to them; **Edit default** and **Edit** set them (Owners and Admins). See [Member budgets](/guide/budgets#member-budgets).
 
 ### Changing plan {#changing-plan}
 
@@ -440,8 +442,8 @@ The **Event Type** list offers only the events the control plane sends:
 | `mcp.server.tool_toggled` | MCP Server Tool Switched On or Off: MEDIUM when a tool is switched off, INFO when on |
 | `mcp.budget.threshold` | MCP Call Budget Threshold Reached: once per budget per period |
 | `mcp.budget.exceeded` | MCP Call Budget Exceeded: once per budget per period, on the first refused call |
-| `finops.budget.threshold` | Budget Threshold Reached |
-| `finops.budget.exceeded` | Budget Exceeded |
+| `finops.budget.threshold` | Budget Threshold Reached: a workspace cap, key budget or member budget reached the alert threshold; once per budget per day or month. Carries `scope`, the key's or member's id and `enforcement` |
+| `finops.budget.exceeded` | Budget Exceeded: a workspace cap, key budget or member budget reached its limit; once per budget per day or month |
 | `plan.deviation.detected` | Plan Deviation Detected |
 | `trial.expired_downgraded` | Trial Expired |
 | `gateway.stale.detected` | Self-Hosted Gateway Unreachable |

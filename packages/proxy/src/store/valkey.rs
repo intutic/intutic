@@ -322,10 +322,36 @@ pub fn spawn_credential_key_announcer(conn: Arc<ConnectionManager>, key_ids: Vec
 pub struct ValkeyStore {
     conn: Arc<ConnectionManager>,
     update_script: redis::Script,
+    rate_script: redis::Script,
     /// Opens the encrypted values in `workspace:credentials:{ws}`; `None` when
     /// this proxy has no `ENCRYPTION_KEY`.
     credential_keys: Option<Arc<CredentialKeyring>>,
 }
+
+/// Checks a key's tokens-per-minute counter, then checks and counts its
+/// requests-per-minute counter, in one atomic step: replicas racing for a
+/// minute's last request cannot both get it, and a refused request is never
+/// counted.
+///
+/// KEYS: the RPM counter, the TPM counter (`key_limits::rate_counter_keys`).
+/// ARGV: RPM limit, TPM limit (0 = none), counter TTL in seconds.
+/// Returns `{1}` when admitted, `{0, kind, used}` when refused — kind 1 for
+/// requests, 2 for tokens.
+const RATE_ADMIT_SCRIPT: &str = r#"
+local tpm = tonumber(ARGV[2])
+if tpm > 0 then
+  local used = tonumber(redis.call('GET', KEYS[2]) or '0')
+  if used >= tpm then return {0, 2, used} end
+end
+local rpm = tonumber(ARGV[1])
+if rpm > 0 then
+  local n = tonumber(redis.call('GET', KEYS[1]) or '0')
+  if n >= rpm then return {0, 1, n} end
+  n = redis.call('INCR', KEYS[1])
+  if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
+end
+return {1}
+"#;
 
 /// The workspace's daily spend counter, as the **control plane** names it.
 ///
@@ -357,6 +383,7 @@ impl ValkeyStore {
         Self {
             conn,
             update_script: redis::Script::new(ARM_UPDATE_SCRIPT),
+            rate_script: redis::Script::new(RATE_ADMIT_SCRIPT),
             credential_keys: None,
         }
     }
@@ -1017,6 +1044,64 @@ impl LocalStore for ValkeyStore {
             .flatten()
     }
 
+    async fn admit_rate(
+        &self,
+        key_id: &str,
+        limit: crate::key_limits::RateLimit,
+        minute: i64,
+    ) -> crate::key_limits::RateDecision {
+        use crate::key_limits::{rate_counter_keys, RateDecision, RateLimitKind};
+        let (rpm_key, tpm_key) = rate_counter_keys(key_id, minute);
+        let mut conn = self.conn();
+        let mut invocation = self.rate_script.key(&rpm_key);
+        invocation
+            .key(&tpm_key)
+            .arg(limit.rpm.unwrap_or(0))
+            .arg(limit.tpm.unwrap_or(0))
+            .arg(crate::key_limits::RATE_COUNTER_TTL_SECS);
+        // Under the gate timeout: this sits on the request path, and a hung
+        // Valkey must not stall it. Fails open (see `RateDecision::Unavailable`).
+        let reply = tokio::time::timeout(
+            GATE_TIMEOUT,
+            invocation.invoke_async::<_, Vec<i64>>(&mut conn),
+        )
+        .await;
+        match reply {
+            Ok(Ok(v)) if v.first() == Some(&1) => RateDecision::Admitted,
+            Ok(Ok(v)) if v.len() == 3 => {
+                let (kind, limit) = if v[1] == 2 {
+                    (RateLimitKind::Tokens, limit.tpm.unwrap_or(0))
+                } else {
+                    (RateLimitKind::Requests, limit.rpm.unwrap_or(0))
+                };
+                RateDecision::Limited {
+                    kind,
+                    limit,
+                    used: v[2].max(0) as u64,
+                }
+            }
+            other => {
+                tracing::warn!(key_id, reply = ?other.map(|r| r.map(|_| ())), "Rate-limit check failed; admitting uncounted");
+                RateDecision::Unavailable
+            }
+        }
+    }
+
+    async fn add_rate_tokens(&self, key_id: &str, tokens: u64, minute: i64) {
+        let (_, tpm_key) = crate::key_limits::rate_counter_keys(key_id, minute);
+        let mut conn = self.conn();
+        let added: Result<i64, redis::RedisError> = conn.incr(&tpm_key, tokens).await;
+        match added {
+            Ok(n) if n == tokens as i64 => {
+                let _: Result<bool, redis::RedisError> = conn
+                    .expire(&tpm_key, crate::key_limits::RATE_COUNTER_TTL_SECS as i64)
+                    .await;
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(key_id, error = %e, "Tokens-per-minute counter not updated"),
+        }
+    }
+
     async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64> {
         let mut conn = self.conn();
         // No TTL: a loop run's lifetime is bounded by its own status, which is
@@ -1385,6 +1470,12 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
             byok_required: auth_json.get("byokRequired").and_then(|v| v.as_bool()),
+            key_id: auth_json
+                .get("keyId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            hard_budgets: crate::key_limits::parse_hard_budgets(auth_json.get("hardBudgets")),
+            rate_limit: crate::key_limits::parse_rate_limit(auth_json.get("rateLimit")),
         }))
     }
 
@@ -1402,6 +1493,30 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             spend_val.and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
             limit_val.and_then(|s| s.parse::<f64>().ok()),
         ))
+    }
+
+    async fn spend_counters(&self, keys: &[String]) -> Option<Vec<f64>> {
+        if keys.is_empty() {
+            return Some(Vec::new());
+        }
+        let mut conn = self.conn();
+        let mut cmd = redis::cmd("MGET");
+        for k in keys {
+            cmd.arg(k);
+        }
+        let fut = cmd.query_async::<_, Vec<Option<String>>>(&mut conn);
+        match tokio::time::timeout(GATE_TIMEOUT, fut).await {
+            Ok(Ok(values)) => Some(
+                values
+                    .into_iter()
+                    .map(|v| v.and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0))
+                    .collect(),
+            ),
+            other => {
+                tracing::warn!(reply = ?other.map(|r| r.map(|_| ())), "Spend counters could not be read");
+                None
+            }
+        }
     }
 
     async fn hard_block(&self, workspace_id: &str) -> HardCapStatus {

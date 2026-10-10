@@ -3,12 +3,12 @@
 page_title: "intutic_virtual_key Resource - intutic"
 subcategory: ""
 description: |-
-  A virtual API key (vk_…), created through POST /api/v1/keys for the member that owns the provider's own key. The key value is returned once, at creation, and stored in Terraform state as a sensitive value; protect the state accordingly. Keys cannot be edited, so any change replaces the key. Destroying the resource revokes it.
+  A virtual API key (vk_…), created through POST /api/v1/keys for the member that owns the provider's own key. The key value is returned once, at creation, and stored in Terraform state as a sensitive value; protect the state accordingly. The spend budgets and rate limits change in place (an OWNER or ADMIN may set them); any other change replaces the key. Destroying the resource revokes it.
 ---
 
 # intutic_virtual_key (Resource)
 
-A virtual API key (`vk_…`), created through `POST /api/v1/keys` for the member that owns the provider's own key. The key value is returned once, at creation, and stored in Terraform state as a sensitive value; protect the state accordingly. Keys cannot be edited, so any change replaces the key. Destroying the resource revokes it.
+A virtual API key (`vk_…`), created through `POST /api/v1/keys` for the member that owns the provider's own key. The key value is returned once, at creation, and stored in Terraform state as a sensitive value; protect the state accordingly. The spend budgets and rate limits change in place (an OWNER or ADMIN may set them); any other change replaces the key. Destroying the resource revokes it.
 
 ## Example Usage
 
@@ -18,6 +18,12 @@ resource "intutic_virtual_key" "ci" {
   allowed_models     = ["claude-haiku-4-5"]
   expires_in_days    = 90
   is_service_account = true
+
+  # Spend budgets and rate limits change in place; an OWNER or ADMIN sets them.
+  daily_budget_usd           = 25
+  monthly_budget_usd         = 400
+  monthly_budget_enforcement = "soft"
+  rate_limit_rpm             = 120
 }
 
 # The key is sensitive; hand it to the system that needs it, for example a
@@ -34,8 +40,14 @@ resource "intutic_virtual_key" "ci" {
 ### Optional
 
 - `allowed_models` (List of String) Models this key may call, intersected with the workspace's approved list (at most 64). Omit to inherit the workspace list.
+- `daily_budget_enforcement` (String) `hard` (the default): the proxy refuses a request the rest of the day budget does not cover, with `429 BUDGET_EXCEEDED`. `soft`: the budget only raises alerts.
+- `daily_budget_usd` (Number) Spend the key may run up per UTC day, in USD (above 0, at most 1,000,000). Omit for no day budget.
 - `expires_in_days` (Number) Days until the key expires (1–365). Omit for a key that does not expire.
 - `is_service_account` (Boolean) Marks an automation key (CI, scripts, a service): exempt from the SSO-recency window, still revoked when its member is deactivated. Defaults to false, as in the API.
+- `monthly_budget_enforcement` (String) `hard` (the default): the proxy refuses a request the rest of the month budget does not cover, with `429 BUDGET_EXCEEDED`. `soft`: the budget only raises alerts.
+- `monthly_budget_usd` (Number) Spend the key may run up per UTC month, in USD (above 0, at most 1,000,000). Omit for no month budget.
+- `rate_limit_rpm` (Number) Requests per minute this key may send (1–100,000), counted per UTC minute by every proxy sharing a Valkey; over it the proxy answers `429 RATE_LIMITED` with `Retry-After`. Omit for no limit.
+- `rate_limit_tpm` (Number) Tokens per minute (1–100,000,000), input plus output, counted as each call completes; once the minute's tokens reach it, the next request is refused. Omit for no limit.
 - `scopes` (List of String) Scopes recorded on the key; defaults to `["*"]`. Attenuated child keys can only narrow them.
 
 ### Read-Only

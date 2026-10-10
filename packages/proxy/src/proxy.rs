@@ -589,8 +589,9 @@ async fn parse_key_context(
     };
 
     // Spend is left at zero: this path establishes identity, and the caller
-    // reads spend and the cap from the cache. The cap the route states is kept
-    // for when the cache has none.
+    // reads spend from the cache. `hardBudgets` carries every hard cap; for a
+    // control plane older than that field, the daily cap the route states is
+    // kept for when the cache has none.
     Ok(Some(VirtualKeyRecord {
         token: token.to_string(),
         key_name: None,
@@ -613,6 +614,14 @@ async fn parse_key_context(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         byok_required: body.get("byokRequired").and_then(|v| v.as_bool()),
+        // The same budget and limit fields as the cached entry, so a request
+        // that took this fallback is held to the same budgets and limits.
+        key_id: body
+            .get("keyId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        hard_budgets: crate::key_limits::parse_hard_budgets(body.get("hardBudgets")),
+        rate_limit: crate::key_limits::parse_rate_limit(body.get("rateLimit")),
     }))
 }
 
@@ -824,26 +833,123 @@ fn estimated_request_cost(model: &str, prompt_chars: usize, body_json: &serde_js
     pricing::estimate_cost(model, prompt_tokens, max_tokens)
 }
 
-/// The pre-request spend check against the key's and workspace's budgets:
-/// the refusal to send when they do not cover `estimated_cost`, else `None`.
+/// The pre-request spend check against every budget covering the key: the
+/// refusal to send when they do not cover `estimated_cost` or their spend
+/// cannot be read, else `None`.
 ///
 /// The one entry point for that check. It decides the request as the caller
 /// wrote it, and decides again, priced for the target's model, before each
 /// upstream fallback is tried (`try_fallbacks`) — so a fallback can never
 /// spend past a budget the request itself was held to, and a budget added
-/// here applies to both.
-fn key_budget_refusal(
+/// here (per key, per member) applies to both.
+async fn key_budget_refusal(
+    control_plane: &dyn crate::store::ControlPlaneCache,
     key: &VirtualKeyRecord,
     workspace_id: &str,
     estimated_cost: f64,
 ) -> Option<Response> {
-    let e = check_budget(key, estimated_cost).err()?;
-    tracing::warn!(workspace_id = %workspace_id, "Budget check failed: {}", e);
-    Some(json_error(
-        StatusCode::TOO_MANY_REQUESTS,
-        "BUDGET_EXCEEDED",
-        "Remaining budget is insufficient for this request's safety margin.",
-    ))
+    match key.hard_budgets.as_deref() {
+        // Every hard budget covering this key: the workspace's caps, the
+        // key's own and its member's. See `crate::key_limits`.
+        Some(budgets) => {
+            check_hard_budgets(
+                control_plane,
+                budgets,
+                workspace_id,
+                key,
+                estimated_cost,
+                chrono::Utc::now(),
+            )
+            .await
+        }
+        // An entry from a control plane that predates `hardBudgets`: the
+        // workspace daily cap, as before.
+        None => {
+            let e = check_budget(key, estimated_cost).err()?;
+            tracing::warn!(workspace_id = %workspace_id, "Budget check failed: {}", e);
+            Some(json_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "BUDGET_EXCEEDED",
+                "Remaining budget is insufficient for this request's safety margin.",
+            ))
+        }
+    }
+}
+
+/// The hard spend budgets gate: refuses with 429 `BUDGET_EXCEEDED` when one of
+/// `budgets` does not cover the request's estimate, and with 503
+/// `BUDGET_UNVERIFIABLE` when their spend cannot be read — a hard budget is a
+/// financial control, so unverifiable spend is not admitted (the same posture
+/// as `HardCapStatus::Unverifiable`).
+async fn check_hard_budgets(
+    control_plane: &dyn crate::store::ControlPlaneCache,
+    budgets: &[crate::key_limits::HardBudget],
+    workspace_id: &str,
+    key: &VirtualKeyRecord,
+    estimated_cost: f64,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<Response> {
+    use crate::key_limits::{first_uncovered, spend_counter_key, BudgetScope};
+    if budgets.is_empty() {
+        return None;
+    }
+    // A key or member budget needs the id that names its counter; an entry
+    // carrying budgets always carries both, so a missing one is a malformed
+    // entry and the budget cannot be checked.
+    let key_id = key.key_id.as_deref().unwrap_or("");
+    let member_id = key.user_id.as_deref().unwrap_or("");
+    let unnamed = budgets.iter().any(|b| {
+        (b.scope == BudgetScope::Key && key_id.is_empty())
+            || (b.scope == BudgetScope::Member && member_id.is_empty())
+    });
+    let counters: Vec<String> = budgets
+        .iter()
+        .map(|b| spend_counter_key(b, workspace_id, key_id, member_id, now))
+        .collect();
+    let spent = if unnamed {
+        None
+    } else {
+        control_plane.spend_counters(&counters).await
+    };
+    let Some(spent) = spent.filter(|v| v.len() == budgets.len()) else {
+        tracing::error!(workspace_id = %workspace_id, "Spend budgets could not be checked — rejecting request");
+        return Some(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "BUDGET_UNVERIFIABLE",
+            "Spend could not be verified against this key's budgets, so this request was not admitted. Retry shortly.",
+        ));
+    };
+    let refusal = first_uncovered(budgets, &spent, estimated_cost, now)?;
+    tracing::warn!(
+        workspace_id = %workspace_id,
+        scope = ?refusal.budget.scope,
+        period = ?refusal.budget.period,
+        limit_usd = refusal.budget.limit_usd,
+        spent_usd = refusal.spent_usd,
+        "Spend budget does not cover the request — rejecting"
+    );
+    crate::metrics::record_policy_refusal("spend_budget", "kill");
+    let body = serde_json::json!({
+        "error": {
+            "type": "BUDGET_EXCEEDED",
+            "message": refusal.message(),
+            "budget": refusal.detail(),
+        }
+    });
+    let mut response = (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response();
+    if let Ok(v) = axum::http::HeaderValue::from_str(&refusal.retry_after_secs(now).to_string()) {
+        response.headers_mut().insert("retry-after", v);
+    }
+    Some(response)
+}
+
+/// 429 `RATE_LIMITED`, with `Retry-After` at the start of the next minute.
+fn rate_limited_response(message: &str, retry_after_secs: u64) -> Response {
+    let mut response = json_error(StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED", message);
+    if let Ok(v) = axum::http::HeaderValue::from_str(&retry_after_secs.to_string()) {
+        response.headers_mut().insert("retry-after", v);
+    }
+    response
 }
 
 /// The cost-prediction gate's answer to a non-streaming request: the reason as
@@ -1795,10 +1901,18 @@ struct FallbackRequest<'a> {
 impl FallbackRequest<'_> {
     /// Whether the spend budgets the request passed would also admit it on
     /// `model` — the same checks, priced for the target.
-    fn budget_admits(&self, model: &str) -> bool {
+    async fn budget_admits(&self, model: &str) -> bool {
         if let Some(key) = self.key_record {
             let cost = estimated_request_cost(model, self.prompt_chars, self.body_json);
-            if key_budget_refusal(key, self.workspace_id, cost).is_some() {
+            if key_budget_refusal(
+                self.state.control_plane.as_ref(),
+                key,
+                self.workspace_id,
+                cost,
+            )
+            .await
+            .is_some()
+            {
                 return false;
             }
         }
@@ -1957,7 +2071,7 @@ async fn try_fallbacks(
             .is_err()
         {
             Some("model_not_allowed")
-        } else if !req.budget_admits(&model) {
+        } else if !req.budget_admits(&model).await {
             Some("budget")
         } else if Instant::now() >= req.deadline {
             Some("time_budget")
@@ -2326,13 +2440,28 @@ fn machine_budget_applies_with(control_plane_url: Option<&str>) -> bool {
 async fn accrue_spend(
     store: &Arc<dyn LocalStore>,
     actual_cost_usd: f64,
-    workspace_id: &str,
     graph_id: &str,
     has_graph: bool,
     workflow_run_id: Option<&str>,
+    tpm_key_id: Option<&str>,
     trace: &crate::telemetry::ExecutionTrace,
 ) {
     crate::local_spend::add_local_spend(actual_cost_usd);
+
+    // The tokens this call used, against its key's tokens-per-minute limit —
+    // counted when the call completes, because that is when they are known.
+    if let Some(key_id) = tpm_key_id {
+        let tokens = u64::from(trace.raw_input_tokens) + u64::from(trace.output_tokens);
+        if tokens > 0 {
+            store
+                .add_rate_tokens(
+                    key_id,
+                    tokens,
+                    crate::key_limits::minute_of(chrono::Utc::now()),
+                )
+                .await;
+        }
+    }
 
     // Accumulate against the graph as well as the machine, so fan-out is
     // visible: eight workers each inside their own budget can still put the
@@ -2344,7 +2473,7 @@ async fn accrue_spend(
     if has_graph && actual_cost_usd > 0.0 {
         store
             .add_graph_spend(
-                workspace_id,
+                &trace.workspace_id,
                 graph_id,
                 actual_cost_usd,
                 crate::plugins::anomaly::broadcast::NODE_TTL_SECS,
@@ -3145,18 +3274,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     match validate_key_via_control_plane(&state.http_client, url, virtual_key).await
                     {
                         Ok(Some(mut record)) => {
-                            // Identity came from the control plane; budgets still
-                            // come from the cache, so this path enforces the same
+                            // A control plane that predates `hardBudgets` sent
+                            // identity only: fill the legacy workspace-cap pair
+                            // from the cache, so this path enforces the same
                             // pre-flight check as the cached one. Without it
                             // `max_budget` stays None and `check_budget` is a no-op
                             // — silently exempting exactly the requests that took
                             // the fallback.
-                            if let Some(ws) = record.team_id.as_deref() {
-                                if let Some((spend, limit)) =
-                                    state.control_plane.daily_budget(ws).await
-                                {
-                                    record.spend = spend;
-                                    record.max_budget = limit.or(record.max_budget);
+                            if record.hard_budgets.is_none() {
+                                if let Some(ws) = record.team_id.as_deref() {
+                                    if let Some((spend, limit)) =
+                                        state.control_plane.daily_budget(ws).await
+                                    {
+                                        record.spend = spend;
+                                        record.max_budget = limit.or(record.max_budget);
+                                    }
                                 }
                             }
                             tracing::debug!(
@@ -3372,13 +3504,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-    // A managed key's daily cap comes from the cache the control plane writes.
+    // A key record without `hardBudgets` (cached by a control plane older than
+    // that field) takes its daily cap from the cache the control plane writes.
     // When that copy is missing (a Valkey flush, or a workspace whose caps were
     // never published), it is read from `/auth/key-context`; a cap that cannot
     // be read is not invented, so the request is refused as unverifiable, as
-    // the hard-cap gate refuses it.
+    // the hard-cap gate refuses it. A record with `hardBudgets` carries the
+    // cap itself.
     let mut key_record = key_record;
-    if let Some(key) = key_record.as_mut().filter(|k| k.max_budget.is_none()) {
+    if let Some(key) = key_record
+        .as_mut()
+        .filter(|k| k.hard_budgets.is_none() && k.max_budget.is_none())
+    {
         match daily_cap(&state, credential.virtual_key(), &workspace_id).await {
             Some(cap) => key.max_budget = Some(cap),
             None => {
@@ -3397,10 +3534,49 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let budget_prompt_chars = body_str.len();
     if let Some(ref key) = key_record {
         let estimated_cost = estimated_request_cost(&model, budget_prompt_chars, &body_json);
-        if let Some(refused) = key_budget_refusal(key, &workspace_id, estimated_cost) {
+        if let Some(refused) = key_budget_refusal(
+            state.control_plane.as_ref(),
+            key,
+            &workspace_id,
+            estimated_cost,
+        )
+        .await
+        {
             return refused;
         }
+
+        // ── Step 2.5b: the key's per-minute limits (Valkey, shared by replicas) ──
+        if let (Some(limit), Some(key_id)) = (key.rate_limit, key.key_id.as_deref()) {
+            let now = chrono::Utc::now();
+            match state
+                .store
+                .admit_rate(key_id, limit, crate::key_limits::minute_of(now))
+                .await
+            {
+                crate::key_limits::RateDecision::Admitted => {}
+                crate::key_limits::RateDecision::Unavailable => {
+                    crate::metrics::record_policy_refusal("key_rate_limit_unchecked", "allow");
+                }
+                crate::key_limits::RateDecision::Limited { kind, limit, used } => {
+                    let retry_after = crate::key_limits::secs_to_next_minute(now);
+                    tracing::warn!(workspace_id = %workspace_id, key_id, ?kind, limit, used, "Key rate limit reached");
+                    crate::metrics::record_policy_refusal("key_rate_limit", "kill");
+                    return rate_limited_response(
+                        &crate::key_limits::rate_limited_message(kind, limit, used, retry_after),
+                        retry_after,
+                    );
+                }
+            }
+        }
     }
+
+    // The key whose tokens-per-minute counter this call's tokens go to when
+    // it completes; `None` unless the key has a TPM limit, so a key without
+    // one costs no write.
+    let tpm_key_id: Option<String> = key_record
+        .as_ref()
+        .filter(|k| k.rate_limit.is_some_and(|r| r.tpm.is_some()))
+        .and_then(|k| k.key_id.clone());
 
     // ── Step 2b: Approved-models allowlist (Valkey, workspace ∩ key) ────
     //
@@ -6391,6 +6567,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // Per-node graph queue key. Composed here, where identity is in
         // scope, because the streaming closures below only receive clones.
         let graph_key_clone = graph_key.clone();
+        let tpm_key_id_clone = tpm_key_id.clone();
         let requested_model_clone = model.clone();
         let actual_model_clone = actual_model.clone();
         // The counterfactual the shadow mode exists to record. `shadow_selection`
@@ -7883,10 +8060,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             accrue_spend(
                 &cache_store_clone,
                 actual_cost_usd,
-                &trace.workspace_id,
                 &node_for_trace.graph_id,
                 graph_key_clone.is_some(),
                 trace.loop_run_id.as_deref(),
+                tpm_key_id_clone.as_deref(),
                 &trace,
             )
             .await;
@@ -8860,10 +9037,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     accrue_spend(
         &state.store,
         actual_cost_usd,
-        &trace.workspace_id,
         &wasm_ctx.node.graph_id,
         graph_key.is_some(),
         trace.loop_run_id.as_deref(),
+        tpm_key_id.as_deref(),
         &trace,
     )
     .await;
@@ -12472,6 +12649,8 @@ mod tests {
     /// priced for its own model, through the same entry point.
     mod fallback_budget {
         use super::super::*;
+        use crate::key_limits::{BudgetPeriod, BudgetScope, HardBudget};
+        use crate::store::memory::NullControlPlaneCache;
 
         fn key(max_budget: f64, spend: f64) -> VirtualKeyRecord {
             serde_json::from_value(serde_json::json!({
@@ -12483,6 +12662,102 @@ mod tests {
             .expect("a key record")
         }
 
+        /// A key carrying its own hard daily budget, as a control plane that
+        /// sends `hardBudgets` writes it.
+        fn key_with_budget(limit_usd: f64) -> VirtualKeyRecord {
+            let mut k = key(0.0, 0.0);
+            k.max_budget = None;
+            k.key_id = Some("key_1".into());
+            k.user_id = Some("mem_1".into());
+            k.hard_budgets = Some(vec![HardBudget {
+                scope: BudgetScope::Key,
+                period: BudgetPeriod::Day,
+                limit_usd,
+            }]);
+            k
+        }
+
+        /// Spend counters that read `0` for every budget; everything else
+        /// as `NullControlPlaneCache` answers it.
+        struct NothingSpent;
+
+        #[async_trait::async_trait]
+        impl crate::store::ControlPlaneCache for NothingSpent {
+            async fn spend_counters(&self, keys: &[String]) -> Option<Vec<f64>> {
+                Some(vec![0.0; keys.len()])
+            }
+            async fn wasm_plugins(&self, _w: &str) -> anyhow::Result<Option<String>> {
+                Ok(None)
+            }
+            async fn wasm_binary(&self, _sha: &str) -> anyhow::Result<Option<Vec<u8>>> {
+                Ok(None)
+            }
+            async fn policy_version(&self, _w: &str) -> Option<u64> {
+                None
+            }
+            async fn predict_gate_threshold(&self, _w: &str) -> Option<f64> {
+                None
+            }
+            async fn token_baseline(
+                &self,
+                _w: &str,
+                _m: &str,
+                _b: &str,
+            ) -> Option<crate::store::TokenBaseline> {
+                None
+            }
+            async fn bandit_keywords(&self, _w: &str) -> Option<serde_json::Value> {
+                None
+            }
+            async fn active_sop_tier(&self, _w: &str) -> Option<String> {
+                None
+            }
+            async fn allowed_models(&self, _w: &str) -> Option<Vec<String>> {
+                None
+            }
+            async fn feature_flags(&self, _w: &str) -> Option<crate::store::FeatureFlags> {
+                None
+            }
+            async fn auth_context(&self, _t: &str) -> crate::store::ControlPlaneAuth {
+                crate::store::ControlPlaneAuth::Unmanaged
+            }
+            async fn daily_budget(&self, _w: &str) -> Option<(f64, Option<f64>)> {
+                None
+            }
+            async fn hard_block(&self, _w: &str) -> crate::store::HardCapStatus {
+                crate::store::HardCapStatus::Clear
+            }
+            async fn loop_status(&self, _l: &str) -> Option<String> {
+                None
+            }
+            async fn active_loop_run(&self, _w: &str, _m: Option<&str>) -> Option<String> {
+                None
+            }
+            async fn auto_judge_active(&self, _s: crate::store::JudgeScope, _id: &str) -> bool {
+                false
+            }
+            async fn break_glass_grant(
+                &self,
+                _t: &str,
+                _w: &str,
+            ) -> Option<crate::store::BreakGlassGrant> {
+                None
+            }
+            async fn transition_baseline(&self, _w: &str) -> Option<String> {
+                None
+            }
+            async fn drain_notifications(
+                &self,
+                _s: crate::store::NotifyScope,
+                _id: &str,
+            ) -> Vec<String> {
+                Vec::new()
+            }
+            async fn is_sandbox_attested(&self, _sid: &str) -> bool {
+                false
+            }
+        }
+
         #[test]
         fn the_estimate_is_priced_for_the_model_it_names() {
             let body = serde_json::json!({"max_tokens": 1000});
@@ -12491,15 +12766,47 @@ mod tests {
             assert!(dear > cheap * 100.0, "cheap={cheap} dear={dear}");
         }
 
-        #[test]
-        fn a_budget_that_covers_the_model_admits_and_a_dearer_model_is_refused() {
+        #[tokio::test]
+        async fn a_budget_that_covers_the_model_admits_and_a_dearer_model_is_refused() {
             let body = serde_json::json!({"max_tokens": 1000});
             let k = key(0.10, 0.0);
+            let cp = NullControlPlaneCache;
             let cheap = estimated_request_cost("gpt-4.1-nano", 40_000, &body);
             let dear = estimated_request_cost("gpt-4", 40_000, &body);
-            assert!(key_budget_refusal(&k, "ws", cheap).is_none());
-            let refused = key_budget_refusal(&k, "ws", dear).expect("over budget");
+            assert!(key_budget_refusal(&cp, &k, "ws", cheap).await.is_none());
+            let refused = key_budget_refusal(&cp, &k, "ws", dear)
+                .await
+                .expect("over budget");
             assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+
+        /// A key's own budget binds a fallback as it binds the request: the
+        /// target is priced for its model against the same counters.
+        #[tokio::test]
+        async fn a_key_budget_admits_a_cheap_target_and_refuses_a_dear_one() {
+            let body = serde_json::json!({"max_tokens": 1000});
+            let k = key_with_budget(0.10);
+            let cheap = estimated_request_cost("gpt-4.1-nano", 40_000, &body);
+            let dear = estimated_request_cost("gpt-4", 40_000, &body);
+            assert!(key_budget_refusal(&NothingSpent, &k, "ws", cheap)
+                .await
+                .is_none());
+            let refused = key_budget_refusal(&NothingSpent, &k, "ws", dear)
+                .await
+                .expect("over the key's budget");
+            assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+
+        /// Spend that cannot be read admits no target, as it admits no request.
+        #[tokio::test]
+        async fn a_key_budget_whose_spend_cannot_be_read_refuses() {
+            let body = serde_json::json!({"max_tokens": 1000});
+            let k = key_with_budget(100.0);
+            let cheap = estimated_request_cost("gpt-4.1-nano", 40_000, &body);
+            let refused = key_budget_refusal(&NullControlPlaneCache, &k, "ws", cheap)
+                .await
+                .expect("unverifiable");
+            assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
         }
 
         /// The request's own check and the fallback's go through one function,
@@ -12507,10 +12814,16 @@ mod tests {
         #[test]
         fn the_request_and_every_fallback_use_one_budget_check() {
             let src = include_str!("proxy.rs");
-            let calls = src
-                .matches(&["key_budget_refusal", "(key,"].concat())
-                .count();
-            assert_eq!(calls, 2, "the request's check and the fallback's");
+            let src = src
+                .split(&["#[cfg(test)]", "\nmod tests"].concat())
+                .next()
+                .unwrap();
+            let calls = src.matches(&["key_budget_refusal", "("].concat()).count();
+            assert_eq!(
+                calls, 3,
+                "its definition, the request's check and the fallback's"
+            );
+            assert!(src.contains(&["budget_admits", "(&model).await"].concat()));
             assert!(
                 src.contains(&["BudgetGatePlugin::verdict", "(model, tokens, remaining)"].concat())
             );

@@ -46,12 +46,19 @@ export class ClawdeBlockedError extends ClawdeVerdictError {
   public readonly code: string
   public readonly status: number
   public readonly ruleId: string | undefined
+  /**
+   * Seconds until the refusal stops applying, from the proxy's `Retry-After`:
+   * set on `RATE_LIMITED` (the next minute) and `BUDGET_EXCEEDED` (the
+   * budget's reset). Undefined for a refusal that retrying will not change.
+   */
+  public readonly retryAfterSeconds: number | undefined
 
-  constructor(verdict: RefusalVerdict, code: string, status: number, message: string, ruleId?: string) {
+  constructor(verdict: RefusalVerdict, code: string, status: number, message: string, ruleId?: string, retryAfterSeconds?: number) {
     super(verdict, message)
     this.name = 'ClawdeBlockedError'
     this.code = code
     this.status = status
     this.ruleId = ruleId
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }

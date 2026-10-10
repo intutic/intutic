@@ -13,7 +13,9 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | [`intutic_policy`](/reference/terraform/resources/policy) | Enforcement policies: what the proxy does when an agent calls a matching tool | `/api/v1/policies` |
 | [`intutic_guardrail`](/reference/terraform/resources/guardrail) | Policy guardrails you author: a rule in the Guardrail IR, held to the same checks as one extracted from a policy document | `/api/v1/policy-guardrails/guardrails` |
 | [`intutic_workspace_settings`](/reference/terraform/resources/workspace_settings) | Workspace settings, only the keys you set | `/api/v1/workspace/settings` |
-| [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`) | `/api/v1/keys` |
+| [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`), with their spend budgets and rate limits | `/api/v1/keys` |
+| [`intutic_workspace_budget`](/reference/terraform/resources/workspace_budget) | The workspace's daily and monthly spend caps, and whether each refuses requests | `/api/v1/budget` |
+| [`intutic_member_budget`](/reference/terraform/resources/member_budget) | A member's spend budgets, or the default member budget (Biz Org and above) | `/api/v1/budget/members` |
 | [`intutic_gateway`](/reference/terraform/resources/gateway) | Self-hosted gateway registrations and their live config | `/api/v1/gateways` |
 | [`intutic_notification_rule`](/reference/terraform/resources/notification_rule) | Slack, email, webhook and PagerDuty notification rules | `/api/v1/notifications/rules` |
 | [`intutic_mcp_server_decision`](/reference/terraform/resources/mcp_server_decision) | Approve or block an MCP server, and switch its tools off | `/api/v1/mcp/servers` |
@@ -184,5 +186,5 @@ The API cannot change an uploaded rule's bytes, so a rebuilt file replaces the r
 - `intutic_guardrail` manages guardrails you author. A guardrail extracted from a policy document cannot be managed or imported: it changes when its document does, and you move it through the [guardrail review](/guide/policy-guardrails).
 - Approving a guardrail for shadow and promoting it are review decisions, not Terraform actions.
 - Org-wide SOPs, members and roles, SSO and SCIM are managed in the dashboard.
-- Spend caps are not managed by the provider. A workspace that has not saved a daily cap is held to $100 a day; set caps on Settings › Billing › Budget Limits or with `PUT /api/v1/budget` (see [Budgets](/guide/budgets#per-workspace-budgets)).
+- Spend caps are not managed by the provider. A workspace that has not saved a daily cap is held to $100 a day; set caps on Settings › Billing › Budget Limits or with `PUT /api/v1/budget` (see [Budgets](/guide/budgets#workspace-caps)).
 - A virtual key belongs to the member whose key runs Terraform, and Terraform sees only that member's keys.

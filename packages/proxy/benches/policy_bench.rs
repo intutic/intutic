@@ -141,6 +141,9 @@ fn make_virtual_key(budget_remaining: f64) -> VirtualKeyRecord {
         expires: None,
         org_id: None,
         byok_required: None,
+        key_id: None,
+        hard_budgets: None,
+        rate_limit: None,
     }
 }
 

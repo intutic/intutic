@@ -21,8 +21,9 @@ import (
 	"github.com/intutic/terraform-provider-intutic/internal/client"
 )
 
-// Virtual-key routes: routes/keys.ts, validated by CreateApiKeyInputSchema.
-// There is no update route, so every input replaces the key.
+// Virtual-key routes: routes/keys.ts, validated by CreateApiKeyInputSchema
+// and UpdateApiKeyInputSchema. The key's spend budgets and rate limit change
+// in place through PATCH /api/v1/keys/:id; every other input replaces the key.
 
 type virtualKeyResource struct{ client *client.Client }
 
@@ -37,6 +38,18 @@ type virtualKeyModel struct {
 	KeyPrefix        types.String `tfsdk:"key_prefix"`
 	ExpiresAt        types.String `tfsdk:"expires_at"`
 	CreatedAt        types.String `tfsdk:"created_at"`
+	// The key's spend budgets and rate limit (PATCH /api/v1/keys/:id).
+	DailyBudgetUsd           types.Float64 `tfsdk:"daily_budget_usd"`
+	DailyBudgetEnforcement   types.String  `tfsdk:"daily_budget_enforcement"`
+	MonthlyBudgetUsd         types.Float64 `tfsdk:"monthly_budget_usd"`
+	MonthlyBudgetEnforcement types.String  `tfsdk:"monthly_budget_enforcement"`
+	RateLimitRpm             types.Int64   `tfsdk:"rate_limit_rpm"`
+	RateLimitTpm             types.Int64   `tfsdk:"rate_limit_tpm"`
+}
+
+type keyRateLimit struct {
+	Rpm *int64 `json:"rpm"`
+	Tpm *int64 `json:"tpm"`
 }
 
 type apiKey struct {
@@ -50,6 +63,8 @@ type apiKey struct {
 	RevokedAt        *string  `json:"revokedAt"`
 	CreatedAt        string   `json:"createdAt"`
 	IsServiceAccount *bool    `json:"isServiceAccount"`
+	Budgets          []spendBudget `json:"budgets"`
+	RateLimit        keyRateLimit  `json:"rateLimit"`
 }
 
 func newVirtualKeyResource() resource.Resource { return &virtualKeyResource{} }
@@ -66,8 +81,8 @@ func (r *virtualKeyResource) Schema(_ context.Context, _ resource.SchemaRequest,
 	resp.Schema = schema.Schema{
 		Description: "A virtual API key (`vk_…`), created through `POST /api/v1/keys` for the member that owns the " +
 			"provider's own key. The key value is returned once, at creation, and stored in Terraform state as a " +
-			"sensitive value; protect the state accordingly. Keys cannot be edited, so any change replaces the key. " +
-			"Destroying the resource revokes it.",
+			"sensitive value; protect the state accordingly. The spend budgets and rate limits change in place " +
+			"(an OWNER or ADMIN may set them); any other change replaces the key. Destroying the resource revokes it.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -137,8 +152,47 @@ func (r *virtualKeyResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Computed:      true,
 				PlanModifiers: keep,
 			},
+			"rate_limit_rpm": schema.Int64Attribute{
+				Optional: true,
+				Description: "Requests per minute this key may send (1–100,000), counted per UTC minute by every proxy " +
+					"sharing a Valkey; over it the proxy answers `429 RATE_LIMITED` with `Retry-After`. Omit for no limit.",
+				Validators: []validator.Int64{int64validator.Between(1, 100_000)},
+			},
+			"rate_limit_tpm": schema.Int64Attribute{
+				Optional: true,
+				Description: "Tokens per minute (1–100,000,000), input plus output, counted as each call completes; " +
+					"once the minute's tokens reach it, the next request is refused. Omit for no limit.",
+				Validators: []validator.Int64{int64validator.Between(1, 100_000_000)},
+			},
 		},
 	}
+	for name, attr := range budgetAttributes("the key") {
+		resp.Schema.Attributes[name] = attr
+	}
+}
+
+// limits is the PATCH body that sets the key's budgets and rate limit to what
+// the model says: budgets replace the key's whole, a null limit removes it.
+func (m *virtualKeyModel) limits() map[string]any {
+	limit := func(v types.Int64) any {
+		if v.IsNull() || v.IsUnknown() {
+			return nil
+		}
+		return v.ValueInt64()
+	}
+	return map[string]any{
+		"budgets": budgetFields{m.DailyBudgetUsd, m.DailyBudgetEnforcement, m.MonthlyBudgetUsd, m.MonthlyBudgetEnforcement}.budgets(),
+		"rateLimit": map[string]any{
+			"rpm": limit(m.RateLimitRpm),
+			"tpm": limit(m.RateLimitTpm),
+		},
+	}
+}
+
+// hasLimits reports whether the model sets any budget or rate limit, so a key
+// without them is created with one call, by any member, as before.
+func (m *virtualKeyModel) hasLimits() bool {
+	return !m.DailyBudgetUsd.IsNull() || !m.MonthlyBudgetUsd.IsNull() || !m.RateLimitRpm.IsNull() || !m.RateLimitTpm.IsNull()
 }
 
 func (r *virtualKeyResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -170,6 +224,20 @@ func (r *virtualKeyResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 	plan.Key = types.StringValue(out.Key)
+	if plan.hasLimits() {
+		// A key is created without limits and limited afterwards: only an
+		// OWNER or ADMIN may set them (routes/keys.ts).
+		var limited apiKey
+		if err := r.client.Patch(ctx, "/api/v1/keys/"+esc(out.KeyID), plan.limits(), &limited); err != nil {
+			// The key exists; record it so the next apply retries the limits
+			// rather than creating a second key.
+			out.applyTo(&plan)
+			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+			resp.Diagnostics.AddError("Setting the virtual key's budgets or rate limit failed", err.Error())
+			return
+		}
+		out.Budgets, out.RateLimit = limited.Budgets, limited.RateLimit
+	}
 	out.applyTo(&plan)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -185,6 +253,18 @@ func (k *apiKey) applyTo(m *virtualKeyModel) {
 	if k.IsServiceAccount != nil {
 		m.IsServiceAccount = types.BoolValue(*k.IsServiceAccount)
 	}
+	f := fieldsFrom(k.Budgets)
+	m.DailyBudgetUsd, m.DailyBudgetEnforcement = f.DailyUsd, f.DailyEnforcement
+	m.MonthlyBudgetUsd, m.MonthlyBudgetEnforcement = f.MonthlyUsd, f.MonthlyEnforcement
+	m.RateLimitRpm = int64OrNull(k.RateLimit.Rpm)
+	m.RateLimitTpm = int64OrNull(k.RateLimit.Tpm)
+}
+
+func int64OrNull(v *int64) types.Int64 {
+	if v == nil {
+		return types.Int64Null()
+	}
+	return types.Int64Value(*v)
 }
 
 func (r *virtualKeyResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -222,9 +302,23 @@ func (r *virtualKeyResource) Read(ctx context.Context, req resource.ReadRequest,
 	resp.State.RemoveResource(ctx)
 }
 
-func (r *virtualKeyResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	resp.Diagnostics.AddError("Virtual keys cannot be updated",
-		"Every attribute of intutic_virtual_key forces replacement; this is a provider bug.")
+// Update changes the budgets and rate limit, the only attributes that do not
+// force replacement.
+func (r *virtualKeyResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan virtualKeyModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var out apiKey
+	if err := r.client.Patch(ctx, "/api/v1/keys/"+esc(plan.ID.ValueString()), plan.limits(), &out); err != nil {
+		resp.Diagnostics.AddError("Updating the virtual key's budgets or rate limit failed", err.Error())
+		return
+	}
+	key := plan.Key
+	out.applyTo(&plan)
+	plan.Key = key
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *virtualKeyResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

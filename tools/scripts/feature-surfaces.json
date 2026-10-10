@@ -1057,6 +1057,87 @@
           { "file": "packages/proxy/tests/cloud_providers_test.rs" }
         ]
       }
+    },
+    {
+      "id": "spend-budgets",
+      "title": "Spend budgets per workspace and virtual key, hard or soft, and key rate limits",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "GET /api/v1/budget", "badge": false },
+          { "ref": "PUT /api/v1/budget", "auth": "OWNER/ADMIN", "badge": false },
+          "GET /api/v1/budget/keys",
+          { "ref": "PATCH /api/v1/keys/:id", "auth": "OWNER/ADMIN" },
+          { "ref": "GET /api/v1/budget/alerts", "badge": false },
+          { "ref": "POST /api/v1/budget/alerts/:alertId/acknowledge", "badge": false }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/settings/SpendBudgetsPanel.tsx", "contains": "KeyBudgetsCard" },
+          { "file": "apps/dashboard/src/components/settings/SpendBudgetsPanel.tsx", "contains": "PlanCapSwitch" },
+          { "file": "apps/dashboard/src/routes/SettingsPage.tsx", "contains": "settings-budget-monthly-enforcement" }
+        ],
+        "cli": [
+          { "ref": "budget", "badge": false },
+          "budget set --daily --monthly --threshold --daily-enforcement --monthly-enforcement",
+          "budget keys",
+          "budget key --daily --monthly --daily-enforcement --monthly-enforcement --rpm --tpm"
+        ],
+        "gateSdk": { "none": "the gate SDKs decide tool calls; spend is counted on model calls at the LLM proxy" },
+        "clawdeSdk": ["BUDGET_EXCEEDED", "RATE_LIMITED", "OVERAGE_HARD_CAP_EXCEEDED"],
+        "mcpTools": { "none": "the intutic MCP server reports MCP call budgets; LLM spend budgets are read with intutic budget and on Settings › Billing" },
+        "kitkat": ["`RATE_LIMITED`: your key's requests or tokens per minute are used up"],
+        "terraform": [
+          { "ref": "intutic_virtual_key", "badge": false },
+          "intutic_workspace_budget",
+          "workspace_settings.enforcement_mode",
+          "workspace_settings.workspace_hard_cap_enabled"
+        ],
+        "docs": [
+          "guide/budgets.md#setting-up-budget-limits",
+          "guide/budgets.md#workspace-caps",
+          "guide/budgets.md#key-budgets",
+          "guide/budgets.md#key-rate-limits",
+          "guide/budgets.md#plan-daily-cap",
+          "guide/budgets.md#budget-alerts",
+          { "ref": "guide/tier-matrix.md#what-a-control-plane-adds", "badge": false },
+          { "ref": "compare/portkey.md#where-portkey-is-stronger", "badge": false }
+        ],
+        "website": [{ "file": "index.html", "contains": "Spend budgets per workspace, API key and member" }],
+        "events": ["finops.budget.threshold", "finops.budget.exceeded", "siem:budget_alerts"],
+        "enforcement": [
+          "proxy:BUDGET_EXCEEDED",
+          "proxy:RATE_LIMITED",
+          "proxy:OVERAGE_HARD_CAP_EXCEEDED",
+          { "file": "packages/proxy/src/key_limits.rs" },
+          { "file": "services/control-plane/src/services/spendBudgetService.ts", "contains": "accrueKeySpend" }
+        ]
+      }
+    },
+    {
+      "id": "member-spend-budgets",
+      "title": "Spend budgets per member, and a default member budget",
+      "plan": "Biz Org+",
+      "surfaces": {
+        "api": [
+          "GET /api/v1/budget/members",
+          { "ref": "PUT /api/v1/budget/members/:memberId", "auth": "OWNER/ADMIN" },
+          { "ref": "DELETE /api/v1/budget/members/:memberId", "auth": "OWNER/ADMIN" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/SpendBudgetsPanel.tsx", "contains": "MemberBudgetsCard" }],
+        "cli": ["budget members", "budget member --daily --monthly --daily-enforcement --monthly-enforcement"],
+        "gateSdk": { "none": "the gate SDKs decide tool calls; spend is counted on model calls at the LLM proxy" },
+        "clawdeSdk": ["BUDGET_EXCEEDED"],
+        "mcpTools": { "none": "LLM spend budgets are read with intutic budget members and on Settings › Billing" },
+        "kitkat": ["names the budget (the workspace's, your key's or yours)"],
+        "terraform": ["intutic_member_budget"],
+        "docs": ["guide/budgets.md#member-budgets"],
+        "website": [{ "file": "index.html", "contains": "Spend budgets per workspace, API key and member" }],
+        "events": ["finops.budget.threshold", "finops.budget.exceeded", "siem:budget_alerts"],
+        "enforcement": [
+          "proxy:BUDGET_EXCEEDED",
+          { "file": "services/control-plane/src/lib/planSkuMap.ts", "contains": "planAllowsMemberBudgets" }
+        ]
+      }
     }
   ]
 }

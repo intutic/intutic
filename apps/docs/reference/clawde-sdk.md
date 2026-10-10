@@ -78,8 +78,9 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 403 | `policy_held` | `hold` | A Rego or WASM rule held the request for approval; the error names the hold id |
 | 409 | `policy_reask` | `reask` | Revise the approach and try again; repeated attempts escalate to `policy_denied` |
 | 403 | `GOVERNANCE_UNAVAILABLE` | `kill` | A governance check could not complete. Either a custom WASM or Rego rule reached no verdict (its deadline, its instruction budget, an error, or a result that is not a verdict): refused whatever the proxy's fail setting, and refused again if the same request is retried, the message naming the rule. Or, with the proxy failing closed, the workspace's PII detector setting could not be read |
-| 429 | `BUDGET_EXCEEDED` | `kill` | The key's remaining budget does not cover the request |
-| 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The daily spend cap is reached |
+| 429 | `BUDGET_EXCEEDED` | `kill` | A hard spend budget covering the request (the workspace's, the virtual key's or its member's) does not cover its estimated cost; `error.budget` names it and `Retry-After` says when it resets |
+| 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The plan's daily spend cap is reached and the workspace has it set to block |
+| 429 | `RATE_LIMITED` | `kill` | The virtual key's requests-per-minute or tokens-per-minute limit is reached; `Retry-After` says when the next minute starts |
 | 402, or 200 | `COST_GATE_EXCEEDED` | `kill` | The request's estimated cost is over the workspace threshold: 402 on a stream, a 200 answer otherwise |
 | 400 | `dlp_policy_violation` | `kill` | The request contains content the DLP policy blocks |
 | 200 | `TOOL_DENIED` | `kill` | The model called a tool an SOP denies to this agent role; the call was withheld |
@@ -88,7 +89,7 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 200 | `RESPONSE_UNPARSEABLE` | `kill` | The model's response did not parse while a tool policy was in force, so it was withheld; retrying may succeed |
 | 200 | `OUTPUT_DLP` | `kill` | The model's response held sensitive content that could not be redacted safely, so it was withheld |
 
-`ClawdeBlockedError` extends `ClawdeVerdictError` and carries `verdict`, `code`, `status`, `ruleId` (`rule_id`) and the proxy's reason as its message. The circuit breaker's budget check throws a plain `ClawdeVerdictError`.
+`ClawdeBlockedError` extends `ClawdeVerdictError` and carries `verdict`, `code`, `status`, `ruleId` (`rule_id`), `retryAfterSeconds` (`retry_after_seconds`) and the proxy's reason as its message. `retryAfterSeconds` is set when the proxy sent `Retry-After` — on `RATE_LIMITED` and `BUDGET_EXCEEDED` — and is how long to wait before the same request can succeed; `chat()` does not wait and retry on its own. The circuit breaker's budget check throws a plain `ClawdeVerdictError`.
 
 **Refusals sent as an error.** A status other than 200 comes with a JSON body, `{"error": {"type": "<code>", "message": "<reason>"}}`. `chat()` matches the status and the code together, so a provider's own 429 or a 403 for a key used against the wrong workspace is not mistaken for a refusal. These carry no `ruleId`.
 
