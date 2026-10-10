@@ -16,7 +16,7 @@
  *      agent loop actually consults.
  *
  * No durable run is exercised here; live runs on the Workflow DevKit's local
- * world are a separate, opt-in rig (TD-418, TD-498). The runtime behaviour
+ * world are a separate, opt-in rig. The runtime behaviour
  * under test is this adapter's own functions against a `FakeGate`, per
  * wrapTools.test.ts's pattern, with the workflow VM simulated by the global
  * marker the runtime sets there (`Symbol.for('WORKFLOW_USE_STEP')`).
@@ -436,7 +436,7 @@ describe('@intutic/gate/workflow is loadable in the workflow VM', () => {
   // The workflow bundler pulls this module (and everything it imports) into
   // the VM bundle of EVERY workflow in the app; one Node built-in anywhere in
   // that graph fails all of them at load with `require is not defined`
-  // (observed with workflow/nitro, TD-498). Walk the value-import graph
+  // (observed with workflow/nitro). Walk the value-import graph
   // (type-only imports are erased) and assert it never reaches one.
   const SRC = join(dirname(fileURLToPath(import.meta.url)), '..')
   const VALUE_IMPORT =

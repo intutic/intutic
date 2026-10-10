@@ -1,4 +1,4 @@
-//! End-to-end: the destructive-SQL guard (TD-480) withholds a model-emitted
+//! End-to-end: the destructive-SQL guard withholds a model-emitted
 //! shell call before the client sees it — on a stream and off one.
 //!
 //! The unit tests in `plugins::sql_guard` pin detection and the hold's state
@@ -131,7 +131,7 @@ async fn destructive_sql_against_a_non_allowlisted_database_never_reaches_the_cl
     std::fs::write(sops_dir.join("databases.md"), SOP).unwrap();
 
     std::env::set_var("OPENAI_UPSTREAM_URL", upstream.uri());
-    // A virtual key is never forwarded upstream (TD-370): the request
+    // A virtual key is never forwarded upstream: the request
     // needs a provider key, so the operator fallback supplies a test one.
     std::env::set_var("OPENAI_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::set_var("CONTROL_PLANE_URL", cp.uri());

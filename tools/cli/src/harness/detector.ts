@@ -5,7 +5,6 @@
  * the workspace. Returns a DetectedHarness array for reporting.
  *
  * HLD §3.14 — Harness Onboarding Matrix
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

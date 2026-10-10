@@ -62,7 +62,7 @@ describe('collectAgentReport — skills facet content scanning', () => {
     })
   })
 
-  // Phase S5 (TD-357): sha256 lets the control plane join this facet against
+  // Phase S5: sha256 lets the control plane join this facet against
   // a previously-judged semantic verdict, without the daemon ever
   // transmitting SKILL.md content itself over /api/v1/agents/report.
   it('reports the sha256 of a successfully-read SKILL.md, matching the file content exactly', async () => {
@@ -135,7 +135,7 @@ describe('collectAgentReport — skills facet content scanning', () => {
   })
 })
 
-describe('collectAgentReport — skills facet bundled-script enumeration (TD-356, Phase S2)', () => {
+describe('collectAgentReport — skills facet bundled-script enumeration (Phase S2)', () => {
   let workspaceRoot: string
 
   beforeEach(async () => {
@@ -226,7 +226,7 @@ describe('collectAgentReport — skills facet bundled-script enumeration (TD-356
     expect(entry.scripts).toBeUndefined()
   })
 
-  // TD-486: the control plane joins VirusTotal verdicts on these hashes.
+  // The control plane joins VirusTotal verdicts on these hashes.
   it('reports the sha256 of each bundled script, matching crypto.createHash over the file bytes', async () => {
     const dir = join(workspaceRoot, '.agents', 'skills', 'two-scripts')
     await fs.mkdir(join(dir, 'lib'), { recursive: true })

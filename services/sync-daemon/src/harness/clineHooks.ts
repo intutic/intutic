@@ -27,7 +27,6 @@
  * product wrote, and leaves a flat `.clinerules` the user wrote alone — in
  * that case no gate can be installed and a warning says why.
  *
- * LLD #14 — Phase 3 cross-harness defence
  * HLD §3.14 — Three-Tier Defense Cascade
  *
  * @module

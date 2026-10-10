@@ -91,7 +91,7 @@ struct Expiring {
     expires_at: Instant,
 }
 
-/// A pinned SOP advisory block plus the instant its TTL elapses (TD-348).
+/// A pinned SOP advisory block plus the instant its TTL elapses.
 /// Same shape as [`Expiring`], kept separate rather than made generic — two
 /// call sites do not earn an abstraction, and `CachedResponse` and
 /// `PinnedSopBlock` are otherwise unrelated types that happen to both want a
@@ -261,7 +261,7 @@ pub struct MemoryStore {
     /// with the minute it counts. A proxy without Valkey is one process, so
     /// these are the whole count; old minutes are dropped as new ones start.
     rate_counters: Mutex<HashMap<String, (i64, u64)>>,
-    /// Pinned SOP advisory blocks (TD-348), keyed by [`PinScope::storage_key`].
+    /// Pinned SOP advisory blocks, keyed by [`PinScope::storage_key`].
     /// Memory-only, same as the response cache above — a pin outlives one
     /// request but never the process, which matches its purpose (holding a
     /// prefix stable for a session, not across a restart).

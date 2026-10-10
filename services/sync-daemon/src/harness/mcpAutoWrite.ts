@@ -20,7 +20,7 @@
  * - Grok Build:       ~/.grok/config.toml + <workspaceRoot>/.grok/config.toml
  *                      ([mcp_servers.*] tables)
  * - OpenCode:         ~/.config/opencode/opencode.json + <workspaceRoot>/opencode.json
- *                      (`mcp` block — TD-487; see `injectOpenCode`)
+ *                      (`mcp` block; see `injectOpenCode`)
  * - Gemini CLI:       ~/.gemini/settings.json + <workspaceRoot>/.gemini/settings.json
  *                      (`mcpServers`)
  * - Antigravity:      ~/.gemini/config/mcp_config.json (`mcpServers`)
@@ -64,8 +64,9 @@
  * `command`-or-`url` shape every other JSON-map harness here uses — `wrapAllServers`
  * / `wrapWithProxy` branch on exactly that, so a `streamable_http` entry is
  * wrapped through the SAME remote-bridge path a `url`-keyed Claude Desktop/
- * Windsurf entry gets, without new code. See TD-362 for why this is recorded
- * as an assumption rather than a confirmation.
+ * Windsurf entry gets, without new code. This is recorded as an assumption
+ * rather than a confirmation because the `muse` binary could not be installed
+ * to check it (see museHooks.ts).
  *
  * Proxy-wrapping convention:
  *   Each existing stdio MCP server entry is rewritten so that the governance
@@ -73,7 +74,7 @@
  *   after `--`, tagged with `--server-name <name>` so the proxy can attribute
  *   traffic to the server it fronts. A `__intutic_wrapped: true` flag is added
  *   to prevent double-wrapping. Remote (HTTP/SSE, `url`-keyed) entries are now
- *   ALSO wrapped — TD-354's stdio→HTTP bridge phase closed the gap this
+ *   ALSO wrapped — the stdio→HTTP bridge phase closed the gap this
  *   comment used to describe as "left untouched": the entry is rewritten to
  *   spawn the SAME proxy binary in bridge mode (`--remote-url`/
  *   `--remote-transport`, headers riding in `INTUTIC_REMOTE_HEADERS` env, not
@@ -89,7 +90,6 @@
  * every ~30s only works because `writeJsonFile` below is write-if-changed —
  * an already-wrapped, unchanged config produces zero bytes written.
  *
- * LLD #14 — mcpAutoWrite.ts
  * HLD §3.14 — GUI Harness Interception (MCP registration + Universal MCP Governance)
  *
  * @module
@@ -124,7 +124,7 @@ interface McpServerEntry {
   /** Remote MCP transport marker on an UNWRAPPED entry. When present (instead
    *  of `command`), `wrapWithProxy` rewrites it into a remote-bridge-mode
    *  stdio entry (`--remote-url`/`--remote-transport`) rather than leaving it
-   *  alone — see TD-354, now superseded. */
+   *  alone, which is what older versions did. */
   url?: string
   /** Some harnesses tag a `url` entry `"sse"` explicitly; absent/other = http. */
   type?: string
@@ -327,7 +327,7 @@ export function antigravityMcpConfigPath(): string {
  * Two wrap conventions, chosen by the entry's pre-wrap shape:
  *   - stdio (`command`/`args`): the proxy binary becomes the command, the
  *     original command is passed after `--`, tagged `--server-name`.
- *   - remote (`url`, HTTP/SSE — TD-354, now superseded): the proxy binary is
+ *   - remote (`url`, HTTP/SSE): the proxy binary is
  *     invoked in bridge mode (`--remote-url`/`--remote-transport` instead of
  *     `--`), also tagged `--server-name`. Any `headers` on the original entry
  *     ride into the wrapped entry's env as `INTUTIC_REMOTE_HEADERS` (a JSON

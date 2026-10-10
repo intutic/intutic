@@ -1,6 +1,6 @@
 /**
- * CLI-side provider credential verification (LLD #70, model catalog &
- * cohort wizard).
+ * CLI-side provider credential verification (model catalog & cohort
+ * wizard).
  *
  * `buildVerificationProbe`/`classifyProbeResponse` in `@intutic/shared-types`
  * describe WHAT request proves a credential works; this is the CLI's

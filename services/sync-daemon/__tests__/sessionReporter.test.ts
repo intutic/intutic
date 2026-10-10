@@ -1,7 +1,7 @@
 /**
  * `startHarnessSession` / `endAllOpenSessions` — which row a harness's git and
- * task context is reported onto, and whose lifecycle the daemon owns (TD-231,
- * Wave 5.6).
+ * task context is reported onto, and whose lifecycle the daemon owns
+ * (Wave 5.6).
  *
  * With a local proxy's instance id the context goes onto that process's own
  * session row (the control plane derives it from `proxyInstanceId`; the

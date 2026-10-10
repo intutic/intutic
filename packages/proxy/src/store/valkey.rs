@@ -39,7 +39,7 @@ use crate::telemetry::ExecutionTrace;
 /// feeds the budget detector, a broadcast rate ceiling, and each other's
 /// notification queues, whose payloads carry tenant-identifying free text.
 ///
-/// A function rather than five `format!` calls (TD-208): the invariant is
+/// A function rather than five `format!` calls: the invariant is
 /// testable here and a new graph key cannot be added without passing through
 /// it. The composite notification id in `broadcast.rs` carries the same
 /// workspace-first shape for the same reason.
@@ -252,7 +252,7 @@ fn session_key(scope: &str) -> String {
     format!("v2:routing:{}", scope)
 }
 
-/// A pinned SOP advisory block's key (TD-348).
+/// A pinned SOP advisory block's key.
 ///
 /// Deliberately its own top-level key, `v2:sopblock:{workspace_id}:{agent}:
 /// {role_hash}` — NOT a new field on `session:metadata:{sid}` above. That hash
@@ -1507,7 +1507,7 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             // workspace list — see `VirtualKeyRecord::models` in metering.rs.
             models: string_list(auth_json.get("allowedModels")),
             expires: None,
-            // Written by the control plane's API-key middleware since LLD #71;
+            // Written by the control plane's API-key middleware;
             // absent on older cache entries, which org-pinned cells resolve by
             // revalidating rather than guessing.
             org_id: auth_json
@@ -2116,7 +2116,7 @@ mod loop_key_contract {
 mod graph_tenancy_tests {
     use super::*;
 
-    /// TD-208: the workspace segment is the whole tenancy boundary here.
+    /// The workspace segment is the whole tenancy boundary here.
     ///
     /// `graph_id` arrives as client-supplied free text on a `baggage` header
     /// and defaults to the session id, so two tenants CAN choose the same one.

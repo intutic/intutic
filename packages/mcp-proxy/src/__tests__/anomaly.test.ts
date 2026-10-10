@@ -288,7 +288,7 @@ describe('SessionState', () => {
 })
 
 /**
- * TD-439: the rest of `detectors.rs`'s `landmark_cycle_tests` module,
+ * The rest of `detectors.rs`'s `landmark_cycle_tests` module,
  * transcribed verbatim where the port has the same inputs. Two Rust fixtures
  * are not portable and are listed here so nobody hunts for them:
  * `action_emission_does_not_change_the_verdict`, `an_interleaved_spin_is_
@@ -296,7 +296,7 @@ describe('SessionState', () => {
  * not_counted` all depend on synthesised `action:` tokens, which this proxy
  * never records (see `anchorProjection`'s doc).
  */
-describe('landmarkCycle — ported detectors.rs fixtures (TD-439)', () => {
+describe('landmarkCycle — ported detectors.rs fixtures', () => {
   const repeat = (pattern: string[], times: number): string[] =>
     Array.from({ length: pattern.length * times }, (_, i) => pattern[i % pattern.length]!)
 

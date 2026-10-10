@@ -59,7 +59,7 @@ describe('appliedSuggestions', () => {
     })
   })
 
-  describe('Per-operation outcome reporting (TD-349)', () => {
+  describe('Per-operation outcome reporting', () => {
     it('returns ok:true and an applied:true per-operation entry for a successful ADD', async () => {
       const edits: ConfigEdit[] = [{
         operation: 'ADD',

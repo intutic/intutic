@@ -483,7 +483,7 @@
       "id": "skill_surface.agents_skills_write",
       "subject": "target",
       "flags": "-",
-      "line": "skill_surface.agents_skills_write\tblock\t-\ttarget\tWrite or edit targets a .agents/skills/** skill file — advisory only, pending a false-positive measurement of scanSkillContent against real skill markdown (TD-358)\t\\.agents/skills/",
+      "line": "skill_surface.agents_skills_write\tblock\t-\ttarget\tWrite or edit targets a .agents/skills/** skill file — advisory only, pending a false-positive measurement of scanSkillContent against real skill markdown\t\\.agents/skills/",
       "argPattern": false,
       "held": [
         {
@@ -564,7 +564,7 @@
       "id": "skill_surface.claude_skills_write",
       "subject": "target",
       "flags": "-",
-      "line": "skill_surface.claude_skills_write\tblock\t-\ttarget\tWrite or edit targets a .claude/skills/** skill file — advisory only, pending a false-positive measurement of scanSkillContent against real skill markdown (TD-358)\t\\.claude/skills/",
+      "line": "skill_surface.claude_skills_write\tblock\t-\ttarget\tWrite or edit targets a .claude/skills/** skill file — advisory only, pending a false-positive measurement of scanSkillContent against real skill markdown\t\\.claude/skills/",
       "argPattern": false,
       "held": [
         {

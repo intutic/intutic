@@ -12,8 +12,8 @@
  * tool calls at all; its choke point is the generated Python CODE STRING,
  * gated by `intutic_clawde.gate.adapters.smolagents.IntuticPythonExecutor`
  * (wraps any `PythonExecutor`) — verified live against smolagents==1.26.0 by
- * driving a real `CodeAgent.run()` end to end. See that module's doc (and
- * TD-377) for what governing code TEXT does and does not cover.
+ * driving a real `CodeAgent.run()` end to end. See that module's doc for
+ * what governing code TEXT does and does not cover.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -30,6 +30,6 @@ export const smolagentsAdapter = makeSdkGatedAdapter({
   importLine: 'from intutic_clawde.gate.adapters.smolagents import IntuticPythonExecutor',
   usageSummary:
     'IntuticPythonExecutor gates CodeAgent\'s generated code text before running it; ' +
-    'ToolCallingAgent tools are covered by @guard/guard_tools instead (see TD-377).',
+    'ToolCallingAgent tools are covered by @guard/guard_tools instead.',
   docsSlug: 'smolagents',
 })

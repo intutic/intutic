@@ -94,7 +94,7 @@ function loadMcpId(): {
   return factory(nodeFs, nodePath, nodeOs)
 }
 
-describe('OpenCode MCP tool id composition (TD-487)', () => {
+describe('OpenCode MCP tool id composition', () => {
   const { id, names } = loadMcpId()
 
   it('composes <server>_<tool> into mcp__<server>__<tool>', () => {

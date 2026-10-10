@@ -136,7 +136,7 @@ describe('intutic credentials', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  // ── LLD #70: registry pre-check hardening ──
+  // ── Registry pre-check hardening ──
 
   it('set refuses an unknown provider before any request is sent', async () => {
     await expect(runCredentialsSet('not-a-real-provider', { field: ['apiKey=sk-test-1234567890'] })).rejects.toThrow(

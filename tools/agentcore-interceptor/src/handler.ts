@@ -30,7 +30,7 @@
  * explicitly wired an interceptor onto is a production governance boundary,
  * not a laptop — see apps/docs/integrations/agentcore.md for the reasoning
  * and the `INTUTIC_FAIL_OPEN=true` escape hatch for operators who have
- * judged their own uptime requirements differently. See TD-431.
+ * judged their own uptime requirements differently.
  *
  * # Both interception points share this file, matching AWS's own reference
  * pass-through example (gateway-interceptors-examples.html): a REQUEST

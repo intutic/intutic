@@ -17,7 +17,7 @@
 //!
 //! ## Continuity
 //! The update rule is byte-for-byte the enterprise reward cron's
-//! (LLD #26 §4.3): `scale = max(1/log2(pulls+2), 0.1)`, `alpha += r*scale`,
+//! own: `scale = max(1/log2(pulls+2), 0.1)`, `alpha += r*scale`,
 //! `beta += (1-r)*scale`, `pulls += 1` — so arm state carries over without
 //! distortion when a workspace upgrades to cloud-managed learning.
 

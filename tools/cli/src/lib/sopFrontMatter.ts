@@ -134,7 +134,7 @@ export function titleFromFileName(fileName: string): string {
 /**
  * Add `intutic sops pull`'s `content_hash:` marker to a file that already
  * carries its own front matter — a projected guardrail, whose fence holds
- * the enforcing keys the proxy reads (LLD #71, Wave 9).
+ * the enforcing keys the proxy reads.
  *
  * Not `renderSopFile`: that wraps a second fence around the text, and the
  * proxy reads only the first, so the enforcing keys would become body prose

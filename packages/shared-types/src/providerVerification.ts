@@ -1,5 +1,5 @@
 /**
- * Provider credential verification (LLD #70, model catalog & cohort wizard).
+ * Provider credential verification (model catalog & cohort wizard).
  *
  * Pure, network-free description of how to check whether a credential works —
  * the cheapest authenticated call each provider's own API exposes. Two

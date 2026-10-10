@@ -1,5 +1,5 @@
 /**
- * Regenerates the Guardrail IR parity fixtures (LLD #71):
+ * Regenerates the Guardrail IR parity fixtures:
  *
  *   fixtures/hook-rule-vectors.json        IR → rendered hook rule → (tool, tool_input) → fires?
  *   fixtures/guardrail-ir/<name>.md        a SOP file whose front matter is rendered from IRs

@@ -8,8 +8,6 @@
  * carries the text, credential-shaped strings replaced by `[redacted]` first;
  * that is what config diffs and SkillOpt need.
  *
- * LLD #51 — Harness Config Capture + SkillOpt Pipeline
- *
  * @module
  */
 
@@ -65,7 +63,7 @@ export function redactConfigText(text: string): string {
 
 /**
  * The four enforcement inputs `POST /api/v1/governance-coverage/snapshot`
- * expects. Re-exported from `@intutic/shared-types` (TD-443) — previously
+ * expects. Re-exported from `@intutic/shared-types` — previously
  * declared locally here as a hand-kept duplicate of
  * `harnessGradeSweep.ts`'s `deriveEnforcementInputs` return shape on the
  * control-plane side, which drifted (this module's sync-cycle consumer

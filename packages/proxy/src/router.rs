@@ -48,16 +48,16 @@ pub fn build_router(state: AppState) -> Router {
         // workspace's declared tool-succession policy, verbatim — and the
         // listener binds `0.0.0.0` with no authentication on this path.
         .route("/intutic/probes", get(run_probes))
-        // Egress enforcement posture + live deny counts (LLD #63 §4). Makes an
+        // Egress enforcement posture + live deny counts. Makes an
         // Enforce/Monitor decision observable rather than silent.
         .route("/intutic/egress", get(egress_status))
         // Today's local-machine spend, sourced from the same numbers the
-        // budget gate already enforces (LLD #8 follow-up: "Live terminal
-        // cost"). Loopback-only — see `spend_status` — because unlike
+        // budget gate already enforces, for a live terminal
+        // cost readout. Loopback-only — see `spend_status` — because unlike
         // `/health` and `/intutic/egress` above, this number grows with the
         // developer's actual usage, and the listener binds `0.0.0.0`.
         .route("/intutic/spend", get(spend_status))
-        // This process's `proxy_instance_id` (TD-231, Wave 5.6). The sync
+        // This process's `proxy_instance_id`. The sync
         // daemon reads it over loopback so it can register the session row
         // the control plane derives for this process and put the workspace's
         // git/task context on it — the row the traces land on. Loopback-only
@@ -67,7 +67,7 @@ pub fn build_router(state: AppState) -> Router {
         // teammate's row. Not folded into `/health`, which load balancers
         // and readiness probes hit unauthenticated.
         .route("/intutic/instance", get(instance_status))
-        // Sandbox attestation callback (LLD #63 §6, TD-333). A `--sandbox`
+        // Sandbox attestation callback. A `--sandbox`
         // container's firewall permits egress ONLY to this proxy — it cannot
         // reach the control plane directly — so this is the one path a
         // sandboxed agent has to attest. The proxy forwards it, authenticated
@@ -247,7 +247,7 @@ async fn run_probes(
 }
 
 /// `POST /intutic/attest-sandbox` — forwards a sandboxed agent's attestation
-/// callback to the control plane (LLD #63 §6, TD-333).
+/// callback to the control plane.
 ///
 /// This exists because of what the sandbox's own firewall permits: the
 /// `entrypoint.sh` that calls this runs AFTER the container's egress firewall
@@ -266,7 +266,7 @@ async fn run_probes(
 /// to skip those steps but still make this one call would still attest. Real
 /// defense against that needs measured/attested boot (TPM, confidential
 /// computing) that does not exist anywhere in this stack. What this closes is
-/// the concrete gap named in TD-333: a session recorded as `SANDBOX` because
+/// the concrete gap: a session recorded as `SANDBOX` because
 /// the host CLI said so, whether or not the sandboxed process ever started.
 /// What must be true before this handler forwards anything: a configured
 /// control plane, a `sessionId` in the body, and an Intutic virtual key as the

@@ -146,7 +146,7 @@ export type EventCallback = (data: {
   budgetPctUsed?: number
 }) => void | Promise<void>
 
-// ─── Control-plane management types (LLD #69) ───
+// ─── Control-plane management types ───
 
 export interface ControlPlaneClientOptions {
   apiKey: string                    // vk_xxx or a JWT — see control-plane.ts's doc comment

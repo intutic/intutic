@@ -86,10 +86,10 @@ pub struct IntuticSettings {
     /// `response_injection:*` echo findings.
     #[serde(default)]
     pub response_injection_snippet: ResponseInjectionSnippetConfig,
-    /// L1 egress enforcement — deny/monitor/enforce + allow policy (LLD #63).
+    /// L1 egress enforcement — deny/monitor/enforce + allow policy.
     #[serde(default)]
     pub egress: crate::egress_policy::EgressConfig,
-    /// L2 hosted-gateway front door — vk_-only enforcement (LLD #64).
+    /// L2 hosted-gateway front door — vk_-only enforcement.
     #[serde(default)]
     pub gateway: crate::gateway::GatewayConfig,
     /// Cloud upstreams — Bedrock, Vertex AI, Azure OpenAI (`crate::cloud`).
@@ -241,7 +241,7 @@ pub struct PolicyConfig {
     // `fallback_region`, `fallback_region_url` and `effective_control_plane_url()`
     // lived here: the accessor was called only by its own tests while production
     // read `control_plane_url` directly (proxy.rs:1226,1381,2021), and no env var
-    // it needed was set in any manifest. TD-182 recorded the transform as done; it
+    // it needed was set in any manifest. It had been recorded as done; it
     // never was. The control-plane half went the same day.
 }
 
@@ -294,7 +294,7 @@ pub struct SnipCompactorConfig {
     #[serde(default = "default_code_skeleton_min_lines")]
     pub code_skeleton_min_lines: usize,
 
-    /// TD-008: Enable per-thread incremental parse cache for code skeleton extraction.
+    /// Enable per-thread incremental parse cache for code skeleton extraction.
     /// When true, identical code blocks (same content hash) are not re-parsed by
     /// tree-sitter on the same thread — the cached skeleton is returned immediately.
     ///
@@ -446,7 +446,7 @@ impl Default for DlpConfig {
     }
 }
 
-/// Contextual bandit routing settings (LLD #26).
+/// Contextual bandit routing settings.
 ///
 /// In control-plane-managed workspaces the Valkey feature-flag hash
 /// (`workspace:feature_flags:{ws}` → `ff_bandit_routing`) is authoritative.
@@ -556,7 +556,7 @@ pub struct RoutingConfig {
     pub mirror_candidate_model: Option<String>,
 
     /// Ceiling, in seconds, on how long a session's injected SOP advisory
-    /// block stays pinned to its first-rendered bytes (TD-348).
+    /// block stays pinned to its first-rendered bytes.
     ///
     /// The bandit's session lock above already pins the MODEL choice for
     /// KV-cache warmth; this is the same idea applied to the governance text
@@ -570,7 +570,7 @@ pub struct RoutingConfig {
     ///
     /// `0` disables pinning entirely — every request falls back to exactly
     /// today's per-request render-and-inject behaviour. This one DOES get a
-    /// config off-switch (unlike TD-347's pricing-correctness fix): prompt
+    /// config off-switch (unlike the cache-aware pricing-correctness fix): prompt
     /// content staleness for up to this many seconds is a real, if usually
     /// small, product trade — a SOP edited or a tier flipped mid-session
     /// will not reach an active session's injected text until the pin
@@ -799,7 +799,7 @@ pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
         }
     }
 
-    // Dynamically route based on INTUTIC_REGION (Phase 5 WS-5MR Gap 2.6 / TD-182)
+    // Dynamically route based on INTUTIC_REGION
     if let Ok(region) = std::env::var("INTUTIC_REGION") {
         if !region.is_empty() {
             if let Some(ref mut url) = config.intutic_settings.policy.control_plane_url {

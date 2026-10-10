@@ -297,14 +297,14 @@ export const GATES: readonly GateEntry[] = [
       'registered in <repo>/.muse/hooks.json AND via managed_hooks_path (the pre-approved ' +
       'tier) in ~/.config/muse/settings.json, pointing at an Intutic-owned ' +
       '~/.config/muse/intutic-managed-hooks.json. The exit-2 block/deny contract, and the ' +
-      'hooks.json schema itself, are ASSUMED from the Codex-CLI-compatible shape (TD-362) — ' +
+      'hooks.json schema itself, are ASSUMED from the Codex-CLI-compatible shape — ' +
       'the `muse` binary was not installable in the environment this writer was authored in, ' +
       'so neither could be confirmed against the real product',
     mcpCalls: 'reachable',
     mcpNote:
       "Already a `.*` catch-all matcher across both PreToolUse and PermissionRequest. Muse " +
       "Code's own MCP tool-naming convention was not independently verified — the binary " +
-      "could not be installed to confirm it (see TD-362).",
+      "could not be installed to confirm it.",
   },
   {
     name: 'githubCopilot',
@@ -438,7 +438,7 @@ export const GATES: readonly GateEntry[] = [
       'specifically) — hence reachable, not yes.',
   },
 
-  // ── OpenCode — a plugin OpenCode loads into its own process (TD-397) ─────
+  // ── OpenCode — a plugin OpenCode loads into its own process ──────────────
   {
     name: 'opencode',
     module: '../../src/harness/openCodeHooks.js',
@@ -457,7 +457,7 @@ export const GATES: readonly GateEntry[] = [
       'names them sanitize(server) + "_" + sanitize(tool) (mcp/catalog.ts, read from source); ' +
       'the plugin composes that into mcp__<server>__<tool> against the server names in the ' +
       'OpenCode config files, longest sanitized name first, so the allowlist backstop parses ' +
-      'it (TD-487). Pinned by the "OpenCode plugin gate" block\'s allowlist cases and ' +
+      'it. Pinned by the "OpenCode plugin gate" block\'s allowlist cases and ' +
       'openCodeHooks.test.ts. 2.x MCP ids are not verified; a 2.x id that is not ' +
       '<server>_<tool>-shaped passes through unchanged.',
   },
@@ -733,7 +733,7 @@ export const NO_GATE: ReadonlyArray<{
       'the runtime at all, so this handler is blind to the common case. For that case ' +
       'the framework-agnostic @guard/guard_tools helpers (framework.py, now duck-typing ' +
       '.forward too) remain the applicable coverage — same as before this module existed. ' +
-      'See TD-374. Detected via any of autogen-agentchat/autogen-core/autogen-ext.',
+      'Detected via any of autogen-agentchat/autogen-core/autogen-ext.',
   },
   {
     file: null,
@@ -747,8 +747,8 @@ export const NO_GATE: ReadonlyArray<{
       'shape most AG2/pyautogen tutorials describe; this adapter targets the current ' +
       'Event/Stream/Middleware architecture, confirmed by reading ' +
       'ag2/middleware/base.py + ag2/tools/executor.py + ag2/tools/final/function_tool.py ' +
-      'directly, not by trusting docs written for the old shape. See TD-376 for the ' +
-      'unverified exception-propagation caveat this adapter’s doc flags.',
+      'directly, not by trusting docs written for the old shape. See this adapter’s doc for ' +
+      'the unverified exception-propagation caveat.',
   },
   {
     file: null,
@@ -825,7 +825,7 @@ export const NO_GATE: ReadonlyArray<{
       'unchanged — verified live against smolagents==1.26.0 by driving a real ' +
       'CodeAgent.run() end to end, including intutic_step_callback observing the same ' +
       'step lifecycle. This governs the code text before it runs, not what an already-' +
-      'running snippet does once started — see that module’s doc (TD-377) for the full ' +
+      'running snippet does once started — see that module’s doc for the full ' +
       'honesty note, matched in tone to openWebuiHooks.ts’s inlet() scope note.',
   },
   {
@@ -847,7 +847,7 @@ export const NO_GATE: ReadonlyArray<{
       'with a real stdio FastMCP server. Egress caveat unique in this family: the ' +
       'DEFAULT model provider (Bedrock, SigV4/boto3) is NOT proxyable — only the ' +
       'Anthropic/OpenAI/LiteLLM providers honor .env.intutic’s base-URL vars. See ' +
-      'TD-420..423 and apps/docs/integrations/strands.md.',
+      'apps/docs/integrations/strands.md.',
   },
   {
     file: null,
@@ -857,7 +857,7 @@ export const NO_GATE: ReadonlyArray<{
       'functions and MCP-materialised FunctionTools) run in the agent’s own Python ' +
       'process. The blocking gate ships SDK-side (intutic_clawde.gate.adapters.' +
       'agent_framework.IntuticFunctionMiddleware, an agent_framework FunctionMiddleware). ' +
-      'A separate framework from autogen above (TD-375), not a new version of it. ' +
+      'A separate framework from autogen above, not a new version of it. ' +
       'Verified live against agent-framework-core==1.20.0 by reading ' +
       'agent_framework/_middleware.py + _tools.py directly AND driving a real Agent ' +
       'through a stub chat client: on a deny the middleware sets context.result to the ' +
@@ -896,7 +896,7 @@ export const NO_GATE: ReadonlyArray<{
       'resolveToolHooks"). A caller who passes ANY hooks option at call time (even {}) ' +
       'silently disables this gate for that call, with no error. See @intutic/gate/mastra\'s ' +
       'module doc and apps/docs/integrations/mastra.md for the same note surfaced to code and ' +
-      'operators respectively. See docs/TECH_DEBT.md TD-380.',
+      'operators respectively.',
   },
   {
     file: null,
@@ -938,7 +938,7 @@ export const NO_GATE: ReadonlyArray<{
       'approval.candidate/approval.settled hook events) maps eve\'s human-approval lifecycle onto ' +
       'tool_allowed/tool_blocked/tool_flagged — telemetry only; settlement attribution is ' +
       'best-effort (the approval events carry no tool name — verified against the shipped ' +
-      'protocol types; TD-411). LIVE-VERIFIED 2026-10-03 on a self-hosted eve build + eve start ' +
+      'protocol types). LIVE-VERIFIED 2026-10-03 on a self-hosted eve build + eve start ' +
       '(local Workflow world, scripted model, no account): deny never runs the body, a thrown ' +
       'policy fails the turn, a parked user-approval call survives a SIGKILL + restart and is ' +
       're-gated on resume. approval.candidate/approval.settled fire only for the ' +
@@ -946,11 +946,11 @@ export const NO_GATE: ReadonlyArray<{
       'audit hook does not read. Not exercised: a Vercel deployment, Vercel Sandbox, a real model. ' +
       'DOCUMENTED LIMITATION (not an Intutic defect): eve routes models through the Vercel AI ' +
       'Gateway by default, whose wire protocol the Intutic proxy does not parse — gateway-routed ' +
-      'egress is ungoverned (TD-412); only the in-code direct-provider path ' +
+      'egress is ungoverned; only the in-code direct-provider path ' +
       '(defineAgent({ model }) with withIntuticProxy(...)) routes through the proxy, and like ' +
       'the Vercel AI SDK it is built on, eve has no env-var base-URL override. ' +
       'PREVIEW churn shield per the dsh precedent: pinned verification version, Preview-labelled ' +
-      'docs — see TD-410.',
+      'docs.',
   },
 
   {
@@ -1047,7 +1047,7 @@ export const NO_GATE: ReadonlyArray<{
       'reaches a microVM — so the native gate those harnesses have on a laptop is ABSENT there; ' +
       'the env/mcpServers passthrough (env: harness-claude-code only) is a possible config ' +
       'channel but injecting hooks through it was NOT verified against a live sandbox. See ' +
-      'apps/docs/integrations/ai-sdk-harness.md and TD-415/TD-416/TD-417.',
+      'apps/docs/integrations/ai-sdk-harness.md.',
   },
   {
     file: null,
@@ -1073,13 +1073,13 @@ export const NO_GATE: ReadonlyArray<{
       'by test against the REAL FatalError.is from the workflow package. One tracked wrinkle: ' +
       'ai@7.0.68 marks tool-level needsApproval @deprecated in favour of generateText-level ' +
       'toolApproval, but @ai-sdk/workflow\'s own loop reads the tool-level field and exposes no ' +
-      'other surface — the correct integration point today, watched for drift in TD-419. ' +
+      'other surface — the correct integration point today, watched for drift. ' +
       'LIVE-VERIFIED 2026-10-03 on the Workflow DevKit local world (nitro dev + workflow/nitro, ' +
       'scripted model, no account): needsApproval executes in the workflow VM, where the gate\'s ' +
       'node:fs access fails ("require is not defined"), so the gate must be called from a ' +
       '"use step" function; from there a refusal runs once (a plain throw: 4 attempts), an ' +
       'approval pause ends the run with a tool-approval-request, and a resumed run carrying the ' +
-      'approval re-gates the call. Not exercised: a hosted world (TD-418). See ' +
+      'approval re-gates the call. Not exercised: a hosted world. See ' +
       'apps/docs/integrations/ai-sdk-workflow.md.',
   },
 
@@ -1135,7 +1135,7 @@ export const NO_GATE: ReadonlyArray<{
       'codex-check.js) — the SAME gate this registry already lists under that harness\'s own row, ' +
       'not a second one. This is the same `delegated` reasoning as Xirp\'s row above, not a new ' +
       'kind — see gateKind.ts. ' +
-      'The third backend, OpenCode, was the one gap: until TD-397 closed (2026-09-23, the ' +
+      'The third backend, OpenCode, was the one gap: until 2026-09-23 (the ' +
       '`opencode` row above) a feature run with `--providers opencode` had no gate to delegate ' +
       'to. It now has the same per-worktree coverage as the other two — the plugin ' +
       'openCodeHooks.ts writes is re-generated in every worktree by the same propagation.',
@@ -1168,7 +1168,7 @@ export const NO_GATE: ReadonlyArray<{
       'mode is the default; private egress needs an explicit NAT setup this adapter cannot do ' +
       'for the operator), and Bedrock\'s own SigV4-signed model-invocation traffic not being ' +
       'proxyable the way an OPENAI_BASE_URL-style override is elsewhere — are documented in ' +
-      'apps/docs/integrations/agentcore.md, not encoded here. See TD-430.',
+      'apps/docs/integrations/agentcore.md, not encoded here.',
   },
 ]
 

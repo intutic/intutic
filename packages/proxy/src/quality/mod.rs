@@ -3,8 +3,6 @@
 //! This module hooks into the proxy's request pipeline BEFORE forwarding
 //! to the LLM provider. It can short-circuit the request by returning
 //! a response directly.
-//!
-//! LLD #49: Inline Prompt Quality & Slash Commands
 
 pub mod slash_interceptor;
 

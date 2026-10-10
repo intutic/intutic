@@ -1211,7 +1211,7 @@ async fn backends_agree_within_epsilon() {
     cleanup(&ws, None).await;
 }
 
-/// The tenancy property TD-208 exists for: two workspaces that choose the SAME
+/// The tenancy property workspace-namespaced graph keys exist for: two workspaces that choose the SAME
 /// graph id must not see each other's membership, spend, broadcast claims, or
 /// notification queues. graph_id is client-supplied free text from a baggage
 /// header, so before the workspace segment was added to every graph key,

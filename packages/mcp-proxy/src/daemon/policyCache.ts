@@ -4,7 +4,6 @@
  * Resolves PCAS permissions + active SOP rules for MCP daemon.
  * Cache hit: < 0.1ms (LRU). Valkey hit: < 2ms. Miss: HTTP to control-plane.
  *
- * LLD #28: MCP Daemon Mode, WS-5MCP
  * @module
  */
 import https from 'node:https'
@@ -72,7 +71,7 @@ export interface ResolvedPolicy {
    * value.
    */
   mcpInjectionAction?: 'warn' | 'block'
-  /** Workspace injection-pattern sources (TD-436); normalized to `[]` like `allowedTools`. */
+  /** Workspace injection-pattern sources; normalized to `[]` like `allowedTools`. */
   mcpInjectionPatterns: string[]
   /**
    * Anomaly-detection mode override (Phase 2, `packages/mcp-proxy/src/anomaly/`).
@@ -127,7 +126,7 @@ export interface ResolvedPolicy {
   fromSnapshot?: boolean
   cachedAt:      number
   /**
-   * The workspace's `v2:sync:config_version` at fetch time (TD-474 item 5).
+   * The workspace's `v2:sync:config_version` at fetch time.
    * A guardrail promote/retire bumps it; a fresh LRU hit whose version no
    * longer matches refetches instead of waiting out the TTL. Absent when
    * Valkey could not be read — then the TTL is the floor, as before.

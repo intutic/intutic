@@ -1,4 +1,4 @@
-//! Integration test for L1 egress enforcement (LLD #63 §4).
+//! Integration test for L1 egress enforcement.
 //!
 //! Unlike the unit tests in `egress_policy.rs` — which prove the pure
 //! `decide()` function — this exercises the *wired* CONNECT handler

@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process'
 import { installGitHooks } from './gitHooks.js'
 
 // Every test here runs real `git commit`s through the real installed hook, and
-// the TD-358 cases spawn the built CLI inside that hook. Alone they take about
+// the skill-content scan cases spawn the built CLI inside that hook. Alone they take about
 // a second each; under a full CLI-suite run on 2026-09-15 they took 7-23 s and
 // hit vitest's 5 s default. The per-describe timeout below is for load, not
 // slow code.
@@ -25,7 +25,7 @@ const git = (cwd: string, ...args: string[]) =>
   spawnSync('git', args, { cwd, encoding: 'utf-8' })
 
 /**
- * Where the built CLI lives, so the TD-358 tests below can put a shim
+ * Where the built CLI lives, so the skill-scan tests below can put a shim
  * `intutic` on `PATH` that the pre-commit hook's `command -v intutic` finds —
  * mirroring how the hook actually resolves it on a real developer machine.
  * Built by `pnpm --filter @intutic/cli build` (a prerequisite for this file
@@ -40,7 +40,7 @@ const CLI_ENTRY = path.join(import.meta.dirname, '..', '..', 'dist', 'cli.js')
  * this is what lets the pre-commit hook's `command -v intutic` and the
  * subsequent `intutic skill scan-staged` resolve to real code instead of
  * silently no-opping the way every other test in this file leaves it (none
- * of them assert on the TD-358 block, only on the secret scan, precisely
+ * of them assert on the skill-scan block, only on the secret scan, precisely
  * because `intutic` is not on PATH in a normal test run).
  */
 function withIntuticShim(binDir: string, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -130,7 +130,7 @@ describe('post-merge decisions-log-refresh hook — marker discipline', { timeou
     expect(content).toContain('>/dev/null 2>&1 &')
   })
 
-  // Same overwrite guard as pre-commit, and (since TD-351) as post-commit
+  // Same overwrite guard as pre-commit, and (now also) as post-commit
   // and post-checkout below — all four hooks `installGitHooks` manages share
   // this discipline via `writeHookIfOursOrAbsent` now.
   it('never clobbers a pre-existing post-merge hook it did not write', async () => {
@@ -155,7 +155,7 @@ describe('post-merge decisions-log-refresh hook — marker discipline', { timeou
   })
 })
 
-describe('post-commit / post-checkout git-context hooks — marker discipline (TD-351)', { timeout: 60_000 }, () => {
+describe('post-commit / post-checkout git-context hooks — marker discipline', { timeout: 60_000 }, () => {
   let repo: string
 
   beforeEach(async () => {
@@ -212,7 +212,7 @@ describe('post-commit / post-checkout git-context hooks — marker discipline (T
 })
 
 /**
- * TD-358: the warn-only skill-content scan the pre-commit hook now runs
+ * The warn-only skill-content scan the pre-commit hook now runs
  * AFTER the secret scan above. Unlike that suite, these tests put a real
  * `intutic` shim on `PATH` (see `withIntuticShim`) so `command -v intutic`
  * resolves and `intutic skill scan-staged` actually runs — every other test
@@ -226,7 +226,7 @@ describe('post-commit / post-checkout git-context hooks — marker discipline (T
  * tested" rather than a confusing spawn failure.
  */
 const cliBuilt = fs.existsSync(CLI_ENTRY)
-;(cliBuilt ? describe : describe.skip)('pre-commit skill-content scan (TD-358, warn-only)', () => {
+;(cliBuilt ? describe : describe.skip)('pre-commit skill-content scan (warn-only)', () => {
   let repo: string
   let home: string
 

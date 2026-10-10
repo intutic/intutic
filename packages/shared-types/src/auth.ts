@@ -1,7 +1,6 @@
 /**
  * Auth + RBAC Types — Shared across control plane services.
  *
- * LLD #7 — Auth, RBAC, Dashboard API
  * HLD §5.1 — Zero-Trust Perimeter
  *
  * @module
@@ -32,11 +31,11 @@ export interface AuthContext {
   email: string
   /** RBAC role within the workspace. */
   role: WorkspaceRole
-  /** Cross-workspace user ID (LLD #11). Optional for pre-migration members. */
+  /** Cross-workspace user ID. Optional for pre-migration members. */
   userId?: string
   /**
-   * The org the workspace belongs to (denormalized `workspaces.orgId`,
-   * LLD #71). Optional: cached auth entries written before this field
+   * The org the workspace belongs to (denormalized `workspaces.orgId`).
+   * Optional: cached auth entries written before this field
    * existed lack it, and readers must treat absence as "unknown", never as
    * "no org" — the proxy's cell org-pinning revalidates via the control
    * plane in that case rather than guessing.
@@ -199,7 +198,7 @@ export const UpdateRoleInputSchema = z.object({
   role: z.enum(['OWNER', 'ADMIN', 'EM', 'DEVELOPER', 'VIEWER']),
 })
 
-// ─── PLG Self-Serve Signup (LLD #9) ───────────────────────────────────
+// ─── PLG Self-Serve Signup ───────────────────────────────────
 
 /** PLG signup input schema. */
 export const SignupInputSchema = z.object({
@@ -249,7 +248,7 @@ export const OrgSignupInputSchema = z.object({
   orgName: z.string().min(1).max(128),
   /**
    * The company's own domain (e.g. "acme.com") — informational, stored in
-   * `orgs.settings.domain` (LLD #71). Deliberately NOT the cell hostname:
+   * `orgs.settings.domain`. Deliberately NOT the cell hostname:
    * the org's slug is the subdomain under gateway.intutic.ai, so no domain
    * verification is needed here.
    */
@@ -335,7 +334,7 @@ export const CreateApiKeyInputSchema = z.object({
   /**
    * Automation key: exempt from the `ssoKeyMaxIdleDays` recency gate, because its
    * owner may never log in interactively. Still bound to the member's active flag
-   * and still revocable, so offboarding applies (TD-218).
+   * and still revocable, so offboarding applies.
    */
   isServiceAccount: z.boolean().default(false),
 })
@@ -403,7 +402,7 @@ export interface ApiKeyInfo {
 
 /**
  * Workspace dashboard summary — aggregated metrics for EM Dashboard.
- * Phase 1 provides JSON API; the EM Dashboard UI is Phase 2 (TD-032).
+ * Phase 1 provides JSON API; the EM Dashboard UI is Phase 2.
  * HLD §8b.1
  */
 export interface DashboardSummary {
@@ -411,7 +410,7 @@ export interface DashboardSummary {
   activeSessions: number
   /**
    * Sessions opened with `executionMode: 'SANDBOX'` in the last 30 days —
-   * `intutic exec --sandbox` runs (LLD #63 §6). A 30-day window rather than
+   * `intutic exec --sandbox` runs. A 30-day window rather than
    * "active" because a sandbox run is typically short-lived.
    */
   sandboxSessions30d: number
@@ -497,7 +496,7 @@ export interface DashboardSummary {
     savedUsd: number
     savingsPercent: number
     /**
-     * Provider prompt-cache reads (TD-347) over the same window — a
+     * Provider prompt-cache reads over the same window — a
      * SEPARATE population from `savedUsd`. A request can show heavy
      * cache-read activity while `savedUsd` is flat or negative (the router
      * moved off a model that was warm), so this must never be folded into

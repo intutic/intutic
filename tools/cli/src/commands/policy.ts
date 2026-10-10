@@ -693,7 +693,7 @@ export function buildCompileArgs(opts: { src?: string; out?: string; debug?: boo
   return args
 }
 
-// ─── Rule candidates: the source of record (LLD #71, Wave 7) ─────────
+// ─── Rule candidates: the source of record ───────────────────────────
 
 /** `GET /api/v1/rule-candidates/:id/source`, as the control plane serves it. */
 export interface CandidateSource {

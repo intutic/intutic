@@ -1,5 +1,5 @@
 /**
- * TD-488: the three gate-side caches (policy snapshot, approved review-hold
+ * The three gate-side caches (policy snapshot, approved review-hold
  * bypasses, central egress policy) refresh through ONE helper that both the
  * daemon loop and `intutic connect` call on every sync cycle. Pinned here
  * against a stubbed control plane: two calls with two different rule sets

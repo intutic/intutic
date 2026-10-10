@@ -45,7 +45,7 @@ reading `ag2/middleware/base.py`, `ag2/tools/executor.py`, and
     multi-gate processes, the same shape `openai_agents.py`'s
     `make_intutic_tool_guardrail` uses.
 
-**Now confirmed live (closes TD-376)**: what AG2's own event/stream
+**Now confirmed live**: what AG2's own event/stream
 dispatcher does with an exception escaping `on_tool_execution` itself (as
 opposed to the `ToolErrorEvent` this adapter returns deliberately) — driven
 through AG2's REAL dispatcher (`ag2.tools.executor.ToolExecutor` wired to a
@@ -112,7 +112,7 @@ def _make_on_tool_execution(gate: Optional[Gate]):
             # CrewAI fail-open finding, which WAS confirmed) — but fail closed
             # on principle rather than let a Gate.guard() bug or a missing
             # install() propagate out of a framework hook of unverified
-            # exception-handling behaviour. See this module's doc + TD-376.
+            # exception-handling behaviour. See this module's doc.
             print(f"[Intutic Governance] BLOCKED: gate error, failing closed: {exc}",
                   file=sys.stderr)
             return ToolErrorEvent.from_call(event, exc)

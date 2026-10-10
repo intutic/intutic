@@ -1,6 +1,6 @@
 /**
  * referencedFiles.test.ts — the `referenced_files.rs` `#[cfg(test)]` block,
- * ported case for case (TD-441). Same inputs, same expected codes.
+ * ported case for case. Same inputs, same expected codes.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import * as fs from 'node:fs/promises'

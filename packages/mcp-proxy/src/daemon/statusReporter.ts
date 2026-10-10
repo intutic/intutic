@@ -18,7 +18,6 @@
  * disk buffer: unlike hook events, a status snapshot is worthless once the next
  * one exists.
  *
- * LLD #28: MCP Daemon Mode, WS-5MCP
  * @module
  */
 import https from 'node:https'

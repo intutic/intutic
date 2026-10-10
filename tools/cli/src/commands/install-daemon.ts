@@ -55,7 +55,7 @@ export interface UninstallDaemonOptions {
 }
 
 /**
- * `intutic daemon install --proxy` (TD-465): supervise the standalone Rust
+ * `intutic daemon install --proxy`: supervise the standalone Rust
  * proxy the way `intutic start` runs it in the foreground. No workspace or
  * API key — standalone has no control plane — so this is a separate option
  * shape rather than a flag on `InstallDaemonOptions`.
@@ -425,7 +425,7 @@ WantedBy=${system ? 'multi-user.target' : 'default.target'}
 `
 }
 
-// ── Standalone proxy (TD-465) ─────────────────────────────────────────
+// ── Standalone proxy ──────────────────────────────────────────────────
 
 /**
  * The environment `intutic start` hands the proxy, as a service file has to
@@ -1117,7 +1117,7 @@ export async function proxyServiceStart(): Promise<void> {
   }
 }
 
-// ── Public API (standalone proxy, TD-465) ────────────────────────────
+// ── Public API (standalone proxy) ────────────────────────────────────
 
 export async function installProxyService(opts: ProxyServiceOptions = {}): Promise<void> {
   const resolved: ResolvedProxyOptions = {

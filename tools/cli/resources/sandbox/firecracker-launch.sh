@@ -1,5 +1,5 @@
 #!/bin/bash
-# Firecracker microVM launch (LLD #63 §6, Increment 4).
+# Firecracker microVM launch.
 #
 # This is the boot sequence validated on a real KVM host (GCE nested-virt,
 # Intel): it sets up the tap link, installs a host-side default-deny egress

@@ -109,7 +109,7 @@
  * guardrail injected by this module also gates voice-agent tool calls.
  * `__tests__/openai.test.ts` drives a real `RealtimeSession` (0.16.1) with a
  * stand-in transport emitting `function_call`: a refused call never executes
- * and the BLOCKED message goes back via `sendFunctionCallOutput` (TD-408).
+ * and the BLOCKED message goes back via `sendFunctionCallOutput`.
  *
  * ## LLM egress and the tracing DLP leak
  *
@@ -504,7 +504,7 @@ function wrapHostedMcpTool(tool: HostedToolSlice, opts: OpenAiWrapOptions): Host
 /** Shared shell/apply_patch wrapping: force every action through the
  *  approval path, gate it there, then replay the tool's original policy.
  *
- *  Fall-through, stated because it is easy to miss (TD-406): this relies on
+ *  Fall-through, stated because it is easy to miss: this relies on
  *  `needsApproval`/`onApproval` being the SDK's veto point for these two
  *  hosted tools. A future `@openai/agents` that executes a shell or
  *  apply_patch action without consulting `onApproval` would bypass the gate
@@ -795,8 +795,8 @@ export interface OpenAiGateConfig extends GateConfig {
  */
 /**
  * Where to point `@openai/agents`' tracing exporter so traces stay governed
- * (TD-405): the control plane's ingest route, authenticated with the same
- * API key the gate uses. Pass the result to the SDK's own exporter —
+ * rather than lost: the control plane's ingest route, authenticated with the
+ * same API key the gate uses. Pass the result to the SDK's own exporter —
  *
  * ```ts
  * import { setTraceProcessors, BatchTraceProcessor, OpenAITracingExporter } from '@openai/agents'

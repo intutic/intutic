@@ -1,5 +1,5 @@
 #!/bin/sh
-# Intutic sandbox entrypoint (LLD #63 §6).
+# Intutic sandbox entrypoint.
 #
 # The container starts as root with NET_ADMIN so this script can install a
 # firewall; the agent must NOT keep that power. So, in order:
@@ -12,7 +12,7 @@
 #      the agent cannot alter or remove the firewall it now runs behind.
 #   4. exec the agent command.
 #
-# Honesty rule (LLD #63 §6): if the firewall cannot be applied, we refuse to run
+# Honesty rule: if the firewall cannot be applied, we refuse to run
 # rather than run ungoverned. A sandbox that silently fails open is worse than
 # no sandbox, because the caller believes it is protected.
 set -eu
@@ -79,8 +79,8 @@ fi
 # firewall above is therefore immutable from inside the sandbox.
 #
 # Attest, then exec — in that order, inside the SAME post-drop shell, so the
-# attestation call itself only has the locked-down firewall to route through
-# (LLD #63 §6, TD-333). Before this, `executionMode: 'SANDBOX'` on a session
+# attestation call itself only has the locked-down firewall to route through.
+# Before this, `executionMode: 'SANDBOX'` on a session
 # was set entirely by the host-side `intutic exec` CLI, before this container
 # even started — a claim with nothing behind it. This callback can only
 # succeed from a process that got this far: firewall installed, capabilities

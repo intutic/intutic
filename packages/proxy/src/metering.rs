@@ -6,7 +6,7 @@
 //! stays here is the domain type and the pure budget check, neither of which
 //! needs a connection.
 //!
-//! WS5: Hard budget cap enforcement (LLD #20 §4.4) is now
+//! Hard budget cap enforcement is now
 //! `ControlPlaneCache::hard_block`.
 
 use serde::Deserialize;
@@ -36,7 +36,7 @@ pub struct VirtualKeyRecord {
     /// workspace — and lets a key be scoped below it.
     pub models: Vec<String>,
     pub expires: Option<String>,
-    /// The org owning the key's workspace (LLD #71). `None` on cached auth
+    /// The org owning the key's workspace. `None` on cached auth
     /// entries written before the control plane carried the field — a
     /// managed cell (INTUTIC_GATEWAY_ORG_ID set) treats `None` as
     /// "unverified", revalidates via the control plane, and fail-closes if
@@ -122,7 +122,7 @@ pub enum MeteringError {
     ModelNotAllowed,
     #[error("Not implemented")]
     NotImplemented,
-    /// WS5 (LLD #20 §4.4) — workspace hard daily spend cap is active.
+    /// Workspace hard daily spend cap is active.
     /// Set by billingCron.enforceOverageCap() when spend > daily_spend_cap_usd.
     /// Translates to HTTP 429 OVERAGE_HARD_CAP_EXCEEDED.
     #[error("Workspace {workspace_id} is hard-capped: daily spend limit exceeded")]

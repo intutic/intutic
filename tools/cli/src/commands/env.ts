@@ -5,7 +5,7 @@
  * (`launchctl setenv`), Linux (`~/.bashrc`) and Windows (`setx`). It shipped
  * under a ✅ RESOLVED marker with a full test file and **no caller anywhere** —
  * so the capability the entry described could not be invoked. This is the
- * route it never had (TD-041).
+ * route it never had.
  *
  * Deliberately opt-in rather than a side effect of `intutic start` or
  * `intutic connect`: on macOS `launchctl setenv` reaches every GUI application

@@ -1,5 +1,5 @@
 /**
- * openCodeHooks.ts — OpenCode plugin gate (TD-397).
+ * openCodeHooks.ts — OpenCode plugin gate.
  *
  * OpenCode (the open-source terminal coding agent: npm `opencode-ai` 1.x,
  * `@opencode/cli` 2.x) has no hook file, no hook JSON and no stdin/stdout
@@ -57,7 +57,7 @@
  * `provider.<id>.options.baseURL` field there (or `OPENCODE_CONFIG_CONTENT`),
  * and the static `permission` deny map cannot express argument rules — both
  * are documented for the user, not generated. The file's `mcp` block is
- * proxy-wrapped by `mcpAutoWrite.ts` (`injectOpenCode`, TD-487), which edits
+ * proxy-wrapped by `mcpAutoWrite.ts` (`injectOpenCode`), which edits
  * that block and nothing else.
  *
  * ## MCP tool ids
@@ -255,7 +255,7 @@ function intuticEvaluate(toolName, args, sessionID) {
   _intuticSessionId = sessionID || '';
   let tool = String(toolName || 'tool');
   // OpenCode's MCP ids are <server>_<tool>; compose them into the
-  // mcp__<server>__<tool> shape the allowlist reads (TD-487).
+  // mcp__<server>__<tool> shape the allowlist reads.
   if (tool.indexOf('_') > 0) tool = intuticOpenCodeMcpId(tool, intuticOpenCodeMcpServerNames(_intuticConfigDirs));
   if (!args || typeof args !== 'object' || Array.isArray(args)) {
     const reason = '[Intutic Governance] BLOCKED: tool "' + tool + '" was called with arguments the gate cannot read (' +

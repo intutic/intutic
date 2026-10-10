@@ -5,7 +5,7 @@
  * restated by hand in three places — the connector service, the sync cron and
  * the dashboard hook — and the dashboard's copy is what the operator sees in
  * the provider picker, so a provider added server-side was invisible until
- * someone remembered the third copy. `LLD #71` widens the list (Google Drive,
+ * someone remembered the third copy. Policy guardrails widened the list (Google Drive,
  * upload) and moves it here so every reader imports it.
  *
  * `MEMORY_PROVIDERS` is deliberately NOT here: memory providers share the

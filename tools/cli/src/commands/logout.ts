@@ -1,7 +1,6 @@
 /**
  * `intutic logout` — Clear stored credentials.
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

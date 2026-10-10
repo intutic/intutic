@@ -250,7 +250,7 @@ export function processServerLine(
   injectionPatterns: readonly string[] = [],
   disabledTools: readonly string[] = [],
 ): ServerLineOutcome {
-  // Workspace-supplied injection patterns (TD-436), on top of the floor.
+  // Workspace-supplied injection patterns, on top of the floor.
   // Idempotent when the list has not changed, so this is cheap per line.
   setDynamicInjectionPatterns(injectionPatterns)
   const trimmed = raw.trim()
@@ -540,7 +540,7 @@ export class McpGovernanceProxy {
    * (for detection + reask counting), `handleHarnessLine` (for post-decision
    * recording), and this class's own `handleServerLine` (for caching the
    * post-curation tools/list the tool_poisoning detector reads). Since Wave
-   * 5.3 (TD-437) it is also shared ACROSS the session's sibling proxy
+   * 5.3 it is also shared ACROSS the session's sibling proxy
    * processes through `sessionStore` when a Valkey URL is configured — see
    * session.ts's module doc.
    */
@@ -670,7 +670,7 @@ export class McpGovernanceProxy {
   private wasmWatch: WasmDirWatcher | null = null
 
   /**
-   * Hot reload for `~/.intutic/wasm/` (TD-442): a directory watcher, not a
+   * Hot reload for `~/.intutic/wasm/`: a directory watcher, not a
    * second timer, so a dropped-in rule takes effect within a second instead
    * of at the next 60-second tick. Re-armed on every tick because the
    * directory may not exist when the proxy starts.

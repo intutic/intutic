@@ -398,7 +398,7 @@ describe('command exit status', () => {
     expect(await exitCodeOf(() => runIntegrityVerify('tmr_1', {}))).toBe(1)
   })
 
-  // TD-249: `--against` compares the copy the customer's own bucket holds. The
+  // `--against` compares the copy the customer's own bucket holds. The
   // control plane can re-sign a rewritten root and pass every other check here.
   describe('--against a mirrored copy', () => {
     const matchRecompute = { ok: true, verdict: 'match', storedRoot: 'a', recomputedRoot: 'a', changedTraceIds: [], missingTraceIds: [] }

@@ -1,7 +1,7 @@
 /**
  * A cited guardrail in SHADOW reaches the developer's machine at severity
  * `warn`, and the emitted gate does exactly what "shadow" promises: it logs
- * `tool_flagged … [sop.guardrail.<id>]` and exits 0 (LLD #71, Wave 4). The
+ * `tool_flagged … [sop.guardrail.<id>]` and exits 0. The
  * same rule after promotion exits 2 with the cited passage on stderr. And the
  * denominator exists: the writer logs `tool_allowed` for every allowed call,
  * the flagged one included, so a shadow period can be measured.

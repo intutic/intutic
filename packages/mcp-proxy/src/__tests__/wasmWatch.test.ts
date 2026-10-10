@@ -13,7 +13,7 @@ function tmp(): string {
   return d
 }
 
-describe('watchWasmDir (TD-442)', () => {
+describe('watchWasmDir', () => {
   it('returns null for a directory that does not exist', () => {
     expect(watchWasmDir(path.join(os.tmpdir(), 'nope-' + Date.now()), () => {})).toBeNull()
   })

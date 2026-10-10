@@ -35,7 +35,7 @@
  * apps/docs/integrations/agentcore.md's deployment walkthrough for how.
  *
  * # Short-circuit + streaming behaviour (corrections to an earlier
- * assumption-only pass — see TD-430)
+ * assumption-only pass)
  *
  * An earlier, non-live-verified pass assumed "buffered request/response
  * only, no streaming" as a blanket AgentCore Gateway interceptor limitation.

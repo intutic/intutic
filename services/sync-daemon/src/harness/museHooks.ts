@@ -24,7 +24,7 @@
  * the same two-tier shape `codexHooks.ts` uses for Codex's user+project
  * `hooks.json` files — see that module's doc comment.
  *
- * ## The block/deny wire contract is UNVERIFIED — see TD-362
+ * ## The block/deny wire contract is UNVERIFIED
  *
  * Muse Code's own documentation does not state whether a PreToolUse/
  * PermissionRequest hook refuses via a non-zero exit code or a JSON object on
@@ -33,8 +33,8 @@
  * package registry entry found). This writer uses the **same exit-2 contract
  * `codexHooks.ts` uses** — the closest architectural analog (a JS gate reading
  * JSON on stdin, registered at both a project and a user-scoped `hooks.json`)
- * — rather than inventing a new one. TD-362 records this as an explicit
- * assumption pending real installation.
+ * — rather than inventing a new one. This is an explicit assumption pending
+ * real installation.
  *
  * @module
  */
@@ -71,7 +71,7 @@ function buildHookScript(proxyUrl: string, workspaceRoot: string, workspaceId: s
  *
  * Registered for PreToolUse AND PermissionRequest — see museHooks.ts's module
  * doc comment for why the block/deny contract below (exit 2) is an ASSUMED
- * contract (TD-362), not a confirmed one.
+ * contract, not a confirmed one.
  */
 ${emitJsFailClosedPrelude({ harness: 'muse-code', contract: 'exit2' })}
 const path = require('path');
@@ -169,7 +169,7 @@ process.stdin.on('end', () => {
  * file `managed_hooks_path` points at — both are assumed to carry the same
  * `{ hooks: { <Event>: [{ matcher, hooks: [{ type, command }] }] } }` shape
  * `codexHooks.ts` established for a Claude-Code-compatible `hooks.json`; see
- * TD-362 for why that shape is an assumption for Muse specifically.
+ * the module doc for why that shape is an assumption for Muse specifically.
  *
  * De-duplication is by command (any entry whose hooks all invoke this gate
  * script is ours and is replaced), matching every other JSON hook writer in

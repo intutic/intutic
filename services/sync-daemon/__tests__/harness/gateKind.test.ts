@@ -54,7 +54,7 @@ describe('gateKindForHarness', () => {
     expect(gateKindForHarness(HarnessType.XIRP)).toBe('delegated')
   })
 
-  it("classifies agentic-orchestrator as 'delegated' — it wraps other CLI backends (two of three gated; see TD-397)", () => {
+  it("classifies agentic-orchestrator as 'delegated' — it wraps other CLI backends (all three gated)", () => {
     expect(gateKindForHarness(HarnessType.AGENTIC_ORCHESTRATOR)).toBe('delegated')
   })
 

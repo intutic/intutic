@@ -11,7 +11,7 @@ Two layers:
     checks the adapter's duck-typed field reads (`.type`,
     `.evaluated_permission`, `.input`, `.mcp_server_name`) against the
     actual shipped shapes, not a hand-rolled guess at them. Locked at
-    `anthropic==1.11.0` since TD-429; the `auto`-policy fixtures below are
+    `anthropic==1.11.0` since the 1.x bump; the `auto`-policy fixtures below are
     VALIDATED (`model_validate`) against its real models.
   * `IntuticSessionConfirmer` is exercised against a small structural
     `_FakeClient` (`.beta.sessions.events.list/send/stream`) — same
@@ -48,7 +48,7 @@ from anthropic.types.beta.sessions import (  # noqa: E402
     BetaManagedAgentsAgentToolUseEvent,
 )
 
-# 1.x-only names (TD-429). Skip just the auto-policy tests on an older pin
+# 1.x-only names. Skip just the auto-policy tests on an older pin
 # rather than the whole module.
 _sessions_types = pytest.importorskip("anthropic.types.beta.sessions")
 HAS_AUTO_POLICY = hasattr(_sessions_types, "BetaManagedAgentsAgentToolEvaluationAuto")
@@ -416,7 +416,7 @@ class TestIntuticSessionConfirmer:
         assert [c["tool_use_id"] for c in sent] == ["t1", "t2"]
         assert sent[1]["result"] == "deny"
 
-    # ── TD-428: reconnect ──────────────────────────────────────────────
+    # ── reconnect ──────────────────────────────────────────────
 
     def test_watch_reopens_a_dropped_stream_and_confirms_each_id_once(self, tmp_path, monkeypatch):
         g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
@@ -510,7 +510,7 @@ class TestIntuticSessionConfirmer:
 
 
 # ---------------------------------------------------------------------------
-# TD-429: the 1.x `auto` permission policy and cross-posted subagent pauses.
+# The 1.x `auto` permission policy and cross-posted subagent pauses.
 # ---------------------------------------------------------------------------
 
 def _validated_tool_use(**fields: Any) -> BetaManagedAgentsAgentToolUseEvent:

@@ -4,7 +4,6 @@
  * Credentials are stored with mode 0o600 (owner-only read/write).
  * Parent directories are created automatically.
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

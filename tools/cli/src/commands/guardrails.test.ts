@@ -1,5 +1,5 @@
 /**
- * `intutic guardrails` (LLD #71, Wave 6) — the wire path, headers and body
+ * `intutic guardrails` — the wire path, headers and body
  * of each command are pinned against a stubbed `fetch`, the way
  * `findings.test.ts` does it. The client validates what the server would
  * refuse before any request is made, and a 409 prints the server's own
@@ -156,7 +156,7 @@ describe('intutic guardrails show', () => {
     expect(out).toContain('PROPOSED (system)')
   })
 
-  it('a settings-class guardrail prints the setting it writes, and for egress that it applies without shadow evidence (TD-474 item 2)', async () => {
+  it('a settings-class guardrail prints the setting it writes, and for egress that it applies without shadow evidence', async () => {
     fetchMock.mockResolvedValueOnce(
       ok({
         guardrail: {
@@ -267,7 +267,7 @@ describe('intutic guardrails reject / replay', () => {
     expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual({ reason: 'duplicates a hand-written SOP' })
   })
 
-  it('replay names an egress allow list\'s missing source instead of reporting zero fires as a measurement (TD-474 item 2)', async () => {
+  it('replay names an egress allow list\'s missing source instead of reporting zero fires as a measurement', async () => {
     fetchMock.mockResolvedValue(ok({ replay: { source: 'none', windowDays: 30, captured: 0, fires: 0, sample: [], truncated: false, unsupported: ["egress_allow: no egress observation source; would-deny decisions stay in the proxy's local log"] } }))
     await runGuardrailsReplay('pgr_e', {})
     expect(printed()).toContain('nothing captured can answer this')

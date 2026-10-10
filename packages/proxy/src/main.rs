@@ -81,7 +81,7 @@ fn egress_enforce_config_from_flags(
 }
 
 /// `intutic-proxy enforce <generate|apply|remove|status>` — the L2 host
-/// firewall (LLD #63 §5). `generate` prints the ruleset (no privilege);
+/// firewall. `generate` prints the ruleset (no privilege);
 /// `apply`/`remove` change the host firewall (privileged); `status` reports.
 fn handle_enforce(args: &[String]) -> anyhow::Result<()> {
     let sub = args.first().map(String::as_str).unwrap_or("status");
@@ -182,8 +182,8 @@ async fn main() -> anyhow::Result<()> {
             let tracer = provider.tracer("intutic-proxy");
             let layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
-            // Metrics: same endpoint, same gate, mirror of the tracer pattern
-            // (TD-161). Push over OTLP — see metrics.rs for why there is no
+            // Metrics: same endpoint, same gate, mirror of the tracer pattern.
+            // Push over OTLP — see metrics.rs for why there is no
             // /metrics pull endpoint. Installed as the global provider BEFORE any
             // instrument is first used: metrics.rs's LazyLock instruments bind
             // whichever provider is global at first deref, and the first deref is
@@ -251,7 +251,7 @@ async fn main() -> anyhow::Result<()> {
     // `azure/…`) become aliases the router resolves (`cloud::resolve`).
     intutic_proxy::cloud::install_aliases(&config.model_list);
 
-    // Install the L1 egress policy (LLD #63 §4) before the first request. The
+    // Install the L1 egress policy before the first request. The
     // mode is logged at boot so an operator running in Enforce sees it in the
     // first lines of log, not after the first denied connection.
     //
@@ -322,7 +322,7 @@ async fn main() -> anyhow::Result<()> {
         ),
     }
 
-    // Install the L2 hosted-gateway front door (LLD #64 §2, TD-334 increment 2)
+    // Install the L2 hosted-gateway front door
     // before the first request. Off by default — a single-tenant local proxy or
     // an enterprise self-hosted deployment keeps today's behaviour (any bearer
     // token accepted, opportunistic credential capture for a developer's own
@@ -344,14 +344,14 @@ async fn main() -> anyhow::Result<()> {
     }
     if gateway::requires_provisioned_key() && gateway::gateway_config().provisioned_key_paid_only {
         tracing::warn!(
-            "Gateway front door: REQUIRE_PROVISIONED_KEY=paid (LLD #64 §4) — a workspace the \
+            "Gateway front door: REQUIRE_PROVISIONED_KEY=paid — a workspace the \
              control plane marks byokRequired (paid plan, not in a trial, not exempt) with no \
              provisioned upstream API key is refused with 402; trials and exempt workspaces \
              ride this pod's shared provider key."
         );
     } else if gateway::requires_provisioned_key() {
         tracing::warn!(
-            "Gateway front door: REQUIRE_PROVISIONED_KEY (LLD #64 §4) — a workspace with no \
+            "Gateway front door: REQUIRE_PROVISIONED_KEY — a workspace with no \
              deliberately provisioned upstream API key is refused with 402 rather than falling \
              back to this pod's shared provider key."
         );
@@ -596,7 +596,7 @@ async fn main() -> anyhow::Result<()> {
         context_snapshot_rate,
     };
 
-    // Self-hosted gateway heartbeat (LLD #66, gateway phase 4) — opt-in via
+    // Self-hosted gateway heartbeat — opt-in via
     // INTUTIC_GATEWAY_TOKEN/INTUTIC_GATEWAY_ID, both set together when the
     // dashboard's gateway registration flow provisions this deployment.
     // Absent (the default: SaaS gateway, single-tenant local proxy, or a

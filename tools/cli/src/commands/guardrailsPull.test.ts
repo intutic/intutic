@@ -1,5 +1,5 @@
 /**
- * `intutic guardrails pull` (LLD #71, Wave 9): the served projection becomes
+ * `intutic guardrails pull`: the served projection becomes
  * flat `guardrail-<id>.md` files whose single fence still holds the
  * enforcing keys and `mode: shadow` beside the pull marker — read back both
  * by `parseSopFile` (the CLI's own dirty check) and by the TypeScript mirror
@@ -23,7 +23,7 @@ const projected = (id: string, lines: string, shadow: boolean) => ({
   markdownContent: renderGuardrailSopFile({
     lines,
     title: 'Engineering handbook',
-    body: '> Agents do not fetch external web pages.\n\nProjected from the cited policy passage above (LLD #71); the front-matter keys are what the proxy enforces.',
+    body: '> Agents do not fetch external web pages.\n\nProjected from the cited policy passage above; the front-matter keys are what the proxy enforces.',
     sourceUrl: 'https://wiki.acme.dev/handbook',
     cite: 'a'.repeat(64),
     shadow,

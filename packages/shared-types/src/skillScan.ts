@@ -38,7 +38,7 @@
  * not allow…") that a tool description never does — precisely the shape
  * this module's patterns key on.
  *
- * **Measured since (TD-358):** `src/__tests__/corpus/skills/` vendors 350
+ * **Measured since:** `src/__tests__/corpus/skills/` vendors 350
  * real, benign `SKILL.md` files from four MIT/Apache-2.0 skill collections
  * at pinned commits (provenance, licences and bias statement in that
  * directory's `PROVENANCE.md`; the reviewed result in `BASELINE.txt`).
@@ -60,7 +60,7 @@
  * measurement is {@link SKILL_CONTENT_BLOCK_PATTERN_IDS}: the zero-hit
  * patterns, shipped to the tool-call gates through the sync daemon's policy
  * snapshot (`skill_content.*`, see `services/sync-daemon/src/lib/policySnapshot.ts`)
- * where one sync cycle retracts them. See `docs/TECH_DEBT.md` TD-358.
+ * where one sync cycle retracts them.
  *
  * # Fixture discipline
  *
@@ -101,7 +101,7 @@ export type SkillScanCategory = 'prompt_injection' | 'data_exfiltration' | 'mali
  * scanner (and `scriptScan.ts`'s, which reuses this union);
  * `'cisco-skill-scanner'` is the separate, opt-in Cisco `skill-scanner`
  * integration (Phase S3, `tools/cli/src/lib/ciscoScanner.ts`) — the
- * genuinely deeper AST/dataflow analysis TD-356 named as the eventual
+ * genuinely deeper AST/dataflow analysis long named as the eventual
  * follow-up to this phase's pattern matching. Optional, not required: a
  * finding from before this field existed has no engine tag, which is fine —
  * absence has always meant "this codebase's own scanner," now made explicit.

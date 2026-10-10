@@ -6,7 +6,6 @@
  * proxy processes and hook scripts pick up changes without restarting.
  *
  * WS-5 — Q1 (fail behavior), Q2 (proxy mode), Q3 (bypass enforcement)
- * TD-151, TD-153, TD-154
  *
  * @module
  */
@@ -77,7 +76,7 @@ export interface WorkspaceSettings {
    * `null` disables the gate. Defaults to 30 days. SCIM provisioning was removed,
    * so nothing reconciles membership against the identity provider: without this,
    * removing a developer at the IdP stops their dashboard login but not their
-   * agents, because API-key auth never consults SSO (TD-218). Setting it makes IdP
+   * agents, because API-key auth never consults SSO. Setting it makes IdP
    * removal expire the keys on its own.
    *
    * Opt-in on purpose — a CI key belongs to a member who may never log in
@@ -141,7 +140,7 @@ export interface WorkspaceSettings {
    *
    * Applies to 8/19 harnesses (those with MCP proxy injection — 9 config
    * paths across 8 harnesses, see sync-daemon mcpAutoWrite.ts).
-   * See TD-151 for the harnesses this does not reach.
+   * The other harnesses have no MCP proxy to fail, so this does not reach them.
    */
   mcpProxyFailBehavior: McpProxyFailBehavior
 
@@ -152,7 +151,7 @@ export interface WorkspaceSettings {
    *   MCP connection. Policy is fetched from control plane at startup with a
    *   60s in-process TTL.
    * - `'daemon'` (active): a long-lived proxy daemon shares its policy cache
-   *   across all MCP sessions. Requires macOS notarization. See TD-153.
+   *   across all MCP sessions. Requires macOS notarization.
    *
    * The sync-daemon writes this value through verbatim to
    * ~/.intutic/env/runtime.env (lib/runtimeEnv.ts) and the MCP proxy honours
@@ -171,7 +170,7 @@ export interface WorkspaceSettings {
    *   governance incident.
    * - `'immutable'`  (opt-in, macOS only): after writing, sets `chflags uchg`
    *   on the config file. Direct edits fail immediately. The flag is cleared
-   *   before the next sync write. See TD-154 for UX risk.
+   *   before the next sync write.
    * - `'alert-only'`: drift triggers a governance incident but does NOT rewrite
    *   the config. For teams that want audit logs without enforced reversion.
    */
@@ -342,7 +341,7 @@ export interface WorkspaceSettings {
 
   /**
    * Central egress-enforcement posture, distributed to this workspace's proxies
-   * (LLD #63 §4). One of `'off'` | `'monitor'` | `'enforce'`. When set, the
+   * One of `'off'` | `'monitor'` | `'enforce'`. When set, the
    * sync-daemon writes it to `.intutic/hooks/egress-policy.json` and the proxy
    * hot-reloads it, so an admin sets the mode once here rather than in each
    * developer's local config. Undefined leaves the proxy on its local config /
@@ -437,7 +436,7 @@ export interface WorkspaceSettings {
 
   /**
    * Workspace-supplied prompt-injection regex sources for the MCP governance
-   * proxy (TD-436), on top of its hardcoded floor. Delivered with the rest of
+   * proxy, on top of its hardcoded floor. Delivered with the rest of
    * the MCP curation; the proxy compiles them and drops one that does not.
    * Absent or empty means the floor alone.
    */
@@ -475,7 +474,7 @@ export interface WorkspaceSettings {
   mcpHighRiskToolChange?: 'notify' | 'hold'
 
   /**
-   * Negotiated per-token rates, by model id, in USD per 1k tokens (TD-434).
+   * Negotiated per-token rates, by model id, in USD per 1k tokens.
    * The `model_pricing` table is LIST price; a workspace paying below list
    * had every savings figure skewed by the difference. Where a model is
    * listed here it is priced at these rates in the routing shadow-savings
@@ -485,7 +484,7 @@ export interface WorkspaceSettings {
   contractedRates?: Record<string, { inputCostPer1k: number; outputCostPer1k: number }>
 
   /**
-   * Whether agents in this workspace must run inside a sandbox (LLD #63 §6).
+   * Whether agents in this workspace must run inside a sandbox.
    * - `'off'` (default): `intutic exec` runs on the host as before.
    * - `'warn'`: an un-sandboxed `intutic exec` runs but prints a warning.
    * - `'require'`: `intutic exec` refuses to run un-sandboxed and tells the
@@ -534,7 +533,7 @@ export interface WorkspaceSettings {
   }
 
   /**
-   * Server-side trajectory monitoring mode (LLD #52, parallel monitoring).
+   * Server-side trajectory monitoring mode (parallel monitoring).
    * Read by `services/control-plane/src/services/trajectoryAnalysisService.ts`'s
    * `getWorkspaceMonitorMode` on every `/trajectory/analyze` call:
    *
@@ -609,7 +608,7 @@ export interface WorkspaceSettings {
   decisionsLogEnabled?: boolean
 
   /**
-   * Opt-in LLM-based semantic analysis of skill files (Phase S5, TD-357),
+   * Opt-in LLM-based semantic analysis of skill files (Phase S5),
    * on top of the always-on deterministic `scanSkillContent` pattern scan.
    * When true:
    * - The CLI (`intutic skill audit`) attaches the FULL content of a
@@ -632,8 +631,8 @@ export interface WorkspaceSettings {
   semanticSkillAnalysisEnabled?: boolean
 
   /**
-   * Opt-in VirusTotal hash lookup for skill-bundled SCRIPTS (Phase S4,
-   * TD-361). When true, and only when a `connector_credentials` row for
+   * Opt-in VirusTotal hash lookup for skill-bundled SCRIPTS (Phase S4).
+   * When true, and only when a `connector_credentials` row for
    * provider `'virustotal'` is also stored, `POST .../skills/report`
    * fire-and-forget enqueues any reported script sha256 hashes for a
    * `GET /api/v3/files/{sha256}` lookup — never an upload, never SKILL.md
@@ -644,7 +643,7 @@ export interface WorkspaceSettings {
    *
    * Distinct from, and narrower than, this product's standing decline of a
    * global MCP-server-reputation/VirusTotal integration — see
-   * `apps/docs/guide/mcp-governance.md` and `docs/TECH_DEBT.md` TD-359 for
+   * `apps/docs/guide/mcp-governance.md` for
    * that separate decision, which this setting does not reverse.
    */
   virusTotalSkillLookupEnabled?: boolean

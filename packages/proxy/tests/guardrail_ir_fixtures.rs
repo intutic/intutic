@@ -1,5 +1,5 @@
 //! Every Guardrail IR front-matter fixture parses in the proxy to the fields
-//! the IR meant (LLD #71).
+//! the IR meant.
 //!
 //! The `.md` files under `packages/shared-types/fixtures/guardrail-ir/` are
 //! rendered by `packages/shared-types/scripts/generate-guardrail-fixtures.ts`

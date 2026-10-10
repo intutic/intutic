@@ -138,8 +138,8 @@ const POLICY_SOURCE_PROVIDERS = new Set(['notion', 'confluence', 'github', 'gdri
 const COVERAGE_FORMATS: Record<CoverageFormat, string> = { json: 'json', md: 'markdown', csv: 'csv', pdf: 'pdf' }
 
 /**
- * Control-plane management client (LLD #69): the operator APIs the CLI
- * exposes, as distinct from `ClawdeClient`'s data-plane chat calls.
+ * Control-plane management client — org/team/gateway/credentials
+ * administration, as distinct from `ClawdeClient`'s data-plane chat calls.
  *
  * Deliberately a separate class, not new methods on `ClawdeClient`:
  * `ClawdeClient.baseUrl` targets the *proxy* (default `http://localhost:4000`);

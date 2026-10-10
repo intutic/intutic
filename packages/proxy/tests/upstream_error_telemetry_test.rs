@@ -99,7 +99,7 @@ async fn a_5xx_from_the_provider_still_reaches_the_caller_unchanged() {
         .await;
 
     std::env::set_var("ANTHROPIC_UPSTREAM_URL", upstream.uri());
-    // A virtual key is never forwarded upstream (TD-370): the request
+    // A virtual key is never forwarded upstream: the request
     // needs a provider key, so the operator fallback supplies a test one.
     std::env::set_var("ANTHROPIC_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::remove_var("CONTROL_PLANE_URL");
@@ -153,7 +153,7 @@ async fn a_connection_failure_still_resolves_to_a_prompt_502() {
     let _serial = serial();
     // Nothing is listening on this port.
     std::env::set_var("ANTHROPIC_UPSTREAM_URL", "http://127.0.0.1:1");
-    // A virtual key is never forwarded upstream (TD-370): the request
+    // A virtual key is never forwarded upstream: the request
     // needs a provider key, so the operator fallback supplies a test one.
     std::env::set_var("ANTHROPIC_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::remove_var("CONTROL_PLANE_URL");

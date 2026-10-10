@@ -1,5 +1,5 @@
 /**
- * Attenuation & GDPR types — LLD #19 (Enterprise Identity & Compliance)
+ * Attenuation & GDPR types (Enterprise Identity & Compliance)
  *
  * DCT Token Attenuation (Patent Family A), OBO Ephemeral Tokens,
  * PointerMemory GDPR erasure, and SSO Group Privilege Scoping.

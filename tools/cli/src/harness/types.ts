@@ -5,7 +5,6 @@
  * config to its native config file, and read the current file hash.
  *
  * HLD §3.14 — Harness Onboarding Matrix
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

@@ -124,7 +124,7 @@ describe('Grok Build hooks writer', () => {
     for (const reg of [projectReg, userReg]) {
       // CONFIRMED shape (xai_grok_hooks::config::parse_hook_file requires a
       // top-level "hooks" key — a flat {event,command,timeout} record, this
-      // writer's shape before the TD-364 fix, silently parses to ZERO hooks).
+      // writer's shape before the fix, silently parses to ZERO hooks).
       const groups = reg.hooks.PreToolUse
       expect(Array.isArray(groups)).toBe(true)
       expect(groups).toHaveLength(1)

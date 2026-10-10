@@ -1,6 +1,6 @@
 //! End-to-end: a request naming a DeepSeek model reaches DeepSeek's own
 //! upstream, on whichever of DeepSeek's two native wire shapes it arrived in,
-//! with governance applied exactly as for OpenAI and Anthropic (TD-370).
+//! with governance applied exactly as for OpenAI and Anthropic.
 //!
 //! ## Why two wire shapes
 //!

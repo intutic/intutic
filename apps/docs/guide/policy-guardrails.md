@@ -264,8 +264,7 @@ Four ways in, one API:
   most one 30-second cycle per machine.
 - **Extraction fidelity is measured against a recorded golden corpus.** The
   corpus (22 documents, two adversarial) has goldens recorded against a real
-  model; a golden is a real extraction, never hand-written, and its review
-  status is tracked in the open-core repository's tech-debt record. The
+  model; a golden is a real extraction, never hand-written. The
   fidelity test's always-on half checks the corpus and prints how many goldens
   exist; its opt-in live half re-extracts every document and holds it to the
   thresholds (mean F1 at least 0.80, per-document

@@ -151,7 +151,7 @@ pub struct ExecutionTrace {
     /// on a model call that did.
     pub cache_hit: bool,
     /// Input tokens the provider itself read from ITS OWN prompt cache
-    /// (TD-347) — Anthropic's `usage.cache_read_input_tokens`, OpenAI's
+    /// — Anthropic's `usage.cache_read_input_tokens`, OpenAI's
     /// `prompt_tokens_details.cached_tokens`, or Gemini's
     /// `cachedContentTokenCount`, whichever the routed model's provider
     /// reported.
@@ -175,7 +175,7 @@ pub struct ExecutionTrace {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_input_tokens: Option<u32>,
     /// Input tokens the provider itself wrote into ITS OWN prompt cache
-    /// (TD-347) — Anthropic's `usage.cache_creation_input_tokens`. No other
+    /// — Anthropic's `usage.cache_creation_input_tokens`. No other
     /// provider parsed by this proxy reports a cache-write bucket today, so
     /// this is `None` for OpenAI/Gemini traces even when `cache_read_input_tokens`
     /// is populated. Same `cache_hit` distinction and same mandatory
@@ -254,8 +254,8 @@ pub struct ExecutionTrace {
     /// (`injection::extract_scrubbed_snippet`) — narrower than "the matched
     /// text broadly": not the matched phrase alone, not the response, never
     /// before DLP-scrubbing. This is a deliberate, narrow exception to this
-    /// codebase's otherwise-universal never-quote-matched-content discipline
-    /// (see TD-344), made only so an operator can adjudicate a
+    /// codebase's otherwise-universal never-quote-matched-content discipline,
+    /// made only so an operator can adjudicate a
     /// `response_injection:*` finding as TRUE_POSITIVE/FALSE_POSITIVE without
     /// reopening the no-full-response-text-stored discipline this codebase
     /// otherwise holds everywhere: there is still no full response body

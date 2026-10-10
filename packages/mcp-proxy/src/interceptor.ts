@@ -441,7 +441,7 @@ export class ToolCallInterceptor {
           log.warn({ action: 'policy_warn', toolName, ruleId: rule.id, reason: rule.reason }, 'Policy warning (allowing)')
           // Fall through to allow. Reported as `tool_flagged` with the rule id
           // in the reason — the same shape the harness gates use — so a
-          // SHADOW guardrail's evidence (LLD #71) counts this proxy's traffic.
+          // SHADOW guardrail's evidence counts this proxy's traffic.
           this.emitter.emit('tool_flagged', toolName, toolInput, `${rule.reason} [${rule.id}]`)
         }
         if (rule.action === 'require_approval') {
@@ -510,7 +510,7 @@ export class ToolCallInterceptor {
     // built) and allow.
     const anomalyMode: AnomalyMode = this.policy.getAnomalyMode() ?? this.anomalyModeDefault
     // The session window — the shared one across this session's sibling
-    // proxy processes when a store is configured (Wave 5.3, TD-437), the
+    // proxy processes when a store is configured (Wave 5.3), the
     // per-process one otherwise. One round trip at most per tools/call, and
     // none when nothing below would read it.
     const window = anomalyMode !== 'off' || this.wasmRunner ? await this.session.loadWindow(toolName) : undefined

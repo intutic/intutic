@@ -77,7 +77,7 @@ export const HARNESS_FILES: Record<HarnessType, string> = Object.fromEntries(
  * The workspace's local SOPs (`.intutic/sops/<dir>/*.md`, narrowed by
  * `session-context.json`'s `activeLocalSops` when present). Read by the
  * gate-cache refresh, which compiles their
- * `review_before:` tokens into hold rules (TD-474 item 4). A missing
+ * `review_before:` tokens into hold rules. A missing
  * directory is an empty list.
  */
 export async function loadLocalSopEntries(workspaceRoot: string, harnesses: HarnessType[]): Promise<SyncSopEntry[]> {
@@ -169,8 +169,7 @@ export interface ConfigEditOperationOutcome {
 
 /**
  * Per-suggestion result of `applyConfigEdits` — what the daemon reports back
- * to control-plane via `POST /api/v1/skillopt/:suggestionId/apply-result`
- * (TD-349).
+ * to control-plane via `POST /api/v1/skillopt/:suggestionId/apply-result`.
  */
 export interface ConfigEditApplyOutcome {
   suggestionId: string
@@ -182,7 +181,7 @@ export interface ConfigEditApplyOutcome {
 /**
  * Apply a list of custom config edits (ADD, DELETE, REPLACE) to a workspace rule file.
  *
- * Returns one `ConfigEditApplyOutcome` per input suggestion (TD-349) instead
+ * Returns one `ConfigEditApplyOutcome` per input suggestion instead
  * of `void` — every operation's real fate (fuzzy-match miss on DELETE/
  * REPLACE, an unresolvable target file, or the final `atomicWrite` itself
  * failing) is recorded here rather than only `console.warn`'d, so the caller

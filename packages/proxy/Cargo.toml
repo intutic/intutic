@@ -110,7 +110,7 @@ rand_distr = "0.4"
 tokio-stream = "0.1"
 futures-util = "0.3"
 
-# Phase 7: Token Intelligence (LLD #47)
+# Phase 7: Token Intelligence
 tiktoken-rs = "0.6"
 # TLS MITM for Windsurf Cascade AI governance
 rcgen = { version = "0.13", features = ["pem"] }

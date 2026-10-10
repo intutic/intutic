@@ -274,7 +274,7 @@ function sameValue(a: unknown, b: unknown): boolean {
 
 /**
  * Which fields of the customer's mirrored copy disagree with what the control
- * plane serves for the same root (TD-249).
+ * plane serves for the same root.
  *
  * This is the check that does not depend on trusting the operator: the copy
  * was written to a bucket the customer owns at seal time, and the comparison
@@ -865,7 +865,7 @@ export async function runIntegrityChain(opts: IntegrityCliOpts): Promise<void> {
 /**
  * `intutic integrity config-chain` — walk the harness config snapshot chain.
  *
- * The TD-232 verifier, reached from the product rather than from a hand-written
+ * The snapshot-chain verifier, reached from the product rather than from a hand-written
  * curl. `content_hash` and `previous_hash` are written on every config snapshot
  * and were read only to find a diff predecessor, so for months a snapshot could
  * be deleted, or its body rewritten under its stored hash, and every reader

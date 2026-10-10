@@ -62,7 +62,7 @@
  *
  * ## 3. `needsApproval` runs in the workflow VM — the gate must run in a step
  *
- * Observed in a live run on the Workflow DevKit's local world (TD-498):
+ * Observed in a live run on the Workflow DevKit's local world:
  * `WorkflowAgent`'s loop runs inside the `"use workflow"` function, so it
  * calls `needsApproval` in the workflow VM, which has no Node.js modules.
  * `Gate` reads its policy snapshot with `node:fs`, so evaluating it there

@@ -3,7 +3,6 @@
  *
  * Prints tailored, step-by-step setup guides for each detected harness.
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 
@@ -238,7 +237,7 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
         // Same "orchestrator, not an agent, writes no config of its own"
         // shape as xirp above — see gateRegistry.ts's NO_GATE row. All three
         // wrapped backends are gated by their own adapters (OpenCode since
-        // TD-397 closed).
+        // 2026-09-23).
         writeCliOutput(`  Agentic Orchestrator orchestrates other CLI backends (Claude Code, Codex,`)
         writeCliOutput(`  and OpenCode) — connect the backend(s) you use normally, against the`)
         writeCliOutput(`  repo's main checkout. Intutic's sync daemon automatically propagates each`)
