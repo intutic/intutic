@@ -107,10 +107,9 @@ pub(crate) fn parse_sso_profile(
             ))));
         };
         (get(s, "sso_start_url"), get(s, "sso_region"), session)
-    } else if let Some(url) = get(p, "sso_start_url") {
-        (Some(url.clone()), get(p, "sso_region"), url)
     } else {
-        return None;
+        let url = get(p, "sso_start_url")?;
+        (Some(url.clone()), get(p, "sso_region"), url)
     };
     let missing = |what: &str| {
         AuthError::rejected(format!(
