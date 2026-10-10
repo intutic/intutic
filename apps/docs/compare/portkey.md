@@ -22,6 +22,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Caching** | Exact and semantic cache, both off until a workspace turns them on; the semantic cache also needs an embedding service and TurboVec | Simple cache on every plan; semantic cache on select Enterprise plans per its docs, though its pricing page lists it under Production |
 | **Budgets** | Daily spend caps enforced before a request leaves; a loop run that exceeds its budget is stopped | Budget and rate limits on paid plans |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, verifiable in the browser or CLI | Request and response logs, kept 3 days on Developer and 30 days on Production; admin audit logs on Enterprise. No cryptographic sealing documented |
+| **Stored provider keys** | Envelope encryption (AES-256-GCM, a data key per value) under a key derived from your deployment's `ENCRYPTION_KEY`, rotatable; every change to a provider key or virtual key is recorded and streamed to SIEM. A cloud KMS key is not supported yet | Envelope encryption under your own AWS KMS key on Enterprise |
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | Hosted, or hybrid with the data plane in your VPC and the control plane hosted by Portkey (or in Palo Alto Networks Strata Cloud Manager). Fully air-gapped deployment is no longer offered to new customers. The open-source gateway still self-hosts |
 | **Pricing** | [Published plans](/guide/plans); the open core is free | Developer free (10k logs a month); Production $49 a month plus $9 per extra 100k logs; Enterprise by quote through Palo Alto Networks |
 | **Source** | Open core (MIT) | The open-source gateway is MIT, last released as v1.15.2 on 2026-01-12 with no merges since 2026-05-25; the Enterprise Gateway (v2.28.0 on 2026-10-08) is closed |
@@ -32,6 +33,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 - **Gateway-level guardrails for any application.** Inline checks on every model call, whether or not the caller is an agent.
 - **Ecosystem.** About 25 partner guardrails (among them Prisma AIRS, Lakera, Pangea, Pillar, Lasso and Bedrock) plus a webhook guardrail, and prompt management with versioning and a playground. Intutic has neither, and its rules do not call third-party decision services.
 - **Central MCP authentication.** Its MCP Gateway signs agents in through your identity provider and injects OAuth or API credentials into upstream servers. Intutic's MCP proxy passes static headers to remote servers and brokers no OAuth.
+- **Customer-managed KMS keys.** Stored provider keys can be encrypted under a key you hold in AWS KMS.
 - **Compliance attestations.** Portkey states SOC 2, ISO 27001, GDPR and HIPAA compliance and ships FIPS 140-3 images for its Enterprise Gateway. Intutic claims no attestation for its own service.
 - **Entry price.** A free Developer tier and a $49-a-month Production tier. Intutic's open core is free, but its connected plans start far higher.
 - **Platform backing.** As Prisma AIRS AI Gateway, it sits inside Palo Alto Networks' AI security portfolio.

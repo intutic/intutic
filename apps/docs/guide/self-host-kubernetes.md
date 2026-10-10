@@ -183,3 +183,18 @@ helm upgrade intutic oci://ghcr.io/intutic/charts/intutic --version <new version
 
 The migration Job runs first; a failed migration leaves the running release
 untouched.
+
+From 2.4.0 the proxy opens the provider keys the control plane stores
+encrypted, and the control plane encrypts them only once a proxy holding the key
+has started. `helm upgrade` rolls the proxy and the control plane together, so
+until the proxy's rollout finishes, a pod from the previous release can still
+receive a request for a workspace whose key is already encrypted; that request
+fails with the provider's authentication error. To avoid it, upgrade the proxy
+first, wait for its rollout, then upgrade the rest:
+
+```bash
+kubectl -n intutic set image deploy/intutic-proxy proxy=ghcr.io/intutic/proxy:<new version>
+kubectl -n intutic rollout status deploy/intutic-proxy
+helm upgrade intutic oci://ghcr.io/intutic/charts/intutic --version <new version> \
+  --namespace intutic --reuse-values
+```

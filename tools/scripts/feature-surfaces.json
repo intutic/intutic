@@ -869,6 +869,46 @@
     },
     {"id": "custom-rule-limits", "title": "Custom WASM and Rego rule limits, fail mode and load failures", "plan": "Open-Core", "surfaces": {"api": [{"ref": "POST /api/v1/wasm-rules", "badge": false, "auth": "OWNER/ADMIN"}], "dashboard": [{"file": "apps/dashboard/src/routes/WasmRulesPage.tsx"}], "cli": [{"ref": "rules test", "badge": false}, {"ref": "policy test", "badge": false}, {"ref": "policy install", "badge": false}, {"file": "tools/cli/src/commands/rules.ts", "contains": "loadMeteredRegoRule"}, {"file": "tools/cli/src/commands/policy.ts", "contains": "meterFuel(new Uint8Array(wasmBuffer), budget)"}], "gateSdk": {"none": "gates never run WASM or Rego rules"}, "clawdeSdk": ["GOVERNANCE_UNAVAILABLE"], "mcpTools": {"none": "enforced inside the proxies, not exposed as a tool"}, "kitkat": ["GOVERNANCE_UNAVAILABLE"], "terraform": ["intutic_wasm_rule"], "docs": [{"ref": "guide/wasm-rules.md#sandboxing-resource-limits", "badge": false}, {"ref": "guide/wasm-rules.md#when-a-rule-reaches-no-verdict", "badge": false}, {"ref": "guide/rego-policies.md#limits", "badge": false}], "website": [{"file": "index.html", "contains": "fuel-limited WASM sandbox, which enforces a hard fuel and wall-clock limit per rule"}], "events": [{"ref": "incident.created", "badge": false}], "enforcement": ["proxy:GOVERNANCE_UNAVAILABLE", "mcp:GOVERNANCE_UNAVAILABLE", {"file": "packages/proxy/src/wasm/limits.rs"}, {"file": "packages/shared-types/src/wasmFuel.ts", "contains": "REGO_FUEL_BUDGET"}, {"file": "packages/shared-types/src/ruleLoadFailures.ts", "contains": "RULE_LOAD_FAILURE_REASONS"}, {"file": "services/control-plane/src/lib/valkeySubscriber.ts", "contains": "wasm_rule_refused"}]}},
     {"id": "hook-gate-deadlines", "title": "Per-harness hook gate deadlines", "plan": "Open-Core", "surfaces": {"api": {"none": "set in each harness's hook registration on the machine"}, "dashboard": {"none": "a machine-local setting"}, "cli": [{"ref": "connect", "badge": false}, {"file": "tools/cli/src/commands/connect.ts"}], "gateSdk": [{"file": "packages/gate-js/src/limits.ts", "contains": "GATE_DEADLINE_MS"}], "clawdeSdk": {"none": "the chat client does not run a hook gate"}, "mcpTools": {"none": "a machine-local setting"}, "kitkat": {"none": "the deadline refusal is a hook-gate code, explained in its reason"}, "terraform": {"none": "a machine-local setting"}, "docs": [{"ref": "reference/harness-security-matrix.md#hook-timeouts", "badge": false}], "website": {"none": "not described on the website"}, "events": {"none": "a deadline refusal is a gate decision, recorded as one"}, "enforcement": ["hook:GATE_DEADLINE", {"file": "packages/shared-types/src/gateLimits.ts", "contains": "HOOK_GATE_TIMEOUTS"}]}},
-    {"id": "gate-self-protection", "title": "Gate self-protection: protected files, snapshot self-heal, Copilot hook settings, TAMPER", "plan": "Open-Core", "surfaces": {"api": [{"ref": "POST /api/v1/hook-events", "badge": false}], "dashboard": [{"file": "apps/dashboard/src/routes/IncidentsPage.tsx", "contains": "Gate verdict"}, {"file": "apps/dashboard/src/components/settings/AddSiemDestinationModal.tsx", "contains": "GATE_DECISION_VERDICTS"}], "cli": [{"ref": "connect", "badge": false}], "gateSdk": ["POLICY_SNAPSHOT_UNVERIFIED"], "clawdeSdk": {"none": "the chat client has no gate files to protect"}, "mcpTools": {"none": "enforced by the sync daemon and the gates"}, "kitkat": ["POLICY_SNAPSHOT_UNVERIFIED"], "terraform": {"none": "machine-local files"}, "docs": [{"ref": "integrations/github-copilot.md#keeping-the-hook-on", "badge": false}, {"file": "apps/docs/guide/siem-export.md", "contains": "TAMPER"}], "website": {"none": "not described on the website"}, "events": [{"ref": "siem:gate_decisions", "badge": false}], "enforcement": ["hook:BUILT_IN_RULE", "hook:POLICY_SNAPSHOT_UNVERIFIED", {"file": "services/sync-daemon/src/harness/protectedPaths.ts"}, {"file": "services/sync-daemon/src/watcher/settingsGuard.ts"}, {"file": "services/sync-daemon/src/watcher/vscodeHookSettings.ts"}, {"file": "packages/shared-types/src/gateDecisions.ts", "contains": "TAMPER"}]}}
+    {"id": "gate-self-protection", "title": "Gate self-protection: protected files, snapshot self-heal, Copilot hook settings, TAMPER", "plan": "Open-Core", "surfaces": {"api": [{"ref": "POST /api/v1/hook-events", "badge": false}], "dashboard": [{"file": "apps/dashboard/src/routes/IncidentsPage.tsx", "contains": "Gate verdict"}, {"file": "apps/dashboard/src/components/settings/AddSiemDestinationModal.tsx", "contains": "GATE_DECISION_VERDICTS"}], "cli": [{"ref": "connect", "badge": false}], "gateSdk": ["POLICY_SNAPSHOT_UNVERIFIED"], "clawdeSdk": {"none": "the chat client has no gate files to protect"}, "mcpTools": {"none": "enforced by the sync daemon and the gates"}, "kitkat": ["POLICY_SNAPSHOT_UNVERIFIED"], "terraform": {"none": "machine-local files"}, "docs": [{"ref": "integrations/github-copilot.md#keeping-the-hook-on", "badge": false}, {"file": "apps/docs/guide/siem-export.md", "contains": "TAMPER"}], "website": {"none": "not described on the website"}, "events": [{"ref": "siem:gate_decisions", "badge": false}], "enforcement": ["hook:BUILT_IN_RULE", "hook:POLICY_SNAPSHOT_UNVERIFIED", {"file": "services/sync-daemon/src/harness/protectedPaths.ts"}, {"file": "services/sync-daemon/src/watcher/settingsGuard.ts"}, {"file": "services/sync-daemon/src/watcher/vscodeHookSettings.ts"}, {"file": "packages/shared-types/src/gateDecisions.ts", "contains": "TAMPER"}]}},
+    {
+      "id": "credential-encryption-and-audit",
+      "title": "Stored provider keys encrypted with a rotatable key; credential changes recorded",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/provider-credentials/:provider", "auth": "OWNER/ADMIN" },
+          { "ref": "DELETE /api/v1/workspace/provider-credentials/:provider", "auth": "OWNER/ADMIN" },
+          { "ref": "POST /api/v1/keys", "badge": false },
+          { "ref": "DELETE /api/v1/keys/:id", "badge": false },
+          { "ref": "GET /api/v1/audit/timeline", "auth": "OWNER/ADMIN", "badge": false }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/routes/AuditTimelinePage.tsx", "contains": "credentialChangeTitle" },
+          { "file": "apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx", "contains": "credential.changed" },
+          { "file": "apps/dashboard/src/components/settings/EditSiemSourcesModal.tsx", "contains": "credential_changes" }
+        ],
+        "cli": [{ "ref": "credentials set", "badge": false }, { "ref": "credentials unset", "badge": false }],
+        "gateSdk": { "none": "not agent-facing" },
+        "clawdeSdk": { "none": "not agent-facing" },
+        "mcpTools": { "none": "not agent-facing" },
+        "kitkat": { "none": "not agent-facing" },
+        "terraform": [{ "ref": "intutic_virtual_key", "badge": false }],
+        "docs": [
+          "security.md#stored-credentials",
+          { "ref": "guide/self-host.md#rotate-the-encryption-key", "badge": false },
+          { "ref": "guide/audit-timeline.md#what-it-shows", "badge": false }
+        ],
+        "website": { "none": "a security detail the docs carry; the landing page names no storage scheme" },
+        "events": ["credential.changed", "siem:credential_changes"],
+        "enforcement": [
+          { "file": "services/control-plane/src/lib/credentialEncryption.ts", "contains": "enc:v1:" },
+          { "file": "packages/proxy/src/credential_crypto.rs", "contains": "enc:v1:" },
+          { "file": "services/control-plane/src/services/credentialEncryptionBackfill.ts", "contains": "proxyKeyReadiness" },
+          { "file": "services/control-plane/src/services/secretReencryption.ts" },
+          { "file": "packages/proxy/src/store/valkey.rs", "contains": "CREDENTIAL_KEYS_ANNOUNCE_PREFIX" },
+          { "file": "services/control-plane/src/services/credentialChangeService.ts" }
+        ]
+      }
+    }
   ]
 }

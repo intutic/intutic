@@ -24,6 +24,7 @@ use super::{
     FeatureFlags, HardCapStatus, JudgeScope, LocalStore, NotifyScope, Ownership, PinScope,
     PinnedSopBlock, RuleRefusalReport, SessionRouting, TokenBaseline,
 };
+use crate::credential_crypto::{self, CredentialKeyring};
 use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
 use crate::routing::mirror::MirrorPairEvent;
@@ -274,9 +275,56 @@ fn response_key(hash: &str) -> String {
     format!("cache:response:{}", hash)
 }
 
+/// Where a proxy says which credential keys it holds, one key per process.
+///
+/// The control plane reads these before it re-encrypts the provider
+/// credentials in this Valkey (`credentialEncryptionBackfill.ts`): it waits
+/// until at least one proxy has announced and every announcing proxy holds the
+/// current key, so a value is never sealed under a key a running proxy lacks.
+/// A proxy without `ENCRYPTION_KEY` announces an empty list, which holds the
+/// control plane back for as long as it runs.
+pub const CREDENTIAL_KEYS_ANNOUNCE_PREFIX: &str = "credential-keys:proxy:";
+
+/// An announcement outlives three missed refreshes, then a stopped proxy drops out.
+const CREDENTIAL_KEYS_ANNOUNCE_TTL_SECS: u64 = 90;
+
+/// Announce, once, the ids of the keys this proxy can open (current first).
+pub async fn announce_credential_keys(
+    conn: &ConnectionManager,
+    instance: &str,
+    key_ids: &[String],
+) -> redis::RedisResult<()> {
+    let mut conn = conn.clone();
+    conn.set_ex(
+        format!("{CREDENTIAL_KEYS_ANNOUNCE_PREFIX}{instance}"),
+        key_ids.join(","),
+        CREDENTIAL_KEYS_ANNOUNCE_TTL_SECS,
+    )
+    .await
+}
+
+/// Keep announcing for the life of the process.
+pub fn spawn_credential_key_announcer(conn: Arc<ConnectionManager>, key_ids: Vec<String>) {
+    let instance = uuid::Uuid::new_v4().to_string();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(
+            CREDENTIAL_KEYS_ANNOUNCE_TTL_SECS / 3,
+        ));
+        loop {
+            tick.tick().await;
+            if let Err(e) = announce_credential_keys(&conn, &instance, &key_ids).await {
+                tracing::warn!("could not announce this proxy's credential keys: {e}");
+            }
+        }
+    });
+}
+
 pub struct ValkeyStore {
     conn: Arc<ConnectionManager>,
     update_script: redis::Script,
+    /// Opens the encrypted values in `workspace:credentials:{ws}`; `None` when
+    /// this proxy has no `ENCRYPTION_KEY`.
+    credential_keys: Option<Arc<CredentialKeyring>>,
 }
 
 /// The workspace's daily spend counter, as the **control plane** names it.
@@ -309,7 +357,14 @@ impl ValkeyStore {
         Self {
             conn,
             update_script: redis::Script::new(ARM_UPDATE_SCRIPT),
+            credential_keys: None,
         }
+    }
+
+    /// The keys provider credentials are sealed under (`credential_crypto`).
+    pub fn with_credential_keyring(mut self, keyring: Option<CredentialKeyring>) -> Self {
+        self.credential_keys = keyring.map(Arc::new);
+        self
     }
 
     fn conn(&self) -> ConnectionManager {
@@ -621,8 +676,24 @@ impl LocalStore for ValkeyStore {
         let key = format!("workspace:credentials:{}", workspace_id);
         for field in fields {
             if let Ok(Some(val)) = conn.hget::<_, _, Option<String>>(&key, *field).await {
-                if !val.is_empty() {
-                    return Some(val);
+                if val.is_empty() {
+                    continue;
+                }
+                match credential_crypto::open_stored(
+                    self.credential_keys.as_deref(),
+                    &val,
+                    &credential_crypto::context(workspace_id, field),
+                ) {
+                    Ok(plain) => return Some(plain),
+                    // Skipped, never forwarded: ciphertext sent upstream as a key
+                    // would only fail there, with no hint of the cause. Logged at
+                    // error because every request for this workspace hits it until
+                    // the proxy is given the key the control plane writes with.
+                    Err(e) => tracing::error!(
+                        workspace_id,
+                        field,
+                        "stored provider credential cannot be used: {e}"
+                    ),
                 }
             }
         }
@@ -632,7 +703,11 @@ impl LocalStore for ValkeyStore {
     async fn set_workspace_credential(&self, workspace_id: &str, field: &str, value: &str) {
         let mut conn = self.conn();
         let key = format!("workspace:credentials:{}", workspace_id);
-        let _: Result<(), redis::RedisError> = redis::Cmd::hset(&key, field, value)
+        let stored = match &self.credential_keys {
+            Some(keys) => keys.encrypt(value, &credential_crypto::context(workspace_id, field)),
+            None => value.to_string(),
+        };
+        let _: Result<(), redis::RedisError> = redis::Cmd::hset(&key, field, stored)
             .query_async(&mut conn)
             .await;
     }

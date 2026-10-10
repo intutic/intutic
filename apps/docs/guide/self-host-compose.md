@@ -128,6 +128,15 @@ Verify the new bundle, unpack it, and run its installer with the same
 data and your override file stay; the images and Compose files are replaced and
 the database is migrated before the new control plane starts.
 
+From 2.4.0 the proxy opens the provider keys the control plane stores
+encrypted. The installer restarts the control plane first and the proxy after
+it; the control plane encrypts the stored provider keys only once the new proxy
+reports that it holds the key, and Compose stops the old proxy before starting
+the new one, so no request is served with a key the proxy cannot read. A
+provider key added or replaced in the seconds between the two restarts is the
+exception: the old proxy cannot read it, so requests needing it fail until the
+new proxy is up.
+
 ## Back up and restore
 
 Everything that matters is in Postgres. Back it up with `pg_dump` from the

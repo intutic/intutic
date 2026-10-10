@@ -49,7 +49,10 @@ pub use memory::{migrate_local_learning, MemoryStore, NullControlPlaneCache};
 pub fn local_snapshot_path() -> std::path::PathBuf {
     memory::default_snapshot_path()
 }
-pub use valkey::{ValkeyControlPlaneCache, ValkeyStore};
+pub use valkey::{
+    announce_credential_keys, spawn_credential_key_announcer, ValkeyControlPlaneCache, ValkeyStore,
+    CREDENTIAL_KEYS_ANNOUNCE_PREFIX,
+};
 
 /// Who owns arm updates for a workspace. Mirrors `reward::RewardMode`; kept
 /// separate so the store layer does not depend on the reward engine.
