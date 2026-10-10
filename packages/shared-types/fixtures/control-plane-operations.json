@@ -1,0 +1,5640 @@
+{
+  "$comment": "Every ControlPlaneClient method of both SDKs (packages/clawde-sdk, camelCase `ts`; packages/intutic-clawde, snake_case `py`), the CLI command it matches (`cli`, null for none), and one call: the arguments (`args` positional for both SDKs; `options` the TypeScript trailing options object, the same names in snake_case as Python keyword arguments; `tsArgs`, `pyArgs`, `pyKwargs` where the two SDKs' signatures predate this file and differ), the request it must make (`body` absent means none; `auth: false` means no Authorization header; `multipart` a form upload) and what it returns for `response` (`returns`, or `returnsText` for a download's bytes; {\"$bytes\": text} is a bytes argument). Both SDKs' tests assert their method set equals this list and run every entry, and `errors` holds what a failure raises. `offline` lists the checks both SDKs export that run without the control plane (the CLI's signature verification, against the key set `keys` fetches), each held to the CLI's own fixture `vectors` by both suites. `excluded` names the CLI commands that act on the machine they run on, with the reason. A method added to one SDK without the other, or a call that drifts, fails both suites.",
+  "operations": [
+    {
+      "ts": "whoami",
+      "py": "whoami",
+      "cli": "whoami",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/auth/me"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "email": "a@b.com",
+          "memberId": "mem_1",
+          "workspaceId": "ws_1",
+          "role": "OWNER"
+        }
+      },
+      "returns": {
+        "email": "a@b.com",
+        "memberId": "mem_1",
+        "workspaceId": "ws_1",
+        "role": "OWNER"
+      }
+    },
+    {
+      "ts": "signupOrg",
+      "py": "signup_org",
+      "cli": null,
+      "tsArgs": [
+        {
+          "email": "a@b.com",
+          "password": "pw-123456",
+          "name": "A",
+          "orgName": "Acme"
+        }
+      ],
+      "pyArgs": [
+        "a@b.com",
+        "pw-123456",
+        "A",
+        "Acme"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/signup/org",
+        "auth": false,
+        "body": {
+          "email": "a@b.com",
+          "password": "pw-123456",
+          "name": "A",
+          "orgName": "Acme"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "user": {
+            "id": "u1",
+            "email": "a@b.com",
+            "name": "A",
+            "emailVerified": false
+          },
+          "org": {
+            "id": "org_1",
+            "name": "Acme",
+            "planTier": "pro",
+            "trialExpiresAt": "2026-11-01"
+          },
+          "workspace": {
+            "id": "ws_1",
+            "name": "default",
+            "planTier": "pro",
+            "trialExpiresAt": "2026-11-01"
+          },
+          "accessToken": "tok",
+          "refreshToken": "rtok",
+          "cliInstall": "npm i -g @intutic/cli",
+          "isNewUser": true
+        }
+      },
+      "returns": {
+        "user": {
+          "id": "u1",
+          "email": "a@b.com",
+          "name": "A",
+          "emailVerified": false
+        },
+        "org": {
+          "id": "org_1",
+          "name": "Acme",
+          "planTier": "pro",
+          "trialExpiresAt": "2026-11-01"
+        },
+        "workspace": {
+          "id": "ws_1",
+          "name": "default",
+          "planTier": "pro",
+          "trialExpiresAt": "2026-11-01"
+        },
+        "accessToken": "tok",
+        "refreshToken": "rtok",
+        "cliInstall": "npm i -g @intutic/cli",
+        "isNewUser": true
+      }
+    },
+    {
+      "ts": "startDomainVerification",
+      "py": "start_domain_verification",
+      "cli": "org create",
+      "args": [
+        "acme.com"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/domain-verification/start",
+        "body": {
+          "domain": "acme.com"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "verificationId": "dv_1",
+          "domain": "acme.com",
+          "txtRecordName": "_intutic-verify.acme.com",
+          "txtRecordValue": "intutic-verify=abc",
+          "expiresAt": "2026-10-10T00:00:00.000Z"
+        }
+      },
+      "returns": {
+        "verificationId": "dv_1",
+        "domain": "acme.com",
+        "txtRecordName": "_intutic-verify.acme.com",
+        "txtRecordValue": "intutic-verify=abc",
+        "expiresAt": "2026-10-10T00:00:00.000Z"
+      }
+    },
+    {
+      "ts": "checkDomainVerification",
+      "py": "check_domain_verification",
+      "cli": "org create",
+      "args": [
+        "dv_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/domain-verification/dv_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "verificationId": "dv_1",
+          "domain": "acme.com",
+          "txtRecordName": "_intutic-verify.acme.com",
+          "txtRecordValue": "intutic-verify=abc",
+          "expiresAt": "2026-10-10T00:00:00.000Z",
+          "status": "verified",
+          "verifiedAt": "2026-10-09T00:00:00.000Z"
+        }
+      },
+      "returns": {
+        "verificationId": "dv_1",
+        "domain": "acme.com",
+        "txtRecordName": "_intutic-verify.acme.com",
+        "txtRecordValue": "intutic-verify=abc",
+        "expiresAt": "2026-10-10T00:00:00.000Z",
+        "status": "verified",
+        "verifiedAt": "2026-10-09T00:00:00.000Z"
+      }
+    },
+    {
+      "ts": "createOrg",
+      "py": "create_org",
+      "cli": "org create",
+      "tsArgs": [
+        {
+          "orgName": "Acme",
+          "domain": "acme.com",
+          "verificationId": "dv_1"
+        }
+      ],
+      "pyArgs": [
+        "Acme",
+        "acme.com",
+        "dv_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/orgs",
+        "body": {
+          "orgName": "Acme",
+          "domain": "acme.com",
+          "verificationId": "dv_1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "orgId": "org_1",
+          "teamId": "team_1",
+          "workspaceId": "ws_1",
+          "name": "Acme",
+          "planTier": "pro"
+        }
+      },
+      "returns": {
+        "orgId": "org_1",
+        "teamId": "team_1",
+        "workspaceId": "ws_1",
+        "name": "Acme",
+        "planTier": "pro"
+      }
+    },
+    {
+      "ts": "listTeams",
+      "py": "list_teams",
+      "cli": "team list",
+      "args": [
+        "org_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/orgs/org_1/teams"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "teamId": "team_1",
+              "orgId": "org_1",
+              "name": "Platform",
+              "slug": "platform",
+              "createdAt": "2026-10-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "teamId": "team_1",
+          "orgId": "org_1",
+          "name": "Platform",
+          "slug": "platform",
+          "createdAt": "2026-10-01T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "createTeam",
+      "py": "create_team",
+      "cli": "team create",
+      "args": [
+        "org_1",
+        "Platform"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/orgs/org_1/teams",
+        "body": {
+          "name": "Platform"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "teamId": "team_1",
+          "orgId": "org_1",
+          "name": "Platform",
+          "slug": "platform",
+          "createdAt": "2026-10-01T00:00:00.000Z"
+        }
+      },
+      "returns": {
+        "teamId": "team_1",
+        "orgId": "org_1",
+        "name": "Platform",
+        "slug": "platform",
+        "createdAt": "2026-10-01T00:00:00.000Z"
+      }
+    },
+    {
+      "ts": "listTeamWorkspaces",
+      "py": "list_team_workspaces",
+      "cli": "team workspaces",
+      "args": [
+        "team_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/teams/team_1/workspaces"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "workspaceId": "ws_2",
+              "name": "Payments",
+              "slug": "payments",
+              "planTier": "pro",
+              "createdAt": "2026-10-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "workspaceId": "ws_2",
+          "name": "Payments",
+          "slug": "payments",
+          "planTier": "pro",
+          "createdAt": "2026-10-01T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "createWorkspace",
+      "py": "create_workspace",
+      "cli": "team create-workspace",
+      "args": [
+        "team_1",
+        "Payments"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/teams/team_1/workspaces",
+        "body": {
+          "name": "Payments"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "workspaceId": "ws_2",
+          "name": "Payments",
+          "slug": "payments",
+          "planTier": "pro",
+          "createdAt": "2026-10-01T00:00:00.000Z"
+        }
+      },
+      "returns": {
+        "workspaceId": "ws_2",
+        "name": "Payments",
+        "slug": "payments",
+        "planTier": "pro",
+        "createdAt": "2026-10-01T00:00:00.000Z"
+      }
+    },
+    {
+      "ts": "registerGateway",
+      "py": "register_gateway",
+      "cli": "gateway register",
+      "tsArgs": [
+        {
+          "name": "prod-gw",
+          "deploymentTarget": "kubernetes"
+        }
+      ],
+      "pyArgs": [
+        "prod-gw",
+        "kubernetes"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/gateways",
+        "body": {
+          "name": "prod-gw",
+          "deploymentTarget": "kubernetes"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "gatewayId": "gw_1",
+          "name": "prod-gw",
+          "deploymentTarget": "kubernetes",
+          "status": "pending",
+          "token": "gwt_x",
+          "instructions": "helm install"
+        }
+      },
+      "returns": {
+        "gatewayId": "gw_1",
+        "name": "prod-gw",
+        "deploymentTarget": "kubernetes",
+        "status": "pending",
+        "token": "gwt_x",
+        "instructions": "helm install"
+      }
+    },
+    {
+      "ts": "listGateways",
+      "py": "list_gateways",
+      "cli": "gateway list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/gateways"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "gatewayId": "gw_1",
+              "name": "prod-gw",
+              "deploymentTarget": "kubernetes",
+              "status": "online",
+              "keyPrefix": "gwt_",
+              "lastHeartbeatAt": null,
+              "proxyVersion": "2.3.0",
+              "createdAt": "2026-10-01T00:00:00.000Z",
+              "revokedAt": null
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "gatewayId": "gw_1",
+          "name": "prod-gw",
+          "deploymentTarget": "kubernetes",
+          "status": "online",
+          "keyPrefix": "gwt_",
+          "lastHeartbeatAt": null,
+          "proxyVersion": "2.3.0",
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "revokedAt": null
+        }
+      ]
+    },
+    {
+      "ts": "getGatewayStatus",
+      "py": "get_gateway_status",
+      "cli": "gateway status",
+      "args": [
+        "gw_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/gateways/gw_1/status"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "status": "online",
+          "proxyVersion": "2.3.0",
+          "uptimeSeconds": 60,
+          "activeWorkspaces": 1,
+          "litellmReachable": true,
+          "lastError": null,
+          "reportedAt": "2026-10-09T00:00:00.000Z",
+          "appliedConfigVersion": 2,
+          "desiredConfigVersion": 2
+        }
+      },
+      "returns": {
+        "status": "online",
+        "proxyVersion": "2.3.0",
+        "uptimeSeconds": 60,
+        "activeWorkspaces": 1,
+        "litellmReachable": true,
+        "lastError": null,
+        "reportedAt": "2026-10-09T00:00:00.000Z",
+        "appliedConfigVersion": 2,
+        "desiredConfigVersion": 2
+      }
+    },
+    {
+      "ts": "rotateGatewayToken",
+      "py": "rotate_gateway_token",
+      "cli": "gateway rotate",
+      "args": [
+        "gw_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/gateways/gw_1/rotate",
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "gatewayId": "gw_1",
+          "token": "gwt_y",
+          "previousTokenValidUntil": "2026-10-10T00:00:00.000Z",
+          "instructions": "update"
+        }
+      },
+      "returns": {
+        "gatewayId": "gw_1",
+        "token": "gwt_y",
+        "previousTokenValidUntil": "2026-10-10T00:00:00.000Z",
+        "instructions": "update"
+      }
+    },
+    {
+      "ts": "revokeGateway",
+      "py": "revoke_gateway",
+      "cli": "gateway revoke",
+      "args": [
+        "gw_1",
+        "decommissioned"
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/gateways/gw_1",
+        "body": {
+          "reason": "decommissioned"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true
+        }
+      },
+      "returns": null
+    },
+    {
+      "ts": "getGatewayConfig",
+      "py": "get_gateway_config",
+      "cli": "gateway config get",
+      "args": [
+        "gw_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/gateways/gw_1/config"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "config": {
+            "requireVk": true
+          },
+          "configVersion": 3
+        }
+      },
+      "returns": {
+        "config": {
+          "requireVk": true
+        },
+        "configVersion": 3
+      }
+    },
+    {
+      "ts": "setGatewayConfig",
+      "py": "set_gateway_config",
+      "cli": "gateway config set",
+      "tsArgs": [
+        "gw_1",
+        {
+          "requireVk": true
+        }
+      ],
+      "pyArgs": [
+        "gw_1"
+      ],
+      "pyKwargs": {
+        "require_vk": true
+      },
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/gateways/gw_1/config",
+        "body": {
+          "requireVk": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "config": {
+            "requireVk": true
+          },
+          "configVersion": 4
+        }
+      },
+      "returns": {
+        "config": {
+          "requireVk": true
+        },
+        "configVersion": 4
+      }
+    },
+    {
+      "ts": "assignWorkspaceGateway",
+      "py": "assign_workspace_gateway",
+      "cli": "gateway assign",
+      "args": [
+        "gw_1"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspace/gateway",
+        "body": {
+          "gatewayId": "gw_1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "gatewayId": "gw_1"
+        }
+      },
+      "returns": {
+        "gatewayId": "gw_1"
+      }
+    },
+    {
+      "ts": "assignOrgGateway",
+      "py": "assign_org_gateway",
+      "cli": "gateway assign",
+      "args": [
+        "org_1",
+        null
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/orgs/org_1/gateway",
+        "body": {
+          "gatewayId": null
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "gatewayId": null
+        }
+      },
+      "returns": {
+        "gatewayId": null
+      }
+    },
+    {
+      "ts": "resolveGateway",
+      "py": "resolve_gateway",
+      "cli": "gateway resolve",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspace/gateway-resolution"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "source": "org",
+          "gateway": {
+            "gatewayId": "gw_1",
+            "name": "prod-gw",
+            "deploymentTarget": "kubernetes",
+            "status": "online"
+          }
+        }
+      },
+      "returns": {
+        "source": "org",
+        "gateway": {
+          "gatewayId": "gw_1",
+          "name": "prod-gw",
+          "deploymentTarget": "kubernetes",
+          "status": "online"
+        }
+      }
+    },
+    {
+      "ts": "getWorkspaceSettings",
+      "py": "get_workspace_settings",
+      "cli": "settings get",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspace/settings"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "workspaceId": "ws_1",
+          "settings": {
+            "mcpDefaultPolicy": "deny"
+          }
+        }
+      },
+      "returns": {
+        "workspaceId": "ws_1",
+        "settings": {
+          "mcpDefaultPolicy": "deny"
+        }
+      }
+    },
+    {
+      "ts": "updateWorkspaceSettings",
+      "py": "update_workspace_settings",
+      "cli": "settings set",
+      "args": [
+        {
+          "mcpDefaultPolicy": "allow"
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/workspace/settings",
+        "body": {
+          "mcpDefaultPolicy": "allow"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "workspaceId": "ws_1",
+          "settings": {
+            "mcpDefaultPolicy": "allow"
+          },
+          "updated": true
+        }
+      },
+      "returns": {
+        "workspaceId": "ws_1",
+        "settings": {
+          "mcpDefaultPolicy": "allow"
+        },
+        "updated": true
+      }
+    },
+    {
+      "ts": "listProviderCredentials",
+      "py": "list_provider_credentials",
+      "cli": "credentials list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspace/provider-credentials"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "provider": "anthropic",
+              "routingLive": true,
+              "provisioned": true,
+              "lastFour": "abcd",
+              "updatedAt": "2026-10-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "provider": "anthropic",
+          "routingLive": true,
+          "provisioned": true,
+          "lastFour": "abcd",
+          "updatedAt": "2026-10-01T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "setProviderCredential",
+      "py": "set_provider_credential",
+      "cli": "credentials set",
+      "args": [
+        "anthropic",
+        {
+          "apiKey": "test-value"
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/workspace/provider-credentials/anthropic",
+        "body": {
+          "apiKey": "test-value"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "provider": "anthropic",
+          "routingLive": true,
+          "provisioned": true,
+          "lastFour": "abcd",
+          "updatedAt": "2026-10-01T00:00:00.000Z"
+        }
+      },
+      "returns": {
+        "provider": "anthropic",
+        "routingLive": true,
+        "provisioned": true,
+        "lastFour": "abcd",
+        "updatedAt": "2026-10-01T00:00:00.000Z"
+      }
+    },
+    {
+      "ts": "unsetProviderCredential",
+      "py": "unset_provider_credential",
+      "cli": "credentials unset",
+      "args": [
+        "anthropic"
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/workspace/provider-credentials/anthropic"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true
+        }
+      },
+      "returns": null
+    },
+    {
+      "ts": "listMcpServers",
+      "py": "list_mcp_servers",
+      "cli": "mcp list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/mcp/servers"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "servers",
+          "rowCase": "camel",
+          "servers": [
+            {
+              "serverId": "mcp_1",
+              "serverName": "github",
+              "status": "approved",
+              "tools": [
+                "create_issue",
+                "delete_repo"
+              ],
+              "disabledTools": [
+                "delete_repo"
+              ],
+              "lastSeenAt": "2026-10-09T00:00:00.000Z",
+              "heldForReview": false
+            }
+          ],
+          "defaultPolicy": "deny",
+          "highRiskToolChange": "hold",
+          "pendingCount": 0
+        }
+      },
+      "returns": {
+        "listProperty": "servers",
+        "rowCase": "camel",
+        "servers": [
+          {
+            "serverId": "mcp_1",
+            "serverName": "github",
+            "status": "approved",
+            "tools": [
+              "create_issue",
+              "delete_repo"
+            ],
+            "disabledTools": [
+              "delete_repo"
+            ],
+            "lastSeenAt": "2026-10-09T00:00:00.000Z",
+            "heldForReview": false
+          }
+        ],
+        "defaultPolicy": "deny",
+        "highRiskToolChange": "hold",
+        "pendingCount": 0
+      }
+    },
+    {
+      "ts": "approveMcpServer",
+      "py": "approve_mcp_server",
+      "cli": "mcp approve",
+      "args": [
+        "mcp_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/mcp/servers/mcp_1/status",
+        "body": {
+          "status": "approved"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "server": {
+            "serverId": "mcp_1",
+            "serverName": "github",
+            "status": "approved",
+            "tools": [
+              "create_issue",
+              "delete_repo"
+            ],
+            "disabledTools": [
+              "delete_repo"
+            ],
+            "lastSeenAt": "2026-10-09T00:00:00.000Z",
+            "heldForReview": false
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "server": {
+          "serverId": "mcp_1",
+          "serverName": "github",
+          "status": "approved",
+          "tools": [
+            "create_issue",
+            "delete_repo"
+          ],
+          "disabledTools": [
+            "delete_repo"
+          ],
+          "lastSeenAt": "2026-10-09T00:00:00.000Z",
+          "heldForReview": false
+        }
+      }
+    },
+    {
+      "ts": "blockMcpServer",
+      "py": "block_mcp_server",
+      "cli": "mcp block",
+      "args": [
+        "mcp_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/mcp/servers/mcp_1/status",
+        "body": {
+          "status": "blocked"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "server": {
+            "serverId": "mcp_1",
+            "serverName": "github",
+            "status": "blocked",
+            "tools": [
+              "create_issue",
+              "delete_repo"
+            ],
+            "disabledTools": [
+              "delete_repo"
+            ],
+            "lastSeenAt": "2026-10-09T00:00:00.000Z",
+            "heldForReview": false
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "server": {
+          "serverId": "mcp_1",
+          "serverName": "github",
+          "status": "blocked",
+          "tools": [
+            "create_issue",
+            "delete_repo"
+          ],
+          "disabledTools": [
+            "delete_repo"
+          ],
+          "lastSeenAt": "2026-10-09T00:00:00.000Z",
+          "heldForReview": false
+        }
+      }
+    },
+    {
+      "ts": "resetMcpServer",
+      "py": "reset_mcp_server",
+      "cli": "mcp reset",
+      "args": [
+        "mcp_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/mcp/servers/mcp_1/status",
+        "body": {
+          "status": "candidate"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "server": {
+            "serverId": "mcp_1",
+            "serverName": "github",
+            "status": "candidate",
+            "tools": [
+              "create_issue",
+              "delete_repo"
+            ],
+            "disabledTools": [
+              "delete_repo"
+            ],
+            "lastSeenAt": "2026-10-09T00:00:00.000Z",
+            "heldForReview": false
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "server": {
+          "serverId": "mcp_1",
+          "serverName": "github",
+          "status": "candidate",
+          "tools": [
+            "create_issue",
+            "delete_repo"
+          ],
+          "disabledTools": [
+            "delete_repo"
+          ],
+          "lastSeenAt": "2026-10-09T00:00:00.000Z",
+          "heldForReview": false
+        }
+      }
+    },
+    {
+      "ts": "enableMcpTool",
+      "py": "enable_mcp_tool",
+      "cli": "mcp enable-tool",
+      "args": [
+        "mcp_1",
+        "delete_repo"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/mcp/servers/mcp_1/tools",
+        "body": {
+          "tool": "delete_repo",
+          "enabled": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "server": {
+            "serverId": "mcp_1",
+            "serverName": "github",
+            "status": "approved",
+            "tools": [
+              "create_issue",
+              "delete_repo"
+            ],
+            "disabledTools": [],
+            "lastSeenAt": "2026-10-09T00:00:00.000Z",
+            "heldForReview": false
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "server": {
+          "serverId": "mcp_1",
+          "serverName": "github",
+          "status": "approved",
+          "tools": [
+            "create_issue",
+            "delete_repo"
+          ],
+          "disabledTools": [],
+          "lastSeenAt": "2026-10-09T00:00:00.000Z",
+          "heldForReview": false
+        }
+      }
+    },
+    {
+      "ts": "disableMcpTool",
+      "py": "disable_mcp_tool",
+      "cli": "mcp disable-tool",
+      "args": [
+        "mcp_1",
+        "delete_repo"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/mcp/servers/mcp_1/tools",
+        "body": {
+          "tool": "delete_repo",
+          "enabled": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "server": {
+            "serverId": "mcp_1",
+            "serverName": "github",
+            "status": "approved",
+            "tools": [
+              "create_issue",
+              "delete_repo"
+            ],
+            "disabledTools": [
+              "delete_repo"
+            ],
+            "lastSeenAt": "2026-10-09T00:00:00.000Z",
+            "heldForReview": false
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "server": {
+          "serverId": "mcp_1",
+          "serverName": "github",
+          "status": "approved",
+          "tools": [
+            "create_issue",
+            "delete_repo"
+          ],
+          "disabledTools": [
+            "delete_repo"
+          ],
+          "lastSeenAt": "2026-10-09T00:00:00.000Z",
+          "heldForReview": false
+        }
+      }
+    },
+    {
+      "ts": "listNotificationRules",
+      "py": "list_notification_rules",
+      "cli": "notifications list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/notifications/rules"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "rules",
+          "rowCase": "camel",
+          "rules": [
+            {
+              "ruleId": "nr_1",
+              "eventType": "incident.created",
+              "channel": "webhook",
+              "channelConfig": {
+                "webhookUrl": "https://hooks.example.com/intutic"
+              },
+              "filters": {
+                "severity": [
+                  "HIGH"
+                ]
+              },
+              "cooldownMinutes": 15,
+              "enabled": true
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "ruleId": "nr_1",
+          "eventType": "incident.created",
+          "channel": "webhook",
+          "channelConfig": {
+            "webhookUrl": "https://hooks.example.com/intutic"
+          },
+          "filters": {
+            "severity": [
+              "HIGH"
+            ]
+          },
+          "cooldownMinutes": 15,
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "ts": "createNotificationRule",
+      "py": "create_notification_rule",
+      "cli": "notifications create",
+      "args": [
+        {
+          "eventType": "incident.created",
+          "channel": "webhook",
+          "channelConfig": {
+            "webhookUrl": "https://hooks.example.com/intutic"
+          },
+          "filters": {
+            "severity": [
+              "HIGH"
+            ]
+          },
+          "cooldownMinutes": 15
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/notifications/rules",
+        "body": {
+          "eventType": "incident.created",
+          "channel": "webhook",
+          "channelConfig": {
+            "webhookUrl": "https://hooks.example.com/intutic"
+          },
+          "filters": {
+            "severity": [
+              "HIGH"
+            ]
+          },
+          "cooldownMinutes": 15
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "ruleId": "nr_1",
+          "eventType": "incident.created",
+          "channel": "webhook",
+          "channelConfig": {
+            "webhookUrl": "https://hooks.example.com/intutic"
+          },
+          "filters": {
+            "severity": [
+              "HIGH"
+            ]
+          },
+          "cooldownMinutes": 15,
+          "enabled": true,
+          "signingSecret": "whsec_test"
+        }
+      },
+      "returns": {
+        "ruleId": "nr_1",
+        "eventType": "incident.created",
+        "channel": "webhook",
+        "channelConfig": {
+          "webhookUrl": "https://hooks.example.com/intutic"
+        },
+        "filters": {
+          "severity": [
+            "HIGH"
+          ]
+        },
+        "cooldownMinutes": 15,
+        "enabled": true,
+        "signingSecret": "whsec_test"
+      }
+    },
+    {
+      "ts": "updateNotificationRule",
+      "py": "update_notification_rule",
+      "cli": "notifications update",
+      "args": [
+        "nr_1",
+        {
+          "enabled": false
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/notifications/rules/nr_1",
+        "body": {
+          "enabled": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ruleId": "nr_1",
+          "eventType": "incident.created",
+          "channel": "webhook",
+          "channelConfig": {
+            "webhookUrl": "https://hooks.example.com/intutic"
+          },
+          "filters": {
+            "severity": [
+              "HIGH"
+            ]
+          },
+          "cooldownMinutes": 15,
+          "enabled": false
+        }
+      },
+      "returns": {
+        "ruleId": "nr_1",
+        "eventType": "incident.created",
+        "channel": "webhook",
+        "channelConfig": {
+          "webhookUrl": "https://hooks.example.com/intutic"
+        },
+        "filters": {
+          "severity": [
+            "HIGH"
+          ]
+        },
+        "cooldownMinutes": 15,
+        "enabled": false
+      }
+    },
+    {
+      "ts": "deleteNotificationRule",
+      "py": "delete_notification_rule",
+      "cli": "notifications delete",
+      "args": [
+        "nr_1"
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/notifications/rules/nr_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true
+        }
+      },
+      "returns": null
+    },
+    {
+      "ts": "rotateNotificationRuleSecret",
+      "py": "rotate_notification_rule_secret",
+      "cli": "notifications rotate-secret",
+      "args": [
+        "nr_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/notifications/rules/nr_1/signing-secret"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ruleId": "nr_1",
+          "signingSecret": "whsec_new"
+        }
+      },
+      "returns": {
+        "ruleId": "nr_1",
+        "signingSecret": "whsec_new"
+      }
+    },
+    {
+      "ts": "listSiemDestinations",
+      "py": "list_siem_destinations",
+      "cli": "siem list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/siem/destinations"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "items": [
+            {
+              "destinationId": "sd_1",
+              "name": "splunk",
+              "adapterType": "splunk_hec",
+              "isActive": true,
+              "sourceTables": [],
+              "batchSize": 100,
+              "flushIntervalMs": 5000,
+              "lastHeartbeatAt": null,
+              "lastError": null,
+              "config": {
+                "url": "https://splunk.example.com",
+                "token": "****"
+              }
+            }
+          ],
+          "sources": {
+            "all": [
+              "execution_traces",
+              "governance_incidents",
+              "login_events"
+            ],
+            "defaults": [
+              "execution_traces",
+              "governance_incidents"
+            ]
+          }
+        }
+      },
+      "returns": {
+        "items": [
+          {
+            "destinationId": "sd_1",
+            "name": "splunk",
+            "adapterType": "splunk_hec",
+            "isActive": true,
+            "sourceTables": [],
+            "batchSize": 100,
+            "flushIntervalMs": 5000,
+            "lastHeartbeatAt": null,
+            "lastError": null,
+            "config": {
+              "url": "https://splunk.example.com",
+              "token": "****"
+            }
+          }
+        ],
+        "sources": {
+          "all": [
+            "execution_traces",
+            "governance_incidents",
+            "login_events"
+          ],
+          "defaults": [
+            "execution_traces",
+            "governance_incidents"
+          ]
+        }
+      }
+    },
+    {
+      "ts": "getSiemDestination",
+      "py": "get_siem_destination",
+      "cli": "siem show",
+      "args": [
+        "sd_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/siem/destinations/sd_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "destinationId": "sd_1",
+          "name": "splunk",
+          "adapterType": "splunk_hec",
+          "isActive": true,
+          "sourceTables": [],
+          "batchSize": 100,
+          "flushIntervalMs": 5000,
+          "lastHeartbeatAt": null,
+          "lastError": null,
+          "config": {
+            "url": "https://splunk.example.com",
+            "token": "****"
+          }
+        }
+      },
+      "returns": {
+        "destinationId": "sd_1",
+        "name": "splunk",
+        "adapterType": "splunk_hec",
+        "isActive": true,
+        "sourceTables": [],
+        "batchSize": 100,
+        "flushIntervalMs": 5000,
+        "lastHeartbeatAt": null,
+        "lastError": null,
+        "config": {
+          "url": "https://splunk.example.com",
+          "token": "****"
+        }
+      }
+    },
+    {
+      "ts": "listSiemSources",
+      "py": "list_siem_sources",
+      "cli": "siem sources",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/siem/destinations"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "items": [
+            {
+              "destinationId": "sd_1",
+              "name": "splunk",
+              "adapterType": "splunk_hec",
+              "isActive": true,
+              "sourceTables": [],
+              "batchSize": 100,
+              "flushIntervalMs": 5000,
+              "lastHeartbeatAt": null,
+              "lastError": null,
+              "config": {
+                "url": "https://splunk.example.com",
+                "token": "****"
+              }
+            }
+          ],
+          "sources": {
+            "all": [
+              "execution_traces",
+              "governance_incidents",
+              "login_events"
+            ],
+            "defaults": [
+              "execution_traces",
+              "governance_incidents"
+            ]
+          }
+        }
+      },
+      "returns": {
+        "all": [
+          "execution_traces",
+          "governance_incidents",
+          "login_events"
+        ],
+        "defaults": [
+          "execution_traces",
+          "governance_incidents"
+        ]
+      }
+    },
+    {
+      "ts": "createSiemDestination",
+      "py": "create_siem_destination",
+      "cli": "siem create",
+      "args": [
+        {
+          "name": "splunk",
+          "adapterType": "splunk_hec",
+          "config": {
+            "url": "https://splunk.example.com",
+            "token": "test-value"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/siem/destinations",
+        "body": {
+          "name": "splunk",
+          "adapterType": "splunk_hec",
+          "config": {
+            "url": "https://splunk.example.com",
+            "token": "test-value"
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "destinationId": "sd_1",
+          "name": "splunk",
+          "adapterType": "splunk_hec",
+          "isActive": true,
+          "sourceTables": [],
+          "batchSize": 100,
+          "flushIntervalMs": 5000,
+          "lastHeartbeatAt": null,
+          "lastError": null,
+          "config": {
+            "url": "https://splunk.example.com",
+            "token": "****"
+          }
+        }
+      },
+      "returns": {
+        "destinationId": "sd_1",
+        "name": "splunk",
+        "adapterType": "splunk_hec",
+        "isActive": true,
+        "sourceTables": [],
+        "batchSize": 100,
+        "flushIntervalMs": 5000,
+        "lastHeartbeatAt": null,
+        "lastError": null,
+        "config": {
+          "url": "https://splunk.example.com",
+          "token": "****"
+        }
+      }
+    },
+    {
+      "ts": "updateSiemDestination",
+      "py": "update_siem_destination",
+      "cli": "siem update",
+      "args": [
+        "sd_1",
+        {
+          "isActive": true,
+          "batchSize": 50
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/siem/destinations/sd_1",
+        "body": {
+          "isActive": true,
+          "batchSize": 50
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "destinationId": "sd_1",
+          "name": "splunk",
+          "adapterType": "splunk_hec",
+          "isActive": true,
+          "sourceTables": [],
+          "batchSize": 50,
+          "flushIntervalMs": 5000,
+          "lastHeartbeatAt": null,
+          "lastError": null,
+          "config": {
+            "url": "https://splunk.example.com",
+            "token": "****"
+          }
+        }
+      },
+      "returns": {
+        "destinationId": "sd_1",
+        "name": "splunk",
+        "adapterType": "splunk_hec",
+        "isActive": true,
+        "sourceTables": [],
+        "batchSize": 50,
+        "flushIntervalMs": 5000,
+        "lastHeartbeatAt": null,
+        "lastError": null,
+        "config": {
+          "url": "https://splunk.example.com",
+          "token": "****"
+        }
+      }
+    },
+    {
+      "ts": "deleteSiemDestination",
+      "py": "delete_siem_destination",
+      "cli": "siem delete",
+      "args": [
+        "sd_1"
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/siem/destinations/sd_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "destinationId": "sd_1"
+        }
+      },
+      "returns": null
+    },
+    {
+      "ts": "rotateSiemDestinationSecret",
+      "py": "rotate_siem_destination_secret",
+      "cli": "siem rotate-secret",
+      "args": [
+        "sd_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/siem/destinations/sd_1/signing-secret"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "destinationId": "sd_1",
+          "signingSecret": "whsec_new"
+        }
+      },
+      "returns": {
+        "destinationId": "sd_1",
+        "signingSecret": "whsec_new"
+      }
+    },
+    {
+      "ts": "getMemberUsage",
+      "py": "get_member_usage",
+      "cli": "usage members",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/usage/members?period=monthly"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "scope": "workspace",
+          "members": [
+            {
+              "memberId": "mem_1",
+              "displayName": "A",
+              "email": "a@b.com",
+              "totalCostUsd": 1.25,
+              "totalRawCostUsd": 1.5,
+              "totalInputTokens": 1000,
+              "totalOutputTokens": 200,
+              "traceCount": 4,
+              "models": [
+                "claude-sonnet-4-5"
+              ],
+              "activeDays": 2
+            }
+          ]
+        }
+      },
+      "returns": {
+        "scope": "workspace",
+        "members": [
+          {
+            "memberId": "mem_1",
+            "displayName": "A",
+            "email": "a@b.com",
+            "totalCostUsd": 1.25,
+            "totalRawCostUsd": 1.5,
+            "totalInputTokens": 1000,
+            "totalOutputTokens": 200,
+            "traceCount": 4,
+            "models": [
+              "claude-sonnet-4-5"
+            ],
+            "activeDays": 2
+          }
+        ]
+      }
+    },
+    {
+      "ts": "getTeamUsage",
+      "py": "get_team_usage",
+      "cli": "usage teams",
+      "args": [],
+      "options": {
+        "period": "daily"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/usage/teams?period=daily"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "scimGroups": true,
+          "teams": [
+            {
+              "groupId": "g_1",
+              "displayName": "Platform",
+              "memberCount": 3,
+              "activeMembers": 1,
+              "totalCostUsd": 1.25,
+              "totalRawCostUsd": 1.5,
+              "totalInputTokens": 1000,
+              "totalOutputTokens": 200,
+              "traceCount": 4
+            }
+          ]
+        }
+      },
+      "returns": {
+        "scimGroups": true,
+        "teams": [
+          {
+            "groupId": "g_1",
+            "displayName": "Platform",
+            "memberCount": 3,
+            "activeMembers": 1,
+            "totalCostUsd": 1.25,
+            "totalRawCostUsd": 1.5,
+            "totalInputTokens": 1000,
+            "totalOutputTokens": 200,
+            "traceCount": 4
+          }
+        ]
+      }
+    },
+    {
+      "ts": "getBranchUsage",
+      "py": "get_branch_usage",
+      "cli": "usage branches",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/usage/branches?period=monthly"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "scope": "self",
+          "branches": [
+            {
+              "repo": "github.com/acme/api",
+              "branch": "main",
+              "commitCount": 2,
+              "totalCostUsd": 1.25,
+              "totalRawCostUsd": 1.5,
+              "totalInputTokens": 1000,
+              "totalOutputTokens": 200,
+              "traceCount": 4,
+              "lastCallAt": "2026-10-09T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": {
+        "scope": "self",
+        "branches": [
+          {
+            "repo": "github.com/acme/api",
+            "branch": "main",
+            "commitCount": 2,
+            "totalCostUsd": 1.25,
+            "totalRawCostUsd": 1.5,
+            "totalInputTokens": 1000,
+            "totalOutputTokens": 200,
+            "traceCount": 4,
+            "lastCallAt": "2026-10-09T00:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "ts": "getCommitUsage",
+      "py": "get_commit_usage",
+      "cli": "usage commits",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/usage/commits?period=monthly"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "scope": "workspace",
+          "commits": [
+            {
+              "repo": null,
+              "branch": null,
+              "commit": null,
+              "totalCostUsd": 1.25,
+              "totalRawCostUsd": 1.5,
+              "totalInputTokens": 1000,
+              "totalOutputTokens": 200,
+              "traceCount": 4,
+              "firstCallAt": "2026-10-09T00:00:00.000Z",
+              "lastCallAt": "2026-10-09T01:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": {
+        "scope": "workspace",
+        "commits": [
+          {
+            "repo": null,
+            "branch": null,
+            "commit": null,
+            "totalCostUsd": 1.25,
+            "totalRawCostUsd": 1.5,
+            "totalInputTokens": 1000,
+            "totalOutputTokens": 200,
+            "traceCount": 4,
+            "firstCallAt": "2026-10-09T00:00:00.000Z",
+            "lastCallAt": "2026-10-09T01:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "ts": "getPullRequestUsage",
+      "py": "get_pull_request_usage",
+      "cli": "usage pull-requests",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/usage/pull-requests?period=monthly"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "scope": "workspace",
+          "github": {
+            "connector": true,
+            "webhook": false,
+            "apiHost": "github.com",
+            "noAccessRepos": [],
+            "mappedPullRequests": 0,
+            "lastCheckedAt": null
+          },
+          "pullRequests": []
+        }
+      },
+      "returns": {
+        "scope": "workspace",
+        "github": {
+          "connector": true,
+          "webhook": false,
+          "apiHost": "github.com",
+          "noAccessRepos": [],
+          "mappedPullRequests": 0,
+          "lastCheckedAt": null
+        },
+        "pullRequests": []
+      }
+    },
+    {
+      "ts": "refreshPullRequestUsage",
+      "py": "refresh_pull_request_usage",
+      "cli": "usage pull-requests --refresh",
+      "args": [],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/usage/pull-requests/refresh"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "checked": 3,
+          "notModified": 1,
+          "pullRequests": 2,
+          "noAccess": 0,
+          "rateLimited": false
+        }
+      },
+      "returns": {
+        "checked": 3,
+        "notModified": 1,
+        "pullRequests": 2,
+        "noAccess": 0,
+        "rateLimited": false
+      }
+    },
+    {
+      "ts": "getInventorySummary",
+      "py": "get_inventory_summary",
+      "cli": "inventory summary",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/inventory/summary"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "devices": 2,
+            "staleDevices": 0,
+            "harnesses": 3,
+            "governedHarnesses": 2,
+            "governedPercent": 67,
+            "ungovernedHarnesses": 1,
+            "staleGates": 0,
+            "unverifiedHarnesses": 0,
+            "mcpServers": 1,
+            "ungovernedMcpServers": 1,
+            "skills": 4
+          }
+        }
+      },
+      "returns": {
+        "devices": 2,
+        "staleDevices": 0,
+        "harnesses": 3,
+        "governedHarnesses": 2,
+        "governedPercent": 67,
+        "ungovernedHarnesses": 1,
+        "staleGates": 0,
+        "unverifiedHarnesses": 0,
+        "mcpServers": 1,
+        "ungovernedMcpServers": 1,
+        "skills": 4
+      }
+    },
+    {
+      "ts": "listInventoryDevices",
+      "py": "list_inventory_devices",
+      "cli": "inventory devices",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/inventory/devices"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "data",
+          "rowCase": "camel",
+          "data": [
+            {
+              "deviceId": "idv_1",
+              "hostname": "mbp",
+              "platform": "darwin",
+              "cliVersion": "2.3.0",
+              "reportedBy": "a@b.com",
+              "workspace": "/src",
+              "guardProbes": {
+                "total": 3,
+                "failed": 0,
+                "ranAt": 1760000000
+              },
+              "firstSeenAt": "2026-10-01T00:00:00.000Z",
+              "lastSeenAt": "2026-10-09T00:00:00.000Z",
+              "stale": false,
+              "disconnectedAt": null,
+              "harnesses": 2,
+              "ungovernedHarnesses": 0,
+              "staleGates": 0,
+              "mcpServers": 1,
+              "ungovernedMcpServers": 1,
+              "skills": 2
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "deviceId": "idv_1",
+          "hostname": "mbp",
+          "platform": "darwin",
+          "cliVersion": "2.3.0",
+          "reportedBy": "a@b.com",
+          "workspace": "/src",
+          "guardProbes": {
+            "total": 3,
+            "failed": 0,
+            "ranAt": 1760000000
+          },
+          "firstSeenAt": "2026-10-01T00:00:00.000Z",
+          "lastSeenAt": "2026-10-09T00:00:00.000Z",
+          "stale": false,
+          "disconnectedAt": null,
+          "harnesses": 2,
+          "ungovernedHarnesses": 0,
+          "staleGates": 0,
+          "mcpServers": 1,
+          "ungovernedMcpServers": 1,
+          "skills": 2
+        }
+      ]
+    },
+    {
+      "ts": "listInventoryHarnesses",
+      "py": "list_inventory_harnesses",
+      "cli": "inventory harnesses",
+      "args": [],
+      "options": {
+        "status": "ungoverned",
+        "search": "mbp"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/inventory/harnesses?status=ungoverned&q=mbp"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "data",
+          "rowCase": "camel",
+          "data": [
+            {
+              "itemId": "iit_1",
+              "deviceId": "idv_1",
+              "hostname": "mbp",
+              "deviceStale": false,
+              "firstSeenAt": "2026-10-01T00:00:00.000Z",
+              "lastSeenAt": "2026-10-09T00:00:00.000Z",
+              "harness": "claude_code",
+              "version": "2.1.0",
+              "configured": true,
+              "gateKind": "hook",
+              "gateInstalled": true,
+              "gateFile": "~/.claude/settings.json",
+              "lastHookEventAt": "2026-10-09T00:00:00.000Z",
+              "status": "governed",
+              "reason": null,
+              "reasonText": null
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "itemId": "iit_1",
+          "deviceId": "idv_1",
+          "hostname": "mbp",
+          "deviceStale": false,
+          "firstSeenAt": "2026-10-01T00:00:00.000Z",
+          "lastSeenAt": "2026-10-09T00:00:00.000Z",
+          "harness": "claude_code",
+          "version": "2.1.0",
+          "configured": true,
+          "gateKind": "hook",
+          "gateInstalled": true,
+          "gateFile": "~/.claude/settings.json",
+          "lastHookEventAt": "2026-10-09T00:00:00.000Z",
+          "status": "governed",
+          "reason": null,
+          "reasonText": null
+        }
+      ]
+    },
+    {
+      "ts": "listInventoryMcpServers",
+      "py": "list_inventory_mcp_servers",
+      "cli": "inventory mcp-servers",
+      "args": [],
+      "options": {
+        "harness": "cursor",
+        "device": "idv_1"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/inventory/mcp-servers?harness=cursor&device=idv_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "itemId": "iit_1",
+              "deviceId": "idv_1",
+              "hostname": "mbp",
+              "deviceStale": false,
+              "firstSeenAt": "2026-10-01T00:00:00.000Z",
+              "lastSeenAt": "2026-10-09T00:00:00.000Z",
+              "server": "github",
+              "harness": "cursor",
+              "transport": "stdio",
+              "endpoint": null,
+              "status": "ungoverned",
+              "reason": "not wrapped"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "itemId": "iit_1",
+          "deviceId": "idv_1",
+          "hostname": "mbp",
+          "deviceStale": false,
+          "firstSeenAt": "2026-10-01T00:00:00.000Z",
+          "lastSeenAt": "2026-10-09T00:00:00.000Z",
+          "server": "github",
+          "harness": "cursor",
+          "transport": "stdio",
+          "endpoint": null,
+          "status": "ungoverned",
+          "reason": "not wrapped"
+        }
+      ]
+    },
+    {
+      "ts": "listInventorySkills",
+      "py": "list_inventory_skills",
+      "cli": "inventory skills --device --search",
+      "args": [],
+      "options": {
+        "device": "idv_1",
+        "search": "deploy"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/inventory/skills?device=idv_1&q=deploy"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "itemId": "iit_1",
+              "deviceId": "idv_1",
+              "hostname": "mbp",
+              "deviceStale": false,
+              "firstSeenAt": "2026-10-01T00:00:00.000Z",
+              "lastSeenAt": "2026-10-09T00:00:00.000Z",
+              "name": "deploy",
+              "source": "~/.claude/skills",
+              "sha256": null,
+              "scanned": true,
+              "clean": true,
+              "findingsCount": 0,
+              "scriptCount": 1
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "itemId": "iit_1",
+          "deviceId": "idv_1",
+          "hostname": "mbp",
+          "deviceStale": false,
+          "firstSeenAt": "2026-10-01T00:00:00.000Z",
+          "lastSeenAt": "2026-10-09T00:00:00.000Z",
+          "name": "deploy",
+          "source": "~/.claude/skills",
+          "sha256": null,
+          "scanned": true,
+          "clean": true,
+          "findingsCount": 0,
+          "scriptCount": 1
+        }
+      ]
+    },
+    {
+      "ts": "listInventoryDisconnects",
+      "py": "list_inventory_disconnects",
+      "cli": "inventory disconnects",
+      "args": [],
+      "options": {
+        "limit": 50
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/inventory/disconnects?limit=50"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "disconnectId": "ddc_1",
+              "hostname": "mbp",
+              "fingerprint": "fp",
+              "scope": "harness",
+              "harnesses": [
+                "cursor"
+              ],
+              "memberId": "mem_1",
+              "reportedBy": "a@b.com",
+              "createdAt": "2026-10-09T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "disconnectId": "ddc_1",
+          "hostname": "mbp",
+          "fingerprint": "fp",
+          "scope": "harness",
+          "harnesses": [
+            "cursor"
+          ],
+          "memberId": "mem_1",
+          "reportedBy": "a@b.com",
+          "createdAt": "2026-10-09T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "downloadInventoryHarnessesCsv",
+      "py": "download_inventory_harnesses_csv",
+      "cli": "inventory harnesses --csv",
+      "args": [],
+      "options": {
+        "status": "governed"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/inventory/harnesses?status=governed&format=csv"
+      },
+      "response": {
+        "status": 200,
+        "text": "Machine,Harness\nmbp,claude_code\n",
+        "contentType": "text/csv; charset=utf-8"
+      },
+      "returnsText": "Machine,Harness\nmbp,claude_code\n"
+    },
+    {
+      "ts": "downloadInventoryMcpServersCsv",
+      "py": "download_inventory_mcp_servers_csv",
+      "cli": "inventory mcp-servers --csv",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/inventory/mcp-servers?format=csv"
+      },
+      "response": {
+        "status": 200,
+        "text": "Machine,MCP server\nmbp,github\n",
+        "contentType": "text/csv; charset=utf-8"
+      },
+      "returnsText": "Machine,MCP server\nmbp,github\n"
+    },
+    {
+      "ts": "getFrameworkCoverage",
+      "py": "get_framework_coverage",
+      "cli": "compliance coverage",
+      "args": [
+        "eu_ai_act"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/compliance/frameworks/eu_ai_act/coverage"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "frameworkId": "eu_ai_act",
+          "name": "EU AI Act",
+          "mappingVersion": "2026-09",
+          "generatedAt": "2026-10-09T00:00:00.000Z",
+          "summary": {
+            "controls": 10,
+            "mapped": 8,
+            "full": 5,
+            "partial": 3,
+            "states": {
+              "passing": 5,
+              "failing": 1
+            }
+          }
+        }
+      },
+      "returns": {
+        "frameworkId": "eu_ai_act",
+        "name": "EU AI Act",
+        "mappingVersion": "2026-09",
+        "generatedAt": "2026-10-09T00:00:00.000Z",
+        "summary": {
+          "controls": 10,
+          "mapped": 8,
+          "full": 5,
+          "partial": 3,
+          "states": {
+            "passing": 5,
+            "failing": 1
+          }
+        }
+      }
+    },
+    {
+      "ts": "downloadFrameworkCoverage",
+      "py": "download_framework_coverage",
+      "cli": "compliance coverage --format",
+      "args": [
+        "eu_ai_act",
+        "md"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/compliance/frameworks/eu_ai_act/coverage?format=markdown"
+      },
+      "response": {
+        "status": 200,
+        "text": "# EU AI Act\n",
+        "contentType": "text/markdown; charset=utf-8"
+      },
+      "returnsText": "# EU AI Act\n"
+    },
+    {
+      "ts": "collectEvidence",
+      "py": "collect_evidence",
+      "cli": "compliance collect --from --to",
+      "args": [],
+      "options": {
+        "periodStart": "2026-09-01",
+        "periodEnd": "2026-10-01"
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/compliance/soc2-collect",
+        "body": {
+          "periodStart": "2026-09-01",
+          "periodEnd": "2026-10-01"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "runId": "run_1",
+          "archive": {
+            "formatVersion": 3,
+            "runId": "run_1",
+            "periodStart": "2026-09-01T00:00:00.000Z",
+            "periodEnd": "2026-10-01T00:00:00.000Z",
+            "overallScore": null
+          },
+          "artifactUrl": null,
+          "signed": false,
+          "unsignedReason": "Unsigned: this deployment has no signing key."
+        }
+      },
+      "returns": {
+        "runId": "run_1",
+        "archive": {
+          "formatVersion": 3,
+          "runId": "run_1",
+          "periodStart": "2026-09-01T00:00:00.000Z",
+          "periodEnd": "2026-10-01T00:00:00.000Z",
+          "overallScore": null
+        },
+        "artifactUrl": null,
+        "signed": false,
+        "unsignedReason": "Unsigned: this deployment has no signing key."
+      }
+    },
+    {
+      "ts": "downloadEvidence",
+      "py": "download_evidence",
+      "cli": "compliance download",
+      "args": [
+        "run_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/compliance/soc2-export/run_1"
+      },
+      "response": {
+        "status": 200,
+        "text": "{\"runId\":\"run_1\"}",
+        "contentType": "application/json"
+      },
+      "returnsText": "{\"runId\":\"run_1\"}"
+    },
+    {
+      "ts": "getSigningKeys",
+      "py": "get_signing_keys",
+      "cli": "compliance verify",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/.well-known/intutic-trace-signing.json",
+        "auth": false
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "keys": [
+            {
+              "kty": "OKP",
+              "crv": "Ed25519",
+              "x": "11H2QriK3gOzF0L6y7qfSwkNIcQf4b0p2JR2eCQ2P0c",
+              "kid": "k1"
+            }
+          ]
+        }
+      },
+      "returns": {
+        "keys": [
+          {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "11H2QriK3gOzF0L6y7qfSwkNIcQf4b0p2JR2eCQ2P0c",
+            "kid": "k1"
+          }
+        ]
+      }
+    },
+    {
+      "ts": "getGateLiveness",
+      "py": "get_gate_liveness",
+      "cli": "gate-liveness",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/governance/gate-liveness"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "windowHours": 24,
+          "gates": [
+            {
+              "harnessType": "claude_code",
+              "status": "silent",
+              "lastSeen": null,
+              "agentLastSeen": "2026-10-09T00:00:00.000Z",
+              "alertOpen": true
+            }
+          ]
+        }
+      },
+      "returns": {
+        "windowHours": 24,
+        "gates": [
+          {
+            "harnessType": "claude_code",
+            "status": "silent",
+            "lastSeen": null,
+            "agentLastSeen": "2026-10-09T00:00:00.000Z",
+            "alertOpen": true
+          }
+        ]
+      }
+    },
+    {
+      "ts": "getGithubWebhook",
+      "py": "get_github_webhook",
+      "cli": "github webhook show",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/integrations/github/webhook"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "configured": true,
+          "url": "https://cp.example.com/api/v1/webhooks/github/ws_1",
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "secretRotatedAt": "2026-10-01T00:00:00.000Z",
+          "lastDeliveryAt": null
+        }
+      },
+      "returns": {
+        "configured": true,
+        "url": "https://cp.example.com/api/v1/webhooks/github/ws_1",
+        "createdAt": "2026-10-01T00:00:00.000Z",
+        "secretRotatedAt": "2026-10-01T00:00:00.000Z",
+        "lastDeliveryAt": null
+      }
+    },
+    {
+      "ts": "rotateGithubWebhookSecret",
+      "py": "rotate_github_webhook_secret",
+      "cli": "github webhook rotate-secret",
+      "args": [],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/integrations/github/webhook/secret"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "url": "https://cp.example.com/api/v1/webhooks/github/ws_1",
+          "secret": "ghsec_test"
+        }
+      },
+      "returns": {
+        "url": "https://cp.example.com/api/v1/webhooks/github/ws_1",
+        "secret": "ghsec_test"
+      }
+    },
+    {
+      "ts": "listPolicySources",
+      "py": "list_policy_sources",
+      "cli": "guardrails sources list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/connectors"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "items": [
+            {
+              "connector_id": "con_1",
+              "provider": "notion",
+              "name": "Handbook",
+              "config": {},
+              "last_synced_at": null,
+              "last_sync_error": null,
+              "last_attempt_at": null,
+              "created_at": "2026-10-01T00:00:00.000Z"
+            },
+            {
+              "connector_id": "con_2",
+              "provider": "jira",
+              "name": "Tickets",
+              "config": {},
+              "last_synced_at": null,
+              "last_sync_error": null,
+              "last_attempt_at": null,
+              "created_at": "2026-10-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "connector_id": "con_1",
+          "provider": "notion",
+          "name": "Handbook",
+          "config": {},
+          "last_synced_at": null,
+          "last_sync_error": null,
+          "last_attempt_at": null,
+          "created_at": "2026-10-01T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "addPolicySource",
+      "py": "add_policy_source",
+      "cli": "guardrails sources add",
+      "args": [
+        {
+          "provider": "notion",
+          "name": "Handbook",
+          "token": "test-value"
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/connectors",
+        "body": {
+          "config": {},
+          "provider": "notion",
+          "name": "Handbook",
+          "token": "test-value"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "connector_id": "con_1",
+          "provider": "notion",
+          "name": "Handbook",
+          "config": {},
+          "last_synced_at": null
+        }
+      },
+      "returns": {
+        "connector_id": "con_1",
+        "provider": "notion",
+        "name": "Handbook",
+        "config": {},
+        "last_synced_at": null
+      }
+    },
+    {
+      "ts": "syncPolicySource",
+      "py": "sync_policy_source",
+      "cli": "guardrails sources sync",
+      "args": [
+        "con_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/connectors/con_1/sync",
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "success": true,
+          "processed_docs": 3,
+          "updated_sops": [
+            "sop_1"
+          ],
+          "successor_sops": []
+        }
+      },
+      "returns": {
+        "success": true,
+        "processed_docs": 3,
+        "updated_sops": [
+          "sop_1"
+        ],
+        "successor_sops": []
+      }
+    },
+    {
+      "ts": "listPolicyDocuments",
+      "py": "list_policy_documents",
+      "cli": "guardrails docs list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/documents"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "documents": [
+            {
+              "docId": "pd_1",
+              "title": "Handbook",
+              "provider": "notion",
+              "sourceUrl": null,
+              "status": "ACTIVE",
+              "injectionFlagged": false,
+              "sopId": null,
+              "fetchedAt": "2026-10-09T00:00:00.000Z",
+              "passageCount": 4,
+              "clauseCount": 2,
+              "guardrailCount": 1,
+              "lastRun": null
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "docId": "pd_1",
+          "title": "Handbook",
+          "provider": "notion",
+          "sourceUrl": null,
+          "status": "ACTIVE",
+          "injectionFlagged": false,
+          "sopId": null,
+          "fetchedAt": "2026-10-09T00:00:00.000Z",
+          "passageCount": 4,
+          "clauseCount": 2,
+          "guardrailCount": 1,
+          "lastRun": null
+        }
+      ]
+    },
+    {
+      "ts": "getPolicyDocument",
+      "py": "get_policy_document",
+      "cli": "guardrails docs show",
+      "args": [
+        "pd_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/documents/pd_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "document": {
+            "docId": "pd_1",
+            "title": "Handbook",
+            "provider": "notion",
+            "sourceUrl": null,
+            "status": "ACTIVE",
+            "injectionFlagged": false,
+            "sopId": null,
+            "fetchedAt": "2026-10-09T00:00:00.000Z",
+            "passageCount": 4,
+            "clauseCount": 2,
+            "guardrailCount": 1,
+            "lastRun": null,
+            "contentHash": "ab12",
+            "upstreamVersion": null,
+            "passages": [],
+            "clauses": [],
+            "runs": []
+          }
+        }
+      },
+      "returns": {
+        "docId": "pd_1",
+        "title": "Handbook",
+        "provider": "notion",
+        "sourceUrl": null,
+        "status": "ACTIVE",
+        "injectionFlagged": false,
+        "sopId": null,
+        "fetchedAt": "2026-10-09T00:00:00.000Z",
+        "passageCount": 4,
+        "clauseCount": 2,
+        "guardrailCount": 1,
+        "lastRun": null,
+        "contentHash": "ab12",
+        "upstreamVersion": null,
+        "passages": [],
+        "clauses": [],
+        "runs": []
+      }
+    },
+    {
+      "ts": "extractPolicyDocument",
+      "py": "extract_policy_document",
+      "cli": "guardrails docs extract",
+      "args": [
+        "pd_1"
+      ],
+      "options": {
+        "llm": false
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policy-guardrails/documents/pd_1/extract",
+        "body": {
+          "llm": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "result": {
+            "docId": "pd_1",
+            "runId": null,
+            "extractor": "front_matter",
+            "skipped": "llm_disabled",
+            "cap": null,
+            "llmUnavailable": false,
+            "chunks": 0,
+            "proposals": 0,
+            "verbatimQuotes": 0,
+            "valid": 0,
+            "rejected": 0,
+            "malformed": 0,
+            "guardrails": {
+              "proposed": 0,
+              "rejectedForInjection": 0,
+              "existing": 0
+            },
+            "lifted": {
+              "clauses": 1,
+              "valid": 1,
+              "errors": []
+            },
+            "error": null
+          }
+        }
+      },
+      "returns": {
+        "docId": "pd_1",
+        "runId": null,
+        "extractor": "front_matter",
+        "skipped": "llm_disabled",
+        "cap": null,
+        "llmUnavailable": false,
+        "chunks": 0,
+        "proposals": 0,
+        "verbatimQuotes": 0,
+        "valid": 0,
+        "rejected": 0,
+        "malformed": 0,
+        "guardrails": {
+          "proposed": 0,
+          "rejectedForInjection": 0,
+          "existing": 0
+        },
+        "lifted": {
+          "clauses": 1,
+          "valid": 1,
+          "errors": []
+        },
+        "error": null
+      }
+    },
+    {
+      "ts": "getGuardrailCoverage",
+      "py": "get_guardrail_coverage",
+      "cli": "guardrails search",
+      "args": [
+        "bash"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/coverage?token=bash"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "coverage": {
+            "token": "bash",
+            "passages": [],
+            "guardrails": []
+          }
+        }
+      },
+      "returns": {
+        "token": "bash",
+        "passages": [],
+        "guardrails": []
+      }
+    },
+    {
+      "ts": "searchPolicyPassages",
+      "py": "search_policy_passages",
+      "cli": "guardrails search --text",
+      "args": [
+        "production deploy"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/search?q=production+deploy"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "search": {
+            "query": "production deploy",
+            "passages": []
+          }
+        }
+      },
+      "returns": {
+        "query": "production deploy",
+        "passages": []
+      }
+    },
+    {
+      "ts": "getGuardrailImpact",
+      "py": "get_guardrail_impact",
+      "cli": "guardrails impact",
+      "args": [],
+      "options": {
+        "docId": "pd_1"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/impact?docId=pd_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "impact": {
+            "seed": {
+              "docId": "pd_1",
+              "passageId": null
+            },
+            "maxDepth": 5,
+            "passages": [],
+            "clauses": [],
+            "guardrails": [],
+            "truncated": false
+          }
+        }
+      },
+      "returns": {
+        "seed": {
+          "docId": "pd_1",
+          "passageId": null
+        },
+        "maxDepth": 5,
+        "passages": [],
+        "clauses": [],
+        "guardrails": [],
+        "truncated": false
+      }
+    },
+    {
+      "ts": "listGuardrailDuplicates",
+      "py": "list_guardrail_duplicates",
+      "cli": "guardrails duplicates",
+      "args": [],
+      "options": {
+        "minJaccard": 0.8
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/duplicates?minJaccard=0.8"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "duplicates": {
+            "minJaccard": 0.8,
+            "passagePairs": [],
+            "sameRule": []
+          }
+        }
+      },
+      "returns": {
+        "minJaccard": 0.8,
+        "passagePairs": [],
+        "sameRule": []
+      }
+    },
+    {
+      "ts": "listGuardrails",
+      "py": "list_guardrails",
+      "cli": "guardrails list",
+      "args": [],
+      "options": {
+        "status": "SHADOW",
+        "provenance": "authored",
+        "limit": 10
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/guardrails?status=SHADOW&provenance=authored&limit=10"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "guardrails": [
+            {
+              "guardrailId": "pgr_1",
+              "provenance": "authored",
+              "name": "No force push",
+              "description": null,
+              "version": 1,
+              "supersedes": null,
+              "target": "hook_rule",
+              "status": "SHADOW",
+              "ir": {
+                "kind": "hook_rule",
+                "tools": [
+                  "Bash"
+                ],
+                "argContains": [
+                  "push --force"
+                ]
+              },
+              "rendered": {
+                "toolPattern": "^Bash$"
+              },
+              "roles": [],
+              "scope": "workspace",
+              "shadowEvaluations": 10,
+              "shadowWouldAct": 1,
+              "enforcingFires": 0,
+              "sourceStale": false,
+              "ruleCandidateId": null,
+              "proposedAt": "2026-10-01T00:00:00.000Z",
+              "shadowAt": "2026-10-02T00:00:00.000Z",
+              "promotedAt": null,
+              "rejectedReason": null,
+              "clause": null,
+              "document": null
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "guardrailId": "pgr_1",
+          "provenance": "authored",
+          "name": "No force push",
+          "description": null,
+          "version": 1,
+          "supersedes": null,
+          "target": "hook_rule",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          },
+          "rendered": {
+            "toolPattern": "^Bash$"
+          },
+          "roles": [],
+          "scope": "workspace",
+          "shadowEvaluations": 10,
+          "shadowWouldAct": 1,
+          "enforcingFires": 0,
+          "sourceStale": false,
+          "ruleCandidateId": null,
+          "proposedAt": "2026-10-01T00:00:00.000Z",
+          "shadowAt": "2026-10-02T00:00:00.000Z",
+          "promotedAt": null,
+          "rejectedReason": null,
+          "clause": null,
+          "document": null
+        }
+      ]
+    },
+    {
+      "ts": "getGuardrail",
+      "py": "get_guardrail",
+      "cli": "guardrails show",
+      "args": [
+        "pgr_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "guardrail": {
+            "guardrailId": "pgr_1",
+            "provenance": "authored",
+            "name": "No force push",
+            "description": null,
+            "version": 1,
+            "supersedes": null,
+            "target": "hook_rule",
+            "status": "SHADOW",
+            "ir": {
+              "kind": "hook_rule",
+              "tools": [
+                "Bash"
+              ],
+              "argContains": [
+                "push --force"
+              ]
+            },
+            "rendered": {
+              "toolPattern": "^Bash$"
+            },
+            "roles": [],
+            "scope": "workspace",
+            "shadowEvaluations": 10,
+            "shadowWouldAct": 1,
+            "enforcingFires": 0,
+            "sourceStale": false,
+            "ruleCandidateId": null,
+            "proposedAt": "2026-10-01T00:00:00.000Z",
+            "shadowAt": "2026-10-02T00:00:00.000Z",
+            "promotedAt": null,
+            "rejectedReason": null,
+            "clause": null,
+            "document": null,
+            "validation": [],
+            "passage": null,
+            "events": [],
+            "supersededBy": null
+          }
+        }
+      },
+      "returns": {
+        "guardrailId": "pgr_1",
+        "provenance": "authored",
+        "name": "No force push",
+        "description": null,
+        "version": 1,
+        "supersedes": null,
+        "target": "hook_rule",
+        "status": "SHADOW",
+        "ir": {
+          "kind": "hook_rule",
+          "tools": [
+            "Bash"
+          ],
+          "argContains": [
+            "push --force"
+          ]
+        },
+        "rendered": {
+          "toolPattern": "^Bash$"
+        },
+        "roles": [],
+        "scope": "workspace",
+        "shadowEvaluations": 10,
+        "shadowWouldAct": 1,
+        "enforcingFires": 0,
+        "sourceStale": false,
+        "ruleCandidateId": null,
+        "proposedAt": "2026-10-01T00:00:00.000Z",
+        "shadowAt": "2026-10-02T00:00:00.000Z",
+        "promotedAt": null,
+        "rejectedReason": null,
+        "clause": null,
+        "document": null,
+        "validation": [],
+        "passage": null,
+        "events": [],
+        "supersededBy": null
+      }
+    },
+    {
+      "ts": "getGuardrailReadiness",
+      "py": "get_guardrail_readiness",
+      "cli": "guardrails show",
+      "args": [
+        "pgr_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1/readiness"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "readiness": {
+            "ready": false,
+            "reasons": [
+              "needs 200 shadow evaluations"
+            ],
+            "neverFired": false,
+            "evaluations": 10,
+            "wouldAct": 1,
+            "wouldActRate": 0.1,
+            "adjudicated": 0,
+            "adjudicatedRequired": 5,
+            "falsePositives": 0,
+            "falsePositiveRate": null,
+            "thresholds": {
+              "minShadowEvaluations": 200,
+              "maxWouldActRate": 0.2,
+              "minAdjudicatedFires": 5,
+              "maxAdjudicatedFalsePositiveRate": 0.1
+            }
+          }
+        }
+      },
+      "returns": {
+        "ready": false,
+        "reasons": [
+          "needs 200 shadow evaluations"
+        ],
+        "neverFired": false,
+        "evaluations": 10,
+        "wouldAct": 1,
+        "wouldActRate": 0.1,
+        "adjudicated": 0,
+        "adjudicatedRequired": 5,
+        "falsePositives": 0,
+        "falsePositiveRate": null,
+        "thresholds": {
+          "minShadowEvaluations": 200,
+          "maxWouldActRate": 0.2,
+          "minAdjudicatedFires": 5,
+          "maxAdjudicatedFalsePositiveRate": 0.1
+        }
+      }
+    },
+    {
+      "ts": "approveGuardrailShadow",
+      "py": "approve_guardrail_shadow",
+      "cli": "guardrails approve-shadow",
+      "args": [
+        "pgr_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1/approve-shadow",
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "guardrail": {
+            "guardrailId": "pgr_1",
+            "provenance": "authored",
+            "name": "No force push",
+            "description": null,
+            "version": 1,
+            "supersedes": null,
+            "target": "hook_rule",
+            "status": "SHADOW",
+            "ir": {
+              "kind": "hook_rule",
+              "tools": [
+                "Bash"
+              ],
+              "argContains": [
+                "push --force"
+              ]
+            },
+            "rendered": {
+              "toolPattern": "^Bash$"
+            },
+            "roles": [],
+            "scope": "workspace",
+            "shadowEvaluations": 10,
+            "shadowWouldAct": 1,
+            "enforcingFires": 0,
+            "sourceStale": false,
+            "ruleCandidateId": null,
+            "proposedAt": "2026-10-01T00:00:00.000Z",
+            "shadowAt": "2026-10-02T00:00:00.000Z",
+            "promotedAt": null,
+            "rejectedReason": null,
+            "clause": null,
+            "document": null,
+            "validation": [],
+            "passage": null,
+            "events": [],
+            "supersededBy": null
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "guardrail": {
+          "guardrailId": "pgr_1",
+          "provenance": "authored",
+          "name": "No force push",
+          "description": null,
+          "version": 1,
+          "supersedes": null,
+          "target": "hook_rule",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          },
+          "rendered": {
+            "toolPattern": "^Bash$"
+          },
+          "roles": [],
+          "scope": "workspace",
+          "shadowEvaluations": 10,
+          "shadowWouldAct": 1,
+          "enforcingFires": 0,
+          "sourceStale": false,
+          "ruleCandidateId": null,
+          "proposedAt": "2026-10-01T00:00:00.000Z",
+          "shadowAt": "2026-10-02T00:00:00.000Z",
+          "promotedAt": null,
+          "rejectedReason": null,
+          "clause": null,
+          "document": null,
+          "validation": [],
+          "passage": null,
+          "events": [],
+          "supersededBy": null
+        }
+      }
+    },
+    {
+      "ts": "promoteGuardrail",
+      "py": "promote_guardrail",
+      "cli": "guardrails promote",
+      "args": [
+        "pgr_1"
+      ],
+      "options": {
+        "acknowledgeNoTraffic": true
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1/promote",
+        "body": {
+          "acknowledgeNoTraffic": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "guardrail": {
+            "guardrailId": "pgr_1",
+            "provenance": "authored",
+            "name": "No force push",
+            "description": null,
+            "version": 1,
+            "supersedes": null,
+            "target": "hook_rule",
+            "status": "ENFORCING",
+            "ir": {
+              "kind": "hook_rule",
+              "tools": [
+                "Bash"
+              ],
+              "argContains": [
+                "push --force"
+              ]
+            },
+            "rendered": {
+              "toolPattern": "^Bash$"
+            },
+            "roles": [],
+            "scope": "workspace",
+            "shadowEvaluations": 10,
+            "shadowWouldAct": 1,
+            "enforcingFires": 0,
+            "sourceStale": false,
+            "ruleCandidateId": null,
+            "proposedAt": "2026-10-01T00:00:00.000Z",
+            "shadowAt": "2026-10-02T00:00:00.000Z",
+            "promotedAt": null,
+            "rejectedReason": null,
+            "clause": null,
+            "document": null,
+            "validation": [],
+            "passage": null,
+            "events": [],
+            "supersededBy": null
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "guardrail": {
+          "guardrailId": "pgr_1",
+          "provenance": "authored",
+          "name": "No force push",
+          "description": null,
+          "version": 1,
+          "supersedes": null,
+          "target": "hook_rule",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          },
+          "rendered": {
+            "toolPattern": "^Bash$"
+          },
+          "roles": [],
+          "scope": "workspace",
+          "shadowEvaluations": 10,
+          "shadowWouldAct": 1,
+          "enforcingFires": 0,
+          "sourceStale": false,
+          "ruleCandidateId": null,
+          "proposedAt": "2026-10-01T00:00:00.000Z",
+          "shadowAt": "2026-10-02T00:00:00.000Z",
+          "promotedAt": null,
+          "rejectedReason": null,
+          "clause": null,
+          "document": null,
+          "validation": [],
+          "passage": null,
+          "events": [],
+          "supersededBy": null
+        }
+      }
+    },
+    {
+      "ts": "rejectGuardrail",
+      "py": "reject_guardrail",
+      "cli": "guardrails reject",
+      "args": [
+        "pgr_1",
+        "too broad"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1/reject",
+        "body": {
+          "reason": "too broad"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "guardrail": {
+            "guardrailId": "pgr_1",
+            "provenance": "authored",
+            "name": "No force push",
+            "description": null,
+            "version": 1,
+            "supersedes": null,
+            "target": "hook_rule",
+            "status": "REJECTED",
+            "ir": {
+              "kind": "hook_rule",
+              "tools": [
+                "Bash"
+              ],
+              "argContains": [
+                "push --force"
+              ]
+            },
+            "rendered": {
+              "toolPattern": "^Bash$"
+            },
+            "roles": [],
+            "scope": "workspace",
+            "shadowEvaluations": 10,
+            "shadowWouldAct": 1,
+            "enforcingFires": 0,
+            "sourceStale": false,
+            "ruleCandidateId": null,
+            "proposedAt": "2026-10-01T00:00:00.000Z",
+            "shadowAt": "2026-10-02T00:00:00.000Z",
+            "promotedAt": null,
+            "rejectedReason": "too broad",
+            "clause": null,
+            "document": null,
+            "validation": [],
+            "passage": null,
+            "events": [],
+            "supersededBy": null
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "guardrail": {
+          "guardrailId": "pgr_1",
+          "provenance": "authored",
+          "name": "No force push",
+          "description": null,
+          "version": 1,
+          "supersedes": null,
+          "target": "hook_rule",
+          "status": "REJECTED",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          },
+          "rendered": {
+            "toolPattern": "^Bash$"
+          },
+          "roles": [],
+          "scope": "workspace",
+          "shadowEvaluations": 10,
+          "shadowWouldAct": 1,
+          "enforcingFires": 0,
+          "sourceStale": false,
+          "ruleCandidateId": null,
+          "proposedAt": "2026-10-01T00:00:00.000Z",
+          "shadowAt": "2026-10-02T00:00:00.000Z",
+          "promotedAt": null,
+          "rejectedReason": "too broad",
+          "clause": null,
+          "document": null,
+          "validation": [],
+          "passage": null,
+          "events": [],
+          "supersededBy": null
+        }
+      }
+    },
+    {
+      "ts": "retireGuardrail",
+      "py": "retire_guardrail",
+      "cli": "guardrails retire",
+      "args": [
+        "pgr_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1/retire",
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "guardrail": {
+            "guardrailId": "pgr_1",
+            "provenance": "authored",
+            "name": "No force push",
+            "description": null,
+            "version": 1,
+            "supersedes": null,
+            "target": "hook_rule",
+            "status": "RETIRED",
+            "ir": {
+              "kind": "hook_rule",
+              "tools": [
+                "Bash"
+              ],
+              "argContains": [
+                "push --force"
+              ]
+            },
+            "rendered": {
+              "toolPattern": "^Bash$"
+            },
+            "roles": [],
+            "scope": "workspace",
+            "shadowEvaluations": 10,
+            "shadowWouldAct": 1,
+            "enforcingFires": 0,
+            "sourceStale": false,
+            "ruleCandidateId": null,
+            "proposedAt": "2026-10-01T00:00:00.000Z",
+            "shadowAt": "2026-10-02T00:00:00.000Z",
+            "promotedAt": null,
+            "rejectedReason": null,
+            "clause": null,
+            "document": null,
+            "validation": [],
+            "passage": null,
+            "events": [],
+            "supersededBy": null
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "guardrail": {
+          "guardrailId": "pgr_1",
+          "provenance": "authored",
+          "name": "No force push",
+          "description": null,
+          "version": 1,
+          "supersedes": null,
+          "target": "hook_rule",
+          "status": "RETIRED",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          },
+          "rendered": {
+            "toolPattern": "^Bash$"
+          },
+          "roles": [],
+          "scope": "workspace",
+          "shadowEvaluations": 10,
+          "shadowWouldAct": 1,
+          "enforcingFires": 0,
+          "sourceStale": false,
+          "ruleCandidateId": null,
+          "proposedAt": "2026-10-01T00:00:00.000Z",
+          "shadowAt": "2026-10-02T00:00:00.000Z",
+          "promotedAt": null,
+          "rejectedReason": null,
+          "clause": null,
+          "document": null,
+          "validation": [],
+          "passage": null,
+          "events": [],
+          "supersededBy": null
+        }
+      }
+    },
+    {
+      "ts": "reconfirmGuardrail",
+      "py": "reconfirm_guardrail",
+      "cli": "guardrails reconfirm",
+      "args": [
+        "pgr_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1/reconfirm",
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "guardrail": {
+            "guardrailId": "pgr_1",
+            "provenance": "authored",
+            "name": "No force push",
+            "description": null,
+            "version": 1,
+            "supersedes": null,
+            "target": "hook_rule",
+            "status": "SHADOW",
+            "ir": {
+              "kind": "hook_rule",
+              "tools": [
+                "Bash"
+              ],
+              "argContains": [
+                "push --force"
+              ]
+            },
+            "rendered": {
+              "toolPattern": "^Bash$"
+            },
+            "roles": [],
+            "scope": "workspace",
+            "shadowEvaluations": 10,
+            "shadowWouldAct": 1,
+            "enforcingFires": 0,
+            "sourceStale": false,
+            "ruleCandidateId": null,
+            "proposedAt": "2026-10-01T00:00:00.000Z",
+            "shadowAt": "2026-10-02T00:00:00.000Z",
+            "promotedAt": null,
+            "rejectedReason": null,
+            "clause": null,
+            "document": null,
+            "validation": [],
+            "passage": null,
+            "events": [],
+            "supersededBy": null
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "guardrail": {
+          "guardrailId": "pgr_1",
+          "provenance": "authored",
+          "name": "No force push",
+          "description": null,
+          "version": 1,
+          "supersedes": null,
+          "target": "hook_rule",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          },
+          "rendered": {
+            "toolPattern": "^Bash$"
+          },
+          "roles": [],
+          "scope": "workspace",
+          "shadowEvaluations": 10,
+          "shadowWouldAct": 1,
+          "enforcingFires": 0,
+          "sourceStale": false,
+          "ruleCandidateId": null,
+          "proposedAt": "2026-10-01T00:00:00.000Z",
+          "shadowAt": "2026-10-02T00:00:00.000Z",
+          "promotedAt": null,
+          "rejectedReason": null,
+          "clause": null,
+          "document": null,
+          "validation": [],
+          "passage": null,
+          "events": [],
+          "supersededBy": null
+        }
+      }
+    },
+    {
+      "ts": "createGuardrail",
+      "py": "create_guardrail",
+      "cli": "guardrails create",
+      "args": [
+        {
+          "name": "No force push",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policy-guardrails/guardrails",
+        "body": {
+          "name": "No force push",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "ok": true,
+          "guardrail": {
+            "guardrailId": "pgr_1",
+            "provenance": "authored",
+            "name": "No force push",
+            "description": null,
+            "version": 1,
+            "supersedes": null,
+            "target": "hook_rule",
+            "status": "PROPOSED",
+            "ir": {
+              "kind": "hook_rule",
+              "tools": [
+                "Bash"
+              ],
+              "argContains": [
+                "push --force"
+              ]
+            },
+            "rendered": {
+              "toolPattern": "^Bash$"
+            },
+            "roles": [],
+            "scope": "workspace",
+            "shadowEvaluations": 10,
+            "shadowWouldAct": 1,
+            "enforcingFires": 0,
+            "sourceStale": false,
+            "ruleCandidateId": null,
+            "proposedAt": "2026-10-01T00:00:00.000Z",
+            "shadowAt": "2026-10-02T00:00:00.000Z",
+            "promotedAt": null,
+            "rejectedReason": null,
+            "clause": null,
+            "document": null,
+            "validation": [],
+            "passage": null,
+            "events": [],
+            "supersededBy": null
+          },
+          "forked": false,
+          "supersedes": null
+        }
+      },
+      "returns": {
+        "ok": true,
+        "guardrail": {
+          "guardrailId": "pgr_1",
+          "provenance": "authored",
+          "name": "No force push",
+          "description": null,
+          "version": 1,
+          "supersedes": null,
+          "target": "hook_rule",
+          "status": "PROPOSED",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          },
+          "rendered": {
+            "toolPattern": "^Bash$"
+          },
+          "roles": [],
+          "scope": "workspace",
+          "shadowEvaluations": 10,
+          "shadowWouldAct": 1,
+          "enforcingFires": 0,
+          "sourceStale": false,
+          "ruleCandidateId": null,
+          "proposedAt": "2026-10-01T00:00:00.000Z",
+          "shadowAt": "2026-10-02T00:00:00.000Z",
+          "promotedAt": null,
+          "rejectedReason": null,
+          "clause": null,
+          "document": null,
+          "validation": [],
+          "passage": null,
+          "events": [],
+          "supersededBy": null
+        },
+        "forked": false,
+        "supersedes": null
+      }
+    },
+    {
+      "ts": "updateGuardrail",
+      "py": "update_guardrail",
+      "cli": "guardrails update",
+      "args": [
+        "pgr_1",
+        {
+          "description": null
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1",
+        "body": {
+          "description": null
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "guardrail": {
+            "guardrailId": "pgr_1",
+            "provenance": "authored",
+            "name": "No force push",
+            "description": null,
+            "version": 1,
+            "supersedes": null,
+            "target": "hook_rule",
+            "status": "SHADOW",
+            "ir": {
+              "kind": "hook_rule",
+              "tools": [
+                "Bash"
+              ],
+              "argContains": [
+                "push --force"
+              ]
+            },
+            "rendered": {
+              "toolPattern": "^Bash$"
+            },
+            "roles": [],
+            "scope": "workspace",
+            "shadowEvaluations": 10,
+            "shadowWouldAct": 1,
+            "enforcingFires": 0,
+            "sourceStale": false,
+            "ruleCandidateId": null,
+            "proposedAt": "2026-10-01T00:00:00.000Z",
+            "shadowAt": "2026-10-02T00:00:00.000Z",
+            "promotedAt": null,
+            "rejectedReason": null,
+            "clause": null,
+            "document": null,
+            "validation": [],
+            "passage": null,
+            "events": [],
+            "supersededBy": null
+          },
+          "forked": false,
+          "supersedes": null
+        }
+      },
+      "returns": {
+        "ok": true,
+        "guardrail": {
+          "guardrailId": "pgr_1",
+          "provenance": "authored",
+          "name": "No force push",
+          "description": null,
+          "version": 1,
+          "supersedes": null,
+          "target": "hook_rule",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          },
+          "rendered": {
+            "toolPattern": "^Bash$"
+          },
+          "roles": [],
+          "scope": "workspace",
+          "shadowEvaluations": 10,
+          "shadowWouldAct": 1,
+          "enforcingFires": 0,
+          "sourceStale": false,
+          "ruleCandidateId": null,
+          "proposedAt": "2026-10-01T00:00:00.000Z",
+          "shadowAt": "2026-10-02T00:00:00.000Z",
+          "promotedAt": null,
+          "rejectedReason": null,
+          "clause": null,
+          "document": null,
+          "validation": [],
+          "passage": null,
+          "events": [],
+          "supersededBy": null
+        },
+        "forked": false,
+        "supersedes": null
+      }
+    },
+    {
+      "ts": "deleteGuardrail",
+      "py": "delete_guardrail",
+      "cli": "guardrails delete",
+      "args": [
+        "pgr_1"
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "guardrail": {
+            "guardrailId": "pgr_1",
+            "provenance": "authored",
+            "name": "No force push",
+            "description": null,
+            "version": 1,
+            "supersedes": null,
+            "target": "hook_rule",
+            "status": "RETIRED",
+            "ir": {
+              "kind": "hook_rule",
+              "tools": [
+                "Bash"
+              ],
+              "argContains": [
+                "push --force"
+              ]
+            },
+            "rendered": {
+              "toolPattern": "^Bash$"
+            },
+            "roles": [],
+            "scope": "workspace",
+            "shadowEvaluations": 10,
+            "shadowWouldAct": 1,
+            "enforcingFires": 0,
+            "sourceStale": false,
+            "ruleCandidateId": null,
+            "proposedAt": "2026-10-01T00:00:00.000Z",
+            "shadowAt": "2026-10-02T00:00:00.000Z",
+            "promotedAt": null,
+            "rejectedReason": null,
+            "clause": null,
+            "document": null,
+            "validation": [],
+            "passage": null,
+            "events": [],
+            "supersededBy": null
+          }
+        }
+      },
+      "returns": {
+        "ok": true,
+        "guardrail": {
+          "guardrailId": "pgr_1",
+          "provenance": "authored",
+          "name": "No force push",
+          "description": null,
+          "version": 1,
+          "supersedes": null,
+          "target": "hook_rule",
+          "status": "RETIRED",
+          "ir": {
+            "kind": "hook_rule",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "push --force"
+            ]
+          },
+          "rendered": {
+            "toolPattern": "^Bash$"
+          },
+          "roles": [],
+          "scope": "workspace",
+          "shadowEvaluations": 10,
+          "shadowWouldAct": 1,
+          "enforcingFires": 0,
+          "sourceStale": false,
+          "ruleCandidateId": null,
+          "proposedAt": "2026-10-01T00:00:00.000Z",
+          "shadowAt": "2026-10-02T00:00:00.000Z",
+          "promotedAt": null,
+          "rejectedReason": null,
+          "clause": null,
+          "document": null,
+          "validation": [],
+          "passage": null,
+          "events": [],
+          "supersededBy": null
+        }
+      }
+    },
+    {
+      "ts": "replayGuardrail",
+      "py": "replay_guardrail",
+      "cli": "guardrails replay",
+      "args": [
+        "pgr_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policy-guardrails/guardrails/pgr_1/replay",
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "replay": {
+            "source": "enforcement_log",
+            "windowDays": 30,
+            "captured": 40,
+            "fires": 2,
+            "sample": [
+              {
+                "toolName": "Bash",
+                "at": "2026-10-08T00:00:00.000Z",
+                "excerpt": "git push --force"
+              }
+            ],
+            "truncated": false,
+            "unsupported": []
+          }
+        }
+      },
+      "returns": {
+        "source": "enforcement_log",
+        "windowDays": 30,
+        "captured": 40,
+        "fires": 2,
+        "sample": [
+          {
+            "toolName": "Bash",
+            "at": "2026-10-08T00:00:00.000Z",
+            "excerpt": "git push --force"
+          }
+        ],
+        "truncated": false,
+        "unsupported": []
+      }
+    },
+    {
+      "ts": "listGuardrailConflicts",
+      "py": "list_guardrail_conflicts",
+      "cli": "guardrails conflicts",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policy-guardrails/conflicts"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "conflicts": [
+            {
+              "kind": "deny_vs_count",
+              "token": "Bash",
+              "a": {
+                "id": "pgr_1",
+                "quote": "never"
+              },
+              "b": {
+                "id": "pgr_2",
+                "quote": "at most 3"
+              },
+              "detail": "deny and count"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "kind": "deny_vs_count",
+          "token": "Bash",
+          "a": {
+            "id": "pgr_1",
+            "quote": "never"
+          },
+          "b": {
+            "id": "pgr_2",
+            "quote": "at most 3"
+          },
+          "detail": "deny and count"
+        }
+      ]
+    },
+    {
+      "ts": "approveDecision",
+      "py": "approve_decision",
+      "cli": "decision approve --reason",
+      "args": [
+        "hold_1"
+      ],
+      "options": {
+        "reason": "expected"
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/decisions/hold_1/review",
+        "body": {
+          "action": "approve",
+          "reason": "expected"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "status": "APPROVED",
+          "bypassWritten": true
+        }
+      },
+      "returns": {
+        "ok": true,
+        "status": "APPROVED",
+        "bypassWritten": true
+      }
+    },
+    {
+      "ts": "rejectDecision",
+      "py": "reject_decision",
+      "cli": "decision reject",
+      "args": [
+        "hold_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/decisions/hold_1/review",
+        "body": {
+          "action": "reject"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "status": "REJECTED"
+        }
+      },
+      "returns": {
+        "ok": true,
+        "status": "REJECTED"
+      }
+    },
+    {
+      "ts": "startLoopRun",
+      "py": "start_loop_run",
+      "cli": "loop start",
+      "args": [
+        "nightly"
+      ],
+      "options": {
+        "budgetLimitUsd": 5,
+        "sops": [
+          "deploy"
+        ],
+        "autoJudge": true
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/loops/start",
+        "body": {
+          "name": "nightly",
+          "budgetLimitUsd": 5,
+          "sops": [
+            "deploy"
+          ],
+          "autoJudge": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "loop": {
+            "loopRunId": "lr_1",
+            "name": "nightly",
+            "status": "ACTIVE",
+            "totalTokenCostUsd": "0",
+            "budgetLimitUsd": "5.00"
+          }
+        }
+      },
+      "returns": {
+        "loopRunId": "lr_1",
+        "name": "nightly",
+        "status": "ACTIVE",
+        "totalTokenCostUsd": "0",
+        "budgetLimitUsd": "5.00"
+      }
+    },
+    {
+      "ts": "getLoopRun",
+      "py": "get_loop_run",
+      "cli": "loop exec",
+      "args": [
+        "lr_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/loops/lr_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "loop": {
+            "loopRunId": "lr_1",
+            "name": "nightly",
+            "status": "ACTIVE",
+            "totalTokenCostUsd": "0",
+            "budgetLimitUsd": "5.00"
+          }
+        }
+      },
+      "returns": {
+        "loopRunId": "lr_1",
+        "name": "nightly",
+        "status": "ACTIVE",
+        "totalTokenCostUsd": "0",
+        "budgetLimitUsd": "5.00"
+      }
+    },
+    {
+      "ts": "listLoopRuns",
+      "py": "list_loop_runs",
+      "cli": "loop list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/loops"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "loops",
+          "rowCase": "camel",
+          "ok": true,
+          "loops": [
+            {
+              "loopRunId": "lr_1",
+              "name": "nightly",
+              "status": "ACTIVE",
+              "totalTokenCostUsd": "0",
+              "budgetLimitUsd": "5.00"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "loopRunId": "lr_1",
+          "name": "nightly",
+          "status": "ACTIVE",
+          "totalTokenCostUsd": "0",
+          "budgetLimitUsd": "5.00"
+        }
+      ]
+    },
+    {
+      "ts": "completeLoopRun",
+      "py": "complete_loop_run",
+      "cli": "loop complete",
+      "args": [
+        "lr_1"
+      ],
+      "options": {
+        "outcome": "SUCCEEDED"
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/loops/lr_1/complete",
+        "body": {
+          "outcome": "SUCCEEDED"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "outcome": "SUCCEEDED"
+        }
+      },
+      "returns": {
+        "ok": true,
+        "outcome": "SUCCEEDED"
+      }
+    },
+    {
+      "ts": "killLoopRun",
+      "py": "kill_loop_run",
+      "cli": "loop kill",
+      "args": [
+        "lr_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/loops/lr_1/kill"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true
+        }
+      },
+      "returns": {
+        "ok": true
+      }
+    },
+    {
+      "ts": "approveLoopRun",
+      "py": "approve_loop_run",
+      "cli": "loop review --approve",
+      "args": [
+        "lr_1"
+      ],
+      "options": {
+        "note": "looks right"
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/loops/lr_1/review",
+        "body": {
+          "action": "approve",
+          "note": "looks right"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "status": "ACTIVE"
+        }
+      },
+      "returns": {
+        "ok": true,
+        "status": "ACTIVE"
+      }
+    },
+    {
+      "ts": "rejectLoopRun",
+      "py": "reject_loop_run",
+      "cli": "loop review --reject",
+      "args": [
+        "lr_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/loops/lr_1/review",
+        "body": {
+          "action": "reject"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "status": "KILLED"
+        }
+      },
+      "returns": {
+        "ok": true,
+        "status": "KILLED"
+      }
+    },
+    {
+      "ts": "listFindings",
+      "py": "list_findings",
+      "cli": "findings list",
+      "args": [],
+      "options": {
+        "unadjudicated": true,
+        "detectorId": "prompt_injection",
+        "limit": 20
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/findings?unadjudicated=true&detector_id=prompt_injection&limit=20"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "findings": [
+            {
+              "finding_id": "fnd_1",
+              "trace_id": "tr_1",
+              "session_id": null,
+              "loop_run_id": null,
+              "detector_id": "prompt_injection",
+              "anomaly_kind": "INJECTION",
+              "severity": "HIGH",
+              "disposition": "KILL",
+              "confidence": 0.9,
+              "reason": "echo",
+              "harness": null,
+              "shadowed": false,
+              "outcome": null,
+              "outcome_by": null,
+              "outcome_at": null,
+              "outcome_note": null,
+              "created_at": "2026-10-09T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "finding_id": "fnd_1",
+          "trace_id": "tr_1",
+          "session_id": null,
+          "loop_run_id": null,
+          "detector_id": "prompt_injection",
+          "anomaly_kind": "INJECTION",
+          "severity": "HIGH",
+          "disposition": "KILL",
+          "confidence": 0.9,
+          "reason": "echo",
+          "harness": null,
+          "shadowed": false,
+          "outcome": null,
+          "outcome_by": null,
+          "outcome_at": null,
+          "outcome_note": null,
+          "created_at": "2026-10-09T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "adjudicateFinding",
+      "py": "adjudicate_finding",
+      "cli": "findings adjudicate",
+      "args": [
+        "fnd_1",
+        "FALSE_POSITIVE"
+      ],
+      "options": {
+        "note": "benign"
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/findings/fnd_1/adjudicate",
+        "body": {
+          "outcome": "FALSE_POSITIVE",
+          "note": "benign"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "finding_id": "fnd_1",
+          "outcome": "FALSE_POSITIVE"
+        }
+      },
+      "returns": {
+        "finding_id": "fnd_1",
+        "outcome": "FALSE_POSITIVE"
+      }
+    },
+    {
+      "ts": "getFindingStats",
+      "py": "get_finding_stats",
+      "cli": "findings stats",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/findings/stats"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "detectors": [
+            {
+              "detector_id": "prompt_injection",
+              "anomaly_kind": "INJECTION",
+              "shadowed": false,
+              "total_findings": 4,
+              "adjudicated": 0,
+              "false_positives": 0,
+              "false_positive_rate": null
+            }
+          ],
+          "caveats": [
+            "small sample"
+          ]
+        }
+      },
+      "returns": {
+        "detectors": [
+          {
+            "detector_id": "prompt_injection",
+            "anomaly_kind": "INJECTION",
+            "shadowed": false,
+            "total_findings": 4,
+            "adjudicated": 0,
+            "false_positives": 0,
+            "false_positive_rate": null
+          }
+        ],
+        "caveats": [
+          "small sample"
+        ]
+      }
+    },
+    {
+      "ts": "getResponseEchoReport",
+      "py": "get_response_echo_report",
+      "cli": "findings echo-report",
+      "args": [],
+      "options": {
+        "since": "2026-10-01T00:00:00Z"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/findings/response-echo/report?since=2026-10-01T00%3A00%3A00Z"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "window": {
+            "since": "2026-10-01T00:00:00Z",
+            "until": "2026-10-09T00:00:00Z"
+          },
+          "tracesIngested": 0,
+          "refusal": "no traffic in the window",
+          "patterns": []
+        }
+      },
+      "returns": {
+        "window": {
+          "since": "2026-10-01T00:00:00Z",
+          "until": "2026-10-09T00:00:00Z"
+        },
+        "tracesIngested": 0,
+        "refusal": "no traffic in the window",
+        "patterns": []
+      }
+    },
+    {
+      "ts": "listTraces",
+      "py": "list_traces",
+      "cli": "traces list",
+      "args": [],
+      "options": {
+        "limit": 50,
+        "offset": 0,
+        "since": "24h",
+        "enforcement": "KILL"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/traces?limit=50&offset=0&since=24h&enforcement=KILL"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "traces",
+          "rowCase": "camel",
+          "format": "toon",
+          "data": "TOON|traceId,timestamp,requestedModel,actualModelRouted,enforcementAction,complianceScore,actualCostUsd,anomalyDetected,breakGlass\ntr_1|2026-10-09T00:00:00.000Z|claude-sonnet-4-5|claude-sonnet-4-5|BYPASS|0.98|0.0125|-|f\ntr_2|2026-10-09T00:01:00.000Z|gpt-4o|gpt-4o-mini|KILL|0.2|0|{\"kind\":\"loop\"}|t\n",
+          "total": 22
+        }
+      },
+      "returns": {
+        "listProperty": "traces",
+        "rowCase": "camel",
+        "total": 22,
+        "traces": [
+          {
+            "traceId": "tr_1",
+            "timestamp": "2026-10-09T00:00:00.000Z",
+            "requestedModel": "claude-sonnet-4-5",
+            "actualModelRouted": "claude-sonnet-4-5",
+            "enforcementAction": "BYPASS",
+            "complianceScore": 0.98,
+            "actualCostUsd": 0.0125,
+            "anomalyDetected": null,
+            "breakGlass": false
+          },
+          {
+            "traceId": "tr_2",
+            "timestamp": "2026-10-09T00:01:00.000Z",
+            "requestedModel": "gpt-4o",
+            "actualModelRouted": "gpt-4o-mini",
+            "enforcementAction": "KILL",
+            "complianceScore": 0.2,
+            "actualCostUsd": 0,
+            "anomalyDetected": {
+              "kind": "loop"
+            },
+            "breakGlass": true
+          }
+        ]
+      }
+    },
+    {
+      "ts": "getTrace",
+      "py": "get_trace",
+      "cli": "traces inspect",
+      "args": [
+        "tr_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/traces/tr_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "traceId": "tr_1",
+          "timestamp": "2026-10-09T00:00:00.000Z",
+          "requestedModel": "claude-sonnet-4-5",
+          "actualModelRouted": "claude-sonnet-4-5",
+          "enforcementAction": "BYPASS",
+          "complianceScore": 0.98,
+          "actualCostUsd": 0.0125,
+          "anomalyDetected": null,
+          "breakGlass": false,
+          "sessionId": "sess_1",
+          "requestId": "req_1"
+        }
+      },
+      "returns": {
+        "traceId": "tr_1",
+        "timestamp": "2026-10-09T00:00:00.000Z",
+        "requestedModel": "claude-sonnet-4-5",
+        "actualModelRouted": "claude-sonnet-4-5",
+        "enforcementAction": "BYPASS",
+        "complianceScore": 0.98,
+        "actualCostUsd": 0.0125,
+        "anomalyDetected": null,
+        "breakGlass": false,
+        "sessionId": "sess_1",
+        "requestId": "req_1"
+      }
+    },
+    {
+      "ts": "listIntegrityRoots",
+      "py": "list_integrity_roots",
+      "cli": "integrity roots",
+      "args": [],
+      "options": {
+        "loopRunId": "lr_1"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/integrity/roots?loopRunId=lr_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "data",
+          "rowCase": "snake",
+          "ok": true,
+          "data": [
+            {
+              "root_id": "tmr_1",
+              "loop_run_id": "lr_1",
+              "leaf_schema_version": 2,
+              "merkle_root": "ab",
+              "leaf_count": 3,
+              "first_trace_at": "2026-10-08T00:00:00.000Z",
+              "last_trace_at": "2026-10-08T01:00:00.000Z",
+              "signature_alg": "EdDSA",
+              "signing_key_id": "k1",
+              "sealed_at": "2026-10-08T02:00:00.000Z"
+            }
+          ],
+          "leafSchemaVersion": 2
+        }
+      },
+      "returns": {
+        "listProperty": "data",
+        "rowCase": "snake",
+        "ok": true,
+        "data": [
+          {
+            "root_id": "tmr_1",
+            "loop_run_id": "lr_1",
+            "leaf_schema_version": 2,
+            "merkle_root": "ab",
+            "leaf_count": 3,
+            "first_trace_at": "2026-10-08T00:00:00.000Z",
+            "last_trace_at": "2026-10-08T01:00:00.000Z",
+            "signature_alg": "EdDSA",
+            "signing_key_id": "k1",
+            "sealed_at": "2026-10-08T02:00:00.000Z"
+          }
+        ],
+        "leafSchemaVersion": 2
+      }
+    },
+    {
+      "ts": "getIntegrityRoot",
+      "py": "get_integrity_root",
+      "cli": "integrity verify",
+      "args": [
+        "tmr_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/integrity/roots/tmr_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "root": {
+            "root_id": "tmr_1",
+            "loop_run_id": "lr_1",
+            "leaf_schema_version": 2,
+            "merkle_root": "ab",
+            "leaf_count": 3,
+            "first_trace_at": "2026-10-08T00:00:00.000Z",
+            "last_trace_at": "2026-10-08T01:00:00.000Z",
+            "signature_alg": "EdDSA",
+            "signing_key_id": "k1",
+            "sealed_at": "2026-10-08T02:00:00.000Z",
+            "workspace_id": "ws_1",
+            "signature": "c2ln",
+            "previous_root": null,
+            "signing_preimage_version": 2
+          },
+          "leaves": [
+            {
+              "trace_id": "tr_1",
+              "leaf_index": 0,
+              "leaf_hash": "cd"
+            }
+          ]
+        }
+      },
+      "returns": {
+        "ok": true,
+        "root": {
+          "root_id": "tmr_1",
+          "loop_run_id": "lr_1",
+          "leaf_schema_version": 2,
+          "merkle_root": "ab",
+          "leaf_count": 3,
+          "first_trace_at": "2026-10-08T00:00:00.000Z",
+          "last_trace_at": "2026-10-08T01:00:00.000Z",
+          "signature_alg": "EdDSA",
+          "signing_key_id": "k1",
+          "sealed_at": "2026-10-08T02:00:00.000Z",
+          "workspace_id": "ws_1",
+          "signature": "c2ln",
+          "previous_root": null,
+          "signing_preimage_version": 2
+        },
+        "leaves": [
+          {
+            "trace_id": "tr_1",
+            "leaf_index": 0,
+            "leaf_hash": "cd"
+          }
+        ]
+      }
+    },
+    {
+      "ts": "recomputeIntegrityRoot",
+      "py": "recompute_integrity_root",
+      "cli": "integrity verify",
+      "args": [
+        "tmr_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/integrity/roots/tmr_1/recompute",
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "verdict": "match",
+          "storedRoot": "ab",
+          "recomputedRoot": "ab",
+          "changedTraceIds": [],
+          "missingTraceIds": []
+        }
+      },
+      "returns": {
+        "ok": true,
+        "verdict": "match",
+        "storedRoot": "ab",
+        "recomputedRoot": "ab",
+        "changedTraceIds": [],
+        "missingTraceIds": []
+      }
+    },
+    {
+      "ts": "getIntegrityChain",
+      "py": "get_integrity_chain",
+      "cli": "integrity chain",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/integrity/chain"
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "ok": false,
+          "workspaceId": "ws_1",
+          "rootsWalked": 2,
+          "rootsNotWalked": 0,
+          "unchainedRootIds": [],
+          "breaks": [
+            {
+              "rootId": "tmr_2",
+              "namedPrevious": "zz",
+              "precedingRootId": "tmr_1",
+              "precedingMerkleRoot": "ab"
+            }
+          ],
+          "intact": false
+        }
+      },
+      "returns": {
+        "ok": false,
+        "workspaceId": "ws_1",
+        "rootsWalked": 2,
+        "rootsNotWalked": 0,
+        "unchainedRootIds": [],
+        "breaks": [
+          {
+            "rootId": "tmr_2",
+            "namedPrevious": "zz",
+            "precedingRootId": "tmr_1",
+            "precedingMerkleRoot": "ab"
+          }
+        ],
+        "intact": false
+      }
+    },
+    {
+      "ts": "getIntegrityConfigChain",
+      "py": "get_integrity_config_chain",
+      "cli": "integrity config-chain",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/integrity/config-chain"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "workspaceId": "ws_1",
+          "harnessType": null,
+          "snapshotsWalked": 4,
+          "snapshotsNotWalked": 0,
+          "unchainedSnapshotIds": [],
+          "breaks": [],
+          "contentMismatches": [],
+          "snapshotsWithoutContent": 0,
+          "intact": true
+        }
+      },
+      "returns": {
+        "ok": true,
+        "workspaceId": "ws_1",
+        "harnessType": null,
+        "snapshotsWalked": 4,
+        "snapshotsNotWalked": 0,
+        "unchainedSnapshotIds": [],
+        "breaks": [],
+        "contentMismatches": [],
+        "snapshotsWithoutContent": 0,
+        "intact": true
+      }
+    },
+    {
+      "ts": "listPolicies",
+      "py": "list_policies",
+      "cli": "policy export",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/policies"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "policies": [
+            {
+              "policyId": "pol_1",
+              "workspaceId": "ws_1",
+              "name": "No prod writes",
+              "description": null,
+              "riskCategory": null,
+              "targetToolPattern": "Bash",
+              "enforcementAction": "KILL",
+              "interventionMode": null,
+              "priority": 10,
+              "conditions": {},
+              "isActive": true,
+              "currentVersion": 3,
+              "createdAt": "2026-10-01T00:00:00.000Z",
+              "updatedAt": "2026-10-02T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "policyId": "pol_1",
+          "workspaceId": "ws_1",
+          "name": "No prod writes",
+          "description": null,
+          "riskCategory": null,
+          "targetToolPattern": "Bash",
+          "enforcementAction": "KILL",
+          "interventionMode": null,
+          "priority": 10,
+          "conditions": {},
+          "isActive": true,
+          "currentVersion": 3,
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "updatedAt": "2026-10-02T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "enablePolicy",
+      "py": "enable_policy",
+      "cli": "policy enable",
+      "args": [
+        "pol_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policies/pol_1/enable"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "currentVersion": 4
+        }
+      },
+      "returns": {
+        "ok": true,
+        "currentVersion": 4
+      }
+    },
+    {
+      "ts": "disablePolicy",
+      "py": "disable_policy",
+      "cli": "policy disable",
+      "args": [
+        "pol_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policies/pol_1/disable"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "currentVersion": 5
+        }
+      },
+      "returns": {
+        "ok": true,
+        "currentVersion": 5
+      }
+    },
+    {
+      "ts": "rollbackPolicy",
+      "py": "rollback_policy",
+      "cli": "policy rollback",
+      "args": [
+        "pol_1",
+        2
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/policies/pol_1/rollback",
+        "body": {
+          "version": 2
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "currentVersion": 6
+        }
+      },
+      "returns": {
+        "ok": true,
+        "currentVersion": 6
+      }
+    },
+    {
+      "ts": "getRuleCandidateSource",
+      "py": "get_rule_candidate_source",
+      "cli": "policy compile --candidate",
+      "args": [
+        "rc_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/rule-candidates/rc_1/source"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "candidateId": "rc_1",
+          "guardrailId": "pgr_1",
+          "status": "MOCKS_SELECTED",
+          "source": "export function evaluate(): i32 { return 0 }\n",
+          "sourceSha256": "27FFB1A548D3C658B9DC6076EBD1890853D5DA7C37EE32C06ECB183A4B021AA2"
+        }
+      },
+      "returns": {
+        "candidateId": "rc_1",
+        "guardrailId": "pgr_1",
+        "status": "MOCKS_SELECTED",
+        "source": "export function evaluate(): i32 { return 0 }\n",
+        "sourceSha256": "27ffb1a548d3c658b9dc6076ebd1890853d5da7c37ee32c06ecb183a4b021aa2"
+      }
+    },
+    {
+      "ts": "uploadRuleCandidateBundle",
+      "py": "upload_rule_candidate_bundle",
+      "cli": "policy compile --candidate --upload",
+      "args": [
+        "rc_1",
+        {
+          "$bytes": "\u0000asm"
+        },
+        "27ffb1a548d3c658b9dc6076ebd1890853d5da7c37ee32c06ecb183a4b021aa2"
+      ],
+      "options": {
+        "fileName": "rc_1.wasm"
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/rule-candidates/rc_1/bundle",
+        "multipart": {
+          "file": {
+            "field": "file",
+            "fileName": "rc_1.wasm",
+            "contentType": "application/wasm",
+            "text": "\u0000asm"
+          },
+          "fields": {
+            "source_sha256": "27ffb1a548d3c658b9dc6076ebd1890853d5da7c37ee32c06ecb183a4b021aa2"
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "accepted": true,
+          "gates": [
+            {
+              "gate": "source_hash",
+              "passed": true,
+              "detail": "matches"
+            }
+          ],
+          "ruleId": "wr_1",
+          "mode": "SHADOW"
+        }
+      },
+      "returns": {
+        "accepted": true,
+        "gates": [
+          {
+            "gate": "source_hash",
+            "passed": true,
+            "detail": "matches"
+          }
+        ],
+        "ruleId": "wr_1",
+        "mode": "SHADOW"
+      }
+    },
+    {
+      "ts": "replayWasmRule",
+      "py": "replay_wasm_rule",
+      "cli": "policy replay",
+      "args": [
+        "wr_1"
+      ],
+      "options": {
+        "limit": 100
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/wasm-rules/wr_1/replay",
+        "body": {
+          "limit": 100
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ruleId": "wr_1",
+          "since": null,
+          "contextCount": 120,
+          "wouldActCount": 6,
+          "wouldActRate": 0.05,
+          "verdictCounts": {
+            "0": 114,
+            "1": 6
+          },
+          "sampleMatches": []
+        }
+      },
+      "returns": {
+        "ruleId": "wr_1",
+        "since": null,
+        "contextCount": 120,
+        "wouldActCount": 6,
+        "wouldActRate": 0.05,
+        "verdictCounts": {
+          "0": 114,
+          "1": 6
+        },
+        "sampleMatches": []
+      }
+    },
+    {
+      "ts": "listSops",
+      "py": "list_sops",
+      "cli": "sops pull",
+      "args": [],
+      "options": {
+        "limit": 100
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sops?limit=100"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "items",
+          "rowCase": "camel",
+          "items": [
+            {
+              "sopId": "sop_1",
+              "title": "Deploys",
+              "contentHash": "ab"
+            }
+          ],
+          "total": 1
+        }
+      },
+      "returns": [
+        {
+          "sopId": "sop_1",
+          "title": "Deploys",
+          "contentHash": "ab"
+        }
+      ]
+    },
+    {
+      "ts": "getSop",
+      "py": "get_sop",
+      "cli": "sops pull",
+      "args": [
+        "sop_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sops/sop_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sopId": "sop_1",
+          "title": "Deploys",
+          "riskTier": "HIGH",
+          "version": "1.0.0",
+          "markdownContent": "Pin images."
+        }
+      },
+      "returns": {
+        "sopId": "sop_1",
+        "title": "Deploys",
+        "riskTier": "HIGH",
+        "version": "1.0.0",
+        "markdownContent": "Pin images."
+      }
+    },
+    {
+      "ts": "createSop",
+      "py": "create_sop",
+      "cli": "sops push",
+      "args": [
+        {
+          "title": "Deploys",
+          "markdown_content": "Pin images.",
+          "risk_tier": "HIGH",
+          "complexity_tier": "TIER_0"
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/sops",
+        "body": {
+          "title": "Deploys",
+          "markdown_content": "Pin images.",
+          "risk_tier": "HIGH",
+          "complexity_tier": "TIER_0"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "ok": true,
+          "sopId": "sop_1"
+        }
+      },
+      "returns": {
+        "ok": true,
+        "sopId": "sop_1"
+      }
+    },
+    {
+      "ts": "listOrgSops",
+      "py": "list_org_sops",
+      "cli": "sops org-list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspace/org-sops"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "orgSopId": "osop_1",
+              "orgId": "org_1",
+              "title": "Floor",
+              "riskTier": "HIGH",
+              "createdAt": "2026-10-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "orgSopId": "osop_1",
+          "orgId": "org_1",
+          "title": "Floor",
+          "riskTier": "HIGH",
+          "createdAt": "2026-10-01T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "createOrgSop",
+      "py": "create_org_sop",
+      "cli": "sops push --org",
+      "args": [
+        {
+          "title": "Floor",
+          "markdown_content": "Never."
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/workspace/org-sops",
+        "body": {
+          "title": "Floor",
+          "markdown_content": "Never."
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "orgSopId": "osop_1",
+          "orgId": "org_1",
+          "title": "Floor",
+          "riskTier": "HIGH",
+          "createdAt": "2026-10-01T00:00:00.000Z"
+        }
+      },
+      "returns": {
+        "orgSopId": "osop_1",
+        "orgId": "org_1",
+        "title": "Floor",
+        "riskTier": "HIGH",
+        "createdAt": "2026-10-01T00:00:00.000Z"
+      }
+    },
+    {
+      "ts": "deleteOrgSop",
+      "py": "delete_org_sop",
+      "cli": "sops org-rm",
+      "args": [
+        "osop_1"
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/workspace/org-sops/osop_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "deleted": true
+        }
+      },
+      "returns": null
+    },
+    {
+      "ts": "attenuateKey",
+      "py": "attenuate_key",
+      "cli": "attenuate",
+      "args": [
+        "vk_parent",
+        [
+          "chat",
+          "read"
+        ]
+      ],
+      "options": {
+        "ttlSeconds": 600
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/attenuate",
+        "body": {
+          "parentKeyId": "vk_parent",
+          "requestedCaps": [
+            "chat",
+            "read"
+          ],
+          "ttlSeconds": 600
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "childKey": "vk_child_test",
+          "childKeyId": "key_2",
+          "attenuationChainId": "ch_1",
+          "grantedCaps": [
+            "chat",
+            "read"
+          ],
+          "expiresAt": "2026-10-09T01:00:00.000Z"
+        }
+      },
+      "returns": {
+        "childKey": "vk_child_test",
+        "childKeyId": "key_2",
+        "attenuationChainId": "ch_1",
+        "grantedCaps": [
+          "chat",
+          "read"
+        ],
+        "expiresAt": "2026-10-09T01:00:00.000Z"
+      }
+    },
+    {
+      "ts": "getAttenuationChain",
+      "py": "get_attenuation_chain",
+      "cli": "attenuate chain",
+      "args": [
+        "ch_1"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/attenuate/chain/ch_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "chain": [
+            {
+              "chainId": "ch_1",
+              "parentKeyId": "key_1",
+              "childKeyId": "key_2",
+              "workspaceId": "ws_1",
+              "grantedCaps": [
+                "chat"
+              ],
+              "expiresAt": "2026-10-09T01:00:00.000Z",
+              "createdAt": "2026-10-09T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "chainId": "ch_1",
+          "parentKeyId": "key_1",
+          "childKeyId": "key_2",
+          "workspaceId": "ws_1",
+          "grantedCaps": [
+            "chat"
+          ],
+          "expiresAt": "2026-10-09T01:00:00.000Z",
+          "createdAt": "2026-10-09T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "predictCost",
+      "py": "predict_cost",
+      "cli": "predict-cost",
+      "args": [
+        {
+          "workspaceId": "ws_1",
+          "model": "claude-sonnet-4-5",
+          "inputTokenCount": 1200
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/predict-cost",
+        "body": {
+          "workspaceId": "ws_1",
+          "model": "claude-sonnet-4-5",
+          "inputTokenCount": 1200
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "inputTokens": 1200,
+          "estimatedOutputTokens": 400,
+          "estimatedReasoningTokens": null,
+          "estimatedCostUsd": 0.0096,
+          "confidence": "low",
+          "basedOnSamples": 0
+        }
+      },
+      "returns": {
+        "inputTokens": 1200,
+        "estimatedOutputTokens": 400,
+        "estimatedReasoningTokens": null,
+        "estimatedCostUsd": 0.0096,
+        "confidence": "low",
+        "basedOnSamples": 0
+      }
+    },
+    {
+      "ts": "getMirrorAdoptionReport",
+      "py": "get_mirror_adoption_report",
+      "cli": "routing adoption-report",
+      "args": [
+        "gpt-4o-mini"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/routing/mirror-adoption-report?candidateModel=gpt-4o-mini"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "candidateModel": "gpt-4o-mini",
+          "sufficientData": false,
+          "sampleCount": 3,
+          "minimumRequired": 30,
+          "reason": "not enough judged pairs"
+        }
+      },
+      "returns": {
+        "candidateModel": "gpt-4o-mini",
+        "sufficientData": false,
+        "sampleCount": 3,
+        "minimumRequired": 30,
+        "reason": "not enough judged pairs"
+      }
+    }
+  ],
+  "offline": [
+    {
+      "ts": "verifyEvidenceArchive",
+      "py": "verify_evidence_archive",
+      "cli": "compliance verify",
+      "keys": "getSigningKeys",
+      "vectors": "tools/cli/src/commands/__fixtures__/evidence-archive.json"
+    },
+    {
+      "ts": "verifyIntegrityRoot",
+      "py": "verify_integrity_root",
+      "cli": "integrity verify",
+      "keys": "getSigningKeys",
+      "vectors": "tools/cli/src/commands/__fixtures__/integrity-roots.json"
+    }
+  ],
+  "errors": [
+    {
+      "$comment": "A 403 that names the roles allowed reads as that sentence, as the CLI prints it.",
+      "ts": "approveMcpServer",
+      "args": [
+        "mcp_1"
+      ],
+      "response": {
+        "status": 403,
+        "body": {
+          "error": "Forbidden",
+          "code": "E_FORBIDDEN",
+          "detail": "Requires the OWNER or ADMIN role"
+        }
+      },
+      "message": "Control plane POST /api/v1/mcp/servers/mcp_1/status refused (403): Requires the OWNER or ADMIN role"
+    },
+    {
+      "$comment": "A 403 with no detail, and any other failure, carries the status and the body as sent.",
+      "ts": "getTeamUsage",
+      "args": [],
+      "response": {
+        "status": 403,
+        "body": {
+          "error": "Forbidden"
+        }
+      },
+      "message": "Control plane GET /api/v1/usage/teams?period=monthly failed (403): {\"error\":\"Forbidden\"}"
+    },
+    {
+      "ts": "getGuardrail",
+      "args": [
+        "pgr_9"
+      ],
+      "response": {
+        "status": 404,
+        "body": {
+          "error": "Guardrail not found"
+        }
+      },
+      "message": "Control plane GET /api/v1/policy-guardrails/guardrails/pgr_9 failed (404): {\"error\":\"Guardrail not found\"}"
+    },
+    {
+      "$comment": "A download's failure is JSON like any other.",
+      "ts": "downloadEvidence",
+      "args": [
+        "run_1"
+      ],
+      "response": {
+        "status": 403,
+        "body": {
+          "error": "Forbidden",
+          "detail": "Requires the OWNER or ADMIN role"
+        }
+      },
+      "message": "Control plane GET /api/v1/compliance/soc2-export/run_1 refused (403): Requires the OWNER or ADMIN role"
+    },
+    {
+      "$comment": "A served source that does not hash to its own sourceSha256 is refused.",
+      "ts": "getRuleCandidateSource",
+      "args": [
+        "rc_1"
+      ],
+      "response": {
+        "status": 200,
+        "body": {
+          "candidateId": "rc_1",
+          "guardrailId": null,
+          "status": "MOCKS_SELECTED",
+          "source": "changed",
+          "sourceSha256": "27ffb1a548d3c658b9dc6076ebd1890853d5da7c37ee32c06ecb183a4b021aa2"
+        }
+      },
+      "message": "The served source hashes to d67e2e944994496c8d8ec76eed0cf9f09679448d584b532bebf941852a37f5ed, not the 27ffb1a548d3c658b9dc6076ebd1890853d5da7c37ee32c06ecb183a4b021aa2 the control plane states."
+    }
+  ],
+  "excluded": {
+    "login": "session establishment: an SDK caller supplies apiKey",
+    "logout": "session establishment",
+    "exec": "registers a session for a wrapped process; ClawdeClient registers its own",
+    "init": "writes the local project config",
+    "setup": "interactive; its one control-plane call is setProviderCredential",
+    "doctor": "diagnoses this machine",
+    "install-daemon": "installs a local service",
+    "connect": "the sync daemon's own channel (config, status, SOP hashes, device reports)",
+    "disconnect": "undoes connect on this machine",
+    "start": "starts the local proxy",
+    "sync-context": "writes the local context file",
+    "rollback": "restores local harness files",
+    "enforce": "local enforcement state",
+    "rules": "builds and tests WASM and Rego rules locally",
+    "judge configure": "writes local judge artifacts",
+    "skill": "scans and reports this machine's skill files (its loop commands are covered)",
+    "sops status": "compares this checkout's SOP files with the control plane",
+    "guardrails pull": "writes served guardrails into this checkout",
+    "policy compile|install|list-local|snapshot": "the local WASM toolchain and this machine's policy snapshot",
+    "budget": "the workspace budget is ClawdeClient.checkBudget(); key and member budget methods ship with the budgets feature",
+    "traces (no credentials)": "reads this machine's proxy trace log"
+  }
+}

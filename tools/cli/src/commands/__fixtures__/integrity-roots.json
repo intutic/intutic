@@ -1,0 +1,267 @@
+{
+  "$comment": "Trace roots as GET /api/v1/integrity/roots/:rootId serves them, sealed by services/control-plane/src/lib/rootSigner.ts: signRoot for the v2 roots, and its v1 signingPreimage under the since-retired key for the v1 root, with keys generated for this file and discarded. integrity-jwks.json is what publicJwks published for those keys, active first. Held to rootSigner by services/control-plane/__tests__/unit/integrityRootsFixture.test.ts, and verified by the CLI (integrity.test.ts) and both SDKs (verifyIntegrityRoot, verify_integrity_root). `cases` are the checks all three run: a root from `roots` with `set` applied and `delete` removed, checked against a key set (`published` is integrity-jwks.json, `activeOnly` without the retired key, `empty` no keys, `brokenActive` the active key with an unloadable x, `none` no key set at all), and the verdict.",
+  "activeKeyId": "nGujR7DSsTR9m29HdeoJFolwmnDEKtzsSYOKS6BALKw",
+  "retiredKeyId": "_CS2wQmotWYO4H-OjOuPcEJw7bOkoKbhIC5NW71lIE8",
+  "roots": {
+    "v2Chained": {
+      "workspace_id": "ws_3f2a9c1e-5b7d-4e8a-9c0f-1a2b3c4d5e6f",
+      "leaf_count": 4,
+      "first_trace_at": "2026-10-08T00:00:00.000Z",
+      "last_trace_at": "2026-10-08T00:59:59.000Z",
+      "root_id": "tmr_v2_chained",
+      "loop_run_id": "lr_7",
+      "leaf_schema_version": 2,
+      "merkle_root": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "previous_root": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "sealed_at": "2026-10-08T02:00:00.000Z",
+      "signature_alg": "EdDSA",
+      "signature": "g4ttvOAEAGRS6ondZF5IzaRQHhc/bYBcgHSM08Uq7HFCwxa89KVbk1vka5KiMCRzGPywGh5EG184zRFY9zllCw==",
+      "signing_key_id": "nGujR7DSsTR9m29HdeoJFolwmnDEKtzsSYOKS6BALKw",
+      "signing_preimage_version": 2
+    },
+    "v2First": {
+      "workspace_id": "ws_3f2a9c1e-5b7d-4e8a-9c0f-1a2b3c4d5e6f",
+      "leaf_count": 4,
+      "first_trace_at": "2026-10-08T00:00:00.000Z",
+      "last_trace_at": "2026-10-08T00:59:59.000Z",
+      "root_id": "tmr_v2_first",
+      "loop_run_id": null,
+      "leaf_schema_version": 2,
+      "merkle_root": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "previous_root": null,
+      "sealed_at": "2026-10-08T01:00:00.000Z",
+      "signature_alg": "EdDSA",
+      "signature": "0BZnry/FJ4e411oCAO6SuDCcx/3MekwgXZSKo4CBZDRhQrkSRzBRCS0bO4cXppSMEt3Hn9Ci3xY2CUrxwQ3fAw==",
+      "signing_key_id": "nGujR7DSsTR9m29HdeoJFolwmnDEKtzsSYOKS6BALKw",
+      "signing_preimage_version": 2
+    },
+    "v1RetiredKey": {
+      "workspace_id": "ws_3f2a9c1e-5b7d-4e8a-9c0f-1a2b3c4d5e6f",
+      "leaf_count": 4,
+      "first_trace_at": "2026-10-08T00:00:00.000Z",
+      "last_trace_at": "2026-10-08T00:59:59.000Z",
+      "root_id": "tmr_v1_retired",
+      "loop_run_id": "lr_7",
+      "leaf_schema_version": 1,
+      "merkle_root": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "previous_root": null,
+      "sealed_at": "2026-09-01T02:00:00.000Z",
+      "signature_alg": "EdDSA",
+      "signature": "T2s9WPeYU5oxAe1yjcRYxl3v7eoRPV77H5rJ6vBEi9cierrmn89L0lLzTydCtRneybs9tcaalSODneLnJiw0CA==",
+      "signing_key_id": "_CS2wQmotWYO4H-OjOuPcEJw7bOkoKbhIC5NW71lIE8",
+      "signing_preimage_version": 1
+    },
+    "unsigned": {
+      "workspace_id": "ws_3f2a9c1e-5b7d-4e8a-9c0f-1a2b3c4d5e6f",
+      "leaf_count": 4,
+      "first_trace_at": "2026-10-08T00:00:00.000Z",
+      "last_trace_at": "2026-10-08T00:59:59.000Z",
+      "root_id": "tmr_unsigned",
+      "loop_run_id": null,
+      "leaf_schema_version": 2,
+      "merkle_root": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+      "previous_root": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "signature_alg": null,
+      "signature": null,
+      "signing_key_id": null,
+      "signing_preimage_version": 2,
+      "sealed_at": "2026-10-08T03:00:00.000Z"
+    }
+  },
+  "cases": [
+    {
+      "name": "a v2 root, under the key it names",
+      "root": "v2Chained",
+      "set": {},
+      "delete": [],
+      "jwks": "published",
+      "expect": "valid"
+    },
+    {
+      "name": "a workspace's first root, which names no predecessor",
+      "root": "v2First",
+      "set": {},
+      "delete": [],
+      "jwks": "published",
+      "expect": "valid"
+    },
+    {
+      "name": "a previous_root the server omitted reads as an explicit null",
+      "root": "v2First",
+      "set": {},
+      "delete": [
+        "previous_root"
+      ],
+      "jwks": "published",
+      "expect": "valid"
+    },
+    {
+      "name": "a v1 root sealed under a key since rotated out, still published",
+      "root": "v1RetiredKey",
+      "set": {},
+      "delete": [],
+      "jwks": "published",
+      "expect": "valid"
+    },
+    {
+      "name": "an absent signing_preimage_version means 1, as a pre-113 control plane serves it",
+      "root": "v1RetiredKey",
+      "set": {},
+      "delete": [
+        "signing_preimage_version"
+      ],
+      "jwks": "published",
+      "expect": "valid"
+    },
+    {
+      "name": "the rotated-out key dropped from the published set: unverifiable, never invalid",
+      "root": "v1RetiredKey",
+      "set": {},
+      "delete": [],
+      "jwks": "activeOnly",
+      "expect": "unverifiable"
+    },
+    {
+      "name": "no key was configured at seal time",
+      "root": "unsigned",
+      "set": {},
+      "delete": [],
+      "jwks": "published",
+      "expect": "unsigned"
+    },
+    {
+      "name": "no signing key id recorded",
+      "root": "v2Chained",
+      "set": {
+        "signing_key_id": null
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "unsigned"
+    },
+    {
+      "name": "the published keys could not be fetched",
+      "root": "v2Chained",
+      "set": {},
+      "delete": [],
+      "jwks": "none",
+      "expect": "keys_unavailable"
+    },
+    {
+      "name": "nothing published at all",
+      "root": "v2Chained",
+      "set": {},
+      "delete": [],
+      "jwks": "empty",
+      "expect": "unverifiable"
+    },
+    {
+      "name": "a relinked chain: previous_root is in the v2 signature",
+      "root": "v2Chained",
+      "set": {
+        "previous_root": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "invalid"
+    },
+    {
+      "name": "a predecessor of the empty string is not the same claim as none",
+      "root": "v2First",
+      "set": {
+        "previous_root": ""
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "invalid"
+    },
+    {
+      "name": "the signature does not carry to another workspace",
+      "root": "v2Chained",
+      "set": {
+        "workspace_id": "ws_other"
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "invalid"
+    },
+    {
+      "name": "nor to another loop run, or none",
+      "root": "v2Chained",
+      "set": {
+        "loop_run_id": null
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "invalid"
+    },
+    {
+      "name": "a changed merkle root",
+      "root": "v2Chained",
+      "set": {
+        "merkle_root": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "invalid"
+    },
+    {
+      "name": "another root's signature",
+      "root": "v2Chained",
+      "set": {
+        "signature": "0BZnry/FJ4e411oCAO6SuDCcx/3MekwgXZSKo4CBZDRhQrkSRzBRCS0bO4cXppSMEt3Hn9Ci3xY2CUrxwQ3fAw=="
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "invalid"
+    },
+    {
+      "name": "rebuilt under the wrong version, the bytes were never signed",
+      "root": "v2Chained",
+      "set": {
+        "signing_preimage_version": 1
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "invalid"
+    },
+    {
+      "name": "no fallback to another published key: the named key rejects it",
+      "root": "v2Chained",
+      "set": {
+        "signing_key_id": "_CS2wQmotWYO4H-OjOuPcEJw7bOkoKbhIC5NW71lIE8"
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "invalid"
+    },
+    {
+      "name": "a preimage version this verifier cannot rebuild",
+      "root": "v2Chained",
+      "set": {
+        "signing_preimage_version": 3
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "unverifiable"
+    },
+    {
+      "name": "an algorithm this verifier cannot check",
+      "root": "v2Chained",
+      "set": {
+        "signature_alg": "ES256"
+      },
+      "delete": [],
+      "jwks": "published",
+      "expect": "unverifiable"
+    },
+    {
+      "name": "a published key that cannot be loaded is one we do not hold",
+      "root": "v2Chained",
+      "set": {},
+      "delete": [],
+      "jwks": "brokenActive",
+      "expect": "unverifiable"
+    }
+  ]
+}

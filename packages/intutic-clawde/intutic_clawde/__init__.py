@@ -21,6 +21,8 @@ from .gate import (
     guard_tools,
     intutic_headers,
 )
+from .evidence import verify_evidence_archive
+from .integrity import verify_integrity_root
 
 __all__ = [
     "ClawdeClient", "ControlPlaneClient", "ClawdeError", "ClawdeConnectionError", "ClawdeVerdictError",
@@ -29,4 +31,5 @@ __all__ = [
     "stream_refusal",
     "Gate", "GateClient", "GateConfig", "GateResponse", "IntuticGateHold", "IntuticGateRefusal",
     "guard", "guard_tools", "intutic_headers",
+    "verify_evidence_archive", "verify_integrity_root",
 ]

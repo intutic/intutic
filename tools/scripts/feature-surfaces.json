@@ -42,7 +42,12 @@
           { "file": "packages/gate-js/src/harness.ts", "contains": "evaluateMcp(toolName, snap)" },
           { "file": "packages/intutic-clawde/intutic_clawde/gate/snapshot.py", "contains": "mcp_registry" }
         ],
-        "clawdeSdk": { "none": "MCP tool calls never pass through the clawde chat client" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "approveMcpServer" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "approve_mcp_server" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "disableMcpTool" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "disable_mcp_tool" }
+        ],
         "mcpTools": ["intutic_mcp_registry_status"],
         "kitkat": ["SERVER_NOT_APPROVED", "intutic_mcp_registry_status", "POLICY_SNAPSHOT_UNVERIFIED"],
         "terraform": ["intutic_mcp_server_decision", "workspace_settings.mcpDefaultPolicy"],
@@ -85,7 +90,12 @@
         "dashboard": [{ "file": "apps/dashboard/src/routes/DecisionsPage.tsx" }],
         "cli": ["decision approve --reason", "decision reject"],
         "gateSdk": ["HELD"],
-        "clawdeSdk": ["policy_held", "LOOP_RUN_PENDING_REVIEW"],
+        "clawdeSdk": [
+          "policy_held",
+          "LOOP_RUN_PENDING_REVIEW",
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "approveDecision" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "approve_decision" }
+        ],
         "mcpTools": ["intutic_hold_status"],
         "kitkat": ["intutic decision approve", "reviewHoldBypassEnabled"],
         "terraform": ["workspace_settings.reviewHoldBypassEnabled"],
@@ -274,7 +284,14 @@
           { "file": "packages/gate-js/src/client.ts", "contains": "gateSource: 'sdk'" },
           { "file": "packages/intutic-clawde/intutic_clawde/gate/client.py", "contains": "\"gateSource\": \"sdk\"" }
         ],
-        "clawdeSdk": { "none": "alerts are for operators" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getGateLiveness" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_gate_liveness" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getIntegrityChain" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_integrity_chain" },
+          { "file": "packages/clawde-sdk/src/integrity.ts", "contains": "verifyIntegrityRoot" },
+          { "file": "packages/intutic-clawde/intutic_clawde/integrity.py", "contains": "verify_integrity_root" }
+        ],
         "mcpTools": { "none": "alerts are for operators" },
         "kitkat": { "none": "alerts are for operators" },
         "terraform": ["intutic_notification_rule"],
@@ -300,7 +317,12 @@
         ],
         "cli": ["siem list", "siem show", "siem sources", "siem create", "siem update", "siem delete"],
         "gateSdk": { "none": "operator configuration" },
-        "clawdeSdk": { "none": "operator configuration" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "createSiemDestination" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "create_siem_destination" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "listSiemSources" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "list_siem_sources" }
+        ],
         "mcpTools": { "none": "operator configuration" },
         "kitkat": { "none": "operator configuration" },
         "terraform": ["intutic_siem_destination"],
@@ -341,7 +363,12 @@
           { "ref": "siem rotate-secret", "badge": false }
         ],
         "gateSdk": { "none": "receivers verify; the docs give Node and Python snippets" },
-        "clawdeSdk": { "none": "receivers verify; the docs give Node and Python snippets" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "rotateNotificationRuleSecret" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "rotate_notification_rule_secret" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "rotateSiemDestinationSecret" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "rotate_siem_destination_secret" }
+        ],
         "mcpTools": { "none": "operator configuration" },
         "kitkat": { "none": "operator configuration" },
         "terraform": [
@@ -390,7 +417,14 @@
         ],
         "cli": ["compliance coverage", "compliance collect --from --to", "compliance download", "compliance verify --jwks"],
         "gateSdk": { "none": "auditor reporting" },
-        "clawdeSdk": { "none": "auditor reporting" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "downloadFrameworkCoverage" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "download_framework_coverage" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "collectEvidence" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "collect_evidence" },
+          { "file": "packages/clawde-sdk/src/evidence.ts", "contains": "verifyEvidenceArchive" },
+          { "file": "packages/intutic-clawde/intutic_clawde/evidence.py", "contains": "verify_evidence_archive" }
+        ],
         "mcpTools": { "none": "auditor reporting" },
         "kitkat": { "none": "auditor reporting" },
         "terraform": { "none": "the mappings are versioned in code" },
@@ -420,7 +454,10 @@
         "dashboard": [{ "file": "apps/dashboard/src/routes/InventoryPage.tsx", "contains": "useInventoryDisconnects" }],
         "cli": ["disconnect --harness --dry-run --keep-login", "inventory disconnects --limit"],
         "gateSdk": { "none": "SDK gates install nothing to undo" },
-        "clawdeSdk": { "none": "the SDKs install nothing to undo" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "listInventoryDisconnects" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "list_inventory_disconnects" }
+        ],
         "mcpTools": { "none": "a local command" },
         "kitkat": ["intutic disconnect"],
         "terraform": { "none": "a machine-local command" },
@@ -516,7 +553,11 @@
           { "file": "packages/clawde-sdk/src/git-context.ts", "contains": "branchName" },
           { "file": "packages/intutic-clawde/intutic_clawde/client.py", "contains": "x-session-id" },
           { "file": "packages/intutic-clawde/intutic_clawde/git_context.py", "contains": "branchName" },
-          { "file": "apps/docs/reference/clawde-sdk.md", "contains": "Git context and cost attribution" }
+          { "file": "apps/docs/reference/clawde-sdk.md", "contains": "Git context and cost attribution" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getMemberUsage" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_member_usage" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getCommitUsage" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_commit_usage" }
         ],
         "mcpTools": { "none": "reporting" },
         "kitkat": { "none": "reporting" },
@@ -551,7 +592,12 @@
         ],
         "cli": ["usage pull-requests", "github webhook show", "github webhook rotate-secret"],
         "gateSdk": { "none": "attribution comes from the branch the daemon reports" },
-        "clawdeSdk": { "none": "attribution comes from the branch the daemon reports (see fleet-analytics)" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getPullRequestUsage" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_pull_request_usage" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "rotateGithubWebhookSecret" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "rotate_github_webhook_secret" }
+        ],
         "mcpTools": { "none": "reporting" },
         "kitkat": { "none": "reporting" },
         "terraform": { "none": "the webhook secret is shown once and belongs in GitHub's settings, not in Terraform state" },
@@ -574,7 +620,12 @@
         "dashboard": { "none": "decisions are approved in Slack or the CLI (guide/decisions.md)" },
         "cli": ["decision approve", "decision reject", "loop review"],
         "gateSdk": [{ "ref": "HELD", "badge": false }],
-        "clawdeSdk": { "none": "see mcp-approval-holds" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "approveLoopRun" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "approve_loop_run" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "rejectDecision" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "reject_decision" }
+        ],
         "mcpTools": [{ "ref": "intutic_hold_status", "badge": false }],
         "kitkat": ["Owner, Admin or Engineering Manager"],
         "terraform": { "none": "approver roles are fixed in code" },
@@ -704,7 +755,12 @@
         "dashboard": [{ "file": "apps/dashboard/src/routes/InventoryPage.tsx" }],
         "cli": ["inventory summary", "inventory harnesses", "inventory mcp-servers", "inventory skills --device --search", "inventory devices"],
         "gateSdk": { "none": "the daemon collects the inventory; SDK gates report only their own events" },
-        "clawdeSdk": { "none": "the daemon collects the inventory" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getInventorySummary" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_inventory_summary" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "listInventorySkills" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "list_inventory_skills" }
+        ],
         "mcpTools": { "none": "an operator report" },
         "kitkat": { "none": "an operator report" },
         "terraform": { "none": "an observation, not configuration" },
@@ -802,7 +858,12 @@
         "dashboard": [{ "file": "apps/dashboard/src/components/policy/AuthoredGuardrailForm.tsx" }],
         "cli": ["guardrails create", "guardrails update", "guardrails delete"],
         "gateSdk": { "none": "a promoted guardrail reaches the SDK gates as a snapshot rule, like an extracted one" },
-        "clawdeSdk": { "none": "a promoted guardrail reaches the proxy like an extracted one" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "createGuardrail" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "create_guardrail" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "deleteGuardrail" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "delete_guardrail" }
+        ],
         "mcpTools": { "none": "operator authoring" },
         "kitkat": { "none": "operator authoring" },
         "terraform": ["intutic_guardrail"],
@@ -857,7 +918,10 @@
         "dashboard": { "none": "each control's role follows the route it calls" },
         "cli": [{ "file": "tools/cli/src/lib/api.ts", "contains": "body.detail" }],
         "gateSdk": { "none": "gates call routes open to every role but Viewer" },
-        "clawdeSdk": { "none": "the chat client calls the proxy, not role-guarded routes" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "body.detail" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "body.get(\"detail\")" }
+        ],
         "mcpTools": { "none": "not agent-facing" },
         "kitkat": { "none": "not agent-facing" },
         "terraform": [{ "file": "apps/docs/reference/terraform/index.md", "contains": "OWNER or ADMIN for most resources" }],
