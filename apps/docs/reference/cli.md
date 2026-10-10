@@ -2394,7 +2394,7 @@ currently provisioned and its last-4 preview.
 Provision or rotate a workspace's own upstream provider key.
 
 ```bash
-intutic credentials set <provider> --field key=value [--field key=value ...] [options]
+intutic credentials set <provider> --field key=value [--field key=value ...] [--field-file key=path ...] [options]
 ```
 
 **Options:**
@@ -2402,8 +2402,11 @@ intutic credentials set <provider> --field key=value [--field key=value ...] [op
 | Option | Description |
 |--------|-------------|
 | `--field <key=value>` | A credential field; repeat for multi-field providers |
+| `--field-file <key=path>` | A credential field read from a file, such as a Vertex AI service-account key; repeatable |
 | `--json` | Output as JSON instead of a report |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
+
+The fields are checked before anything is sent: a field the provider does not take, a missing required field, a Bedrock credential with neither an access key pair nor an API key, an Azure endpoint that is not an Azure resource over `https`, or a Vertex AI key that is not a service-account file is refused.
 
 **Examples:**
 
@@ -2411,12 +2414,22 @@ intutic credentials set <provider> --field key=value [--field key=value ...] [op
 # A single-key provider
 intutic credentials set anthropic --field apiKey=sk-ant-...
 
-# A multi-field provider (Azure OpenAI)
+# AWS Bedrock: a region and an access key pair, or a Bedrock API key
+intutic credentials set bedrock --field awsRegion=us-east-1 --field apiKey=<BEDROCK_API_KEY>
+
+# Google Vertex AI: the project, a location and a service-account key file
+intutic credentials set vertex_ai --field projectId=my-project --field location=global \
+  --field-file serviceAccountJson=./service-account.json
+
+# Azure OpenAI: the resource endpoint and its key
 intutic credentials set azure_openai \
-  --field apiKey=sk-... \
   --field endpoint=https://your-resource.openai.azure.com \
-  --field deployment=gpt-4
+  --field apiKey=<API_KEY>
 ```
+
+After saving, the command checks the credential against the provider (the same check as **Test** on the Provider Keys card) and prints whether it was verified, rejected, or could not be verified; `--json` includes it as `verification`. A rejected credential is still saved.
+
+Requests then name the provider's models as `bedrock/<model id>`, `vertex/<model>` or `azure/<deployment>`; see [AWS Bedrock](/integrations/aws-bedrock), [Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai).
 
 If BYO-key enforcement is on for your gateway, requests for a provider with no provisioned key
 fail with `402 byok_required` until one is set here.

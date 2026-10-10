@@ -3,6 +3,9 @@
  * provisioning a workspace's own upstream provider keys.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 vi.mock('../config/store.js', () => ({
   loadCredentials: vi.fn(async () => ({ apiKey: 'vk_test_key', workspaceId: 'ws_test' })),
@@ -64,28 +67,73 @@ describe('intutic credentials', () => {
     expect(JSON.parse(init.body)).toEqual({ apiKey: 'sk-ant-abcwxyz' })
   })
 
+  it('set checks the saved credential against the provider and says what came back', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ provider: 'bedrock', routingLive: true, provisioned: true, lastFour: 'WXYZ', updatedAt: '2026-10-09T00:00:00Z' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ provider: 'bedrock', status: 'invalid', httpStatus: 403, detail: 'AWS Bedrock rejected the credential (HTTP 403)' }),
+      })
+
+    await runCredentialsSet('bedrock', { field: ['awsRegion=us-east-1', 'apiKey=bedrock-key-12345'] })
+
+    const [url, init] = fetchMock.mock.calls[1]
+    expect(url).toBe('https://api.test.invalid/api/v1/workspace/provider-credentials/bedrock/verify')
+    expect(init.method).toBe('POST')
+    const printed = [...logSpy.mock.calls, ...errSpy.mock.calls].map((c: unknown[]) => String(c[0])).join('\n')
+    expect(printed).toContain('rejected the credential')
+    expect(printed).not.toContain('bedrock-key-12345')
+  })
+
   it('set hits PUT with multiple fields for a multi-field provider', async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ provider: 'azure_openai', routingLive: false, provisioned: true, lastFour: null, updatedAt: '2026-08-13T00:00:00Z' }),
     })
 
-    // deploymentName, not deployment -- azure_openai's actual registry field
-    // key (providers.ts). This test used the wrong key until the LLD #70
-    // registry pre-check caught it: the server would have silently ignored
-    // an unrecognized "deployment" field and 400'd on the missing required
-    // "deploymentName", so this test was never actually exercising a request
-    // that would succeed against the real route.
     await runCredentialsSet('azure_openai', {
-      field: ['apiKey=sk-abc12345', 'endpoint=https://foo.openai.azure.com', 'deploymentName=gpt4'],
+      field: ['apiKey=sk-abc12345', 'endpoint=https://foo.openai.azure.com'],
     })
 
     const [, init] = fetchMock.mock.calls[0]
     expect(JSON.parse(init.body)).toEqual({
       apiKey: 'sk-abc12345',
       endpoint: 'https://foo.openai.azure.com',
-      deploymentName: 'gpt4',
     })
+  })
+
+  it('set reads a --field-file value from disk (a Vertex AI service-account key)', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ provider: 'vertex_ai', routingLive: true, provisioned: true, lastFour: null, updatedAt: '2026-10-09T00:00:00Z' }),
+    })
+    const dir = mkdtempSync(join(tmpdir(), 'intutic-cred-'))
+    const keyFile = join(dir, 'sa.json')
+    const doc = JSON.stringify({ type: 'service_account', client_email: 'sa@p.iam.gserviceaccount.com' }, null, 2)
+    writeFileSync(keyFile, doc)
+
+    await runCredentialsSet('vertex_ai', {
+      field: ['projectId=proj-1'],
+      fieldFile: [`serviceAccountJson=${keyFile}`],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(init.body)).toEqual({ projectId: 'proj-1', serviceAccountJson: doc })
+  })
+
+  it('set refuses a Bedrock credential with neither a key pair nor an API key', async () => {
+    await expect(runCredentialsSet('bedrock', { field: ['awsRegion=us-east-1'] })).rejects.toThrow('process.exit(1)')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('set refuses an Azure endpoint that is not an Azure resource', async () => {
+    await expect(
+      runCredentialsSet('azure_openai', { field: ['apiKey=sk-abc12345', 'endpoint=https://foo.example.com'] }),
+    ).rejects.toThrow('process.exit(1)')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   // ── LLD #70: registry pre-check hardening ──
@@ -106,7 +154,7 @@ describe('intutic credentials', () => {
 
   it('set refuses when a required field is missing', async () => {
     await expect(
-      runCredentialsSet('azure_openai', { field: ['apiKey=sk-abc12345', 'endpoint=https://foo.openai.azure.com'] }),
+      runCredentialsSet('azure_openai', { field: ['endpoint=https://foo.openai.azure.com'] }),
     ).rejects.toThrow('process.exit(1)')
     expect(fetchMock).not.toHaveBeenCalled()
   })

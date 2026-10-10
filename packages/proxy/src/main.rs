@@ -247,6 +247,9 @@ async fn main() -> anyhow::Result<()> {
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
     let config = config::load_config(&config_path)?;
     tracing::info!("Config loaded from {}", config_path);
+    // `model_list` entries that name a cloud model (`bedrock/…`, `vertex/…`,
+    // `azure/…`) become aliases the router resolves (`cloud::resolve`).
+    intutic_proxy::cloud::install_aliases(&config.model_list);
 
     // Install the L1 egress policy (LLD #63 §4) before the first request. The
     // mode is logged at boot so an operator running in Enforce sees it in the

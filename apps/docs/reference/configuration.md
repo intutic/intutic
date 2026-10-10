@@ -32,7 +32,7 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `UPSTREAM_URL` | unset | One upstream for every provider, such as a LiteLLM gateway. A provider's own variable below takes precedence. See [Standalone](/integrations/standalone) |
 | `ANTHROPIC_UPSTREAM_URL` | `https://api.anthropic.com` | Where requests for Anthropic models go |
 | `OPENAI_UPSTREAM_URL` | `https://api.openai.com` | Where requests for OpenAI models go |
-| `GEMINI_UPSTREAM_URL` | `https://generativelanguage.googleapis.com` | Where requests for Gemini models go |
+| `GEMINI_UPSTREAM_URL` | `https://generativelanguage.googleapis.com` | Where requests for Gemini models go. A `gemini-*` model asked for on `/v1/messages`, `/v1/chat/completions` or `/v1/responses` is translated to the Gemini API's `generateContent`, with the requested model and the Gemini key in `x-goog-api-key`. Requests on the Gemini API's own `/v1beta` route are not supported |
 | `MISTRAL_UPSTREAM_URL` | `https://api.mistral.ai` | Where requests for Mistral models go |
 | `OPENROUTER_UPSTREAM_URL` | `https://openrouter.ai/api` | Where requests for OpenRouter models go |
 | `DEEPSEEK_UPSTREAM_URL` | `https://api.deepseek.com` | Where requests for DeepSeek models go |
@@ -40,7 +40,23 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `ENCRYPTION_KEY` | unset | Opens the workspace provider keys a control plane stores encrypted in Valkey: the same value the control plane has. Without it, the proxy never sends an encrypted value upstream: it treats the key as not provisioned and logs why. A key the proxy captures from a request is stored encrypted when this is set. With Valkey, the proxy announces the ids of the keys it holds (none, without this), and the control plane encrypts stored keys only once every running proxy holds its key |
 | `ENCRYPTION_KEY_PREVIOUS` | unset | While `ENCRYPTION_KEY` is being rotated: the key it replaces, or several separated by commas. Values sealed under them still open |
 
-The proxy picks the provider from the model name, so these are the only way to point a provider somewhere else; `model_list` in `config.yaml` does not route. For a single upstream used by every provider, see [Standalone](/integrations/standalone).
+The proxy picks the provider from the model name, so these are the only way to point a first-party provider somewhere else. For a single upstream used by every provider, see [Standalone](/integrations/standalone).
+
+#### Cloud providers
+
+Models named `bedrock/…`, `vertex/…` and `azure/…` go to AWS Bedrock, Google Vertex AI and Azure OpenAI. A request with an Intutic key uses the credential the workspace provisioned (Settings → Provider Keys); otherwise, and for any other caller, the proxy uses [`intutic_settings.providers`](#cloud-providers-intutic-settings-providers) and then these variables. See [AWS Bedrock](/integrations/aws-bedrock), [Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai).
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `AWS_REGION`, `AWS_DEFAULT_REGION` | unset | The Bedrock region. Required for Bedrock unless `providers.bedrock.region` is set |
+| `AWS_BEARER_TOKEN_BEDROCK` | unset | A Bedrock API key. Unset, requests are SigV4-signed with the AWS credential chain: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`, static keys in the shared credentials file (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`), an IAM Identity Center profile in the config file (`AWS_CONFIG_FILE`, the sign-in `aws sso login` cached), a profile that assumes a role (`role_arn` with `source_profile` or `credential_source`; MFA profiles are refused), web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` with `AWS_ROLE_ARN`), container credentials (ECS, EKS Pod Identity), then the EC2 instance role (`AWS_EC2_METADATA_DISABLED=true` skips it) |
+| `GOOGLE_CLOUD_PROJECT`, `ANTHROPIC_VERTEX_PROJECT_ID` | unset | The Vertex AI project. Required for Vertex AI unless `providers.vertex.project` is set |
+| `GOOGLE_CLOUD_LOCATION`, `CLOUD_ML_REGION` | `global` | The Vertex AI location (`global`, `us`, `eu`, or a region such as `us-east5`) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | unset | A service-account or `authorized_user` key file, or a workload identity federation configuration (`external_account`). Unset, Application Default Credentials continue with gcloud's `application-default` login, then the metadata server (Compute Engine, Google Kubernetes Engine Workload Identity, Cloud Run) |
+| `AZURE_OPENAI_ENDPOINT` | unset | The Azure OpenAI or Azure AI Foundry resource, `https://<resource>.openai.azure.com` or `https://<resource>.services.ai.azure.com` |
+| `AZURE_OPENAI_API_KEY` | unset | The resource's API key. Without one, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` sign in to Microsoft Entra ID with client credentials |
+| `GCE_METADATA_HOST` | `metadata.google.internal` | The Google metadata server Application Default Credentials ask for a token when no key file is found |
+| `IDENTITY_ENDPOINT`, `IDENTITY_HEADER` | set by Azure App Service | With `providers.azure.managed_identity`, the managed identity endpoint to ask for a token; unset, the instance metadata service is asked |
 
 #### Rules, budgets and memory
 
@@ -58,7 +74,7 @@ The proxy picks the provider from the model name, so these are the only way to p
 
 #### Egress control
 
-The proxy decides what to do with each `CONNECT` it receives when clients use it as their HTTPS proxy: AI provider hosts are decrypted and governed; other hosts follow the egress policy.
+The proxy decides what to do with each `CONNECT` it receives when clients use it as their HTTPS proxy: AI provider hosts are decrypted and governed; other hosts follow the egress policy. Cloud model endpoints (AWS Bedrock, Vertex AI, Azure OpenAI) are not intercepted, because a Bedrock request's signature covers its body; agents reach them governed through the proxy's own routes with a [`bedrock/`, `vertex/` or `azure/` model name](#cloud-providers), and a direct connection to them follows the egress policy like any other host.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
@@ -266,7 +282,14 @@ IDs are a short prefix, an underscore and 21 random characters (`ws_V1StGXR8_Z5j
 
 The proxy reads a LiteLLM-shaped `config.yaml` (path from `CONFIG_PATH`). Every key is optional, and keys the proxy does not know are ignored.
 
-Of LiteLLM's own keys, only `model_list` does anything here, and only one thing: when it is non-empty, a `routing.candidate_models` entry it does not name (as `model_name` or `litellm_params.model`) is dropped at startup. The proxy does not route by it; upstreams and keys come from the [environment](#provider-upstreams-and-keys). `litellm_params.api_key`, `litellm_params.api_base` and `general_settings` (including `master_key` and `database_url`) are ignored: the proxy does not authenticate callers with a master key.
+Of LiteLLM's own keys, only `model_list` does anything here, and two things: when it is non-empty, a `routing.candidate_models` entry it does not name (as `model_name` or `litellm_params.model`) is dropped at startup; and an entry whose `litellm_params.model` names a cloud model (`bedrock/…`, `vertex/…` or `vertex_ai/…`, `azure/…`) makes its `model_name` an alias for it, so a client asking for `claude-sonnet-4-5` can be served from Bedrock without changing what it sends. Other entries do not route; first-party upstreams and keys come from the [environment](#provider-upstreams-and-keys).
+
+```yaml
+model_list:
+  - model_name: claude-sonnet-4-5-20250929
+    litellm_params:
+      model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+``` `litellm_params.api_key`, `litellm_params.api_base` and `general_settings` (including `master_key` and `database_url`) are ignored: the proxy does not authenticate callers with a master key.
 
 Intutic's options live under `intutic_settings`:
 
@@ -281,6 +304,39 @@ Intutic's options live under `intutic_settings`:
 | `response_gate.fail_closed` | boolean | `true` | When a deny list applies and the response will not parse, refuse it rather than forward it unchecked |
 | `response_injection_snippet.enabled` | boolean | `true` | Keep a short, DLP-scrubbed excerpt around a prompt-injection pattern found in a response, so a finding can be reviewed |
 | `response_injection_snippet.window_bytes` | number | `200` | The excerpt's width, capped by the proxy |
+
+### Cloud providers (`intutic_settings.providers`)
+
+Where Bedrock, Vertex AI and Azure OpenAI requests go when no workspace credential applies. Each value falls back to the [environment variable](#cloud-providers) beside it. A secret is never written into this file: secret fields take an environment reference, `os.environ/NAME`, and a literal value stops the proxy at startup. Unknown keys are refused too, so a misspelt setting cannot be silently ignored.
+
+```yaml
+intutic_settings:
+  providers:
+    bedrock:
+      region: us-east-1
+    vertex:
+      project: my-project
+      location: global
+    azure:
+      endpoint: https://my-resource.openai.azure.com
+      api_key: os.environ/AZURE_OPENAI_API_KEY
+```
+
+| Setting | Type | Default | Description |
+| :--- | :---: | :---: | :--- |
+| `bedrock.region` | string | `AWS_REGION` | The AWS region |
+| `bedrock.api_key` | env ref | `AWS_BEARER_TOKEN_BEDROCK` | A Bedrock API key; without one, the AWS credential chain signs requests |
+| `bedrock.runtime_endpoint` | URL | `https://bedrock-runtime.<region>.amazonaws.com` | The Bedrock Runtime endpoint, such as a VPC interface endpoint |
+| `bedrock.mantle_endpoint` | URL | `https://bedrock-mantle.<region>.api.aws` | The endpoint for Claude Opus 4.7 and later |
+| `vertex.project` | string | `GOOGLE_CLOUD_PROJECT` | The Google Cloud project |
+| `vertex.location` | string | `global` | The location |
+| `vertex.credentials_file` | path | Application Default Credentials | A service-account or `authorized_user` key file |
+| `vertex.endpoint` | URL | by location | The API endpoint, such as a Private Service Connect address |
+| `azure.endpoint` | URL | `AZURE_OPENAI_ENDPOINT` | The resource URL |
+| `azure.api_key` | env ref | `AZURE_OPENAI_API_KEY` | The resource's API key |
+| `azure.tenant_id`, `azure.client_id` | string | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` | Microsoft Entra ID client credentials, with `client_secret` |
+| `azure.client_secret` | env ref | `AZURE_CLIENT_SECRET` | The Entra ID client secret |
+| `azure.managed_identity` | boolean | `false` | Authenticate with the host's managed identity (App Service, or the instance metadata service on VMs and AKS); `client_id` picks a user-assigned identity |
 
 ### Policy check (`intutic_settings.policy`)
 
@@ -363,7 +419,18 @@ How the proxy retries a provider call that failed before any response reached th
 
 ### Fallbacks (`intutic_settings.routing.fallbacks`)
 
-Ordered targets per model, tried when that model's retries run out on a retryable failure. Empty by default. Each key is the model that was sent upstream; each target has a `model`, a `provider` (`anthropic`, `openai`, `gemini`, `mistral`, `openrouter`, `deepseek`), or both. Up to five targets per model.
+Ordered targets per model, tried when that model's retries run out on a retryable failure. Empty by default. Each key is the model that was sent upstream; each target has a `model`, a `provider` (`anthropic`, `openai`, `gemini`, `mistral`, `openrouter`, `deepseek`, `bedrock`, `vertex_ai`, `azure_openai`), or both. Up to five targets per model.
+
+A target that names only a provider sends the same model there. Between Anthropic's API, Bedrock and Vertex AI the model id is rewritten into the target's scheme: `claude-sonnet-4-5-20250929` becomes `vertex/claude-sonnet-4-5@20250929` on Vertex AI and, on Bedrock, the cross-region inference profile for the configured region (`bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0`; `eu.`, `apac.` or `global.` elsewhere), and an undated id such as `claude-opus-4-7` becomes `bedrock/anthropic.claude-opus-4-7`. Name the `model` as well when your account uses another inference profile.
+
+```yaml
+intutic_settings:
+  routing:
+    fallbacks:
+      claude-sonnet-4-5-20250929:
+        - provider: bedrock
+        - provider: vertex_ai
+```
 
 A workspace's `upstreamRetry` setting overrides any of these fields; the fields it leaves out keep the values here.
 

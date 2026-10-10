@@ -312,6 +312,16 @@ describe('ControlPlaneClient', () => {
     expect(res.routingLive).toBe(false)
   })
 
+  it('setProviderCredential() sends every field of a multi-field cloud credential', async () => {
+    respondWithBody = { provider: 'bedrock', routingLive: true, provisioned: true, lastFour: 'WXYZ', updatedAt: '2026-10-09' }
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const fields = { awsRegion: 'us-east-1', awsAccessKeyId: 'AKIA' + 'EXAMPLEWXYZ', awsSecretAccessKey: 'x'.repeat(40) }
+    const res = await client.setProviderCredential('bedrock', fields)
+    expect(receivedPath).toBe('/api/v1/workspace/provider-credentials/bedrock')
+    expect(receivedBody).toEqual(fields)
+    expect(res.routingLive).toBe(true)
+  })
+
   it('unsetProviderCredential() sends DELETE to /api/v1/workspace/provider-credentials/:provider', async () => {
     const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
     await client.unsetProviderCredential('openrouter')

@@ -31,7 +31,8 @@
       "invalid_body",
       "unsupported_route",
       "byok_required",
-      "no_upstream_credential"
+      "no_upstream_credential",
+      "invalid_upstream_credential"
     ]
   },
   "gate": {

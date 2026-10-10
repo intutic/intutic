@@ -608,6 +608,7 @@ export * from './providers.js'
 // LLD #70: model catalog & cohort wizard
 export * from './modelCatalog.js'
 export * from './providerVerification.js'
+export * from './cloudProbe.js'
 
 
 

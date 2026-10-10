@@ -1472,6 +1472,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "crc32fast",
  "criterion",
  "futures-util",
  "hex",

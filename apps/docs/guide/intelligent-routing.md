@@ -267,6 +267,20 @@ intutic_settings:
           provider: deepseek
 ```
 
+A target that names only a provider sends the same model there. Between Anthropic's API,
+[AWS Bedrock](/integrations/aws-bedrock) and [Google Vertex AI](/integrations/google-vertex-ai)
+the model id is rewritten into the target's scheme, so one Claude model can fall back across all
+three:
+
+```yaml
+intutic_settings:
+  routing:
+    fallbacks:
+      claude-sonnet-4-5-20250929:
+        - provider: bedrock
+        - provider: vertex_ai
+```
+
 A fallback runs only after the model's retries are spent on a retryable failure, and each target
 gets the same retry policy within the same time budget. With retries turned off
 (`retry.enabled: false`), each model gets one call and the fallbacks still run after it fails. A

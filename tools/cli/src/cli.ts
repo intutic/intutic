@@ -1381,6 +1381,7 @@ credentialsCmd
   .command('set <provider>')
   .description('Provision or rotate a provider credential (e.g. --field apiKey=sk-ant-...)')
   .option('--field <key=value>', 'A credential field; repeat for multi-field providers', (v, prev: string[]) => [...prev, v], [] as string[])
+  .option('--field-file <key=path>', 'A credential field read from a file (e.g. a service-account JSON key)', (v, prev: string[]) => [...prev, v], [] as string[])
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (provider, opts) => {

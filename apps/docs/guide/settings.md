@@ -110,9 +110,10 @@ Creating and revoking a key is recorded with who did it on the
 
 ### Provider Keys
 
-Provision your workspace's own upstream API key for each model provider — Anthropic, OpenAI,
-Gemini, Mistral, OpenRouter, and DeepSeek today, with more providers pre-configurable ahead of their
-routing support (see below). Configuring your own key means requests bill against your
+Provision your workspace's own upstream credential for each model provider — Anthropic, OpenAI,
+Gemini, Mistral, OpenRouter, DeepSeek, [AWS Bedrock](/integrations/aws-bedrock),
+[Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai),
+with more providers pre-configurable ahead of their routing support (see below). Configuring your own key means requests bill against your
 provider account directly rather than Intutic's shared operator key.
 
 Each provider row shows a **Live** or **Not yet routable** badge. **Live** means the gateway
@@ -133,9 +134,19 @@ intutic credentials set anthropic --field apiKey=sk-ant-...
 intutic credentials unset anthropic
 ```
 
-A provider needing more than one field (e.g. Azure OpenAI: endpoint, deployment, key) takes a
-repeated `--field key=value` flag, one per field — the wizard's dynamic form and the CLI submit
-the same shape.
+A provider needing more than one field takes a repeated `--field key=value` flag, one per field,
+and `--field-file key=path` reads a value from a file — the wizard's dynamic form and the CLI
+submit the same shape. AWS Bedrock takes a region and either an access key pair or a Bedrock API
+key; Google Vertex AI a project, an optional location and a service-account key; Azure OpenAI the
+resource endpoint, which must be an Azure host over `https`, and its key. Requests name these
+providers' models as `bedrock/<model id>`, `vertex/<model>` and `azure/<deployment>`.
+
+A saved credential is checked against the provider straight away, and the card says what came back:
+verified, rejected (check the values and save again), or not verified when the provider could not
+be reached or the check cannot prove it. **Test** repeats the check for a provisioned credential, and
+`intutic credentials set` prints the same result. AWS Bedrock and Google Vertex AI are checked by a
+signed AWS call or a Google token request, which prove the credential but not the model permissions
+the first request uses.
 
 Keys are encrypted before they are stored, and only the last four characters are ever shown
 again (see [Stored credentials](/security#stored-credentials)). Adding, replacing and removing a
