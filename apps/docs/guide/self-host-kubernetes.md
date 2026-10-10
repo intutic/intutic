@@ -51,6 +51,11 @@ kubectl -n intutic create secret generic intutic-owner \
 
 The owner's password needs 12 characters or more.
 
+The control plane refuses to start when `JWT_SECRET` or `ENCRYPTION_KEY` is
+shorter than 32 characters or a template value such as `changeme`, or when a
+database URL's password is one. Generate each as above; `ENCRYPTION_KEY` is 64
+hex characters.
+
 Optional keys in `intutic-secrets`: `DATABASE_SSL` (above), `SMTP_URL` (your mail
 relay), `TRACE_SIGNING_PRIVATE_KEY`, `TRACE_SIGNING_RETIRED_KEYS`,
 `LITELLM_PLATFORM_KEY`. Keep `ENCRYPTION_KEY` with your database backups: stored

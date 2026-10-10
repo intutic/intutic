@@ -128,6 +128,14 @@ Verify the new bundle, unpack it, and run its installer with the same
 data and your override file stay; the images and Compose files are replaced and
 the database is migrated before the new control plane starts.
 
+`POSTGRES_PASSWORD`, `JWT_SECRET` and `ENCRYPTION_KEY` are required, and the
+control plane refuses a template value such as `changeme` for any of them. The
+installer generated all three. A stack set up by hand from
+`.env.enterprise.example` that left `POSTGRES_PASSWORD` at its old
+`changeme_prod` must change it before upgrading: set the new password on the
+role (`docker compose exec postgres psql -U intutic -c "ALTER ROLE intutic PASSWORD '…'"`),
+then put the same value in `.env`.
+
 From 2.4.0 the proxy opens the provider keys the control plane stores
 encrypted. The installer restarts the control plane first and the proxy after
 it; the control plane encrypts the stored provider keys only once the new proxy
