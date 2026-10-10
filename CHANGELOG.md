@@ -7,6 +7,473 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-09
+
+Everything that reached `main` since 2.2.0. Self-hosted gateway operators
+should upgrade promptly (see Security). Check these behaviour changes before
+upgrading: the sync daemon regenerates every hook gate as gate body v18
+(`GATE_VERSION` 18) on its next cycle, and the gates refuse with new codes:
+`COMMAND_TOO_LARGE` for a command over 256 KiB or arguments over 1 MiB,
+`GATE_DEADLINE` when a gate is still deciding a second before its harness's
+hook timeout (9 seconds for most harnesses, 4 for Windsurf and Muse Code), and
+`POLICY_SNAPSHOT_UNVERIFIED` for every MCP call while the policy snapshot fails
+its integrity check, observe-only (`SILENT_LOG`) workspaces included; the gates
+also apply the MCP server registry, so under `mcpDefaultPolicy: deny` a
+harness's own servers (Claude Code's `mcp__ide__…`) are refused until approved.
+In `@intutic/gate` and `intutic_clawde.gate` a `.rules` file with no `#digest`
+line now counts as unverified, and a hold rule raises `IntuticGateHold` (a
+subclass of `IntuticGateRefusal`, code `HELD`) instead of blocking. The clawde
+SDKs raise `ClawdeBlockedError` on every in-band proxy refusal, and with a
+`vk_` key they register a session on the first call that carries the working
+directory's repository, branch and commit (`autoContext: false` /
+`auto_context=False` turns it off). The proxies redact payment card numbers and
+IBANs by default, and a workspace's `piiDetectors` setting is the baseline that
+local config may only tighten; a proxy that fails closed refuses a request when
+it cannot read that setting. `intutic connect` now wraps Gemini CLI's and
+Antigravity's MCP servers (an SSE-only remote server written as `url` needs
+`"type": "sse"`), reports the machine's AI inventory and the repository each
+session works in, writes rule sets only to the file each harness reads (never
+`CLAUDE.md`), and sets VS Code's `chat.useHooks` and `chat.hookFilesLocations`
+back when they would switch off the GitHub Copilot gate. A custom WASM or Rego
+rule that reaches no verdict (its deadline, its fuel, a trap or an unreadable
+result) now refuses the call with `GOVERNANCE_UNAVAILABLE` in both proxies,
+whatever the fail-open settings say, and Rego rules are on by default; the
+shipped Rego examples refuse input cut to fit the 64 KB cap, so the
+deny-writes example refuses a `Write` over about 64 KB. Destructive-SQL and action
+matching catch more spellings, and `DROP DATABASE` and `DROP SCHEMA` are now
+`action:db_write`, so expect more holds and refusals. The workspace settings
+API now answers `400` for an unknown key inside `featureFlags`,
+`imageProvenance`, `anomaly_enforcement`, `banditKeywords` or `byocStorage`
+(they were silently dropped), and for a notification rule `eventType` that is
+not one of the published event types. `intutic compliance verify` exits `3`
+for a file it cannot read. A workspace that never saved a daily cap is held to
+$100 a day, enforced as before, and Settings › Billing, `intutic budget` and
+`GET /api/v1/budget` (`daily_budget_is_default`) now say when the cap is that
+default; save your own on Settings › Billing › Budget Limits or with
+`PUT /api/v1/budget`. The control plane now refuses to start (outside
+`NODE_ENV=test`/`development`) when `JWT_SECRET` or `ENCRYPTION_KEY` is missing,
+a placeholder or under 32 characters, or when the database password or another
+shared secret is a placeholder such as `changeme`; the Compose file no longer
+defaults `POSTGRES_PASSWORD` to `changeme_prod` and requires it, `JWT_SECRET`
+and `ENCRYPTION_KEY` (a Compose install that kept the old default must change
+the Postgres role's password first; see the Compose guide). The provider
+settings show Gemini as not yet routable: its requests were never translated
+to Gemini's format, and Gemini routing arrives in 2.4.0.
+
+### Security
+
+- **Placeholder secrets are refused at boot.** A deployment that kept a
+  template value for `JWT_SECRET` let anyone sign a login token for any user.
+  The control plane now refuses to start with placeholder or short secrets
+  (`JWT_SECRET`, `ENCRYPTION_KEY`, the database URL passwords,
+  `SLACK_ENCRYPTION_KEY`, `SLACK_SIGNING_SECRET`, `STRIPE_WEBHOOK_SECRET`,
+  `INTUTIC_ADMIN_TOKEN`), and the Kubernetes manifest check fails any overlay or
+  chart that renders a placeholder Secret value. Generate secrets with
+  `openssl rand -hex 32`. If yours was ever a placeholder, rotate it. A new
+  `JWT_SECRET` signs everyone out. A new `ENCRYPTION_KEY` makes the SSO,
+  connector and notification secrets sealed under the old one unreadable unless
+  they are re-encrypted first; 2.4.0 adds `ENCRYPTION_KEY_PREVIOUS` and a
+  re-encryption command for that.
+- **Terraform provider dependencies.** `golang.org/x/crypto`, `golang.org/x/net`
+  and `google.golang.org/grpc` are updated past their advisories, and the
+  provider is built with Go 1.26.9.
+- **Advisory for self-hosted deployments: provider API keys are stored
+  unencrypted in Valkey.** A workspace's provider credentials live in Valkey,
+  which persists them to disk and replicates them to every region's Valkey.
+  Until 2.4.0, which encrypts them at the application layer, keep Valkey
+  reachable only from the control plane and proxies (network policy or
+  firewall), require a password or ACL and TLS, and keep its data volume on an
+  encrypted disk.
+- **The workspace PII setting could be switched off by a machine.** A proxy
+  whose local config turned DLP off (`dlp.enabled: false`, or both scan
+  directions off) skipped the workspace's PII detector setting. The workspace
+  baseline now always applies, in both directions; local config can only add
+  to it. An unreadable setting is refused as `GOVERNANCE_UNAVAILABLE`.
+- **A daily spend cap could silently become $100.** The cap was stored with a
+  24-hour expiry and the proxy fell back to $100 when the copy expired. Caps
+  no longer expire; a proxy whose copy is missing reads it from the control
+  plane and refuses with `BUDGET_UNVERIFIABLE` if it cannot.
+- **Editing a notification rule could replace its PagerDuty key with the
+  mask.** A key that is left out or sent back masked now keeps the stored key.
+- **The SDKs sent repository details before confirming the key.** With the
+  workspace taken from `INTUTIC_WORKSPACE_ID` or the daemon config, the
+  session carrying the repository, branch and commit was registered without
+  first checking the key. Both SDKs now always confirm it with
+  `GET /api/v1/auth/me`.
+- **A redacted reply could be served unredacted from the response cache.**
+  Without streaming, a reply that output DLP had redacted was stored in the
+  exact cache before redaction, so the next identical request got the
+  credential back. Redacted replies are no longer cached.
+- **Provider keys reached the control plane.** On a passthrough proxy the
+  request's bearer can be the caller's own provider key, and several
+  control-plane calls sent it as it came: `/fix` memory enhancement, the
+  tool-call substitution report, the judge, slash commands and the
+  `/intutic/attest-sandbox` forward used it as their bearer, and the policy
+  check sent its first 12 characters, which traces and logs also recorded as
+  the virtual key id. Every control-plane call now takes a typed virtual key
+  that only a `vk_` bearer produces (`RequestCredential`), so a provider key
+  goes to its provider and nowhere else. Requests made with a provider key are
+  answered locally where the control plane used to refuse them (the policy
+  check under the configured fail mode, the judge as unavailable) and record no
+  key id.
+- **Pre-authentication credential overwrite in the proxy.** The session
+  credential capture ran before authentication, so an unauthenticated caller
+  could replace a workspace's stored Anthropic credential. It now runs after
+  authentication. Self-hosted gateway
+  operators should upgrade, and run with virtual keys required
+  (`INTUTIC_GATEWAY_REQUIRE_VK=true`, or `requireVk` in the gateway config) so
+  any other bearer is refused with `401`.
+- **WASM rule modules are checked against their SHA-256.** A rule module from
+  the control plane is loaded only when its bytes hash to the SHA-256 its
+  descriptor names. A mismatch is logged and raised once as an incident, and
+  the version of the rule already running stays in force.
+- **Gates that never ran.** The Goose, Hermes and OpenHands registrations were
+  in shapes those harnesses skip (Hermes ignored `hooks.preToolUse` as an
+  unknown event), so their gates never fired. They are now written in the
+  schemas each harness loads, with its fail-closed switch where it has one
+  (Goose `on_failure: "block"`, Hermes `fail_closed: true`) and a 10 second
+  timeout. OpenClaw's gate was an internal hook that never sees a tool call; it
+  is now a plugin whose `before_tool_call` hook blocks. Pi's gate and model
+  routing were written to files Pi does not read; the gate is now an extension
+  in `~/.pi/agent/extensions/` and routing goes to `~/.pi/agent/models.json`.
+  Continue's CLI never runs `PreToolUse` hooks, so Continue is reclassified as
+  having no gate and is governed by the proxy and its rules file.
+- **A slow gate allowed the call.** Most harnesses run a tool call whose hook
+  outlives its timeout. Every hook gate now refuses with `GATE_DEADLINE` a
+  second before the timeout its own harness applies, at most 9 seconds (a
+  watchdog in the bash gates, an interrupting `vm` timeout in the JavaScript
+  gates, and a deadline from the start of each call in the in-process
+  OpenCode, Pi and OpenClaw gates). `connect` sets a 10 second hook timeout
+  wherever a harness has a key for one, now including Cursor and Grok Build;
+  Windsurf and Muse Code document none, so their gates assume 5 seconds and
+  refuse at 4. One table in `@intutic/shared-types` (`HOOK_GATE_TIMEOUTS`)
+  holds every harness's timeout, and a test checks each written hook entry
+  against it. The bash gates screen each subject with one `grep` holding every
+  rule's pattern before testing rule by rule, so a call at the size limit
+  takes about a fifth of the time it did and is not refused on a busy machine.
+- **Gate bypasses by spelling.** A destructive SQL statement or a held action
+  (`review_before` on `action:db_write` or `action:deploy`) could get past the
+  MCP proxy's DLP, the hook gates' `destructive.sql_drop` rule and the hold
+  classifiers when its words were separated by something other than a single
+  space. Every gate, both SDK gates, the proxy's action classifier and the MCP
+  proxy now match a phrase's words whatever separates them, with one shared set
+  of test vectors. Matching is literal, so a quoted string that contains the
+  phrase still matches the text rules; the proxy's SQL guard, which reads the
+  statement, does not.
+- **ReDoS.** The JavaScript and Python classifiers, and the bash hold
+  classifier, could take seconds to a minute on crafted command text. A linear
+  phrase matcher replaces the backtracking regex; gate rules shaped `A.*B` run
+  as sequences of steps; the `chmod`/`chown` root rules and the skill-content
+  patterns no longer go super-linear; and a static check refuses any new rule a
+  backtracking engine could take super-linear time on. Git remote
+  normalisation no longer uses backtracking regexes.
+- **Protected paths covered every gate.** An agent could rewrite or delete the
+  files that load its own gate: Cline's gate (the list still named
+  `.cline/hooks`), Codex's `hooks.json` and `config.toml` (where
+  `features.hooks = false` turns hooks off), GitHub Copilot's two hook files,
+  Hermes' and Goose's `config.yaml`, the Open WebUI filter, Cursor's
+  machine-wide `hooks.json`, Antigravity's `~/.gemini/config/hooks.json` and a
+  project's `.agents/hooks.json`, OpenClaw's `openclaw.json`, Pi's extension
+  directories, and `.intutic/env`, whose workspace id makes every gate drop the
+  snapshot's rules when it does not match. All are protected paths now, and
+  the settings guard restores every gate script and registration when it is
+  deleted or replaced. The guard watched the project's `.gemini/settings.json`
+  instead of `~/.gemini/settings.json`, where the Gemini CLI gate is
+  registered, and `connect` filtered watched paths by file name before the
+  guard saw them, so OpenClaw's config, Muse's managed hooks and every dsh
+  profile patch were never restored. Both are fixed.
+- **GitHub Copilot's gate could be switched off from VS Code settings.** Every
+  gate now refuses an agent edit that sets `chat.useHooks` or
+  `chat.hookFilesLocations`, and a shell command that names either key. While
+  the Copilot gate is installed, the sync daemon sets either value back when
+  it would switch the gate off, leaves the rest of the settings file
+  (comments included) as it was, and reports a `config_tamper` incident. VS
+  Code's `ChatHooks` policy remains the administrator's hard lock.
+- **A tampered policy snapshot refuses every MCP call.** A snapshot whose
+  digest is broken or missing, or that names another workspace, used to keep
+  the registry's refusals; but a deleted record looks like one never set, and
+  an edit to the blocked list or default policy still widened it. Every gate
+  and both SDK gates now refuse every MCP call on such a snapshot with
+  `POLICY_SNAPSHOT_UNVERIFIED`. The sync daemon keeps the last snapshot it
+  wrote in `~/.intutic/hooks/verified/`, puts it back as soon as the live one
+  differs (an edit, a deletion or an older copy), and reports the tamper; the
+  MCP daemon seeds its policy at startup from that verified copy
+  (`~/.intutic/hooks/verified/policy-snapshot.json`) instead of the live file.
+- **The MCP server allowlist sat outside the digest.** `mcpAllowedServers` was
+  a `#mcpservers` header, so adding a server by hand widened the allowlist and
+  left the snapshot valid. It is now an `@mcp_allowlist` record inside the
+  digest.
+- **Gates were skipped and holds let calls run.** `intutic connect` installed
+  no gate for a harness that no rule set targeted; every configured harness
+  now gets its gate. The sandbox gate script `@intutic/gate/harness` writes
+  refused a block but ran a call a hold rule matched; it now refuses it.
+  `@intutic/gate` and `intutic_clawde.gate` never fired a
+  `review_before: action:…` hold and never recorded an SOP approval hold; both
+  now hold as the hook gates do.
+- **WASM limits.** The proxy checked a rule's time limit only after the guest
+  returned, so the limit never fired and only the fuel budget stopped a slow
+  rule. Fuel is now the limit a rule is held to, the same on any machine:
+  1,000,000 instructions for a native rule and 100,000,000 for a Rego rule in
+  the proxy (300,000,000 in the MCP proxy, whose meter counts differently),
+  each at least four times what the largest shipped policy spends on the
+  largest input. A wall-clock deadline (wasmtime epoch interruption in the
+  proxy) stops what fuel cannot see, set well above the time a loaded machine
+  needs to spend the whole budget: 1 s native and 2 s Rego in the proxy, 1 s
+  and 10 s in the MCP proxy. A busy machine no longer turns into refusals of
+  correct calls.
+- **A custom rule that reaches no verdict refuses the call.** A WASM or Rego
+  rule that hit its deadline or fuel budget, trapped, or returned something
+  other than a verdict was allowed, so input crafted to slow a rule down got
+  past it. Both proxies now refuse with `GOVERNANCE_UNAVAILABLE`, naming the
+  rule and the cause, whatever `fail_closed`, `mcpProxyFailBehavior` or
+  `INTUTIC_MCP_FAIL_OPEN` say: those settings cover control-plane outages,
+  which an agent cannot cause. In the MCP proxy a rule quarantined after three
+  runaways in a row refuses every call until the next rescan, where it used to
+  be skipped. The shipped Rego examples refuse input marked `truncated`, and
+  `intutic rules build` warns about a policy that reads `input.args` without
+  checking `input.truncated`. `read_referenced_file` returns a new code, `-7`,
+  for a path the call names but the host did not read (past 8 manifests or
+  64 KiB of command), so a rule can refuse it rather than read it as absent.
+- **Rule load failures are reported.** A rule pushed from the dashboard that
+  failed to load was dropped without a word, and a module that failed to
+  compile stopped every later sync. The previous version now stays in force
+  and one incident is raised per version, saying so when no version loaded.
+
+### Added
+
+- **Refusal codes everywhere.** One shared list names every refusal per
+  surface. The proxy names each in-band refusal (`TOOL_DENIED`, `SSO_GROUP`,
+  `SQL_GUARD`, `RESPONSE_UNPARSEABLE`, `OUTPUT_DLP`, `COST_GATE_EXCEEDED`) in
+  `x-intutic-refusal` and `x-intutic-refusal-rule` headers, or a
+  `: intutic-refusal {…}` comment line on a stream. The MCP proxy puts
+  `error.data.code` and `error.data.ruleId` on every refusal (a budget refusal
+  adds its budget, limit, use and `resetAt`). Cline, Grok Build and
+  Antigravity gate decisions carry `code` and `ruleId`.
+- **Holds in the SDK gates.** `@intutic/gate` and `intutic_clawde.gate` hold a
+  call through the decisions API, as the MCP proxy does: an exact approved
+  bypass lets the identical call through, otherwise the hold is recorded and
+  `IntuticGateHold` names its `holdId`. Every hold message, in every gate and
+  the MCP proxy, says who can approve (owner, admin or EM) and that the retry
+  passes only with the workspace's review-hold bypass on. The proxy's `403
+  policy_held` (a Rego or WASM hold) is classified as a hold in both clawde
+  SDKs.
+- **MCP server registry in the hook and SDK gates.** The policy snapshot
+  carries the registry inside its digest, and every hook gate and both SDK
+  gates refuse a blocked or held server, an unapproved one under
+  `mcpDefaultPolicy: deny`, and a disabled tool, with the MCP proxy's codes and
+  rule ids. A server refused as unapproved joins the approval queue.
+- **MCP call budgets and tool-change risk scoring.** Budgets per server, tool,
+  member, or member on a server, per hour or day, counted in the Valkey the MCP
+  proxies share (`INTUTIC_VALKEY_URL`); a used-up budget refuses with
+  `BUDGET_EXCEEDED` and its reset time. A change to a server's tool set gets a
+  deterministic risk score, and a high-risk change holds the server for
+  re-approval (`SERVER_HELD`). The `intutic` MCP server gains
+  `intutic_hold_status`, `intutic_mcp_registry_status` and
+  `intutic_mcp_budget_remaining`.
+- **Checksum-validated PII detectors** in the proxy and the MCP proxy, from one
+  shared definition: `pii.card` (known card prefix and length, Luhn),
+  `pii.iban` (registry country and length, mod-97) and `pii.ssn` (rejects
+  numbers never issued) redact by default; `pii.email` and `pii.phone` are off.
+  Set each to `off`, `redact` or `block` with `dlp.detectors` (proxy) or
+  `INTUTIC_MCP_DLP_DETECTORS` (MCP proxy), or centrally with the workspace's
+  `piiDetectors` setting.
+- **Rego policies as rules.** OPA-compiled Rego modules run in the proxy and
+  the MCP proxy wherever WASM rules run (`INTUTIC_DISABLE_REGO_RULES=1` turns
+  them off), with a fixed set of host builtins checked against `opa eval`.
+  A policy can allow, deny, hold or reask. `intutic rules build --rego` and
+  `intutic rules test` build and test them; `intutic policy install` validates
+  them.
+- **Google Antigravity** is governed: a `PreToolUse` gate in
+  `~/.gemini/config/hooks.json`, rule sets in `GEMINI.md`, and its
+  `mcp_config.json` servers behind the MCP proxy. Gemini CLI's
+  `mcpServers` are wrapped too, and Gemini CLI reports as `gemini-cli`.
+  Antigravity and Gemini CLI gates have Jamf and Intune manifests.
+- **AI inventory.** `intutic connect` reports each machine's harnesses (with
+  gate kind, whether the gate file is present and when it last reported), MCP
+  servers (wrapped or not, endpoint sanitised), skill bundles (name, source,
+  hash) and the local proxy's guard-probe result, on the first poll and every
+  five minutes after. Only names, home-relative paths, hashes and timestamps
+  leave the machine.
+- **Cost per branch, commit and pull request.** The sync daemon reports each
+  session's repository (the `origin` remote, credentials, port and query
+  removed) and reports again when the branch or `HEAD` moves. The clawde SDKs
+  register a session with the same context (see Changed).
+- **Event ids.** Every gate, reporter and SDK stamps each event with a random
+  `eventId`, so a resent event is filed once.
+- **Kitkat governance skill** covers every refusal code and hold and what an
+  agent should do with each, and `intutic connect` installs it in
+  `.agents/skills/` when missing.
+- **CLI:** `settings get|set`; `mcp list|approve|block|reset|enable-tool|disable-tool`;
+  `notifications list|create|update|delete|rotate-secret`;
+  `siem list|show|sources|create|update|delete|rotate-secret`;
+  `compliance coverage` (json, md, csv or pdf) and `compliance
+  collect|download|verify` (`verify` checks an evidence archive's hashes and
+  Ed25519 signature offline and exits `2` for an unsigned one);
+  `usage members|teams|branches|commits|pull-requests`; `github webhook
+  show|rotate-secret`; `inventory summary|harnesses|mcp-servers|skills`;
+  `gate-liveness`; `gateway config get`; and `guardrails create|update|delete`
+  for guardrails written directly in the Guardrail IR. A `403` prints the roles
+  the server requires.
+- **clawde SDKs:** `getWorkspaceSettings` / `updateWorkspaceSettings` and
+  `getGatewayConfig` (`get_workspace_settings`, `update_workspace_settings`,
+  `get_gateway_config`) on the control-plane client; `GatewayStatus` carries
+  the applied and desired config versions; `ClawdeBlockedError` carries
+  `ruleId` (`rule_id`); `streamRefusal` (`stream_refusal`) reads a stream's
+  refusal marker.
+- **Terraform provider 0.1.0**, released alongside this version
+  (`terraform-provider-v0.1.0`), manages a workspace as code: `intutic_sop`,
+  `intutic_policy`, `intutic_guardrail`, `intutic_workspace_settings`,
+  `intutic_virtual_key`, `intutic_gateway`, `intutic_notification_rule`,
+  `intutic_mcp_server_decision`, `intutic_siem_destination` and
+  `intutic_wasm_rule` (uploads a WASM or Rego module and checks its stored
+  SHA-256), with the `intutic_workspace` and `intutic_members` data sources.
+  Every resource supports import; notification rules and SIEM destinations
+  rotate their signing secret in place with `secret_rotation_triggers`.
+  The source is in `packages/terraform-provider-intutic`.
+- `@intutic/shared-types`: the phrase and sequence matchers, gate limits
+  (`COMMAND_SIZE_LIMIT`, `ARGUMENTS_SIZE_LIMIT`, `HOOK_GATE_TIMEOUTS` and
+  `gateDeadlineMs()`), the MCP
+  registry and allowlist records and evaluators, MCP budgets and tool-risk
+  scoring, PII detector settings and precedence (`effectivePiiActions`),
+  `HARNESS_RULES_FILES`, `normalizeGitRemote`, the device inventory, usage and
+  authored-guardrail types, and notification events for decision reviews, MCP
+  server decisions, refused sign-ins, SCIM changes, secret rotations and
+  evidence downloads.
+- Docs: Rego policies, AI inventory, Terraform and Google Antigravity pages;
+  MITRE ATLAS mapping; which role may make each change; where each harness's
+  rule sets go; hook timeouts per harness; SIEM sources for MCP registry
+  decisions, SCIM changes, decision reviews, secret rotations and evidence
+  exports, with an OCSF-shaped `actor`.
+
+### Changed
+
+- **Workspace PII settings win over local config.** A workspace's
+  `piiDetectors` is the baseline in both proxies; `dlp.detectors` and
+  `INTUTIC_MCP_DLP_DETECTORS` may make a detector stricter but never looser,
+  and detectors the workspace leaves out keep the local action. If the proxy
+  cannot read the setting it follows its fail mode (fail closed, the default,
+  refuses; in the LLM proxy, a global break-glass scans with local config). The MCP proxy keeps
+  the setting it last loaded through an outage, and refuses with
+  `GOVERNANCE_UNAVAILABLE` under fail-closed when the stored value cannot be
+  read. `pii.ssn` replaces the old SSN pattern.
+- **clawde SDKs register a session.** With a `vk_` key, and no session id from
+  the environment, `ClawdeClient` registers a session carrying the working
+  directory's repository, branch and commit on its first call (after the
+  control plane accepts the key) and sends it as `x-session-id`. A provider
+  key never triggers it. `autoContext: false` (`auto_context=False`) sends
+  nothing. Both SDKs raise `ClawdeBlockedError` on every in-band proxy
+  refusal, where they used to return verdict `allow`.
+- **Rule sets go only to the file each harness reads**, named per harness in
+  `HARNESS_RULES_FILES`: a marked section of a shared `AGENTS.md` for every
+  reader (Codex now gets rules), `.claude/rules/`, `.cursor/rules/`,
+  `.windsurf/rules/`, `.continue/rules/`, a section of `.goosehints`, a section
+  of `GEMINI.md` (read only in a trusted folder), an OpenHands microagent and
+  OpenClaw's agent-workspace `AGENTS.md`. Your own text in shared files is
+  kept. Files earlier versions overwrote whole (`CLAUDE.md`, `.cursorrules`,
+  `.windsurfrules`, `.roorules`, `AGENTS.md`) are given back on the first sync.
+- **The decisions log** follows the same map. Claude Code's goes to
+  `.claude/rules/intutic-decisions.md`, and `CLAUDE.md` is never created or
+  written; the section earlier versions put there comes out on the next sync.
+- **Gate body v18.** Every gate is regenerated each sync cycle. Beyond the
+  refusals under Security, a long option between a command's words
+  (`git --no-pager push`) counts as the command, Gemini CLI's
+  `run_shell_command` is a shell tool for holds, and SSO group rules match an
+  MCP tool by its own name (`run_query`) as well as its harness name
+  (`mcp__<server>__run_query`) at every gate.
+- **WASM rules:** a rule is held to its fuel budget, with a wall-clock
+  deadline as a backstop (see Security); a rule that runs out of either
+  refuses the call, where a slow rule used to finish and its verdict applied.
+  Rego input is capped at 64 KB.
+- **Hermes** asks you to approve the shell hook the first time it sees it.
+  **Cline** shows a refusal from `errorMessage`.
+- `intutic disconnect` reports the disconnect before it removes the
+  credentials, and removes everything the new gates, rules sections, skills
+  and MCP wraps add, plus what earlier versions wrote for Continue, OpenClaw
+  and Pi.
+- The sync daemon's event drain no longer deletes events a gate appends while
+  a batch is in flight; a batch left behind by a crash is sent again.
+- `@intutic/gate` and `intutic_clawde.gate` export `GATE_REFUSAL_CODES`
+  (`GateRefusalCode`), checked against the shared list.
+- `@intutic/gate` exports `GATE_DEADLINE_MS` (9000): its sandbox hook gate
+  refuses with `GATE_DEADLINE` a second inside the 10 second timeout of the
+  hook it writes.
+
+- **Gemini is shown as not yet routable.** The provider registry and the
+  settings guide called Gemini live, but the proxy forwarded Gemini requests
+  without translating them to Gemini's format, so none succeeded. Gemini keys
+  can still be saved, in the same field, and are used once Gemini routing
+  arrives in 2.4.0.
+
+### Removed
+
+- **Continue's gate registration.** `cn` never ran it; `intutic disconnect
+  --harness continue` removes it.
+- **Claude Desktop and Roo Code hook writers**: neither product read what they
+  wrote. Both are classified as having no gate of their own.
+- **n8n's workflow-settings rules update**, which n8n's schema always refused.
+  n8n reads no instructions file.
+- **`SOP_RULE_APPROVAL`** from the SDK gates' refusal codes: an SOP approval
+  rule is a hold (`HELD`). `GateClient.hold_for_review` in `intutic-clawde` is
+  replaced by the hold flow.
+- From `@intutic/shared-types`: `PRIVILEGED_SOURCE_PROVIDERS`; owners and
+  admins manage every connector provider.
+
+### Fixed
+
+- `intutic inventory devices` and `intutic inventory disconnects` give the CLI
+  the dashboard's machine and disconnect views; `guardrails` commands print the
+  roles a refused call needs; `guardrails sources sync` prints its real counts.
+- Gate Health no longer reports harnesses that have no gate (Continue, Claude
+  Desktop, Roo Code, aider) or that delegate to another harness as silent.
+- `intutic rules build`, `rules test`, `policy test` and `policy install` meter
+  rules with the proxies' instruction budgets, so a rule that would run out in
+  a proxy fails locally too.
+- A custom rule refused at load names why (`missing`, `hash_mismatch`,
+  `compile_error`, `unsupported_import`, `load_error`), with one incident per
+  rule version and reason.
+- The dashboard shows `TAMPER` gate decisions and the file that was restored.
+- Terraform: removing a credential from `intutic_siem_destination`
+  `secret_config` clears it, and `event_type` on `intutic_notification_rule`
+  is validated against the published event types.
+- The Python SDK no longer lets a malformed control-plane reply during session
+  registration break a call, registers once across threads, and types
+  `get_gateway_status`.
+- **MCP proxy policy cache with Valkey down.** Every cache miss waited out a
+  read and then a write through the Valkey client's retries, seconds per miss
+  and growing with the outage, and a Valkey that accepted the connection but
+  never answered held the call forever. Valkey is asked only when it is ready,
+  and the write-through no longer blocks the call.
+- **The response cache answered an agent's next turn with its last one.**
+  The exact cache keyed only on the plain text of user and system messages, so
+  a request carrying a tool result hashed like the turn before it and got that
+  turn's reply back, sending a coding agent round in a loop; every posture
+  preset turns this cache on. The exact key now covers the whole request:
+  model, every message including tool calls and results, tools and sampling
+  parameters. The semantic cache answers only a plain-text question with no
+  tools, with everything but the question matched exactly. A streaming request
+  served from cache now gets a valid event stream, a Responses API hit gets the
+  `output[]` shape, and replies that call a tool or were cut off are no longer
+  cached. Requests with `n` above 1, and Responses API requests that do not
+  set `"store": false`, skip the cache. Entries keyed the old way are not
+  served and expire within 24 hours. Nothing is written to the cache while
+  both cache flags are off.
+- Rule sets never reached Gemini CLI, Antigravity or OpenHands: neither
+  Gemini product reads `customInstructions` in `.gemini/settings.json`, and
+  OpenHands never read an `[intutic]` table in `config.toml`. `connect`
+  removes the stale key and table.
+- Aider's `read:` entry is an absolute path, so Aider finds the rules from any
+  subdirectory.
+- The settings guard sent OpenCode plugin tampering to the Goose writer.
+- The MCP proxy failed on a registry from an older MCP daemon that lacked
+  held servers.
+- The smolagents step callback logged a held step as neither blocked nor
+  allowed.
+- `intutic-clawde`'s snapshot reader normalised commands differently from the
+  shipped gates, so a command starting with `DROP TABLE` did not match.
+- Docs: compliance evidence exports are signed only when a signing key is
+  configured; OpenClaw's proxy routing is set by hand; gate counts and
+  comparison pages checked against the code.
+
 ## [2.2.0] - 2026-10-08
 
 Everything that reached `main` since 2.1.0. Check these behaviour changes
