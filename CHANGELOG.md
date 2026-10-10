@@ -403,6 +403,13 @@ to Gemini's format, and Gemini routing arrives in 2.4.0.
   without translating them to Gemini's format, so none succeeded. Gemini keys
   can still be saved, in the same field, and are used once Gemini routing
   arrives in 2.4.0.
+- **Messages no longer cite internal tracker ids.** Generated firewall
+  rulesets, two proxy startup warnings, the LiteLLM config that
+  `judge configure` writes, the AutoGen and smolagents usage summaries, the
+  installed pre-commit hook and the sync daemon's skill-surface warnings now
+  state the reason instead of an internal reference. The sandbox gate script's
+  header changed with them, so each sandbox re-runs its bootstrap once after
+  upgrading.
 
 ### Removed
 
