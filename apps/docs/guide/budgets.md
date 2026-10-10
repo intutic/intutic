@@ -64,7 +64,7 @@ One key per kind of traffic (CI, a service, a developer's machine) gives each it
 
 ### Member budgets <Badge type="warning" text="Biz Org+" /> {#member-budgets}
 
-A member budget limits what one member spends across all the virtual keys they own: a call belongs to the member who owns the key that made it, as it does in **Cost by Developer**. A service-account key belongs to the member who created it.
+A member budget limits what one member spends across all the virtual keys they own: a call belongs to the member who owns the key that made it, as it does in **Cost by Developer**. A service-account key belongs to the member who created it, so its calls count against that member's budgets, as they do in Cost by Developer; give automation its own [key budget](#key-budgets) to limit it separately.
 
 - **The default member budget** applies to every member without a budget of their own for that period.
 - **A member's own budget** for a period replaces the default's for that period. A member with only their own month budget still has the default day budget.
