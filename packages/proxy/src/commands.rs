@@ -92,8 +92,8 @@ pub struct GraphContext {
 /// "the proxy is on the path, so the gate is always present" — false for any
 /// harness whose blocking gate ships SDK-side (`intutic-clawde`/`@intutic/gate`,
 /// no on-disk hook file for the daemon, or this proxy, to point at) or that
-/// wraps other harnesses instead of running tools itself. TD-365 tracked this
-/// as the identical bug in this proxy's own local `/fix`/`/draw` self-check,
+/// wraps other harnesses instead of running tools itself. This was
+/// the identical bug in this proxy's own local `/fix`/`/draw` self-check,
 /// a separate code path from the TypeScript-side fix (`agentReporter.ts`) that
 /// this table mirrors rather than shares — Rust and TypeScript don't share a
 /// module boundary here, so `gateKind.ts`'s classification must be kept in
@@ -254,7 +254,7 @@ impl Inventory {
             skills_total: (!self.skills.is_empty()).then_some(self.skills.len() as u32),
             skills_sourced: self.skills.len() as u32, // discovered on disk = sourced
             graph_present: self.graph.as_ref().map(|_| true),
-            graph_workspace_scoped: true, // proxy namespaces all graph keys (TD-208)
+            graph_workspace_scoped: true, // proxy namespaces all graph keys
             loops_configured: self.loop_run.is_some(),
             loops_bounded: self.loop_run.is_some(),
             memory_total: (!self.memory_chunks.is_empty()).then_some(

@@ -1,5 +1,5 @@
 // ============================================
-// LLD #45-slack: Notification Hub + Slack Adapter
+// Notification Hub + Slack Adapter
 // ============================================
 
 // ── Notification Hub Types ─────────────────────────────────────
@@ -51,9 +51,9 @@ export const NOTIFICATION_EVENT_TYPES = [
   'sop.cascade.invalidated',
   'sop.integrity.drift',
   'sop.lifecycle.transitioned',
-  /** A source-connector sync found an enforced SOP's upstream document changed and created a DRAFT successor awaiting review (TD-474 item 7). */
+  /** A source-connector sync found an enforced SOP's upstream document changed and created a DRAFT successor awaiting review. */
   'sop.upstream.changed',
-  // ── Policy guardrails (LLD #71) ──
+  // ── Policy guardrails ──
   /** A SHADOW guardrail crossed the promotion thresholds; a named member decides. */
   'guardrail.ready',
   /** The passage a guardrail cites changed upstream; promotion is refused until re-confirmed. */
@@ -72,7 +72,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   /** An MCP call budget ran out and the proxy refused a call (sent once per budget per period). */
   'mcp.budget.exceeded',
   // ── Governance judge ──
-  /** A judged response is waiting for a person in the judge review queue: the typed judge was unsure, or it is a spot check of one it cleared (LLD #72). */
+  /** A judged response is waiting for a person in the judge review queue: the typed judge was unsure, or it is a spot check of one it cleared. */
   'judge.review.queued',
   // ── FinOps & budget ──
   'finops.budget.exceeded',
@@ -101,7 +101,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   'evidence.exported',
   // ── Workspace context ──
   'workspace.context.updated',
-  // ── Self-hosted gateway (LLD #66) ──
+  // ── Self-hosted gateway ──
   /**
    * A registered, non-revoked self-hosted gateway has gone past
    * GATEWAY_HEARTBEAT_TTL without a heartbeat -- fired once per member
@@ -112,7 +112,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   /**
    * A managed cell (`deployment_target='managed_cell'`) has sat `pending`
    * (registered, never heartbeated) past `CELL_STUCK_PENDING_THRESHOLD_MS`
-   * (15 min) -- the provisioner is failing to converge it (TD-342(c)).
+   * (15 min) -- the provisioner is failing to converge it.
    * Fired by `detectStuckPendingCells` (gatewayHealthService.ts), same
    * org→workspace fan-out and stable-reason dedup as `gateway.stale.detected`.
    * Already wired into `notificationRouterService.ts`'s dispatch and
@@ -129,7 +129,7 @@ export const NOTIFICATION_EVENT_TYPES = [
    * pre-existing-dispatch note as `gateway.cell.stuck_pending` above.
    */
   'region.sync.stale',
-  // ── Managed gateway cell deprovisioning (LLD #71 Phase C2) ──
+  // ── Managed gateway cell deprovisioning ──
   /**
    * A managed cell was marked for removal because its org's plan tier no
    * longer covers it (`maxCellsPerOrg` in planSkuMap.ts) -- either a
@@ -157,7 +157,7 @@ export const NOTIFICATION_EVENT_TYPES = [
    * region just changed, same tier as `gateway.stale.detected`.
    */
   'org.cells.deprovisioned',
-  // ── Enforcement device visibility (post-strip gap #2, LLD #63 hardening) ──
+  // ── Enforcement device visibility ──
   /**
    * A device's reported enforcement posture (firewall/CA-trust/system-hooks)
    * hasn't been refreshed past DEVICE_STALE_THRESHOLD_MS (72h) -- fired by
@@ -209,7 +209,7 @@ export const NOTIFICATION_EVENT_TYPES = [
    * gateway.stale.detected's org-membership join provides for gateways.
    */
   'provider.outage.detected',
-  // ── Billing (LLD #71 Phase C2's fix to customer.subscription.updated) ──
+  // ── Billing (customer.subscription.updated handling) ──
   /**
    * A Stripe subscription reported `status: 'past_due'` or `'unpaid'` via
    * `customer.subscription.updated` -- visibility only, not a tier change
@@ -229,7 +229,7 @@ export const NOTIFICATION_EVENT_TYPES = [
    * a usage-pattern signal to review later.
    */
   'skill.malware.detected',
-  // ── Semantic skill analysis (Phase S5, TD-357) ──
+  // ── Semantic skill analysis (Phase S5) ──
   /**
    * The opt-in LLM judge (`semanticSkillAnalysisEnabled`) called a skill's
    * `SKILL.md` prose `'suspicious'` or `'malicious'` — content that

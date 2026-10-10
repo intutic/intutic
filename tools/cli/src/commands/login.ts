@@ -4,7 +4,6 @@
  * Supports API key (--api-key vk_...) or email+password.
  * Stores credentials at ~/.intutic/credentials.json (mode 0o600).
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

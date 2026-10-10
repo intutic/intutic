@@ -122,7 +122,7 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  *   picks the fail-open reading of that ambiguity rather than blocking every
  *   MCP call the first time a v6 gate meets an old snapshot).
  *
- * v8 (TD-474 item 4): the `hold` severity and the `action` subject. A hold
+ * v8: the `hold` severity and the `action` subject. A hold
  * rule — a `require_approval` SOP rule the control plane resolves, or a local
  * `review_before:` token the daemon compiles as `sop.local.review_before.*` —
  * refuses the call through the harness's own contract, appends the v1 hold
@@ -1850,7 +1850,7 @@ ${refuseWith('_mcp.code', '_mcp.ruleId')}
 
 
 /**
- * Pre-image capture — the storage half of the rollback enforcement rung (TD-328).
+ * Pre-image capture — the storage half of the rollback enforcement rung.
  *
  * ## Why this exists and why it is here
  *
@@ -1891,7 +1891,7 @@ ${refuseWith('_mcp.code', '_mcp.ruleId')}
  */
 export function emitPreImageCapture(): string {
   return `
-// ── Intutic pre-image capture (rollback rung, TD-328) ────────────────────────
+// ── Intutic pre-image capture (rollback rung) ────────────────────────────────
 const _INTUTIC_ROLLBACK_DIR = path.join(process.cwd(), '.intutic', 'rollback');
 const _INTUTIC_MAX_PREIMAGE_BYTES = 2 * 1024 * 1024;
 const _INTUTIC_MAX_PREIMAGE_ENTRIES = 50;

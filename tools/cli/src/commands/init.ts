@@ -6,7 +6,6 @@
  * makes no network call: `intutic connect` writes the harness configs, from
  * the control plane's SOPs plus the local `.intutic/sops`.
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 
@@ -22,7 +21,7 @@ import pc from 'picocolors'
 /**
  * Walk up from cwd looking for .git/ or package.json to find workspace root.
  *
- * Exported for `intutic setup` (LLD #70, cohort wizard) — its codescan step
+ * Exported for `intutic setup` (the cohort wizard) — its codescan step
  * reuses this exact resolution, then `detectHarnesses` below, rather than a
  * second implementation of "where does this workspace start."
  */

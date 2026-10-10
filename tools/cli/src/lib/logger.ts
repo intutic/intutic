@@ -1,7 +1,6 @@
 /**
  * Colorized console logger using picocolors.
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

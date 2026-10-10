@@ -623,7 +623,7 @@ pub fn scan_with(text: &str, pii: Option<&PiiPolicy>) -> Vec<DlpFinding> {
     findings
 }
 
-/// Scrub one unit of streamed text (TD-210).
+/// Scrub one unit of streamed text.
 ///
 /// # What this covers, and what it does not
 ///
@@ -1778,7 +1778,7 @@ mod redaction_before_forward_tests {
     use super::*;
 
     /// Redaction must leave the body parseable, because the proxy forwards the
-    /// redacted JSON rather than the original (TD-DLP-001). A replacement that
+    /// redacted JSON rather than the original. A replacement that
     /// broke the structure would turn a leak into a confusing upstream error.
     #[test]
     fn redacting_inside_json_keeps_it_valid() {

@@ -107,7 +107,7 @@ describe('loadConfig', () => {
     }
   })
 
-  it('falls back to INTUTIC_HOST — the key the sync daemon actually writes — for the control plane URL (TD-490)', async () => {
+  it('falls back to INTUTIC_HOST — the key the sync daemon actually writes — for the control plane URL', async () => {
     await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_HOST=https://api.example.test\nINTUTIC_WORKSPACE_ID=ws-test-1234\n', 'utf-8')
     expect((await loadConfig(['--', 'node', 'server.js'])).controlPlaneUrl).toBe('https://api.example.test')
 

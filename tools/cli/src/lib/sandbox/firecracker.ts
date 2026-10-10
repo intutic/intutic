@@ -1,6 +1,6 @@
 /**
- * FirecrackerBackend — VM-grade isolation via a Firecracker microVM (LLD #63 §6,
- * Increment 4). Same `SandboxBackend` interface as the container backend; the
+ * FirecrackerBackend — VM-grade isolation via a Firecracker microVM.
+ * Same `SandboxBackend` interface as the container backend; the
  * difference is the boundary: a separate guest kernel over KVM rather than
  * shared-kernel namespaces.
  *
@@ -10,7 +10,7 @@
  * source address). That keeps the enforcement outside the guest, where the
  * agent cannot touch it, which is stronger than the in-container firewall.
  *
- * Honesty status (see LLD #63 §7 + TECH_DEBT): the microVM *boots on real KVM*
+ * Honesty status: the microVM *boots on real KVM*
  * — validated on a GCE nested-virt host, where Firecracker loaded and ran the
  * guest kernel through this exact config + API sequence (the launch script this
  * backend invokes). What is NOT yet validated end-to-end is an agent running to

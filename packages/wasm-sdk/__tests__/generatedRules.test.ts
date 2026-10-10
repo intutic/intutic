@@ -323,7 +323,7 @@ describe('numeric fields arrive in either JSON form', () => {
 })
 
 /**
- * A rule cited from a policy document (LLD #71, Wave 7) is the same rendering
+ * A rule cited from a policy document is the same rendering
  * with the citation in its rationale, and the control plane reads the
  * predicate with `evaluatePredicate` before any bundle exists — to select
  * mocks from captured traffic and to preview a replay. Both are pinned here:

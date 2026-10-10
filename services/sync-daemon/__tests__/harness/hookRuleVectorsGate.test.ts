@@ -1,6 +1,6 @@
 /**
  * The emitted harness gate is the third real matcher for generated hook rules
- * (LLD #71) — and the one that runs on the developer's machine, with no
+ * — and the one that runs on the developer's machine, with no
  * network. This file builds one policy snapshot per authored hook-rule
  * vector the way the daemon builds one (`buildSnapshotRules`, so every
  * vector also has to survive `validateRule`), writes it with a real digest,

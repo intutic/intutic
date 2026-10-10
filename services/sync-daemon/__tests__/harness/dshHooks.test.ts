@@ -412,7 +412,7 @@ describe('dsh settingsGuard tamper restore', () => {
     expect(isDshProfilesRoot(node_path.join(dshHome, 'settings.yaml'))).toBe(false)
   })
 
-  it('guardSettingsFile registers governance the moment the profiles ROOT directory appears (TD-370 addDir handling)', async () => {
+  it('guardSettingsFile registers governance the moment the profiles ROOT directory appears (addDir handling)', async () => {
     // This is the event driftWatcher.ts forwards on chokidar's `addDir` for
     // the profiles root specifically (see isDshProfilesRoot) — the profile
     // itself already exists on disk by the time this fires (dsh creates it

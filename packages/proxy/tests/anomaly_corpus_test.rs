@@ -296,7 +296,7 @@ WHAT `measured` MEANS
                       detector — PromptInjectionDetector returns None the moment
                       its findings list is empty, so it is a pass-through.
   external-tooldesc   measured against 10,753 real tool and parameter descriptions
-                      from 14 BFCL v3 splits. This is the corpus TD-274 was held
+                      from 14 BFCL v3 splits. This is the corpus the tool-poisoning gap was held
                       open for, on the claim that no public set of them existed.
                       Recall is NOT measured — there is no vendored corpus of real
                       poisoned descriptions, so no detection rate is claimed.
@@ -524,7 +524,7 @@ async fn action_tokens_come_from_the_classifier_not_from_the_fixture() {
 
 /// The false-positive rate for tool-poisoning patterns, on real tool descriptions.
 ///
-/// `TD-274` was held open on a specific claim: that closing it needed "a benign
+/// The tool-poisoning gap was held open on a specific claim: that closing it needed "a benign
 /// corpus of tool descriptions" and "no such public set exists". The set exists.
 /// This is it, and this test is the measurement the entry said was unavailable.
 ///
@@ -614,7 +614,7 @@ async fn a_poisoned_tool_description_reaches_the_registry() {
     );
 }
 
-/// TD-248: `CYCLE_COVERAGE_FLOOR` was "chosen by inspection... needs a corpus
+/// `CYCLE_COVERAGE_FLOOR` was "chosen by inspection... needs a corpus
 /// of real tool sequences with labelled outcomes" — a considered guess with a
 /// test pinning it, worse than a measurement. This is the measurement.
 ///
@@ -624,14 +624,14 @@ async fn a_poisoned_tool_description_reaches_the_registry() {
 /// the actual `landmark_cycle_coverage` ratio for every real trajectory that
 /// reaches the coverage gate at all, which is floor-independent, and check
 /// where the current floor sits relative to that measured distribution — and
-/// relative to the one shape TD-248 names as what the floor exists to stop
+/// relative to the one shape the floor exists to stop
 /// (`mutations.json`'s `collapse_tail_1`: "ten of one anchor is a period-1
 /// cycle at full coverage").
 ///
 /// `landmark_cycle_coverage` is `LandmarkCycleDetector::detect`'s own coverage
 /// computation, extracted so this and the detector call the same code rather
 /// than this test carrying a second copy of the survivor logic to drift from
-/// it — precisely the risk TD-248's own title warns about, one level up.
+/// it — the same chosen-by-inspection risk the floor had, one level up.
 #[tokio::test]
 async fn cycle_coverage_floor_has_empirical_headroom_against_real_traffic() {
     use intutic_proxy::plugins::anomaly::detectors::{
@@ -658,7 +658,7 @@ async fn cycle_coverage_floor_has_empirical_headroom_against_real_traffic() {
 
     // The false-positive story the floor carries, measured rather than
     // assumed — and the measurement corrects the assumption. Before this
-    // test, "TD-248 needs a corpus" implied the floor's real-traffic rate was
+    // test, "the floor needs a corpus" implied the floor's real-traffic rate was
     // simply unknown; the honest reading of the corpus test's own
     // `EXPECTED_BENIGN_FIRINGS` ("two long trajectories with genuine
     // repetition in them; they are false positives") already named these two
@@ -671,7 +671,7 @@ async fn cycle_coverage_floor_has_empirical_headroom_against_real_traffic() {
         EXPECTED_BENIGN_FIRINGS.to_vec(),
         "the set of real trajectories reaching CYCLE_COVERAGE_FLOOR ({}) changed — this is the \
          floor's real-traffic false-positive set, and a different set here (not just a \
-         different count) is the regression TD-248 exists to catch before it reaches a customer",
+         different count) is the regression this test exists to catch before it reaches a customer",
         CYCLE_COVERAGE_FLOOR,
     );
 
@@ -692,7 +692,7 @@ async fn cycle_coverage_floor_has_empirical_headroom_against_real_traffic() {
         CYCLE_COVERAGE_FLOOR,
     );
 
-    // The evidence TD-248 asked for, and it is not the clean "enormous
+    // The evidence the floor's tuning asked for, and it is not the clean "enormous
     // headroom" the entry's prose assumed. Two findings, not one:
     //
     // (1) Only 2 of 1,000 published trajectories reach the coverage gate at
@@ -711,7 +711,7 @@ async fn cycle_coverage_floor_has_empirical_headroom_against_real_traffic() {
     //     are already above the current floor.
     //
     // So this is not a tuning gap that a different constant closes. It is the
-    // TD-247 argument again, one detector over: coverage counts REPETITION,
+    // argument that keeps the cycle detector advisory, again: coverage counts REPETITION,
     // not intent, and a long trajectory with genuine repeated structure
     // produces the same number as a manufactured cycle. `CYCLE_COVERAGE_FLOOR`
     // stays at 0.75 — nothing in this measurement makes another value better,

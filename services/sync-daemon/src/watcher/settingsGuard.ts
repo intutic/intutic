@@ -18,7 +18,6 @@
  *   - Gemini CLI's ~/.gemini/settings.json and Antigravity's
  *     ~/.gemini/config/hooks.json: restore when the gate registration is gone.
  *
- * LLD #14 — settingsGuard.ts
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
  *
  * @module
@@ -179,7 +178,7 @@ export function buildProtectedPaths(workspaceRoot: string): string[] {
  * once dsh creates it; `driftWatcher.ts` needs to know to react to `addDir`
  * for this ONE path — every other protected path only reacts to
  * `change`/`unlink` (see that module's own comment) — so this predicate is
- * exported for it to check against. TD-370.
+ * exported for it to check against.
  */
 export function isDshProfilesRoot(changedPath: string): boolean {
   return changedPath === path.join(resolveDshHome(), 'profiles')
@@ -449,7 +448,7 @@ export async function guardSettingsFile(
   // --profile <name>` run on this machine) ──────────────────────────────
   // driftWatcher.ts forwards this here on chokidar's `addDir` event (see
   // isDshProfilesRoot) — register governance into whichever profile(s) now
-  // exist immediately, closing TD-370's silent window at the moment it
+  // exist immediately, closing dsh's silent no-profile window the moment it
   // closes itself, rather than waiting for an unrelated file change or the
   // next poll cycle to notice.
   if (isDshProfilesRoot(changedPath)) {
@@ -770,7 +769,7 @@ async function guardDshFile(filePath: string, markers: string[], workspaceRoot: 
 
 /**
  * Side-effecting wrapper around `dshHooks.ts`'s pure `detectDshCoverageGap` —
- * logs TD-370's "silent no-profile window" as a `dsh_coverage_gap` warning
+ * logs dsh's "silent no-profile window" as a `dsh_coverage_gap` warning
  * when dsh is present on this machine but has zero profiles, so the window
  * is at least documented in the logs even though there is nothing to
  * restore into yet. Called once at `intutic connect` startup — see
@@ -785,7 +784,7 @@ export async function warnIfDshCoverageGap(): Promise<boolean> {
     log.warn(
       { action: 'dsh_coverage_gap', dshDetected: result.dshDetected, profileCount: result.profileCount },
       'dsh is present on this machine but has zero profiles yet — nothing is governed until the ' +
-        'first `dsh --profile <name>` run creates one (TD-370). The next sync after that run picks ' +
+        'first `dsh --profile <name>` run creates one. The next sync after that run picks ' +
         'it up automatically; this warning is visibility for the window before it, not a fix for it.',
     )
   }

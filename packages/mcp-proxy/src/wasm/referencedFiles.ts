@@ -1,6 +1,6 @@
 /**
  * wasm/referencedFiles.ts — The MCP-side resolver behind the
- * `read_referenced_file` host import (TD-441). A 1:1 port of
+ * `read_referenced_file` host import. A 1:1 port of
  * `packages/proxy/src/wasm/referenced_files.rs`: same constants, same error
  * codes, same candidate-token rules, same six guards, same realpath
  * confinement. Where the two differ it is stated at the site.

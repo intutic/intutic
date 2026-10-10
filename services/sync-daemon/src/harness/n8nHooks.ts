@@ -20,7 +20,6 @@
  *    — an importable n8n workflow (webhook → IF → HTTP Request) that forwards
  *    tool_blocked events to the control plane. Telemetry, not enforcement.
  *
- * LLD #14 — Phase 3 cross-harness defence (Gap 3, WS-B)
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
  *
  * @module

@@ -1,6 +1,6 @@
 /**
- * `intutic guardrails` — the Policy Clause Ledger from the terminal
- * (LLD #71, Wave 6): sources, documents, the review queue, and the three
+ * `intutic guardrails` — the Policy Clause Ledger from the terminal:
+ * sources, documents, the review queue, and the three
  * decisions that move a cited guardrail. A client of
  * `/api/v1/policy-guardrails/*` and `/api/v1/connectors`; nothing here
  * decides anything the server would not.
@@ -568,7 +568,7 @@ export async function runGuardrailsShow(guardrailId: string, opts: CommonOpts): 
     log.field('Predicate source', '')
     for (const line of rendered.source.split('\n')) log.dim(`    ${line}`)
   } else if (g.target === 'workspace_setting' && rendered.key && Array.isArray(rendered.values)) {
-    // A settings-class guardrail (TD-474 item 2) is a proposed value for one workspace setting.
+    // A settings-class guardrail is a proposed value for one workspace setting.
     log.field('Workspace setting', `${rendered.key}: ${rendered.values.join(', ')}`)
     if (rendered.key === 'egressAllow') {
       log.dim('    No shadow evidence exists for egress: `promote --acknowledge-no-traffic` adds these entries from PROPOSED, and only adds.')

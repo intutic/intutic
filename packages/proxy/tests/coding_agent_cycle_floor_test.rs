@@ -1,4 +1,4 @@
-//! TD-248: `CYCLE_COVERAGE_FLOOR` against real coding-agent trajectories.
+//! `CYCLE_COVERAGE_FLOOR` against real coding-agent trajectories.
 //!
 //! The BFCL sweep in `anomaly_corpus_test.rs` could only speak for 2 of 1,000
 //! trajectories, because API-orchestration runs are too short to reach the
@@ -7,7 +7,7 @@
 //!
 //! **Fetched, not vendored, and skipped without it.** The corpus is a derived
 //! extract of `nebius/SWE-rebench-openhands-trajectories` (CC-BY-4.0); see
-//! `corpus/openhands/extract.py` and the TD-248 section of
+//! `corpus/openhands/extract.py` and the OpenHands section of
 //! `corpus/PROVENANCE.md`. Vendoring it is a decision about carrying 35 MB of
 //! third-party data in a mirrored tree, not one to make inside a test. Without
 //! `INTUTIC_CODING_CORPUS` this test prints that it did not run and returns —
@@ -19,7 +19,7 @@
 //! name recurs in any 24-call window, so the floor admits everything and the
 //! detector's false-positive behaviour is decided by `CYCLE_MATCH_RATIO` alone.
 //! The assertion pins that finding, so a change that makes the floor start
-//! discriminating on this traffic fails here and sends someone back to TD-248.
+//! discriminating on this traffic fails here and sends someone back to re-tune the floor.
 
 // Shared with anomaly_corpus_test.rs, which uses the rest of it (the BFCL
 // seeds and mutators); only the context builder is needed here.
@@ -140,8 +140,8 @@ async fn cycle_coverage_floor_does_not_discriminate_on_coding_agent_traffic() {
     assert!(
         (gated_below_floor as f64) < 0.01 * gated as f64,
         "{gated_below_floor} of {gated} gated requests fell below CYCLE_COVERAGE_FLOOR ({}) — the \
-         floor now discriminates on coding-agent traffic, which TD-248 records it does not. \
-         Re-read the entry before changing either.",
+         floor now discriminates on coding-agent traffic, which this test records it does not. \
+         Re-read its module doc before changing either.",
         CYCLE_COVERAGE_FLOOR,
     );
 }

@@ -11,14 +11,14 @@ object. `pytest.importorskip` skips cleanly on a machine without the optional
 dependency installed. `asyncio.run` drives every async call, matching this
 package's existing convention.
 
-`TestRealDispatcher` (TD-376 closer) goes one level deeper than the tests
+`TestRealDispatcher` goes one level deeper than the tests
 above: it drives a tool call through AG2's REAL end-to-end dispatcher —
 `ag2.tools.executor.ToolExecutor` wired to a real `ag2.stream.MemoryStream`
 and `ConversationContext`, exactly the machinery `ag2.plugin`'s `Agent`
 construction wires up internally (`ToolExecutor(PydanticSerializer(...))`,
 same serializer config) — rather than calling `on_tool_execution` by hand
 with a hand-rolled `call_next`. This answers the question `ag2.py`'s module
-doc and TD-376 both flagged as unconfirmed: what AG2's own dispatcher does
+doc flagged as unconfirmed: what AG2's own dispatcher does
 with an exception that escapes `on_tool_execution` itself (as opposed to the
 `ToolErrorEvent` `IntuticMiddleware` deliberately returns). Confirmed live:
 `ag2.tools.executor._execute_call` wraps `await context.send(call)` in a
@@ -137,7 +137,7 @@ class TestIntuticMiddleware:
 
 
 # ---------------------------------------------------------------------------
-# TD-376 closer: AG2's REAL end-to-end dispatcher, not a hand-rolled call.
+# AG2's REAL end-to-end dispatcher, not a hand-rolled call.
 # ---------------------------------------------------------------------------
 
 async def _collect_tool_results(*, tools, middleware, arguments: dict) -> ToolResultsEvent:
@@ -188,11 +188,11 @@ class TestRealDispatcher:
     dispatcher (see module doc) rather than calling `on_tool_execution`
     directly — the same escalation from "confirmed shape" to "confirmed
     against the real dispatcher" `test_adapter_crewai.py` already applies for
-    CrewAI, now applied to AG2 to close TD-376.
+    CrewAI, now applied to AG2.
     """
 
     def test_an_exception_escaping_middleware_is_caught_by_ag2s_own_dispatcher_not_swallowed_as_allowed(self):
-        """The TD-376 finding: unlike CrewAI (confirmed fail-OPEN — see
+        """The finding: unlike CrewAI (confirmed fail-OPEN — see
         crewai.py's module doc), AG2's own `_execute_call` catches ANY
         exception escaping a middleware's `on_tool_execution` — even one from
         a middleware with no `IntuticGateRefusal`/catch-all handling at all —

@@ -5,7 +5,6 @@
  * When changes are detected, it notifies the daemon via a callback to trigger
  * validation against the integrity baseline.
  *
- * LLD #14 — driftWatcher.ts
  * HLD §3.14 — Real-Time State Mirroring (Filesystem integrity checks)
  *
  * @module
@@ -72,7 +71,7 @@ export function startWatcher(
     // dsh's profiles ROOT directory is watched (via buildProtectedPaths)
     // before it exists on disk, precisely so its own CREATION — chokidar's
     // `addDir`, never `change`/`unlink` — is observable: that is the moment
-    // TD-370's "silent no-profile window" closes, and settingsGuard.ts has
+    // dsh's "silent no-profile window" closes, and settingsGuard.ts has
     // nothing to register into until it does. Every other protected path
     // stays `change`/`unlink`-only, unchanged.
     const isDshProfilesCreation = event === 'addDir' && isDshProfilesRoot(path)

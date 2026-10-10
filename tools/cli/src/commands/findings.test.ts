@@ -255,8 +255,8 @@ describe('intutic findings', () => {
       // [14, 19, 20, 26, 12, 14] across 6 columns: every box-drawing line
       // (borders, header, and both coloured/uncoloured data rows) must have
       // the SAME visible width once ANSI is stripped. An ANSI-unsafe pad
-      // (measuring raw length instead of visible length, as the CLI shipped
-      // with in TD-344) would either misalign a coloured row against the
+      // (measuring raw length instead of visible length, as the CLI once
+      // shipped with) would either misalign a coloured row against the
       // borders or slice it mid-escape-sequence — either way this width
       // check catches it, which a mere substring check would not.
       const expectedWidth = [14, 19, 20, 26, 12, 14].reduce((a, w) => a + w, 0) + 3 * 6 + 1

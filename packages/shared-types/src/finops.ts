@@ -3,7 +3,7 @@
  *
  * These types correspond to the `execution_traces` table and the
  * `finops_attribution_4d` materialized view defined in
- * LLD 01-data-architecture §3.1.
+ * the data-architecture schema.
  *
  * HLD §3.6 (FinOps Ledger), §3.19 (4D Attribution)
  *
@@ -295,7 +295,7 @@ export interface TraceDetail {
   correctivePromptCard: unknown | null
   reasoningTokens?: number | null
   /**
-   * Provider-reported prompt-cache token counts (TD-347; migration 165) —
+   * Provider-reported prompt-cache token counts (migration 165) —
    * Anthropic's `usage.cache_read_input_tokens` / `cache_creation_input_tokens`
    * today. Null when the provider/proxy build doesn't report them; distinct
    * from `cacheHit`/`cacheSavingsUsd` (the proxy's own semantic response

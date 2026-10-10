@@ -5,8 +5,6 @@
  * extract blacklisted tools and regex patterns, and that the settings.json
  * config is written correctly.
  *
- * LLD #14 — Test Strategy
- *
  * @module
  */
 

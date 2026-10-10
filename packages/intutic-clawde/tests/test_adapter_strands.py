@@ -23,9 +23,9 @@ the adapter's internal callback. Three layers, in increasing realism:
     tool objects.
 
 Plus the two surfaces beyond a single `Agent`: a `strands.bidi.BidiAgent`
-(TD-422 — same `BeforeToolCallEvent`, driven offline through a fake
+(same `BeforeToolCallEvent`, driven offline through a fake
 `BidiModel` that never connects), and real `GraphBuilder`/`Swarm`
-orchestrators gated through `install_multiagent()` (TD-423), driven by
+orchestrators gated through `install_multiagent()`, driven by
 `_ScriptedModel`.
 
 Also covers the exception posture the adapter deliberately relies on:
@@ -277,7 +277,7 @@ class TestMcpTools:
 
 
 # --------------------------------------------------------------------------
-# TD-422: strands.bidi.BidiAgent
+# strands.bidi.BidiAgent
 # --------------------------------------------------------------------------
 
 
@@ -347,7 +347,7 @@ class TestBidiAgent:
 
 
 # --------------------------------------------------------------------------
-# TD-423: install_multiagent() over real Graph / Swarm orchestrators
+# install_multiagent() over real Graph / Swarm orchestrators
 # --------------------------------------------------------------------------
 
 

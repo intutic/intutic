@@ -115,7 +115,7 @@ describe('the injector is reachable from a command', () => {
   // envInjector shipped under a ✅ RESOLVED marker with this test file beside
   // it and no caller anywhere in `src/` — the tests exercised the functions
   // directly, which is exactly why nobody noticed there was no way for a user
-  // to invoke them (TD-041). Testing a function is not the same as shipping it.
+  // to invoke them. Testing a function is not the same as shipping it.
   const here = dirname(fileURLToPath(import.meta.url))
   const commandsDir = join(here, '..', 'commands')
 

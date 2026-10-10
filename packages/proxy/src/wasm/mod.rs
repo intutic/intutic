@@ -2,7 +2,7 @@
 //!
 //! Hosts both first-party rules and AssemblyScript user rules — authored with
 //! `packages/wasm-sdk` and compiled/installed via `intutic policy compile` /
-//! `intutic policy install` (TD-004, shipped) — and Rego policies compiled by
+//! `intutic policy install` — and Rego policies compiled by
 //! OPA (`intutic rules build --rego`, see [`opa`]).
 
 pub mod context;

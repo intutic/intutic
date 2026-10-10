@@ -11,9 +11,9 @@
  * (never `console.log`/stdout — the same stdio-isolation rule every other
  * module in this package follows). `read_referenced_file` resolves against
  * the per-evaluation table the runner pre-reads through `referencedFiles.ts`
- * (TD-441) — the port of `host.rs`'s `read_referenced_file_impl`, code for
- * code: the read budget is charged before argument validation, a refusal is
- * a value the rule can act on, and nothing here traps. With no table (no
+ * — the port of `host.rs`'s `read_referenced_file_impl`, code for code: the
+ * read budget is charged before argument validation, a refusal is a value
+ * the rule can act on, and nothing here traps. With no table (no
  * `INTUTIC_WASM_MANIFEST_ROOT`, or a rule that does not import the function)
  * every call gets `ERR_REFUSED`, which is what the Rust proxy answers with no
  * root configured.

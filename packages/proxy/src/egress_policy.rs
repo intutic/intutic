@@ -1,11 +1,11 @@
-//! egress_policy.rs — the L1 enforcement layer (LLD #63 §4).
+//! egress_policy.rs — the L1 enforcement layer.
 //!
 //! Today the proxy TLS-MITMs AI-provider hosts and tunnels everything else
 //! through untouched (`tls_mitm::handle_connect`). That is mediation, not
 //! control: it can inspect an AI call, but it cannot *deny* a connection to
 //! anywhere. This module adds the decision that turns the proxy into an egress
 //! chokepoint — for the traffic that reaches it. Layers L2 (host firewall) and
-//! L3 (sandbox) are what make reaching it non-optional; see the LLD.
+//! L3 (sandbox) are what make reaching it non-optional.
 //!
 //! ## The three modes
 //!
@@ -277,7 +277,7 @@ impl EgressPolicy {
     }
 
     /// Return a copy of this policy with a central (control-plane) policy layered
-    /// on top (LLD #63 §4). The central `mode`, when present, is authoritative;
+    /// on top. The central `mode`, when present, is authoritative;
     /// the central allow entries are **unioned** with the local ones, so a
     /// developer's local infra allowances are never dropped by a central list.
     /// A central `mode` of `None` (central management not configured) leaves the
@@ -386,7 +386,7 @@ pub fn default_egress_policy_path() -> std::path::PathBuf {
     intutic_dir().join("hooks").join("egress-policy.json")
 }
 
-/// Parse a daemon-written `egress-policy.json` (LLD #63 §4), verifying its
+/// Parse a daemon-written `egress-policy.json`, verifying its
 /// digest and — when a workspace id is known — its workspace. Returns the
 /// central policy it declares, or `None` on any error / mismatch. Fail-closed
 /// toward local config: a corrupt, foreign, or unparseable file degrades to
@@ -446,7 +446,7 @@ pub fn load_local_egress_file(
 // `handle_connect` is a free handler with no access to `AppState`, so the
 // policy lives in a process-global cell initialised from `main` after config
 // load. It is swappable behind an `RwLock<Arc<..>>` so the daemon-distributed
-// central policy can be **hot-reloaded** into a running proxy (LLD #63 §4)
+// central policy can be **hot-reloaded** into a running proxy
 // without a restart. Uninitialised (unit tests, embedders) it reads as a
 // default `Off` policy, so nothing is ever denied by an uninitialised policy.
 
@@ -650,7 +650,7 @@ mod tests {
         );
     }
 
-    // ── Central policy distribution (LLD #63 §4) ──────────────────────────
+    // ── Central policy distribution ───────────────────────────────────────
 
     fn write_egress_file(
         dir: &std::path::Path,

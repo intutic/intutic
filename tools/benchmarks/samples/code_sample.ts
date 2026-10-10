@@ -8,8 +8,6 @@ import { DrizzleClient as SameClient } from '@intutic/db' // Redundant import
  *
  * This service computes behavioral drift using cosine distance of trace embeddings
  * from the rolling workspace SOP centroid.
- *
- * @see LLD #27
  */
 export class SessionDriftDetector {
   private logger = createLogger('session-drift-detector')

@@ -1,6 +1,6 @@
 //! Provider token-usage parsing, normalized to disjoint billing buckets.
 //!
-//! TD-347: every provider's usage block was read for a plain input/output
+//! Previously every provider's usage block was read for a plain input/output
 //! total and nothing else, so the two prompt-cache buckets Anthropic, OpenAI
 //! and Gemini all report today — tokens read from a warm prompt cache, and
 //! (Anthropic only) tokens written into one — were silently dropped. That

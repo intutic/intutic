@@ -5,8 +5,6 @@
 //! - Tool calls: functionCall / functionResponse (not tool_use / function)
 //! - System message: systemInstruction field (not system role)
 //! - Safety settings: required safetySettings array
-//!
-//! See LLD §5.3 and TD-007.
 
 use serde::{Deserialize, Serialize};
 
@@ -251,7 +249,7 @@ impl GeminiAdapter {
         };
 
         // Usage metadata — read via the shared `TokenUsage::from_anthropic`
-        // parser (TD-347) rather than an open-coded `input_tokens`/
+        // parser rather than an open-coded `input_tokens`/
         // `output_tokens` read, so this translator and every other usage call
         // site agree on what "Anthropic usage" means. `total_input()` is used
         // for `promptTokenCount` rather than exposing the cache split on the

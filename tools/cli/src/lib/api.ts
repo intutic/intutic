@@ -4,7 +4,6 @@
  * Uses native fetch() (Node 18+). All requests include
  * Authorization: Bearer <apiKey> header.
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

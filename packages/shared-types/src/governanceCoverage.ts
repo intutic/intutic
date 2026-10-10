@@ -15,7 +15,7 @@
  *     just built in memory for the same cycle's `POST /api/v1/agents/report`
  *     call.
  *
- * Hand-copying this mapping between the two is how it drifted (TD-443):
+ * Hand-copying this mapping between the two is how it drifted:
  * the sync daemon's copy read `report.facets.mcp_tools.length > 0` with no
  * `Array.isArray` guard, while `harnessGradeSweep.ts`'s copy guarded it —
  * the exact two-hand-kept-copies failure `secretPatterns.ts`'s module doc

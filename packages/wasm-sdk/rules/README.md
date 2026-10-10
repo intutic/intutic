@@ -27,8 +27,7 @@ with):**
 
 **Field-coverage — one rule per `RequestContext` field with no other
 consumer, so the rule doubles as the field's coverage test** (this is the
-actual criterion the other six were picked by; see `docs/TECH_DEBT.md`
-TD-306):
+actual criterion the other six were picked by):
 
 | Rule | Field it exercises | The inversion its allow mock catches |
 |---|---|---|

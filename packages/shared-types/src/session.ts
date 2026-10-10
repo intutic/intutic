@@ -3,7 +3,7 @@
  *
  * These types correspond to the `agent_sessions` table and the
  * Valkey session checkpoint keys defined in
- * LLD 01-data-architecture §3.1 and §3.3.
+ * the data-architecture schema.
  *
  * HLD §4.5 (Session Tracking)
  *

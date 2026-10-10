@@ -16,8 +16,6 @@
  *   INTUTIC_WORKSPACE_ID=ws_...
  *   INTUTIC_VALKEY_URL=redis://127.0.0.1:6379   (only when a local Valkey is running)
  *
- * LLD #14 — Dual-path hook telemetry (WS-A1)
- *
  * @module
  */
 
@@ -48,7 +46,7 @@ export interface RuntimeEnvOptions {
   bypassEnforcementTier?: string
   /**
    * The local Valkey the MCP governance proxies share their anomaly session
-   * window through (Wave 5.3, TD-437). Written as `INTUTIC_VALKEY_URL` only
+   * window through (Wave 5.3). Written as `INTUTIC_VALKEY_URL` only
    * when the caller has one running; omitted otherwise, so a proxy never
    * probes a Valkey nobody started.
    */

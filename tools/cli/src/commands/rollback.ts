@@ -1,5 +1,5 @@
 /**
- * `intutic rollback` — the restore half of the rollback enforcement rung (TD-328).
+ * `intutic rollback` — the restore half of the rollback enforcement rung.
  *
  * The gate captures a pre-image when a guard FLAGS a call and lets it proceed
  * (see `emitPreImageCapture` in the sync daemon). This restores one. Without

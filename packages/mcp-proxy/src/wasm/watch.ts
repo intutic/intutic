@@ -1,6 +1,6 @@
 /**
  * Watch the local rules directory and call back, debounced, when a `.wasm`
- * file appears, changes or goes away (TD-442).
+ * file appears, changes or goes away.
  *
  * The rescan rides the 60-second policy tick (`policy.ts` `start(onTick)`)
  * and no second timer was wanted. A filesystem watcher is not a timer: it

@@ -42,7 +42,7 @@ pub async fn handle_connect(req: Request<Body>) -> Response<Body> {
 
     let target = format!("{}:{}", host, port);
 
-    // L1 egress decision (LLD #63 §4). AI hosts → MITM (unchanged); allowed
+    // L1 egress decision. AI hosts → MITM (unchanged); allowed
     // hosts → tunnel; denied hosts (Enforce) → 403 with no tunnel opened.
     let decision = global_policy().decide(&host, port);
     let should_mitm = matches!(decision, EgressDecision::Mitm);

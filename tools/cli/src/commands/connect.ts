@@ -5,7 +5,6 @@
  * a real-time filesystem watcher for configuration drift detection,
  * and a 30-second HTTP polling loop as a secondary fallback.
  *
- * LLD #14 — connect.ts
  * HLD §3.14 — Real-Time State Mirroring
  *
  * @module
@@ -382,7 +381,7 @@ export async function runConnect(opts: {
   // 2. AbortController for clean shutdown
   let proxyProc: ChildProcess | null = null
   const ac = new AbortController()
-  // TD-484: this handler used to abort the loop and hope. The process stayed
+  // This handler used to abort the loop and hope. The process stayed
   // alive for hours. `createShutdownHandler` adds the exit deadline and the
   // second-signal exit; `terminateChild` escalates to SIGKILL.
   const shutdown = createShutdownHandler({
@@ -578,11 +577,11 @@ export async function runConnect(opts: {
   // when the config version moved: policy changes without the config version
   // changing, and a guardrail promoted, a hold approved or an egress mode
   // flipped mid-session used to reach a connected machine only on restart —
-  // this function was called once, at startup (TD-488). None of these throw.
+  // this function was called once, at startup. None of these throw.
   //
   // The snapshot also carries this workspace's `review_before:` tokens as hold
   // rules (synced SOPs, settings and local `.intutic/sops`), so every gate —
-  // not only the Claude Code hook — holds on them (TD-474 item 4).
+  // not only the Claude Code hook — holds on them.
   //
   // First, the snapshot's self-heal: a snapshot changed while the daemon was
   // stopped is put back to the last verified copy, and reported, before the
@@ -910,7 +909,7 @@ export async function runConnect(opts: {
         proxyStatus = 'unhealthy'
         if (ac.signal.aborted) {
           // Shutting down: the proxy is gone because we stopped it. Re-spawning
-          // it here would leave an orphan holding the port (TD-484).
+          // it here would leave an orphan holding the port.
           proxyStatus = 'stopped'
         } else if (proxyProc) {
           log.warn('[DR] Managed proxy gateway process has terminated. Auto-healing re-spawn...')
@@ -974,7 +973,7 @@ export async function runConnect(opts: {
       log.warn(`Failed to send daemon heartbeat: ${err instanceof Error ? err.message : String(err)}`)
     }
 
-    // g. Enforcement device visibility (post-strip gap #2, LLD #63
+    // g. Enforcement device visibility (post-strip gap #2, egress
     // hardening) — the "interval" half of "continuous compliance": this
     // loop already runs unprivileged, as the real user, on a timer, and
     // already just computed sslTrustStatus above for its own DR-healing
@@ -1015,7 +1014,7 @@ export async function runConnect(opts: {
         mcpProxyFailBehavior: syncConfig.settings?.mcpProxyFailBehavior,
         mcpProxyMode: syncConfig.settings?.mcpProxyMode,
         bypassEnforcementTier: syncConfig.settings?.bypassEnforcementTier,
-        // Shared by the MCP proxies for their session window (Wave 5.3, TD-437) — only when it is running.
+        // Shared by the MCP proxies for their session window — only when it is running.
         valkeyUrl: valkeyResult.running ? valkeyUrl : undefined,
       })
     } catch (err) {
@@ -1118,7 +1117,7 @@ export async function runConnect(opts: {
       controlPlaneUrl,
       apiKey: safeCreds.apiKey,
       workspaceId: safeCreds.workspaceId,
-      // Shared by the MCP proxies for their session window (Wave 5.3, TD-437) — only when it is running.
+      // Shared by the MCP proxies for their session window — only when it is running.
       valkeyUrl: valkeyResult.running ? valkeyUrl : undefined,
     })
   } catch (err) {
@@ -1253,7 +1252,7 @@ export async function runConnect(opts: {
   // Run initial compliance check on startup
   await runProbes()
 
-  // dsh coverage-gap visibility (TD-370): once at startup, not every poll
+  // dsh coverage-gap visibility: once at startup, not every poll
   // tick — the gap only changes state on the user's first `dsh --profile
   // <name>` run, which the filesystem watcher below reacts to immediately
   // via settingsGuard.ts's isDshProfilesRoot `addDir` handling. Only worth

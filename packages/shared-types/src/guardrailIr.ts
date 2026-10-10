@@ -1,5 +1,5 @@
 /**
- * Guardrail IR — the only thing a policy compiler may say (LLD #71).
+ * Guardrail IR — the only thing a policy compiler may say.
  *
  * An LLM reading corporate policy prose is allowed to propose exactly two
  * things: a verbatim quote anchored to a passage it was shown, and a clause in
@@ -23,7 +23,7 @@
  *   `max_calls`, `forbid_with`). `~>` adjacency is not offered; `->` only.
  * - `wasm_predicate` — the existing closed predicate DSL, verdict 3 (reask)
  *   only. A generated rule can never originate a block.
- * - the two settings-class kinds (TD-474 item 2): `allowed_models` and
+ * - the two settings-class kinds: `allowed_models` and
  *   `egress_allow`, each a list of values for one workspace setting
  *   (`SETTING_KIND_KEYS`). Neither carries roles — a workspace setting has no
  *   per-role form — and neither is projected into a rule endpoint: a promoted
@@ -301,7 +301,7 @@ export function isFrontMatterIr(ir: GuardrailIr): ir is FrontMatterIr {
   return (FRONT_MATTER_KINDS as readonly string[]).includes(ir.kind)
 }
 
-/** The settings-class kinds: each is a list of values for one workspace setting (TD-474 item 2). */
+/** The settings-class kinds: each is a list of values for one workspace setting. */
 export const SETTING_KINDS = ['allowed_models', 'egress_allow'] as const
 
 /**

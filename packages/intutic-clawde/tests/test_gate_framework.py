@@ -297,7 +297,7 @@ class TestIntuticHeaders:
 
 
 class TestGuardToolsRefusesBetaTool:
-    """TD-427: `anthropic.lib.tools.beta_tool` objects call a validated copy of
+    """`anthropic.lib.tools.beta_tool` objects call a validated copy of
     the function captured at construction, never `.func`, so the generic
     `.func` swap would gate nothing. It must refuse, loudly, like the TS twin."""
 

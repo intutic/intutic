@@ -95,7 +95,7 @@ describe('harness protected paths', () => {
     // states plainly that its Tier A1 does NOT compile in
     // `staticFloorPatterns()` the way the four `emit*` mechanisms do (it
     // reads only the policy-snapshot file) — a real, documented subset, not
-    // a hidden one (see TD-370 and gate.ts's own doc comment). Grepping for
+    // a hidden one (see gate.ts's own doc comment). Grepping for
     // the literal package name here is the same positive-trace discipline
     // this test already applies to the other four mechanisms: a writer that
     // does not reference ANY of the five recognised traces has no

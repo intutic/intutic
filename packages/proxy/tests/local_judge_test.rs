@@ -1,6 +1,6 @@
 //! End-to-end: a self-hosted gateway with `INTUTIC_GATEWAY_LOCAL_JUDGE=true`
 //! answers finalize-time judging from its OWN LiteLLM instance, and never
-//! calls out to `CONTROL_PLANE_URL` for it (LLD #68 §2 phase 2).
+//! calls out to `CONTROL_PLANE_URL` for it.
 //!
 //! ## What this observes
 //!
@@ -93,7 +93,7 @@ async fn local_judge_answers_finalize_without_calling_the_control_plane() {
         .await;
 
     std::env::set_var("OPENAI_UPSTREAM_URL", upstream.uri());
-    // A virtual key is never forwarded upstream (TD-370): the request
+    // A virtual key is never forwarded upstream: the request
     // needs a provider key, so the operator fallback supplies a test one.
     std::env::set_var("OPENAI_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::set_var("CONTROL_PLANE_URL", cp.uri());

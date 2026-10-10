@@ -1,4 +1,4 @@
-//! gateway.rs — the L2 hosted-gateway front door (LLD #64 §2, TD-334 increment 2).
+//! gateway.rs — the L2 hosted-gateway front door.
 //!
 //! A single managed proxy already authenticates and workspace-scopes traffic
 //! per request (the `vk_` virtual-key auth in `proxy.rs`). What it does NOT do
@@ -42,7 +42,7 @@ pub struct GatewayConfig {
     /// credential capture runs. Off by default.
     #[serde(default)]
     pub require_vk: bool,
-    /// LLD #64 §4 — Enforced BYO-key. When true, a workspace with no
+    /// Enforced BYO-key. When true, a workspace with no
     /// deliberately provisioned upstream credential (`workspace:credentials:{ws}`,
     /// set via the dashboard's provider-key panel, never opportunistic capture)
     /// gets refused with 402 instead of silently riding the proxy pod's own
@@ -60,7 +60,7 @@ pub struct GatewayConfig {
     /// `require_provisioned_key` is off. See `provisioned_key_required`.
     #[serde(default)]
     pub provisioned_key_paid_only: bool,
-    /// LLD #68 §2 phase 2 — local judge for self-hosted gateways. When true,
+    /// Local judge for self-hosted gateways. When true,
     /// finalize-time judge evaluation is answered by a LOCAL LiteLLM
     /// instance (`LITELLM_LOCAL_URL`, see `judge_local.rs`) instead of
     /// `{CONTROL_PLANE_URL}/api/v1/judge/finalize` — so the content being
@@ -226,7 +226,7 @@ pub fn requires_vk_only() -> bool {
     gateway_config().require_vk
 }
 
-/// True if `require_provisioned_key` is on (LLD #64 §4, Enforced BYO-key). A
+/// True if `require_provisioned_key` is on (Enforced BYO-key). A
 /// tiny wrapper for the same reason as `requires_vk_only` above.
 pub fn requires_provisioned_key() -> bool {
     gateway_config().require_provisioned_key
@@ -247,13 +247,13 @@ pub fn provisioned_key_required(cfg: &GatewayConfig, byok_required: Option<bool>
     cfg.require_provisioned_key && !(cfg.provisioned_key_paid_only && byok_required == Some(false))
 }
 
-/// True if `local_judge` is on (LLD #68 §2 phase 2). A tiny wrapper for the
+/// True if `local_judge` is on. A tiny wrapper for the
 /// same reason as `requires_vk_only` above.
 pub fn uses_local_judge() -> bool {
     gateway_config().local_judge
 }
 
-/// The org this deployment is a dedicated managed cell for (LLD #71), or
+/// The org this deployment is a dedicated managed cell for, or
 /// `None` — the shared gateway and every self-hosted deployment. Set by the
 /// cell provisioner via `INTUTIC_GATEWAY_ORG_ID` in the cell's pod env; read
 /// once (a boot-time security posture, same set-once discipline as
@@ -401,7 +401,7 @@ mod tests {
         assert!(token_allowed("sk-ant-anything", requires_vk_only()));
     }
 
-    // ── require_provisioned_key (LLD #64 §4) ────────────────────────────
+    // ── require_provisioned_key ─────────────────────────────────────────
 
     #[test]
     fn require_provisioned_key_off_by_default() {
@@ -606,7 +606,7 @@ mod tests {
         assert!(!off.require_provisioned_key);
     }
 
-    // LLD #71 — the pure cell-admission decision, every arm. The Unverified
+    // The pure cell-admission decision, every arm. The Unverified
     // arm is the one worth staring at: it must be a distinct value, NOT a
     // pass and NOT a mismatch, because the caller's contract is "revalidate
     // then fail closed" — collapsing it into Allow would silently disable

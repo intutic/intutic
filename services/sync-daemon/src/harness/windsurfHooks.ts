@@ -10,7 +10,6 @@
  * Intutic TLS MITM proxy,
  * enabling governance of Cascade AI traffic that has no native base URL override.
  *
- * LLD #14 — Phase 3 cross-harness defence
  * HLD §3.14 — Three-Tier Defense Cascade
  *
  * # Correction (2026-08-18): this file's hook event names and payload

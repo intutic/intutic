@@ -57,7 +57,7 @@ export const CreateSessionSchema = z.object({
   executionMode: z.enum(constValues(ExecutionMode)).optional(),
 
   /**
-   * The local proxy process this session's traces are filed under (TD-231).
+   * The local proxy process this session's traces are filed under.
    * When set, the server records the git/task context on the row it derives
    * for that process's traces — a PROXY row named by the server, never a new
    * `ses_` id — and ignores `executionMode` / `userId`. Mutually exclusive with

@@ -1,6 +1,6 @@
 /**
  * `writeRuntimeEnv` — the file every hook script and MCP proxy reads at
- * invocation time. Wave 5.3 (TD-437) adds `INTUTIC_VALKEY_URL`, written only
+ * invocation time. Wave 5.3 adds `INTUTIC_VALKEY_URL`, written only
  * when the caller has a local Valkey running: a proxy must never probe one
  * nobody started.
  */

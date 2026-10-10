@@ -1,5 +1,5 @@
 /**
- * Monetization & Financial Ledger types — LLD #20
+ * Monetization & Financial Ledger types
  *
  * Stripe Metered Billing,
  * and usage-based overage enforcement.

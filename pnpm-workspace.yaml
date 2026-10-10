@@ -24,7 +24,7 @@ minimumReleaseAgeExclude:
   # eve@0.71.0 (published 2026-10-03; first verified at 0.39.1) is the exact
   # version @intutic/gate/eve's shipped-d.ts verification was performed
   # against — a devDependency of packages/gate-js only, never a runtime
-  # dependency. See TD-410. (The AI SDK family it peers on — ai 7.0.127,
+  # dependency. (The AI SDK family it peers on — ai 7.0.127,
   # @ai-sdk/workflow 2.0.58, @ai-sdk/harness 1.0.138, workflow 5.0.1 — is
   # older than the 24h window and needs no entry; the old ai@7.0.68 /
   # harness@1.0.75 / workflow@1.0.69 / gateway / openai entries went with it.)

@@ -47,7 +47,7 @@
  *    existing bypass-permissions behavior unless users opt in." Under
  *    `'allow-all'` nothing pauses. Under the stricter modes the mode decides
  *    WHICH built-ins pause, and each paused call is then a genuine per-call
- *    approval this gate answers (TD-415, corrected): the
+ *    approval this gate answers: the
  *    `@ai-sdk/harness-claude-code` bridge (`dist/bridge/index.mjs`,
  *    `createPermissionSettings`/`nativeToolRequiresApproval`) adds `ask` rules
  *    for bash-kind tools (`Bash`, `Monitor`) under `'allow-edits'`, and for
@@ -431,7 +431,7 @@ export interface RecommendedHarnessSettingsOptions {
    * Whether to also recommend excluding the sandbox's native `bash` builtin
    * from the tool set entirely, via `HarnessAgentSettings.inactiveTools`.
    * Defaults to `true` — see {@link RecommendedHarnessSettings.inactiveTools}
-   * for what this does and does not guarantee (TD-415).
+   * for what this does and does not guarantee.
    */
   filterBash?: boolean
 }
@@ -459,12 +459,12 @@ export interface RecommendedHarnessSettings {
   networkPolicy: RecommendedNetworkPolicy
   /**
    * Spread into `HarnessAgentSettings.inactiveTools` — `undefined` when
-   * `filterBash: false` was passed. TD-415, resolved with a corrected
-   * understanding: `HarnessV1BuiltinToolFiltering` (the same package's own
-   * type, `dist/index.d.ts`/`dist/agent/index.d.ts`) genuinely CAN drop
-   * `bash` at config time, confirmed against real shipped `dist/index.js`
-   * for both harnesses TD-417 discusses (not just their `.d.ts` — the
-   * behaviour lives in compiled logic no type file states):
+   * `filterBash: false` was passed. `HarnessV1BuiltinToolFiltering` (the
+   * same package's own type, `dist/index.d.ts`/`dist/agent/index.d.ts`)
+   * genuinely CAN drop `bash` at config time, confirmed against real
+   * shipped `dist/index.js` for both wrapped harnesses, Claude Code and
+   * Grok Build (not just their `.d.ts` — the behaviour lives in compiled
+   * logic no type file states):
    *
    *   - `@ai-sdk/harness-claude-code@1.0.78` sets BOTH
    *     `supportsBuiltinToolApprovals: true` AND
@@ -546,7 +546,7 @@ export function recommendedHarnessSettings(
 }
 
 // ============================================================================
-// Sandbox bootstrap — TD-417 Half A
+// Sandbox bootstrap
 // ============================================================================
 //
 // `recommendedHarnessSettings()` and `intuticApprovalResponder()` above cover
@@ -556,7 +556,7 @@ export function recommendedHarnessSettings(
 // laptop (`services/sync-daemon/src/harness/claudeCodeHooks.ts`, generating
 // `.intutic/hooks/claude-code-check.js` + `.claude/settings.json`). Inside a
 // `@ai-sdk/harness` sandbox there is no laptop for the sync-daemon to write
-// to, so that native gate is simply absent (TD-417's core finding).
+// to, so that native gate is simply absent and the harness runs ungated.
 //
 // ## The channel — confirmed against a real install, not assumed
 //
@@ -667,7 +667,7 @@ export function recommendedHarnessSettings(
 // own PreToolUse dispatch runs this script, `process.exit(2)` stops the call
 // (the model receives an error tool result naming the block), and the files
 // survive a container stop/start + `resumeSession`. A true snapshot restore
-// (Vercel Sandbox) and Grok Build remain unverified. See TD-417.
+// (Vercel Sandbox) and Grok Build remain unverified.
 
 /** Structural copy of `@ai-sdk/provider-utils`'s `SandboxSession`, narrowed
  *  to the methods {@link intuticSandboxBootstrap}'s `onBootstrap` calls.
@@ -764,7 +764,7 @@ function renderSandboxGateScript(rulesFileName: string, workspaceId = ''): strin
  * Unlike the laptop's claude-code-check.js, this script has no live
  * control-plane connection at call time (the recommended sandbox network
  * policy is deny-all) and therefore implements NEITHER the SOP tier (A3)
- * NOR review-hold parking NOR governance-event draining. See TD-417.
+ * NOR review-hold parking NOR governance-event draining.
  */
 const fs = require('fs');
 const path = require('path');
@@ -1064,8 +1064,8 @@ async function writeSandboxUserSettings(
 
 /**
  * Builds `{ bootstrapHash, onBootstrap }` for
- * `HarnessAgentSettings.sandboxConfig` — the channel TD-417 identified as
- * existing but unused:
+ * `HarnessAgentSettings.sandboxConfig` — a channel the framework provides
+ * but nothing used:
  *
  * ```ts
  * import { HarnessAgent } from '@ai-sdk/harness/agent'

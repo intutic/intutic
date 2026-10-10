@@ -11,8 +11,6 @@
  * - No LLM calls on developer machine (all judgment is server-side)
  * - Cooldown rate limiter: 1 analysis request per minute per session
  *
- * LLD #52 §4.1 — Daemon-side trajectory buffer
- *
  * @module
  */
 
@@ -44,7 +42,7 @@ export interface TraceEvent {
   sessionId: string
   workspaceId: string
   /**
-   * DEPRECATED (TD-207): has always carried the task type, not a tool name.
+   * DEPRECATED: has always carried the task type, not a tool name.
    * Kept because deployed daemons key summary metrics off it. Prefer `tools`.
    */
   toolName: string
@@ -141,7 +139,7 @@ export class TrajectoryBuffer {
     // Real tool calls, flattened across the window's events. Falls back to
     // the legacy per-event toolName only when NO event carries a tools array —
     // i.e. an old proxy — because toolName has always held the task type
-    // (TD-207) and mixing the two vocabularies in one list would make
+    // and mixing the two vocabularies in one list would make
     // uniqueTools and the consecutive-repeat scan meaningless.
     const flattenedToolCalls = this.events.flatMap((e) => e.tools ?? [])
     const anyToolArrays = this.events.some((e) => e.tools !== undefined)
@@ -264,7 +262,6 @@ export class TrajectoryMonitor {
 
     // Note: Valkey subscription is handled by the sync-daemon's existing
     // Redis subscriber. Events are forwarded to this worker via postMessage.
-    // See LLD #52 §4.1 for the worker thread lifecycle.
   }
 
   /**

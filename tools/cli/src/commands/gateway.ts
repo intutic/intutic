@@ -1,6 +1,6 @@
 /**
- * `intutic gateway` — manage self-hosted gateway registrations (LLD #66)
- * and routing assignment (LLD #68 §2).
+ * `intutic gateway` — manage self-hosted gateway registrations
+ * and routing assignment.
  *
  * Subcommands:
  *   - `intutic gateway register --name <name> --target <docker|kubernetes|bare_metal>`
@@ -363,7 +363,7 @@ export async function runGatewayConfigSet(
   }
 }
 
-/** `intutic gateway assign` — LLD #68 §2. */
+/** `intutic gateway assign` — set or clear a gateway routing assignment. */
 export async function runGatewayAssign(
   opts: GatewayCliOpts & { gateway?: string; clear?: boolean; org?: string },
 ): Promise<void> {
@@ -418,7 +418,7 @@ interface GatewayResolutionResponse {
   staleAssignment?: string
 }
 
-/** `intutic gateway resolve` — LLD #68 §2. */
+/** `intutic gateway resolve` — show which gateway this workspace resolves to. */
 export async function runGatewayResolve(opts: GatewayCliOpts): Promise<void> {
   const client = await getClient(opts)
 

@@ -4,8 +4,6 @@
  * Tests hash computation, file discovery, and capture throttling.
  * Uses temp filesystem — no network I/O.
  *
- * LLD #51 — Phase A Verification
- *
  * @module
  */
 

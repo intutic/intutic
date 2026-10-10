@@ -11,7 +11,6 @@
  * If a file is immutable but has been tampered with, a governance_override_attempt
  * incident is emitted to the control plane instead of a silent restore.
  *
- * LLD #14 — Phase 3 cross-harness defence
  * HLD §3.14 — Three-Tier Defense Cascade
  *
  * @module

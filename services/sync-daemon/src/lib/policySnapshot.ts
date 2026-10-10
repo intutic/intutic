@@ -4,7 +4,7 @@
  *
  * # Why
  *
- * TD-307: `POST /api/v1/hook-gate` was called by two of thirteen gates, so DLP,
+ * `POST /api/v1/hook-gate` was called by two of thirteen gates, so DLP,
  * `BLOCK:` SOPs, SSO policy and promoted findings reached two of thirteen. The
  * obvious repair — route the other eleven through the gate — is the wrong one:
  * those eleven enforce locally and **fail closed**, the two network callers were
@@ -145,10 +145,9 @@ export const DESTRUCTIVE_TIER_SEVERITY: 'block' | 'warn' = 'warn'
  * is not that kind of rule: it does not run `scanSkillContent` or judge
  * anything about what a skill file says, only WHERE a write's target path
  * points — `.agents/skills/**` or `.claude/skills/**`, a deterministic,
- * zero-ambiguity match. TD-358 (`docs/TECH_DEBT.md`) says this about exactly
- * that distinction: "Path-matching is the one exception, and it is not
+ * zero-ambiguity match. Path-matching is the one exception, and it is not
  * actually an exception to the measurement requirement — it never needed
- * one." There is no false-positive rate to earn a promotion by measuring,
+ * one. There is no false-positive rate to earn a promotion by measuring,
  * because there is nothing probabilistic here to measure in the first place.
  *
  * The second half of the argument is what `warn` actually buys on this
@@ -184,7 +183,7 @@ export const SKILL_SURFACE_TIER_SEVERITY: 'block' | 'warn' = 'block'
  * ships as `block` or as `warn`.
  *
  * `block`, licensed by a measurement rather than by argument, unlike
- * `SKILL_SURFACE_TIER_SEVERITY` above. TD-358 held content enforcement at warn
+ * `SKILL_SURFACE_TIER_SEVERITY` above. Content enforcement was held at warn
  * until `scanSkillContent`'s false-positive rate on real benign skills had been
  * measured. It now has: 350 vendored SKILL.md files
  * (`packages/shared-types/src/__tests__/corpus/skills/`), and the nine patterns
@@ -213,7 +212,7 @@ export interface ResolvedPolicy {
     action: string
     reason: string
     /**
-     * LLD #71: `'guardrail'` on rules the control plane projects from a cited
+     * `'guardrail'` on rules the control plane projects from a cited
      * policy guardrail. The only origin for which `action: 'warn'` is shipped
      * (at severity `warn`, report-only); every other warn rule is still
      * dropped, the HIGH/CRITICAL catch-all included.
@@ -273,7 +272,7 @@ export interface PolicySnapshotOptions {
    * `review_before:` tokens from the workspace's local SOPs and settings
    * (`parseSopConstraints(...).reviewBefore`). Each becomes a `hold` rule,
    * `sop.local.review_before.<token>`, so every gate holds on them — not only
-   * the Claude Code hook that used to bake them in (TD-474 item 4).
+   * the Claude Code hook that used to bake them in.
    */
   localHoldTokens?: readonly string[]
 }
@@ -394,7 +393,7 @@ function toGuardPattern(
   // for anything that ships rules to a blocking path, and the reason this filter
   // is the first line rather than an afterthought.
   //
-  // One exception (LLD #71): a rule the control plane projects from a cited
+  // One exception: a rule the control plane projects from a cited
   // policy guardrail in SHADOW carries `origin: 'guardrail'` and `action:
   // 'warn'`. It ships at severity `warn` — the gate logs `tool_flagged` and
   // allows — so the rule can earn its evidence. That is the documented meaning
@@ -464,7 +463,7 @@ function toGuardPattern(
       ? `Held for human review: ${rule.reason || `SOP ${rule.id}`}`
       : rule.reason || `Blocked by SOP ${rule.id}`,
     rationale: guardrail
-      ? 'Projected from a cited policy guardrail by the control plane (LLD #71).'
+      ? 'Projected from a cited policy guardrail by the control plane.'
       : hold
         ? 'Resolved from a REQUIRE_APPROVAL: SOP title by the control plane.'
         : 'Resolved from a BLOCK: SOP title by the control plane.',
@@ -659,7 +658,7 @@ export function buildSnapshotRules(policy: ResolvedPolicy, localHoldTokens: read
     severity: shadow ? ('shadow' as GuardPattern['severity']) : SKILL_SURFACE_TIER_SEVERITY,
   }))
 
-  // Skill-CONTENT tier (TD-358): a skill-directory write whose written text
+  // Skill-CONTENT tier: a skill-directory write whose written text
   // matches a pattern measured at zero benign-corpus false positives. No
   // floor copy exists, so no `.tier` suffix is needed; SILENT_LOG demotes it
   // to shadow like every other dynamic-tier rule.

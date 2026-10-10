@@ -119,7 +119,7 @@ pub fn tool_objects(tools: &[serde_json::Value]) -> Vec<&serde_json::Value> {
 
 /// Mutable counterpart to [`tool_objects`], for a caller that needs to rewrite
 /// a tool object in place rather than only read it (`tool_poison::redact_body`
-/// — TD-274's mitigation half). Same three-shape unwrapping, kept here rather
+/// — the tool-poisoning mitigation). Same three-shape unwrapping, kept here rather
 /// than duplicated a third time, for the reason `tool_objects`'s own doc
 /// comment gives: this file already carries the one place that walk is
 /// correct, after Gemini's nesting was missed here and in `proxy::extract_tools`

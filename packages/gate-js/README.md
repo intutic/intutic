@@ -178,7 +178,7 @@ to match. Confirmed against `@ai-sdk/harness@1.0.75` and re-verified on
   or event draining, and a hold rule refuses the call outright because no
   approval can be requested — those need a live control-plane connection a
   bootstrap function can't have). Spread its output into
-  `sandboxConfig` alongside `recommendedHarnessSettings()`. See TD-417 and
+  `sandboxConfig` alongside `recommendedHarnessSettings()`. See
   `apps/docs/integrations/ai-sdk-harness.md` for what has and hasn't been
   live-verified.
 
@@ -222,7 +222,8 @@ arrives — a real, documented pre-execution veto ("Denied tools do not run.").
 `IntuticSessionConfirmer` answers those pauses with a `Gate.guard()` verdict,
 via polling, a webhook (`session.requires_action`), or a live stream. A tool
 configured `always_allow` never pauses and is therefore never seen by
-Intutic at all — see TD-425.
+Intutic at all — coverage is opt-in per tool, so configure `always_ask` on
+every tool you want gated.
 
 `agent.custom_tool_use` (your own tools) has no pause concept — it is gated
 at the point YOUR code executes it instead, via
@@ -231,7 +232,7 @@ at the point YOUR code executes it instead, via
 does not apply here). See `apps/docs/integrations/anthropic-managed-agents.md`
 for the full operator-facing version, including the self-hosted
 `EnvironmentWorker` coverage story and the Python-side custom-tool decorator
-ordering gotcha (TD-427).
+ordering gotcha.
 
 ## Subpath convention
 
@@ -243,7 +244,7 @@ Eight adapters exist today, one source file each: `@intutic/gate/dsh`
 `@intutic/gate/eve` (`src/eve.ts` — approval policies for eve's
 per-tool/per-connection `approval` surface, plus the observe-only
 `intuticAuditHooks()`; verified against a pinned `eve@0.71.0` install — a
-pre-1.0 Preview product, see its module doc and TD-410), `@intutic/gate/harness`
+pre-1.0 Preview product, see its module doc), `@intutic/gate/harness`
 (`src/harness.ts` — see above), `@intutic/gate/workflow` (`src/workflow.ts`
 — see above), and `@intutic/gate/managed-agents` (`src/managedAgents.ts` — see
 above). Later adapter phases follow the SAME convention (also

@@ -5,7 +5,7 @@
  * Same shape as langgraph.ts (see sdkGatedAdapter.ts). Agent Framework (the
  * AutoGen + Semantic Kernel successor, `agent-framework` /
  * `agent-framework-core` on PyPI, imported as `agent_framework`) is a separate
- * framework from AutoGen (autogen.ts), so it has its own adapter (TD-375).
+ * framework from AutoGen (autogen.ts), so it has its own adapter.
  * Its tools run in the agent's own Python process, so the blocking gate ships
  * SDK-side via
  * `intutic_clawde.gate.adapters.agent_framework.IntuticFunctionMiddleware`, a

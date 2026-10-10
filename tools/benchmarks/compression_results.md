@@ -28,7 +28,7 @@ This table compares **SnipCompactor** (Rust-based heuristics) with **Headroom** 
 
 ### Go/No-Go Decision
 
-According to the Go/No-Go Decision Framework (LLD #27 §12 / HLD §3.20):
+According to the Go/No-Go Decision Framework:
 - Marginal improvement over SnipCompactor must be **>= 20 percentage points**.
 - Compression latency P95 must be **< 100ms**.
 
@@ -37,5 +37,5 @@ While SmartCrusher and TOON Format achieve some token reduction, the marginal im
 
 **Resolution:**
 - Confirmed **SnipCompactor** as the permanent context context compression solution for Intutic.
-- Marked **TD-003** (Headroom evaluation) as **RESOLVED (No-Go)**.
-- Marked **TD-005** (TOON evaluation) as **RESOLVED (No-Go)**.
+- Marked the **Headroom evaluation** as **RESOLVED (No-Go)**.
+- Marked the **TOON evaluation** as **RESOLVED (No-Go)**.

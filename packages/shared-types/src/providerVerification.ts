@@ -1,5 +1,5 @@
 /**
- * Provider credential verification (LLD #70, model catalog & cohort wizard).
+ * Provider credential verification (model catalog & cohort wizard).
  *
  * Pure, network-free description of how to check whether a credential works —
  * the cheapest authenticated call each provider's own API exposes. Two
@@ -61,7 +61,7 @@ export interface ProviderProbeRequest {
  * Bedrock and Vertex AI return `null`: verifying them means SigV4 request
  * signing or a GCP OAuth2/JWT exchange, neither of which exists anywhere in
  * this codebase yet (the same "real per-provider engineering, not a config
- * change" boundary LLD #67 §3 draws around routing those two providers). A
+ * change" boundary that also keeps routing those two providers out). A
  * caller seeing `null` should say "cannot verify automatically," not fail
  * the credential.
  */

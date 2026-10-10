@@ -128,7 +128,7 @@ describe('injectMcpServer — write-if-changed', () => {
     expect(after.mcpServers.figma.args).toContain('--server-name')
   })
 
-  // M2: TD-354's stdio→HTTP bridge phase supersedes the old "remote entries
+  // M2: the stdio→HTTP bridge phase supersedes the old "remote entries
   // are left alone" behaviour — a remote (url-based) entry now gets wrapped
   // into the proxy's bridge mode (`--remote-url`/`--remote-transport`),
   // exactly like a stdio entry gets wrapped with `--`.
@@ -446,7 +446,7 @@ describe('Goose YAML structural editing', () => {
   })
 })
 
-describe('injectMcpServer — OpenCode opencode.json mcp block (TD-487)', () => {
+describe('injectMcpServer — OpenCode opencode.json mcp block', () => {
   let ctx: Ctx
   let prevXdg: string | undefined
 

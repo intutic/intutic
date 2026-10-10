@@ -139,7 +139,7 @@ describe('policyCache Unit Tests', () => {
     expect(stats.entries).toBeGreaterThanOrEqual(1)
   })
 
-  it('refetches a fresh entry when the workspace config version moved (TD-474 item 5)', async () => {
+  it('refetches a fresh entry when the workspace config version moved', async () => {
     const ws = 'ws_version_bump_test'
     const key = `v2:sync:config_version:${ws}`
     const valkey = new Redis(process.env['VALKEY_URL'] ?? process.env['REDIS_URL'] ?? 'redis://localhost:6379', { lazyConnect: true, maxRetriesPerRequest: 1 })

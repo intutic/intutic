@@ -1,4 +1,4 @@
-//! Local judge for self-hosted gateways (LLD #68 §2 phase 2).
+//! Local judge for self-hosted gateways.
 //!
 //! The SaaS judge (`routes/judge.ts`) is not a small thing to port: SOP
 //! registry lookup, personal-SOP merging, a Valkey-backed mid-stream
@@ -18,7 +18,7 @@
 //! — so for an org running this, judged content never leaves their
 //! infrastructure. SOP *text* still comes from the existing gateway-mode
 //! SOP fetch (`sops::all_sops_for_workspace`) — a real, disclosed
-//! trade-off documented in LLD #68, not silently glossed over.
+//! trade-off, not silently glossed over.
 //!
 //! Opt-in, off by default (`INTUTIC_GATEWAY_LOCAL_JUDGE`, see `gateway.rs`)
 //! — a gateway that does not set it keeps calling `CONTROL_PLANE_URL`
@@ -166,7 +166,7 @@ pub async fn local_judge_finalize(
     })
 }
 
-// ── Typed stage (LLD #72 Phase 4) ─────────────────────────────────────────
+// ── Typed stage ───────────────────────────────────────────────────────────
 //
 // The SaaS judge's cascade, ported to the gateway: two yes/no questions over
 // the same state, each answered as one token with its log-probabilities, so

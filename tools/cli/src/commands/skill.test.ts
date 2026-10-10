@@ -186,7 +186,7 @@ describe('auditSkillFile', () => {
     expect(entry.kind).toBe('skill_md')
   })
 
-  // ── Phase S5 (TD-357): opt-in content attachment ─────────────────────
+  // ── Phase S5: opt-in content attachment ──────────────────────────────
 
   it('does NOT attach content by default (attachContent omitted)', async () => {
     const dir = join(workspaceRoot, '.agents', 'skills', 'no-content-default')

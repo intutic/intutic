@@ -206,7 +206,7 @@ describe('buildSnapshotRules', () => {
     expect(rules.filter((r) => r.id.startsWith('sop.')).map((r) => r.severity)).toEqual(['shadow', 'shadow'])
   })
 
-  it('admits a warn rule only when the control plane marks it as a guardrail projection (LLD #71)', () => {
+  it('admits a warn rule only when the control plane marks it as a guardrail projection', () => {
     const rules = buildSnapshotRules(
       policy({
         sopRules: [
@@ -381,7 +381,7 @@ describe('buildSnapshotRules', () => {
     }
   })
 
-  describe('skill-surface tier (TD-358 block-tier promotion)', () => {
+  describe('skill-surface tier (block-tier promotion)', () => {
     it('ships one rule per SKILL_SURFACE_PATTERNS entry at SKILL_SURFACE_TIER_SEVERITY', () => {
       const rules = buildSnapshotRules(policy())
       const skillRules = rules.filter((r) => r.id.startsWith('skill_surface.'))
@@ -430,7 +430,7 @@ describe('buildSnapshotRules', () => {
   })
 })
 
-/** The benign-skill corpus vendored for TD-358's measurement. */
+/** The benign-skill corpus vendored for the skill-content false-positive measurement. */
 const SKILL_CORPUS = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../../../packages/shared-types/src/__tests__/corpus/skills',
@@ -461,7 +461,7 @@ describe('caseFoldedArgSource', () => {
   })
 })
 
-describe('skill-content tier (TD-358 benign-corpus measurement)', () => {
+describe('skill-content tier (benign-corpus measurement)', () => {
   const contentRules = () => buildSnapshotRules(policy()).filter((r) => r.id.startsWith('skill_content.'))
 
   it('ships one rule per block-eligible pattern at SKILL_CONTENT_TIER_SEVERITY, and never read-sensitive-path', () => {
