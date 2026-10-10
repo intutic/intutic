@@ -39,6 +39,25 @@ use crate::routing::bandit::BanditArmState;
 use crate::routing::mirror::MirrorPairEvent;
 use crate::telemetry::ExecutionTrace;
 
+/// A control-plane rule version a proxy refused to load, as the control plane
+/// reads it: the fields the MCP proxy's `wasm_rule_refused` event carries, in
+/// this channel's snake case.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RuleRefusalWire {
+    pub rule_id: String,
+    pub name: String,
+    pub sha256: String,
+    /// Why, as one of `RULE_LOAD_FAILURE_REASONS` in shared-types:
+    /// `missing`, `hash_mismatch`, `compile_error`, `unsupported_import` or
+    /// `load_error`. The control plane files the incident under it.
+    pub refusal: &'static str,
+    /// What the binary hashed to, on a hash mismatch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_sha256: Option<String>,
+    /// Whether an earlier version of the rule stays in force on this proxy.
+    pub previous_in_force: bool,
+}
+
 pub mod memory;
 pub mod valkey;
 
@@ -49,7 +68,10 @@ pub use memory::{migrate_local_learning, MemoryStore, NullControlPlaneCache};
 pub fn local_snapshot_path() -> std::path::PathBuf {
     memory::default_snapshot_path()
 }
-pub use valkey::{ValkeyControlPlaneCache, ValkeyStore};
+pub use valkey::{
+    announce_credential_keys, spawn_credential_key_announcer, ValkeyControlPlaneCache, ValkeyStore,
+    CREDENTIAL_KEYS_ANNOUNCE_PREFIX,
+};
 
 /// Who owns arm updates for a workspace. Mirrors `reward::RewardMode`; kept
 /// separate so the store layer does not depend on the reward engine.
@@ -266,20 +288,6 @@ pub struct TokenBaseline {
 pub enum JudgeScope {
     Session,
     Loop,
-}
-
-/// A control-plane rule version a proxy refused to load, as the control plane
-/// files it: an incident whose reason is one of `RULE_LOAD_FAILURE_REASONS`
-/// in shared-types (`missing`, `hash_mismatch`, `compile_error`,
-/// `unsupported_import`, `load_error`).
-#[derive(Debug, Clone, Copy)]
-pub struct RuleRefusalReport<'a> {
-    pub rule_id: &'a str,
-    pub rule_name: &'a str,
-    pub sha256: &'a str,
-    pub reason: &'a str,
-    /// The incident's text: what was refused, why, and what still enforces.
-    pub description: &'a str,
 }
 
 /// A break-glass override token validated for a SPECIFIC workspace.
@@ -553,8 +561,9 @@ pub trait LocalStore: Send + Sync + 'static {
     /// released never. A pick the upstream cannot serve was therefore locked in
     /// for the scope's whole life: every subsequent request took the
     /// session-lock branch, re-sent the unservable model, and failed the same
-    /// way. Called when an upstream error is attributed to the routed model, so
-    /// the next request re-selects from arms that have since been penalised.
+    /// way. Called whenever the locked model fails a request
+    /// (`proxy::release_routing_lock`), so the next request re-selects instead
+    /// of returning to it.
     ///
     /// Deliberately leaves `last_model` in place — see its doc comment on
     /// `SessionRouting`.
@@ -854,6 +863,21 @@ pub trait LocalStore: Send + Sync + 'static {
     /// measured against.
     async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64>;
 
+    /// Checks one request against a virtual key's per-minute limits and, when
+    /// it is within them, counts it — atomically, so replicas sharing this
+    /// store cannot both take a minute's last request. A request refused here
+    /// is not counted. See `crate::key_limits` for what RPM and TPM count.
+    async fn admit_rate(
+        &self,
+        key_id: &str,
+        limit: crate::key_limits::RateLimit,
+        minute: i64,
+    ) -> crate::key_limits::RateDecision;
+
+    /// Adds a completed call's tokens to its key's tokens-per-minute counter
+    /// for `minute`. Best effort: a failed write under-counts one call.
+    async fn add_rate_tokens(&self, key_id: &str, tokens: u64, minute: i64);
+
     /// Hold a loop run for human review, recording why.
     ///
     /// On `LocalStore` rather than `ControlPlaneCache` because the proxy is the
@@ -997,6 +1021,26 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// never become the accidental behavior of a Valkey read glitch either.
     async fn allowed_models(&self, workspace_id: &str) -> Option<Vec<String>>;
 
+    /// The workspace's own smart-routing candidates, read from
+    /// `workspace:routing_candidates:{workspace_id}` (the `routingCandidates`
+    /// workspace setting). `None` — no control plane, an unset key, a read
+    /// failure — means this proxy's `routing.candidate_models` applies, so a
+    /// Valkey blip falls back to the operator's pool rather than to no routing
+    /// or to a pool nobody chose. Defaults to `None` for caches that never
+    /// learned the key.
+    async fn routing_candidates(&self, _workspace_id: &str) -> Option<Vec<String>> {
+        None
+    }
+
+    /// The model ids the workspace's stored `provider` credential was seen to
+    /// list when it was last verified — `workspace:provider_models:{ws}`, field
+    /// `provider` (a provider registry id: `anthropic`, `openai`, `gemini`, …).
+    /// `None` when nothing was discovered, which the router reads as "no
+    /// evidence either way", never as "reaches nothing".
+    async fn provider_models(&self, _workspace_id: &str, _provider: &str) -> Option<Vec<String>> {
+        None
+    }
+
     /// `None` when no control plane manages this workspace. Fails open — a
     /// read error or timeout is indistinguishable from absence by design, so a
     /// Valkey blip cannot strand a workspace with all features off.
@@ -1021,6 +1065,19 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// requests that took the fallback. Returns `None` when unknown, which the
     /// caller must treat as "no pre-flight opinion", not "no limit".
     async fn daily_budget(&self, workspace_id: &str) -> Option<(f64, Option<f64>)>;
+
+    /// The current values of spend counters the control plane writes
+    /// (`crate::key_limits::spend_counter_key`), in order, in one round trip;
+    /// a counter not yet written reads 0.
+    ///
+    /// `None` when they could not be read, which the caller must treat as
+    /// unverifiable spend and refuse — they back hard budgets, a financial
+    /// control (see [`HardCapStatus`]). That is also the default, so an
+    /// implementation that never learned to read them fails closed rather than
+    /// waving every hard budget through.
+    async fn spend_counters(&self, _keys: &[String]) -> Option<Vec<f64>> {
+        None
+    }
 
     /// Status of a governed loop run, if the control plane is tracking it.
     async fn loop_status(&self, loop_run_id: &str) -> Option<String>;
@@ -1078,12 +1135,20 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
 
     /// Raise a control-plane rule version this proxy refused to load on
     /// `intutic:system_anomalies`, the channel `LocalStore::publish_system_anomaly`
-    /// writes and the control plane turns into an incident, with the reason
-    /// it files the incident under. Here for the rule registry, which reads
-    /// rules through this trait and holds no `LocalStore`. The default does
-    /// nothing: standalone has no control plane to raise it with, and no
-    /// control-plane rules to raise it about.
-    async fn publish_rule_refusal(&self, _workspace_id: &str, _refusal: &RuleRefusalReport<'_>) {}
+    /// writes and the control plane turns into an incident, with the version
+    /// and the reason, so the control plane files one incident per version and
+    /// reason however many proxies refuse it — this proxy's replicas and the
+    /// MCP proxy, which reports the same refusal as a hook event. Here for the
+    /// rule registry, which reads rules through this trait and holds no
+    /// `LocalStore`. The default does nothing: standalone has no control plane
+    /// to raise it with, and no control-plane rules to raise it about.
+    async fn publish_rule_refusal(
+        &self,
+        _workspace_id: &str,
+        _description: &str,
+        _rule: &RuleRefusalWire,
+    ) {
+    }
 
     // ── Token intelligence ───────────────────────────────────────────
 

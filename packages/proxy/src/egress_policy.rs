@@ -524,6 +524,31 @@ mod tests {
         assert_eq!(p.decide("exfil.evil.com", 443), EgressDecision::Deny);
     }
 
+    /// Cloud model endpoints are reached through the proxy's own `bedrock/`,
+    /// `vertex/` and `azure/` routes, not intercepted: a Bedrock request's
+    /// SigV4 signature covers its body, so a redacted copy could not be
+    /// forwarded under the agent's signature. A direct connection is therefore
+    /// an ordinary host — refused under `enforce` unless allowed — never a
+    /// tunnel that skips governance.
+    #[test]
+    fn cloud_model_endpoints_are_governed_routes_not_intercepted_hosts() {
+        let p = enforce(&[]);
+        for host in [
+            "bedrock-runtime.us-east-1.amazonaws.com",
+            "bedrock-mantle.us-east-1.api.aws",
+            "us-east5-aiplatform.googleapis.com",
+            "aiplatform.googleapis.com",
+            "my-resource.openai.azure.com",
+        ] {
+            assert_eq!(p.decide(host, 443), EgressDecision::Deny, "{host}");
+        }
+        let allowed = enforce(&[".amazonaws.com"]);
+        assert_eq!(
+            allowed.decide("bedrock-runtime.us-east-1.amazonaws.com", 443),
+            EgressDecision::Allow
+        );
+    }
+
     #[test]
     fn enforce_subdomain_and_suffix_rules() {
         let p = enforce(&["github.com", ".internal.corp"]);

@@ -33,7 +33,7 @@ func TestProviderSchemasAreValid(t *testing.T) {
 	for _, name := range []string{
 		"intutic_sop", "intutic_policy", "intutic_guardrail", "intutic_workspace_settings", "intutic_virtual_key",
 		"intutic_gateway", "intutic_notification_rule", "intutic_mcp_server_decision", "intutic_siem_destination",
-		"intutic_wasm_rule",
+		"intutic_wasm_rule", "intutic_provider_credential",
 	} {
 		if _, ok := resp.ResourceSchemas[name]; !ok {
 			t.Errorf("missing resource %s", name)
@@ -78,6 +78,22 @@ resource "intutic_workspace_settings" "this" {
 resource "intutic_workspace_settings" "this" {
   settings = jsonencode({ featureFlags = { ff_nope = true } })
 }`, `featureFlags.ff_nope`},
+		{"a budget enforcement the API does not know", `
+resource "intutic_virtual_key" "k" {
+  label                    = "x"
+  daily_budget_usd         = 5
+  daily_budget_enforcement = "warn"
+}`, `value must be one of`},
+		{"a zero budget", `
+resource "intutic_member_budget" "m" {
+  member_id        = "default"
+  daily_budget_usd = 0
+}`, `between`},
+		{"a rate limit of zero", `
+resource "intutic_virtual_key" "k" {
+  label          = "x"
+  rate_limit_rpm = 0
+}`, `between 1 and 100000`},
 		{"settings must be an object", `
 resource "intutic_workspace_settings" "this" {
   settings = jsonencode(["egressMode"])
@@ -286,6 +302,41 @@ resource "intutic_wasm_rule" "w" {
   source = %q
   sha256 = "abc"
 }`, rule), `must be a SHA-256 in hex`},
+		{"provider credential: unknown provider", `
+resource "intutic_provider_credential" "c" {
+  provider_id = "groq"
+  fields      = { apiKey = "groq-key-0123" }
+}`, `value must be one of`},
+		{"provider credential: a required field", `
+resource "intutic_provider_credential" "c" {
+  provider_id = "azure_openai"
+  fields      = { apiKey = "azure-key-0123" }
+}`, `azure_openai needs endpoint in fields`},
+		{"provider credential: neither Bedrock credential set", `
+resource "intutic_provider_credential" "c" {
+  provider_id = "bedrock"
+  fields      = { awsRegion = "us-east-1", awsAccessKeyId = "access-key-id-0000" }
+}`, `bedrock needs awsAccessKeyId and awsSecretAccessKey, or apiKey in fields`},
+		{"provider credential: a field the provider does not take", `
+resource "intutic_provider_credential" "c" {
+  provider_id = "openai"
+  fields      = { apiKey = "openai-key-0123", organization = "org" }
+}`, `openai takes no field organization`},
+		{"provider credential: a key too short to be real", `
+resource "intutic_provider_credential" "c" {
+  provider_id = "anthropic"
+  fields      = { apiKey = "short" }
+}`, `apiKey must be between 8 and 512 characters`},
+		{"provider credential: an endpoint that is not an Azure resource", `
+resource "intutic_provider_credential" "c" {
+  provider_id = "azure_openai"
+  fields      = { endpoint = "https://llm.example.com", apiKey = "azure-key-0123" }
+}`, `Resource Endpoint must be https://<resource>.openai.azure.com`},
+		{"provider credential: a service account that is not JSON", `
+resource "intutic_provider_credential" "c" {
+  provider_id = "vertex_ai"
+  fields      = { projectId = "my-project", serviceAccountJson = "not json" }
+}`, `Service Account JSON is not valid JSON`},
 		{"unknown MCP status", `
 resource "intutic_mcp_server_decision" "m" {
   server_name = "github"

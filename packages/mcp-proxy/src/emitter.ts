@@ -18,6 +18,8 @@ import { httpRequest } from './httpJson.js'
 import type { CallerIdentity } from './identity.js'
 import type { AnomalyFinding } from './anomaly/index.js'
 import type { BudgetEventDetail } from './budget.js'
+import type { ShadowReport } from './wasm/runner.js'
+import type { RuleLoadFailureReason } from '@intutic/shared-types'
 
 const log = createLogger('mcp-proxy-emitter')
 
@@ -75,6 +77,40 @@ export type EventKind =
    * refusal; every refusal also sends its own `tool_blocked`.
    */
   | 'mcp_budget_exceeded'
+  /**
+   * A version of one of the workspace's control-plane rules was refused
+   * (wasm/cloudRules.ts): its binary is missing, does not hash to what its
+   * descriptor names, or cannot load. Sent once per hash and reason, with
+   * `toolName` carrying the rule id and `wasmRule` the detail; the control
+   * plane files one incident per version, as for the LLM proxy's refusals.
+   */
+  | 'wasm_rule_refused'
+  /**
+   * The call was evaluated against custom rules in `SHADOW` mode: what each
+   * would have done, bypasses included, in `wasmShadowReports`. The same
+   * report the LLM proxy carries on a trace (`wasm_shadow_reports`); the
+   * control plane counts both toward the rule's promotion evidence.
+   */
+  | 'wasm_shadow_evaluated'
+
+/** What a custom-rule event carries: `wasmRule` on `wasm_rule_refused`, `wasmShadowReports` on `wasm_shadow_evaluated`. */
+export interface RuleEventDetail {
+  wasmRule?: WasmRuleRefusalDetail
+  wasmShadowReports?: ShadowReport[]
+}
+
+/** Which rule version a `wasm_rule_refused` event is about, and why it was refused. */
+export interface WasmRuleRefusalDetail {
+  ruleId: string
+  name: string
+  sha256: string
+  /** One of `RULE_LOAD_FAILURE_REASONS`, as the Rust proxy reports it too. */
+  refusal: RuleLoadFailureReason
+  /** What the binary hashed to, on a hash mismatch. */
+  actualSha256?: string
+  /** Whether an earlier version of the rule stays in force on this proxy. */
+  previousInForce: boolean
+}
 
 /**
  * What a detection-style event found, so the control plane can file it as a
@@ -134,6 +170,10 @@ export interface GovernanceEvent {
    * budget refused: which budget, its limit, the calls made, when it resets.
    */
   budget?: BudgetEventDetail
+  /** Set on `wasm_rule_refused`. */
+  wasmRule?: WasmRuleRefusalDetail
+  /** Set on `wasm_shadow_evaluated`. */
+  wasmShadowReports?: ShadowReport[]
   timestamp: string
 }
 
@@ -154,6 +194,7 @@ export class GovernanceEmitter {
     reason?: string,
     finding?: DetectionFinding,
     budget?: BudgetEventDetail,
+    rule?: RuleEventDetail,
   ): void {
     const event: GovernanceEvent = {
       incidentId: node_crypto.randomUUID(),
@@ -168,6 +209,8 @@ export class GovernanceEmitter {
       finding,
       principal: this.identity,
       budget,
+      wasmRule: rule?.wasmRule,
+      wasmShadowReports: rule?.wasmShadowReports,
       timestamp: new Date().toISOString(),
     }
 
@@ -189,6 +232,8 @@ export class GovernanceEmitter {
         toolInput,
         principal: event.principal,
         budget,
+        wasmRule: event.wasmRule,
+        wasmShadowReports: event.wasmShadowReports,
       }
       callDaemonSocket('telemetry.enqueue', eventPayload).then(() => {
         log.debug({ action: 'telemetry_enqueued' }, 'Telemetry successfully enqueued to daemon')
@@ -231,6 +276,8 @@ export class GovernanceEmitter {
           finding: event.finding,
           principal: event.principal,
           budget: event.budget,
+          wasmRule: event.wasmRule,
+          wasmShadowReports: event.wasmShadowReports,
           timestamp: event.timestamp,
         },
       ],

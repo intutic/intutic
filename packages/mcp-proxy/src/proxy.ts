@@ -35,7 +35,15 @@ import type { ProxyConfig } from './config.js'
 import { PolicyClient } from './policy.js'
 import { GovernanceEmitter, detectionFinding } from './emitter.js'
 import { ToolCallInterceptor, type Block } from './interceptor.js'
-import { budgetRemaining, describeFailure, holdStatus, readControlPlane, registryStatus } from './agentTools.js'
+import {
+  LIST_INCIDENTS_ARGS,
+  budgetRemaining,
+  describeFailure,
+  holdStatus,
+  incidentListPath,
+  readControlPlane,
+  registryStatus,
+} from './agentTools.js'
 import type { RefusalData } from './refusals.js'
 import { redactText as redactMcpText, setWorkspacePii } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns, type InjectionSource } from './injection.js'
@@ -45,6 +53,7 @@ import { ValkeySessionStore, type SharedSessionStore } from './sessionStore.js'
 import { GuardedValkey } from './guardedValkey.js'
 import { McpBudgetEnforcer, ValkeyBudgetStore } from './budget.js'
 import { WasmRunner } from './wasm/runner.js'
+import { CloudRuleSet, fetchRuleBinaryFrom, refusalDetail } from './wasm/cloudRules.js'
 import { checkTofu, decideTofuAction } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
@@ -546,9 +555,11 @@ export class McpGovernanceProxy {
   private readonly sessionStore: SharedSessionStore | undefined
   /**
    * Phase 3's WASM custom-rule runner — owns the one dedicated
-   * `worker_threads` Worker and the `~/.intutic/wasm/` directory loader.
-   * Rescanned on the SAME 60s policy-tick timer `PolicyClient.start` already
-   * runs, not a second one (see `policy.ts`'s `start(onTick)`).
+   * `worker_threads` Worker, the `~/.intutic/wasm/` directory loader and the
+   * workspace's control-plane rules. The directory is rescanned on the SAME
+   * 60s policy-tick timer `PolicyClient.start` already runs, not a second one
+   * (see `policy.ts`'s `start(onTick)`); the control-plane rules follow the
+   * policy itself (the interceptor syncs them before each evaluation).
    */
   private readonly wasmRunner: WasmRunner
   /** Reports this proxy's server to the registry; absent for the standalone `intutic` entry, which fronts none. */
@@ -587,7 +598,15 @@ export class McpGovernanceProxy {
         ? 'Anomaly session window shared with sibling proxies through Valkey'
         : 'Anomaly session window is per-process',
     )
-    this.wasmRunner = new WasmRunner(config.mcpWasmDir)
+    this.wasmRunner = new WasmRunner(
+      config.mcpWasmDir,
+      new CloudRuleSet(fetchRuleBinaryFrom(config.controlPlaneUrl, config.apiKey), (report) => {
+        // The hook-event ingest caps `reason` at 512 characters; an unloadable
+        // rule's compile error can run longer.
+        const reason = report.description.slice(0, 512)
+        this.emitter.emit('wasm_rule_refused', report.descriptor.ruleId, undefined, reason, undefined, undefined, { wasmRule: refusalDetail(report) })
+      }),
+    )
     this.registryObserver = config.standalone
       ? undefined
       : new RegistryObserver(config.controlPlaneUrl, config.apiKey, config.serverName, config.remoteTransport ?? 'stdio')
@@ -754,12 +773,10 @@ export class McpGovernanceProxy {
     // Tool: intutic_list_incidents
     server.tool(
       'intutic_list_incidents',
-      'Lists recent governance incidents (policy violations, blocked tool calls) in this workspace.',
-      { limit: z.number().int().min(1).max(50).default(10).describe('Number of incidents to return (1–50)') },
-      async ({ limit }) => {
-        const result = await callControlPlane(
-          `/api/v1/incidents?workspaceId=${workspaceId}&limit=${limit}`
-        )
+      'Lists governance incidents (policy violations, blocked tool calls, refused custom rules, unreachable dependencies) in this workspace, most in need of review first, optionally of one type.',
+      LIST_INCIDENTS_ARGS,
+      async (args) => {
+        const result = await callControlPlane(incidentListPath(workspaceId, args))
         const text = result.ok
           ? JSON.stringify(result.data, null, 2)
           : describeFailure(result, 'list incidents')

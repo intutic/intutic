@@ -272,13 +272,15 @@ pub fn score_mirrored(
 /// Prices a mirrored response: `(model, prompt_tokens, completion_tokens) -> USD`.
 pub type CostEstimator = Arc<dyn Fn(&str, u32, u32) -> f64 + Send + Sync>;
 
-#[allow(clippy::too_many_arguments)] // one call site in proxy.rs, request-scoped values
+/// How long a mirrored call may take. Generous: nobody is waiting on it.
+pub const ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// `send` is the mirrored call itself, already addressed to the candidate's
+/// own provider with that provider's credential (`proxy::resolve_target`);
+/// it is not started until this runs.
 pub async fn run_mirror(
     _slot: MirrorSlot,
-    http_client: reqwest::Client,
-    url: String,
-    headers: reqwest::header::HeaderMap,
-    body: Vec<u8>,
+    send: impl std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
     request_json: Option<Value>,
     candidate_model: String,
     workspace_id: String,
@@ -286,13 +288,7 @@ pub async fn run_mirror(
 ) -> Option<MirrorOutcome> {
     let started = std::time::Instant::now();
 
-    let resp = http_client
-        .post(&url)
-        .headers(headers)
-        .body(body)
-        .timeout(std::time::Duration::from_secs(60))
-        .send()
-        .await;
+    let resp = send.await;
 
     let resp = match resp {
         Ok(r) => r,

@@ -78,8 +78,9 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 403 | `policy_held` | `hold` | A Rego or WASM rule held the request for approval; the error names the hold id |
 | 409 | `policy_reask` | `reask` | Revise the approach and try again; repeated attempts escalate to `policy_denied` |
 | 403 | `GOVERNANCE_UNAVAILABLE` | `kill` | A governance check could not complete. Either a custom WASM or Rego rule reached no verdict (its deadline, its instruction budget, an error, or a result that is not a verdict): refused whatever the proxy's fail setting, and refused again if the same request is retried, the message naming the rule. Or, with the proxy failing closed, the workspace's PII detector setting could not be read |
-| 429 | `BUDGET_EXCEEDED` | `kill` | The key's remaining budget does not cover the request |
-| 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The daily spend cap is reached |
+| 429 | `BUDGET_EXCEEDED` | `kill` | A hard spend budget covering the request (the workspace's, the virtual key's or its member's) does not cover its estimated cost; `error.budget` names it and `Retry-After` says when it resets |
+| 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The plan's daily spend cap is reached and the workspace has it set to block |
+| 429 | `RATE_LIMITED` | `kill` | The virtual key's requests-per-minute or tokens-per-minute limit is reached; `Retry-After` says when the next minute starts |
 | 402, or 200 | `COST_GATE_EXCEEDED` | `kill` | The request's estimated cost is over the workspace threshold: 402 on a stream, a 200 answer otherwise |
 | 400 | `dlp_policy_violation` | `kill` | The request contains content the DLP policy blocks |
 | 200 | `TOOL_DENIED` | `kill` | The model called a tool an SOP denies to this agent role; the call was withheld |
@@ -88,7 +89,7 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 200 | `RESPONSE_UNPARSEABLE` | `kill` | The model's response did not parse while a tool policy was in force, so it was withheld; retrying may succeed |
 | 200 | `OUTPUT_DLP` | `kill` | The model's response held sensitive content that could not be redacted safely, so it was withheld |
 
-`ClawdeBlockedError` extends `ClawdeVerdictError` and carries `verdict`, `code`, `status`, `ruleId` (`rule_id`) and the proxy's reason as its message. The circuit breaker's budget check throws a plain `ClawdeVerdictError`.
+`ClawdeBlockedError` extends `ClawdeVerdictError` and carries `verdict`, `code`, `status`, `ruleId` (`rule_id`), `retryAfterSeconds` (`retry_after_seconds`) and the proxy's reason as its message. `retryAfterSeconds` is set when the proxy sent `Retry-After` — on `RATE_LIMITED` and `BUDGET_EXCEEDED` — and is how long to wait before the same request can succeed; `chat()` does not wait and retry on its own. The circuit breaker's budget check throws a plain `ClawdeVerdictError`.
 
 **Refusals sent as an error.** A status other than 200 comes with a JSON body, `{"error": {"type": "<code>", "message": "<reason>"}}`. `chat()` matches the status and the code together, so a provider's own 429 or a 403 for a key used against the wrong workspace is not mistaken for a refusal. These carry no `ruleId`.
 
@@ -99,7 +100,9 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 
 `chat()` reads both. It does not stream, so for a stream you read yourself, pass each line (or the whole body) to `streamRefusal()` (`stream_refusal()`), which returns the refusal or `null` (`None`). `PROXY_REFUSALS`, `REFUSAL_HEADER`, `REFUSAL_RULE_HEADER` and `STREAM_REFUSAL_MARKER` are exported alongside it.
 
-Every other failure throws `ClawdeConnectionError` with the status and response body in its message: an unreachable proxy, a timeout, a 5xx after the retries run out, or a 4xx that is not a refusal, such as a key the proxy does not accept.
+Every other failure throws `ClawdeConnectionError` with the status and response body in its message: an unreachable proxy, a timeout, a 5xx after the retries run out, or a 4xx that is not a refusal, such as a key the proxy does not accept. A 5xx the proxy already [retried upstream](/guide/intelligent-routing#retries-and-fallbacks) (it carries `x-intutic-upstream-attempts`) throws at once rather than being retried again from the client.
+
+**Upstream retries.** When the proxy needed more than one provider call for an answer, the response carries `upstream`: `{ attempts, fallbackFrom? }` (`{"attempts", "fallback_from"}` in Python), read from the `x-intutic-upstream-attempts` and `x-intutic-upstream-fallback-from` headers. `fallbackFrom` names the model whose retries ran out when a fallback target answered; the response's `model` names the one that did. Absent on the ordinary single-call response. `UPSTREAM_ATTEMPTS_HEADER` and `UPSTREAM_FALLBACK_HEADER` are exported.
 
 `budgetRemainingUsd` and `budgetPctUsed` are deprecated and never set; the proxy does not report budget on responses. Use `checkBudget()` instead.
 
@@ -173,60 +176,235 @@ except ClawdeConnectionError as e:
 
 ## Control-Plane Management (`ControlPlaneClient`)
 
-Everything above (`ClawdeClient`) is a **data-plane** client: it wraps the local proxy for chat calls. `ControlPlaneClient` is a separate, optional class for the **management** operations the [CLI](/reference/cli) already exposes interactively — org signup, team/workspace creation, gateway registration and assignment, and provider-credential provisioning — so the same actions can be driven programmatically (infra-as-code, a secrets-manager sync job, provisioning a workspace per tenant in your own SaaS built on Intutic).
+Everything above (`ClawdeClient`) is a **data-plane** client: it wraps the local proxy for chat calls. `ControlPlaneClient` is a separate, optional class for the **operator** APIs the [CLI](/reference/cli) exposes: org and workspace setup, gateways, settings and provider credentials, the MCP registry, notification rules, SIEM destinations, usage, the AI inventory, compliance evidence, policy guardrails, held decisions and loop runs, incidents, findings, traces, trace integrity, policies and SOPs. Both SDKs have the same methods, camelCase in TypeScript and snake_case in Python, so the same work can run from code (infra-as-code, a secrets-manager sync job, a nightly compliance export, provisioning a workspace per tenant in your own product built on Intutic).
 
-It talks to the **control plane** — Intutic's hosted one by default, or your own self-hosted `CONTROL_PLANE_URL` — not the proxy: a different origin from `ClawdeClient`'s `baseUrl`, so it takes its own `baseUrl`. Every method is a direct HTTP call with no hosted-vs-self-hosted branching, so it works unmodified against either. It needs a control plane to talk to, same as `intutic whoami` does: an open-core deployment with no control plane configured simply won't have anything to call.
+It talks to the **control plane** — Intutic's hosted one by default, or your own self-hosted `CONTROL_PLANE_URL` — not the proxy: a different origin from `ClawdeClient`'s `baseUrl`, so it takes its own `baseUrl` (`base_url`). Every method is a direct HTTP call with no hosted-vs-self-hosted branching, so it works unmodified against either. It needs a control plane to talk to, same as `intutic whoami` does: an open-core deployment with no control plane configured simply won't have anything to call.
 
-Auth: the same `apiKey` you already pass to `ClawdeClient` — a `vk_...` virtual key or a login JWT both work, as long as the underlying member has `OWNER`/`ADMIN` on the relevant workspace for admin-gated calls (gateway registration, team creation, etc.).
+Auth: the same `apiKey` you already pass to `ClawdeClient` — a `vk_...` virtual key or a login JWT. Each call needs the role the CLI command needs: approving an MCP server, writing a SIEM destination or collecting evidence takes OWNER or ADMIN, workspace-wide usage and the whole machine inventory take OWNER, ADMIN or EM, and a DEVELOPER sees only their own usage and machines.
 
 ### TypeScript
 
 ```typescript
-import { ControlPlaneClient } from '@intutic/clawde';
+import { ControlPlaneClient, verifyEvidenceArchive } from '@intutic/clawde';
 
 const cp = new ControlPlaneClient({
   apiKey: process.env.INTUTIC_API_KEY!,
   baseUrl: process.env.INTUTIC_CONTROL_PLANE_URL, // defaults to Intutic's hosted control plane
 });
 
-const gateways = await cp.listGateways();
-const { gatewayId, token } = await cp.registerGateway({ name: 'prod-gw', deploymentTarget: 'kubernetes' });
-await cp.setProviderCredential('anthropic', { apiKey: 'sk-ant-...' });
-const resolution = await cp.resolveGateway(); // which gateway this workspace should point at, and why
+const { servers, pendingCount } = await cp.listMcpServers();
+await cp.approveMcpServer(servers[0].serverId);
+const usage = await cp.getMemberUsage({ period: 'daily' });
+
+// Seal this month's evidence, then check the archive offline
+const { runId } = await cp.collectEvidence({ periodStart: '2026-10-01' });
+const archive = JSON.parse(new TextDecoder().decode(await cp.downloadEvidence(runId)));
+const check = verifyEvidenceArchive(archive, await cp.getSigningKeys());
+if (!check.verified) throw new Error(`evidence not verified: ${check.signature}`);
 ```
 
 ### Python
 
 ```python
+import json
 import os
 
-from intutic_clawde import ControlPlaneClient
+from intutic_clawde import ControlPlaneClient, verify_evidence_archive
 
 cp = ControlPlaneClient(api_key=os.environ["INTUTIC_API_KEY"])  # base_url defaults to Intutic's hosted control plane
 
-gateways = cp.list_gateways()
-gw = cp.register_gateway("prod-gw", "kubernetes")
-cp.set_provider_credential("anthropic", {"apiKey": "sk-ant-..."})
-resolution = cp.resolve_gateway()
+registry = cp.list_mcp_servers()
+cp.approve_mcp_server(registry["servers"][0]["serverId"])
+usage = cp.get_member_usage(period="daily")
+
+run = cp.collect_evidence(period_start="2026-10-01")
+archive = json.loads(cp.download_evidence(run["runId"]))
+check = verify_evidence_archive(archive, cp.get_signing_keys())
+assert check["verified"], check["signature"]
 ```
+
+### Arguments and answers
+
+A method takes the ids it acts on as positional arguments, then its optional settings: one options object in TypeScript (`getMemberUsage({ period: 'daily' })`), the same names in snake_case as keyword arguments in Python (`get_member_usage(period="daily")`). A request body with several fields, such as a notification rule, a SIEM destination or an authored guardrail, is passed whole, with the keys the route takes (`createNotificationRule({ eventType, channel, channelConfig })`, `create_notification_rule({"eventType": ..., ...})`).
+
+Answers are the route's JSON, typed: TypeScript interfaces, Python `TypedDict`s, both with the route's own key names. A list that is the whole answer comes back as the list (`listNotificationRules()` returns the rules); an answer with more than rows comes back whole (`listMcpServers()` also returns the default policy and the pending count). `download…` methods return the file's bytes (`Uint8Array`, `bytes`): a coverage report (`json`, `md`, `csv` or `pdf`), an inventory CSV, an evidence archive.
+
+A call that fails throws (raises) `ClawdeConnectionError` with the method, path, status and the control plane's answer in its message. A 403 that names the roles allowed reads as that sentence, as the CLI prints it: `Control plane POST /api/v1/mcp/servers/mcp_1/status refused (403): Requires the OWNER or ADMIN role`. The integrity chain walks (`getIntegrityChain`, `getIntegrityConfigChain`) return the walk whether or not it found a break.
+
+`verifyEvidenceArchive(archive, jwks)` (`verify_evidence_archive`) checks an evidence archive offline, as `intutic compliance verify` does: the manifest's section hashes, the whole-archive hash, then the Ed25519 signature against the published key its `keyId` names. `verified` is true only when the hashes match and a published key accepts the signature; an unsigned archive, or one whose key is not published, is reported but not verified. Pass `null` (`None`) for `jwks` when the keys cannot be had.
+
+`verifyIntegrityRoot(root, jwks)` (`verify_integrity_root`) checks a sealed trace root's signature offline, as `intutic integrity verify` does: it rebuilds the bytes the control plane signed from the root's own fields, under the preimage version the root records, and checks the Ed25519 signature against the published key its `signing_key_id` names. Pass the `root` of `getIntegrityRoot()`. It answers `valid`, or `invalid` when that key rejects the signature, which is the only answer that says the root changed. `unsigned` means no signing key was configured when the root was sealed; `unverifiable` means the key is not published, or the root names an algorithm or preimage version this SDK cannot check; `keys_unavailable` means `jwks` was `null` (`None`). `recomputeIntegrityRoot()` checks the other half, whether the stored traces still hash to the root.
+
+```typescript
+import { verifyIntegrityRoot } from '@intutic/clawde';
+
+const { root } = await cp.getIntegrityRoot(rootId);
+const signature = verifyIntegrityRoot(root, await cp.getSigningKeys()); // 'valid' | 'invalid' | …
+const { verdict } = await cp.recomputeIntegrityRoot(rootId);            // 'match' | 'mismatch' | 'missing_traces'
+```
+
+In Python both signature checks need the `cryptography` package: `pip install 'intutic-clawde[compliance]'`.
 
 ### What's covered
 
-| Area | Methods |
-|---|---|
-| Identity | `whoami()` |
-| Org signup | `signupOrg()` / `signup_org()` — unauthenticated; a self-hosted control plane always refuses it, and the hosted one only accepts it with `INTUTIC_PUBLIC_ORG_SIGNUP=true`, so prefer org creation below |
-| Org creation | `startDomainVerification`, `checkDomainVerification`, `createOrg` / `start_domain_verification`, `check_domain_verification`, `create_org` — publish the returned TXT record, poll until `status` is `verified`, then create the org with that `verificationId` |
-| Teams & workspaces | `listTeams`, `createTeam`, `listTeamWorkspaces`, `createWorkspace` / `list_teams`, `create_team`, `list_team_workspaces`, `create_workspace` |
-| Gateways | `registerGateway`, `listGateways`, `getGatewayStatus`, `rotateGatewayToken`, `revokeGateway`, `getGatewayConfig`, `setGatewayConfig`, `assignWorkspaceGateway`, `assignOrgGateway`, `resolveGateway` / `register_gateway`, `list_gateways`, `get_gateway_status`, `rotate_gateway_token`, `revoke_gateway`, `get_gateway_config`, `set_gateway_config`, `assign_workspace_gateway`, `assign_org_gateway`, `resolve_gateway` |
-| Workspace settings | `getWorkspaceSettings`, `updateWorkspaceSettings` / `get_workspace_settings`, `update_workspace_settings` |
-| Provider credentials | `listProviderCredentials`, `setProviderCredential`, `unsetProviderCredential` / `list_provider_credentials`, `set_provider_credential`, `unset_provider_credential` |
+| Area | TypeScript | Python | Route | CLI |
+|---|---|---|---|---|
+| Identity and org setup | `whoami` | `whoami` | `GET /api/v1/auth/me` | `intutic whoami` |
+|  | `signupOrg` | `signup_org` | `POST /api/v1/auth/signup/org` | — |
+|  | `startDomainVerification` | `start_domain_verification` | `POST /api/v1/domain-verification/start` | `intutic org create` |
+|  | `checkDomainVerification` | `check_domain_verification` | `GET /api/v1/domain-verification/:verificationId` | `intutic org create` |
+|  | `createOrg` | `create_org` | `POST /api/v1/orgs` | `intutic org create` |
+|  | `listTeams` | `list_teams` | `GET /api/v1/orgs/:orgId/teams` | `intutic team list` |
+|  | `createTeam` | `create_team` | `POST /api/v1/orgs/:orgId/teams` | `intutic team create` |
+|  | `listTeamWorkspaces` | `list_team_workspaces` | `GET /api/v1/teams/:teamId/workspaces` | `intutic team workspaces` |
+|  | `createWorkspace` | `create_workspace` | `POST /api/v1/teams/:teamId/workspaces` | `intutic team create-workspace` |
+| Gateways | `registerGateway` | `register_gateway` | `POST /api/v1/gateways` | `intutic gateway register` |
+|  | `listGateways` | `list_gateways` | `GET /api/v1/gateways` | `intutic gateway list` |
+|  | `getGatewayStatus` | `get_gateway_status` | `GET /api/v1/gateways/:gatewayId/status` | `intutic gateway status` |
+|  | `rotateGatewayToken` | `rotate_gateway_token` | `POST /api/v1/gateways/:gatewayId/rotate` | `intutic gateway rotate` |
+|  | `revokeGateway` | `revoke_gateway` | `DELETE /api/v1/gateways/:gatewayId` | `intutic gateway revoke` |
+|  | `getGatewayConfig` | `get_gateway_config` | `GET /api/v1/gateways/:gatewayId/config` | `intutic gateway config get` |
+|  | `setGatewayConfig` | `set_gateway_config` | `PATCH /api/v1/gateways/:gatewayId/config` | `intutic gateway config set` |
+|  | `assignWorkspaceGateway` | `assign_workspace_gateway` | `PATCH /api/v1/workspace/gateway` | `intutic gateway assign` |
+|  | `assignOrgGateway` | `assign_org_gateway` | `PATCH /api/v1/orgs/:orgId/gateway` | `intutic gateway assign` |
+|  | `resolveGateway` | `resolve_gateway` | `GET /api/v1/workspace/gateway-resolution` | `intutic gateway resolve` |
+| Settings and provider credentials | `getWorkspaceSettings` | `get_workspace_settings` | `GET /api/v1/workspace/settings` | `intutic settings get` |
+|  | `updateWorkspaceSettings` | `update_workspace_settings` | `PUT /api/v1/workspace/settings` | `intutic settings set` |
+|  | `listProviderCredentials` | `list_provider_credentials` | `GET /api/v1/workspace/provider-credentials` | `intutic credentials list` |
+|  | `setProviderCredential` | `set_provider_credential` | `PUT /api/v1/workspace/provider-credentials/:provider` | `intutic credentials set` |
+|  | `unsetProviderCredential` | `unset_provider_credential` | `DELETE /api/v1/workspace/provider-credentials/:provider` | `intutic credentials unset` |
+|  | `listProviderModels` | `list_provider_models` | `GET /api/v1/workspace/provider-credentials/:provider/models` | `intutic credentials models` |
+| MCP server registry | `listMcpServers` | `list_mcp_servers` | `GET /api/v1/mcp/servers` | `intutic mcp list` |
+|  | `approveMcpServer` | `approve_mcp_server` | `POST /api/v1/mcp/servers/:serverId/status` | `intutic mcp approve` |
+|  | `blockMcpServer` | `block_mcp_server` | `POST /api/v1/mcp/servers/:serverId/status` | `intutic mcp block` |
+|  | `resetMcpServer` | `reset_mcp_server` | `POST /api/v1/mcp/servers/:serverId/status` | `intutic mcp reset` |
+|  | `enableMcpTool` | `enable_mcp_tool` | `POST /api/v1/mcp/servers/:serverId/tools` | `intutic mcp enable-tool` |
+|  | `disableMcpTool` | `disable_mcp_tool` | `POST /api/v1/mcp/servers/:serverId/tools` | `intutic mcp disable-tool` |
+| Notifications | `listNotificationRules` | `list_notification_rules` | `GET /api/v1/notifications/rules` | `intutic notifications list` |
+|  | `createNotificationRule` | `create_notification_rule` | `POST /api/v1/notifications/rules` | `intutic notifications create` |
+|  | `updateNotificationRule` | `update_notification_rule` | `PUT /api/v1/notifications/rules/:ruleId` | `intutic notifications update` |
+|  | `deleteNotificationRule` | `delete_notification_rule` | `DELETE /api/v1/notifications/rules/:ruleId` | `intutic notifications delete` |
+|  | `rotateNotificationRuleSecret` | `rotate_notification_rule_secret` | `POST /api/v1/notifications/rules/:ruleId/signing-secret` | `intutic notifications rotate-secret` |
+| SIEM export | `listSiemDestinations` | `list_siem_destinations` | `GET /api/v1/siem/destinations` | `intutic siem list` |
+|  | `getSiemDestination` | `get_siem_destination` | `GET /api/v1/siem/destinations/:destinationId` | `intutic siem show` |
+|  | `listSiemSources` | `list_siem_sources` | `GET /api/v1/siem/destinations` | `intutic siem sources` |
+|  | `createSiemDestination` | `create_siem_destination` | `POST /api/v1/siem/destinations` | `intutic siem create` |
+|  | `updateSiemDestination` | `update_siem_destination` | `PUT /api/v1/siem/destinations/:destinationId` | `intutic siem update` |
+|  | `deleteSiemDestination` | `delete_siem_destination` | `DELETE /api/v1/siem/destinations/:destinationId` | `intutic siem delete` |
+|  | `rotateSiemDestinationSecret` | `rotate_siem_destination_secret` | `POST /api/v1/siem/destinations/:destinationId/signing-secret` | `intutic siem rotate-secret` |
+| Usage | `getMemberUsage` | `get_member_usage` | `GET /api/v1/usage/members` | `intutic usage members` |
+|  | `getTeamUsage` | `get_team_usage` | `GET /api/v1/usage/teams` | `intutic usage teams` |
+|  | `getBranchUsage` | `get_branch_usage` | `GET /api/v1/usage/branches` | `intutic usage branches` |
+|  | `getCommitUsage` | `get_commit_usage` | `GET /api/v1/usage/commits` | `intutic usage commits` |
+|  | `getPullRequestUsage` | `get_pull_request_usage` | `GET /api/v1/usage/pull-requests` | `intutic usage pull-requests` |
+|  | `refreshPullRequestUsage` | `refresh_pull_request_usage` | `POST /api/v1/usage/pull-requests/refresh` | `intutic usage pull-requests --refresh` |
+| AI inventory | `getInventorySummary` | `get_inventory_summary` | `GET /api/v1/inventory/summary` | `intutic inventory summary` |
+|  | `listInventoryDevices` | `list_inventory_devices` | `GET /api/v1/inventory/devices` | `intutic inventory devices` |
+|  | `listInventoryHarnesses` | `list_inventory_harnesses` | `GET /api/v1/inventory/harnesses` | `intutic inventory harnesses` |
+|  | `listInventoryMcpServers` | `list_inventory_mcp_servers` | `GET /api/v1/inventory/mcp-servers` | `intutic inventory mcp-servers` |
+|  | `listInventorySkills` | `list_inventory_skills` | `GET /api/v1/inventory/skills` | `intutic inventory skills --device --search` |
+|  | `listInventoryDisconnects` | `list_inventory_disconnects` | `GET /api/v1/inventory/disconnects` | `intutic inventory disconnects` |
+|  | `downloadInventoryHarnessesCsv` | `download_inventory_harnesses_csv` | `GET /api/v1/inventory/harnesses` | `intutic inventory harnesses --csv` |
+|  | `downloadInventoryMcpServersCsv` | `download_inventory_mcp_servers_csv` | `GET /api/v1/inventory/mcp-servers` | `intutic inventory mcp-servers --csv` |
+| Compliance | `getFrameworkCoverage` | `get_framework_coverage` | `GET /api/v1/compliance/frameworks/:frameworkId/coverage` | `intutic compliance coverage` |
+|  | `downloadFrameworkCoverage` | `download_framework_coverage` | `GET /api/v1/compliance/frameworks/:frameworkId/coverage` | `intutic compliance coverage --format` |
+|  | `collectEvidence` | `collect_evidence` | `POST /api/v1/compliance/soc2-collect` | `intutic compliance collect --from --to` |
+|  | `downloadEvidence` | `download_evidence` | `GET /api/v1/compliance/soc2-export/:runId` | `intutic compliance download` |
+|  | `getSigningKeys` | `get_signing_keys` | `GET /.well-known/intutic-trace-signing.json` | `intutic compliance verify` |
+|  | `verifyEvidenceArchive` | `verify_evidence_archive` | none, offline | `intutic compliance verify` |
+| Gate liveness, GitHub webhook | `getGateLiveness` | `get_gate_liveness` | `GET /api/v1/governance/gate-liveness` | `intutic gate-liveness` |
+|  | `getGithubWebhook` | `get_github_webhook` | `GET /api/v1/integrations/github/webhook` | `intutic github webhook show` |
+|  | `rotateGithubWebhookSecret` | `rotate_github_webhook_secret` | `POST /api/v1/integrations/github/webhook/secret` | `intutic github webhook rotate-secret` |
+| Policy guardrails | `listPolicySources` | `list_policy_sources` | `GET /api/v1/connectors` | `intutic guardrails sources list` |
+|  | `addPolicySource` | `add_policy_source` | `POST /api/v1/connectors` | `intutic guardrails sources add` |
+|  | `syncPolicySource` | `sync_policy_source` | `POST /api/v1/connectors/:connectorId/sync` | `intutic guardrails sources sync` |
+|  | `listPolicyDocuments` | `list_policy_documents` | `GET /api/v1/policy-guardrails/documents` | `intutic guardrails docs list` |
+|  | `getPolicyDocument` | `get_policy_document` | `GET /api/v1/policy-guardrails/documents/:docId` | `intutic guardrails docs show` |
+|  | `extractPolicyDocument` | `extract_policy_document` | `POST /api/v1/policy-guardrails/documents/:docId/extract` | `intutic guardrails docs extract` |
+|  | `getGuardrailCoverage` | `get_guardrail_coverage` | `GET /api/v1/policy-guardrails/coverage` | `intutic guardrails search` |
+|  | `searchPolicyPassages` | `search_policy_passages` | `GET /api/v1/policy-guardrails/search` | `intutic guardrails search --text` |
+|  | `getGuardrailImpact` | `get_guardrail_impact` | `GET /api/v1/policy-guardrails/impact` | `intutic guardrails impact` |
+|  | `listGuardrailDuplicates` | `list_guardrail_duplicates` | `GET /api/v1/policy-guardrails/duplicates` | `intutic guardrails duplicates` |
+|  | `listGuardrails` | `list_guardrails` | `GET /api/v1/policy-guardrails/guardrails` | `intutic guardrails list` |
+|  | `getGuardrail` | `get_guardrail` | `GET /api/v1/policy-guardrails/guardrails/:guardrailId` | `intutic guardrails show` |
+|  | `getGuardrailReadiness` | `get_guardrail_readiness` | `GET /api/v1/policy-guardrails/guardrails/:guardrailId/readiness` | `intutic guardrails show` |
+|  | `approveGuardrailShadow` | `approve_guardrail_shadow` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/approve-shadow` | `intutic guardrails approve-shadow` |
+|  | `promoteGuardrail` | `promote_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/promote` | `intutic guardrails promote` |
+|  | `rejectGuardrail` | `reject_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/reject` | `intutic guardrails reject` |
+|  | `retireGuardrail` | `retire_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/retire` | `intutic guardrails retire` |
+|  | `reconfirmGuardrail` | `reconfirm_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/reconfirm` | `intutic guardrails reconfirm` |
+|  | `createGuardrail` | `create_guardrail` | `POST /api/v1/policy-guardrails/guardrails` | `intutic guardrails create` |
+|  | `updateGuardrail` | `update_guardrail` | `PUT /api/v1/policy-guardrails/guardrails/:guardrailId` | `intutic guardrails update` |
+|  | `deleteGuardrail` | `delete_guardrail` | `DELETE /api/v1/policy-guardrails/guardrails/:guardrailId` | `intutic guardrails delete` |
+|  | `replayGuardrail` | `replay_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/replay` | `intutic guardrails replay` |
+|  | `listGuardrailConflicts` | `list_guardrail_conflicts` | `GET /api/v1/policy-guardrails/conflicts` | `intutic guardrails conflicts` |
+| Held decisions and loop runs | `approveDecision` | `approve_decision` | `POST /api/v1/decisions/:holdId/review` | `intutic decision approve --reason` |
+|  | `rejectDecision` | `reject_decision` | `POST /api/v1/decisions/:holdId/review` | `intutic decision reject` |
+|  | `startLoopRun` | `start_loop_run` | `POST /api/v1/loops/start` | `intutic loop start` |
+|  | `getLoopRun` | `get_loop_run` | `GET /api/v1/loops/:loopRunId` | `intutic loop exec` |
+|  | `listLoopRuns` | `list_loop_runs` | `GET /api/v1/loops` | `intutic loop list` |
+|  | `completeLoopRun` | `complete_loop_run` | `POST /api/v1/loops/:loopRunId/complete` | `intutic loop complete` |
+|  | `killLoopRun` | `kill_loop_run` | `POST /api/v1/loops/:loopRunId/kill` | `intutic loop kill` |
+|  | `approveLoopRun` | `approve_loop_run` | `POST /api/v1/loops/:loopRunId/review` | `intutic loop review --approve` |
+|  | `rejectLoopRun` | `reject_loop_run` | `POST /api/v1/loops/:loopRunId/review` | `intutic loop review --reject` |
+| Incidents | `listIncidents` | `list_incidents` | `GET /api/v1/incidents` | `intutic incidents list` |
+|  | `getIncident` | `get_incident` | `GET /api/v1/incidents/:incidentId` | `intutic incidents show` |
+| Findings and traces | `listFindings` | `list_findings` | `GET /api/v1/findings` | `intutic findings list` |
+|  | `adjudicateFinding` | `adjudicate_finding` | `POST /api/v1/findings/:findingId/adjudicate` | `intutic findings adjudicate` |
+|  | `getFindingStats` | `get_finding_stats` | `GET /api/v1/findings/stats` | `intutic findings stats` |
+|  | `getResponseEchoReport` | `get_response_echo_report` | `GET /api/v1/findings/response-echo/report` | `intutic findings echo-report` |
+|  | `listTraces` | `list_traces` | `GET /api/v1/traces` | `intutic traces list` |
+|  | `getTrace` | `get_trace` | `GET /api/v1/traces/:traceId` | `intutic traces inspect` |
+| Trace integrity | `listIntegrityRoots` | `list_integrity_roots` | `GET /api/v1/integrity/roots` | `intutic integrity roots` |
+|  | `getIntegrityRoot` | `get_integrity_root` | `GET /api/v1/integrity/roots/:rootId` | `intutic integrity verify` |
+|  | `recomputeIntegrityRoot` | `recompute_integrity_root` | `POST /api/v1/integrity/roots/:rootId/recompute` | `intutic integrity verify` |
+|  | `getIntegrityChain` | `get_integrity_chain` | `GET /api/v1/integrity/chain` | `intutic integrity chain` |
+|  | `getIntegrityConfigChain` | `get_integrity_config_chain` | `GET /api/v1/integrity/config-chain` | `intutic integrity config-chain` |
+|  | `verifyIntegrityRoot` | `verify_integrity_root` | none, offline | `intutic integrity verify` |
+| Compliance policies, WASM rules | `listPolicies` | `list_policies` | `GET /api/v1/policies` | `intutic policy export` |
+|  | `enablePolicy` | `enable_policy` | `POST /api/v1/policies/:policyId/enable` | `intutic policy enable` |
+|  | `disablePolicy` | `disable_policy` | `POST /api/v1/policies/:policyId/disable` | `intutic policy disable` |
+|  | `rollbackPolicy` | `rollback_policy` | `POST /api/v1/policies/:policyId/rollback` | `intutic policy rollback` |
+|  | `getRuleCandidateSource` | `get_rule_candidate_source` | `GET /api/v1/rule-candidates/:candidateId/source` | `intutic policy compile --candidate` |
+|  | `uploadRuleCandidateBundle` | `upload_rule_candidate_bundle` | `POST /api/v1/rule-candidates/:candidateId/bundle` | `intutic policy compile --candidate --upload` |
+|  | `replayWasmRule` | `replay_wasm_rule` | `POST /api/v1/wasm-rules/:ruleId/replay` | `intutic policy replay` |
+| SOPs | `listSops` | `list_sops` | `GET /api/v1/sops` | `intutic sops pull` |
+|  | `getSop` | `get_sop` | `GET /api/v1/sops/:sopId` | `intutic sops pull` |
+|  | `createSop` | `create_sop` | `POST /api/v1/sops` | `intutic sops push` |
+|  | `listOrgSops` | `list_org_sops` | `GET /api/v1/workspace/org-sops` | `intutic sops org-list` |
+|  | `createOrgSop` | `create_org_sop` | `POST /api/v1/workspace/org-sops` | `intutic sops push --org` |
+|  | `deleteOrgSop` | `delete_org_sop` | `DELETE /api/v1/workspace/org-sops/:orgSopId` | `intutic sops org-rm` |
+| Keys, cost, routing | `attenuateKey` | `attenuate_key` | `POST /api/v1/attenuate` | `intutic attenuate` |
+|  | `getAttenuationChain` | `get_attenuation_chain` | `GET /api/v1/attenuate/chain/:chainId` | `intutic attenuate chain` |
+|  | `predictCost` | `predict_cost` | `POST /api/v1/predict-cost` | `intutic predict-cost` |
+|  | `getMirrorAdoptionReport` | `get_mirror_adoption_report` | `GET /api/v1/routing/mirror-adoption-report` | `intutic routing adoption-report` |
+
+Cloud providers take several fields. AWS Bedrock takes `awsRegion` with either `awsAccessKeyId` and `awsSecretAccessKey` or a Bedrock `apiKey`; Google Vertex AI takes `projectId`, `serviceAccountJson` and an optional `location`; Azure OpenAI takes `endpoint` and `apiKey`:
+
+```typescript
+await cp.setProviderCredential('bedrock', { awsRegion: 'us-east-1', apiKey: process.env.BEDROCK_API_KEY! });
+await cp.setProviderCredential('vertex_ai', {
+  projectId: 'my-project',
+  location: 'global',
+  serviceAccountJson: fs.readFileSync('sa.json', 'utf8'),
+});
+await cp.setProviderCredential('azure_openai', { endpoint: 'https://my-resource.openai.azure.com', apiKey: process.env.AZURE_OPENAI_API_KEY! });
+```
+
+A chat call then names the model with the provider's prefix — `bedrock/anthropic.claude-opus-4-7`, `vertex/gemini-2.5-pro`, `azure/<deployment>` — through `ClawdeClient` unchanged. See [AWS Bedrock](/integrations/aws-bedrock), [Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai).
+
+`listProviderModels` (`list_provider_models`) returns `{ provider, models, checkedAt }`: the model ids the stored key can reach, as the provider listed them when the key was last checked. Both are `null` until a check has recorded a list, and stay `null` for Azure OpenAI, AWS Bedrock and Google Vertex AI, which have none.
 
 `getGatewayStatus` (`get_gateway_status`) reports `appliedConfigVersion`, the config version the gateway said it runs in its last heartbeat (`null` when it is unreachable or has not reported one), beside `desiredConfigVersion`, the version the latest config change produced. `getGatewayConfig` (`get_gateway_config`) returns the flags set on the gateway and that version, readable by any member of the gateway's org.
 
 `updateWorkspaceSettings({ key: value })` (`update_workspace_settings({...})`) is the route `intutic settings set` calls: only the keys given change, and the control plane applies the same checks. An unknown key or a bad value is refused with a 400 that names it, a setting the plan does not include (the group policy for high-risk tools below Biz Org) with a 403 `Upgrade required`, and a member below OWNER or ADMIN with a 403. Each refusal throws (raises) `ClawdeConnectionError` with the server's answer in its message. See [Workspace settings](/reference/workspace-settings) for every key, its type and what it does.
 
-Not covered, on purpose: session establishment (`intutic login`/`logout` — supply `apiKey` directly instead) and local-environment/terminal-only commands (`init`, `doctor`, `install-daemon`, `integrity`, `rollback`, `connect`, `exec`, `start`, `syncContext`, `skill`) that have no meaning for a library embedded in your own process. The operator commands for the MCP server registry (`intutic mcp`), SIEM destinations (`siem`), notification rules (`notifications`), usage reports (`usage`), the AI inventory (`inventory`), compliance coverage and evidence (`compliance`), guardrails and custom rules (`guardrails`, `rules`, `policy`), approval holds (`decision`), findings (`findings`) and gate health (`gate-liveness`) are in the CLI and the [API](/reference/api) only; neither SDK wraps them.
+
+`signupOrg` is unauthenticated; a self-hosted control plane always refuses it, and the hosted one only accepts it with `INTUTIC_PUBLIC_ORG_SIGNUP=true`, so create orgs with `startDomainVerification`, `checkDomainVerification` and `createOrg`: publish the returned TXT record, poll until `status` is `verified`, then create the org with that `verificationId`.
+
+`listIncidents` filters by `status`, `severity`, `type` (an [incident type](/guide/concepts#incident-types); the control plane refuses one it does not know), `page` and `limit`, and returns the page ranked by review priority with `meta` (the total and the review budget). A page of 20 incidents or more arrives TOON-encoded and is decoded before it is returned, with each cell cut at 120 characters: `getIncident` returns a long description whole. `listTraces` takes `since` as an ISO 8601 time or a duration such as `24h`; a page of 20 traces or more arrives TOON-encoded and is decoded before it is returned, with any cell longer than 120 characters cut short as the control plane sent it. `getRuleCandidateSource` refuses a source that does not hash to the `sourceSha256` served with it.
+
+Not covered, on purpose: session establishment (`intutic login`/`logout` — supply `apiKey` directly; `ClawdeClient` registers its own session), the workspace budget (`checkBudget()` above), and commands that act on the machine they run on: `init`, `setup`, `doctor`, `install-daemon`, `connect`, `disconnect`, `exec`, `start`, `sync-context`, `rollback`, `enforce`, `rules`, `judge`, `skill` (its loop commands are covered), `sops status`, `guardrails pull` and `policy compile`, `install`, `list-local` and `snapshot`.
 
 ---
 

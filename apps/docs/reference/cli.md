@@ -787,6 +787,57 @@ intutic findings echo-report --since 2026-09-01 --until 2026-10-01
 
 ---
 
+## `intutic incidents list` <Badge type="tip" text="Cloud" />
+
+List the workspace's governance incidents, as on **Findings › Incidents**. Needs the OWNER, ADMIN or EM role.
+
+```bash
+intutic incidents list [options]
+```
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--status <status>` | Only incidents with this status: `OPEN`, `RESOLVED` or `AUTO_RESOLVED` | _(every status)_ |
+| `--severity <severity>` | Only incidents of this severity: `CRITICAL`, `HIGH`, `MEDIUM` or `LOW` | _(every severity)_ |
+| `--type <type>` | Only incidents of this [type](/guide/concepts#incident-types): an anomaly type such as `SCOPE_VIOLATION`, or `WASM_RULE_REFUSED` or `SYSTEM_ANOMALY` | _(every type)_ |
+| `--page <n>` | The page to show | `1` |
+| `--limit <n>` | Incidents per page (at most 100) | `20` |
+| `--json` | Output as JSON instead of table | — |
+| `--dev` | Use local control plane (`http://localhost:3001`) | — |
+
+**What it does:**
+Prints each incident's id, severity, type, status and time, with its description below. The list is ranked by review priority (severity, detector confidence and age), not by time, and the review queue is bounded: when the budget leaves incidents out, the CLI says how many. A severity or type that does not exist is refused before any request. A list of 20 or more arrives compressed, with each description cut at 120 characters; `intutic incidents show` prints the whole incident.
+
+**Example:**
+
+```bash
+intutic incidents list --status OPEN --type SYSTEM_ANOMALY
+```
+
+---
+
+## `intutic incidents show <incidentId>` <Badge type="tip" text="Cloud" />
+
+Print one governance incident in full.
+
+```bash
+intutic incidents show <incidentId> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON instead of table |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints the incident's type, severity, status, when it was filed and resolved and by whom, its session and trace, its whole description, and its escalation details: for a refused custom filter, the rule, the version, the reason and how many times it was reported.
+
+---
+
 ## `intutic integrity roots` <Badge type="tip" text="Cloud" />
 
 List the sealed Merkle roots for the workspace, newest first. Roots are sealed by the control
@@ -933,7 +984,7 @@ intact window is not an intact history.
 
 ## `intutic budget`
 
-Check remaining daily/monthly budget and list active loops, or watch spend live.
+Check remaining daily/monthly budget and list active loops, or watch spend live. The subcommands below set the workspace's caps and the budgets and rate limits on keys and members.
 
 ```bash
 intutic budget [options]
@@ -980,6 +1031,117 @@ intutic budget --watch
 
 # Every 2 seconds
 intutic budget --watch --interval 2
+```
+
+---
+
+## `intutic budget set` <Badge type="tip" text="Cloud" />
+
+Set the workspace's daily and monthly caps, the alert threshold, and whether each cap refuses requests. OWNER or ADMIN.
+
+```bash
+intutic budget set [--daily <usd|default>] [--monthly <usd|default>] [--threshold <pct>] [--daily-enforcement hard|soft] [--monthly-enforcement hard|soft]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--daily <usd>` | Daily cap in USD; `0` for no daily cap; `default` returns a saved daily cap to the $100 default |
+| `--monthly <usd>` | Monthly cap in USD; `0` for no monthly cap; `default` returns it to the $500 default |
+| `--threshold <pct>` | Raise a budget alert at this percentage of each cap (1–100) |
+| `--daily-enforcement <mode>` | `hard`: the proxy refuses a request the rest of the day's cap does not cover. `soft`: alerts only. A new workspace's daily cap is `hard` |
+| `--monthly-enforcement <mode>` | The same for the month. A new workspace's monthly cap is `soft` |
+| `--json` | Print the budget after the change as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+Only the options you give are sent; everything else stays as it is, so `--monthly` alone leaves a daily cap that was never saved on the $100 default. See [Budgets](/guide/budgets#workspace-caps).
+
+```bash
+intutic budget set --monthly 1000 --monthly-enforcement hard
+intutic budget set --daily default
+```
+
+---
+
+## `intutic budget keys` <Badge type="tip" text="Cloud" />
+
+Every live virtual key with its owner, its spend budgets, its rate limit, and what it has spent today and this month (UTC). OWNER, ADMIN and EM see every key; anyone else sees their own.
+
+```bash
+intutic budget keys [--json] [--dev]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+---
+
+## `intutic budget key <keyId>` <Badge type="tip" text="Cloud" />
+
+Set a virtual key's spend budgets and rate limit. OWNER or ADMIN, for any key in the workspace.
+
+```bash
+intutic budget key <keyId> [--daily <usd|none>] [--monthly <usd|none>] [--daily-enforcement hard|soft] [--monthly-enforcement hard|soft] [--rpm <n|none>] [--tpm <n|none>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--daily <usd>` | The key's day budget in USD, or `none` to remove it |
+| `--monthly <usd>` | The key's month budget in USD, or `none` to remove it |
+| `--daily-enforcement <mode>` | `hard` (the default for a new budget): refuse requests the budget does not cover. `soft`: alert only |
+| `--monthly-enforcement <mode>` | The same for the month budget |
+| `--rpm <n>` | Requests per minute, or `none` to remove the limit |
+| `--tpm <n>` | Tokens per minute, or `none` to remove the limit |
+| `--json` | Print the key after the change as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+Only what you name changes. Find key ids with `intutic budget keys`. See [Key budgets](/guide/budgets#key-budgets) and [Rate limits](/guide/budgets#key-rate-limits).
+
+```bash
+intutic budget key key_abc123 --daily 5 --monthly 100 --monthly-enforcement soft --rpm 60
+intutic budget key key_abc123 --tpm none
+```
+
+---
+
+## `intutic budget members` <Badge type="warning" text="Biz Org+" />
+
+The default member budget, and each active member with their own budgets, the budgets that apply to them, and their spend today and this month across the keys they own. OWNER, ADMIN and EM see every member; anyone else sees themselves.
+
+```bash
+intutic budget members [--json] [--dev]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+---
+
+## `intutic budget member <memberId>` <Badge type="warning" text="Biz Org+" />
+
+Set a member's spend budgets, or with `default` the budget every member without their own gets. OWNER or ADMIN.
+
+```bash
+intutic budget member <memberId|default> [--daily <usd|none>] [--monthly <usd|none>] [--daily-enforcement hard|soft] [--monthly-enforcement hard|soft]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--daily <usd>` | Day budget in USD, or `none` to remove it |
+| `--monthly <usd>` | Month budget in USD, or `none` to remove it |
+| `--daily-enforcement <mode>` | `hard` (the default for a new budget) or `soft` |
+| `--monthly-enforcement <mode>` | `hard` (the default for a new budget) or `soft` |
+| `--json` | Print the member's budgets after the change as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+A member's own budget for a period replaces the default's for that period. See [Member budgets](/guide/budgets#member-budgets).
+
+```bash
+intutic budget member default --daily 20 --monthly 300 --monthly-enforcement soft
+intutic budget member mem_abc123 --monthly 1000
 ```
 
 ---
@@ -2394,7 +2556,7 @@ currently provisioned and its last-4 preview.
 Provision or rotate a workspace's own upstream provider key.
 
 ```bash
-intutic credentials set <provider> --field key=value [--field key=value ...] [options]
+intutic credentials set <provider> --field key=value [--field key=value ...] [--field-file key=path ...] [options]
 ```
 
 **Options:**
@@ -2402,8 +2564,11 @@ intutic credentials set <provider> --field key=value [--field key=value ...] [op
 | Option | Description |
 |--------|-------------|
 | `--field <key=value>` | A credential field; repeat for multi-field providers |
+| `--field-file <key=path>` | A credential field read from a file, such as a Vertex AI service-account key; repeatable |
 | `--json` | Output as JSON instead of a report |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
+
+The fields are checked before anything is sent: a field the provider does not take, a missing required field, a Bedrock credential with neither an access key pair nor an API key, an Azure endpoint that is not an Azure resource over `https`, or a Vertex AI key that is not a service-account file is refused.
 
 **Examples:**
 
@@ -2411,12 +2576,22 @@ intutic credentials set <provider> --field key=value [--field key=value ...] [op
 # A single-key provider
 intutic credentials set anthropic --field apiKey=sk-ant-...
 
-# A multi-field provider (Azure OpenAI)
+# AWS Bedrock: a region and an access key pair, or a Bedrock API key
+intutic credentials set bedrock --field awsRegion=us-east-1 --field apiKey=<BEDROCK_API_KEY>
+
+# Google Vertex AI: the project, a location and a service-account key file
+intutic credentials set vertex_ai --field projectId=my-project --field location=global \
+  --field-file serviceAccountJson=./service-account.json
+
+# Azure OpenAI: the resource endpoint and its key
 intutic credentials set azure_openai \
-  --field apiKey=sk-... \
   --field endpoint=https://your-resource.openai.azure.com \
-  --field deployment=gpt-4
+  --field apiKey=<API_KEY>
 ```
+
+After saving, the command checks the credential against the provider (the same check as **Test** on the Provider Keys card) and prints whether it was verified, rejected, or could not be verified; `--json` includes it as `verification`. A rejected credential is still saved. When the provider lists the models the key can reach, the command says how many; [`intutic credentials models`](#intutic-credentials-models) lists them.
+
+Requests then name the provider's models as `bedrock/<model id>`, `vertex/<model>` or `azure/<deployment>`; see [AWS Bedrock](/integrations/aws-bedrock), [Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai).
 
 If BYO-key enforcement is on for your gateway, requests for a provider with no provisioned key
 fail with `402 byok_required` until one is set here.
@@ -2439,6 +2614,36 @@ intutic credentials unset <provider> [options]
 
 If BYO-key enforcement is on, requests for this provider are refused after this until a new
 key is provisioned.
+
+---
+
+## `intutic credentials models <provider>` <Badge type="tip" text="Cloud" />
+
+The models a provider credential can reach, as the provider listed them when the key was last
+checked.
+
+```bash
+intutic credentials models <provider> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON instead of a report (`provider`, `models`, `checkedAt`) |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+The list is recorded when a saved key is checked and the provider answers with its models, so
+it follows the key: `intutic credentials set` (or **Test** on the Provider Keys card) records it,
+and replacing, removing or failing the check on the key clears it. Until then the command says
+no models have been discovered. Azure OpenAI, AWS Bedrock and Google Vertex AI keys have no
+list: Azure lists base models rather than the deployments requests name.
+
+**Example:**
+
+```bash
+intutic credentials models anthropic
+```
 
 ---
 
@@ -2918,7 +3123,7 @@ intutic settings set <key> (<value> | --file <path>) [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Sends `PUT /api/v1/workspace/settings` with only this key, so every other setting keeps its value, and prints the key's new value. You need the OWNER or ADMIN role, and the change is recorded in the settings history. The server refuses an unknown key or a bad value with a message naming it. `mcpBudgets`, `sso_group_policy` and `piiDetectors` are also checked by the CLI before sending, and a mistake is reported with the path of the field at fault.
+Sends `PUT /api/v1/workspace/settings` with only this key, so every other setting keeps its value, and prints the key's new value. You need the OWNER or ADMIN role, and the change is recorded in the settings history. The server refuses an unknown key or a bad value with a message naming it. `mcpBudgets`, `sso_group_policy`, `piiDetectors` and `upstreamRetry` are also checked by the CLI before sending, and a mistake is reported with the path of the field at fault.
 
 Settings often changed this way:
 
@@ -2933,6 +3138,7 @@ Settings often changed this way:
 | `mcpAnomalyOverrides` | A JSON object of detector id to `steer`, `reask`, `kill` or `off` |
 | `sso_group_policy` | The [group policy for high-risk tools](/guide/settings#security), as a JSON object of `highRiskTools`, `requiredGroups` and `requireOboFor`; `null` clears it. Setting one needs a <Badge type="warning" text="Biz Org+" /> plan |
 | `piiDetectors` | The [PII detector](/guide/policies#pii-detectors) actions for the workspace, as a JSON object of detector id to `off`, `redact` or `block`; each machine's proxy config may only tighten them. `null` clears it |
+| `upstreamRetry` | The proxy's [retries and fallbacks](/guide/intelligent-routing#retries-and-fallbacks) for the workspace, as a JSON object; each field overrides the proxy's config. `null` clears it |
 | `configBodyUpload` | `true` or `false`: [config content upload](#config-content-upload) |
 
 **Examples:**
@@ -2942,6 +3148,7 @@ intutic settings set mcpDefaultPolicy deny
 intutic settings set mcpBudgets --file mcp-budgets.json
 intutic settings set sso_group_policy null
 intutic settings set piiDetectors '{"pii.card":"block","pii.email":"redact"}'
+intutic settings set upstreamRetry '{"maxAttempts":4,"budgetMs":45000}'
 ```
 
 ---

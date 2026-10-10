@@ -13,8 +13,10 @@ import { HttpStatusError, httpRequest } from './httpJson.js'
 import type { ResolvedPolicy } from './daemon/policyCache.js'
 import {
   parseMcpBudgetPolicy,
+  parseWasmRuleDescriptors,
   parseWorkspacePiiDetectors,
   type McpBudgetPolicy,
+  type WasmRuleDescriptor,
   type WorkspacePiiDetectors,
 } from '@intutic/shared-types'
 
@@ -250,6 +252,13 @@ export class PolicyClient {
    * the stored value; the interceptor applies the fail setting to that.
    */
   private piiDetectors: WorkspacePiiDetectors = { kind: 'none' }
+  /**
+   * The workspace's custom rules on the control plane (`wasmRules`), as
+   * descriptors; the WASM runner fetches and verifies each binary. `undefined`
+   * until a policy from the control plane has loaded — the daemon's snapshot
+   * seed carries none — and then kept through refreshes that fail.
+   */
+  private wasmRules: WasmRuleDescriptor[] | undefined
   /** The first refresh `start()` kicks off, so the first tool call can wait for it. */
   private firstRefresh: Promise<void> | null = null
   private lastRefreshAttemptAt = 0
@@ -342,6 +351,11 @@ export class PolicyClient {
   /** The workspace's PII detector actions (see the field). */
   getPiiDetectors(): WorkspacePiiDetectors {
     return this.piiDetectors
+  }
+
+  /** The workspace's control-plane rule descriptors, or `undefined` while none have loaded (see the field). */
+  getWasmRules(): readonly WasmRuleDescriptor[] | undefined {
+    return this.wasmRules
   }
 
   /** The workspace's fail-open choice, or `undefined` to fall back to the local setting (see the field). */
@@ -446,6 +460,28 @@ export class PolicyClient {
     }
   }
 
+  /**
+   * Takes `wasmRules` from a policy the control plane sent. A control plane
+   * that sends none has none to enforce. A list that cannot be read is not
+   * applied in part: the rules already loaded keep enforcing, as the Rust
+   * proxy keeps its set when a descriptor list does not parse.
+   */
+  private absorbWasmRules(value: unknown): void {
+    if (value === undefined) {
+      this.wasmRules = []
+      return
+    }
+    const parsed = parseWasmRuleDescriptors(value)
+    if (parsed.ok) {
+      this.wasmRules = parsed.rules
+      return
+    }
+    log.warn(
+      { action: 'wasm_rules_unreadable', reason: parsed.reason, kept: this.wasmRules?.length ?? null },
+      "The workspace's custom rule list could not be read; the loaded rules stay in force",
+    )
+  }
+
   /** Find the first matching rule for a given tool name + serialized args. */
   matchRule(toolName: string, toolInputJson: string): SopRule | null {
     for (const rule of this.rules) {
@@ -513,7 +549,10 @@ export class PolicyClient {
           // Re-parsed, not trusted: a daemon on an older version, or an entry it
           // cached before a field existed, can carry a registry without one.
           if (policy.mcpRegistry) this.registry = parseRegistry(policy.mcpRegistry) ?? this.registry
-          if (!policy.fromSnapshot) this.loadedFromControlPlane = true
+          if (!policy.fromSnapshot) {
+            this.absorbWasmRules(policy.wasmRules)
+            this.loadedFromControlPlane = true
+          }
           log.info({ action: 'policy_refreshed_from_daemon', ruleCount: this.rules.length }, 'SOP rules refreshed from daemon')
           return
         }
@@ -552,6 +591,7 @@ export class PolicyClient {
     this.absorbCuration(parsed)
     // A control plane that sends no registry has none: unrestricted, not unknown.
     this.registry = parseRegistry(parsed['mcpRegistry']) ?? UNRESTRICTED_REGISTRY
+    this.absorbWasmRules(parsed['wasmRules'])
     this.loadedFromControlPlane = true
     log.info({ action: 'policy_refreshed', ruleCount: rules.length }, 'SOP rules refreshed')
   }

@@ -128,6 +128,19 @@ The **Autonomous Reasoning Engine** runs on the control plane over the traces an
 
 When the ARE flags an anomaly it records the finding and can open a governance incident. A finding blocks nothing on its own; it reaches enforcement only through the [promotion rule](/concepts/enforcement-actions#the-promotion-rule).
 
+### Incident types
+
+A governance incident's type is one of the twelve anomaly types above, or one of two system incident types. A system incident is not an anomaly: no agent caused it, nothing detects it on the request path, and it never reaches enforcement.
+
+| Type | What it records |
+|------|-----------------|
+| `WASM_RULE_REFUSED` | A proxy refused to load a version of a [custom filter](/guide/wasm-rules#when-a-rule-cannot-load) |
+| `SYSTEM_ANOMALY` | A proxy could not reach something it depends on: the LLM provider, or the semantic cache's embedding service or vector store |
+
+Before 2.4.0 both were filed as `SCOPE_VIOLATION`, and those incidents keep that type. A refused filter filed then still carries `escalation_chain.kind` `wasm_rule_refused`; a system anomaly filed then has no `escalation_chain`.
+
+**Findings › Incidents** filters the list by type, as `GET /api/v1/incidents` does with `?type=` (for example `?type=SYSTEM_ANOMALY`); an unknown type is refused with `400`. The `incident.created` notification is sent at the incident's own severity, so a rule's [severity filter](/guide/settings#rule-filters) applies to incidents.
+
 ## Trust Scores
 
 Every agent session receives a **trust score** — a numerical reliability rating that tracks how well the agent follows governance rules over time. Trust scores factor into enforcement decisions: a session with a declining trust score may trigger stricter PCAS actions.
@@ -138,7 +151,7 @@ Each trace receives a **compliance score** indicating how closely the request al
 
 ## Budget Tiers
 
-Each session carries a budget tier label (`JUNIOR`, `SENIOR`, `STAFF` or `PRINCIPAL`, `JUNIOR` unless set), shown with the session in the dashboard. The tier sets no spending limit: spend is capped per workspace, by a daily cap the proxy enforces on every request, and a monthly cap that raises alerts. See [Budgets](/guide/budgets#per-workspace-budgets).
+Each session carries a budget tier label (`JUNIOR`, `SENIOR`, `STAFF` or `PRINCIPAL`, `JUNIOR` unless set), shown with the session in the dashboard. The tier sets no spending limit: spend is limited by the workspace's caps and by budgets on virtual keys and members. See [Budgets](/guide/budgets#setting-up-budget-limits).
 
 <!-- ENTERPRISE_ONLY_START -->
 ## RBAC Roles

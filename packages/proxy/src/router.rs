@@ -4,7 +4,7 @@
 //! - POST /v1/messages          (Anthropic Messages API — Claude Code)
 //! - POST /v1/chat/completions   (OpenAI Chat Completions — Cursor)
 //! - POST /v1/responses          (OpenAI Responses API — Codex CLI)
-//! - POST /v1beta/models/:model  (Gemini v1beta — Antigravity)
+//! - POST /v1beta/models/:model  (Gemini v1beta — refused, see `root`)
 //! - GET  /health                (Health check)
 //! - GET  /intutic/instance      (This process's instance id — loopback only)
 
@@ -105,20 +105,19 @@ async fn root_info() -> Json<serde_json::Value> {
         //
         // `gemini` was listed here and does not function: `/v1beta/models/:id`
         // is routed, but a Gemini body carries its model in the URL rather than
-        // in `model`, so `extract_model` yields `"unknown"`,
-        // `get_model_provider` answers OpenAI, `is_same_provider` is false for
-        // every Gemini request, and the body is posted to OpenAI's
-        // chat-completions endpoint — a 400. There is no Gemini stream
-        // translator either. Advertising it made an unreachable path look like
-        // a supported one, which is how it stayed unreachable: the request side
-        // was built, the response side never was.
+        // in `model`, so `extract_model` yields `"unknown"` and
+        // `get_model_provider` answers OpenAI. No translation exists from the
+        // Gemini wire to that target (`proxy::wire_route`), so the request is
+        // refused with `400 unsupported_route`; it used to be posted to
+        // OpenAI's chat-completions endpoint as a Gemini body. There is no
+        // Gemini stream translator either.
         //
-        // The route stays (removing it would change behaviour for anyone
-        // pointed at it), and `gemini_unsupported` says why rather than
-        // leaving its absence to be read as an oversight. See
+        // The route stays, so a client pointed at it gets that refusal and its
+        // reason rather than a 404, and `gemini_unsupported` says why rather
+        // than leaving its absence to be read as an oversight. See
         // `proxy::DeltaShape::Unparsed` for the full chain.
         "protocols": ["anthropic", "openai", "openai-responses"],
-        "gemini_unsupported": "requests to /v1beta/ are routed but not translated; the model name is not read from the URL"
+        "gemini_unsupported": "requests to /v1beta/ are refused: the model name is not read from the URL. Gemini models are served on /v1/messages, /v1/chat/completions and /v1/responses"
     }))
 }
 

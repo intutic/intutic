@@ -14,6 +14,7 @@ import type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier } from '
 import type { SsoGroupPolicy } from './attenuation.js'
 import type { McpBudgetSettings } from './mcpBudgets.js'
 import type { PiiDetectorSettings } from './piiDetectors.js'
+import type { UpstreamRetrySettings } from './upstreamRetry.js'
 
 // Re-export so callers only need one import
 export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
@@ -112,6 +113,16 @@ export interface WorkspaceSettings {
   piiDetectors?: PiiDetectorSettings | null
 
   /**
+   * How the LLM proxy retries a provider call that failed before any response
+   * reached the client, and the ordered fallback targets it tries when those
+   * retries run out (`UpstreamRetrySettingsSchema`). Each field overrides the
+   * proxy's own config.yaml value; absent fields keep it. The proxy reads it
+   * from `/api/v1/auth/key-context`. `null` in a settings write clears it, and
+   * is never stored.
+   */
+  upstreamRetry?: UpstreamRetrySettings | null
+
+  /**
    * Bring-your-own-cloud trace storage. Optional — absent means Intutic-managed
    * storage. Previously accessed only through `as unknown as` casts; typed here
    * so the settings UI and the control plane share one shape.
@@ -167,6 +178,12 @@ export interface WorkspaceSettings {
   /** Feature flags for platform capabilities (Phase 5+) */
   featureFlags?: {
     ff_bandit_routing?: boolean
+    /**
+     * Run the router and record the model it would have picked, while every
+     * request is still served with the model it asked for. Read by the proxy
+     * from `workspace:feature_flags:{ws}`; the cost posture presets set it.
+     */
+    ff_shadow_routing?: boolean
     ff_response_cache_exact?: boolean
     ff_response_cache_semantic?: boolean
     /** Phase 5 — MetaClaw prompt evolution engine (Enterprise only) */
@@ -354,6 +371,17 @@ export interface WorkspaceSettings {
   allowedModels?: string[]
 
   /**
+   * The models smart routing may choose between for this workspace.
+   * Distributed to the proxy under `workspace:routing_candidates:{workspaceId}`
+   * (same pattern as `allowedModels` above). Absent or empty means the proxy's
+   * own configured pool. Either way the proxy narrows the pool further to the
+   * models this workspace can actually reach: a provider it holds a
+   * credential for, the `allowedModels` allowlist, and the models a verified
+   * credential's provider listed.
+   */
+  routingCandidates?: string[]
+
+  /**
    * Additive MCP server allowlist: server names the MCP governance proxy
    * (`packages/mcp-proxy`) will proxy for this workspace, matched against
    * the `--server-name` identity threaded through by
@@ -422,6 +450,18 @@ export interface WorkspaceSettings {
    * no limits.
    */
   mcpBudgets?: McpBudgetSettings
+
+  /**
+   * The plan's daily spend cap (`workspaces.daily_spend_cap_usd`, set from the
+   * plan) as a hard block: with `enforcement_mode: 'hard'` AND
+   * `workspace_hard_cap_enabled: true`, the control plane checks the day's
+   * spend every five minutes and, once it is over the cap, the proxy refuses
+   * every request with `OVERAGE_HARD_CAP_EXCEEDED` until midnight UTC
+   * (`billingService.enforceOverageCap`). Either one absent or off: no block.
+   * Separate from the workspace budget caps (`PUT /api/v1/budget`).
+   */
+  enforcement_mode?: 'soft' | 'hard'
+  workspace_hard_cap_enabled?: boolean
 
   /**
    * What happens when a server's tool set changes and the change scores high

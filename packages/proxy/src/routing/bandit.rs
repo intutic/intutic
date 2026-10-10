@@ -262,18 +262,37 @@ fn cache_guard_decision(
     now_unix: i64,
     cfg: &crate::config::RoutingConfig,
 ) -> Option<String> {
-    let Some(warm_model) = session.cache_warm_model.as_deref() else {
+    if session.cache_warm_model.is_none() {
         if cfg.cache_guard_cold_start_prompt_bytes == 0 {
             return None;
         }
         return (prompt_bytes >= cfg.cache_guard_cold_start_prompt_bytes)
             .then(|| requested_model.to_string());
+    }
+    prefix_is_warm(session, requested_model, now_unix, cfg).then(|| requested_model.to_string())
+}
+
+/// Whether the scope's last prompt-cache observation says `model`'s prefix is
+/// warm right now: an observation for the same model family, fresh within
+/// `cache_guard_max_age_secs`, reading at least `cache_guard_min_read_bp`.
+///
+/// The evidence half of the cache-honesty guard above, and the test the
+/// upstream fallback uses to say on the trace when serving a different family
+/// cost this turn a warm cache.
+pub fn prefix_is_warm(
+    session: &SessionRouting,
+    model: &str,
+    now_unix: i64,
+    cfg: &crate::config::RoutingConfig,
+) -> bool {
+    let Some(warm_model) = session.cache_warm_model.as_deref() else {
+        return false;
     };
 
     // `0` is the documented kill switch: no observation is ever "fresh"
     // enough, so every scope falls through to normal sampling.
     if cfg.cache_guard_max_age_secs == 0 {
-        return None;
+        return false;
     }
 
     // Family, not exact model — `pricing::model_family` collapses date
@@ -283,30 +302,107 @@ fn cache_guard_decision(
     // the same observation.
     let same_family = match (
         pricing::model_family(warm_model),
-        pricing::model_family(requested_model),
+        pricing::model_family(model),
     ) {
         (Some(a), Some(b)) => a == b,
         _ => false,
     };
     if !same_family {
-        return None;
+        return false;
     }
 
     let fresh = session.cache_observed_at.is_some_and(|observed| {
         now_unix.saturating_sub(observed) <= cfg.cache_guard_max_age_secs as i64
     });
     if !fresh {
-        return None;
+        return false;
     }
 
-    let warm = session
+    session
         .cache_read_bp
-        .is_some_and(|bp| bp >= cfg.cache_guard_min_read_bp);
-    if !warm {
-        return None;
+        .is_some_and(|bp| bp >= cfg.cache_guard_min_read_bp)
+}
+
+/// A model id without its snapshot suffix: the line a dated snapshot, a pinned
+/// version or a `-latest` alias belongs to. `claude-sonnet-4-5-20250929`,
+/// `gpt-4o-2024-08-06`, `gpt-4-0613`, `gemini-2.0-flash-001`,
+/// `claude-3-5-sonnet-latest` and Vertex AI's `claude-sonnet-4-5@20250929` all
+/// lose their last segment; nothing else does.
+///
+/// Deliberately narrower than [`pricing::model_family`], which collapses
+/// `claude-opus-4-1` and `claude-opus-4-5` into one pricing family. Routing
+/// keys arms and session locks on these names, and treating two different
+/// releases as one would let a request for one be answered as if it named the
+/// other. A suffix is stripped only when it is all digits in a snapshot's
+/// shape (`-YYYY-MM-DD`, or 3, 4 or 8 digits) or the literal `-latest`, so
+/// `-preview`, `-mini` and version numbers like `-4-5` are never touched.
+pub fn model_line(model: &str) -> String {
+    let m = model.trim().to_ascii_lowercase();
+    let all_digits = |s: &str, len: usize| s.len() == len && s.bytes().all(|b| b.is_ascii_digit());
+    if let Some((base, version)) = m.rsplit_once('@') {
+        if !base.is_empty() && !version.is_empty() && version.bytes().all(|b| b.is_ascii_digit()) {
+            return base.to_string();
+        }
+    }
+    if let Some(base) = m.strip_suffix("-latest").filter(|b| !b.is_empty()) {
+        return base.to_string();
+    }
+    let parts: Vec<&str> = m.rsplitn(4, '-').collect();
+    if let [day, month, year, base] = parts[..] {
+        if all_digits(day, 2) && all_digits(month, 2) && all_digits(year, 4) && !base.is_empty() {
+            return base.to_string();
+        }
+    }
+    if let Some((base, last)) = m.rsplit_once('-') {
+        if !base.is_empty() && [3, 4, 8].iter().any(|&len| all_digits(last, len)) {
+            return base.to_string();
+        }
+    }
+    m
+}
+
+/// Whether two model ids name the same model line ([`model_line`]).
+pub fn same_model_line(a: &str, b: &str) -> bool {
+    model_line(a) == model_line(b)
+}
+
+/// The candidates one request may be routed between, already narrowed to the
+/// models this request can actually reach (see `proxy::routing_pool`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CandidatePool {
+    /// The candidate the requested model is, or is a snapshot or alias of. Its
+    /// arm is the one credited when the request is served as asked, and
+    /// choosing it sends the requested model unchanged — a caller who pinned
+    /// `claude-sonnet-4-5-20250929` keeps that exact snapshot.
+    pub requested_arm: String,
+    /// Every candidate this request may be sent to, `requested_arm` included.
+    pub arms: Vec<String>,
+}
+
+impl CandidatePool {
+    /// The configured candidate `requested_model` belongs to: an exact match
+    /// first, then the first candidate of the same [`model_line`]. `None`
+    /// means the request is not routed at all.
+    pub fn requested_arm_for(requested_model: &str, candidates: &[String]) -> Option<String> {
+        candidates
+            .iter()
+            .find(|c| c.eq_ignore_ascii_case(requested_model))
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .find(|c| same_model_line(c, requested_model))
+            })
+            .cloned()
     }
 
-    Some(requested_model.to_string())
+    /// The model to send when `arm` is chosen.
+    fn model_for(&self, arm: &str, requested_model: &str) -> String {
+        if arm == self.requested_arm {
+            requested_model.to_string()
+        } else {
+            arm.to_string()
+        }
+    }
 }
 
 /// `route_model`'s result. A struct rather than a 3-tuple so `prior_cache_read_ratio`
@@ -315,7 +411,15 @@ fn cache_guard_decision(
 /// destructure could silently misbind.
 #[derive(Debug, Clone)]
 pub struct RouteDecision {
+    /// The model to send upstream.
     pub model: String,
+    /// The candidate this decision is credited to — the arm whose reward and
+    /// outage counters the response feeds. `None` when the request was not
+    /// routed (its model belongs to no candidate).
+    pub arm: Option<String>,
+    /// The candidate the requested model belongs to; the arm credited if
+    /// shadow mode serves the request as asked. `None` exactly when `arm` is.
+    pub requested_arm: Option<String>,
     pub sop_tier: String,
     pub task_type: String,
     /// `requested_model`'s most recently observed prompt-cache-read fraction
@@ -334,8 +438,10 @@ pub struct RouteDecision {
 
 /// Resolves model routing via Contextual Bandit or Session Lock.
 ///
-/// `candidate_models` comes from `intutic_settings.routing.candidate_models`;
-/// requests for models outside the pool bypass the bandit entirely.
+/// `pool` is the request's candidates, already narrowed by the caller to the
+/// models this request can reach (`proxy::routing_pool`). `None` — the
+/// requested model belongs to no candidate, or nothing else is reachable —
+/// bypasses the bandit entirely.
 #[allow(clippy::too_many_arguments)] // one call site, request-scoped values
 pub async fn route_model(
     store: &Arc<dyn LocalStore>,
@@ -344,7 +450,7 @@ pub async fn route_model(
     scope: &str,
     requested_model: &str,
     prompt: &str,
-    candidate_models: &[String],
+    pool: Option<&CandidatePool>,
     routing_cfg: &crate::config::RoutingConfig,
 ) -> anyhow::Result<RouteDecision> {
     // The message deliberately does not echo `scope`: it is a routing
@@ -381,15 +487,25 @@ pub async fn route_model(
     };
 
     // 0. Bypass bandit routing if the requested model is not in the candidate pool
-    if !candidate_models.iter().any(|m| m == requested_model) {
+    let Some(pool) = pool else {
         tracing::debug!(requested_model = %requested_model, "Requested model not in candidate pool — bypassing bandit");
         return Ok(RouteDecision {
             model: requested_model.to_string(),
+            arm: None,
+            requested_arm: None,
             sop_tier: resolved_sop_tier,
             task_type: task_type.to_string(),
             prior_cache_read_ratio,
         });
-    }
+    };
+    let decided = |arm: String, sop_tier: String| RouteDecision {
+        model: pool.model_for(&arm, requested_model),
+        arm: Some(arm),
+        requested_arm: Some(pool.requested_arm.clone()),
+        sop_tier,
+        task_type: task_type.to_string(),
+        prior_cache_read_ratio,
+    };
 
     // 1. Session-Locked Model Routing
     //
@@ -421,14 +537,21 @@ pub async fn route_model(
     // see `resolve_injection_block`'s doc comment for the full trade-off.
     // .clone(), not a move: cache_guard_decision below needs `&session`
     // whole, immediately after this block.
-    if let Some(locked_model) = session.locked_model.clone() {
-        tracing::debug!(scope = %scope, locked_model = %locked_model, "Session lock hit");
-        return Ok(RouteDecision {
-            model: locked_model,
-            sop_tier: resolved_sop_tier,
-            task_type: task_type.to_string(),
-            prior_cache_read_ratio,
-        });
+    //
+    // A lock names an arm, and is honoured only while that arm is still in
+    // this request's pool. The scope is `{workspace}:{agent}`, not one
+    // conversation, and the pool is narrowed per request: a provider key
+    // removed, an allowlist tightened, the candidate list edited, or a request
+    // in another wire format (an Anthropic-format request cannot be sent to an
+    // OpenAI model) all leave a lock pointing at a model this request must not
+    // reach. Such a lock is ignored, and the selection below replaces it.
+    if let Some(locked_arm) = session
+        .locked_model
+        .clone()
+        .filter(|arm| pool.arms.contains(arm))
+    {
+        tracing::debug!(scope = %scope, locked_model = %locked_arm, "Session lock hit");
+        return Ok(decided(locked_arm, resolved_sop_tier));
     }
 
     // Wave 3.4: strong, fresh evidence the requested model is already warm
@@ -442,17 +565,13 @@ pub async fn route_model(
         routing_cfg,
     ) {
         tracing::debug!(scope = %scope, model = %pinned_model, "Cache-honesty guard declined to sample");
-        return Ok(RouteDecision {
-            model: pinned_model,
-            sop_tier: resolved_sop_tier,
-            task_type: task_type.to_string(),
-            prior_cache_read_ratio,
-        });
+        return Ok(decided(pool.requested_arm.clone(), resolved_sop_tier));
     }
 
-    // No lock is active — either this session has never been routed, or a
-    // lock was just released (e.g. the unservable-model path in `proxy.rs`
-    // clears it after a failed request). Either way we're about to
+    // No usable lock — this session has never been routed, its lock was
+    // released because the locked model failed a request
+    // (`proxy::release_routing_lock`), or the lock names an arm outside this
+    // request's pool. Either way we're about to
     // Thompson-sample fresh; `last_model` (set alongside every lock and left
     // in place when the lock clears) is the only memory of what the session
     // was just running on, so it feeds the same-family tie-break below.
@@ -467,7 +586,7 @@ pub async fn route_model(
     let mut arms = Vec::new();
     let mut total_pulls = 0;
 
-    for model in candidate_models {
+    for model in &pool.arms {
         let arm_key = format!("arm:{}:{}:{}", model, resolved_sop_tier, task_type);
 
         match raw_arms.get(&arm_key) {
@@ -492,28 +611,19 @@ pub async fn route_model(
     // 3. Fallback check: if cumulative pulls < 20, bypass selection and use requested model
     if total_pulls < 20 {
         tracing::debug!(workspace_id = %workspace_id, total_pulls = %total_pulls, "Total pulls < 20 — using requested model");
-        let selected_model = requested_model.to_string();
-        let _ = store.set_session_locked_model(scope, &selected_model).await;
-        return Ok(RouteDecision {
-            model: selected_model,
-            sop_tier: resolved_sop_tier,
-            task_type: task_type.to_string(),
-            prior_cache_read_ratio,
-        });
+        let _ = store
+            .set_session_locked_model(scope, &pool.requested_arm)
+            .await;
+        return Ok(decided(pool.requested_arm.clone(), resolved_sop_tier));
     }
 
     // 4. Sample arms using Thompson Sampling, tie-broken toward `prefer_family`
-    let best_model = select_arm(arms, requested_model, prefer_family.as_deref());
+    let best_arm = select_arm(arms, &pool.requested_arm, prefer_family.as_deref());
 
     // Lock selected model for the scope
-    let _ = store.set_session_locked_model(scope, &best_model).await;
+    let _ = store.set_session_locked_model(scope, &best_arm).await;
 
-    Ok(RouteDecision {
-        model: best_model,
-        sop_tier: resolved_sop_tier,
-        task_type: task_type.to_string(),
-        prior_cache_read_ratio,
-    })
+    Ok(decided(best_arm, resolved_sop_tier))
 }
 
 /// Whether an upstream error says the MODEL was unservable, as opposed to the
@@ -809,6 +919,219 @@ mod tests {
         // fallback rather than panicking.
         let winner = select_arm(vec![], "claude-sonnet-4-5", Some("claude-opus"));
         assert_eq!(winner, "claude-sonnet-4-5");
+    }
+
+    #[test]
+    fn model_line_strips_only_snapshot_suffixes() {
+        for (snapshot, line) in [
+            ("claude-sonnet-4-5-20250929", "claude-sonnet-4-5"),
+            ("claude-3-5-sonnet-latest", "claude-3-5-sonnet"),
+            ("gpt-4o-2024-08-06", "gpt-4o"),
+            ("o1-2024-12-17", "o1"),
+            ("gpt-4-0613", "gpt-4"),
+            ("gemini-2.0-flash-001", "gemini-2.0-flash"),
+            (
+                "vertex/claude-sonnet-4-5@20250929",
+                "vertex/claude-sonnet-4-5",
+            ),
+            ("Claude-Sonnet-4-5", "claude-sonnet-4-5"),
+        ] {
+            assert_eq!(model_line(snapshot), line, "{snapshot}");
+        }
+        // Different releases, sizes and previews stay different lines.
+        for distinct in [
+            "claude-opus-4-1",
+            "claude-opus-4-5",
+            "gpt-4o-mini",
+            "gpt-4-1106-preview",
+            "gemini-2.5-flash-lite",
+            "llama-3.1-405b",
+            "latest",
+            "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        ] {
+            assert_eq!(
+                model_line(distinct),
+                distinct.to_ascii_lowercase(),
+                "{distinct}"
+            );
+        }
+        assert!(!same_model_line("claude-opus-4-1", "claude-opus-4-5"));
+        assert!(!same_model_line("gpt-4o", "gpt-4o-mini"));
+        assert!(same_model_line("gpt-4.1", "gpt-4.1-2025-04-14"));
+    }
+
+    #[test]
+    fn a_snapshot_or_alias_enters_routing_through_its_candidate() {
+        let candidates: Vec<String> = ["claude-sonnet-4-5", "gpt-4.1"].map(String::from).to_vec();
+        assert_eq!(
+            CandidatePool::requested_arm_for("claude-sonnet-4-5-20250929", &candidates).as_deref(),
+            Some("claude-sonnet-4-5")
+        );
+        assert_eq!(
+            CandidatePool::requested_arm_for("gpt-4.1-2025-04-14", &candidates).as_deref(),
+            Some("gpt-4.1")
+        );
+        // Another release of the same family is not a snapshot of the candidate.
+        assert_eq!(
+            CandidatePool::requested_arm_for("claude-sonnet-4-6", &candidates),
+            None
+        );
+        assert_eq!(
+            CandidatePool::requested_arm_for("gpt-4.1-mini", &candidates),
+            None
+        );
+        // An exact match wins over a same-line one listed earlier.
+        let both: Vec<String> = ["claude-sonnet-4-5", "claude-sonnet-4-5-20250929"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            CandidatePool::requested_arm_for("claude-sonnet-4-5-20250929", &both).as_deref(),
+            Some("claude-sonnet-4-5-20250929")
+        );
+    }
+
+    mod pool {
+        use super::*;
+        use crate::store::{LocalStore, MemoryStore, NullControlPlaneCache};
+
+        fn stores() -> (Arc<dyn LocalStore>, Arc<dyn ControlPlaneCache>) {
+            (
+                Arc::new(MemoryStore::new()),
+                Arc::new(NullControlPlaneCache),
+            )
+        }
+
+        fn pool(requested_arm: &str, arms: &[&str]) -> CandidatePool {
+            CandidatePool {
+                requested_arm: requested_arm.to_string(),
+                arms: arms.iter().map(|a| a.to_string()).collect(),
+            }
+        }
+
+        #[tokio::test]
+        async fn choosing_the_requested_arm_sends_the_requested_snapshot() {
+            let (store, cp) = stores();
+            let p = pool(
+                "claude-sonnet-4-5",
+                &["claude-sonnet-4-5", "gemini-2.5-flash"],
+            );
+            // Cold start (no pulls yet): served as asked, credited to its arm.
+            let d = route_model(
+                &store,
+                &cp,
+                "ws",
+                "ws:agent",
+                "claude-sonnet-4-5-20250929",
+                "write a function",
+                Some(&p),
+                &crate::config::RoutingConfig::default(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(d.model, "claude-sonnet-4-5-20250929");
+            assert_eq!(d.arm.as_deref(), Some("claude-sonnet-4-5"));
+            assert_eq!(d.requested_arm.as_deref(), Some("claude-sonnet-4-5"));
+            let locked = store
+                .session_routing("ws:agent")
+                .await
+                .unwrap()
+                .locked_model;
+            assert_eq!(
+                locked.as_deref(),
+                Some("claude-sonnet-4-5"),
+                "the lock names the arm"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_lock_on_an_arm_outside_this_requests_pool_is_ignored() {
+            let (store, cp) = stores();
+            // Locked by an earlier OpenAI-format request in the same scope.
+            store
+                .set_session_locked_model("ws:agent", "gpt-4.1")
+                .await
+                .unwrap();
+            let p = pool(
+                "claude-sonnet-4-5",
+                &["claude-sonnet-4-5", "gemini-2.5-flash"],
+            );
+            let d = route_model(
+                &store,
+                &cp,
+                "ws",
+                "ws:agent",
+                "claude-sonnet-4-5",
+                "write a function",
+                Some(&p),
+                &crate::config::RoutingConfig::default(),
+            )
+            .await
+            .unwrap();
+            assert_ne!(d.model, "gpt-4.1", "an unreachable lock must not be served");
+            assert!(p.arms.contains(d.arm.as_ref().unwrap()));
+            let locked = store
+                .session_routing("ws:agent")
+                .await
+                .unwrap()
+                .locked_model;
+            assert_ne!(
+                locked.as_deref(),
+                Some("gpt-4.1"),
+                "the stale lock is replaced"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_lock_inside_the_pool_holds() {
+            let (store, cp) = stores();
+            store
+                .set_session_locked_model("ws:agent", "gemini-2.5-flash")
+                .await
+                .unwrap();
+            let p = pool(
+                "claude-sonnet-4-5",
+                &["claude-sonnet-4-5", "gemini-2.5-flash"],
+            );
+            let d = route_model(
+                &store,
+                &cp,
+                "ws",
+                "ws:agent",
+                "claude-sonnet-4-5",
+                "write a function",
+                Some(&p),
+                &crate::config::RoutingConfig::default(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(d.model, "gemini-2.5-flash");
+            assert_eq!(d.arm.as_deref(), Some("gemini-2.5-flash"));
+        }
+
+        #[tokio::test]
+        async fn no_pool_is_no_routing() {
+            let (store, cp) = stores();
+            let d = route_model(
+                &store,
+                &cp,
+                "ws",
+                "ws:agent",
+                "claude-sonnet-4-5",
+                "write a function",
+                None,
+                &crate::config::RoutingConfig::default(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(d.model, "claude-sonnet-4-5");
+            assert_eq!(d.arm, None);
+            assert!(store
+                .session_routing("ws:agent")
+                .await
+                .unwrap()
+                .locked_model
+                .is_none());
+        }
     }
 
     /// Wave 3.4: the cache-honesty guard. "Three absences, three answers" —

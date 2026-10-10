@@ -22,8 +22,9 @@ use std::sync::Arc;
 use super::{
     BreakGlassGrant, CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache,
     FeatureFlags, HardCapStatus, JudgeScope, LocalStore, NotifyScope, Ownership, PinScope,
-    PinnedSopBlock, RuleRefusalReport, SessionRouting, TokenBaseline,
+    PinnedSopBlock, SessionRouting, TokenBaseline,
 };
+use crate::credential_crypto::{self, CredentialKeyring};
 use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
 use crate::routing::mirror::MirrorPairEvent;
@@ -274,10 +275,83 @@ fn response_key(hash: &str) -> String {
     format!("cache:response:{}", hash)
 }
 
+/// Where a proxy says which credential keys it holds, one key per process.
+///
+/// The control plane reads these before it re-encrypts the provider
+/// credentials in this Valkey (`credentialEncryptionBackfill.ts`): it waits
+/// until at least one proxy has announced and every announcing proxy holds the
+/// current key, so a value is never sealed under a key a running proxy lacks.
+/// A proxy without `ENCRYPTION_KEY` announces an empty list, which holds the
+/// control plane back for as long as it runs.
+pub const CREDENTIAL_KEYS_ANNOUNCE_PREFIX: &str = "credential-keys:proxy:";
+
+/// An announcement outlives three missed refreshes, then a stopped proxy drops out.
+const CREDENTIAL_KEYS_ANNOUNCE_TTL_SECS: u64 = 90;
+
+/// Announce, once, the ids of the keys this proxy can open (current first).
+pub async fn announce_credential_keys(
+    conn: &ConnectionManager,
+    instance: &str,
+    key_ids: &[String],
+) -> redis::RedisResult<()> {
+    let mut conn = conn.clone();
+    conn.set_ex(
+        format!("{CREDENTIAL_KEYS_ANNOUNCE_PREFIX}{instance}"),
+        key_ids.join(","),
+        CREDENTIAL_KEYS_ANNOUNCE_TTL_SECS,
+    )
+    .await
+}
+
+/// Keep announcing for the life of the process.
+pub fn spawn_credential_key_announcer(conn: Arc<ConnectionManager>, key_ids: Vec<String>) {
+    let instance = uuid::Uuid::new_v4().to_string();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(
+            CREDENTIAL_KEYS_ANNOUNCE_TTL_SECS / 3,
+        ));
+        loop {
+            tick.tick().await;
+            if let Err(e) = announce_credential_keys(&conn, &instance, &key_ids).await {
+                tracing::warn!("could not announce this proxy's credential keys: {e}");
+            }
+        }
+    });
+}
+
 pub struct ValkeyStore {
     conn: Arc<ConnectionManager>,
     update_script: redis::Script,
+    rate_script: redis::Script,
+    /// Opens the encrypted values in `workspace:credentials:{ws}`; `None` when
+    /// this proxy has no `ENCRYPTION_KEY`.
+    credential_keys: Option<Arc<CredentialKeyring>>,
 }
+
+/// Checks a key's tokens-per-minute counter, then checks and counts its
+/// requests-per-minute counter, in one atomic step: replicas racing for a
+/// minute's last request cannot both get it, and a refused request is never
+/// counted.
+///
+/// KEYS: the RPM counter, the TPM counter (`key_limits::rate_counter_keys`).
+/// ARGV: RPM limit, TPM limit (0 = none), counter TTL in seconds.
+/// Returns `{1}` when admitted, `{0, kind, used}` when refused — kind 1 for
+/// requests, 2 for tokens.
+const RATE_ADMIT_SCRIPT: &str = r#"
+local tpm = tonumber(ARGV[2])
+if tpm > 0 then
+  local used = tonumber(redis.call('GET', KEYS[2]) or '0')
+  if used >= tpm then return {0, 2, used} end
+end
+local rpm = tonumber(ARGV[1])
+if rpm > 0 then
+  local n = tonumber(redis.call('GET', KEYS[1]) or '0')
+  if n >= rpm then return {0, 1, n} end
+  n = redis.call('INCR', KEYS[1])
+  if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
+end
+return {1}
+"#;
 
 /// The workspace's daily spend counter, as the **control plane** names it.
 ///
@@ -309,7 +383,15 @@ impl ValkeyStore {
         Self {
             conn,
             update_script: redis::Script::new(ARM_UPDATE_SCRIPT),
+            rate_script: redis::Script::new(RATE_ADMIT_SCRIPT),
+            credential_keys: None,
         }
+    }
+
+    /// The keys provider credentials are sealed under (`credential_crypto`).
+    pub fn with_credential_keyring(mut self, keyring: Option<CredentialKeyring>) -> Self {
+        self.credential_keys = keyring.map(Arc::new);
+        self
     }
 
     fn conn(&self) -> ConnectionManager {
@@ -621,8 +703,24 @@ impl LocalStore for ValkeyStore {
         let key = format!("workspace:credentials:{}", workspace_id);
         for field in fields {
             if let Ok(Some(val)) = conn.hget::<_, _, Option<String>>(&key, *field).await {
-                if !val.is_empty() {
-                    return Some(val);
+                if val.is_empty() {
+                    continue;
+                }
+                match credential_crypto::open_stored(
+                    self.credential_keys.as_deref(),
+                    &val,
+                    &credential_crypto::context(workspace_id, field),
+                ) {
+                    Ok(plain) => return Some(plain),
+                    // Skipped, never forwarded: ciphertext sent upstream as a key
+                    // would only fail there, with no hint of the cause. Logged at
+                    // error because every request for this workspace hits it until
+                    // the proxy is given the key the control plane writes with.
+                    Err(e) => tracing::error!(
+                        workspace_id,
+                        field,
+                        "stored provider credential cannot be used: {e}"
+                    ),
                 }
             }
         }
@@ -632,7 +730,11 @@ impl LocalStore for ValkeyStore {
     async fn set_workspace_credential(&self, workspace_id: &str, field: &str, value: &str) {
         let mut conn = self.conn();
         let key = format!("workspace:credentials:{}", workspace_id);
-        let _: Result<(), redis::RedisError> = redis::Cmd::hset(&key, field, value)
+        let stored = match &self.credential_keys {
+            Some(keys) => keys.encrypt(value, &credential_crypto::context(workspace_id, field)),
+            None => value.to_string(),
+        };
+        let _: Result<(), redis::RedisError> = redis::Cmd::hset(&key, field, stored)
             .query_async(&mut conn)
             .await;
     }
@@ -725,7 +827,7 @@ impl LocalStore for ValkeyStore {
     }
 
     async fn publish_system_anomaly(&self, workspace_id: &str, description: &str) {
-        publish_anomaly(self.conn(), workspace_id, description).await;
+        publish_anomaly(self.conn(), workspace_id, description, None).await;
     }
 
     async fn publish_notification(&self, scope: NotifyScope, id: &str, payload: &str) {
@@ -942,6 +1044,64 @@ impl LocalStore for ValkeyStore {
             .flatten()
     }
 
+    async fn admit_rate(
+        &self,
+        key_id: &str,
+        limit: crate::key_limits::RateLimit,
+        minute: i64,
+    ) -> crate::key_limits::RateDecision {
+        use crate::key_limits::{rate_counter_keys, RateDecision, RateLimitKind};
+        let (rpm_key, tpm_key) = rate_counter_keys(key_id, minute);
+        let mut conn = self.conn();
+        let mut invocation = self.rate_script.key(&rpm_key);
+        invocation
+            .key(&tpm_key)
+            .arg(limit.rpm.unwrap_or(0))
+            .arg(limit.tpm.unwrap_or(0))
+            .arg(crate::key_limits::RATE_COUNTER_TTL_SECS);
+        // Under the gate timeout: this sits on the request path, and a hung
+        // Valkey must not stall it. Fails open (see `RateDecision::Unavailable`).
+        let reply = tokio::time::timeout(
+            GATE_TIMEOUT,
+            invocation.invoke_async::<_, Vec<i64>>(&mut conn),
+        )
+        .await;
+        match reply {
+            Ok(Ok(v)) if v.first() == Some(&1) => RateDecision::Admitted,
+            Ok(Ok(v)) if v.len() == 3 => {
+                let (kind, limit) = if v[1] == 2 {
+                    (RateLimitKind::Tokens, limit.tpm.unwrap_or(0))
+                } else {
+                    (RateLimitKind::Requests, limit.rpm.unwrap_or(0))
+                };
+                RateDecision::Limited {
+                    kind,
+                    limit,
+                    used: v[2].max(0) as u64,
+                }
+            }
+            other => {
+                tracing::warn!(key_id, reply = ?other.map(|r| r.map(|_| ())), "Rate-limit check failed; admitting uncounted");
+                RateDecision::Unavailable
+            }
+        }
+    }
+
+    async fn add_rate_tokens(&self, key_id: &str, tokens: u64, minute: i64) {
+        let (_, tpm_key) = crate::key_limits::rate_counter_keys(key_id, minute);
+        let mut conn = self.conn();
+        let added: Result<i64, redis::RedisError> = conn.incr(&tpm_key, tokens).await;
+        match added {
+            Ok(n) if n == tokens as i64 => {
+                let _: Result<bool, redis::RedisError> = conn
+                    .expire(&tpm_key, crate::key_limits::RATE_COUNTER_TTL_SECS as i64)
+                    .await;
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(key_id, error = %e, "Tokens-per-minute counter not updated"),
+        }
+    }
+
     async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64> {
         let mut conn = self.conn();
         // No TTL: a loop run's lifetime is bounded by its own status, which is
@@ -1048,17 +1208,36 @@ impl LocalStore for ValkeyStore {
 
 /// One message on `intutic:system_anomalies`, which the control plane's
 /// subscriber records as an incident. Both halves of the store publish it.
-async fn publish_anomaly(mut conn: ConnectionManager, workspace_id: &str, description: &str) {
-    let payload = serde_json::json!({
+async fn publish_anomaly(
+    mut conn: ConnectionManager,
+    workspace_id: &str,
+    description: &str,
+    rule: Option<&super::RuleRefusalWire>,
+) {
+    let payload = anomaly_payload(workspace_id, description, rule);
+    let _: Result<(), redis::RedisError> = conn
+        .publish("intutic:system_anomalies", payload.to_string())
+        .await;
+}
+
+/// The message itself: the fields every anomaly has, plus `wasm_rule` for a
+/// refused rule version, which the control plane files under its reason, once
+/// per version and reason, rather than as a generic incident.
+fn anomaly_payload(
+    workspace_id: &str,
+    description: &str,
+    rule: Option<&super::RuleRefusalWire>,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
         "workspace_id": workspace_id,
         "description": description,
         "severity": "HIGH",
         "timestamp": chrono::Utc::now().to_rfc3339()
     });
-    if let Ok(payload_str) = serde_json::to_string(&payload) {
-        let _: Result<(), redis::RedisError> =
-            conn.publish("intutic:system_anomalies", &payload_str).await;
+    if let Some(rule) = rule {
+        payload["wasm_rule"] = serde_json::json!(rule);
     }
+    payload
 }
 
 pub struct ValkeyControlPlaneCache {
@@ -1102,6 +1281,18 @@ impl ValkeyControlPlaneCache {
     }
 }
 
+/// A model list read from the control plane, trimmed, without blanks; `None`
+/// when nothing is left. An empty list means "unset" to every reader here, so
+/// it must never reach them as a list that excludes everything.
+fn non_empty_model_list(models: Vec<String>) -> Option<Vec<String>> {
+    let models: Vec<String> = models
+        .into_iter()
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .collect();
+    (!models.is_empty()).then_some(models)
+}
+
 #[async_trait]
 impl ControlPlaneCache for ValkeyControlPlaneCache {
     async fn bandit_keywords(&self, workspace_id: &str) -> Option<serde_json::Value> {
@@ -1109,6 +1300,39 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         let key = format!("workspace:bandit_keywords:{}", workspace_id);
         match tokio::time::timeout(KEYWORDS_TIMEOUT, conn.get::<_, Option<String>>(&key)).await {
             Ok(Ok(Some(s))) => serde_json::from_str(&s).ok(),
+            _ => None,
+        }
+    }
+
+    async fn routing_candidates(&self, workspace_id: &str) -> Option<Vec<String>> {
+        let mut conn = self.conn();
+        let key = format!("workspace:routing_candidates:{}", workspace_id);
+        match tokio::time::timeout(KEYWORDS_TIMEOUT, conn.get::<_, Option<String>>(&key)).await {
+            Ok(Ok(Some(s))) => serde_json::from_str::<Vec<String>>(&s)
+                .ok()
+                .and_then(non_empty_model_list),
+            _ => None,
+        }
+    }
+
+    async fn provider_models(&self, workspace_id: &str, provider: &str) -> Option<Vec<String>> {
+        let mut conn = self.conn();
+        let key = format!("workspace:provider_models:{}", workspace_id);
+        match tokio::time::timeout(
+            KEYWORDS_TIMEOUT,
+            conn.hget::<_, _, Option<String>>(&key, provider),
+        )
+        .await
+        {
+            Ok(Ok(Some(s))) => {
+                #[derive(serde::Deserialize)]
+                struct Discovered {
+                    models: Vec<String>,
+                }
+                serde_json::from_str::<Discovered>(&s)
+                    .ok()
+                    .and_then(|d| non_empty_model_list(d.models))
+            }
             _ => None,
         }
     }
@@ -1291,6 +1515,12 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
             byok_required: auth_json.get("byokRequired").and_then(|v| v.as_bool()),
+            key_id: auth_json
+                .get("keyId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            hard_budgets: crate::key_limits::parse_hard_budgets(auth_json.get("hardBudgets")),
+            rate_limit: crate::key_limits::parse_rate_limit(auth_json.get("rateLimit")),
         }))
     }
 
@@ -1308,6 +1538,30 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             spend_val.and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
             limit_val.and_then(|s| s.parse::<f64>().ok()),
         ))
+    }
+
+    async fn spend_counters(&self, keys: &[String]) -> Option<Vec<f64>> {
+        if keys.is_empty() {
+            return Some(Vec::new());
+        }
+        let mut conn = self.conn();
+        let mut cmd = redis::cmd("MGET");
+        for k in keys {
+            cmd.arg(k);
+        }
+        let fut = cmd.query_async::<_, Vec<Option<String>>>(&mut conn);
+        match tokio::time::timeout(GATE_TIMEOUT, fut).await {
+            Ok(Ok(values)) => Some(
+                values
+                    .into_iter()
+                    .map(|v| v.and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0))
+                    .collect(),
+            ),
+            other => {
+                tracing::warn!(reply = ?other.map(|r| r.map(|_| ())), "Spend counters could not be read");
+                None
+            }
+        }
     }
 
     async fn hard_block(&self, workspace_id: &str) -> HardCapStatus {
@@ -1541,30 +1795,14 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         let _: Result<(), redis::RedisError> = conn.expire(&key, DELIVERED_MARKER_TTL_SECS).await;
     }
 
-    async fn publish_rule_refusal(&self, workspace_id: &str, refusal: &RuleRefusalReport<'_>) {
-        let payload = rule_refusal_payload(workspace_id, refusal);
-        let mut conn = self.conn();
-        let _: Result<(), redis::RedisError> = conn
-            .publish("intutic:system_anomalies", payload.to_string())
-            .await;
+    async fn publish_rule_refusal(
+        &self,
+        workspace_id: &str,
+        description: &str,
+        rule: &super::RuleRefusalWire,
+    ) {
+        publish_anomaly(self.conn(), workspace_id, description, Some(rule)).await;
     }
-}
-
-/// The system anomaly a refused rule version is published as: the generic
-/// fields every anomaly has, plus `kind` and the rule, so the control plane
-/// files it under its reason rather than as a generic incident.
-fn rule_refusal_payload(workspace_id: &str, refusal: &RuleRefusalReport<'_>) -> serde_json::Value {
-    serde_json::json!({
-        "workspace_id": workspace_id,
-        "description": refusal.description,
-        "severity": "HIGH",
-        "timestamp": chrono::Utc::now().to_rfc3339(),
-        "kind": "wasm_rule_refused",
-        "reason": refusal.reason,
-        "rule_id": refusal.rule_id,
-        "rule_name": refusal.rule_name,
-        "sha256": refusal.sha256,
-    })
 }
 
 /// `HMGET count sum reasoning_sum` on a baseline hash. `None` when the hash is
@@ -1775,29 +2013,41 @@ mod loop_key_contract {
         assert_eq!(active_loop_key("ws_1", None), "intutic:active_loop:ws_1");
     }
 
-    /// The control plane files a refused rule under `reason`, from these fields.
+    /// The control plane files a refused rule under its reason, from these
+    /// fields (`ruleRefusalFromWire` in the control plane).
     #[test]
     fn a_rule_refusal_carries_its_reason_and_rule() {
-        let payload = rule_refusal_payload(
+        let payload = anomaly_payload(
             "ws_1",
-            &RuleRefusalReport {
-                rule_id: "wasm_1",
-                rule_name: "no-shell",
-                sha256: "ab12",
-                reason: "hash_mismatch",
-                description: "WASM rule 'no-shell' (wasm_1) was refused",
-            },
+            "WASM rule 'no-shell' (wasm_1) was refused",
+            Some(&crate::store::RuleRefusalWire {
+                rule_id: "wasm_1".into(),
+                name: "no-shell".into(),
+                sha256: "ab12".into(),
+                refusal: "hash_mismatch",
+                actual_sha256: Some("cd34".into()),
+                previous_in_force: true,
+            }),
         );
-        assert_eq!(payload["kind"], "wasm_rule_refused");
-        assert_eq!(payload["reason"], "hash_mismatch");
         assert_eq!(payload["workspace_id"], "ws_1");
-        assert_eq!(payload["rule_id"], "wasm_1");
-        assert_eq!(payload["rule_name"], "no-shell");
-        assert_eq!(payload["sha256"], "ab12");
         assert_eq!(
             payload["description"],
             "WASM rule 'no-shell' (wasm_1) was refused"
         );
+        assert_eq!(payload["wasm_rule"]["refusal"], "hash_mismatch");
+        assert_eq!(payload["wasm_rule"]["rule_id"], "wasm_1");
+        assert_eq!(payload["wasm_rule"]["name"], "no-shell");
+        assert_eq!(payload["wasm_rule"]["sha256"], "ab12");
+        assert_eq!(payload["wasm_rule"]["actual_sha256"], "cd34");
+        assert_eq!(payload["wasm_rule"]["previous_in_force"], true);
+    }
+
+    /// Any other anomaly carries no rule, and is filed as a generic incident.
+    #[test]
+    fn a_plain_anomaly_carries_no_rule() {
+        let payload = anomaly_payload("ws_1", "disk full", None);
+        assert!(payload.get("wasm_rule").is_none());
+        assert_eq!(payload["severity"], "HIGH");
     }
 
     /// The state key must not collide with its own scalars — a prefix bug here

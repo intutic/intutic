@@ -74,7 +74,7 @@ The proxy is a high-performance Rust proxy gateway (`@intutic/proxy`) that trans
 | `/v1/messages` | Anthropic | Claude Code, Continue, Aider |
 | `/v1/responses` | OpenAI Responses | OpenAI Codex |
 
-`/v1beta/models/:model` (Gemini) is routed but not translated, so Gemini traffic — Antigravity's included — is not supported. Claude Desktop sends its model traffic to Anthropic directly and cannot be routed.
+`/v1beta/models/:model` (Gemini's own route) is refused with `400 unsupported_route`, so Antigravity's model traffic is not supported. Gemini models are served on the three routes above, translated to the Gemini API. Claude Desktop sends its model traffic to Anthropic directly and cannot be routed.
 
 ### Pre-request pipeline
 

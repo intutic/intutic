@@ -10,6 +10,8 @@ import {
 } from './types'
 import { ClawdeBlockedError, ClawdeConnectionError } from './errors'
 import { parseRefusal, headerRefusal, streamRefusal, REFUSAL_HEADER, REFUSAL_RULE_HEADER, type ProxyRefusal } from './refusals'
+import { upstreamCalls } from './upstream'
+import type { UpstreamCalls } from './types'
 import { normalizeRequest, normalizeResponse } from './schema-enforcer'
 import { resolveContext } from './context-resolver'
 import { resolveGitContext } from './git-context'
@@ -141,11 +143,15 @@ export class ClawdeClient {
       let text: string
       let refusedBy: string | null
       let refusedRule: string | null
+      let upstream: UpstreamCalls | undefined
+      let retryAfter: string | null
       try {
         const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal })
         status = response.status
         refusedBy = response.headers.get(REFUSAL_HEADER)
         refusedRule = response.headers.get(REFUSAL_RULE_HEADER)
+        upstream = upstreamCalls(response.headers)
+        retryAfter = response.headers.get('retry-after')
         text = await response.text()
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
@@ -173,16 +179,22 @@ export class ClawdeClient {
         const answered = headerRefusal(refusedBy, refusedRule, typeof content === 'string' ? content : '')
         if (answered) this.refuse(answered, status)
         normalized.verdict = 'allow'
+        if (upstream) normalized.upstream = upstream
         return normalized
       }
 
       const refusal = parseRefusal(status, text)
-      if (refusal) this.refuse(refusal, status)
+      if (refusal) this.refuse(refusal, status, retryAfter)
 
       lastError = `HTTP error ${status}: ${text}`
       // A 4xx that is not a refusal (bad key, malformed body) fails the same
-      // way every time; only a 5xx is worth another attempt.
+      // way every time; only a 5xx is worth another attempt — and not one the
+      // proxy already retried upstream, which another round from here would
+      // only multiply.
       if (status < 500) throw new ClawdeConnectionError(lastError)
+      if (upstream) {
+        throw new ClawdeConnectionError(`${lastError} (the proxy already made ${upstream.attempts} upstream calls)`)
+      }
     }
 
     throw new ClawdeConnectionError(`Request failed after ${maxAttempts} attempts. Last error: ${lastError}`)
@@ -240,8 +252,9 @@ export class ClawdeClient {
   }
 
   /** Fires the refusal's event, then throws it. */
-  private refuse(refusal: ProxyRefusal, status: number): never {
-    this.eventEmitter.emit(refusal.verdict, { ...refusal, status })
-    throw new ClawdeBlockedError(refusal.verdict, refusal.code, status, refusal.message, refusal.ruleId)
+  private refuse(refusal: ProxyRefusal, status: number, retryAfter: string | null = null): never {
+    const seconds = retryAfter !== null && /^\d+$/.test(retryAfter.trim()) ? Number(retryAfter.trim()) : undefined
+    this.eventEmitter.emit(refusal.verdict, { ...refusal, status, ...(seconds !== undefined ? { retryAfterSeconds: seconds } : {}) })
+    throw new ClawdeBlockedError(refusal.verdict, refusal.code, status, refusal.message, refusal.ruleId, seconds)
   }
 }

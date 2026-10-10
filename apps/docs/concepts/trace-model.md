@@ -6,7 +6,7 @@ Intutic monitors, accounts for, and evaluates every AI agent request through a s
 
 ## Telemetry Schema
 
-Every trace tracks token counts, routing tiers, active cost profiles, anomalies, and policy enforcement decisions in the database:
+Every trace tracks token counts, the requested and routed model, active cost profiles, anomalies, and policy enforcement decisions in the database:
 
 ```typescript
 interface ExecutionTrace {
@@ -18,7 +18,7 @@ interface ExecutionTrace {
   // Model Routing & Selection
   requestedModel: string;        // Model requested by the agent harness
   actualModelRouted: string;     // Model actually used (after optimization routing)
-  routingTier: string;           // Selected routing tier ('cost', 'quality', 'speed')
+  routingTier: string;           // Always 'frontier': a fixed value kept because traces' integrity hashes include it
   complexityScore: number;       // Inferred task complexity score (0.0 to 1.0)
   
   // Token Auditing
@@ -159,6 +159,8 @@ not a documentation one.
 | `taxonomyMetadata` | `traceIngestClassifier` at ingest | every probe, not just the winner |
 | `complianceScore` | the proxy | 0.0–1.0 rule alignment |
 | `toolResultBytesSaved` | the proxy | bytes the compactor removed from the response |
+| `upstreamAttempts` | the proxy | every upstream call when it [retried or fell back](/guide/intelligent-routing#retries-and-fallbacks); null for a single call |
+| `upstreamFallback` | the proxy | the fallback target that answered, and the model whose retries ran out |
 
 ### Waste patterns
 

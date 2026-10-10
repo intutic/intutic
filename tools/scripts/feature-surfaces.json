@@ -42,7 +42,12 @@
           { "file": "packages/gate-js/src/harness.ts", "contains": "evaluateMcp(toolName, snap)" },
           { "file": "packages/intutic-clawde/intutic_clawde/gate/snapshot.py", "contains": "mcp_registry" }
         ],
-        "clawdeSdk": { "none": "MCP tool calls never pass through the clawde chat client" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "approveMcpServer" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "approve_mcp_server" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "disableMcpTool" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "disable_mcp_tool" }
+        ],
         "mcpTools": ["intutic_mcp_registry_status"],
         "kitkat": ["SERVER_NOT_APPROVED", "intutic_mcp_registry_status", "POLICY_SNAPSHOT_UNVERIFIED"],
         "terraform": ["intutic_mcp_server_decision", "workspace_settings.mcpDefaultPolicy"],
@@ -85,7 +90,12 @@
         "dashboard": [{ "file": "apps/dashboard/src/routes/DecisionsPage.tsx" }],
         "cli": ["decision approve --reason", "decision reject"],
         "gateSdk": ["HELD"],
-        "clawdeSdk": ["policy_held", "LOOP_RUN_PENDING_REVIEW"],
+        "clawdeSdk": [
+          "policy_held",
+          "LOOP_RUN_PENDING_REVIEW",
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "approveDecision" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "approve_decision" }
+        ],
         "mcpTools": ["intutic_hold_status"],
         "kitkat": ["intutic decision approve", "reviewHoldBypassEnabled"],
         "terraform": ["workspace_settings.reviewHoldBypassEnabled"],
@@ -274,7 +284,14 @@
           { "file": "packages/gate-js/src/client.ts", "contains": "gateSource: 'sdk'" },
           { "file": "packages/intutic-clawde/intutic_clawde/gate/client.py", "contains": "\"gateSource\": \"sdk\"" }
         ],
-        "clawdeSdk": { "none": "alerts are for operators" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getGateLiveness" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_gate_liveness" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getIntegrityChain" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_integrity_chain" },
+          { "file": "packages/clawde-sdk/src/integrity.ts", "contains": "verifyIntegrityRoot" },
+          { "file": "packages/intutic-clawde/intutic_clawde/integrity.py", "contains": "verify_integrity_root" }
+        ],
         "mcpTools": { "none": "alerts are for operators" },
         "kitkat": { "none": "alerts are for operators" },
         "terraform": ["intutic_notification_rule"],
@@ -300,7 +317,12 @@
         ],
         "cli": ["siem list", "siem show", "siem sources", "siem create", "siem update", "siem delete"],
         "gateSdk": { "none": "operator configuration" },
-        "clawdeSdk": { "none": "operator configuration" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "createSiemDestination" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "create_siem_destination" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "listSiemSources" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "list_siem_sources" }
+        ],
         "mcpTools": { "none": "operator configuration" },
         "kitkat": { "none": "operator configuration" },
         "terraform": ["intutic_siem_destination"],
@@ -341,7 +363,12 @@
           { "ref": "siem rotate-secret", "badge": false }
         ],
         "gateSdk": { "none": "receivers verify; the docs give Node and Python snippets" },
-        "clawdeSdk": { "none": "receivers verify; the docs give Node and Python snippets" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "rotateNotificationRuleSecret" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "rotate_notification_rule_secret" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "rotateSiemDestinationSecret" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "rotate_siem_destination_secret" }
+        ],
         "mcpTools": { "none": "operator configuration" },
         "kitkat": { "none": "operator configuration" },
         "terraform": [
@@ -390,7 +417,14 @@
         ],
         "cli": ["compliance coverage", "compliance collect --from --to", "compliance download", "compliance verify --jwks"],
         "gateSdk": { "none": "auditor reporting" },
-        "clawdeSdk": { "none": "auditor reporting" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "downloadFrameworkCoverage" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "download_framework_coverage" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "collectEvidence" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "collect_evidence" },
+          { "file": "packages/clawde-sdk/src/evidence.ts", "contains": "verifyEvidenceArchive" },
+          { "file": "packages/intutic-clawde/intutic_clawde/evidence.py", "contains": "verify_evidence_archive" }
+        ],
         "mcpTools": { "none": "auditor reporting" },
         "kitkat": { "none": "auditor reporting" },
         "terraform": { "none": "the mappings are versioned in code" },
@@ -420,7 +454,10 @@
         "dashboard": [{ "file": "apps/dashboard/src/routes/InventoryPage.tsx", "contains": "useInventoryDisconnects" }],
         "cli": ["disconnect --harness --dry-run --keep-login", "inventory disconnects --limit"],
         "gateSdk": { "none": "SDK gates install nothing to undo" },
-        "clawdeSdk": { "none": "the SDKs install nothing to undo" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "listInventoryDisconnects" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "list_inventory_disconnects" }
+        ],
         "mcpTools": { "none": "a local command" },
         "kitkat": ["intutic disconnect"],
         "terraform": { "none": "a machine-local command" },
@@ -516,7 +553,11 @@
           { "file": "packages/clawde-sdk/src/git-context.ts", "contains": "branchName" },
           { "file": "packages/intutic-clawde/intutic_clawde/client.py", "contains": "x-session-id" },
           { "file": "packages/intutic-clawde/intutic_clawde/git_context.py", "contains": "branchName" },
-          { "file": "apps/docs/reference/clawde-sdk.md", "contains": "Git context and cost attribution" }
+          { "file": "apps/docs/reference/clawde-sdk.md", "contains": "Git context and cost attribution" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getMemberUsage" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_member_usage" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getCommitUsage" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_commit_usage" }
         ],
         "mcpTools": { "none": "reporting" },
         "kitkat": { "none": "reporting" },
@@ -551,7 +592,12 @@
         ],
         "cli": ["usage pull-requests", "github webhook show", "github webhook rotate-secret"],
         "gateSdk": { "none": "attribution comes from the branch the daemon reports" },
-        "clawdeSdk": { "none": "attribution comes from the branch the daemon reports (see fleet-analytics)" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getPullRequestUsage" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_pull_request_usage" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "rotateGithubWebhookSecret" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "rotate_github_webhook_secret" }
+        ],
         "mcpTools": { "none": "reporting" },
         "kitkat": { "none": "reporting" },
         "terraform": { "none": "the webhook secret is shown once and belongs in GitHub's settings, not in Terraform state" },
@@ -574,7 +620,12 @@
         "dashboard": { "none": "decisions are approved in Slack or the CLI (guide/decisions.md)" },
         "cli": ["decision approve", "decision reject", "loop review"],
         "gateSdk": [{ "ref": "HELD", "badge": false }],
-        "clawdeSdk": { "none": "see mcp-approval-holds" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "approveLoopRun" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "approve_loop_run" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "rejectDecision" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "reject_decision" }
+        ],
         "mcpTools": [{ "ref": "intutic_hold_status", "badge": false }],
         "kitkat": ["Owner, Admin or Engineering Manager"],
         "terraform": { "none": "approver roles are fixed in code" },
@@ -704,7 +755,12 @@
         "dashboard": [{ "file": "apps/dashboard/src/routes/InventoryPage.tsx" }],
         "cli": ["inventory summary", "inventory harnesses", "inventory mcp-servers", "inventory skills --device --search", "inventory devices"],
         "gateSdk": { "none": "the daemon collects the inventory; SDK gates report only their own events" },
-        "clawdeSdk": { "none": "the daemon collects the inventory" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "getInventorySummary" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "get_inventory_summary" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "listInventorySkills" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "list_inventory_skills" }
+        ],
         "mcpTools": { "none": "an operator report" },
         "kitkat": { "none": "an operator report" },
         "terraform": { "none": "an observation, not configuration" },
@@ -726,7 +782,7 @@
         "api": [
           { "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" },
           { "file": "services/control-plane/src/routes/workspace.ts", "contains": "piiDetectors: PiiDetectorSettingsSchema" },
-          { "file": "services/control-plane/src/routes/auth.ts", "contains": "piiDetectors: await keyPiiDetectors(c, auth)" },
+          { "file": "services/control-plane/src/routes/auth.ts", "contains": "piiDetectors: settings === undefined ? null : piiDetectorsField(settings?.piiDetectors, auth.workspaceId)" },
           { "file": "services/control-plane/src/routes/sops.ts", "contains": "piiDetectors: curation.piiDetectors" },
           { "file": "services/control-plane/src/routes/evaluate.ts", "contains": "piiDetectors: curation.piiDetectors" }
         ],
@@ -763,7 +819,10 @@
       "title": "Rego policies",
       "plan": "Open-Core",
       "surfaces": {
-        "api": [{ "ref": "POST /api/v1/wasm-rules", "badge": false, "auth": "OWNER/ADMIN" }],
+        "api": [
+          { "ref": "POST /api/v1/wasm-rules", "badge": false, "auth": "OWNER/ADMIN" },
+          { "ref": "GET /api/v1/wasm-rules/binaries/:sha256", "badge": false }
+        ],
         "dashboard": [{ "file": "apps/dashboard/src/routes/WasmRulesPage.tsx" }],
         "cli": ["rules build --rego --entrypoint --risk-tier", "rules test --input", "policy install --wasm"],
         "gateSdk": { "none": "Rego rules run in the proxy and the MCP proxy; the SDK gates evaluate the policy snapshot" },
@@ -775,13 +834,17 @@
           "guide/rego-policies.md#building",
           "guide/rego-policies.md#testing",
           "guide/rego-policies.md#deploying",
-          "guide/wasm-rules.md#when-a-rule-reaches-no-verdict"
+          "guide/wasm-rules.md#when-a-rule-reaches-no-verdict",
+          "integrations/mcp-proxy.md#custom-rules"
         ],
         "website": [{ "file": "index.html", "contains": "Rules can also be written in Rego" }],
         "events": [{ "file": "services/control-plane/src/routes/decisions.ts", "contains": "'decision.pending'" }],
         "enforcement": [
           { "file": "packages/proxy/src/wasm/opa.rs" },
           { "file": "packages/shared-types/src/regoRules.ts" },
+          { "file": "packages/mcp-proxy/src/wasm/cloudRules.ts", "contains": "binaryMatches(bytes, descriptor.sha256)" },
+          { "file": "packages/mcp-proxy/src/interceptor.ts", "contains": "await runner.syncCloudRules(this.policy.getWasmRules())" },
+          { "file": "services/control-plane/src/lib/mcpCuration.ts", "contains": "activeWasmRuleDescriptors(db, workspaceId)" },
           "mcp:WASM_RULE",
           "proxy:GOVERNANCE_UNAVAILABLE",
           "mcp:GOVERNANCE_UNAVAILABLE"
@@ -802,7 +865,12 @@
         "dashboard": [{ "file": "apps/dashboard/src/components/policy/AuthoredGuardrailForm.tsx" }],
         "cli": ["guardrails create", "guardrails update", "guardrails delete"],
         "gateSdk": { "none": "a promoted guardrail reaches the SDK gates as a snapshot rule, like an extracted one" },
-        "clawdeSdk": { "none": "a promoted guardrail reaches the proxy like an extracted one" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "createGuardrail" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "create_guardrail" },
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "deleteGuardrail" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "delete_guardrail" }
+        ],
         "mcpTools": { "none": "operator authoring" },
         "kitkat": { "none": "operator authoring" },
         "terraform": ["intutic_guardrail"],
@@ -857,7 +925,10 @@
         "dashboard": { "none": "each control's role follows the route it calls" },
         "cli": [{ "file": "tools/cli/src/lib/api.ts", "contains": "body.detail" }],
         "gateSdk": { "none": "gates call routes open to every role but Viewer" },
-        "clawdeSdk": { "none": "the chat client calls the proxy, not role-guarded routes" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "body.detail" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "body.get(\"detail\")" }
+        ],
         "mcpTools": { "none": "not agent-facing" },
         "kitkat": { "none": "not agent-facing" },
         "terraform": [{ "file": "apps/docs/reference/terraform/index.md", "contains": "OWNER or ADMIN for most resources" }],
@@ -867,8 +938,315 @@
         "enforcement": [{ "file": "services/control-plane/__tests__/unit/routeRoleGuards.test.ts" }]
       }
     },
-    {"id": "custom-rule-limits", "title": "Custom WASM and Rego rule limits, fail mode and load failures", "plan": "Open-Core", "surfaces": {"api": [{"ref": "POST /api/v1/wasm-rules", "badge": false, "auth": "OWNER/ADMIN"}], "dashboard": [{"file": "apps/dashboard/src/routes/WasmRulesPage.tsx"}], "cli": [{"ref": "rules test", "badge": false}, {"ref": "policy test", "badge": false}, {"ref": "policy install", "badge": false}, {"file": "tools/cli/src/commands/rules.ts", "contains": "loadMeteredRegoRule"}, {"file": "tools/cli/src/commands/policy.ts", "contains": "meterFuel(new Uint8Array(wasmBuffer), budget)"}], "gateSdk": {"none": "gates never run WASM or Rego rules"}, "clawdeSdk": ["GOVERNANCE_UNAVAILABLE"], "mcpTools": {"none": "enforced inside the proxies, not exposed as a tool"}, "kitkat": ["GOVERNANCE_UNAVAILABLE"], "terraform": ["intutic_wasm_rule"], "docs": [{"ref": "guide/wasm-rules.md#sandboxing-resource-limits", "badge": false}, {"ref": "guide/wasm-rules.md#when-a-rule-reaches-no-verdict", "badge": false}, {"ref": "guide/rego-policies.md#limits", "badge": false}], "website": [{"file": "index.html", "contains": "fuel-limited WASM sandbox, which enforces a hard fuel and wall-clock limit per rule"}], "events": [{"ref": "incident.created", "badge": false}], "enforcement": ["proxy:GOVERNANCE_UNAVAILABLE", "mcp:GOVERNANCE_UNAVAILABLE", {"file": "packages/proxy/src/wasm/limits.rs"}, {"file": "packages/shared-types/src/wasmFuel.ts", "contains": "REGO_FUEL_BUDGET"}, {"file": "packages/shared-types/src/ruleLoadFailures.ts", "contains": "RULE_LOAD_FAILURE_REASONS"}, {"file": "services/control-plane/src/lib/valkeySubscriber.ts", "contains": "wasm_rule_refused"}]}},
+    {"id": "custom-rule-limits", "title": "Custom WASM and Rego rule limits, fail mode and load failures", "plan": "Open-Core", "surfaces": {"api": [{"ref": "POST /api/v1/wasm-rules", "badge": false, "auth": "OWNER/ADMIN"}], "dashboard": [{"file": "apps/dashboard/src/routes/WasmRulesPage.tsx"}, {"file": "apps/dashboard/src/lib/incidentType.ts", "contains": "WASM_RULE_REFUSED"}], "cli": [{"ref": "rules test", "badge": false}, {"ref": "policy test", "badge": false}, {"ref": "policy install", "badge": false}, {"file": "tools/cli/src/commands/rules.ts", "contains": "loadMeteredRegoRule"}, {"file": "tools/cli/src/commands/policy.ts", "contains": "meterFuel(new Uint8Array(wasmBuffer), budget)"}], "gateSdk": {"none": "gates never run WASM or Rego rules"}, "clawdeSdk": ["GOVERNANCE_UNAVAILABLE"], "mcpTools": {"none": "enforced inside the proxies, not exposed as a tool"}, "kitkat": ["GOVERNANCE_UNAVAILABLE"], "terraform": ["intutic_wasm_rule"], "docs": [{"ref": "guide/wasm-rules.md#sandboxing-resource-limits", "badge": false}, {"ref": "guide/wasm-rules.md#when-a-rule-reaches-no-verdict", "badge": false}, {"ref": "guide/rego-policies.md#limits", "badge": false}, {"ref": "guide/wasm-rules.md#when-a-rule-cannot-load", "badge": false}], "website": [{"file": "index.html", "contains": "fuel-limited WASM sandbox, which enforces a hard fuel and wall-clock limit per rule"}], "events": [{"ref": "incident.created", "badge": false}, {"file": "services/control-plane/src/services/siem/adapters.ts", "contains": "[SystemIncidentType.WASM_RULE_REFUSED]: { eventClass: 'WASM_RULE_REFUSED'"}], "enforcement": ["proxy:GOVERNANCE_UNAVAILABLE", "mcp:GOVERNANCE_UNAVAILABLE", {"file": "packages/proxy/src/wasm/limits.rs"}, {"file": "packages/shared-types/src/wasmFuel.ts", "contains": "REGO_FUEL_BUDGET"}, {"file": "packages/shared-types/src/ruleLoadFailures.ts", "contains": "RULE_LOAD_FAILURE_REASONS"}, {"file": "services/control-plane/src/services/wasmRuleRefusalService.ts", "contains": "z.enum(RULE_LOAD_FAILURE_REASONS)"}, {"file": "services/control-plane/src/services/wasmRuleRefusalService.ts", "contains": "anomalyType: SystemIncidentType.WASM_RULE_REFUSED"}, {"file": "packages/db/src/postgres/migrations/218_wasm_rule_refused_incident_type.sql", "contains": "ADD VALUE IF NOT EXISTS 'WASM_RULE_REFUSED'"}]}},
+    {
+      "id": "incident-types",
+      "title": "Incident types: anomaly categories and system incidents, filtered and alerted by type and severity",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "GET /api/v1/incidents", "badge": false, "auth": "OWNER/ADMIN/EM" },
+          { "file": "services/control-plane/src/routes/incidents.ts", "contains": "type: z.enum(INCIDENT_TYPES).optional()" }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/routes/IncidentsPage.tsx", "contains": "id=\"incidents-type-filter\"" },
+          { "file": "apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx", "contains": "An incident is sent at its own severity" }
+        ],
+        "cli": ["incidents list --status --severity --type --page --limit", "incidents show"],
+        "gateSdk": { "none": "gates file incidents; they do not read them" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "public async listIncidents(filters: IncidentFilters = {})" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "def list_incidents(" },
+          { "file": "packages/shared-types/fixtures/control-plane-operations.json", "contains": "\"ts\": \"getIncident\"" }
+        ],
+        "mcpTools": ["intutic_list_incidents", { "file": "packages/mcp-proxy/src/agentTools.ts", "contains": ".enum(INCIDENT_TYPES)" }],
+        "kitkat": { "none": "incidents are for reviewers, not the agent" },
+        "terraform": { "none": "incidents are records, not configuration" },
+        "docs": [
+          { "ref": "guide/concepts.md#incident-types", "badge": false },
+          { "ref": "guide/settings.md#rule-filters", "badge": false },
+          { "ref": "reference/cli.md#intutic-incidents-list", "badge": false }
+        ],
+        "website": { "none": "an operational detail of the incident queue" },
+        "events": [{ "ref": "incident.created", "badge": false }],
+        "enforcement": [
+          { "file": "packages/shared-types/src/enums.ts", "contains": "export const INCIDENT_TYPES" },
+          { "file": "packages/shared-types/src/notifications.ts", "contains": "export function incidentNotificationSeverity" },
+          { "file": "services/control-plane/src/services/notificationRouterService.ts", "contains": "case 'incident.created': return incidentNotificationSeverity(data.severity)" },
+          { "file": "packages/db/src/postgres/migrations/219_system_anomaly_incident_type.sql", "contains": "ADD VALUE IF NOT EXISTS 'SYSTEM_ANOMALY'" }
+        ]
+      }
+    },
     {"id": "hook-gate-deadlines", "title": "Per-harness hook gate deadlines", "plan": "Open-Core", "surfaces": {"api": {"none": "set in each harness's hook registration on the machine"}, "dashboard": {"none": "a machine-local setting"}, "cli": [{"ref": "connect", "badge": false}, {"file": "tools/cli/src/commands/connect.ts"}], "gateSdk": [{"file": "packages/gate-js/src/limits.ts", "contains": "GATE_DEADLINE_MS"}], "clawdeSdk": {"none": "the chat client does not run a hook gate"}, "mcpTools": {"none": "a machine-local setting"}, "kitkat": {"none": "the deadline refusal is a hook-gate code, explained in its reason"}, "terraform": {"none": "a machine-local setting"}, "docs": [{"ref": "reference/harness-security-matrix.md#hook-timeouts", "badge": false}], "website": {"none": "not described on the website"}, "events": {"none": "a deadline refusal is a gate decision, recorded as one"}, "enforcement": ["hook:GATE_DEADLINE", {"file": "packages/shared-types/src/gateLimits.ts", "contains": "HOOK_GATE_TIMEOUTS"}]}},
-    {"id": "gate-self-protection", "title": "Gate self-protection: protected files, snapshot self-heal, Copilot hook settings, TAMPER", "plan": "Open-Core", "surfaces": {"api": [{"ref": "POST /api/v1/hook-events", "badge": false}], "dashboard": [{"file": "apps/dashboard/src/routes/IncidentsPage.tsx", "contains": "Gate verdict"}, {"file": "apps/dashboard/src/components/settings/AddSiemDestinationModal.tsx", "contains": "GATE_DECISION_VERDICTS"}], "cli": [{"ref": "connect", "badge": false}], "gateSdk": ["POLICY_SNAPSHOT_UNVERIFIED"], "clawdeSdk": {"none": "the chat client has no gate files to protect"}, "mcpTools": {"none": "enforced by the sync daemon and the gates"}, "kitkat": ["POLICY_SNAPSHOT_UNVERIFIED"], "terraform": {"none": "machine-local files"}, "docs": [{"ref": "integrations/github-copilot.md#keeping-the-hook-on", "badge": false}, {"file": "apps/docs/guide/siem-export.md", "contains": "TAMPER"}], "website": {"none": "not described on the website"}, "events": [{"ref": "siem:gate_decisions", "badge": false}], "enforcement": ["hook:BUILT_IN_RULE", "hook:POLICY_SNAPSHOT_UNVERIFIED", {"file": "services/sync-daemon/src/harness/protectedPaths.ts"}, {"file": "services/sync-daemon/src/watcher/settingsGuard.ts"}, {"file": "services/sync-daemon/src/watcher/vscodeHookSettings.ts"}, {"file": "packages/shared-types/src/gateDecisions.ts", "contains": "TAMPER"}]}}
+    {"id": "gate-self-protection", "title": "Gate self-protection: protected files, snapshot self-heal, Copilot hook settings, TAMPER", "plan": "Open-Core", "surfaces": {"api": [{"ref": "POST /api/v1/hook-events", "badge": false}], "dashboard": [{"file": "apps/dashboard/src/routes/IncidentsPage.tsx", "contains": "Gate verdict"}, {"file": "apps/dashboard/src/components/settings/AddSiemDestinationModal.tsx", "contains": "GATE_DECISION_VERDICTS"}], "cli": [{"ref": "connect", "badge": false}], "gateSdk": ["POLICY_SNAPSHOT_UNVERIFIED"], "clawdeSdk": {"none": "the chat client has no gate files to protect"}, "mcpTools": {"none": "enforced by the sync daemon and the gates"}, "kitkat": ["POLICY_SNAPSHOT_UNVERIFIED"], "terraform": {"none": "machine-local files"}, "docs": [{"ref": "integrations/github-copilot.md#keeping-the-hook-on", "badge": false}, {"file": "apps/docs/guide/siem-export.md", "contains": "TAMPER"}], "website": {"none": "not described on the website"}, "events": [{"ref": "siem:gate_decisions", "badge": false}], "enforcement": ["hook:BUILT_IN_RULE", "hook:POLICY_SNAPSHOT_UNVERIFIED", {"file": "services/sync-daemon/src/harness/protectedPaths.ts"}, {"file": "services/sync-daemon/src/watcher/settingsGuard.ts"}, {"file": "services/sync-daemon/src/watcher/vscodeHookSettings.ts"}, {"file": "packages/shared-types/src/gateDecisions.ts", "contains": "TAMPER"}]}},
+    {
+      "id": "credential-encryption-and-audit",
+      "title": "Stored provider keys encrypted with a rotatable key; credential changes recorded",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/provider-credentials/:provider", "auth": "OWNER/ADMIN" },
+          { "ref": "DELETE /api/v1/workspace/provider-credentials/:provider", "auth": "OWNER/ADMIN" },
+          { "ref": "POST /api/v1/keys", "badge": false },
+          { "ref": "DELETE /api/v1/keys/:id", "badge": false },
+          { "ref": "GET /api/v1/audit/timeline", "auth": "OWNER/ADMIN", "badge": false }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/routes/AuditTimelinePage.tsx", "contains": "credentialChangeTitle" },
+          { "file": "apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx", "contains": "credential.changed" },
+          { "file": "apps/dashboard/src/components/settings/EditSiemSourcesModal.tsx", "contains": "credential_changes" }
+        ],
+        "cli": [{ "ref": "credentials set", "badge": false }, { "ref": "credentials unset", "badge": false }],
+        "gateSdk": { "none": "not agent-facing" },
+        "clawdeSdk": { "none": "not agent-facing" },
+        "mcpTools": { "none": "not agent-facing" },
+        "kitkat": { "none": "not agent-facing" },
+        "terraform": [{ "ref": "intutic_virtual_key", "badge": false }],
+        "docs": [
+          "security.md#stored-credentials",
+          { "ref": "guide/self-host.md#rotate-the-encryption-key", "badge": false },
+          { "ref": "guide/audit-timeline.md#what-it-shows", "badge": false }
+        ],
+        "website": { "none": "a security detail the docs carry; the landing page names no storage scheme" },
+        "events": ["credential.changed", "siem:credential_changes"],
+        "enforcement": [
+          { "file": "services/control-plane/src/lib/credentialEncryption.ts", "contains": "enc:v1:" },
+          { "file": "packages/proxy/src/credential_crypto.rs", "contains": "enc:v1:" },
+          { "file": "services/control-plane/src/services/credentialEncryptionBackfill.ts", "contains": "proxyKeyReadiness" },
+          { "file": "services/control-plane/src/services/secretReencryption.ts" },
+          { "file": "packages/proxy/src/store/valkey.rs", "contains": "CREDENTIAL_KEYS_ANNOUNCE_PREFIX" },
+          { "file": "services/control-plane/src/services/credentialChangeService.ts" }
+        ]
+      }
+    },
+    {
+      "id": "upstream-retries",
+      "title": "Upstream retries and fallbacks",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" },
+          { "file": "services/control-plane/src/routes/workspace.ts", "contains": "upstreamRetry: UpstreamRetrySettingsSchema" },
+          { "file": "services/control-plane/src/routes/auth.ts", "contains": "upstreamRetry: settings === undefined ? null" },
+          { "file": "services/control-plane/src/services/traceQueryService.ts", "contains": "upstreamAttempts: executionTraces.upstreamAttempts" }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/settings/UpstreamRetryPanel.tsx", "contains": "upstreamRetry" },
+          { "file": "apps/dashboard/src/components/traces/TraceDetailDrawer.tsx", "contains": "Upstream calls" }
+        ],
+        "cli": [
+          { "ref": "settings set", "badge": false },
+          { "file": "tools/cli/src/commands/settings.ts", "contains": "UpstreamRetrySettingsSchema" }
+        ],
+        "gateSdk": { "none": "gates decide tool calls; retries are on the model call, in the proxy" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/upstream.ts", "contains": "x-intutic-upstream-attempts" },
+          { "file": "packages/intutic-clawde/intutic_clawde/upstream.py", "contains": "x-intutic-upstream-attempts" }
+        ],
+        "mcpTools": { "none": "model calls, not MCP calls" },
+        "kitkat": { "none": "nothing for an agent to act on; retries finish before the answer reaches it" },
+        "terraform": ["workspace_settings.upstreamRetry"],
+        "docs": [
+          "guide/intelligent-routing.md#retries-and-fallbacks",
+          { "ref": "reference/configuration.md#retries-intutic-settings-routing-retry", "badge": false },
+          { "ref": "guide/settings.md#retries-fallbacks", "badge": false }
+        ],
+        "website": [{ "file": "index.html", "contains": "Retries overloaded and rate-limited provider calls" }],
+        "events": ["siem:execution_traces"],
+        "enforcement": [
+          { "file": "packages/proxy/src/routing/retry.rs", "contains": "pub async fn send_with_retry" },
+          { "file": "packages/proxy/src/proxy.rs", "contains": "async fn try_fallbacks(" },
+          { "file": "packages/shared-types/fixtures/upstream-retry-vectors.json" },
+          { "file": "packages/proxy/tests/upstream_retry_test.rs" }
+        ]
+      }
+    },
+    {
+      "id": "cloud-providers",
+      "title": "AWS Bedrock, Google Vertex AI and Azure OpenAI upstreams",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/provider-credentials/:provider", "badge": false, "auth": "OWNER/ADMIN" },
+          { "file": "services/control-plane/src/routes/providerCredentials.ts", "contains": "checkCloudCredentialFields(def.id, values)" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/ProviderCredentialFields.tsx", "contains": "requiresOneOf" }],
+        "cli": [{ "ref": "credentials set --field-file", "badge": false }],
+        "gateSdk": { "none": "gates decide tool calls; which provider serves the model call is the proxy's" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "setProviderCredential" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "set_provider_credential" }
+        ],
+        "mcpTools": { "none": "model calls, not MCP calls" },
+        "kitkat": { "none": "nothing for an agent to act on; the model name picks the provider" },
+        "terraform": ["intutic_provider_credential"],
+        "docs": [
+          "integrations/aws-bedrock.md#naming-a-bedrock-model",
+          "integrations/google-vertex-ai.md#naming-a-vertex-ai-model",
+          "integrations/azure-openai.md#naming-a-deployment",
+          { "ref": "reference/configuration.md#cloud-providers-intutic-settings-providers", "badge": false },
+          { "ref": "reference/configuration.md#fallbacks-intutic-settings-routing-fallbacks", "badge": false }
+        ],
+        "website": [{ "file": "index.html", "contains": "AWS Bedrock, Google Vertex AI and Azure OpenAI with your own cloud credentials" }],
+        "events": ["siem:execution_traces"],
+        "enforcement": [
+          { "file": "packages/proxy/src/cloud/mod.rs", "contains": "pub async fn send(" },
+          { "file": "packages/proxy/src/cloud/sigv4.rs", "contains": "fn get_vanilla()" },
+          { "file": "packages/proxy/tests/cloud_providers_test.rs" }
+        ]
+      }
+    },
+    {
+      "id": "spend-budgets",
+      "title": "Spend budgets per workspace and virtual key, hard or soft, and key rate limits",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          { "ref": "GET /api/v1/budget", "badge": false },
+          { "ref": "PUT /api/v1/budget", "auth": "OWNER/ADMIN", "badge": false },
+          "GET /api/v1/budget/keys",
+          { "ref": "PATCH /api/v1/keys/:id", "auth": "OWNER/ADMIN" },
+          { "ref": "GET /api/v1/budget/alerts", "badge": false },
+          { "ref": "POST /api/v1/budget/alerts/:alertId/acknowledge", "badge": false }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/settings/SpendBudgetsPanel.tsx", "contains": "KeyBudgetsCard" },
+          { "file": "apps/dashboard/src/components/settings/SpendBudgetsPanel.tsx", "contains": "PlanCapSwitch" },
+          { "file": "apps/dashboard/src/routes/SettingsPage.tsx", "contains": "settings-budget-monthly-enforcement" }
+        ],
+        "cli": [
+          { "ref": "budget", "badge": false },
+          "budget set --daily --monthly --threshold --daily-enforcement --monthly-enforcement",
+          "budget keys",
+          "budget key --daily --monthly --daily-enforcement --monthly-enforcement --rpm --tpm"
+        ],
+        "gateSdk": { "none": "the gate SDKs decide tool calls; spend is counted on model calls at the LLM proxy" },
+        "clawdeSdk": ["BUDGET_EXCEEDED", "RATE_LIMITED", "OVERAGE_HARD_CAP_EXCEEDED"],
+        "mcpTools": { "none": "the intutic MCP server reports MCP call budgets; LLM spend budgets are read with intutic budget and on Settings › Billing" },
+        "kitkat": ["`RATE_LIMITED`: your key's requests or tokens per minute are used up"],
+        "terraform": [
+          { "ref": "intutic_virtual_key", "badge": false },
+          "intutic_workspace_budget",
+          "workspace_settings.enforcement_mode",
+          "workspace_settings.workspace_hard_cap_enabled"
+        ],
+        "docs": [
+          "guide/budgets.md#setting-up-budget-limits",
+          "guide/budgets.md#workspace-caps",
+          "guide/budgets.md#key-budgets",
+          "guide/budgets.md#key-rate-limits",
+          "guide/budgets.md#plan-daily-cap",
+          "guide/budgets.md#budget-alerts",
+          { "ref": "guide/tier-matrix.md#what-a-control-plane-adds", "badge": false },
+          { "ref": "compare/portkey.md#where-portkey-is-stronger", "badge": false }
+        ],
+        "website": [{ "file": "index.html", "contains": "Spend budgets per workspace, API key and member" }],
+        "events": ["finops.budget.threshold", "finops.budget.exceeded", "siem:budget_alerts"],
+        "enforcement": [
+          "proxy:BUDGET_EXCEEDED",
+          "proxy:RATE_LIMITED",
+          "proxy:OVERAGE_HARD_CAP_EXCEEDED",
+          { "file": "packages/proxy/src/key_limits.rs" },
+          { "file": "services/control-plane/src/services/spendBudgetService.ts", "contains": "accrueKeySpend" }
+        ]
+      }
+    },
+    {
+      "id": "member-spend-budgets",
+      "title": "Spend budgets per member, and a default member budget",
+      "plan": "Biz Org+",
+      "surfaces": {
+        "api": [
+          "GET /api/v1/budget/members",
+          { "ref": "PUT /api/v1/budget/members/:memberId", "auth": "OWNER/ADMIN" },
+          { "ref": "DELETE /api/v1/budget/members/:memberId", "auth": "OWNER/ADMIN" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/SpendBudgetsPanel.tsx", "contains": "MemberBudgetsCard" }],
+        "cli": ["budget members", "budget member --daily --monthly --daily-enforcement --monthly-enforcement"],
+        "gateSdk": { "none": "the gate SDKs decide tool calls; spend is counted on model calls at the LLM proxy" },
+        "clawdeSdk": ["BUDGET_EXCEEDED"],
+        "mcpTools": { "none": "LLM spend budgets are read with intutic budget members and on Settings › Billing" },
+        "kitkat": ["names the budget (the workspace's, your key's or yours)"],
+        "terraform": ["intutic_member_budget"],
+        "docs": ["guide/budgets.md#member-budgets"],
+        "website": [{ "file": "index.html", "contains": "Spend budgets per workspace, API key and member" }],
+        "events": ["finops.budget.threshold", "finops.budget.exceeded", "siem:budget_alerts"],
+        "enforcement": [
+          "proxy:BUDGET_EXCEEDED",
+          { "file": "services/control-plane/src/lib/planSkuMap.ts", "contains": "planAllowsMemberBudgets" }
+        ]
+      }
+    },
+    {
+      "id": "smart-routing-candidates",
+      "title": "Smart routing chooses only among the candidates a request can reach",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" },
+          { "file": "services/control-plane/src/routes/workspace.ts", "contains": "routingCandidates: z" },
+          { "file": "services/control-plane/src/services/workspaceSettingsService.ts", "contains": "workspace:routing_candidates:" }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/settings/RoutingCachePanel.tsx", "contains": "routingCandidates" },
+          { "file": "apps/dashboard/src/components/settings/RoutingCachePanel.tsx", "contains": "ff_shadow_routing" }
+        ],
+        "cli": [
+          { "ref": "settings set", "badge": false },
+          { "file": "tools/cli/src/commands/operatorCommands.test.ts", "contains": "routingCandidates" }
+        ],
+        "gateSdk": { "none": "gates decide tool calls; which model serves a request is the proxy's" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "updateWorkspaceSettings" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "update_workspace_settings" }
+        ],
+        "mcpTools": { "none": "model calls, not MCP calls" },
+        "kitkat": { "none": "nothing for an agent to act on; the proxy chooses the model" },
+        "terraform": ["workspace_settings.routingCandidates"],
+        "docs": [
+          "guide/intelligent-routing.md#which-models-a-request-can-be-routed-to",
+          { "ref": "guide/intelligent-routing.md#try-it-in-shadow-mode-first", "badge": false },
+          { "ref": "guide/settings.md#smart-model-routing-response-cache", "badge": false },
+          { "ref": "reference/configuration.md#model-routing-intutic-settings-routing", "badge": false }
+        ],
+        "website": { "none": "the landing page names no routing internals" },
+        "events": ["siem:execution_traces"],
+        "enforcement": [
+          { "file": "packages/proxy/src/proxy.rs", "contains": "async fn routing_pool(" },
+          { "file": "packages/proxy/src/proxy.rs", "contains": "fn wire_route(" },
+          { "file": "packages/proxy/src/routing/bandit.rs", "contains": "pub fn model_line(" },
+          { "file": "packages/proxy/tests/smart_routing_test.rs" }
+        ]
+      }
+    },
+    {
+      "id": "provider-model-discovery",
+      "title": "The models a provider key can reach, recorded when the key is checked",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          "GET /api/v1/workspace/provider-credentials/:provider/models",
+          { "ref": "POST /api/v1/workspace/provider-credentials/:provider/verify", "auth": "OWNER/ADMIN" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/ProviderKeyWizard.tsx", "contains": "Models this key can reach" }],
+        "cli": ["credentials models"],
+        "gateSdk": { "none": "not agent-facing" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "listProviderModels" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "list_provider_models" }
+        ],
+        "mcpTools": { "none": "not agent-facing" },
+        "kitkat": { "none": "not agent-facing" },
+        "terraform": { "none": "a read-only list a key check produces; there is nothing to manage" },
+        "docs": ["guide/settings.md#provider-keys"],
+        "website": { "none": "an operator detail the docs carry" },
+        "events": { "none": "recorded on each check; no event is raised for it" },
+        "enforcement": [
+          { "file": "packages/shared-types/src/providerVerification.ts", "contains": "export function parseProviderModels(" },
+          { "file": "services/control-plane/src/lib/providerVerify.ts", "contains": "parseProviderModels" },
+          { "file": "packages/proxy/src/proxy.rs", "contains": "async fn key_lists(" }
+        ]
+      }
+    }
   ]
 }

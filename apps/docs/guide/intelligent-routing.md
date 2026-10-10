@@ -1,6 +1,9 @@
 # Intelligent Model Routing Guide <Badge type="info" text="FinOps & Latency" />
 
-Intelligent Model Routing allows organizations to dynamically optimize LLM model selection across connected AI agent harnesses. By classifying tasks and routing prompts to the most cost-effective and capable models using adaptive reinforcement learning, Intutic helps you achieve peak performance while minimizing token expenses.
+Intelligent Model Routing lets the proxy choose which model serves a request, from a list of candidate models you set, learning from the outcome of each choice which candidate does best for each kind of task.
+
+> [!WARNING]
+> **Experimental, and off until you turn it on.** Routing changes the model your agents talk to. Try it in [shadow mode](#try-it-in-shadow-mode-first) first: the router records the model it would have picked while every request is served with the model it asked for.
 
 ---
 
@@ -31,6 +34,33 @@ Background **LLMProbe** workers audit trajectory outputs, evaluating response qu
                           └─────────────────────┘       └─────────────────────┘
 ```
 <!-- ENTERPRISE_ONLY_END -->
+
+---
+
+## Which models a request can be routed to <Badge type="tip" text="Open-Core" />
+
+A request is routed only when the model it names is one of the **candidate models**, or a dated snapshot or `-latest` alias of one: with `claude-sonnet-4-5` as a candidate, `claude-sonnet-4-5-20250929` and `claude-sonnet-4-5-latest` are routed too, and `claude-sonnet-4-6` is not. Every other request is forwarded as written. When the router keeps a snapshot on its own candidate, the request goes out under the exact snapshot name it asked for.
+
+The candidates are the proxy's `routing.candidate_models` ([configuration](/reference/configuration#model-routing-intutic-settings-routing)), by default `claude-sonnet-5-5`, `gpt-4.1` and `gemini-3.8-flash`. A workspace can replace that list with its own `routingCandidates` setting: **Settings › AI Routing & Caching › Candidate Models** in the dashboard, or
+
+```bash
+intutic settings set routingCandidates '["claude-sonnet-5-5", "claude-haiku-4-5", "gemini-3.8-flash"]'
+intutic settings set routingCandidates '[]'   # back to the proxy's list
+```
+
+Each request then only sees the candidates it can actually reach. A candidate is left out of that request's choice when:
+
+- **its format cannot carry the request.** A Messages request (`/v1/messages`, what Claude Code sends) can go to Claude, DeepSeek, Gemini models (through the Gemini API translation), and Claude on AWS Bedrock, Google Vertex AI and Azure AI Foundry. It never goes to an OpenAI-format model: nothing translates Messages to that format. A Chat Completions or Responses request can go to any OpenAI-format model as written, and to Claude, Gemini and the Claude cloud deployments through a translation applied to the request and, in reverse, to the answer. A request on Gemini's own `/v1beta/models/…` route is refused rather than routed: its model is named in the URL, which the proxy does not read. Send Gemini models on the Messages, Chat Completions or Responses route instead;
+- **it is not allowed**: the workspace's [approved models](/guide/settings#approved-models) (or a standalone proxy's `allowedModels` file) and the key's own model list both apply, exactly as they apply to the request;
+- **it would not fit a spend budget** the request passed, priced for the candidate's model;
+- **there is no credential for its provider**: neither a workspace key under [Provider Keys](/guide/settings#provider-keys) nor the proxy's operator key. A request made with your own provider key keeps that key on that key's provider only;
+- **the workspace's key does not list it.** When a provider key is checked (on save, or with **Test**), the proxy keeps the models the provider listed for it, and leaves out a candidate the key cannot reach. A dated snapshot in that list counts for the candidate's alias. Nothing listed yet means no restriction.
+
+The model the request named is always kept: choosing it sends the request as written. The proxy counts every candidate it leaves out in the `routing_targets_skipped` metric, by reason ([OpenTelemetry](/guide/opentelemetry#metrics)).
+
+### Try it in shadow mode first
+
+Shadow mode runs the whole selection and records its pick on the trace (`routing_shadow_model`) and in the shadow savings report, while every request is served with the model it asked for. Turn on **Shadow Routing** in the dashboard, or set `ff_shadow_routing` (`intutic settings set featureFlags '{"ff_shadow_routing": true}'`); standalone, set `routing.mode: shadow`. Shadow says how often the router would switch and what that would cost; it cannot say whether the other model's answers would have been as good, because it never ran. [Mirroring](/guide/mirror-adoption-report) measures that.
 
 ---
 
@@ -68,7 +98,7 @@ Enable routing directly in the proxy's `config.yaml` — no dashboard or control
 intutic_settings:
   routing:
     enabled: true
-    candidate_models: ["claude-3-5-sonnet", "gpt-4o", "gemini-2.0-flash"]
+    candidate_models: ["claude-sonnet-5-5", "gpt-4.1", "gemini-3.8-flash"]
     reward:
       enabled: true
       latency_slo_ms: 30000
@@ -79,10 +109,7 @@ intutic_settings:
 
 When `config.yaml` has a non-empty `model_list`, a candidate it does not name (as `model_name` or `litellm_params.model`) is dropped at startup with an error in the log, so a typo cannot become a model the bandit routes to. That check is all `model_list` does: the provider is chosen from the model name, its address from `ANTHROPIC_UPSTREAM_URL` and the other [upstream variables](/reference/configuration#provider-upstreams-and-keys), and cost from the bundled price list. Requests for models outside the pool bypass the bandit untouched.
 
-In a cloud-managed workspace, the routing candidate pool is further narrowed to the intersection
-of `candidate_models` and the workspace's approved-models allowlist (see
-[Settings › Security › Approved Models](/guide/settings#approved-models)) — a candidate the allowlist excludes
-is never selected, no matter how strong its arm.
+The allowlists narrow the pool in every deployment, standalone included: a candidate the workspace's approved models, a standalone proxy's `allowedModels` file or the key's own list excludes is never selected, no matter how strong its arm. See [Which models a request can be routed to](#which-models-a-request-can-be-routed-to) for the other checks.
 
 > [!IMPORTANT]
 > **Precedence**: if a control plane publishes a feature-flag payload for the workspace, `ff_bandit_routing` is authoritative and `routing.enabled` is ignored — even if that payload is malformed, in which case every flag resolves to `false`. Presence is what confers authority. The config toggle applies only when no control plane manages the workspace.
@@ -151,11 +178,20 @@ load-bearing for cost and latency.
 
 - **Engaged**: the first time a scope is routed — either because Thompson sampling picked an arm,
   or because the fallback path (fewer than 20 cumulative pulls on the relevant arms) used the
-  requested model outright — the chosen model is written as that scope's locked model. Every
+  requested model outright — the chosen candidate is written as that scope's locked model. Every
   subsequent request in the scope reads the lock and skips sampling entirely.
-- **Released**: a lock clears when the proxy detects the locked model has become unservable (for
-  example, the provider has decommissioned it and starts returning errors specifically attributable
-  to the model choice, not the request). The next request in that scope re-samples fresh, and the
+- **Honoured only while reachable**: a lock counts only when its candidate is in the request's
+  pool. A provider key removed, an allowlist tightened, the candidate list edited, or a request in
+  another format (a Messages request in a scope an OpenAI-format request locked to `gpt-4.1`)
+  leaves the lock pointing at a model this request must not reach; it is ignored, and the new
+  selection replaces it.
+- **Released**: a lock clears whenever the locked model fails a request: the provider refuses the
+  credential (`401`, `402`, `403`), does not serve the model (`404`, or a model-not-found error),
+  times out (`408`), is still rate limited after the retries (`429`), answers with a server error
+  (`5xx`) or cannot be reached at all; and when the proxy has no credential for it (`402
+  no_upstream_credential`). That holds when a [fallback](#retries-and-fallbacks) answered in its
+  place, too. A `400` or `422` is the request's own fault, which another model would refuse as
+  well, and keeps the lock. The next request in that scope re-samples fresh, and the
   model the scope was just running on feeds a same-family tie-break preference for the new pick —
   so a released lock still prefers landing back in the same model family where reasonably possible,
   rather than jumping to an unrelated one.
@@ -171,7 +207,7 @@ whole scope's life.
 ## Cache-Honesty Guard
 
 The session lock above protects a scope's *first* routing decision for as long as it holds — but a
-lock releases (an unservable pick) or was never engaged (this is the scope's first-ever turn), and
+lock releases (a failed pick) or was never engaged (this is the scope's first-ever turn), and
 at that moment the bandit is about to Thompson-sample fresh with no special regard for whatever
 warmth the requested model may already have. The cache-honesty guard is the layer that closes that
 gap: immediately before sampling, it asks whether there is strong, fresh, first-party evidence
@@ -214,6 +250,137 @@ old number was never real.
 
 ---
 
+## Retries and fallbacks <Badge type="tip" text="Open-Core" />
+
+When a provider is overloaded or rate limited, the proxy retries the call itself, before anything
+reaches your agent. When a model's retries run out, it can send the request to fallback targets
+you list, in order. Both run in the proxy, locally and deterministically, on every plan. Retries
+are on by default; fallbacks are off until you list a target.
+
+### What is retried
+
+- **Statuses** `429`, `500`, `502`, `503`, `504` and `529` (Anthropic's overloaded), plus
+  timeouts and failed or reset connections. Other `4xx` answers describe the request itself and
+  are passed straight back.
+- **Only before a response has started.** The proxy forwards nothing until the provider's
+  response head arrives, so a failure before it is retried and a `2xx` head commits the request.
+  A stream that breaks after it started, or an `error` event inside a `200` stream, is never
+  retried: your agent may already hold part of the answer.
+- **Only inference calls**: `POST` to `/v1/messages`, `/v1/chat/completions`, `/v1/responses` and
+  Gemini's `generateContent`. These create nothing you can address later, so sending one twice
+  costs tokens and changes no state. Anything else the proxy passes through (batches, files,
+  cached contents) is sent once.
+- **Not a spent quota.** A `429` that reports an exhausted spend limit or quota
+  (`enforced_spend_limit_reached`, `insufficient_quota` and similar) does not clear by waiting,
+  so it is returned at once and starts no fallback.
+- **The provider's verdict wins.** `x-should-retry: false` stops a retry; `true` asks for one.
+
+### How long it waits
+
+Each wait is random between zero and a bound that starts at `initial_backoff_ms` and doubles per
+attempt up to `max_backoff_ms` ("full jitter"), so many clients failing together do not retry
+together. When the provider says how long to wait — `retry-after-ms`, `retry-after` (seconds or
+an HTTP date), or OpenAI's `x-ratelimit-reset-requests` / `-tokens` for the limit that is spent —
+the proxy waits exactly that long instead.
+
+`budget_ms` bounds the whole request: every call, wait and fallback. A wait that would outlast it
+is not made, and a provider that asks for longer than the budget allows gets its answer, its
+`retry-after` included, passed straight back so your agent's own client can wait. A call already
+in progress is never cut short by the budget.
+
+### Fallbacks
+
+`routing.fallbacks` lists ordered targets per model. Each key is the model that was sent
+upstream, after routing; each target names a `model`, a `provider`, or both:
+
+```yaml
+intutic_settings:
+  routing:
+    fallbacks:
+      claude-opus-4-1:
+        - model: claude-sonnet-4-5
+        - model: deepseek-chat
+          provider: deepseek
+```
+
+A target that names only a provider sends the same model there. Between Anthropic's API,
+[AWS Bedrock](/integrations/aws-bedrock) and [Google Vertex AI](/integrations/google-vertex-ai)
+the model id is rewritten into the target's scheme, so one Claude model can fall back across all
+three:
+
+```yaml
+intutic_settings:
+  routing:
+    fallbacks:
+      claude-sonnet-4-5-20250929:
+        - provider: bedrock
+        - provider: vertex_ai
+```
+
+A fallback runs only after the model's retries are spent on a retryable failure, and each target
+gets the same retry policy within the same time budget. With retries turned off
+(`retry.enabled: false`), each model gets one call and the fallbacks still run after it fails. A
+target is skipped, and the skip recorded, when it:
+
+- cannot take your request as it is: another wire format (a Claude target for a Chat Completions
+  request), or the Gemini route, which names the model in its URL;
+- is not allowed by the workspace's [approved models](/guide/settings#approved-models) or the
+  key's own model list;
+- would not fit a spend budget the request passed. The proxy runs the same pre-request check the
+  request went through — the key's and workspace's budgets, or a standalone proxy's
+  [daily cap](/guide/budgets#local-daily-cap) — priced for the target's model, and skips it with
+  `budget` on the trace. A fallback never spends past a cap the request was held to;
+- has no credential for its provider. A request made with your own provider key is sent on with
+  that key to the same provider only;
+- would start after the time budget is spent (`time_budget`).
+
+If every target fails, your agent gets the routed model's own error.
+
+### Session lock and prompt cache
+
+A fallback never takes the [session lock](#session-lock-and-kv-cache-affinity). The routed model
+failed its retries, so its lock is released, and the next turn selects again — preferring the
+failed model's family among near-ties — rather than returning to a model that is failing. The
+fallback's answer is not written to the response cache, and its cache usage is not recorded for
+the session.
+When the routed model's prefix was warm and the fallback is a different model family, the trace
+says so (`cache_affinity_broken`): that turn paid full price for a prefix the routed model had
+cached.
+
+A fallback never answers for the routed model in the bandit either. The routed arm takes the
+failure (a `5xx` or a dropped connection; a `429` is the account's limit, not the model's), and
+the fallback's response earns it nothing.
+
+### What you see
+
+- **Response headers**: `x-intutic-upstream-attempts` when the answer took more than one call, and
+  `x-intutic-upstream-fallback-from` naming the model whose retries ran out when a fallback
+  answered. `x-intutic-routed-to` then names the fallback.
+- **The trace**: `upstream_attempts` lists every call — model, provider, outcome, latency, the
+  wait before the next call and why it stopped — and `upstream_fallback` names the target that
+  answered. Both show in the dashboard's trace detail. They are absent on the ordinary request
+  that took one call.
+- **Metrics**: `upstream_retries` (by provider and the failure that prompted it) and
+  `upstream_fallbacks` (served or exhausted). See [OpenTelemetry](/guide/opentelemetry#metrics).
+
+### Per-workspace settings
+
+The workspace setting `upstreamRetry` overrides any of the proxy's values, field by field:
+
+```bash
+intutic settings set upstreamRetry '{"maxAttempts": 4, "budgetMs": 45000}'
+intutic settings set upstreamRetry --file retry.json   # with fallbacks
+intutic settings set upstreamRetry null                # back to each proxy's config
+```
+
+Its fallback targets take every provider `config.yaml` does, `bedrock`, `vertex` and `azure` included.
+The same setting is under **Settings › AI Routing & Caching › Retries & Fallbacks** in the dashboard and in
+Terraform's `intutic_workspace_settings`. The proxy picks a change up on the key's next request.
+See [configuration](/reference/configuration#retries-intutic-settings-routing-retry) for every key
+and its limit.
+
+---
+
 ## Setup & Activation
 
 <!-- ENTERPRISE_ONLY_START -->
@@ -221,7 +388,9 @@ old number was never real.
 1. Open the Intutic dashboard (your control-plane console, or the local one at `http://localhost:5174`).
 2. Open **Settings** from the sidebar.
 3. Click the **AI Routing & Caching** tab, and find the **Smart Model Routing & Response Cache** card.
-4. Turn on **Enable Intelligent Model Routing**.
+4. Optionally list the workspace's own **Candidate Models**, one per line, and **Save Candidate Models**. Left empty, the proxy's configured pool applies.
+5. Turn on **Shadow Routing** and watch what the router would pick before it picks anything.
+6. When the shadow results look right, turn on **Enable Intelligent Model Routing**.
 
 ---
 
@@ -261,4 +430,4 @@ export OPENAI_BASE_URL="http://localhost:4000/v1"
 export ANTHROPIC_BASE_URL="http://localhost:4000"
 ```
 
-Once connected, your prompts are automatically routed to the most optimal model based on local rules and current learning rates.
+Once connected, and with routing on, a request whose model is in the candidate pool is routed as described in [Which models a request can be routed to](#which-models-a-request-can-be-routed-to); every other request is forwarded with the model it asked for.

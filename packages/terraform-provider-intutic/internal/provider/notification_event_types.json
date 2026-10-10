@@ -48,6 +48,7 @@
     "scim.group.changed",
     "webhook.secret.rotated",
     "evidence.exported",
+    "credential.changed",
     "workspace.context.updated",
     "gateway.stale.detected",
     "gateway.cell.stuck_pending",

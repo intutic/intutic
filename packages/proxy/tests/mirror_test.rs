@@ -59,6 +59,19 @@ fn slot() -> mirror::MirrorSlot {
         .expect("under the ceiling, so a slot is granted")
 }
 
+/// The mirrored call as `proxy.rs` hands it to `run_mirror`: addressed and
+/// built, not yet sent.
+fn post(
+    url: impl reqwest::IntoUrl,
+    body: Vec<u8>,
+) -> impl std::future::Future<Output = Result<reqwest::Response, reqwest::Error>> {
+    reqwest::Client::new()
+        .post(url)
+        .body(body)
+        .timeout(mirror::ATTEMPT_TIMEOUT)
+        .send()
+}
+
 /// A flat price, so the assertion is about plumbing rather than the price table.
 fn flat_estimate() -> mirror::CostEstimator {
     Arc::new(|_model: &str, prompt: u32, completion: u32| {
@@ -87,10 +100,10 @@ async fn mirrors_a_real_request_and_scores_the_response() {
     let before = mirror::in_flight();
     let outcome = mirror::run_mirror(
         slot(),
-        reqwest::Client::new(),
-        format!("{}/v1/messages", server.uri()),
-        reqwest::header::HeaderMap::new(),
-        serde_json::to_vec(&json!({ "model": "cheap-model", "messages": [] })).unwrap(),
+        post(
+            format!("{}/v1/messages", server.uri()),
+            serde_json::to_vec(&json!({ "model": "cheap-model", "messages": [] })).unwrap(),
+        ),
         Some(json!({ "messages": [] })),
         "cheap-model".to_string(),
         "ws_test".to_string(),
@@ -140,10 +153,7 @@ async fn faults_a_response_the_agent_could_not_use() {
 
     let outcome = mirror::run_mirror(
         slot(),
-        reqwest::Client::new(),
-        server.uri(),
-        reqwest::header::HeaderMap::new(),
-        b"{}".to_vec(),
+        post(server.uri(), b"{}".to_vec()),
         Some(json!({ "tools": [{ "name": "get_weather" }] })),
         "cheap-model".to_string(),
         "ws_test".to_string(),
@@ -174,10 +184,7 @@ async fn does_not_score_an_upstream_error() {
     let before = mirror::in_flight();
     let outcome = mirror::run_mirror(
         slot(),
-        reqwest::Client::new(),
-        server.uri(),
-        reqwest::header::HeaderMap::new(),
-        b"{}".to_vec(),
+        post(server.uri(), b"{}".to_vec()),
         None,
         "cheap-model".to_string(),
         "ws_test".to_string(),
@@ -205,10 +212,7 @@ async fn a_connection_failure_is_swallowed() {
     let before = mirror::in_flight();
     let outcome = mirror::run_mirror(
         slot(),
-        reqwest::Client::new(),
-        "http://127.0.0.1:1/unreachable".to_string(),
-        reqwest::header::HeaderMap::new(),
-        b"{}".to_vec(),
+        post("http://127.0.0.1:1/unreachable".to_string(), b"{}".to_vec()),
         None,
         "cheap-model".to_string(),
         "ws_test".to_string(),
@@ -241,10 +245,10 @@ async fn carries_the_candidate_model_to_the_upstream() {
 
     let outcome = mirror::run_mirror(
         slot(),
-        reqwest::Client::new(),
-        server.uri(),
-        reqwest::header::HeaderMap::new(),
-        serde_json::to_vec(&json!({ "model": "cheap-model", "messages": [] })).unwrap(),
+        post(
+            server.uri(),
+            serde_json::to_vec(&json!({ "model": "cheap-model", "messages": [] })).unwrap(),
+        ),
         Some(json!({ "messages": [] })),
         "cheap-model".to_string(),
         "ws_test".to_string(),
@@ -306,10 +310,7 @@ async fn a_secret_in_the_mirror_response_never_crosses_the_publish_boundary_unsc
 
     let outcome = mirror::run_mirror(
         slot(),
-        reqwest::Client::new(),
-        server.uri(),
-        reqwest::header::HeaderMap::new(),
-        b"{}".to_vec(),
+        post(server.uri(), b"{}".to_vec()),
         Some(json!({ "messages": [] })),
         "cheap-model".to_string(),
         "ws_test".to_string(),

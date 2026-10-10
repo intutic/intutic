@@ -161,6 +161,9 @@ never silent. Raising `max_daily_budget_usd` is the better fix; the variable is 
 you need to keep working.
 :::
 
+#### Budgets for the Workspace, a Virtual Key or a Member (Connected)
+A connected workspace has daily and monthly caps of its own, and an owner or admin can give each virtual key, and on Biz Org and above each member, a day and month budget, each one refusing requests over it or alerting only. Keys can also be limited in requests and tokens per minute. See [Budgets](/guide/budgets#setting-up-budget-limits).
+
 #### Checking Budgets in Chat (Slash Command)
 While pair-programming inside the agent chat window (like Cursor or Claude Code), check your budget status at any point by prepending the budget command:
 ```markdown

@@ -90,6 +90,7 @@ describe('ClawdeClient', () => {
     [403, 'GOVERNANCE_UNAVAILABLE', 'kill'],
     [429, 'BUDGET_EXCEEDED', 'kill'],
     [429, 'OVERAGE_HARD_CAP_EXCEEDED', 'kill'],
+    [429, 'RATE_LIMITED', 'kill'],
     [402, 'COST_GATE_EXCEEDED', 'kill'],
     [400, 'dlp_policy_violation', 'kill'],
   ])('a %i %s refusal is not retried, fires %s and throws ClawdeBlockedError', async (status, code, verdict) => {
@@ -106,6 +107,20 @@ describe('ClawdeClient', () => {
     expect(err).toMatchObject({ verdict, code, status, message: `refused: ${code}` })
     expect(received).toHaveLength(1)
     expect(events).toEqual([{ verdict, code, status, message: `refused: ${code}` }])
+  })
+
+  it('carries Retry-After on a rate limit or spent budget, for the caller to wait on', async () => {
+    replies = [{ status: 429, headers: { 'retry-after': '17' }, body: proxyError('RATE_LIMITED', 'This API key is limited to 60 requests per minute') }]
+    const c = client()
+    const events: any[] = []
+    c.on('kill', (event) => { events.push(event) })
+    const err = await ask(c).catch((e) => e)
+    expect(err).toMatchObject({ code: 'RATE_LIMITED', status: 429, retryAfterSeconds: 17 })
+    expect(events[0]).toMatchObject({ code: 'RATE_LIMITED', retryAfterSeconds: 17 })
+    expect(received).toHaveLength(1)
+
+    replies = [{ status: 429, body: proxyError('BUDGET_EXCEEDED', 'spent') }]
+    expect(await ask(client()).catch((e) => e)).toMatchObject({ code: 'BUDGET_EXCEEDED', retryAfterSeconds: undefined })
   })
 
   // The cost-prediction gate answers a non-streaming request with a 200 whose
@@ -185,6 +200,31 @@ describe('ClawdeClient', () => {
 
     expect(response.verdict).toBe('allow')
     expect(received).toHaveLength(3)
+  })
+
+  it('reports the proxy\'s upstream retries and the fallback that answered', async () => {
+    replies = [{
+      status: 200,
+      body: completion,
+      headers: { 'x-intutic-upstream-attempts': '4', 'x-intutic-upstream-fallback-from': 'claude-opus-4-1' },
+    }]
+
+    const response = await ask(client())
+
+    expect(response.upstream).toEqual({ attempts: 4, fallbackFrom: 'claude-opus-4-1' })
+  })
+
+  it('leaves upstream unset on the ordinary single-call response', async () => {
+    replies = [{ status: 200, body: completion }]
+
+    expect((await ask(client())).upstream).toBeUndefined()
+  })
+
+  it('does not retry a 5xx the proxy already retried upstream', async () => {
+    replies = [{ status: 529, body: { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, headers: { 'x-intutic-upstream-attempts': '3' } }]
+
+    await expect(ask(client({ retries: 2 }))).rejects.toThrow(/already made 3 upstream calls/)
+    expect(received).toHaveLength(1)
   })
 
   it('throws ClawdeConnectionError once every attempt has failed with a 5xx', async () => {

@@ -398,3 +398,38 @@ func TestWasmRuleUpdateBodySendsOnlyApiFields(t *testing.T) {
 		t.Fatalf("body = %v", got)
 	}
 }
+
+func TestSpendBudgetsRoundTripThroughTheFourAttributes(t *testing.T) {
+	list := []spendBudget{{"day", 5, "hard"}, {"month", 100, "soft"}}
+	f := fieldsFrom(list)
+	if got := f.budgets(); !reflect.DeepEqual(got, list) {
+		t.Fatalf("budgets = %v, want %v", got, list)
+	}
+	empty := fieldsFrom(nil)
+	if !empty.DailyUsd.IsNull() || empty.DailyEnforcement.ValueString() != "hard" || len(empty.budgets()) != 0 {
+		t.Fatalf("no budgets must read as null amounts and the default enforcement, got %+v", empty)
+	}
+}
+
+func TestVirtualKeyLimitsReplaceTheKeysBudgetsAndClearAnUnsetLimit(t *testing.T) {
+	m := virtualKeyModel{
+		DailyBudgetUsd:           types.Float64Null(),
+		DailyBudgetEnforcement:   types.StringValue("hard"),
+		MonthlyBudgetUsd:         types.Float64Value(250),
+		MonthlyBudgetEnforcement: types.StringValue("soft"),
+		RateLimitRpm:             types.Int64Value(60),
+		RateLimitTpm:             types.Int64Null(),
+	}
+	got, _ := json.Marshal(m.limits())
+	want := `{"budgets":[{"period":"month","limitUsd":250,"enforcement":"soft"}],"rateLimit":{"rpm":60,"tpm":null}}`
+	if string(got) != want {
+		t.Fatalf("PATCH body = %s, want %s", got, want)
+	}
+	if !m.hasLimits() {
+		t.Fatal("a key with a month budget has limits")
+	}
+	none := virtualKeyModel{DailyBudgetUsd: types.Float64Null(), MonthlyBudgetUsd: types.Float64Null(), RateLimitRpm: types.Int64Null(), RateLimitTpm: types.Int64Null()}
+	if none.hasLimits() {
+		t.Fatal("a key with nothing set is created in one call")
+	}
+}

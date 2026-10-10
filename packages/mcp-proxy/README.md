@@ -22,7 +22,7 @@ The proxy spawns the real MCP server as a child process and relays JSON-RPC mess
 
 ### Standalone Mode
 
-With no server to wrap (no `--` command, no `--remote-url`), `intutic-mcp-proxy` is itself an MCP server named `intutic`, exposing three read-only tools: `intutic_governance_status`, `intutic_list_sops` and `intutic_list_incidents`. The two list tools take a `limit` (1–50, default 10). The control plane lists incidents only for the OWNER, ADMIN or EM role; any other role gets a message saying so instead.
+With no server to wrap (no `--` command, no `--remote-url`), `intutic-mcp-proxy` is itself an MCP server named `intutic`, exposing three read-only tools: `intutic_governance_status`, `intutic_list_sops` and `intutic_list_incidents`. The two list tools take a `limit` (1–50, default 10), and `intutic_list_incidents` an optional incident `type`, such as `SCOPE_VIOLATION`, `WASM_RULE_REFUSED` or `SYSTEM_ANOMALY`. The control plane lists incidents only for the OWNER, ADMIN or EM role; any other role gets a message saying so instead.
 
 ```
 Agent ↔ intutic-mcp-proxy (MCP server) ↔ Intutic control plane

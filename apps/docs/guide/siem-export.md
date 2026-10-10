@@ -49,7 +49,7 @@ Every event carries a `sourceTable` naming its source:
 
 | Source | What it carries |
 |---|---|
-| `execution_traces` | Every completed trace, as it's recorded |
+| `execution_traces` | Every completed trace, as it's recorded, with the proxy's upstream retries and fallback (`upstreamAttempts`, `upstreamFallback`) when it made more than one call |
 | `governance_incidents` | Every raised incident |
 | `detector_findings` | Every finding from the proxy's anomaly detector pipeline, allowed or blocked |
 | `stored_plans` | Plan approve, reject and close decisions |
@@ -64,6 +64,8 @@ Every event carries a `sourceTable` naming its source:
 | `decision_reviews` | A [held decision](/guide/decisions#slack-interactive-reviews) approved or rejected, in Slack or with `intutic decision`: `status` (`APPROVED` or `REJECTED`), the reviewer, `via` (`API`, or the Slack account), the reviewer's reason, the decision summary, and whether a review-hold bypass was written |
 | `secret_rotations` | A signing secret replaced: `target` (`notification_rule`, `siem_destination` or `github_webhook`), `target_id` (the rule's or destination's id; `null` for the GitHub webhook, which a workspace has one of), `target_name` (the destination's name for a SIEM destination, `null` otherwise), and who replaced it. Never the secret |
 | `evidence_exports` | A compliance evidence download: `kind` (`soc2_archive`, `framework_report` or `human_oversight`), `format`, the framework, the evidence run, the period, whether it was signed, and who downloaded it |
+| `credential_changes` | A credential created, rotated, updated, revoked or deleted: `credential_type` (`api_key`, `gateway_token`, `scim_token` or `provider_credential`), `credential_id` (the key, gateway or token id, or the provider), `label`, `action`, and who made the change: a member, or with `actor_type` `system`, `system:offboarding` for keys revoked when a member is offboarded and `system:gateway-rotation` for a gateway token rotated on its schedule. Never the credential |
+| `budget_alerts` | A [budget alert](/guide/budgets#budget-alerts): a workspace cap, virtual key budget or member budget reaching its alert threshold or its limit, once per budget per day or month. `alert_type` (`THRESHOLD` or `EXCEEDED`), `scope` (`workspace`, `key` or `member`), `subject_id` (the key's or member's id) and `key_prefix` for a key, `enforcement` (`hard` or `soft`), `period` (`daily` or `monthly`), `spend_usd`, `limit_usd` and `pct_used` |
 | `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also `TAMPER`: a governance file (a gate, a hook registration, the policy snapshot or a VS Code hook setting) changed outside the sync daemon, which the daemon put back. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
 
 ### Who: the `actor` object {#the-actor}
@@ -88,7 +90,7 @@ Every payload with a person behind it carries `actor`, shaped like the [OCSF](ht
 - `actor.user` is the workspace member the control plane resolved from the authenticated key or session: their member id, email, display name and effective groups (their SCIM groups while SCIM provisioning is active, else the groups their last SSO sign-in carried). An id that is not a member of the workspace, such as `system:tool-risk` on a scored tool change, is `{ "uid": … }` alone.
 - `actor.user.credential_uid`, `actor.session` and `actor.process` are what the reporting process said about itself: the API key prefix, the harness session and the OS user the MCP proxy or gate ran as. They are reported, not verified.
 
-Which payloads carry it: `gate_decisions` and the `governance_incidents` filed from a gate's report (the caller of the call), `login_events`, `workspace_settings_changes`, `sop_registry`, `stored_plans`, `device_disconnects`, `mcp_server_changes`, `decision_reviews`, `secret_rotations` and `evidence_exports` (the member who acted). `scim_changes` names the SCIM token instead, because the identity provider made the change. Over syslog, the member is CEF's `suid` and `suser`. The Kafka/CDC path below delivers table rows as they are, without `actor`.
+Which payloads carry it: `gate_decisions` and the `governance_incidents` filed from a gate's report (the caller of the call), `login_events`, `workspace_settings_changes`, `sop_registry`, `stored_plans`, `device_disconnects`, `mcp_server_changes`, `decision_reviews`, `secret_rotations`, `evidence_exports` and `credential_changes` (the member who acted). `scim_changes` names the SCIM token instead, because the identity provider made the change. Over syslog, the member is CEF's `suid` and `suser`. The Kafka/CDC path below delivers table rows as they are, without `actor`.
 
 Only what a SIEM needs to tie an event to your identity provider leaves: the member id, email, name and groups. An event held in the dead-letter queue is cleared of a person's identifiers when their data is erased, like the rest of the workspace's records.
 
@@ -116,6 +118,7 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 
 | Source | Event class | Severity |
 |---|---|---|
+| `governance_incidents` | `GOVERNANCE_VIOLATION` for a HIGH or CRITICAL incident, `GOVERNANCE_NOTICE` otherwise; `WASM_RULE_REFUSED` for a [custom filter a proxy refused to load](/guide/wasm-rules#when-a-rule-cannot-load) and `SYSTEM_ANOMALY` for a dependency a proxy could not reach (see [incident types](/guide/concepts#incident-types); one filed before 2.4.0 is a `GOVERNANCE_VIOLATION`) | 10, 7, 4 or 1 for CRITICAL, HIGH, MEDIUM or LOW; both system types are filed HIGH, 7 |
 | `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block or a tamper, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
 | `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
 | `workspace_settings_changes` | `SETTINGS_CHANGE` | 5 |
@@ -127,8 +130,12 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 | `decision_reviews` | `DECISION_APPROVED` or `DECISION_REJECTED` | 5 and 3 |
 | `secret_rotations` | `SECRET_ROTATED` | 5 |
 | `evidence_exports` | `EVIDENCE_EXPORT` | 4 |
+| `credential_changes` | `CREDENTIAL_CHANGE` | 5 |
+| `budget_alerts` | `BUDGET_THRESHOLD` or `BUDGET_EXCEEDED` | 4; an exceeded budget 7 when it is hard, 5 when soft |
 
 Every class carries the member as `suid` (member id) and `suser` (email) when the event has an [actor](#the-actor).
+
+An incident's `msg` is its description.
 
 ### Bucket batching
 

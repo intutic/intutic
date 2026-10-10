@@ -134,6 +134,15 @@ describe('intutic settings', () => {
     expect(printed()).toContain('mcpDefaultPolicy updated')
   })
 
+  // The routing pool has no CLI-side schema: the server's settings schema
+  // checks its entries, so the CLI only has to send a JSON array as an array.
+  it('set sends a JSON array value as an array (the routing candidate pool)', async () => {
+    const pool = ['claude-sonnet-5-5', 'gpt-4.1']
+    fetchMock.mockReturnValue(reply(200, { updated: true, workspaceId: 'ws_test', settings: { routingCandidates: pool } }))
+    await runSettingsSet('routingCandidates', '["claude-sonnet-5-5","gpt-4.1"]', {})
+    expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { routingCandidates: pool } })
+  })
+
   it('set --file sends the file, and --json prints the response', async () => {
     const file = join(scratch(), 'budgets.json')
     const budgets = { budgets: [{ id: 'gh-daily', scope: 'server', server: 'github', period: 'day', limit: 500 }] }
@@ -160,6 +169,28 @@ describe('intutic settings', () => {
     fetchMock.mockReturnValue(reply(200, { updated: true, workspaceId: 'ws_test', settings: { piiDetectors: actions } }))
     await runSettingsSet('piiDetectors', JSON.stringify(actions), {})
     expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { piiDetectors: actions } })
+  })
+
+  it('sends the retry setting from a file, and refuses one past the proxy ceilings naming the field, before any request', async () => {
+    await expectFailure(() => runSettingsSet('upstreamRetry', '{"maxAttempts":9}', {}), 'upstreamRetry.maxAttempts')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const setting = { budgetMs: 45000, fallbacks: { 'claude-opus-4-1': [{ model: 'claude-sonnet-4-5' }] } }
+    const file = join(scratch(), 'retry.json')
+    writeFileSync(file, JSON.stringify(setting))
+    fetchMock.mockReturnValue(reply(200, { updated: true, workspaceId: 'ws_test', settings: { upstreamRetry: setting } }))
+    await runSettingsSet('upstreamRetry', undefined, { file })
+    expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { upstreamRetry: setting } })
+  })
+
+  it('sends fallbacks to Bedrock, Vertex AI and Azure OpenAI, and refuses a provider the proxy cannot reach, before any request', async () => {
+    await expectFailure(() => runSettingsSet('upstreamRetry', '{"fallbacks":{"gpt-4o":[{"provider":"cohere"}]}}', {}), 'upstreamRetry.fallbacks.gpt-4o.0.provider')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const setting = { fallbacks: { 'claude-sonnet-4-5-20250929': [{ provider: 'bedrock' }, { provider: 'vertex_ai' }], 'gpt-4o': [{ provider: 'azure' }] } }
+    fetchMock.mockReturnValue(reply(200, { updated: true, workspaceId: 'ws_test', settings: { upstreamRetry: setting } }))
+    await runSettingsSet('upstreamRetry', JSON.stringify(setting), {})
+    expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { upstreamRetry: setting } })
   })
 
   it('refuses a value given both ways', async () => {

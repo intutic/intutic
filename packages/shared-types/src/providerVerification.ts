@@ -26,6 +26,8 @@
  * @module
  */
 
+import { buildCloudVerificationProbe } from './cloudProbe.js'
+
 /**
  * Strip trailing `/` characters, without a regex. `endpoint`/`apiBase` are
  * workspace-provisioned credential fields — CodeQL correctly flagged the
@@ -45,8 +47,14 @@ export interface ProviderProbeRequest {
   url: string
   method: 'GET' | 'POST'
   headers: Record<string, string>
-  /** Present only for POST probes (currently: Anthropic's 1-token message). */
+  /** Present only for POST probes (the cloud token and STS calls). */
   body?: string
+  /** A provider-specific reading of the answer; `classifyProbeResponse` otherwise. */
+  classify?: (status: number, headers: { get(name: string): string | null }) => ProbeVerdict
+  /** What a `valid` answer proves, when it is narrower than "the credential works". */
+  validDetail?: string
+  /** Decided without a request (a key that cannot be used at all); nothing is sent. */
+  localVerdict?: ProbeVerdict
 }
 
 /**
@@ -55,15 +63,14 @@ export interface ProviderProbeRequest {
  *
  * `fields` is the provider's credential field map exactly as stored — the
  * same shape `PROVIDER_REGISTRY`'s `ProviderCredentialField.key`s describe
- * (`providers.ts`), e.g. `{ apiKey: '...' }` for Anthropic, `{ apiKey, endpoint,
- * deploymentName }` for Azure OpenAI.
+ * (`providers.ts`), e.g. `{ apiKey: '...' }` for Anthropic, `{ apiKey, endpoint }`
+ * for Azure OpenAI.
  *
- * Bedrock and Vertex AI return `null`: verifying them means SigV4 request
- * signing or a GCP OAuth2/JWT exchange, neither of which exists anywhere in
- * this codebase yet (the same "real per-provider engineering, not a config
- * change" boundary that also keeps routing those two providers out). A
- * caller seeing `null` should say "cannot verify automatically," not fail
- * the credential.
+ * Bedrock and Vertex AI return `null` here: their probe is signed per
+ * request, which takes WebCrypto and is asynchronous — see
+ * `buildVerificationProbeAsync`, which every executor calls. A caller seeing
+ * `null` from that should say "cannot verify automatically," not fail the
+ * credential.
  */
 export function buildVerificationProbe(
   provider: string,
@@ -73,21 +80,16 @@ export function buildVerificationProbe(
     case 'anthropic': {
       const apiKey = fields.apiKey
       if (!apiKey) return null
-      // Anthropic's API has no /v1/models endpoint to probe cheaply, so the
-      // cheapest real call is a 1-max-token message — costs about one token.
+      // Listing models is the cheapest authenticated call Anthropic has: it
+      // spends no tokens, and the answer says which models the key reaches.
+      // 1000 is the page-size ceiling, enough for the whole catalog in one call.
       return {
-        url: 'https://api.anthropic.com/v1/messages',
-        method: 'POST',
+        url: 'https://api.anthropic.com/v1/models?limit=1000',
+        method: 'GET',
         headers: {
           'x-api-key': apiKey,
           'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
         },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5',
-          max_tokens: 1,
-          messages: [{ role: 'user', content: 'hi' }],
-        }),
       }
     }
 
@@ -145,7 +147,7 @@ export function buildVerificationProbe(
       const apiKey = fields.apiKey
       if (!apiKey) return null
       return {
-        url: `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`,
+        url: `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`,
         method: 'GET',
         headers: {},
       }
@@ -185,6 +187,76 @@ export function buildVerificationProbe(
 }
 
 export type ProbeVerdict = 'valid' | 'invalid' | 'unknown'
+
+/** `body[listKey][].{idKey}` values that are non-empty strings. */
+function pluck(body: unknown, listKey: string, idKey: string): string[] | null {
+  if (typeof body !== 'object' || body === null) return null
+  const list = (body as Record<string, unknown>)[listKey]
+  if (!Array.isArray(list)) return null
+  const ids: string[] = []
+  for (const entry of list) {
+    const id = typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>)[idKey] : undefined
+    if (typeof id === 'string' && id.length > 0) ids.push(id)
+  }
+  return ids
+}
+
+/**
+ * The model ids in a provider's list-models answer (the body a `valid`
+ * verification probe got back), deduplicated and sorted; `null` when this
+ * provider's probe does not list the models a request can name, or the body
+ * is not the expected shape.
+ *
+ * Azure OpenAI's probe lists base models, while a request names a deployment,
+ * so its list would mislead; Bedrock and Vertex AI probe identity, not models.
+ */
+export function parseProviderModels(provider: string, body: unknown): string[] | null {
+  let ids: string[] | null
+  switch (provider) {
+    case 'anthropic':
+    case 'openai':
+    case 'mistral':
+    case 'openrouter':
+    case 'deepseek':
+      ids = pluck(body, 'data', 'id')
+      break
+    case 'gemini':
+      // Gemini names a model `models/gemini-2.5-pro`; requests use the bare id.
+      ids = pluck(body, 'models', 'name')?.map((n) => (n.startsWith('models/') ? n.slice('models/'.length) : n)) ?? null
+      break
+    case 'cohere':
+    case 'ollama':
+      ids = pluck(body, 'models', 'name')
+      break
+    default:
+      return null
+  }
+  if (!ids) return null
+  return [...new Set(ids.filter((id) => id.length > 0))].sort()
+}
+
+/**
+ * The probe for any provider: a signed cloud probe for Bedrock and Vertex AI
+ * (`cloudProbe.ts`), the plain request description otherwise.
+ */
+export async function buildVerificationProbeAsync(
+  provider: string,
+  fields: Record<string, string>,
+  now: Date = new Date(),
+): Promise<ProviderProbeRequest | null> {
+  return (await buildCloudVerificationProbe(provider, fields, now)) ?? buildVerificationProbe(provider, fields)
+}
+
+/** The verdict for a probe's answer: the probe's own reading when it has one. */
+export function classifyProbe(
+  probe: ProviderProbeRequest,
+  status: number,
+  headers?: { get(name: string): string | null },
+): ProbeVerdict {
+  return probe.classify
+    ? probe.classify(status, headers ?? { get: () => null })
+    : classifyProbeResponse(status)
+}
 
 /**
  * Classify a probe's HTTP response. Deliberately narrow about what counts as

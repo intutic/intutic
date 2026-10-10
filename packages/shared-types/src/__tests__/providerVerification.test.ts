@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildVerificationProbe, classifyProbeResponse } from '../providerVerification.js'
+import { buildVerificationProbe, classifyProbeResponse, parseProviderModels } from '../providerVerification.js'
 import { PROVIDER_REGISTRY } from '../providers.js'
 
 describe('classifyProbeResponse', () => {
@@ -20,14 +20,15 @@ describe('classifyProbeResponse', () => {
 })
 
 describe('buildVerificationProbe', () => {
-  it('builds an Anthropic probe as a 1-token POST /v1/messages, never /v1/chat/completions', () => {
-    const probe = buildVerificationProbe('anthropic', { apiKey: 'sk-ant-test' })
+  it('builds an Anthropic probe as a bodiless GET /v1/models listing every model, never /v1/chat/completions', () => {
+    const probe = buildVerificationProbe('anthropic', { apiKey: 'ant-test-key' })
     expect(probe).not.toBeNull()
-    expect(probe!.method).toBe('POST')
-    expect(probe!.url).toContain('/v1/messages')
+    expect(probe!.method).toBe('GET')
+    expect(probe!.url).toBe('https://api.anthropic.com/v1/models?limit=1000')
     expect(probe!.url).not.toContain('/v1/chat/completions')
-    expect(probe!.headers['x-api-key']).toBe('sk-ant-test')
-    expect(JSON.parse(probe!.body!).max_tokens).toBe(1)
+    expect(probe!.headers['x-api-key']).toBe('ant-test-key')
+    expect(probe!.headers['anthropic-version']).toBe('2023-06-01')
+    expect(probe!.body).toBeUndefined()
   })
 
   it('builds an OpenAI-shaped GET /v1/models probe for OpenAI-compatible providers', () => {
@@ -45,13 +46,13 @@ describe('buildVerificationProbe', () => {
     const probe = buildVerificationProbe('gemini', { apiKey: 'test-key' })
     expect(probe).not.toBeNull()
     expect(probe!.url).toContain('key=test-key')
+    expect(probe!.url).toContain('pageSize=1000')
   })
 
   it('builds an Azure OpenAI probe using the endpoint field, trimming a trailing slash', () => {
     const probe = buildVerificationProbe('azure_openai', {
       apiKey: 'test-key',
       endpoint: 'https://my-resource.openai.azure.com/',
-      deploymentName: 'gpt-4o-deployment',
     })
     expect(probe).not.toBeNull()
     expect(probe!.url).toBe('https://my-resource.openai.azure.com/openai/models?api-version=2024-02-01')
@@ -70,7 +71,6 @@ describe('buildVerificationProbe', () => {
     const probe = buildVerificationProbe('azure_openai', {
       apiKey: 'test-key',
       endpoint: pathological,
-      deploymentName: 'gpt-4o-deployment',
     })
     expect(Date.now() - started).toBeLessThan(100)
     expect(probe!.url).toBe('https://my-resource.openai.azure.com/openai/models?api-version=2024-02-01')
@@ -117,5 +117,37 @@ describe('buildVerificationProbe', () => {
         expect(probe.url).not.toContain('/v1/chat/completions')
       }
     }
+  })
+})
+
+describe('parseProviderModels', () => {
+  it.each(['anthropic', 'openai', 'mistral', 'openrouter', 'deepseek'])('%s: data[].id, deduplicated and sorted', (provider) => {
+    const body = { data: [{ id: 'model-b' }, { id: 'model-a' }, { id: 'model-b' }, { id: 42 }, { name: 'no-id' }, null, 'bare'], has_more: false }
+    expect(parseProviderModels(provider, body)).toEqual(['model-a', 'model-b'])
+  })
+
+  it('gemini: models[].name without the models/ prefix', () => {
+    const body = { models: [{ name: 'models/gemini-2.5-pro' }, { name: 'models/gemini-2.5-flash' }, { name: 'tuned-x' }] }
+    expect(parseProviderModels('gemini', body)).toEqual(['gemini-2.5-flash', 'gemini-2.5-pro', 'tuned-x'])
+  })
+
+  it.each(['cohere', 'ollama'])('%s: models[].name', (provider) => {
+    const body = { models: [{ name: 'llama3.1:8b' }, { name: 'command-r' }, { name: '' }] }
+    expect(parseProviderModels(provider, body)).toEqual(['command-r', 'llama3.1:8b'])
+  })
+
+  it('returns null for providers whose probe does not list requestable models', () => {
+    const body = { data: [{ id: 'gpt-4o' }] }
+    for (const provider of ['azure_openai', 'bedrock', 'vertex_ai', 'not-a-provider']) {
+      expect(parseProviderModels(provider, body), provider).toBeNull()
+    }
+  })
+
+  it('returns null for a body that is not the expected shape, and [] for an empty list', () => {
+    expect(parseProviderModels('openai', null)).toBeNull()
+    expect(parseProviderModels('openai', 'text')).toBeNull()
+    expect(parseProviderModels('openai', { data: 'nope' })).toBeNull()
+    expect(parseProviderModels('gemini', { data: [{ id: 'x' }] })).toBeNull()
+    expect(parseProviderModels('openai', { data: [] })).toEqual([])
   })
 })
