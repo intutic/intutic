@@ -6888,9 +6888,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Mirroring is triggered further down, once the primary response's own
     // body has been read (see the comment at that site for why: publishing a
     // useful comparison pair needs the ORIGINAL response text in hand, which
-    // does not exist yet at this point in the request). `mirror_plan` itself
-    // was already fully captured above, before anything here can consume the
-    // headers/body it holds.
+    // does not exist yet at this point in the request). The copy is resolved
+    // there too (`resolve_target`), from headers nothing here consumes.
 
     if is_streaming {
         resp_headers.insert(
@@ -9086,8 +9085,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     //
     // Deliberately placed HERE — after the primary response's own body
     // (`resp_bytes`) has been read AND after `request_costs` has priced the
-    // served call — rather than immediately after `mirror_plan` was captured
-    // far above. The scrubbed comparison pair published below needs the
+    // served call — rather than immediately after `mirror_candidate` was
+    // chosen far above. The scrubbed comparison pair published below needs the
     // ORIGINAL response text and, since interview-audit closeout Wave 2, the
     // original side's cost and latency, so the adoption report's cost and
     // latency deltas are measured rather than structurally null. Neither

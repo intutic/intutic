@@ -570,9 +570,10 @@ pub async fn route_model(
         return Ok(decided(pool.requested_arm.clone(), resolved_sop_tier));
     }
 
-    // No lock is active — either this session has never been routed, or a
-    // lock was just released (e.g. the unservable-model path in `proxy.rs`
-    // clears it after a failed request). Either way we're about to
+    // No usable lock — this session has never been routed, its lock was
+    // released because the locked model failed a request
+    // (`proxy::release_routing_lock`), or the lock names an arm outside this
+    // request's pool. Either way we're about to
     // Thompson-sample fresh; `last_model` (set alongside every lock and left
     // in place when the lock clears) is the only memory of what the session
     // was just running on, so it feeds the same-family tie-break below.

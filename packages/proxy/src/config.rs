@@ -513,8 +513,8 @@ pub struct RoutingConfig {
     /// An explicit, operator-directed mirror candidate — independent of
     /// `mode`/shadow routing.
     ///
-    /// Before this field existed, `mirror_plan` (see `proxy.rs`) could only be
-    /// built from `shadow_selection`, which is itself only populated when
+    /// Before this field existed, the mirror candidate (`mirror_candidate` in
+    /// `proxy.rs`) could only come from `shadow_selection`, which is itself only populated when
     /// `mode: shadow` is active AND the bandit's selection for this request
     /// happened to disagree with what was served. That makes mirroring
     /// structurally unreachable for the case an operator actually wants: "test
@@ -522,7 +522,7 @@ pub struct RoutingConfig {
     /// model may not be one the bandit would ever pick — it may not even be a
     /// bandit candidate at all.
     ///
-    /// When set, `proxy.rs` builds `mirror_plan` from this model for a sampled
+    /// When set, `proxy.rs` mirrors this model for a sampled
     /// fraction of ALL eligible non-streaming traffic (still governed by
     /// `mirror_sample_rate` and the same concurrency/rate ceilings in
     /// `routing::mirror`), regardless of what shadow routing decided. If both

@@ -561,8 +561,9 @@ pub trait LocalStore: Send + Sync + 'static {
     /// released never. A pick the upstream cannot serve was therefore locked in
     /// for the scope's whole life: every subsequent request took the
     /// session-lock branch, re-sent the unservable model, and failed the same
-    /// way. Called when an upstream error is attributed to the routed model, so
-    /// the next request re-selects from arms that have since been penalised.
+    /// way. Called whenever the locked model fails a request
+    /// (`proxy::release_routing_lock`), so the next request re-selects instead
+    /// of returning to it.
     ///
     /// Deliberately leaves `last_model` in place — see its doc comment on
     /// `SessionRouting`.
