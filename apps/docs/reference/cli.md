@@ -952,7 +952,7 @@ intutic budget --watch [--interval <seconds>]
 
 Without `--watch`:
 
-- When you are logged in, prints the workspace's budget from the control plane: daily and monthly spend against their budgets with percentages, remaining budget, and an alert line when the alert threshold is exceeded.
+- When you are logged in, prints the workspace's budget from the control plane: daily and monthly spend against their budgets with percentages, the daily cap and whether it is the workspace's own or the $100-a-day default of a workspace that never saved one, remaining budget, and an alert line when the alert threshold is exceeded.
 - Prints the local spending cap from `~/.intutic/config.json` (`maxDailyBudgetUsd`, or `max_daily_budget_usd`; default `$10.00`).
 - Prints today's machine-local spend from the local proxy at `http://127.0.0.1:4000` (or the port of `INTUTIC_PROXY_URL`), or a dash when the proxy is not running.
 - When you are logged in, lists every `ACTIVE` loop run with its token spend and budget limit.
