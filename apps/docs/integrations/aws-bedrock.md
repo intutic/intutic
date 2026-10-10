@@ -38,13 +38,21 @@ The credential is checked as soon as it is saved, and again from **Test** on the
 
 1. a Bedrock API key in `AWS_BEARER_TOKEN_BEDROCK` (or `providers.bedrock.api_key: os.environ/<NAME>`);
 2. `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, with `AWS_SESSION_TOKEN` for temporary credentials;
-3. static keys for `AWS_PROFILE` in the shared credentials file;
-4. an IAM Identity Center (SSO) profile for `AWS_PROFILE` in the config file (`AWS_CONFIG_FILE`, default `~/.aws/config`), in either the `sso_session` form or the legacy `sso_start_url` form, using the sign-in `aws sso login` cached under `~/.aws/sso/cache`;
-5. web identity — `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_ARN`, as on EKS with IAM roles for service accounts;
-6. container credentials, as on ECS and EKS Pod Identity;
-7. the EC2 instance role (`AWS_EC2_METADATA_DISABLED=true` skips it).
+3. the profile named by `AWS_PROFILE` (default `default`) in the shared files — the config file (`AWS_CONFIG_FILE`, default `~/.aws/config`) and the credentials file (`AWS_SHARED_CREDENTIALS_FILE`, default `~/.aws/credentials`), the credentials file winning where both set a value:
+   - static keys;
+   - an IAM Identity Center (SSO) sign-in, in either the `sso_session` form or the legacy `sso_start_url` form, using what `aws sso login` cached under `~/.aws/sso/cache`;
+   - a role: `role_arn` with `source_profile` (another profile, itself keys, SSO or a role, chained up to 16 profiles deep; a profile naming itself uses its own keys) or with `credential_source` (`Environment`, `Ec2InstanceMetadata` or `EcsContainer`), assumed with STS `AssumeRole` signed by those source credentials, with the profile's `external_id`, `role_session_name` (default `intutic-proxy`) and `duration_seconds`;
+4. web identity — `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_ARN`, as on EKS with IAM roles for service accounts;
+5. container credentials, as on ECS and EKS Pod Identity;
+6. the EC2 instance role (`AWS_EC2_METADATA_DISABLED=true` skips it).
 
-Temporary credentials are cached until five minutes before they expire. When an SSO profile's cached sign-in has expired, the proxy renews it with the cached refresh token (`sso_session` profiles) without writing the cache back; when it cannot, the error says to run `aws sso login --profile <name>`. Profiles that assume a role (`role_arn` with `source_profile`) are not read; export the credentials or use a workload role.
+Temporary credentials, assumed roles included, are cached until five minutes before they expire and then fetched or assumed again. STS is called in the Bedrock region (`sts.<region>.amazonaws.com`).
+
+A profile that sets `mfa_serial` is refused with an error saying so: the proxy cannot prompt for an MFA code. Profiles that name each other in a cycle, a `source_profile` that is not defined, a profile with both or neither of `source_profile` and `credential_source`, and a `duration_seconds` outside 900–43200 are refused the same way. `credential_process` is not run.
+
+When an SSO profile's cached sign-in has expired, the proxy renews it with the cached refresh token (`sso_session` profiles) and keeps the renewed token, and any rotated refresh token, in its own memory. It does not write `~/.aws/sso/cache`: AWS documents that `aws sso login` writes that file and documents no write-back by a refreshing SDK, so the file stays the AWS CLI's. When renewal is not possible, the error says to run `aws sso login --profile <name>`.
+
+These files are read only from the proxy's own host, as its operator's configuration; a workspace's stored Bedrock credential is always a key pair or an API key.
 
 The credentials need `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on the models you use, and `bedrock-mantle:CreateInference` for Claude Opus 4.7 and later.
 

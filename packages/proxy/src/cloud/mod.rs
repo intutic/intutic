@@ -37,6 +37,7 @@
 //! only knows `claude-sonnet-4-5` can be served from Bedrock unchanged.
 
 pub mod auth;
+pub mod aws_role;
 pub mod aws_sso;
 pub mod azure;
 pub mod bedrock;

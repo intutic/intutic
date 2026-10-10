@@ -10,7 +10,8 @@
 //! - **AWS chain**: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`
 //!   (`AWS_SESSION_TOKEN`); static keys in the shared credentials file
 //!   (`AWS_PROFILE`); an IAM Identity Center profile in the config file
-//!   (`aws sso login`, `super::aws_sso`); web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` +
+//!   (`aws sso login`, `super::aws_sso`); a profile that assumes a role
+//!   (`super::aws_role`); web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` +
 //!   `AWS_ROLE_ARN`, EKS IRSA) via STS `AssumeRoleWithWebIdentity`; container
 //!   credentials (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` / `_FULL_URI`, ECS
 //!   and EKS Pod Identity); EC2 instance metadata (IMDSv2) unless
@@ -133,11 +134,11 @@ pub async fn aws(
 }
 
 /// Network locations the chain reads from; overridden only by tests.
-struct AwsEndpoints {
-    sts: Option<String>,
-    container_host: String,
-    imds: String,
-    sso: super::aws_sso::SsoEndpoints,
+pub(crate) struct AwsEndpoints {
+    pub(crate) sts: Option<String>,
+    pub(crate) container_host: String,
+    pub(crate) imds: String,
+    pub(crate) sso: super::aws_sso::SsoEndpoints,
 }
 
 impl Default for AwsEndpoints {
@@ -165,17 +166,10 @@ async fn aws_chain(
             session_token: env("AWS_SESSION_TOKEN"),
         });
     }
-    if let Some(c) = profile_credentials(&env) {
-        return Ok(c);
-    }
-    // An IAM Identity Center profile in the config file (`aws sso login`).
-    if let Some(profile) = super::aws_sso::sso_profile(&env) {
-        let profile = profile?;
-        let home = env("HOME")
-            .or_else(|| env("USERPROFILE"))
-            .unwrap_or_default();
-        let cache_dir = std::path::Path::new(&home).join(".aws/sso/cache");
-        return super::aws_sso::sso_credentials(client, &profile, &cache_dir, &ep.sso).await;
+    // `AWS_PROFILE` in the shared files: static keys, an IAM Identity Center
+    // sign-in, or a role assumed from either (`super::aws_role`).
+    if let Some(creds) = super::aws_role::profile_credentials(client, region, ep, &env).await {
+        return creds;
     }
     if let (Some(token_file), Some(role)) =
         (env("AWS_WEB_IDENTITY_TOKEN_FILE"), env("AWS_ROLE_ARN"))
@@ -218,49 +212,65 @@ async fn aws_chain(
         cache_put(key, Cached::Aws(creds.clone()), lifetime);
         return Ok(creds);
     }
-    let container_uri = env("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
-        .map(|rel| format!("{}{rel}", ep.container_host))
-        .or_else(|| env("AWS_CONTAINER_CREDENTIALS_FULL_URI"));
-    if let Some(uri) = container_uri {
-        let key = format!("aws-container:{}", fingerprint(&[&uri]));
-        if let Some(Cached::Aws(c)) = cache_get(&key) {
-            return Ok(c);
-        }
-        let auth = env("AWS_CONTAINER_AUTHORIZATION_TOKEN").or_else(|| {
-            env("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE")
-                .and_then(|f| std::fs::read_to_string(f).ok())
-                .map(|s| s.trim().to_string())
-        });
-        let mut req = client.get(&uri).timeout(Duration::from_secs(5));
-        if let Some(a) = auth {
-            req = req.header("authorization", a);
-        }
-        let v = fetch_json(req, "AWS container credentials").await?;
-        let (creds, lifetime) = json_credentials(&v)
-            .ok_or_else(|| AuthError::unreachable("AWS container credentials were malformed"))?;
-        cache_put(key, Cached::Aws(creds.clone()), lifetime);
-        return Ok(creds);
+    if let Some(creds) = container_credentials(client, &ep.container_host, &env).await {
+        return creds;
     }
     if env("AWS_EC2_METADATA_DISABLED").is_some_and(|v| v.eq_ignore_ascii_case("true")) {
         return Err(no_aws_credentials());
     }
-    if let Some(Cached::Aws(c)) = cache_get("aws-imds") {
-        return Ok(c);
-    }
     imds_credentials(client, &ep.imds).await
 }
 
-fn no_aws_credentials() -> AuthError {
+/// ECS / EKS Pod Identity container credentials, when the environment names
+/// an endpoint (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` / `_FULL_URI`).
+pub(crate) async fn container_credentials(
+    client: &reqwest::Client,
+    container_host: &str,
+    env: &impl Fn(&str) -> Option<String>,
+) -> Option<Result<AwsCredentials, AuthError>> {
+    let uri = env("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
+        .map(|rel| format!("{container_host}{rel}"))
+        .or_else(|| env("AWS_CONTAINER_CREDENTIALS_FULL_URI"))?;
+    let key = format!("aws-container:{}", fingerprint(&[&uri]));
+    if let Some(Cached::Aws(c)) = cache_get(&key) {
+        return Some(Ok(c));
+    }
+    let auth = env("AWS_CONTAINER_AUTHORIZATION_TOKEN").or_else(|| {
+        env("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE")
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .map(|s| s.trim().to_string())
+    });
+    let mut req = client.get(&uri).timeout(Duration::from_secs(5));
+    if let Some(a) = auth {
+        req = req.header("authorization", a);
+    }
+    Some(
+        async {
+            let v = fetch_json(req, "AWS container credentials").await?;
+            let (creds, lifetime) = json_credentials(&v).ok_or_else(|| {
+                AuthError::unreachable("AWS container credentials were malformed")
+            })?;
+            cache_put(key, Cached::Aws(creds.clone()), lifetime);
+            Ok(creds)
+        }
+        .await,
+    )
+}
+
+pub(crate) fn no_aws_credentials() -> AuthError {
     AuthError::rejected(
         "no AWS credentials were found (environment, shared credentials file, web identity, \
          container or instance role); set AWS credentials or a Bedrock API key",
     )
 }
 
-async fn imds_credentials(
+pub(crate) async fn imds_credentials(
     client: &reqwest::Client,
     base: &str,
 ) -> Result<AwsCredentials, AuthError> {
+    if let Some(Cached::Aws(c)) = cache_get("aws-imds") {
+        return Ok(c);
+    }
     let quick = Duration::from_secs(1);
     let token = client
         .put(format!("{base}/latest/api/token"))
@@ -302,47 +312,6 @@ async fn imds_credentials(
     Ok(creds)
 }
 
-/// Static keys from the shared credentials file for `AWS_PROFILE` (default
-/// `default`). IAM Identity Center profiles are `aws_sso`'s; profiles that
-/// assume a role (`role_arn` + `source_profile`) are not resolved.
-fn profile_credentials(env: &impl Fn(&str) -> Option<String>) -> Option<AwsCredentials> {
-    let path = env("AWS_SHARED_CREDENTIALS_FILE").or_else(|| {
-        env("HOME")
-            .or_else(|| env("USERPROFILE"))
-            .map(|h| format!("{h}/.aws/credentials"))
-    })?;
-    let text = std::fs::read_to_string(path).ok()?;
-    let profile = env("AWS_PROFILE").unwrap_or_else(|| "default".into());
-    parse_profile(&text, &profile)
-}
-
-fn parse_profile(text: &str, profile: &str) -> Option<AwsCredentials> {
-    let mut in_section = false;
-    let mut kv: HashMap<String, String> = HashMap::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with('#') || line.starts_with(';') || line.is_empty() {
-            continue;
-        }
-        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-            in_section = name.trim() == profile;
-            continue;
-        }
-        if in_section {
-            if let Some((k, v)) = line.split_once('=') {
-                kv.insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
-            }
-        }
-    }
-    Some(AwsCredentials {
-        access_key_id: kv.remove("aws_access_key_id").filter(|v| !v.is_empty())?,
-        secret_access_key: kv
-            .remove("aws_secret_access_key")
-            .filter(|v| !v.is_empty())?,
-        session_token: kv.remove("aws_session_token").filter(|v| !v.is_empty()),
-    })
-}
-
 /// `{AccessKeyId, SecretAccessKey, Token, Expiration}` — the container and
 /// instance-metadata credential document.
 fn json_credentials(v: &Value) -> Option<(AwsCredentials, Duration)> {
@@ -356,7 +325,7 @@ fn json_credentials(v: &Value) -> Option<(AwsCredentials, Duration)> {
 }
 
 /// The credentials in an STS `AssumeRoleWithWebIdentity` XML response.
-fn sts_credentials(xml: &str) -> Option<(AwsCredentials, Duration)> {
+pub(crate) fn sts_credentials(xml: &str) -> Option<(AwsCredentials, Duration)> {
     let tag = |name: &str| {
         let open = format!("<{name}>");
         let start = xml.find(&open)? + open.len();
@@ -964,19 +933,6 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(t.expose(), "ya29.md");
-    }
-
-    #[test]
-    fn shared_credentials_file_profiles() {
-        let text = "[default]\naws_access_key_id = AKIDDEF\naws_secret_access_key = sdef\n\n[work]\naws_access_key_id=AKIDWORK\naws_secret_access_key=swork\naws_session_token=tok\n";
-        assert_eq!(
-            parse_profile(text, "default").unwrap().access_key_id,
-            "AKIDDEF"
-        );
-        let w = parse_profile(text, "work").unwrap();
-        assert_eq!(w.session_token.as_deref(), Some("tok"));
-        assert!(parse_profile(text, "missing").is_none());
-        assert!(parse_profile("[sso]\nsso_start_url=x\n", "sso").is_none());
     }
 
     #[test]

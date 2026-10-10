@@ -14,14 +14,24 @@
 //!
 //! An expired access token is refreshed with the cached refresh token and
 //! client registration (`sso-session` profiles; IAM Identity Center OIDC
-//! `CreateToken`, `grantType: refresh_token`), in memory only; when that is
-//! not possible the error says to run `aws sso login`.
+//! `CreateToken`, `grantType: refresh_token`); when that is not possible the
+//! error says to run `aws sso login`.
+//!
+//! The renewed token is kept in this process, with the refresh token that
+//! came back with it, and is not written to `~/.aws/sso/cache`: AWS documents
+//! that `aws sso login` writes that file, and documents no write-back by a
+//! refreshing SDK, so the file stays the AWS CLI's. The next refresh uses the
+//! newest refresh token this process holds; a later `aws sso login` writes a
+//! fresh file, which is read once the in-process token expires.
 //! <https://docs.aws.amazon.com/sdkref/latest/guide/feature-sso-credentials.html>
 //! <https://docs.aws.amazon.com/singlesignon/latest/PortalAPIReference/API_GetRoleCredentials.html>
 //! <https://docs.aws.amazon.com/singlesignon/latest/OIDCAPIReference/API_CreateToken.html>
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
+
+use once_cell::sync::Lazy;
 
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
@@ -42,8 +52,18 @@ pub(crate) struct SsoProfile {
     pub cache_key: String,
 }
 
+/// An access token renewed in this process: the token, when it expires, and
+/// the refresh token that came with it. Keyed by the token cache key.
+struct MemToken {
+    access: String,
+    expires: chrono::DateTime<chrono::Utc>,
+    refresh: Option<String>,
+}
+
+static TOKENS: Lazy<Mutex<HashMap<String, MemToken>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
 /// Sections of an AWS INI file: `[default]`, `[profile x]`, `[sso-session y]`.
-fn sections(text: &str) -> HashMap<String, HashMap<String, String>> {
+pub(crate) fn sections(text: &str) -> HashMap<String, HashMap<String, String>> {
     let mut out: HashMap<String, HashMap<String, String>> = HashMap::new();
     let mut current: Option<String> = None;
     for line in text.lines() {
@@ -124,20 +144,6 @@ pub(crate) fn parse_sso_profile(
     }))
 }
 
-/// The SSO profile `AWS_PROFILE` (default `default`) names in the config file.
-pub(crate) fn sso_profile(
-    env: &impl Fn(&str) -> Option<String>,
-) -> Option<Result<SsoProfile, AuthError>> {
-    let path = env("AWS_CONFIG_FILE").or_else(|| {
-        env("HOME")
-            .or_else(|| env("USERPROFILE"))
-            .map(|h| format!("{h}/.aws/config"))
-    })?;
-    let text = std::fs::read_to_string(path).ok()?;
-    let profile = env("AWS_PROFILE").unwrap_or_else(|| "default".into());
-    parse_sso_profile(&text, &profile)
-}
-
 /// The token cache file name for a session name or start URL.
 pub(crate) fn cache_file_name(cache_key: &str) -> String {
     format!("{}.json", hex::encode(Sha1::digest(cache_key.as_bytes())))
@@ -193,17 +199,38 @@ pub(crate) async fn sso_credentials(
                 t.with_timezone(&chrono::Utc) > chrono::Utc::now() + chrono::Duration::seconds(60)
             })
     };
-    let token = if live(s("expiresAt")) {
+    let soon = chrono::Utc::now() + chrono::Duration::seconds(60);
+    let (mem_live, mem_refresh) = {
+        let tokens = TOKENS.lock().unwrap_or_else(|e| e.into_inner());
+        match tokens.get(&p.cache_key) {
+            Some(t) => (
+                (t.expires > soon).then(|| t.access.clone()),
+                t.refresh.clone(),
+            ),
+            None => (None, None),
+        }
+    };
+    let token = if let Some(t) = mem_live {
+        t
+    } else if live(s("expiresAt")) {
         s("accessToken").ok_or_else(|| login_again(p))?.to_string()
     } else {
+        // The newest refresh token this process holds, else the file's.
+        let refresh = mem_refresh.or_else(|| s("refreshToken").map(str::to_string));
         match (
-            s("refreshToken"),
+            refresh,
             s("clientId"),
             s("clientSecret"),
             live(s("registrationExpiresAt")),
         ) {
             (Some(refresh), Some(id), Some(secret), true) => {
-                refresh_token(client, p, ep, refresh, id, secret).await?
+                let renewed = refresh_token(client, p, ep, &refresh, id, secret).await?;
+                let access = renewed.access.clone();
+                TOKENS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(p.cache_key.clone(), renewed);
+                access
             }
             _ => return Err(login_again(p)),
         }
@@ -270,7 +297,7 @@ async fn refresh_token(
     refresh: &str,
     client_id: &str,
     client_secret: &str,
-) -> Result<String, AuthError> {
+) -> Result<MemToken, AuthError> {
     let oidc = ep
         .oidc
         .clone()
@@ -291,11 +318,24 @@ async fn refresh_token(
         return Err(login_again(p));
     }
     let v: Value = resp.json().await.map_err(|_| login_again(p))?;
-    v.get("accessToken")
+    let access = v
+        .get("accessToken")
         .and_then(|t| t.as_str())
         .filter(|t| !t.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| login_again(p))
+        .ok_or_else(|| login_again(p))?
+        .to_string();
+    let expires_in = v.get("expiresIn").and_then(|e| e.as_i64()).unwrap_or(3600);
+    Ok(MemToken {
+        access,
+        expires: chrono::Utc::now() + chrono::Duration::seconds(expires_in),
+        // A rotated refresh token replaces the one used.
+        refresh: v
+            .get("refreshToken")
+            .and_then(|t| t.as_str())
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .or_else(|| Some(refresh.to_string())),
+    })
 }
 
 #[cfg(test)]
@@ -385,9 +425,11 @@ sso_session = nowhere
             .unwrap();
         // A start URL unique to this test, so the in-process cache is fresh.
         p.start_url = format!("{}#{}", p.start_url, uuid::Uuid::new_v4());
+        // Unique per test: the in-process token store is keyed by it.
+        p.cache_key = format!("my-sso-{}", uuid::Uuid::new_v4());
         write_cache(
             &dir,
-            "my-sso",
+            &p.cache_key,
             json!({"startUrl": p.start_url, "region": "us-east-1", "accessToken": "sso-access-token",
                    "expiresAt": (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339()}),
         );
@@ -435,11 +477,13 @@ sso_session = nowhere
             .unwrap()
             .unwrap();
         p.start_url = format!("{}#{}", p.start_url, uuid::Uuid::new_v4());
+        // Unique per test: the in-process token store is keyed by it.
+        p.cache_key = format!("my-sso-{}", uuid::Uuid::new_v4());
         let past = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
         let future = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
         write_cache(
             &dir,
-            "my-sso",
+            &p.cache_key,
             json!({"accessToken": "stale", "expiresAt": past, "refreshToken": "rtok",
                    "clientId": "cid", "clientSecret": "csecret", "registrationExpiresAt": future}),
         );
@@ -447,10 +491,16 @@ sso_session = nowhere
             portal: Some(server.uri()),
             oidc: Some(server.uri()),
         };
+        let before = std::fs::read_to_string(dir.join(cache_file_name(&p.cache_key))).unwrap();
         let c = sso_credentials(&reqwest::Client::new(), &p, &dir, &ep)
             .await
             .unwrap();
         assert_eq!(c.access_key_id, "ASIAREFRESHED");
+        // The AWS CLI's cache file is left as it was.
+        assert_eq!(
+            std::fs::read_to_string(dir.join(cache_file_name(&p.cache_key))).unwrap(),
+            before
+        );
 
         // A legacy profile's cache holds no refresh token: log in again.
         let mut l = parse_sso_profile(CONFIG, "legacy").unwrap().unwrap();
