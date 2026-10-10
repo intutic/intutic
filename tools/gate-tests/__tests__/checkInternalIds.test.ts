@@ -14,9 +14,10 @@ import { dirname, join, resolve } from 'node:path'
 
 const SCRIPT = resolve(import.meta.dirname, '../../scripts/check-internal-ids.js')
 
-/** Ids and the tracker's name are assembled here so this file carries none of its own. */
+/** Ids, the tracker's name and the docs/ link are assembled here so this file carries none of its own. */
 const id = (prefix: string, sep: string) => `${prefix}${sep}7`
 const TRACKER = ['TECH', 'DEBT.md'].join('_')
+const DOCS_URL = ['https://github.com/intutic/intutic/blob/main', 'docs', 'decisions.md'].join('/')
 
 function runGate(...args: string[]): Promise<{ status: number; out: string }> {
   return new Promise((res, reject) => {
@@ -71,7 +72,7 @@ describe('internal ids in published docs', () => {
     `See ${id('LLD', '-')} for the design.`,
     `An earlier design (${id('LLD', ' ')}) said otherwise.`,
     `See \`docs/${TRACKER}\` for the record.`,
-    'See [the record](https://github.com/intutic/intutic/blob/main/docs/decisions.md).',
+    `See [the record](${DOCS_URL}).`,
     'See [the record](../../../docs/decisions.md).',
   ])('fails "%s"', async (line) => {
     await page(`${line}\n`)

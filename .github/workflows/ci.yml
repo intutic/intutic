@@ -78,6 +78,13 @@ jobs:
       - name: Verify the configuration reference names every environment variable
         run: pnpm lint:config-env
 
+      # 925 source lines here once cited tracker ids and design-doc numbers
+      # this repo has no record of: "see <id>" where the comment should have
+      # said why. The docs site carried 64 more. Every file in the tree is
+      # scanned.
+      - name: Verify no internal tracker ids or internal docs links
+        run: pnpm lint:internal-ids
+
   typecheck:
     name: Typecheck (TS Workspaces) - Run TypeScript typecheck
     runs-on: ubuntu-latest
@@ -189,7 +196,7 @@ jobs:
   changes:
     name: Detect Rust inputs
     runs-on: ubuntu-latest
-    # TD-491: the Rust job takes ~19 minutes and most PRs touch no Rust. It runs
+    # The Rust job takes ~19 minutes and most PRs touch no Rust. It runs
     # on every push to main, and on a PR only when an input of the crate's build
     # or tests changed. That is more than packages/proxy: tests read the anomaly
     # taxonomy, shared-types fixtures, the agent-commands doc and the bundled
@@ -380,7 +387,7 @@ jobs:
       - name: cargo test (all suites, nocapture for grammar load logs)
         run: |
           cd packages/proxy
-          cargo test --test snip_test -- --nocapture 2>&1 | grep -E '(\[TD-|test result|FAILED|running)'
+          cargo test --test snip_test -- --nocapture 2>&1 | grep -E '(\[(grammar|grammar-status|java)\]|test result|FAILED|running)'
           cargo test
 
       # Always, so a linker death above still leaves the disk picture behind.
@@ -457,7 +464,7 @@ jobs:
     name: Build (TS Workspaces) - Bundle TS apps and packages
     runs-on: ubuntu-latest
     needs: [lint, typecheck, test, rust, python, secret-scan]
-    # A skipped Rust job (TD-491) must not skip Build, and a failed one must
+    # A skipped Rust job (see `changes`) must not skip Build, and a failed one must
     # still stop it: always() alone would run Build after any failure.
     if: ${{ !cancelled() && needs.lint.result == 'success' && needs.typecheck.result == 'success' && needs.test.result == 'success' && needs.python.result == 'success' && needs['secret-scan'].result == 'success' && (needs.rust.result == 'success' || needs.rust.result == 'skipped') }}
     steps:
