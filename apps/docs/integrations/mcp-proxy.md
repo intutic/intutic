@@ -155,12 +155,12 @@ Every refusal is a JSON-RPC `-32603` error whose message is written for the agen
 | `HELD` | The SOP rule id | A `require_approval` SOP rule matched: the call is held for a person's approval, and `holdId` names the hold |
 | `INJECTION` | `injection.tool_input` | The arguments matched a prompt-injection pattern, and the workspace blocks injection |
 | `ANOMALY` | The detector id | An anomaly detector stopped the call |
-| `WASM_RULE` | `wasm:<rule id>` | A custom WASM rule blocked the call |
+| `WASM_RULE` | `wasm:<rule id>` | A custom WASM or Rego rule blocked the call |
 | `REASK` | The detector id, or `wasm:<rule id>` | An anomaly detector or WASM rule refused this attempt; revise the approach |
 | `REASK_EXHAUSTED` | The detector id, or `wasm:<rule id>` | The same detector or rule refused three attempts, so it now blocks outright |
 | `BUDGET_EXCEEDED` | The budget id | An MCP call budget covering this call is used up until `resetAt` |
 | `BUDGET_UNAVAILABLE` | `mcpProxyFailBehavior` | A call budget covers this call but could not be checked, and the proxy fails closed |
-| `GOVERNANCE_UNAVAILABLE` | `mcpProxyFailBehavior`, `piiDetectors`, `wasm:<rule id>` or `wasm` | A governance check could not complete, such as a custom WASM or Rego rule that reached no verdict, and the proxy fails closed; the reason names the check or rule |
+| `GOVERNANCE_UNAVAILABLE` | `mcpProxyFailBehavior`, `piiDetectors`, `wasm:<rule id>` or `wasm` | A governance check could not complete; the reason names it. With `mcpProxyFailBehavior` or `piiDetectors`, the control plane's policy, the PII setting or the DLP scan was unavailable and the proxy fails closed. With `wasm:<rule id>` or `wasm`, a custom WASM or Rego rule reached no verdict (cause `deadline`, `budget`, `error`, `result`, or `quarantined` after three runaways in a row): refused whatever the fail setting, and refused again if retried with the same input |
 | `TOFU_UNAVAILABLE` | `mcpProxyFailBehavior` | The server's pinned tool definitions could not be read or written, and the proxy fails closed |
 | `TOOL_DEFINITIONS_CHANGED` | `tofu.<server>` | The server's tool definitions changed since they were first pinned, and the proxy fails closed |
 | `RESULT_WITHHELD_DLP` | `dlp.<pattern>` | The tool ran, but its result held sensitive data that could not be redacted safely, so it was not delivered |

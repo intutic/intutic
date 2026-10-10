@@ -16,6 +16,7 @@
 import * as node_fs from 'node:fs/promises'
 import * as node_os from 'node:os'
 import * as node_path from 'node:path'
+import type { RuleLoadFailureReason } from '@intutic/shared-types'
 import { createStderrLogger as createLogger } from '../stderrLog.js'
 
 const log = createLogger('mcp-proxy-wasm-loader')
@@ -126,7 +127,8 @@ export interface LoadedRuleMeta {
 
 export type CompileOutcome =
   | { ok: true; readsReferencedFiles: boolean; rego: boolean }
-  | { ok: false; error: string; unsupportedImports?: string[] }
+  /** `reason` names the failure as the Rust proxy and the control plane do (`RULE_LOAD_FAILURE_REASONS`). */
+  | { ok: false; error: string; reason: RuleLoadFailureReason; unsupportedImports?: string[] }
 
 /** What `WasmLoader` needs from the worker to load/unload a rule — implemented by `WasmRunner`. */
 export interface CompileBridge {
@@ -228,6 +230,7 @@ export class WasmLoader {
           {
             action: 'wasm_rule_load_error',
             file: filePath,
+            reason: result.reason,
             error: result.error,
             unsupportedImports: result.unsupportedImports,
           },

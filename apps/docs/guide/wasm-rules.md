@@ -439,6 +439,8 @@ Filters are hot-reloaded into the proxy without requiring a service restart:
 
 A module whose bytes do not match its SHA-256 is not loaded. The proxy logs it and raises an incident for the workspace, and the version of that filter it already runs, if any, stays in force.
 
+Uploaded filters reach the LLM proxy. The MCP governance proxy runs only the rules in the local rules directory (`~/.intutic/wasm/`, or `INTUTIC_WASM_DIR`), so a filter meant for MCP tool calls is installed there with `intutic policy install` as well.
+
 ---
 
 ## Managing Filters

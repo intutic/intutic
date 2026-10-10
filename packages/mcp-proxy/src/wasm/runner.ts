@@ -8,7 +8,7 @@
  * ## Divergences from the Rust runner (all recorded as TD entries)
  *
  * - **Fuel: the same 1,000,000-instruction budget, metered a different
- *   way.** V8 has no fuel hook, so `fuel.ts` rewrites each rule at load to
+ *   way.** V8 has no fuel hook, so `wasmFuel.ts` (shared-types) rewrites each rule at load to
  *   count its own instructions and trap when the budget runs out (TD-440).
  *   A rule that exhausts it reaches no verdict, as under Wasmtime.
  * - **The deadline is a backstop, not the limit.** Fuel is the limit: it is
@@ -21,10 +21,10 @@
  *   `runner.rs` sets a `StoreLimits` cap; V8 has no such hook, but it does
  *   enforce the maximum a module declares, so `worker.ts` rewrites the
  *   module's memory section to declare 16MB as its maximum before compiling
- *   (`memoryCap.ts`). A `memory.grow` past it returns -1 as it would under
+ *   (`wasmMemoryCap.ts`). A `memory.grow` past it returns -1 as it would under
  *   Wasmtime. Not a divergence any more; TD-440 records how it got here.
  * - **Rego rules (OPA builds) run through `@intutic/shared-types`' Rego
- *   host**, with their own instruction budget (`fuel.ts`'s
+ *   host**, with their own instruction budget (`wasmFuel.ts`'s
  *   `REGO_FUEL_BUDGET`) and deadline (`REGO_EVALUATE_TIMEOUT_MS`), and
  *   reply with a decision instead of a verdict code — a hold has none.
  * - **`read_referenced_file` is served from a pre-read table**
@@ -39,6 +39,7 @@
 import { Worker } from 'node:worker_threads'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import type { RuleLoadFailureReason } from '@intutic/shared-types'
 import { createStderrLogger as createLogger } from '../stderrLog.js'
 import { WasmLoader, resolveWasmDir, type CompileBridge, type CompileOutcome } from './loader.js'
 import { buildRegoInput, buildWasmContext, type WasmContextInput } from './context.js'
@@ -104,7 +105,7 @@ type RuleResult =
   | { code: number; reason?: string }
   | { decision: 'allow' | 'deny' | 'hold' | 'reask'; reason?: string; riskTier?: string }
 
-/** A rule that ran and reached no verdict: why, in a phrase ("it ran past its 50 ms deadline"). */
+/** A rule that ran and reached no verdict: why, in a phrase ("it ran past its 1 s deadline"). */
 interface RuleFailure {
   stop: Exclude<RuleStop, 'quarantined'>
   detail: string
@@ -220,15 +221,21 @@ export class WasmRunner implements CompileBridge {
       readsReferencedFiles?: boolean
       rego?: boolean
       unsupportedImports?: string[]
+      reason?: RuleLoadFailureReason
       error?: string
     }>({ type: 'compile', id, ruleId, bytes: toArrayBuffer(bytes) }, COMPILE_TIMEOUT_MS)
-    if (!reply) return { ok: false, error: `compile timed out after ${COMPILE_TIMEOUT_MS}ms` }
+    if (!reply) return { ok: false, reason: 'load_error', error: `compile timed out after ${COMPILE_TIMEOUT_MS}ms` }
     if (!reply.ok) {
       const fallback =
         reply.unsupportedImports && reply.unsupportedImports.length > 0
           ? `imports ${reply.unsupportedImports.join(', ')}, which this proxy does not provide`
           : 'unknown compile error'
-      return { ok: false, error: reply.error ?? fallback, unsupportedImports: reply.unsupportedImports }
+      return {
+        ok: false,
+        reason: reply.reason ?? 'load_error',
+        error: reply.error ?? fallback,
+        unsupportedImports: reply.unsupportedImports,
+      }
     }
     return { ok: true, readsReferencedFiles: reply.readsReferencedFiles ?? false, rego: reply.rego ?? false }
   }

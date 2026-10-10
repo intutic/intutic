@@ -473,6 +473,8 @@ The same alerts stream to [SIEM export](/guide/siem-export) destinations.
 
 ## Endpoints
 
+The CLI wraps the walks and checks: `intutic integrity roots` lists the sealed roots, `intutic integrity verify <root_id>` recomputes one, `intutic integrity chain` walks the root chain and `intutic integrity config-chain` the harness config snapshot chain. See [the CLI reference](/reference/cli#intutic-integrity-roots).
+
 | Endpoint | Purpose |
 | :--- | :--- |
 | `GET /api/v1/integrity/roots` | Sealed roots for the workspace, newest first. |

@@ -39,7 +39,7 @@ DLP is configured in `config.yaml` under `intutic_settings.dlp`:
 | `enabled` | `true` | Master switch |
 | `scan_input` | `true` | Scan request bodies and forwarded header values before forwarding |
 | `scan_output` | `true` | Scan response bodies; streaming responses are scrubbed before each chunk reaches the client |
-| `stream_holdback_bytes` | derived (1020 with the built-in patterns) | How far a streamed response is held back so a secret split across two chunks is seen whole before any of it is sent. The default is the longest match any installed pattern can produce. It delays the first token by the time the model takes to write that many bytes (a few seconds), not the end of the response. `0` turns the holdback off, and a split secret can then get through; a smaller number leaves secrets longer than it uncovered. Applies only when `enabled` and `scan_output` are on |
+| `stream_holdback_bytes` | derived (1020 with the built-in patterns) | How far a streamed response is held back so a secret split across two chunks is seen whole before any of it is sent. The default is the longest match any installed pattern can produce. It delays the first token by the time the model takes to write that many bytes (a few seconds), not the end of the response. `0` turns the holdback off, and a split secret can then get through; a smaller number leaves secrets longer than it uncovered. Applies whenever responses are scanned: with `enabled` and `scan_output` on, or for the detectors a workspace's `piiDetectors` names |
 | `patterns` | none | Your own patterns, added to the built-in set (below) |
 | `detectors` | see below | The action for each PII detector: `off`, `redact` or `block` |
 
@@ -118,14 +118,18 @@ MCP proxy — may make it stricter (`off` → `redact` → `block`) but never lo
 | not set | not set | the detector's default |
 
 A detector the workspace leaves out is governed by each machine's config, as it
-is on a proxy with no workspace. A change reaches every LLM proxy within 30
+is on a proxy with no workspace. The LLM proxy's DLP switches cannot loosen the
+baseline either: with `dlp.enabled`, `scan_input` or `scan_output` off, the
+detectors the workspace names still run on the requests or responses the switch
+covers; only the machine's own patterns stop. A change reaches every LLM proxy within 30
 seconds, and every MCP proxy with the rest of its policy: within a minute, or
 up to five minutes for a proxy in `daemon` mode, whose MCP daemon caches the
 policy.
 
 If the LLM proxy cannot read the setting, it follows its
 [fail mode](/concepts/circuit-breaker#proxy-side-fail-mode): with
-`fail_closed: true`, the default, it refuses the request; with
+`fail_closed: true`, the default, it refuses the request
+(`GOVERNANCE_UNAVAILABLE`); with
 `fail_closed: false`, or under a global break-glass override, it scans with the
 machine's config alone. The MCP proxy keeps the setting it last loaded while
 the control plane is unreachable, as it keeps the rest of its policy. When the

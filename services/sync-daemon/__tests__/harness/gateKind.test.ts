@@ -5,14 +5,14 @@
  * @module
  */
 import { describe, it, expect } from 'vitest'
-import { HarnessType } from '@intutic/shared-types'
 import {
+  HarnessType,
   gateKindForHarness,
   SDK_GATED_HARNESSES,
   NO_GATE_HARNESSES,
   DELEGATED_GATE_HARNESSES,
   BRIDGE_GATED_HARNESSES,
-} from '../../src/harness/gateKind.js'
+} from '@intutic/shared-types'
 import { GATES, NO_GATE } from './gateRegistry.js'
 
 describe('gateKindForHarness', () => {

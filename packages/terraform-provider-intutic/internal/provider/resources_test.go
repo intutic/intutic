@@ -12,6 +12,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -50,6 +54,28 @@ func TestNotificationRuleKeepsAConfiguredRoutingKeyBehindItsMask(t *testing.T) {
 	(&apiRule{RuleID: "nr_1", Channel: "pagerduty", ChannelConfig: apiChannelConfig{PagerdutyKey: &other}}).applyTo(&m)
 	if m.PagerdutyKey.ValueString() != other {
 		t.Fatalf("a key changed outside Terraform must show as a difference, got %q", m.PagerdutyKey.ValueString())
+	}
+}
+
+func TestNotificationRuleEventTypeMustBeOneTheAPIDispatches(t *testing.T) {
+	var resp resource.SchemaResponse
+	(&notificationRuleResource{}).Schema(context.Background(), resource.SchemaRequest{}, &resp)
+	attribute := resp.Schema.Attributes["event_type"].(schema.StringAttribute)
+	accepts := func(v string) bool {
+		var out validator.StringResponse
+		for _, check := range attribute.Validators {
+			check.ValidateString(context.Background(), validator.StringRequest{Path: path.Root("event_type"), ConfigValue: types.StringValue(v)}, &out)
+		}
+		return !out.Diagnostics.HasError()
+	}
+	if !accepts("decision.pending") || !accepts("governance.gate.silent") {
+		t.Fatal("an event type the API dispatches must be accepted")
+	}
+	if accepts("policy.violaton") || accepts("") {
+		t.Fatal("an event type the API does not know must fail at plan time")
+	}
+	if len(notificationEventTypes) < 50 {
+		t.Fatalf("notification_event_types.json holds %d event types; expected the whole list", len(notificationEventTypes))
 	}
 }
 
@@ -172,6 +198,66 @@ func TestSiemDestinationKeepsAConfiguredSecretBehindItsMask(t *testing.T) {
 	read.applyTo(&imported)
 	if !imported.SecretConfig.Equal(strMap("token", "********9999")) {
 		t.Fatalf("imported secret_config = %v", imported.SecretConfig)
+	}
+}
+
+func TestSiemDestinationClearsARemovedCredential(t *testing.T) {
+	ctx := context.Background()
+	var diags diag.Diagnostics
+	state := siemDestinationModel{
+		Name:         types.StringValue("hook"),
+		AdapterType:  types.StringValue("webhook_https"),
+		Config:       jsontypes.NewNormalizedValue(`{"webhookUrl":"https://hooks.example.com/siem"}`),
+		SecretConfig: strMap("authHeaderValue", "Bearer 0123456789"),
+		SourceTables: types.SetValueMust(types.StringType, []attr.Value{}),
+	}
+	read := func(authHeaderValue string) apiSiemDestination {
+		value, _ := json.Marshal(authHeaderValue)
+		return apiSiemDestination{DestinationID: "siemdest_1", AdapterType: "webhook_https", Config: map[string]json.RawMessage{
+			"webhookUrl":      json.RawMessage(`"https://hooks.example.com/siem"`),
+			"authHeaderValue": value,
+		}}
+	}
+
+	for name, secrets := range map[string]types.Map{
+		"secret_config removed":  types.MapNull(types.StringType),
+		"the credential removed": types.MapValueMust(types.StringType, map[string]attr.Value{}),
+	} {
+		plan := state
+		plan.SecretConfig = secrets
+		body := plan.updateBody(ctx, &state, &diags)
+		cfg, _ := json.Marshal(body["config"])
+		// The API keeps a credential the config leaves out; "" is what clears it.
+		if string(cfg) != `{"authHeaderValue":"","webhookUrl":"https://hooks.example.com/siem"}` {
+			t.Fatalf("%s: config = %s", name, cfg)
+		}
+		// The cleared credential reads back empty, and the state matches the plan.
+		after := read("")
+		after.applyTo(&plan)
+		if !plan.SecretConfig.Equal(secrets) {
+			t.Fatalf("%s: secret_config after the apply = %v, planned %v", name, plan.SecretConfig, secrets)
+		}
+	}
+
+	// Configured as "", it stays "".
+	explicit := state
+	explicit.SecretConfig = strMap("authHeaderValue", "")
+	after := read("")
+	after.applyTo(&explicit)
+	if !explicit.SecretConfig.Equal(strMap("authHeaderValue", "")) {
+		t.Fatalf(`a credential configured as "" must read back as "", got %v`, explicit.SecretConfig)
+	}
+
+	// A credential set outside Terraform still shows as a difference.
+	unmanaged := state
+	unmanaged.SecretConfig = types.MapNull(types.StringType)
+	after = read(siemMask("Bearer set-elsewhere-7777"))
+	after.applyTo(&unmanaged)
+	if !unmanaged.SecretConfig.Equal(strMap("authHeaderValue", "********7777")) {
+		t.Fatalf("a credential set outside Terraform must show, got %v", unmanaged.SecretConfig)
+	}
+	if diags.HasError() {
+		t.Fatal(diags)
 	}
 }
 

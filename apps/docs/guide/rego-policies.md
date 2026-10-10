@@ -242,7 +242,7 @@ A case file holds one input document, or an array of cases:
 ]
 ```
 
-Each case runs through the same Rego host the MCP proxy uses, which decides as the LLM proxy does: both hosts' builtins are tested against `opa eval` on the same inputs. The command prints each decision, and exits 1 when a case gets a decision other than its `expect`, or reaches none. `opa test` also works on the policy source unchanged.
+Each case runs through the same Rego host the MCP proxy uses, which decides as the LLM proxy does: both hosts' builtins are tested against `opa eval` on the same inputs. The test counts instructions against the proxies' budget ([limits](#limits)), so a policy that runs out there runs out here and reaches no decision; it does not time an evaluation, so check the largest inputs you expect. The command prints each decision, and exits 1 when a case gets a decision other than its `expect`, or reaches none. `opa test` also works on the policy source unchanged.
 
 ## Deploying
 
@@ -255,7 +255,7 @@ intutic policy install --wasm build/intutic_shell_deny.wasm --name shell --prior
 `install` loads and evaluates the rule before copying it, and refuses one a proxy could not run. The proxies pick it up within about five seconds.
 
 <!-- ENTERPRISE_ONLY_START -->
-**For a workspace**, upload the module on **Policies › Custom Filters**, or with `POST /api/v1/wasm-rules`, as for any filter. The control plane checks it with the same Rego host and refuses one the proxies could not run, naming the builtin. The proxies receive it the same way as a native rule: the workspace's rule set and each module by its SHA-256.
+**For a workspace**, upload the module on **Policies › Custom Filters**, or with `POST /api/v1/wasm-rules`, as for any filter. The control plane checks it with the same Rego host and refuses one the proxies could not run, naming the builtin. The LLM proxy receives it the same way as a native rule: the workspace's rule set and each module by its SHA-256. The MCP governance proxy runs only the rules in the local rules directory (`~/.intutic/wasm/`, or `INTUTIC_WASM_DIR`), so for MCP tool calls install the module there too.
 
 Replay (`intutic policy replay`, `POST /api/v1/wasm-rules/:id/replay`) runs native rules only: it replays sampled request contexts, which do not record which tool calls made up a request's latest turn. Measure a Rego rule on live traffic in shadow mode instead.
 <!-- ENTERPRISE_ONLY_END -->

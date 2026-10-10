@@ -261,11 +261,13 @@ async fn the_workspace_setting_decides_what_the_request_scan_does() {
     );
 
     // The setting cannot be read: fail-closed, the default, refuses the
-    // request before it reaches the model, as an unreachable policy check does.
+    // request before it reaches the model, as an unreachable policy check
+    // does, as GOVERNANCE_UNAVAILABLE: a check that could not complete, as
+    // the MCP proxy names it.
     let before = upstream.received_requests().await.expect("recording").len();
     let (status, body) = send(UNREADABLE, "ws_pii_d", format!("mail {email}")).await;
     assert_eq!(status, reqwest::StatusCode::FORBIDDEN, "{body}");
-    assert!(body.contains("policy_denied"), "{body}");
+    assert!(body.contains("GOVERNANCE_UNAVAILABLE"), "{body}");
     assert_eq!(
         upstream.received_requests().await.expect("recording").len(),
         before

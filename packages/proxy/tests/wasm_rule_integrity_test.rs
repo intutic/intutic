@@ -8,11 +8,13 @@
 //! check that it is refused, reported once, and that a rule already enforcing
 //! keeps enforcing.
 //!
-//! A version that cannot load (a missing binary, or one importing what the host
-//! does not provide) is refused and reported the same way, so a rule that never
-//! loaded does not leave the workspace ungoverned without an incident.
+//! A version that cannot load (a missing binary, bytes that do not compile, or
+//! one importing what the host does not provide) is refused and reported the
+//! same way, so a rule that never loaded does not leave the workspace
+//! ungoverned without an incident. Each report names its reason, which the
+//! control plane files the incident under.
 
-use intutic_proxy::store::ControlPlaneCache;
+use intutic_proxy::store::{ControlPlaneCache, RuleRefusalReport};
 use intutic_proxy::wasm::context::{RequestContext, Verdict};
 use intutic_proxy::wasm::registry::PluginRegistry;
 use serde_json::json;
@@ -71,6 +73,7 @@ struct CloudRules {
     descriptors: Mutex<String>,
     binaries: Mutex<Vec<(String, Vec<u8>)>>,
     anomalies: Mutex<Vec<String>>,
+    reasons: Mutex<Vec<(String, String, String)>>,
 }
 
 impl CloudRules {
@@ -91,6 +94,11 @@ impl CloudRules {
     fn anomalies(&self) -> Vec<String> {
         self.anomalies.lock().unwrap().clone()
     }
+
+    /// `(rule_id, sha256, reason)` of each report.
+    fn reasons(&self) -> Vec<(String, String, String)> {
+        self.reasons.lock().unwrap().clone()
+    }
 }
 
 #[async_trait::async_trait]
@@ -108,8 +116,16 @@ impl ControlPlaneCache for CloudRules {
             .find(|(s, _)| s == sha)
             .map(|(_, b)| b.clone()))
     }
-    async fn publish_system_anomaly(&self, _w: &str, description: &str) {
-        self.anomalies.lock().unwrap().push(description.to_string());
+    async fn publish_rule_refusal(&self, _w: &str, refusal: &RuleRefusalReport<'_>) {
+        self.anomalies
+            .lock()
+            .unwrap()
+            .push(refusal.description.to_string());
+        self.reasons.lock().unwrap().push((
+            refusal.rule_id.to_string(),
+            refusal.sha256.to_string(),
+            refusal.reason.to_string(),
+        ));
     }
     async fn policy_version(&self, _w: &str) -> Option<u64> {
         None
@@ -234,6 +250,14 @@ async fn a_swapped_binary_is_refused_and_reported() {
     assert!(anomalies[0].contains("wasm_shell"), "{}", anomalies[0]);
     assert!(anomalies[0].contains(&sha(SHELL)), "{}", anomalies[0]);
     assert!(anomalies[0].contains(&sha(DEPLOY)), "{}", anomalies[0]);
+    assert_eq!(
+        rules.reasons(),
+        [(
+            "wasm_shell".to_string(),
+            sha(SHELL),
+            "hash_mismatch".to_string()
+        )]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -309,6 +333,7 @@ async fn a_rule_whose_first_version_cannot_load_is_reported_once() {
         "{}",
         anomalies[0]
     );
+    assert_eq!(rules.reasons()[0].2, "unsupported_import");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -355,5 +380,62 @@ async fn a_rule_whose_binary_is_missing_is_reported() {
     let anomalies = rules.anomalies();
     assert_eq!(anomalies.len(), 1, "{anomalies:?}");
     assert!(anomalies[0].contains("missing"), "{}", anomalies[0]);
+    assert_eq!(rules.reasons()[0].2, "missing");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Bytes under a matching hash that are not a WebAssembly module.
+#[tokio::test]
+async fn a_rule_that_does_not_compile_is_reported_as_a_compile_error() {
+    let dir = empty_rule_dir("compile");
+    let registry = PluginRegistry::new(dir.to_str()).await.unwrap();
+    let rules = Arc::new(CloudRules::default());
+    let bytes = b"\0asm not really".to_vec();
+    rules.publish("wasm_garbage", &sha(&bytes), &bytes);
+    let cp: Arc<dyn ControlPlaneCache> = rules.clone();
+
+    assert_eq!(
+        registry.evaluate(&cp, &ctx("ws", "rm -rf /")).await,
+        Verdict::Bypass
+    );
+    assert_eq!(
+        rules.reasons(),
+        [(
+            "wasm_garbage".to_string(),
+            sha(&bytes),
+            "compile_error".to_string()
+        )]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The reasons a proxy files a refusal under are the control plane's list.
+#[test]
+fn every_refusal_reason_is_one_the_control_plane_knows() {
+    let shared = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../shared-types/src/ruleLoadFailures.ts"),
+    )
+    .unwrap();
+    let list = shared
+        .split("RULE_LOAD_FAILURE_REASONS = [")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .expect("RULE_LOAD_FAILURE_REASONS in shared-types");
+    let mut known: Vec<&str> = list
+        .split(',')
+        .map(|s| s.trim().trim_matches('\''))
+        .filter(|s| !s.is_empty())
+        .collect();
+    known.sort_unstable();
+    assert_eq!(
+        known,
+        [
+            "compile_error",
+            "hash_mismatch",
+            "load_error",
+            "missing",
+            "unsupported_import"
+        ]
+    );
 }

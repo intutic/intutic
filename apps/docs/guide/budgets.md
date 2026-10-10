@@ -18,6 +18,17 @@ Set the workspace's daily and monthly caps and its alert threshold on **Settings
 { "daily_budget_usd": 50, "monthly_budget_usd": 1000, "alert_threshold_pct": 80 }
 ```
 
+What each cap does:
+
+- **The daily cap is enforced.** Before forwarding a request, the proxy estimates its cost and refuses it with `429 BUDGET_EXCEEDED` when the estimate plus a 20% margin is more than what is left of the day's cap. The cap belongs to the workspace: every member and every virtual key in it draws on the same amount.
+- **The monthly cap raises alerts.** Reaching its alert threshold or the cap itself raises the [budget alerts](#budget-alerts) below; requests are not refused.
+
+There are no per-developer or per-virtual-key budgets. To see who spends what, use **Cost by Developer** and **Cost by Virtual Key** (see [Dashboard Widgets](#dashboard-widgets)) or `intutic usage members`.
+
+::: tip
+Start with a conservative daily cap and raise it as you learn your team's usage. Cost by Developer shows where the spend goes.
+:::
+
 ### Local Daily Cap
 
 A standalone proxy (one with no control plane) also keeps a daily cap of its own, for all the spend that passes through it. Set it as `maxDailyBudgetUsd` in `~/.intutic/config.json`:
@@ -28,30 +39,15 @@ A standalone proxy (one with no control plane) also keeps a daily cap of its own
 
 It defaults to `$10.00` when unset, and an edit takes effect within 60 seconds without a restart. `INTUTIC_LOCAL_BUDGET_ENFORCE=0` stops the proxy refusing requests over the cap while it keeps counting the spend. There are no environment variables for the cap itself. A proxy connected to a control plane does not apply it: its spend is capped per workspace by the caps above.
 
-### Developer Budget Tiers
-
-Assign developers to budget tiers that match their role and usage needs:
-
-| Tier | Cap Level | Intended For |
-|------|-----------|-------------|
-| **Junior** | Strict | Junior engineers or experimental features |
-| **Senior** | Balanced | Standard operational budget for senior engineers |
-| **Staff** | High | Heavy coding sessions or complex projects |
-| **Principal** | Generous | Large-scale test pipelines and architectural work |
-
-::: tip
-Start with conservative budgets and increase as you understand your team's usage patterns. The FinOps dashboard helps you identify trends.
-:::
-
 ---
 
 ## How Enforcement Works
 
 Each API request flowing through the proxy is checked against budget limits:
 
-1. **Cost estimation** — The proxy calculates the estimated cost using model pricing data and token counting multipliers
-2. **Budget check** — The estimated cost is compared against the developer's remaining daily/monthly budget
-3. **Decision** — If the request would exceed the budget, it's blocked with a `KILL` enforcement action
+1. **Cost estimation** — The proxy estimates the cost from the model's price, the prompt's length and the request's `max_tokens`
+2. **Budget check** — The estimate plus a 20% margin is compared with what is left of the workspace's daily cap, or of the machine's local daily cap on a standalone proxy
+3. **Decision** — If the request would exceed it, it is blocked with a `KILL` enforcement action and a `429`
 
 ### Enforcement Modes & Connectivity
 
@@ -59,8 +55,8 @@ Intutic's budget enforcer operates in two distinct modes depending on connection
 
 <!-- ENTERPRISE_ONLY_START -->
 #### 1. Connected Mode
-*   **Centralized Caps:** Daily and monthly budgets are managed centrally.
-*   **Valkey Cache Validation:** The control plane caches billing limits and cumulative workspace usage counters in Valkey. The proxy performs a cache precheck (`check_workspace_hard_block`) — a single Valkey GET — on every incoming request.
+*   **Centralized Caps:** The daily cap is set centrally and enforced on every request; the monthly cap raises alerts only.
+*   **Valkey Cache Validation:** The control plane writes the workspace's daily cap and its running daily spend to Valkey, and the proxy reads both with the virtual key on every request.
 *   **Heartbeat Sync:** Actual query costs update Valkey counters and PostgreSQL in real time upon successful completions.
 <!-- ENTERPRISE_ONLY_END -->
 
@@ -70,16 +66,15 @@ Intutic's budget enforcer operates in two distinct modes depending on connection
 *   **Pre-flight Cost Interception:** Before reaching the LLM provider, a native budget gate plugin estimates query cost based on prompt length and static ratios. If this would exceed the remaining budget, the proxy blocks the request with `HTTP 429 Too Many Requests` (`OVERAGE_HARD_CAP_EXCEEDED` error code).
 *   **Offline Telemetry Ingestion:** Successful completion costs are calculated, appended to the daily spend ledger, and queued in sharded files `~/.intutic/logs/traces-YYYY-MM-DD.jsonl` for sync-back.
 
-#### Valkey Failure Behavior (Fail-Open)
+#### Valkey Failure Behavior (Fail-Closed)
 
-When Valkey (the in-memory cache used for budget counters) is unavailable, the budget gate **fails open** — requests are allowed through rather than blocked:
+A connected proxy that cannot read Valkey (the in-memory cache that holds virtual keys and budget counters) cannot verify the caller's key or the workspace's spend, so it **refuses** the request rather than admit spend it cannot check:
 
-*   **Availability over enforcement:** This is a conscious design decision. During a cache outage, blocking all LLM requests would halt developer productivity across the entire workspace. The budget gate prioritizes availability.
-*   **Structured warning logs:** Every request that bypasses the budget check due to Valkey unavailability emits a structured warning log entry, enabling observability dashboards and alerting pipelines to detect prolonged cache outages.
-*   **Automatic recovery:** Once Valkey is back online, the budget gate resumes normal enforcement. Spend that occurred during the outage is reconciled via the heartbeat sync process from completion events in PostgreSQL.
+*   **Retryable refusals:** the proxy answers `503` with `AUTH_UNVERIFIABLE` (the key could not be checked) or `BUDGET_UNVERIFIABLE` (the spend, or the workspace's daily cap, could not be checked: a proxy whose copy of the cap is missing asks the control plane for it and refuses only if it cannot get it; it never falls back to a default cap). The key may well be valid, so clients should retry rather than treat it as an authentication failure.
+*   **Automatic recovery:** once Valkey is reachable again, requests are admitted and checked as usual.
 
 ::: warning
-During a Valkey outage, budget limits are not enforced on the fast path. Monitor your Valkey health and set up alerts for `E_CACHE_UNAVAILABLE` log events to minimize the enforcement gap window.
+A Valkey outage stops a connected workspace's model traffic. Monitor Valkey's health and alert on the proxy's `AUTH_UNVERIFIABLE` and `BUDGET_UNVERIFIABLE` refusals. A standalone proxy is unaffected: its local cap is kept in files.
 :::
 
 ### Budget Breach Anomalies
@@ -88,7 +83,7 @@ When a budget limit is exceeded, Intutic raises one of three anomaly types:
 
 | Anomaly Type | Trigger |
 |-------------|---------|
-| **Budget Breach** | A developer or workspace has exceeded their allocated daily or monthly budget |
+| **Budget Breach** | The workspace, or a standalone machine, has used up its daily budget |
 | **Spawn Budget Breach** | A sub-agent fleet has reached its localized budget boundary |
 | **Workflow Budget Breach** | A multi-step workflow execution has exceeded its set threshold |
 
@@ -106,8 +101,9 @@ The dashboard surfaces budget utilization in real time:
 - **Cost by Developer** — on the same tab: cost, tokens, calls, active days and models used per member, today or this month. Sort by any column; the top 10 show until you choose **Show all**. A call belongs to the member who owns the virtual key that made it. OWNER, ADMIN and EM see every member, plus an **Unattributed** row for calls with no virtual key. A DEVELOPER or VIEWER sees only their own usage.
 - **Cost by Team** — on the same tab, for OWNER, ADMIN and EM: the same figures per [SCIM group](/guide/scim), including members of nested groups. A member in several groups counts in each one, so team totals can add up to more than the workspace total. Without SCIM groups there are no teams, and cost by developer is the finest breakdown. SCIM comes with the Enterprise and Self-host plans.
 - **Cost by Branch** — on the same tab: cost per repository and branch, or per HEAD commit, with the same role scoping as **Cost by Developer** (see [Cost per branch and commit](#cost-per-branch-and-commit)).
+- **Cost by Pull Request** — on the same tab, next to Cost by Branch: cost, calls and developers per GitHub pull request (see [Cost per pull request](#cost-per-pull-request)).
 
-Cost by Developer, Cost by Team and Cost by Branch are fleet analytics <Badge type="warning" text="Biz Org+" />: they come with the Biz Org, Enterprise and Self-host plans and the trials. On another plan each card says which plans include it.
+Cost by Developer, Cost by Team, Cost by Branch and Cost by Pull Request are fleet analytics <Badge type="warning" text="Biz Org+" />: they come with the Biz Org, Enterprise and Self-host plans and the trials. On another plan each card says which plans include it.
 
 The dashboard has no daily spend trend or per-model spend view. **Token Efficiency by Model** on the same tab shows tokens per model, not cost.
 
@@ -192,6 +188,8 @@ The sync daemon (`intutic connect`) reports the repository, Git branch and HEAD 
 - **The clawde SDKs** report their own: with a virtual key, `ClawdeClient` registers a session carrying the repository, branch and commit of the directory it runs in, through a gateway or in CI too. See [Git context and cost attribution](/reference/clawde-sdk#_1a-git-context-and-cost-attribution).
 - **Pull requests:** a branch with a GitHub pull request is also reported per pull request. See [Cost per pull request](#cost-per-pull-request).
 
+From the CLI, `intutic usage branches` and `intutic usage commits` print the same figures (`intutic usage members` and `intutic usage teams` the per-developer and per-team ones); see [the CLI reference](/reference/cli#intutic-usage-branches).
+
 ### Cost per pull request <Badge type="warning" text="Biz Org+" /> {#cost-per-pull-request}
 
 A pull request's cost is the calls made on its head branch, in its repository, from the end of the previous pull request on that branch (or the branch's first call) until it was merged or closed. The dashboard shows it as **Cost by Pull Request** on Overview's **Cost & Token Efficiency** tab, next to Cost by Branch: each pull request links to GitHub, with its state, author, cost, calls and developers. The CLI is `intutic usage pull-requests`, and the API is `GET /api/v1/usage/pull-requests`.
@@ -219,5 +217,5 @@ Budget breach anomalies (see [Budget Breach Anomalies](#budget-breach-anomalies)
 ## Related
 
 - [Settings & Configuration](/guide/settings) — Configure workspace budgets
-- [Core Concepts](/guide/concepts) — Budget tiers and anomaly types
+- [Core Concepts](/guide/concepts) — Anomaly types and enforcement actions
 - [Activity Logs (Traces)](/guide/traces) — Token utility classification

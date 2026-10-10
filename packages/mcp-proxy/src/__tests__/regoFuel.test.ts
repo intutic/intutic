@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { REGO_MAX_INPUT_BYTES, boundedRegoInput, evaluateRegoRule, loadRegoRule } from '@intutic/shared-types'
-import { FUEL_EXPORT, REGO_FUEL_BUDGET, meterFuel } from '../wasm/fuel.js'
+import { FUEL_EXPORT, REGO_FUEL_BUDGET, meterFuel } from '@intutic/shared-types'
 
 const fixture = (name: string): Uint8Array<ArrayBuffer> =>
   new Uint8Array(readFileSync(fileURLToPath(new URL(`../../../proxy/tests/fixtures/rego/${name}`, import.meta.url))))

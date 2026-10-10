@@ -27,11 +27,11 @@
  */
 
 import { createHash, createPublicKey, verify as nodeVerify, type JsonWebKey } from 'node:crypto'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import pc from 'picocolors'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { log } from '../lib/logger.js'
-import { fail, readJsonFile, runApiCommand, writeOutput, type ApiCommandOpts } from './apiCommand.js'
+import { fail, runApiCommand, writeOutput, type ApiCommandOpts } from './apiCommand.js'
 import { fetchSigningKeys, type SignatureState, type SigningJwks } from './integrity.js'
 
 /** The CLI's format names, and the route's for each. */
@@ -244,17 +244,44 @@ const SIGNATURE_TEXT: Record<SignatureState, string> = {
   keys_unavailable: 'not verified: the published keys could not be fetched; pass --jwks <file>',
 }
 
+/**
+ * `verify`'s exit status for an input it cannot read (a missing file, one
+ * that is not JSON, one that is not an archive or a JWKS): its own status, so
+ * a script never reads a wrong path as a changed archive (1) or an unsigned
+ * one (2).
+ */
+export const UNREADABLE_INPUT_EXIT = 3
+
+function unreadable(message: string): never {
+  log.error(message)
+  process.exit(UNREADABLE_INPUT_EXIT)
+}
+
+function readInput(path: string): unknown {
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch (err) {
+    unreadable(`Cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  try {
+    return JSON.parse(text)
+  } catch (err) {
+    unreadable(`${path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
 /** The published key set, from a file when given, else from the control plane's unauthenticated endpoint. */
 function loadJwks(path: string): SigningJwks {
-  const parsed = readJsonFile(path) as SigningJwks
-  if (!Array.isArray(parsed?.keys)) fail(`${path} is not a JWKS: it has no "keys" array`)
+  const parsed = readInput(path) as SigningJwks
+  if (!Array.isArray(parsed?.keys)) unreadable(`${path} is not a JWKS: it has no "keys" array`)
   return parsed
 }
 
 /** `intutic compliance verify <file>` */
 export async function runComplianceVerify(file: string, opts: ApiCommandOpts & { jwks?: string }): Promise<void> {
-  const archive = readJsonFile(file) as EvidenceArchive
-  if (!archive?.manifest?.archiveSha256) fail(`${file} is not an evidence archive: it has no manifest.archiveSha256`)
+  const archive = readInput(file) as EvidenceArchive
+  if (!archive?.manifest?.archiveSha256) unreadable(`${file} is not an evidence archive: it has no manifest.archiveSha256`)
 
   const jwks = opts.jwks
     ? loadJwks(opts.jwks)

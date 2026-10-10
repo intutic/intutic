@@ -1,6 +1,6 @@
 /**
  * The few pieces of the WebAssembly binary format the load-time rewrites
- * (`memoryCap.ts`, `fuel.ts`) share: LEB128 integers, the section list, and
+ * (`wasmMemoryCap.ts`, `wasmFuel.ts`) share: LEB128 integers, the section list, and
  * reassembly. Not a general decoder; each rewrite parses only what it changes.
  */
 

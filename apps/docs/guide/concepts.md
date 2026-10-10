@@ -138,16 +138,7 @@ Each trace receives a **compliance score** indicating how closely the request al
 
 ## Budget Tiers
 
-Budget tiers control how much each developer can spend on LLM calls. They map to seniority levels:
-
-| Tier | Intended for |
-|------|-------------|
-| `JUNIOR` | Junior developers — lowest budget ceiling |
-| `SENIOR` | Senior developers |
-| `STAFF` | Staff engineers |
-| `PRINCIPAL` | Principal engineers — highest budget ceiling |
-
-Exceeding your tier's budget triggers a `BUDGET_BREACH` anomaly and a `KILL` enforcement action. Budget caps are enforced per developer session.
+Each session carries a budget tier label (`JUNIOR`, `SENIOR`, `STAFF` or `PRINCIPAL`, `JUNIOR` unless set), shown with the session in the dashboard. The tier sets no spending limit: spend is capped per workspace, by a daily cap the proxy enforces on every request, and a monthly cap that raises alerts. See [Budgets](/guide/budgets#per-workspace-budgets).
 
 <!-- ENTERPRISE_ONLY_START -->
 ## RBAC Roles

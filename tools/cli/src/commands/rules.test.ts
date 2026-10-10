@@ -4,10 +4,11 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
-import { loadRegoRule } from '@intutic/shared-types'
+import { REGO_FUEL_BUDGET, loadRegoRule } from '@intutic/shared-types'
 import {
   REGO_HOST,
   decideCase,
+  loadMeteredRegoRule,
   defaultOutPath,
   extractPolicyWasm,
   parseCases,
@@ -67,6 +68,15 @@ describe('intutic rules test', () => {
         ? { tool: 'Write', args: { file_path: `/workspace/app/${padding}/../../../etc/passwd`, content: '' } }
         : { tool: 'Bash', args: { command: `${'echo ok; '.repeat(8_000)}${example === 'hold_prod_deploys' ? 'helm upgrade api ./chart -n prod' : 'rm -rf /'}` } }
     expect(decideCase(rule!, input)).toMatchObject({ decision: 'deny', reason: expect.stringContaining('too long to check in full') })
+  })
+
+  it('meters a rule against the proxies\' instruction budget, and one that runs out reaches no decision', async () => {
+    const bytes = await fs.readFile(path.join(fixtures, 'examples/block_destructive_shell.wasm'))
+    const call = { tool: 'Bash', args: { command: 'rm -rf /' } }
+    const metered = loadMeteredRegoRule(bytes)
+    expect(metered?.fuelBudget).toBe(REGO_FUEL_BUDGET)
+    expect(decideCase(metered!, call).decision).toBe('deny')
+    expect(() => decideCase(loadMeteredRegoRule(bytes, 1_000_000)!, call)).toThrow('Rego rule ran out of its 1000000-instruction budget')
   })
 
   it('reports the metadata risk tier when a decision names none', async () => {

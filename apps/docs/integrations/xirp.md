@@ -15,7 +15,7 @@ Per Xirp's own public FAQ, it preserves each wrapped harness's **native, unmodif
 
 ## Governance model
 
-Xirp is registered as a `NO_GATE` harness with a `'delegated'` gate kind (see `services/sync-daemon/src/harness/gateKind.ts`) — the first harness of this shape in this product. That is a deliberate, different claim from "no gate exists" (aider's `'none'` kind): Xirp's tool calls ARE governed, by whichever wrapped harness's own gate is already running inside that session (`claude-code-check.js`, `codex-check.js`, etc.) — the same gate this product already lists under that harness's own row, not a second one credited to Xirp.
+Xirp is registered as a `NO_GATE` harness with a `'delegated'` gate kind (see `packages/shared-types/src/gateKind.ts`) — the first harness of this shape in this product. That is a deliberate, different claim from "no gate exists" (aider's `'none'` kind): Xirp's tool calls ARE governed, by whichever wrapped harness's own gate is already running inside that session (`claude-code-check.js`, `codex-check.js`, etc.) — the same gate this product already lists under that harness's own row, not a second one credited to Xirp.
 
 ## Setup
 

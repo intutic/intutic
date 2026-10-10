@@ -22,9 +22,12 @@ import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import {
+  FUEL_EXPORT,
+  REGO_FUEL_BUDGET,
   boundedRegoInput,
   evaluateRegoRule,
   loadRegoRule,
+  meterFuel,
   regoDecision,
   withRegoMetadata,
   type RegoDecision,
@@ -43,6 +46,22 @@ export const REGO_HOST: RegoHostOptions = {
 }
 
 const RISK_TIERS = ['low', 'medium', 'high', 'critical'] as const
+
+/** A Rego rule metered against an instruction budget, which it records. */
+export type MeteredRegoRule = RegoRule & { fuelBudget: number }
+
+/**
+ * Load a Rego rule as the MCP proxy loads it: rewritten to count its own
+ * instructions against the proxies' budget (`REGO_FUEL_BUDGET`, the Rust
+ * proxy's `limits::REGO` on V8's meter), so a rule that runs out of fuel in a
+ * proxy runs out here, and reaches no decision the same way. Null for a
+ * native rule. `budget` is for tests.
+ */
+export function loadMeteredRegoRule(bytes: Uint8Array, budget = REGO_FUEL_BUDGET): MeteredRegoRule | null {
+  const plain = new Uint8Array(bytes)
+  const rule = loadRegoRule(plain, new WebAssembly.Module(meterFuel(plain, budget)), REGO_HOST)
+  return rule && { ...rule, fuelBudget: budget }
+}
 
 function run(cmd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -177,7 +196,7 @@ export async function runRulesBuild(opts: {
   // Refuse here what a host would refuse at load: a builtin it lacks, an old
   // ABI. Building a rule that every proxy then skips helps nobody.
   try {
-    loadRegoRule(module, undefined, REGO_HOST)
+    loadMeteredRegoRule(module)
   } catch (err) {
     log.error(`The policy compiled, but Intutic cannot run it: ${(err as Error).message}`)
     process.exit(1)
@@ -217,21 +236,39 @@ export function parseCases(text: string): RegoCase[] {
   return [{ input: parsed as Record<string, unknown> }]
 }
 
-/** The decision `rule` reaches on one input, as a proxy would reach it. */
-export function decideCase(rule: RegoRule, input: Record<string, unknown>): RegoDecision {
-  const decision = regoDecision(
-    evaluateRegoRule(rule, boundedRegoInput({ v: 1, ...input }), REGO_HOST),
-    rule.entrypoint,
-  )
+/**
+ * The decision `rule` reaches on one input, as a proxy would reach it. Throws
+ * when it reaches none: out of instructions (a metered rule), an error, or a
+ * result in none of the decision shapes.
+ */
+export function decideCase(rule: RegoRule | MeteredRegoRule, input: Record<string, unknown>): RegoDecision {
+  let fuel: WebAssembly.Global | undefined
+  const host: RegoHostOptions = {
+    ...REGO_HOST,
+    onInstance: (exports) => {
+      const counter = exports[FUEL_EXPORT]
+      if (counter instanceof WebAssembly.Global) fuel = counter
+    },
+  }
+  let raw: unknown
+  try {
+    raw = evaluateRegoRule(rule, boundedRegoInput({ v: 1, ...input }), host)
+  } catch (err) {
+    if (fuel && (fuel.value as number) < 0 && 'fuelBudget' in rule) {
+      throw new Error(`Rego rule ran out of its ${rule.fuelBudget}-instruction budget`, { cause: err })
+    }
+    throw err
+  }
+  const decision = regoDecision(raw, rule.entrypoint)
   return decision.riskTier || !rule.riskTier ? decision : { ...decision, riskTier: rule.riskTier }
 }
 
 export async function runRulesTest(modulePath: string, opts: { input: string[] }): Promise<void> {
   log.header('Intutic — Test Rego Rule')
 
-  let rule: RegoRule | null
+  let rule: MeteredRegoRule | null
   try {
-    rule = loadRegoRule(await fs.readFile(modulePath), undefined, REGO_HOST)
+    rule = loadMeteredRegoRule(await fs.readFile(modulePath))
   } catch (err) {
     log.error(`Cannot load "${modulePath}": ${(err as Error).message}`)
     process.exit(1)
@@ -261,7 +298,7 @@ export async function runRulesTest(modulePath: string, opts: { input: string[] }
       } catch (err) {
         failed += 1
         log.error(
-          `${label}: evaluation reached no decision (a proxy refuses the call): ${(err as Error).message}`,
+          `${label}: evaluation reached no decision (a proxy refuses the call as GOVERNANCE_UNAVAILABLE): ${(err as Error).message}`,
         )
         continue
       }

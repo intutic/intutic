@@ -18,11 +18,13 @@
  * @module
  */
 
+import type { GateKind } from './gateKind.js'
+
 /** Bumped when a field's meaning changes; the control plane refuses versions it does not know. */
 export const DEVICE_INVENTORY_SCHEMA_VERSION = 1
 
-/** How a harness's tool calls are gated (the sync daemon's `gateKind.ts`). */
-export type InventoryGateKind = 'hook' | 'sdk' | 'none' | 'delegated' | 'bridge'
+/** How a harness's tool calls are gated (`gateKind.ts`). */
+export type InventoryGateKind = GateKind
 
 /** One harness found on the machine, by detection or because `intutic connect` is configured for it. */
 export interface InventoryHarness {

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use super::{
     BreakGlassGrant, CachedResponse, ClaimOutcome, ControlPlaneAuth, ControlPlaneCache,
     FeatureFlags, HardCapStatus, JudgeScope, LocalStore, NotifyScope, Ownership, PinScope,
-    PinnedSopBlock, SessionRouting, TokenBaseline,
+    PinnedSopBlock, RuleRefusalReport, SessionRouting, TokenBaseline,
 };
 use crate::metering::VirtualKeyRecord;
 use crate::routing::bandit::BanditArmState;
@@ -284,7 +284,7 @@ pub struct ValkeyStore {
 /// This read `v2:budget:daily:{ws}` and the control plane writes
 /// `v2:budget:{ws}:daily` — the segments transposed. Nothing wrote what this
 /// read, so `spend` parsed as `0.0` on every request forever, `max_budget` fell
-/// through to its `Some(100.0)` default, and `metering::check_budget` computed
+/// through to a `Some(100.0)` default (since removed), and `metering::check_budget` computed
 /// `remaining = 100.0` on every call. The 429 could only fire on a *single*
 /// request estimated above ~$83. A workspace with a $20 daily cap spent without
 /// limit, and every log reported success.
@@ -1273,9 +1273,9 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             key_name: Some(format!("key_{}", key_prefix)),
             team_id: Some(workspace_id.to_string()),
             user_id: Some(member_id.to_string()),
-            max_budget: limit_val
-                .and_then(|s| s.parse::<f64>().ok())
-                .or(Some(100.0)),
+            // A missing cap stays missing: the request path reads it from the
+            // control plane rather than inventing one (`daily_cap`, proxy.rs).
+            max_budget: limit_val.and_then(|s| s.parse::<f64>().ok()),
             spend: spend_val.and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
             // The key's own allowlist, written by the control plane's API-key
             // middleware from `api_keys.allowed_models` (migration 181) and
@@ -1541,9 +1541,30 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         let _: Result<(), redis::RedisError> = conn.expire(&key, DELIVERED_MARKER_TTL_SECS).await;
     }
 
-    async fn publish_system_anomaly(&self, workspace_id: &str, description: &str) {
-        publish_anomaly(self.conn(), workspace_id, description).await;
+    async fn publish_rule_refusal(&self, workspace_id: &str, refusal: &RuleRefusalReport<'_>) {
+        let payload = rule_refusal_payload(workspace_id, refusal);
+        let mut conn = self.conn();
+        let _: Result<(), redis::RedisError> = conn
+            .publish("intutic:system_anomalies", payload.to_string())
+            .await;
     }
+}
+
+/// The system anomaly a refused rule version is published as: the generic
+/// fields every anomaly has, plus `kind` and the rule, so the control plane
+/// files it under its reason rather than as a generic incident.
+fn rule_refusal_payload(workspace_id: &str, refusal: &RuleRefusalReport<'_>) -> serde_json::Value {
+    serde_json::json!({
+        "workspace_id": workspace_id,
+        "description": refusal.description,
+        "severity": "HIGH",
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "kind": "wasm_rule_refused",
+        "reason": refusal.reason,
+        "rule_id": refusal.rule_id,
+        "rule_name": refusal.rule_name,
+        "sha256": refusal.sha256,
+    })
 }
 
 /// `HMGET count sum reasoning_sum` on a baseline hash. `None` when the hash is
@@ -1752,6 +1773,31 @@ mod loop_key_contract {
             "intutic:active_loop:ws_1:mbr_9"
         );
         assert_eq!(active_loop_key("ws_1", None), "intutic:active_loop:ws_1");
+    }
+
+    /// The control plane files a refused rule under `reason`, from these fields.
+    #[test]
+    fn a_rule_refusal_carries_its_reason_and_rule() {
+        let payload = rule_refusal_payload(
+            "ws_1",
+            &RuleRefusalReport {
+                rule_id: "wasm_1",
+                rule_name: "no-shell",
+                sha256: "ab12",
+                reason: "hash_mismatch",
+                description: "WASM rule 'no-shell' (wasm_1) was refused",
+            },
+        );
+        assert_eq!(payload["kind"], "wasm_rule_refused");
+        assert_eq!(payload["reason"], "hash_mismatch");
+        assert_eq!(payload["workspace_id"], "ws_1");
+        assert_eq!(payload["rule_id"], "wasm_1");
+        assert_eq!(payload["rule_name"], "no-shell");
+        assert_eq!(payload["sha256"], "ab12");
+        assert_eq!(
+            payload["description"],
+            "WASM rule 'no-shell' (wasm_1) was refused"
+        );
     }
 
     /// The state key must not collide with its own scalars — a prefix bug here

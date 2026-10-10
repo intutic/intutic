@@ -1,7 +1,7 @@
 """Pre-execution tool gate for agent frameworks without a shipped Intutic harness.
 
 Intutic ships PreToolUse hooks for the harnesses in the sync-daemon's gate
-registry (services/sync-daemon/src/harness/gateKind.ts). LangGraph — and most
+registry (packages/shared-types/src/gateKind.ts). LangGraph — and most
 DIY Python agent loops — are not among them. This subpackage is the missing
 adapter, written against Intutic's own published gate contract:
 

@@ -1700,7 +1700,7 @@ destinationOptions(
     .command('update <destination_id>')
     .description('Change a SIEM destination; only the fields given change')
     .option('--name <name>', 'Display name')
-    .option('--config <path>', 'JSON file with the new adapter settings; masked secrets keep their stored value')
+    .option('--config <path>', 'JSON file with the new adapter settings; a secret left out or left masked keeps its stored value')
     .option('--enable', 'Turn a deactivated destination back on'),
 ).action(async (destinationId, opts) => {
   const { runSiemUpdate } = await import('./commands/siem.js')
@@ -1851,6 +1851,16 @@ inventoryCmd
     await runInventorySummary(opts)
   })
 
+inventoryCmd
+  .command('devices')
+  .description('Every machine that reports, with its id (what --device takes), counts and last report')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runInventoryDevices } = await import('./commands/inventory.js')
+    await runInventoryDevices(opts)
+  })
+
 for (const [view, handler, desc] of [
   ['harnesses', 'runInventoryHarnesses', 'Harnesses by machine, with gate state and status'],
   ['mcp-servers', 'runInventoryMcpServers', 'MCP servers by machine, wrapped by the MCP proxy or not'],
@@ -1882,6 +1892,17 @@ inventoryCmd
   .action(async (opts) => {
     const { runInventorySkills } = await import('./commands/inventory.js')
     await runInventorySkills(opts)
+  })
+
+inventoryCmd
+  .command('disconnects')
+  .description('Machines that ran `intutic disconnect`, newest first: what they disconnected, who and when')
+  .option('--limit <n>', 'At most this many (default 100, at most 500)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runInventoryDisconnects } = await import('./commands/inventory.js')
+    await runInventoryDisconnects(opts)
   })
 
 program

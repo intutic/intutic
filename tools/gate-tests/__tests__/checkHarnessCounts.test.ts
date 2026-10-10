@@ -50,7 +50,7 @@ beforeEach(async () => {
     MEMBERS.map((m, i) => `| ${i + 1} | ${m} |`).join('\n') + '\n',
   )
   await put(
-    'services/sync-daemon/src/harness/gateKind.ts',
+    'packages/shared-types/src/gateKind.ts',
     set('SDK_GATED_HARNESSES', MEMBERS.slice(30, 36)) +
       set('NO_GATE_HARNESSES', MEMBERS.slice(36, 38)) +
       set('DELEGATED_GATE_HARNESSES', MEMBERS.slice(38, 39)) +
@@ -75,6 +75,7 @@ describe('gate-kind counts', () => {
 
   it.each([
     ['native hook gates in 31 of them', 'says 31 harnesses are hook-gated', 'makes it 30'],
+    ['native hooks in 31, in-process SDK gates in 6', 'says 31 harnesses are hook-gated', 'makes it 30'],
     ['in-process SDK gates in 7 agent frameworks', 'says 7 harnesses are SDK-gated', 'makes it 6'],
     ['the other three are governed through the proxies', 'says 3 harnesses are neither hook- nor SDK-gated', 'makes it 4'],
   ])('fails "%s"', async (claim, says, makes) => {

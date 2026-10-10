@@ -3,7 +3,7 @@
  * is exercised exactly rather than whatever a compiler happens to emit.
  */
 import { describe, it, expect } from 'vitest'
-import { capDeclaredMemory } from '../wasm/memoryCap.js'
+import { capDeclaredMemory } from '@intutic/shared-types'
 
 const HEADER = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]
 // type section: one type, (i32) -> i32

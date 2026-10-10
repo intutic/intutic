@@ -21,7 +21,7 @@ There is no config format of Agentic Orchestrator's own for Intutic to write. `c
 
 ## Governance model
 
-Agentic Orchestrator is registered as a `NO_GATE` harness with a `'delegated'` gate kind (see `services/sync-daemon/src/harness/gateKind.ts`) — the same classification Xirp introduced, reused rather than reinvented. A tool call made inside an Agentic-Orchestrator-managed session is governed by whichever wrapped backend's own gate is already running (`claude-code-check.js`, `codex-check.js`) — the same gate this product already lists under that backend's own row, not a second one credited to Agentic Orchestrator.
+Agentic Orchestrator is registered as a `NO_GATE` harness with a `'delegated'` gate kind (see `packages/shared-types/src/gateKind.ts`) — the same classification Xirp introduced, reused rather than reinvented. A tool call made inside an Agentic-Orchestrator-managed session is governed by whichever wrapped backend's own gate is already running (`claude-code-check.js`, `codex-check.js`) — the same gate this product already lists under that backend's own row, not a second one credited to Agentic Orchestrator.
 
 ::: tip OpenCode is gated too
 All three wrapped backends are Intutic harnesses of their own: Claude Code and Codex through their hook files, and [OpenCode](/integrations/opencode) through the plugin `intutic connect` writes into `.opencode/plugins/`. In feature worktrees, Claude Code and Codex are covered by their user-level hooks; OpenCode's plugin is project-level (see above).

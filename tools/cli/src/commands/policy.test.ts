@@ -4,6 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ApiClient } from '../lib/api.js'
+import { DEFAULT_FUEL_BUDGET } from '@intutic/shared-types'
 
 vi.mock('../config/store.js', () => ({
   loadCredentials: vi.fn(async () => ({ apiKey: 'vk_test', workspaceId: 'ws_test' })),
@@ -106,6 +107,14 @@ describe('instantiateAndEvaluate', () => {
     ).rejects.toThrow()
   })
 
+  it('stops a rule that runs out of the proxies\' instruction budget, saying so', async () => {
+    await expect(instantiateAndEvaluate(moduleReturningVerdict(0, true), DEFAULT_ALLOW_MOCK)).rejects.toThrow(
+      `WASM rule ran out of its ${DEFAULT_FUEL_BUDGET}-instruction budget; a proxy reaches no verdict and refuses the call as GOVERNANCE_UNAVAILABLE`,
+    )
+    // Within budget, the same rule shape answers.
+    await expect(instantiateAndEvaluate(moduleReturningVerdict(0), DEFAULT_ALLOW_MOCK)).resolves.toBe(0)
+  })
+
   it('evaluates the checked-in wasm-sdk rule against the allow mock', async () => {
     // Monorepo-only fixture: skip when the built SDK rule is absent.
     let wasmBuffer: Buffer
@@ -155,7 +164,7 @@ function moduleImporting(module: string, name: string): Uint8Array<ArrayBuffer> 
  * wrote), and `evaluate` (i32, i32 -> i32, body ignores both params and
  * returns the constant).
  */
-function moduleReturningVerdict(verdictCode: number): Uint8Array<ArrayBuffer> {
+function moduleReturningVerdict(verdictCode: number, spin = false): Uint8Array<ArrayBuffer> {
   const typeSection = [
     0x01, // section id
     0x0c, // byte length
@@ -172,7 +181,8 @@ function moduleReturningVerdict(verdictCode: number): Uint8Array<ArrayBuffer> {
   ]
   const exportSection = [0x07, exports.length + 1, 0x03, ...exports]
   const allocateBody = [0x00, 0x41, 0x00, 0x0b] // locals: none; i32.const 0; end
-  const evaluateBody = [0x00, 0x41, verdictCode, 0x0b] // locals: none; i32.const <code>; end
+  // locals: none; [loop br 0 end, when spinning]; i32.const <code>; end
+  const evaluateBody = [0x00, ...(spin ? [0x03, 0x40, 0x0c, 0x00, 0x0b] : []), 0x41, verdictCode, 0x0b]
   const code = [
     0x02, // 2 function bodies
     allocateBody.length, ...allocateBody,
@@ -302,17 +312,33 @@ describe('runPolicyInstall end to end', () => {
     expect(installed.some((f) => f.endsWith('.wasm') && f !== 'clean-rule.wasm')).toBe(true)
   })
 
+  it('refuses to install a rule that runs out of the proxies\' instruction budget', async () => {
+    const wasmPath = path.join(wasmDir, 'spinning-rule.wasm')
+    await fs.writeFile(wasmPath, moduleReturningVerdict(0, true))
+
+    await install(wasmPath)
+
+    expect(exitCode).toBe(1)
+    const said = vi.mocked(console.error).mock.calls.map((c) => String(c[0])).join('\n')
+    expect(said).toContain(`ran out of its ${DEFAULT_FUEL_BUDGET}-instruction budget`)
+    expect((await fs.readdir(wasmDir)).filter((f) => f !== 'spinning-rule.wasm')).toEqual([])
+  })
+
   it('refuses to install a rule returning a verdict code the proxy does not map', async () => {
-    // The bypass this closes: outside {0,1,2,3}, the proxy's runner logs a
-    // warning and falls through to Bypass — so a rule that ships believing in
-    // a rung it can never reach (an author inventing "4 = escalate to human")
-    // would install clean and then allow every request it thinks it refuses.
+    // Outside {0,1,2,3} a rule reaches no verdict, and both proxies refuse the
+    // call with GOVERNANCE_UNAVAILABLE — so a rule that ships believing in a
+    // rung it can never reach (an author inventing "4 = escalate to human")
+    // would refuse every call it means to escalate. Install catches it first,
+    // and says what the proxy would do.
     const wasmPath = path.join(wasmDir, 'unmapped-verdict-rule.wasm')
     await fs.writeFile(wasmPath, moduleReturningVerdict(5))
 
     await install(wasmPath)
 
     expect(exitCode, 'a rule returning an unmapped verdict code must not install').toBe(1)
+    const printed = vi.mocked(console.error).mock.calls.flat().join('\n')
+    expect(printed).toContain('GOVERNANCE_UNAVAILABLE')
+    expect(printed).not.toContain('allowed on every request')
     const installed = (await fs.readdir(wasmDir)).filter((f) => f !== 'unmapped-verdict-rule.wasm')
     expect(installed, 'nothing should have been written to the local rules directory').toEqual([])
   })

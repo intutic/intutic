@@ -715,15 +715,12 @@ impl PluginRegistry {
         if !matches {
             return Err(Refusal::HashMismatch { actual });
         }
-        let module = Module::from_binary(&self.engine, bytes)
-            .map_err(|e| Refusal::Unloadable(e.to_string()))?;
-        let rego = super::local_loader::check_loadable(&self.engine, &module, bytes)
-            .map_err(|e| Refusal::Unloadable(e.to_string()))?;
-        Ok((module, rego))
+        super::local_loader::compile_checked(&self.engine, bytes).map_err(Refusal::Load)
     }
 
-    /// Logs a refused rule version and raises it with the control plane as a
-    /// system anomaly (an incident), once per workspace, rule hash and reason.
+    /// Logs a refused rule version and raises it with the control plane, which
+    /// files an incident under its reason, once per workspace, rule hash and
+    /// reason.
     async fn report_refusal(
         &self,
         control_plane: &Arc<dyn ControlPlaneCache>,
@@ -746,7 +743,7 @@ impl PluginRegistry {
                 "its binary hashes to {actual} but its descriptor names {}",
                 desc.sha256
             ),
-            Refusal::Unloadable(error) => format!("it cannot be loaded: {error}"),
+            Refusal::Load(failure) => format!("it cannot be loaded: {failure}"),
         };
         let consequence = if has_previous {
             "The previously loaded version stays in force."
@@ -758,15 +755,23 @@ impl PluginRegistry {
             rule_id = %desc.rule_id,
             rule = %desc.name,
             sha256 = %desc.sha256,
+            reason = refusal.reason(),
             "Refusing control-plane WASM rule: {why}. {consequence}"
         );
+        let description = format!(
+            "WASM rule '{}' ({}) was refused: {why}. {consequence}",
+            desc.name, desc.rule_id
+        );
         control_plane
-            .publish_system_anomaly(
+            .publish_rule_refusal(
                 workspace_id,
-                &format!(
-                    "WASM rule '{}' ({}) was refused: {why}. {consequence}",
-                    desc.name, desc.rule_id
-                ),
+                &crate::store::RuleRefusalReport {
+                    rule_id: &desc.rule_id,
+                    rule_name: &desc.name,
+                    sha256: &desc.sha256,
+                    reason: refusal.reason(),
+                    description: &description,
+                },
             )
             .await;
     }
@@ -777,16 +782,25 @@ impl PluginRegistry {
 enum Refusal {
     Missing,
     HashMismatch { actual: String },
-    Unloadable(String),
+    Load(super::local_loader::LoadFailure),
 }
 
 impl Refusal {
+    /// The reason the control plane files the incident under
+    /// (`RULE_LOAD_FAILURE_REASONS` in shared-types).
+    fn reason(&self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::HashMismatch { .. } => "hash_mismatch",
+            Self::Load(failure) => failure.reason(),
+        }
+    }
+
     /// What makes two refusals of one version the same report.
     fn key(&self) -> String {
         match self {
-            Self::Missing => "missing".to_string(),
             Self::HashMismatch { actual } => actual.clone(),
-            Self::Unloadable(_) => "unloadable".to_string(),
+            other => other.reason().to_string(),
         }
     }
 }

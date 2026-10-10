@@ -198,8 +198,12 @@ the proxies picked it up, and a new workspace has no approved servers yet.
 Switch to `deny` once the servers you mean to keep are approved; the page
 says how many servers stop working before it saves. The setting is
 `mcpDefaultPolicy` in workspace settings
-(`PUT /api/v1/workspace/settings`), changed like every other setting and
-recorded in its change history.
+(`PUT /api/v1/workspace/settings`, or `intutic settings set mcpDefaultPolicy deny`),
+changed like every other setting and recorded in its change history.
+
+From the CLI, `intutic mcp list` shows the registry, and `intutic mcp approve`,
+`block`, `reset`, `enable-tool` and `disable-tool` make the same decisions as
+the page. See [the CLI reference](/reference/cli#intutic-mcp-list).
 
 A refused call tells the agent why and what to do about it:
 
@@ -375,8 +379,9 @@ up.
 
 An owner or admin sets them on **Policies › MCP Servers › Call budgets**:
 add budgets to the draft, set the warning percentage, and save. They are the
-`mcpBudgets` workspace setting (`PUT /api/v1/workspace/settings`), so the
-settings route's role check and change history apply:
+`mcpBudgets` workspace setting (`PUT /api/v1/workspace/settings`, or
+`intutic settings set mcpBudgets --file budgets.json`), so the settings
+route's role check and change history apply:
 
 ```json
 {
