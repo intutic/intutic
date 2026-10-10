@@ -151,8 +151,8 @@ These configure the control plane in hosted and Self-host deployments.
 | Variable | Required? | Default | Description |
 | :--- | :---: | :---: | :--- |
 | `DATABASE_URL` | ✅ | — | Postgres connection string |
-| `JWT_SECRET` | ✅ | — | Secret for signing session tokens |
-| `ENCRYPTION_KEY` | ✅ | — | 32-byte key for encrypting stored credentials and tokens |
+| `JWT_SECRET` | ✅ | — | Secret for signing session tokens. At least 32 characters: `openssl rand -hex 32` |
+| `ENCRYPTION_KEY` | ✅ | — | Key for encrypting stored credentials and tokens: 64 hex characters, `openssl rand -hex 32`. Slack bot tokens are encrypted with it decoded as hex, so another format logs a warning at boot |
 | `APP_URL` | Self-host | — | The dashboard's address; links in emails and invitations point here |
 | `API_BASE_URL` | Self-host | `http://localhost:3001` | The API's public address. Identity providers send users back here, so it builds the OIDC redirect URI (`/api/v1/auth/sso/callback`), the SAML ACS URL (`/api/v1/auth/saml/acs`) and the SCIM base URL |
 | `OIDC_CALLBACK_URL` | ❌ | built from `API_BASE_URL` | The full OIDC redirect URI, when users reach the API at a different address |
@@ -164,6 +164,15 @@ These configure the control plane in hosted and Self-host deployments.
 | `LITELLM_PROXY_URL` | ❌ | — | The LiteLLM endpoint for model calls (judges, probes, extraction). Takes precedence over `LITELLM_ADMIN_BASE_URL` |
 | `LITELLM_ADMIN_BASE_URL` | ❌ | `http://localhost:4000` | The LiteLLM endpoint when `LITELLM_PROXY_URL` is unset |
 | `LITELLM_PLATFORM_KEY` | ❌ | — | Scoped LiteLLM virtual key for judge/probe/generation calls — NOT LiteLLM's own admin secret, which this service never holds. See the key-rotation runbook for how it's minted. |
+
+The control plane refuses to start when `JWT_SECRET` or `ENCRYPTION_KEY` is
+missing, shorter than 32 characters or a template value (`changeme`, `secret`,
+`password`, `REPLACE_WITH_…`, `your-…`, `xxx…` and the like), or when one of
+these is a template value: `SLACK_ENCRYPTION_KEY`, `SLACK_SIGNING_SECRET`,
+`STRIPE_WEBHOOK_SECRET`, `INTUTIC_ADMIN_TOKEN`, or the password in
+`DATABASE_URL`, `MIGRATION_DATABASE_URL` or `BACKGROUND_DATABASE_URL`. The
+error names the variable, never its value. The check is skipped when
+`NODE_ENV` is `test` or `development`.
 
 ---
 <!-- ENTERPRISE_ONLY_END -->

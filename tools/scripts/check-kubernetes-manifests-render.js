@@ -45,6 +45,80 @@ const overlays = ['dev', 'staging', 'prod']
 const failures = []
 let proxyChecked = false
 let gatewayChecked = false
+let upstreamsChecked = 0
+
+/**
+ * A provider upstream (`OPENAI_UPSTREAM_URL`, `UPSTREAM_URL`, ...) that points
+ * at the in-cluster LiteLLM. Until 2026-10-10 the hosted proxy sent every
+ * OpenAI-family request to http://litellm:4000, which serves only the
+ * self-hosted judge aliases and rejects customer keys: each one failed 401.
+ */
+function upstreamProblems(where, docs) {
+  const problems = []
+  for (const d of docs) {
+    const pod = d.spec?.template?.spec
+    for (const c of [...(pod?.initContainers ?? []), ...(pod?.containers ?? [])]) {
+      for (const e of c.env ?? []) {
+        if (!/(^|_)UPSTREAM_URL$/.test(e.name) || typeof e.value !== 'string') continue
+        upstreamsChecked++
+        let host = ''
+        try {
+          host = new URL(e.value).hostname
+        } catch {
+          continue
+        }
+        if (host === 'litellm' || host.startsWith('litellm.')) {
+          problems.push(
+            `${where}: ${d.kind} ${d.metadata?.name} sets ${e.name}=${e.value}, the in-cluster LiteLLM — it serves ` +
+              'only the self-hosted judge aliases and rejects customer keys. Use the provider\'s public API.',
+          )
+        }
+      }
+    }
+  }
+  return problems
+}
+
+/** Template values: `changeme`, `REPLACE_WITH_…`, `your-…`, `xxx…` (control-plane secretStrength.ts). */
+function isPlaceholder(value) {
+  const v = value.trim().toLowerCase()
+  return (
+    ['changeme', 'change-me', 'change_me', 'secret', 'password', 'example', 'test', 'dev', 'placeholder'].includes(v) ||
+    /^(changeme|replace[_-]with|your[-_])/.test(v) ||
+    /^x{3,}$/.test(v)
+  )
+}
+
+/**
+ * A rendered Secret holding a placeholder, alone or as the password of a
+ * connection URL. The staging overlay rendered control-plane-secrets with
+ * `changeme` into the live namespace: applying it would replace the real JWT_SECRET
+ * and ENCRYPTION_KEY with a value anyone could forge tokens with.
+ */
+function placeholderSecretProblems(where, docs) {
+  const problems = []
+  for (const d of docs.filter((doc) => doc.kind === 'Secret')) {
+    const entries = [
+      ...Object.entries(d.data ?? {}).map(([k, v]) => [k, Buffer.from(String(v), 'base64').toString('utf8')]),
+      ...Object.entries(d.stringData ?? {}).map(([k, v]) => [k, String(v)]),
+    ]
+    for (const [key, value] of entries) {
+      let password = ''
+      try {
+        password = decodeURIComponent(new URL(value).password)
+      } catch {
+        // Not a URL.
+      }
+      if (isPlaceholder(value) || (password && isPlaceholder(password))) {
+        problems.push(
+          `${where}: Secret ${d.metadata?.name} renders a placeholder value for ${key}. Create real secrets ` +
+            'out of band; never apply a template Secret.',
+        )
+      }
+    }
+  }
+  return problems
+}
 
 for (const overlay of overlays) {
   const dir = join(OVERLAYS_DIR, overlay)
@@ -59,6 +133,10 @@ for (const overlay of overlays) {
     failures.push(`overlay "${overlay}" failed to render:\n${err.stderr || err.message}`)
     continue
   }
+
+  const overlayDocs = loadAll(rendered).filter((d) => d != null)
+  failures.push(...upstreamProblems(`overlay "${overlay}"`, overlayDocs))
+  failures.push(...placeholderSecretProblems(`overlay "${overlay}"`, overlayDocs))
 
   // The regression this gate exists to catch (TD-229): SOP policy silently
   // undeliverable to the cluster proxy. Only assert on overlays that carry a
@@ -310,6 +388,8 @@ if (existsSync(HELM_DIR)) {
       if (sa && !accounts.has(sa)) failures.push(`chart ${chart}: ${d.kind} ${d.metadata.name} runs as ServiceAccount ${sa}, which the chart does not create`)
     }
     failures.push(...preInstallHookProblems(chart, docs))
+    failures.push(...upstreamProblems(`chart ${chart}`, docs))
+    failures.push(...placeholderSecretProblems(`chart ${chart}`, docs))
     if (args === localJudge) failures.push(...localJudgeProblems(docs))
     if (chart !== 'intutic') continue
     const deployments = new Map(docs.filter((d) => d.kind === 'Deployment').map((d) => [d.metadata.labels['app.kubernetes.io/component'], d]))
@@ -346,6 +426,10 @@ if (!gatewayChecked) {
   )
 }
 
+if (upstreamsChecked === 0) {
+  failures.push('no rendered workload sets a *_UPSTREAM_URL — the LiteLLM-upstream check never ran.')
+}
+
 if (failures.length > 0) {
   console.error(`✖ kubernetes manifests: ${failures.length} problem(s)\n`)
   for (const f of failures) console.error(`    ${f}\n`)
@@ -354,5 +438,6 @@ if (failures.length > 0) {
 
 console.log(
   `[PASS] kubernetes manifests: ${overlays.length} overlay(s), ${cellsRemoteRendered} cells-remote ` +
-    `kustomization(s) and ${helmCharts} Helm chart render(s) pass, SOPS wiring intact.`,
+    `kustomization(s) and ${helmCharts} Helm chart render(s) pass, SOPS wiring intact, ` +
+    `${upstreamsChecked} provider upstream(s) off LiteLLM, no placeholder Secret.`,
 )
