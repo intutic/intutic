@@ -84,7 +84,7 @@ export interface SkillReportEntry {
    */
   language?: string
   /**
-   * Phase S5 (TD-357). FULL content of a `kind: 'skill_md'` file, attached
+   * Phase S5. FULL content of a `kind: 'skill_md'` file, attached
    * ONLY when the workspace has `semanticSkillAnalysisEnabled` on (read from
    * `client.fetchConfig`'s resolved `settings`, the same way
    * `enableLocalSkillAuditDelete` already is below) — never for `kind:
@@ -156,7 +156,7 @@ export async function auditSkillFile(
    *  behaviour) is unaffected. */
   quiet = false,
   /**
-   * Phase S5 (TD-357). Attach the file's full content to the returned entry
+   * Phase S5. Attach the file's full content to the returned entry
    * — only ever set by a caller that already confirmed
    * `semanticSkillAnalysisEnabled` for this workspace (`runSkillAudit`
    * below reads it off `client.fetchConfig`'s resolved settings, the same
@@ -254,8 +254,8 @@ export interface DiscoveredScriptFile {
 
 /**
  * Bounded, symlink-skipping recursive walk of a skill directory's sibling
- * files — everything alongside `SKILL.md`, the surface TD-356
- * (`docs/TECH_DEBT.md`) named as unenumerated. `SKILL.md` itself is excluded
+ * files — everything alongside `SKILL.md`, a surface that previously went
+ * unenumerated. `SKILL.md` itself is excluded
  * (it is already covered by `discoverSkillFiles`/`auditSkillFile` above);
  * everything else found, at any depth up to the cap, is a candidate for
  * `auditScriptFile`.
@@ -690,7 +690,7 @@ export async function runSkillAudit(
   const creds = await loadCredentials().catch(() => null)
   let enableLocalSkillAuditDelete = false
   let ciscoSkillScannerEnabled = false
-  // Phase S5 (TD-357): gates whether `auditSkillFile` below attaches full
+  // Phase S5: gates whether `auditSkillFile` below attaches full
   // `SKILL.md` content to its report entry. Off unless the workspace opted
   // in — see `WorkspaceSettings.semanticSkillAnalysisEnabled`'s own doc
   // comment for what turning it on transmits.
@@ -823,7 +823,7 @@ export async function runSkillAudit(
     issues += entry.issuesDetected
     skillsReport.push(entry)
 
-    // ── Bundled scripts alongside this skill's SKILL.md (TD-356, Phase S2) ─
+    // ── Bundled scripts alongside this skill's SKILL.md (Phase S2) ─────────
     //
     // `discoverSkillFiles` only ever found `SKILL.md`; a sibling `setup.sh`
     // or `helper.py` was invisible to every consumer before this. Enumerate
@@ -928,7 +928,7 @@ function readStagedBlob(workspaceRoot: string, filePath: string): string | null 
 /**
  * Warn-only skill-content scan over staged additions in the skill surface.
  *
- * TD-358. This is the CLI entry point `lib/gitHooks.ts`'s pre-commit hook
+ * This is the CLI entry point `lib/gitHooks.ts`'s pre-commit hook
  * shells out to (`intutic skill scan-staged`) — deliberately separate from
  * `skill audit` above, which scans the whole workspace and is too slow and
  * too broad for a commit-time check that must stay fast.

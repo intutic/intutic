@@ -33,7 +33,7 @@
  * as it already is when those backends run standalone.
  *
  * All three wrapped backends have adapters of their own (`claudeCode.ts`,
- * `codex.ts`, `opencode.ts` — the last since TD-397 closed on 2026-09-23),
+ * `codex.ts`, `opencode.ts` — the last since 2026-09-23),
  * so a feature run against any `--providers` value is governed by that
  * backend's gate inside the worktree. This adapter only detects that
  * Agentic Orchestrator itself is present.

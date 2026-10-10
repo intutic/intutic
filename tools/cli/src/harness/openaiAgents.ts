@@ -29,7 +29,7 @@
  * pointer comment differs. A workspace detected as TypeScript-only gets the
  * `@intutic/gate/openai` pointer; Python-only gets the Python pointer; a
  * monorepo with both gets the Python file with the TypeScript pointer
- * appended (TD-408 item 5 — until 2026-09-22 the TS half was only reachable
+ * appended (until 2026-09-22 the TS half was only reachable
  * through the docs page).
  *
  * HLD §3.14 — Harness Onboarding Matrix
@@ -96,7 +96,7 @@ export const openaiAgentsAdapter: IHarnessAdapter = {
     }
     const filePath = await pythonAdapter.writeConfig(workspaceRoot, sops, proxyUrl)
     if (filePath && js) {
-      // Both ecosystems in one workspace (TD-408 item 5): the file is the
+      // Both ecosystems in one workspace: the file is the
       // Python adapter's, so its pointer named only the Python gate and the
       // TypeScript half of the monorepo was left to find `@intutic/gate`
       // through the docs page. Say it here too.

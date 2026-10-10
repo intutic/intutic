@@ -9,7 +9,6 @@
  * Falls back to local credentials.json if the OS keychain utility is
  * unavailable, or if it accepts a token it cannot then return.
  *
- * LLD #14 — keychain.ts
  * HLD §3.14 — OS Keychain Storage
  *
  * @module

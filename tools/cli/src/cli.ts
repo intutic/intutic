@@ -5,7 +5,6 @@
  * AI governance control plane for developer workspaces.
  * Provides harness detection, config sync, and workspace management.
  *
- * LLD #8 — Sync Daemon / CLI
  * HLD §3.14 — Real-Time State Mirroring
  *
  * @module
@@ -47,7 +46,7 @@ program
     await runInit(opts)
   })
 
-// ── Cohort setup wizard (LLD #70) ────────────────────────────────────────
+// ── Cohort setup wizard ──────────────────────────────────────────────────
 program
   .command('setup')
   .description('Guided setup: detect harnesses, configure a provider credential, and verify it')
@@ -362,7 +361,7 @@ rulesCmd
     await runRulesTest(module, opts)
   })
 
-// Policy Clause Ledger (LLD #71). `intutic policy` is the WASM loop and
+// Policy Clause Ledger. `intutic policy` is the WASM loop and
 // `intutic sops` is files on disk; this namespace is the cited guardrails
 // extracted from policy documents and their shadow -> promote lifecycle.
 const guardrailsCmd = program
@@ -658,7 +657,7 @@ program
     await runStart(opts)
   })
 
-// L2 mandatory egress firewall (LLD #63 §5). Makes the governing proxy
+// L2 mandatory egress firewall. Makes the governing proxy
 // non-optional: default-deny host egress to everything except the proxy, DNS,
 // and declared infra. apply/remove need root; generate/status do not.
 const enforceCmd = program
@@ -791,8 +790,8 @@ program
   .command('exec')
   .description('Execute a command wrapped with Intutic proxy environment variables')
   .argument('[command...]', 'Command and arguments to execute (e.g. -- claude)')
-  // Run the agent inside an isolated sandbox whose ONLY egress is the proxy
-  // (LLD #63 §6): cap-drop, no-new-privileges, read-only rootfs, resource caps,
+  // Run the agent inside an isolated sandbox whose ONLY egress is the proxy:
+  // cap-drop, no-new-privileges, read-only rootfs, resource caps,
   // and a default-deny egress firewall the agent cannot undo.
   .option('--sandbox [kind]', 'Run the agent in an isolated sandbox (kind: oci | firecracker; default oci)')
   .option('--sandbox-image <image>', 'Sandbox image (must contain the agent + nftables + capsh); the default is built locally on first use', DEFAULT_SANDBOX_IMAGE)
@@ -1079,8 +1078,8 @@ daemon
   .option('--mcp', 'Show the MCP proxy daemon instead of the sync-daemon')
   .action(async (opts) => {
     // `mcpDaemonStatus` was exported and never called by any command until the
-    // reachability test widened to the status/stop/start verbs (TD-153's
-    // shape, one more time).
+    // reachability test widened to the status/stop/start verbs (the same
+    // exported-but-unreachable shape, one more time).
     const { daemonStatus, proxyServiceStatus, mcpDaemonStatus } = await import('./commands/install-daemon.js')
     await (opts.proxy ? proxyServiceStatus() : opts.mcp ? mcpDaemonStatus() : daemonStatus())
   })
@@ -1092,8 +1091,8 @@ daemon
   .option('--mcp', 'Stop the MCP proxy daemon instead of the sync-daemon')
   .action(async (opts) => {
     // `mcpDaemonStop` was exported and never called by any command until the
-    // reachability test widened to the status/stop/start verbs (TD-153's
-    // shape, one more time).
+    // reachability test widened to the status/stop/start verbs (the same
+    // exported-but-unreachable shape, one more time).
     const { daemonStop, proxyServiceStop, mcpDaemonStop } = await import('./commands/install-daemon.js')
     await (opts.proxy ? proxyServiceStop() : opts.mcp ? mcpDaemonStop() : daemonStop())
   })
@@ -1105,8 +1104,8 @@ daemon
   .option('--mcp', 'Start the MCP proxy daemon instead of the sync-daemon')
   .action(async (opts) => {
     // `mcpDaemonStart` was exported and never called by any command until the
-    // reachability test widened to the status/stop/start verbs (TD-153's
-    // shape, one more time).
+    // reachability test widened to the status/stop/start verbs (the same
+    // exported-but-unreachable shape, one more time).
     const { daemonStart, proxyServiceStart, mcpDaemonStart } = await import('./commands/install-daemon.js')
     await (opts.proxy ? proxyServiceStart() : opts.mcp ? mcpDaemonStart() : daemonStart())
   })
@@ -1249,7 +1248,7 @@ decisionCmd
     await runDecisionReject(holdId, opts)
   })
 
-// ── Gateway commands (LLD #66) ───────────────────────────────────────────
+// ── Gateway commands ─────────────────────────────────────────────────────
 //
 // Self-hosted gateway registration/management. Previously reachable only by
 // hand-written curl against services/control-plane/src/routes/gateways.ts —
@@ -1359,7 +1358,7 @@ gatewayCmd
     await runGatewayResolve(opts)
   })
 
-// ── Provider credentials (LLD #64 §4, LLD #67) ───────────────────────────
+// ── Provider credentials ─────────────────────────────────────────────────
 //
 // Provision a workspace's own upstream provider keys — the BYO-key wizard's
 // API, previously dashboard-only. See commands/credentials.ts's module doc.
@@ -1397,7 +1396,7 @@ credentialsCmd
     await runCredentialsUnset(provider, opts)
   })
 
-// ── DCT Token Attenuation (LLD #19 §2.1, HLD §5.6 Patent Family A) ───────
+// ── DCT Token Attenuation (HLD §5.6 Patent Family A) ─────────────────────
 //
 // "CLI mints, dashboard audits": this is the mint/inspect half. See
 // commands/attenuate.ts's module doc.
@@ -1422,7 +1421,7 @@ attenuateCmd
     await runAttenuateChain(chainId, opts)
   })
 
-// ── Org signup + team management (LLD #65) ───────────────────────────────
+// ── Org signup + team management ─────────────────────────────────────────
 const orgCmd = program
   .command('org')
   .description('Create and manage orgs')

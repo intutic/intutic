@@ -44,7 +44,7 @@ describe('integrity command registration', () => {
     ['roots', 'runIntegrityRoots'],
     ['verify', 'runIntegrityVerify'],
     ['chain', 'runIntegrityChain'],
-    // `config-chain` is the TD-259 case: the walker exists, is tested, and
+    // `config-chain` is the case this guards: the walker exists, is tested, and
     // without this registration is reachable only by curl.
     ['config-chain', 'runIntegrityConfigChain'],
   ])('wires the %s subcommand to its handler', (subcommand, handler) => {

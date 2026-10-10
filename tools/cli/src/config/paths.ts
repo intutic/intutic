@@ -4,7 +4,6 @@
  * - macOS/Linux: ~/.intutic/
  * - Windows: %APPDATA%\intutic\
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

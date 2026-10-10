@@ -30,8 +30,7 @@
  * download available in this environment, so none of the detection paths
  * below were live-verified against a real install — they follow this
  * codebase's own convention for comparable tools (`~/.grok`, `~/.muse`,
- * `<Name>.app` in `/Applications`) rather than a confirmed Xirp source. See
- * TD-390.
+ * `<Name>.app` in `/Applications`) rather than a confirmed Xirp source.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module

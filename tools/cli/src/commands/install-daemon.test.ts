@@ -109,12 +109,12 @@ describe('Daemon Installer Configuration Builder', () => {
     })
   })
 
-  // ── Standalone proxy (TD-465) ────────────────────────────────────────
+  // ── Standalone proxy ─────────────────────────────────────────────────
   //
   // The proxy is a third process with a config shape nothing like the two
   // daemons': no workspace, no key, no control plane — just the environment
   // `intutic start` sets. These pin that the unit carries exactly that.
-  describe('proxy service (TD-465)', () => {
+  describe('proxy service', () => {
     const proxyOpts = { binaryPath: '/usr/local/bin/intutic-proxy', port: '4000' }
 
     it('getServicePaths names the proxy service and its logs on both platforms', () => {
@@ -209,7 +209,7 @@ describe('every daemon entry point is reachable from the CLI', () => {
   // `installMcpDaemon` and `uninstallMcpDaemon` were written, exported and
   // covered by the builder tests above, and no command ever called them: every
   // route through `daemon install` / `install-daemon` landed on the sync-daemon
-  // function, so the MCP proxy daemon could not be installed at all (TD-153).
+  // function, so the MCP proxy daemon could not be installed at all.
   // The builder tests could not catch it — they test the plist string, not
   // whether anything asks for one.
   //

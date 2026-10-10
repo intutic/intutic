@@ -9,7 +9,7 @@
  * already exists as an unrelated air-gapped docker-compose installer.
  *
  * The host firewall is intentionally NOT part of this command — that's
- * `intutic enforce apply`/`generate` (TD-332's real, tested implementation).
+ * `intutic enforce apply`/`generate` (the real, tested implementation).
  * Rebuilding a `pf.conf`/`iptables.rules` template generator here, as the
  * deleted code did, would just be a second, unmaintained copy of it. This
  * command prints a pointer to it instead.

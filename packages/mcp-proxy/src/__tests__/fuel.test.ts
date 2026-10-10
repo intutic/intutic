@@ -1,5 +1,5 @@
 /**
- * meterFuel (TD-440): hand-assembled modules where the exact charge is known,
+ * meterFuel: hand-assembled modules where the exact charge is known,
  * plus the tree-sitter grammars as large real-world modules the decoder must
  * walk without a single desync.
  */

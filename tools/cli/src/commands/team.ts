@@ -1,6 +1,6 @@
 /**
  * `intutic team` — manage teams and workspaces under an org (tenancy
- * phase 5, LLD #65).
+ * phase 5).
  *
  * Subcommands:
  *   - `intutic team list --org <org_id> [--json]`
@@ -11,7 +11,7 @@
  * Server side: services/control-plane/src/routes/teams.ts. Authorization
  * has no org-level session to check — any member holding OWNER/ADMIN on
  * any active workspace under the org counts as an org admin
- * (`hasOrgAdminAccess`), matching the RBAC decision recorded in LLD #65.
+ * (`hasOrgAdminAccess`) — a deliberate RBAC decision.
  *
  * @module
  */

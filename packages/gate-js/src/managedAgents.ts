@@ -20,7 +20,7 @@
  * adapter was built) was installed as a devDependency of this package and its
  * shipped `.d.ts` read directly (not inferred from docs alone; the Python
  * twin was checked the same way against `anthropic==0.122.0`, its own
- * latest). Re-read against `@anthropic-ai/sdk@0.131.0` (TD-429 bump) — see
+ * latest). Re-read against `@anthropic-ai/sdk@0.131.0` — see
  * "0.131 additions" below:
  *
  *   * `resources/beta/sessions/events.d.ts` — every request this module
@@ -401,7 +401,7 @@ export async function confirmationForEvent(
  * ```
  */
 
-/** Options for {@link IntuticSessionConfirmer.watch} (TD-428). */
+/** Options for {@link IntuticSessionConfirmer.watch}. */
 export interface WatchOptions {
   /** Reconnects allowed after the first connection; unbounded by default. */
   maxReconnects?: number
@@ -540,7 +540,7 @@ export class IntuticSessionConfirmer {
   /**
    * Catch up on anything already pending, then follow the live event
    * stream, yielding each confirmation as it is sent, reconnecting when the
-   * stream drops (TD-428).
+   * stream drops.
    *
    * Modelled on the SDK's own `SessionToolRunner#streamLoop`: open the
    * stream FIRST, then reconcile with `poll()` — an event emitted in the gap

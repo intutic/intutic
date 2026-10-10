@@ -1,5 +1,5 @@
 /**
- * capDeclaredMemory (TD-440): hand-assembled modules, so each limits encoding
+ * capDeclaredMemory: hand-assembled modules, so each limits encoding
  * is exercised exactly rather than whatever a compiler happens to emit.
  */
 import { describe, it, expect } from 'vitest'

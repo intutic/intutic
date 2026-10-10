@@ -16,11 +16,11 @@
  *
  *   3. A REAL `HarnessAgent` turn is driven against a fake adapter that
  *      emits a builtin `bash` approval request exactly as the claude-code
- *      bridge does (TD-415), proving the pause, the responder's verdict, and
+ *      bridge does, proving the pause, the responder's verdict, and
  *      the continuation through real framework code.
  *
  * No live sandbox is exercised — that needs a Vercel Sandbox deployment this
- * environment does not have (see TD-416/TD-417). Gate decisions come from
+ * environment does not have. Gate decisions come from
  * `FakeGate`-style stubs, per wrapTools.test.ts's pattern.
  */
 import { spawn, spawnSync } from 'node:child_process'
@@ -117,7 +117,7 @@ function _typeCheckOnly(): void {
   const policy: HarnessV1NetworkPolicy = settings.networkPolicy
   void policy
 
-  // TD-415: settings.inactiveTools must be assignable to the REAL
+  // settings.inactiveTools must be assignable to the REAL
   // HarnessAgentSettings.inactiveTools field for a tool set that declares a
   // 'bash' builtin (true of every harness this recommendation targets —
   // HARNESS_V1_BUILTIN_TOOL_NAMES includes 'bash'), with no cast.
@@ -370,8 +370,8 @@ describe('recommendedHarnessSettings', () => {
     })
   })
 
-  // TD-415: HarnessV1BuiltinToolFiltering CAN drop `bash` at config time —
-  // confirmed against real shipped dist for both harnesses TD-417 discusses
+  // HarnessV1BuiltinToolFiltering CAN drop `bash` at config time —
+  // confirmed against real shipped dist for both wrapped harnesses
   // (@ai-sdk/harness-claude-code@1.0.78: native filtering; @ai-sdk/harness-
   // grok-build@1.0.12, via its pinned @ai-sdk/harness-acp@1.0.13: framework
   // approval-auto-deny). See RecommendedHarnessSettings.inactiveTools's doc
@@ -397,7 +397,7 @@ describe('recommendedHarnessSettings', () => {
 })
 
 // ------------------------------------------------------------------------
-// TD-415: built-in tools DO have a per-call approval pause — driven through
+// Built-in tools DO have a per-call approval pause — driven through
 // the REAL HarnessAgent.
 //
 // `@ai-sdk/harness-claude-code`'s in-sandbox bridge (dist/bridge/index.mjs,
@@ -416,7 +416,7 @@ describe('recommendedHarnessSettings', () => {
 // the real framework.
 // ------------------------------------------------------------------------
 
-describe('TD-415: a builtin bash approval pause, answered by intuticApprovalResponder through the REAL HarnessAgent', () => {
+describe('a builtin bash approval pause, answered by intuticApprovalResponder through the REAL HarnessAgent', () => {
   /** Refuses any call whose command contains `rm -rf` — a per-call verdict
    *  on the arguments, not a per-tool switch. */
   class CommandGate extends Gate {
@@ -619,7 +619,7 @@ describe('TD-415: a builtin bash approval pause, answered by intuticApprovalResp
 })
 
 // ------------------------------------------------------------------------
-// intuticSandboxBootstrap — TD-417 Half A
+// intuticSandboxBootstrap
 // ------------------------------------------------------------------------
 
 describe('intuticSandboxBootstrap', () => {

@@ -1,6 +1,6 @@
 /**
  * sessionScope.ts — the shared-window scope a proxy process derives for
- * itself (TD-437, Wave 5.3).
+ * itself (Wave 5.3).
  *
  * The sync daemon wraps EACH MCP server entry with its own proxy process, so
  * one harness session runs several `McpGovernanceProxy` processes at once —

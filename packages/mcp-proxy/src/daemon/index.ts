@@ -4,8 +4,6 @@
  * Long-lived process listening on ~/.intutic/mcp-proxy.sock.
  * Manages policy cache, telemetry batching, and MCP server health monitoring.
  *
- * LLD #28: MCP Daemon Mode, WS-5MCP
- *
  * Usage:
  *   node dist/daemon/index.js
  *   (managed by LaunchAgent / systemd via `intutic daemon mcp start`)

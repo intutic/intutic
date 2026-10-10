@@ -1,5 +1,5 @@
 /**
- * The shared-window scope (Wave 5.3, TD-437): what the sibling proxy
+ * The shared-window scope (Wave 5.3): what the sibling proxy
  * processes of one harness session derive in common, and when a process
  * honestly has nothing to share.
  */

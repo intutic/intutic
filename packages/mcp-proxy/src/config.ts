@@ -136,7 +136,7 @@ export interface ProxyConfig {
    */
   mcpWasmDir: string | undefined
   /**
-   * The Valkey the session window is shared through (Wave 5.3, TD-437):
+   * The Valkey the session window is shared through (Wave 5.3):
    * `INTUTIC_VALKEY_URL` or `VALKEY_URL` from the environment, else
    * `INTUTIC_VALKEY_URL` from runtime.env (written by `intutic connect` / the
    * sync daemon when their local Valkey is running). No localhost default —
@@ -281,7 +281,7 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
   // (`runtimeEnv.ts`) and what the hook scripts read. This loader read only
   // `INTUTIC_CONTROL_PLANE_URL`, which nothing writes there, so every
   // per-session proxy on a connected machine fetched policy from
-  // localhost:3001 unless the shell happened to export the variable (TD-490).
+  // localhost:3001 unless the shell happened to export the variable.
   const controlPlaneUrl =
     process.env['INTUTIC_CONTROL_PLANE_URL'] ??
     runtimeEnv['INTUTIC_CONTROL_PLANE_URL'] ??

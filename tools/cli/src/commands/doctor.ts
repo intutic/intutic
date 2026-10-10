@@ -18,7 +18,6 @@
  *
  * No subscription checks — enforcement is server-side (covenant 13).
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

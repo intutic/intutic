@@ -11,9 +11,6 @@
  * connected-mode-only concept with no local equivalent; local mode's
  * `--verdict` filters on the proxy's own, narrower vocabulary instead.
  *
- * LLD #9 — PLG Self-Serve (Appendix: CLI Traces Commands)
- * TD-059
- *
  * @module
  */
 

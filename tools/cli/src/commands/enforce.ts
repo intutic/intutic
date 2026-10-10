@@ -1,5 +1,5 @@
 /**
- * `intutic enforce` — the L2 mandatory-egress firewall (LLD #63 §5).
+ * `intutic enforce` — the L2 mandatory-egress firewall.
  *
  * The proxy governs the traffic it sees, but an agent can bypass it by simply
  * not routing through it. This command closes that door: it default-denies host

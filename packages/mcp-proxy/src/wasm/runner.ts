@@ -9,7 +9,7 @@
  *
  * - **Fuel: the same 1,000,000-instruction budget, metered a different
  *   way.** V8 has no fuel hook, so `wasmFuel.ts` (shared-types) rewrites each rule at load to
- *   count its own instructions and trap when the budget runs out (TD-440).
+ *   count its own instructions and trap when the budget runs out.
  *   A rule that exhausts it reaches no verdict, as under Wasmtime.
  * - **The deadline is a backstop, not the limit.** Fuel is the limit: it is
  *   deterministic, so a rule within budget is never refused because the
@@ -22,7 +22,7 @@
  *   enforce the maximum a module declares, so `worker.ts` rewrites the
  *   module's memory section to declare 16MB as its maximum before compiling
  *   (`wasmMemoryCap.ts`). A `memory.grow` past it returns -1 as it would under
- *   Wasmtime. Not a divergence any more; TD-440 records how it got here.
+ *   Wasmtime. Not a divergence any more.
  * - **Rego rules (OPA builds) run through `@intutic/shared-types`' Rego
  *   host**, with their own instruction budget (`wasmFuel.ts`'s
  *   `REGO_FUEL_BUDGET`) and deadline (`REGO_EVALUATE_TIMEOUT_MS`), and
@@ -424,7 +424,7 @@ export class WasmRunner implements CompileBridge {
   }
 
   /**
-   * The referenced-files table for this evaluation (TD-441). With no
+   * The referenced-files table for this evaluation. With no
    * `INTUTIC_WASM_MANIFEST_ROOT` the table is empty and every read refuses.
    */
   private async prefetchReferencedFiles(input: WasmContextInput): Promise<ReferencedFilesTable> {

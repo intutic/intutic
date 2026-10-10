@@ -4,7 +4,6 @@
  * Probes MCP servers every 30s and records health snapshots.
  * Emits mcp_daemon.mcp_server_down when a server becomes unreachable.
  *
- * LLD #28: MCP Daemon Mode, WS-5MCP
  * @module
  */
 import https from 'node:https'

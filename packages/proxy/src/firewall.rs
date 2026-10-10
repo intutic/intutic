@@ -213,9 +213,7 @@ pub fn generate_egress_enforcement(cfg: &EgressEnforceConfig) -> String {
         Platform::Linux => generate_egress_nftables(cfg),
         Platform::MacOs => generate_egress_pf(cfg),
         // Windows egress enforcement is not implemented.
-        Platform::Windows => {
-            String::from("# Windows default-deny egress is not implemented.\n")
-        }
+        Platform::Windows => String::from("# Windows default-deny egress is not implemented.\n"),
     }
 }
 

@@ -1,5 +1,5 @@
 /**
- * Sandbox backend selection (LLD #63 §6).
+ * Sandbox backend selection.
  *
  * Picks the requested backend, or the best available one. The honesty rule:
  * a backend whose `health()` is false is never silently swapped for a weaker
@@ -47,7 +47,7 @@ export function firecrackerOptionsFromEnv(env: NodeJS.ProcessEnv = process.env):
 /**
  * Select a backend by kind. Both backends gate on their own `health()`; the
  * caller refuses when a backend is unavailable rather than downgrading to a
- * weaker one (the honesty rule, LLD #63 §6).
+ * weaker one (the honesty rule).
  */
 export function selectBackend(
   kind: SandboxKind,

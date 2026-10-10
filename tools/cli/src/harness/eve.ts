@@ -16,20 +16,19 @@
  * No version floor: eve is pre-1.0 (0.39.x at integration time) and the
  * `approval` surface `@intutic/gate/eve` targets has no known major-version
  * boundary to gate on — the churn risk is handled by the gate package's own
- * pinned devDependency verification instead (TD-410).
+ * pinned devDependency verification instead.
  *
  * PREVIEW-CHURN NOTE (same shield the dsh integration established): eve is a
  * fast-moving preview product. `@intutic/gate/eve` was verified against
  * eve@0.71.0's shipped `.d.ts` (first 0.39.1) — see that module's doc for exactly what was
- * confirmed vs. assumed, and docs/TECH_DEBT.md TD-410/TD-411/TD-412.
+ * confirmed vs. assumed.
  *
  * LLM-egress note carried into the generated `.env.intutic`: eve routes
  * models through the Vercel AI Gateway by default, whose wire protocol the
  * Intutic proxy does not parse — and like the plain Vercel AI SDK it is
  * built on, eve has no env-var base-URL override. Only the in-code
  * direct-provider path (`defineAgent({ model: withIntuticProxy(...)(...) })`)
- * routes through the proxy. See TD-412 and
- * `apps/docs/integrations/eve.md`.
+ * routes through the proxy. See `apps/docs/integrations/eve.md`.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
