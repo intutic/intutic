@@ -174,6 +174,16 @@ describe('intutic settings', () => {
     expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { upstreamRetry: setting } })
   })
 
+  it('sends fallbacks to Bedrock, Vertex AI and Azure OpenAI, and refuses a provider the proxy cannot reach, before any request', async () => {
+    await expectFailure(() => runSettingsSet('upstreamRetry', '{"fallbacks":{"gpt-4o":[{"provider":"cohere"}]}}', {}), 'upstreamRetry.fallbacks.gpt-4o.0.provider')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const setting = { fallbacks: { 'claude-sonnet-4-5-20250929': [{ provider: 'bedrock' }, { provider: 'vertex_ai' }], 'gpt-4o': [{ provider: 'azure' }] } }
+    fetchMock.mockReturnValue(reply(200, { updated: true, workspaceId: 'ws_test', settings: { upstreamRetry: setting } }))
+    await runSettingsSet('upstreamRetry', JSON.stringify(setting), {})
+    expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { upstreamRetry: setting } })
+  })
+
   it('refuses a value given both ways', async () => {
     await expectFailure(() => runSettingsSet('configBodyUpload', 'true', { file: 'x.json' }), 'not both')
   })

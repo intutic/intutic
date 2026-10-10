@@ -169,6 +169,71 @@
       }
     },
     {
+      "name": "fallback targets on Bedrock, Vertex AI and Azure OpenAI, by either name",
+      "setting": {
+        "fallbacks": {
+          "claude-sonnet-4-5-20250929": [
+            {
+              "provider": "bedrock"
+            },
+            {
+              "provider": "vertex_ai"
+            },
+            {
+              "provider": "vertex"
+            }
+          ],
+          "gpt-4o": [
+            {
+              "provider": "azure_openai"
+            },
+            {
+              "model": "gpt-4o-mini",
+              "provider": "azure"
+            }
+          ]
+        }
+      },
+      "schemaValid": true,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 30000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {
+          "claude-sonnet-4-5-20250929": [
+            {
+              "provider": "bedrock"
+            },
+            {
+              "provider": "vertex_ai"
+            },
+            {
+              "provider": "vertex"
+            }
+          ],
+          "gpt-4o": [
+            {
+              "provider": "azure_openai"
+            },
+            {
+              "model": "gpt-4o-mini",
+              "provider": "azure"
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "attempts above the ceiling are refused by the schema and clamped by the proxy",
       "setting": {
         "maxAttempts": 9

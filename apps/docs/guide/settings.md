@@ -304,7 +304,7 @@ How the proxy handles an overloaded or rate-limited provider for this workspace:
 
 *   **Retry failed provider calls** — on by default; takes effect at once. Off makes one call per model, and fallback targets still run after it fails.
 *   **Calls per model** and **Time budget (ms)** — blank keeps each proxy's value (3 calls, 30,000 ms by default).
-*   **Fallback targets** — JSON mapping a model to up to five targets, tried in order once its retries run out. A target names a `model`, a `provider`, or both.
+*   **Fallback targets** — JSON mapping a model to up to five targets, tried in order once its retries run out. A target names a `model`, a `provider`, or both; the providers are the ones [`config.yaml` takes](/reference/configuration#fallbacks-intutic-settings-routing-fallbacks), Bedrock, Vertex AI and Azure OpenAI included.
 
 **Save retry settings** writes the fields; **Use each proxy's config** clears the setting. See [Retries and fallbacks](/guide/intelligent-routing#retries-and-fallbacks).
 

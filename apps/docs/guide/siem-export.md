@@ -118,6 +118,7 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 
 | Source | Event class | Severity |
 |---|---|---|
+| `governance_incidents` | `GOVERNANCE_VIOLATION` for a HIGH or CRITICAL incident, `GOVERNANCE_NOTICE` otherwise; `WASM_RULE_REFUSED` for a [custom filter a proxy refused to load](/guide/wasm-rules#when-a-rule-cannot-load) (one filed before 2.4.0 is a `GOVERNANCE_VIOLATION`) | 10, 7, 4 or 1 for CRITICAL, HIGH, MEDIUM or LOW; a refused filter is HIGH, 7 |
 | `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block or a tamper, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
 | `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
 | `workspace_settings_changes` | `SETTINGS_CHANGE` | 5 |
@@ -133,6 +134,8 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 | `budget_alerts` | `BUDGET_THRESHOLD` or `BUDGET_EXCEEDED` | 4; an exceeded budget 7 when it is hard, 5 when soft |
 
 Every class carries the member as `suid` (member id) and `suser` (email) when the event has an [actor](#the-actor).
+
+An incident's `msg` is its description.
 
 ### Bucket batching
 

@@ -12,6 +12,8 @@
  * @module
  */
 
+import { AnomalyType as AnomalyTypeValues } from '@intutic/anomaly-taxonomy'
+
 // ─── Risk Level ──────────────────────────────────────────────────────
 // HLD §3.5, LLD §3.1 — risk_level enum
 
@@ -512,6 +514,28 @@ export const IncidentStatus = {
 
 /** Union of all incident status values. */
 export type IncidentStatus = typeof IncidentStatus[keyof typeof IncidentStatus]
+
+// ─── Incident Type ───────────────────────────────────────────────────
+
+/**
+ * Incidents that are not an agent misbehaving, so they are not anomaly
+ * categories: nothing on the hot path detects them, no corrective card
+ * answers them, and enforcement cannot be promoted on them. They share the
+ * `anomaly_type` column (Postgres enum, migration 218) with the taxonomy.
+ */
+export const SystemIncidentType = {
+  /** A proxy refused to load a custom WASM or Rego rule version (`ruleLoadFailures.ts`). */
+  WASM_RULE_REFUSED: 'WASM_RULE_REFUSED',
+} as const
+
+/** Union of the system incident types. */
+export type SystemIncidentType = typeof SystemIncidentType[keyof typeof SystemIncidentType]
+
+/** What a governance incident is filed under: an anomaly category or a system incident type. */
+export const IncidentType = { ...AnomalyTypeValues, ...SystemIncidentType } as const
+
+/** Union of every incident type, as `governance_incidents.anomaly_type` holds it. */
+export type IncidentType = typeof IncidentType[keyof typeof IncidentType]
 
 // ─── Plan Lifecycle State ────────────────────────────────────────────
 // HLD §3.4.1 — Stored plan compliance trail lifecycle

@@ -336,6 +336,7 @@ intutic settings set upstreamRetry --file retry.json   # with fallbacks
 intutic settings set upstreamRetry null                # back to each proxy's config
 ```
 
+Its fallback targets take every provider `config.yaml` does, `bedrock`, `vertex` and `azure` included.
 The same setting is under **Settings › AI Routing & Caching › Retries & Fallbacks** in the dashboard and in
 Terraform's `intutic_workspace_settings`. The proxy picks a change up on the key's next request.
 See [configuration](/reference/configuration#retries-intutic-settings-routing-retry) for every key

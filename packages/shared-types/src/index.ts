@@ -20,6 +20,8 @@ export {
   HARNESS_HEADLINE_COUNT,
   ExecutionMode,
   IncidentStatus,
+  IncidentType,
+  SystemIncidentType,
   PlanLifecycleState,
   PlanExecutionOutcome,
   SopLifecycleState,

@@ -419,7 +419,7 @@ How the proxy retries a provider call that failed before any response reached th
 
 ### Fallbacks (`intutic_settings.routing.fallbacks`)
 
-Ordered targets per model, tried when that model's retries run out on a retryable failure. Empty by default. Each key is the model that was sent upstream; each target has a `model`, a `provider` (`anthropic`, `openai`, `gemini`, `mistral`, `openrouter`, `deepseek`, `bedrock`, `vertex_ai`, `azure_openai`), or both. Up to five targets per model.
+Ordered targets per model, tried when that model's retries run out on a retryable failure. Empty by default. Each key is the model that was sent upstream; each target has a `model`, a `provider` (`anthropic`, `openai`, `gemini`, `mistral`, `openrouter`, `deepseek`, `bedrock`, `vertex_ai` or `vertex`, `azure_openai` or `azure`), or both. The workspace setting takes the same providers. Up to five targets per model.
 
 A target that names only a provider sends the same model there. Between Anthropic's API, Bedrock and Vertex AI the model id is rewritten into the target's scheme: `claude-sonnet-4-5-20250929` becomes `vertex/claude-sonnet-4-5@20250929` on Vertex AI and, on Bedrock, the cross-region inference profile for the configured region (`bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0`; `eu.`, `apac.` or `global.` elsewhere), and an undated id such as `claude-opus-4-7` becomes `bedrock/anthropic.claude-opus-4-7`. Name the `model` as well when your account uses another inference profile.
 

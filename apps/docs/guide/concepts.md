@@ -128,6 +128,8 @@ The **Autonomous Reasoning Engine** runs on the control plane over the traces an
 
 When the ARE flags an anomaly it records the finding and can open a governance incident. A finding blocks nothing on its own; it reaches enforcement only through the [promotion rule](/concepts/enforcement-actions#the-promotion-rule).
 
+A governance incident's type is one of these twelve, or `WASM_RULE_REFUSED`: a proxy refused to load a version of a [custom filter](/guide/wasm-rules#when-a-rule-cannot-load). That one is not an anomaly. No agent caused it, nothing detects it on the request path, and it never reaches enforcement.
+
 ## Trust Scores
 
 Every agent session receives a **trust score** — a numerical reliability rating that tracks how well the agent follows governance rules over time. Trust scores factor into enforcement decisions: a session with a declining trust score may trigger stricter PCAS actions.

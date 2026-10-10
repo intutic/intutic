@@ -10083,6 +10083,48 @@ mod tests {
     use super::*;
     use axum::http::HeaderMap;
 
+    /// The workspace `upstreamRetry` setting may name exactly the providers
+    /// in `UPSTREAM_PROVIDERS` (shared-types), the control plane's schema. A
+    /// target it accepts that this proxy cannot resolve would be skipped as
+    /// `unknown_provider` on every request; the shared-types test holds the
+    /// two lists equal, this one that each id lands on the right upstream.
+    #[test]
+    fn every_provider_the_workspace_setting_accepts_resolves() {
+        use crate::cloud::CloudProvider;
+        let ts = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../shared-types/src/upstreamRetry.ts"),
+        )
+        .expect("upstreamRetry.ts is readable");
+        let list = ts
+            .split("export const UPSTREAM_PROVIDERS = [")
+            .nth(1)
+            .and_then(|rest| rest.split("] as const").next())
+            .expect("UPSTREAM_PROVIDERS is declared");
+        let ids: Vec<&str> = list
+            .split(',')
+            .map(|s| s.trim().trim_matches('\''))
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(ids.len(), 11, "{ids:?}");
+        for id in &ids {
+            assert!(provider_from_wire_id(id).is_some(), "{id} does not resolve");
+        }
+        for (alias, cloud) in [
+            ("bedrock", CloudProvider::Bedrock),
+            ("vertex", CloudProvider::Vertex),
+            ("vertex_ai", CloudProvider::Vertex),
+            ("azure", CloudProvider::Azure),
+            ("azure_openai", CloudProvider::Azure),
+        ] {
+            assert_eq!(
+                provider_from_wire_id(alias),
+                Some(Provider::Cloud(cloud)),
+                "{alias}"
+            );
+        }
+    }
+
     /// TD-445 / the honest counterfactual (Wave 3.2 of the audit-remediation
     /// programme): `request_costs` used to price `raw` cache-blind
     /// unconditionally while `actual` was cache-aware, which meant a warm

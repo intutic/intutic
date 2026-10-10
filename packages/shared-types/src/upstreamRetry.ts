@@ -38,8 +38,25 @@ export const DEFAULT_UPSTREAM_RETRY = {
   onStatus: [...DEFAULT_UPSTREAM_RETRY_STATUSES],
 } as const
 
-/** Providers a fallback target may name — the proxy's upstreams. */
-export const UPSTREAM_PROVIDERS = ['anthropic', 'openai', 'gemini', 'mistral', 'openrouter', 'deepseek'] as const
+/**
+ * Providers a fallback target may name: every id the proxy resolves
+ * (`provider_from_wire_id` in packages/proxy/src/proxy.rs), the cloud
+ * providers' aliases included, so a target copied from config.yaml is valid
+ * here too. A test holds the two lists equal.
+ */
+export const UPSTREAM_PROVIDERS = [
+  'anthropic',
+  'openai',
+  'gemini',
+  'mistral',
+  'openrouter',
+  'deepseek',
+  'bedrock',
+  'vertex_ai',
+  'vertex',
+  'azure_openai',
+  'azure',
+] as const
 export type UpstreamProvider = (typeof UPSTREAM_PROVIDERS)[number]
 
 /**

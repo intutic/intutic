@@ -66,7 +66,13 @@ A rule that cannot judge a call has not cleared it, so the refusal ranks with a 
 
 **Quarantine (MCP proxy).** A rule that runs past its deadline or its budget three times in a row is quarantined until the proxy next rescans the rules directory. Every call is then refused at once with `GOVERNANCE_UNAVAILABLE` (cause `quarantined`) without the rule running. The call that quarantined the rule is recorded as a blocked call; the refusals after it are not, one per retry. The LLM proxy has no quarantine: each request runs every rule within its deadline.
 
-**A rule that cannot load** is not a rule that reached no verdict, and is not refused per call. The proxy keeps the version of that rule it already runs, if any, and logs the error. A rule pushed from the dashboard that is refused also raises an incident once per version, saying whether an earlier version stays in force or the rule enforces nothing until a version loads.
+### When a rule cannot load
+
+A rule that cannot load is not a rule that reached no verdict, and is not refused per call. A proxy refuses a version whose binary is missing (`missing`), does not hash to the SHA-256 its descriptor names (`hash_mismatch`), is not a module it compiles (`compile_error`), imports a host function it does not provide (`unsupported_import`), or cannot run, such as an OPA build using a builtin the host lacks (`load_error`). The proxy keeps the version of that rule it already runs, if any, and logs the error.
+
+A rule pushed from the dashboard that is refused also raises an incident of type `WASM_RULE_REFUSED`, severity HIGH, saying whether an earlier version stays in force or the rule enforces nothing until a version loads. There is one incident per rule, version and reason, however many proxies report it: reports from the LLM proxy and the MCP proxy count on the same incident, in `escalation_chain.occurrences`. The incident's `escalation_chain` names the rule, the version and the reason. A refused rule is not an [anomaly](/guide/concepts#anomaly-detection-are): no agent caused it, and it never reaches enforcement. It notifies as `incident.created` and reaches a [SIEM](/guide/siem-export#syslog-cef-classes) as a `governance_incidents` event, with the CEF class `WASM_RULE_REFUSED`.
+
+Incidents filed before 2.4.0 have the type `SCOPE_VIOLATION`, and keep it: they are not converted. On those, as on the new ones, `escalation_chain.kind` is `wasm_rule_refused`, which is how to find both. A later report of a refusal filed before 2.4.0 counts on that incident.
 
 
 
@@ -437,7 +443,7 @@ Filters are hot-reloaded into both proxies, the LLM proxy and the MCP governance
 3. A new WebAssembly module is instantiated when the descriptor changes, once its bytes match the SHA-256 the descriptor names; the MCP proxy fetches each module by that hash, once
 4. The filter is active on the request path within one poll interval
 
-A module that is missing, does not match its SHA-256 or cannot load is not loaded. The proxy logs it and raises an incident for the workspace, once per version, and the version of that filter it already runs, if any, stays in force.
+A module that is missing, does not match its SHA-256 or cannot load is not loaded. The proxy logs it and raises a `WASM_RULE_REFUSED` incident for the workspace, once per version and reason, and the version of that filter it already runs, if any, stays in force. See [When a rule cannot load](#when-a-rule-cannot-load).
 
 Both proxies run uploaded filters together with the rules in their local rules directory, as one list: lower priority first, and on equal priority the uploaded filter first. A filter in **Shadow** mode is evaluated and never decides a request or call. Both proxies record what it would have done, allows included: the LLM proxy on each request's trace, the MCP proxy as an event per tool call. Those counts are the evidence a promotion to **Enforce** is judged on. Until the MCP proxy has loaded the workspace's filters, its [fail setting](/integrations/mcp-proxy#custom-rules) decides whether a call goes ahead on the local rules alone.
 
