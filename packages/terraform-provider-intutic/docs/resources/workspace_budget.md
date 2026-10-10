@@ -26,7 +26,7 @@ resource "intutic_workspace_budget" "this" {
 
 ### Required
 
-- `daily_budget_usd` (Number) Daily cap in USD (0–100,000); 0 is no daily cap. A UTC day.
+- `daily_budget_usd` (Number) Daily cap in USD (0–100,000); 0 is no daily cap. A UTC day. A workspace that never saved its caps is held to $100 a day until this resource sets one.
 - `monthly_budget_usd` (Number) Monthly cap in USD (0–1,000,000); 0 is no monthly cap. A UTC calendar month.
 
 ### Optional

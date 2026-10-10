@@ -73,7 +73,8 @@ func (r *workspaceBudgetResource) Schema(_ context.Context, _ resource.SchemaReq
 			},
 			"daily_budget_usd": schema.Float64Attribute{
 				Required:    true,
-				Description: "Daily cap in USD (0–100,000); 0 is no daily cap. A UTC day.",
+				Description: "Daily cap in USD (0–100,000); 0 is no daily cap. A UTC day. A workspace that never saved its " +
+					"caps is held to $100 a day until this resource sets one.",
 				Validators:  []validator.Float64{float64validator.Between(0, 100_000)},
 			},
 			"monthly_budget_usd": schema.Float64Attribute{

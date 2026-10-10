@@ -84,7 +84,7 @@ Types are JSON types. "Absent" is what an unset key with no default means. Lengt
 
 ### Routing and cost
 
-The workspace's spend caps are not settings on this page: set them on **Settings › Billing › Budget Limits** or with `PUT /api/v1/budget`, not with `intutic settings` or `intutic_workspace_settings`. A workspace that has not saved a daily cap is held to $100 a day. See [Budgets](/guide/budgets#per-workspace-budgets).
+The workspace's spend caps are not settings on this page: set them on **Settings › Billing › Budget Limits** or with `PUT /api/v1/budget`, not with `intutic settings` or `intutic_workspace_settings`. A workspace that has not saved a daily cap is held to $100 a day. See [Budgets](/guide/budgets#workspace-caps).
 
 | Key | Type and bounds | Default | What it does |
 |-----|-----------------|---------|--------------|
