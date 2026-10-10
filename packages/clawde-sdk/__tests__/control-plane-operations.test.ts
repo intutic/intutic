@@ -119,6 +119,15 @@ describe('ControlPlaneClient operations (shared with the Python SDK)', () => {
     }
   })
 
+  it('names, for each method, a command the CLI reference documents', () => {
+    const cliDoc = readFileSync(join(__dirname, '../../../apps/docs/reference/cli.md'), 'utf-8')
+    const sections = [...cliDoc.matchAll(/^## `intutic ([^`]+)`/gm)].map((m) => m[1]!)
+    for (const v of [...FIXTURE.operations, ...FIXTURE.offline].filter((o) => o.cli !== null)) {
+      const command = v.cli!.split(' ').filter((w) => !w.startsWith('--')).join(' ')
+      expect(sections.some((s) => s === command || s.startsWith(`${command} `)), `${v.ts}: intutic ${command}`).toBe(true)
+    }
+  })
+
   for (const v of FIXTURE.operations) {
     it(`${v.ts}() → ${v.request.method} ${v.request.path}`, async () => {
       respond = v.response
