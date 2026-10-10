@@ -49,7 +49,7 @@ Every event carries a `sourceTable` naming its source:
 
 | Source | What it carries |
 |---|---|
-| `execution_traces` | Every completed trace, as it's recorded |
+| `execution_traces` | Every completed trace, as it's recorded, with the proxy's upstream retries and fallback (`upstreamAttempts`, `upstreamFallback`) when it made more than one call |
 | `governance_incidents` | Every raised incident |
 | `detector_findings` | Every finding from the proxy's anomaly detector pipeline, allowed or blocked |
 | `stored_plans` | Plan approve, reject and close decisions |

@@ -40,6 +40,12 @@ export interface ChatParams {
   [key: string]: any
 }
 
+/** The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` headers, read. */
+export interface UpstreamCalls {
+  attempts: number
+  fallbackFrom?: string
+}
+
 export interface ChatResponse {
   id: string
   object: string
@@ -57,6 +63,13 @@ export interface ChatResponse {
   }
   /** Always `allow`: a response only comes back when the proxy let the request through. */
   verdict?: Verdict | LegacyVerdict
+  /**
+   * What the proxy's retry layer did, when it did anything: how many upstream
+   * calls this answer took, and — when a fallback answered after the model's
+   * retries ran out — which model failed (`model` names the one that
+   * answered). Absent for the ordinary single-call request.
+   */
+  upstream?: UpstreamCalls
   /** @deprecated Never set: the proxy does not report budget on responses. Use `checkBudget()`. */
   budgetRemainingUsd?: number
   /** @deprecated Never set: the proxy does not report budget on responses. Use `checkBudget()`. */

@@ -12,5 +12,6 @@ export {
   streamRefusal,
   type ProxyRefusal,
 } from './refusals'
+export { UPSTREAM_ATTEMPTS_HEADER, UPSTREAM_FALLBACK_HEADER } from './upstream'
 export { resolveContext } from './context-resolver'
 export { normalizeRequest, normalizeResponse } from './schema-enforcer'

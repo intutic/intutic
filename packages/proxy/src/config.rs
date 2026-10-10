@@ -607,6 +607,19 @@ pub struct RoutingConfig {
 
     #[serde(default)]
     pub reward: RewardConfig,
+
+    /// Retrying a provider call that failed before any response reached the
+    /// client — `routing::retry` has the rules. On by default. A workspace's
+    /// `upstreamRetry` setting overrides these field by field.
+    #[serde(default)]
+    pub retry: crate::routing::retry::RetryConfig,
+
+    /// Where a request goes when its model's retries are exhausted: ordered
+    /// targets keyed by the model that was sent upstream. Empty by default —
+    /// a fallback serves a model the caller did not ask for, so it is opted
+    /// into per model, never implied.
+    #[serde(default)]
+    pub fallbacks: crate::routing::retry::FallbackMap,
 }
 
 impl Default for RoutingConfig {
@@ -629,6 +642,8 @@ impl Default for RoutingConfig {
             cache_guard_min_read_bp: default_cache_guard_min_read_bp(),
             cache_guard_cold_start_prompt_bytes: default_cache_guard_cold_start_prompt_bytes(),
             reward: RewardConfig::default(),
+            retry: crate::routing::retry::RetryConfig::default(),
+            fallbacks: crate::routing::retry::FallbackMap::new(),
         }
     }
 }
@@ -783,6 +798,15 @@ pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
                 }
             }
         }
+    }
+
+    // Out-of-range retry values are clamped and unusable fallback targets
+    // dropped here, once, rather than on every request.
+    {
+        let routing = &mut config.intutic_settings.routing;
+        routing.retry = routing.retry.clone().bounded();
+        routing.fallbacks =
+            crate::routing::retry::sanitize_fallbacks(std::mem::take(&mut routing.fallbacks));
     }
 
     // ── Candidate-pool validation: the read that makes `model_list` real ──

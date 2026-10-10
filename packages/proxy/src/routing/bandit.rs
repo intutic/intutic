@@ -264,18 +264,37 @@ fn cache_guard_decision(
     now_unix: i64,
     cfg: &crate::config::RoutingConfig,
 ) -> Option<String> {
-    let Some(warm_model) = session.cache_warm_model.as_deref() else {
+    if session.cache_warm_model.is_none() {
         if cfg.cache_guard_cold_start_prompt_bytes == 0 {
             return None;
         }
         return (prompt_bytes >= cfg.cache_guard_cold_start_prompt_bytes)
             .then(|| requested_model.to_string());
+    }
+    prefix_is_warm(session, requested_model, now_unix, cfg).then(|| requested_model.to_string())
+}
+
+/// Whether the scope's last prompt-cache observation says `model`'s prefix is
+/// warm right now: an observation for the same model family, fresh within
+/// `cache_guard_max_age_secs`, reading at least `cache_guard_min_read_bp`.
+///
+/// The evidence half of the cache-honesty guard above, and the test the
+/// upstream fallback uses to say on the trace when serving a different family
+/// cost this turn a warm cache.
+pub fn prefix_is_warm(
+    session: &SessionRouting,
+    model: &str,
+    now_unix: i64,
+    cfg: &crate::config::RoutingConfig,
+) -> bool {
+    let Some(warm_model) = session.cache_warm_model.as_deref() else {
+        return false;
     };
 
     // `0` is the documented kill switch: no observation is ever "fresh"
     // enough, so every scope falls through to normal sampling.
     if cfg.cache_guard_max_age_secs == 0 {
-        return None;
+        return false;
     }
 
     // Family, not exact model — `pricing::model_family` collapses date
@@ -285,30 +304,25 @@ fn cache_guard_decision(
     // the same observation.
     let same_family = match (
         pricing::model_family(warm_model),
-        pricing::model_family(requested_model),
+        pricing::model_family(model),
     ) {
         (Some(a), Some(b)) => a == b,
         _ => false,
     };
     if !same_family {
-        return None;
+        return false;
     }
 
     let fresh = session.cache_observed_at.is_some_and(|observed| {
         now_unix.saturating_sub(observed) <= cfg.cache_guard_max_age_secs as i64
     });
     if !fresh {
-        return None;
+        return false;
     }
 
-    let warm = session
+    session
         .cache_read_bp
-        .is_some_and(|bp| bp >= cfg.cache_guard_min_read_bp);
-    if !warm {
-        return None;
-    }
-
-    Some(requested_model.to_string())
+        .is_some_and(|bp| bp >= cfg.cache_guard_min_read_bp)
 }
 
 /// `route_model`'s result. A struct rather than a 3-tuple so `prior_cache_read_ratio`

@@ -15,6 +15,7 @@ import type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier } from '
 import type { SsoGroupPolicy } from './attenuation.js'
 import type { McpBudgetSettings } from './mcpBudgets.js'
 import type { PiiDetectorSettings } from './piiDetectors.js'
+import type { UpstreamRetrySettings } from './upstreamRetry.js'
 
 // Re-export so callers only need one import
 export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
@@ -111,6 +112,16 @@ export interface WorkspaceSettings {
    * in a settings write clears it, and is never stored.
    */
   piiDetectors?: PiiDetectorSettings | null
+
+  /**
+   * How the LLM proxy retries a provider call that failed before any response
+   * reached the client, and the ordered fallback targets it tries when those
+   * retries run out (`UpstreamRetrySettingsSchema`). Each field overrides the
+   * proxy's own config.yaml value; absent fields keep it. The proxy reads it
+   * from `/api/v1/auth/key-context`. `null` in a settings write clears it, and
+   * is never stored.
+   */
+  upstreamRetry?: UpstreamRetrySettings | null
 
   /**
    * Bring-your-own-cloud trace storage. Optional — absent means Intutic-managed

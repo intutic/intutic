@@ -2918,7 +2918,7 @@ intutic settings set <key> (<value> | --file <path>) [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Sends `PUT /api/v1/workspace/settings` with only this key, so every other setting keeps its value, and prints the key's new value. You need the OWNER or ADMIN role, and the change is recorded in the settings history. The server refuses an unknown key or a bad value with a message naming it. `mcpBudgets`, `sso_group_policy` and `piiDetectors` are also checked by the CLI before sending, and a mistake is reported with the path of the field at fault.
+Sends `PUT /api/v1/workspace/settings` with only this key, so every other setting keeps its value, and prints the key's new value. You need the OWNER or ADMIN role, and the change is recorded in the settings history. The server refuses an unknown key or a bad value with a message naming it. `mcpBudgets`, `sso_group_policy`, `piiDetectors` and `upstreamRetry` are also checked by the CLI before sending, and a mistake is reported with the path of the field at fault.
 
 Settings often changed this way:
 
@@ -2933,6 +2933,7 @@ Settings often changed this way:
 | `mcpAnomalyOverrides` | A JSON object of detector id to `steer`, `reask`, `kill` or `off` |
 | `sso_group_policy` | The [group policy for high-risk tools](/guide/settings#security), as a JSON object of `highRiskTools`, `requiredGroups` and `requireOboFor`; `null` clears it. Setting one needs a <Badge type="warning" text="Biz Org+" /> plan |
 | `piiDetectors` | The [PII detector](/guide/policies#pii-detectors) actions for the workspace, as a JSON object of detector id to `off`, `redact` or `block`; each machine's proxy config may only tighten them. `null` clears it |
+| `upstreamRetry` | The proxy's [retries and fallbacks](/guide/intelligent-routing#retries-and-fallbacks) for the workspace, as a JSON object; each field overrides the proxy's config. `null` clears it |
 | `configBodyUpload` | `true` or `false`: [config content upload](#config-content-upload) |
 
 **Examples:**
@@ -2942,6 +2943,7 @@ intutic settings set mcpDefaultPolicy deny
 intutic settings set mcpBudgets --file mcp-budgets.json
 intutic settings set sso_group_policy null
 intutic settings set piiDetectors '{"pii.card":"block","pii.email":"redact"}'
+intutic settings set upstreamRetry '{"maxAttempts":4,"budgetMs":45000}'
 ```
 
 ---

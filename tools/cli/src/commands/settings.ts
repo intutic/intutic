@@ -12,18 +12,24 @@
  * value with a 400 naming it, so the CLI stays correct as settings are added.
  * The MCP policy (`mcpDefaultPolicy`, `mcpHighRiskToolChange`, `mcpBudgets`,
  * `mcpInjectionAction`, `mcpAnomalyMode`, …), the group policy
- * (`sso_group_policy`), the PII detector actions (`piiDetectors`) and
- * `configBodyUpload` are all set this way.
+ * (`sso_group_policy`), the PII detector actions (`piiDetectors`), upstream
+ * retries and fallbacks (`upstreamRetry`) and `configBodyUpload` are all set
+ * this way.
  *
  * The structured settings with a schema in `@intutic/shared-types` are
- * checked here first, so a mistake in a budgets, group-policy or detector
- * file is reported with the path of the field at fault rather than only the
+ * checked here first, so a mistake in a budgets, group-policy, detector or
+ * retry file is reported with the path of the field at fault rather than only the
  * top-level key the server's 400 names.
  *
  * @module
  */
 
-import { McpBudgetSettingsSchema, PiiDetectorSettingsSchema, SsoGroupPolicySchema } from '@intutic/shared-types'
+import {
+  McpBudgetSettingsSchema,
+  PiiDetectorSettingsSchema,
+  SsoGroupPolicySchema,
+  UpstreamRetrySettingsSchema,
+} from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { fail, readJsonFile, runApiCommand, type ApiCommandOpts } from './apiCommand.js'
 
@@ -43,6 +49,7 @@ export function localProblems(key: string, value: unknown): string[] {
     // `null` clears the policy.
     : key === 'sso_group_policy' ? SsoGroupPolicySchema.nullable()
     : key === 'piiDetectors' ? PiiDetectorSettingsSchema.nullable()
+    : key === 'upstreamRetry' ? UpstreamRetrySettingsSchema.nullable()
     : null
   if (!schema) return []
   const checked = schema.safeParse(value)

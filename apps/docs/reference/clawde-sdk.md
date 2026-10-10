@@ -99,7 +99,9 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 
 `chat()` reads both. It does not stream, so for a stream you read yourself, pass each line (or the whole body) to `streamRefusal()` (`stream_refusal()`), which returns the refusal or `null` (`None`). `PROXY_REFUSALS`, `REFUSAL_HEADER`, `REFUSAL_RULE_HEADER` and `STREAM_REFUSAL_MARKER` are exported alongside it.
 
-Every other failure throws `ClawdeConnectionError` with the status and response body in its message: an unreachable proxy, a timeout, a 5xx after the retries run out, or a 4xx that is not a refusal, such as a key the proxy does not accept.
+Every other failure throws `ClawdeConnectionError` with the status and response body in its message: an unreachable proxy, a timeout, a 5xx after the retries run out, or a 4xx that is not a refusal, such as a key the proxy does not accept. A 5xx the proxy already [retried upstream](/guide/intelligent-routing#retries-and-fallbacks) (it carries `x-intutic-upstream-attempts`) throws at once rather than being retried again from the client.
+
+**Upstream retries.** When the proxy needed more than one provider call for an answer, the response carries `upstream`: `{ attempts, fallbackFrom? }` (`{"attempts", "fallback_from"}` in Python), read from the `x-intutic-upstream-attempts` and `x-intutic-upstream-fallback-from` headers. `fallbackFrom` names the model whose retries ran out when a fallback target answered; the response's `model` names the one that did. Absent on the ordinary single-call response. `UPSTREAM_ATTEMPTS_HEADER` and `UPSTREAM_FALLBACK_HEADER` are exported.
 
 `budgetRemainingUsd` and `budgetPctUsed` are deprecated and never set; the proxy does not report budget on responses. Use `checkBudget()` instead.
 

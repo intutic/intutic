@@ -6,6 +6,7 @@ import requests
 from typing import List, Dict, Any, Callable, NoReturn, Optional
 from .errors import ClawdeBlockedError, ClawdeConnectionError
 from .refusals import REFUSAL_HEADER, REFUSAL_RULE_HEADER, ProxyRefusal, header_refusal, parse_refusal, stream_refusal
+from .upstream import upstream_calls
 from .context_resolver import resolve_context
 from .git_context import resolve_git_context
 from .budget_checker import BudgetChecker
@@ -106,11 +107,13 @@ class ClawdeClient:
         """Send a chat request through the proxy's /v1/chat/completions route.
 
         Returns the completion with `verdict` set to "allow" when the proxy let
-        the request through. A governance refusal, including one the proxy
+        the request through, and `upstream` set to ``{"attempts", "fallback_from"}``
+        when the proxy's retry layer made more than one upstream call for it. A governance refusal, including one the proxy
         answers with a 200 and names in `x-intutic-refusal` (or, on a stream,
         in its `: intutic-refusal` line), fires the matching event and raises
         ClawdeBlockedError, unretried. Transport failures, timeouts and 5xx
-        answers are retried; anything else raises ClawdeConnectionError.
+        answers are retried, except a 5xx the proxy already retried upstream;
+        anything else raises ClawdeConnectionError.
         """
         request_payload = {
             "model": model,
@@ -168,6 +171,9 @@ class ClawdeClient:
                 if answered is not None:
                     self._refuse(answered, res.status_code)
                 result["verdict"] = "allow"
+                upstream = upstream_calls(res.headers)
+                if upstream is not None:
+                    result["upstream"] = upstream
                 return result
 
             refusal = parse_refusal(res.status_code, res.text)
@@ -176,9 +182,16 @@ class ClawdeClient:
 
             last_error = f"HTTP error {res.status_code}: {res.text}"
             # A 4xx that is not a refusal (bad key, malformed body) fails the
-            # same way every time; only a 5xx is worth another attempt.
+            # same way every time; only a 5xx is worth another attempt — and
+            # not one the proxy already retried upstream, which another round
+            # from here would only multiply.
             if res.status_code < 500:
                 raise ClawdeConnectionError(last_error)
+            upstream = upstream_calls(res.headers)
+            if upstream is not None:
+                raise ClawdeConnectionError(
+                    f"{last_error} (the proxy already made {upstream['attempts']} upstream calls)"
+                )
 
         raise ClawdeConnectionError(f"Request failed after {max_attempts} attempts. Last error: {last_error}")
 

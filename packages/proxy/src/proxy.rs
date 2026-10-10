@@ -748,6 +748,40 @@ fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
     (status, axum::Json(body)).into_response()
 }
 
+/// What a request is estimated to cost on `model`, as the pre-request spend
+/// check prices it: the prompt at four characters per token in, `max_tokens`
+/// (else 4096) out.
+fn estimated_request_cost(model: &str, prompt_chars: usize, body_json: &serde_json::Value) -> f64 {
+    let prompt_tokens = (prompt_chars as f64 / 4.0).max(1.0) as u32;
+    let max_tokens = body_json
+        .get("max_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(4096) as u32;
+    pricing::estimate_cost(model, prompt_tokens, max_tokens)
+}
+
+/// The pre-request spend check against the key's and workspace's budgets:
+/// the refusal to send when they do not cover `estimated_cost`, else `None`.
+///
+/// The one entry point for that check. It decides the request as the caller
+/// wrote it, and decides again, priced for the target's model, before each
+/// upstream fallback is tried (`try_fallbacks`) — so a fallback can never
+/// spend past a budget the request itself was held to, and a budget added
+/// here applies to both.
+fn key_budget_refusal(
+    key: &VirtualKeyRecord,
+    workspace_id: &str,
+    estimated_cost: f64,
+) -> Option<Response> {
+    let e = check_budget(key, estimated_cost).err()?;
+    tracing::warn!(workspace_id = %workspace_id, "Budget check failed: {}", e);
+    Some(json_error(
+        StatusCode::TOO_MANY_REQUESTS,
+        "BUDGET_EXCEEDED",
+        "Remaining budget is insufficient for this request's safety margin.",
+    ))
+}
+
 /// The cost-prediction gate's answer to a non-streaming request: the reason as
 /// an assistant turn, status 200, and `x-intutic-refusal: COST_GATE_EXCEEDED`
 /// (see `crate::refusal`).
@@ -1496,6 +1530,47 @@ fn insert_deepseek_credential(
     }
 }
 
+/// Puts `cred` on `headers` the way `provider` expects it. Shared by the
+/// primary request and every fallback target, so a target on another provider
+/// is authenticated exactly as a request routed there would be.
+fn insert_provider_credential(
+    headers: &mut reqwest::header::HeaderMap,
+    provider: &Provider,
+    protocol: &crate::protocol::Protocol,
+    cred: &str,
+) {
+    use reqwest::header::{HeaderName, HeaderValue};
+    match provider {
+        Provider::Anthropic => {
+            if cred.starts_with("sk-ant-oat") {
+                if let Ok(v) = HeaderValue::from_str(&format!("Bearer {}", cred)) {
+                    headers.insert(HeaderName::from_static("authorization"), v);
+                }
+            } else if let Ok(v) = HeaderValue::from_str(cred) {
+                headers.insert(HeaderName::from_static("x-api-key"), v);
+            }
+            headers.insert(
+                HeaderName::from_static("anthropic-version"),
+                HeaderValue::from_static("2023-06-01"),
+            );
+        }
+        // Mistral and OpenRouter both use plain OpenAI-style bearer auth
+        // (https://docs.mistral.ai/api/, https://openrouter.ai/docs/quickstart)
+        // -- same arm as OpenAI itself, not a coincidence.
+        Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
+            if let Ok(v) = HeaderValue::from_str(&format!("Bearer {}", cred)) {
+                headers.insert(HeaderName::from_static("authorization"), v);
+            }
+        }
+        Provider::DeepSeek => insert_deepseek_credential(headers, protocol, cred),
+        Provider::Gemini => {
+            if let Ok(v) = HeaderValue::from_str(cred) {
+                headers.insert(HeaderName::from_static("x-goog-api-key"), v);
+            }
+        }
+    }
+}
+
 /// Human-readable provider name for the BYO-key refusal message.
 fn provider_display_name(provider: &Provider) -> &'static str {
     match provider {
@@ -1526,6 +1601,294 @@ fn provider_key_env(provider: &Provider) -> &'static str {
 /// why that distinction matters).
 fn provider_wire_id(provider: &Provider) -> String {
     provider_display_name(provider).to_lowercase()
+}
+
+/// The inverse of `provider_wire_id`, for a fallback target that names its
+/// provider. `None` for a provider this proxy has no upstream for.
+fn provider_from_wire_id(id: &str) -> Option<Provider> {
+    match id.trim().to_ascii_lowercase().as_str() {
+        "anthropic" => Some(Provider::Anthropic),
+        "openai" => Some(Provider::OpenAI),
+        "gemini" => Some(Provider::Gemini),
+        "mistral" => Some(Provider::Mistral),
+        "openrouter" => Some(Provider::OpenRouter),
+        "deepseek" => Some(Provider::DeepSeek),
+        _ => None,
+    }
+}
+
+/// This request's retry policy and fallback targets: the proxy's config.yaml,
+/// overlaid field by field with the workspace's `upstreamRetry` setting when
+/// the request carries a virtual key and a control plane is configured.
+///
+/// The setting rides `/api/v1/auth/key-context`, the per-key answer the PII
+/// detector actions and the SSO group gate read too, fetched once per key per
+/// `key_context::CACHE_TTL` and shared by all of them. A failed read falls back
+/// to config.yaml alone rather than refusing: retries are an availability
+/// feature, and an unreadable setting must not be what fails a request.
+async fn effective_retry_policy(
+    state: &AppState,
+    credential: &RequestCredential,
+    workspace_id: &str,
+) -> (
+    crate::routing::retry::RetryConfig,
+    crate::routing::retry::FallbackMap,
+) {
+    let routing = &state.config.intutic_settings.routing;
+    let policy_cfg = &state.config.intutic_settings.policy;
+    let workspace = match policy_cfg
+        .control_plane_url
+        .as_deref()
+        .zip(credential.virtual_key())
+    {
+        Some((cp_url, virtual_key)) => {
+            let version = state.control_plane.policy_version(workspace_id).await;
+            match crate::key_context::fetch(
+                &state.http_client,
+                cp_url,
+                virtual_key,
+                std::time::Duration::from_millis(policy_cfg.timeout_ms),
+                version,
+            )
+            .await
+            {
+                Ok(crate::key_context::Answer::Body(body)) => {
+                    crate::routing::retry::parse_key_context(&body)
+                }
+                Ok(crate::key_context::Answer::Refused(_)) => None,
+                Err(reason) => {
+                    tracing::warn!(workspace_id = %workspace_id, reason = %reason, "Workspace retry setting unavailable; using this proxy's config");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+    match workspace {
+        Some(w) => w.apply(&routing.retry, &routing.fallbacks),
+        None => (routing.retry.clone(), routing.fallbacks.clone()),
+    }
+}
+
+/// What a fallback target needs from the request whose retries ran out.
+struct FallbackRequest<'a> {
+    state: &'a AppState,
+    workspace_id: &'a str,
+    /// The model and provider that failed.
+    primary_model: &'a str,
+    primary_provider: &'a Provider,
+    /// The wire shape the caller spoke, which every target must serve as-is.
+    inbound: &'a Provider,
+    protocol: &'a Protocol,
+    uri_path: &'a str,
+    host_name: &'a str,
+    method: &'a reqwest::Method,
+    body_json: &'a serde_json::Value,
+    /// The forwarded headers before any credential was added.
+    base_headers: &'a reqwest::header::HeaderMap,
+    /// The primary's forwarded headers, its credential included.
+    primary_headers: &'a reqwest::header::HeaderMap,
+    require_provisioned: bool,
+    allowed_models: Option<&'a [String]>,
+    key_models: &'a [String],
+    /// What the pre-request spend checks need to price a target: the key
+    /// whose budgets apply, the prompt size they priced the request on, and
+    /// the machine's own cap as `(input tokens, remaining USD)` when it is
+    /// enforced.
+    key_record: Option<&'a VirtualKeyRecord>,
+    prompt_chars: usize,
+    machine_budget: Option<(u32, f64)>,
+    retry: &'a crate::routing::retry::RetryConfig,
+    deadline: Instant,
+}
+
+impl FallbackRequest<'_> {
+    /// Whether the spend budgets the request passed would also admit it on
+    /// `model` — the same checks, priced for the target.
+    fn budget_admits(&self, model: &str) -> bool {
+        if let Some(key) = self.key_record {
+            let cost = estimated_request_cost(model, self.prompt_chars, self.body_json);
+            if key_budget_refusal(key, self.workspace_id, cost).is_some() {
+                return false;
+            }
+        }
+        if let Some((tokens, remaining)) = self.machine_budget {
+            if let crate::wasm::context::Verdict::Kill { .. } =
+                crate::plugins::budget_gate::BudgetGatePlugin::verdict(model, tokens, remaining)
+            {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// A fallback target that answered with a 2xx.
+struct FallbackServed {
+    response: reqwest::Response,
+    model: String,
+    provider: Provider,
+}
+
+/// Try `targets` in order, each with the same retry policy and the request's
+/// one shared deadline, until one answers with a 2xx.
+///
+/// A target is skipped, and the skip recorded, when it:
+///   - is the target that just failed;
+///   - cannot take the caller's request as-is (another wire shape, or the
+///     Gemini route, whose model sits in the URL path rather than the body);
+///   - names a model the workspace allowlist or the key does not allow — a
+///     fallback is not a way around the model allowlist;
+///   - would not fit a spend budget the request passed, priced for its own
+///     model (`key_budget_refusal`, the machine cap) — nor around a budget;
+///   - is on a provider with no credential for this workspace. A request made
+///     with the caller's own provider key reuses it only on that same
+///     provider, as routing does;
+///   - would start after the budget is spent.
+///
+/// A target that answers with anything but a 2xx is passed over too: the
+/// caller then gets the primary's error, which describes the request it made.
+async fn try_fallbacks(
+    req: &FallbackRequest<'_>,
+    targets: &[crate::routing::retry::FallbackTarget],
+    attempts: &mut Vec<crate::routing::retry::UpstreamAttempt>,
+) -> Option<FallbackServed> {
+    use crate::routing::retry::UpstreamAttempt;
+    let routing = &req.state.config.intutic_settings.routing;
+    for target in targets {
+        let mut model = target.model_for(req.primary_model);
+        let provider = match target.provider.as_deref() {
+            Some(id) => match provider_from_wire_id(id) {
+                Some(p) => p,
+                None => {
+                    attempts.push(UpstreamAttempt::skipped(&model, id, "unknown_provider"));
+                    continue;
+                }
+            },
+            None => get_model_provider(&model),
+        };
+        // The operator's Anthropic override rewrites every Anthropic-bound
+        // model after routing; a fallback is no exception.
+        if provider == Provider::Anthropic {
+            if let Some(override_model) = &routing.anthropic_model_override {
+                model = override_model.clone();
+            }
+        }
+        let provider_id = provider_wire_id(&provider);
+        let url = (*req.protocol != Protocol::Gemini && provider.serves_natively(req.inbound))
+            .then(|| {
+                // A client-named host is the primary's destination; any other
+                // provider goes to its own configured upstream.
+                let host = if provider == *req.primary_provider {
+                    req.host_name
+                } else {
+                    ""
+                };
+                native_upstream_url(&provider, req.protocol, host, req.uri_path)
+            })
+            .flatten();
+        let skip = if model == req.primary_model && provider == *req.primary_provider {
+            Some("same_target")
+        } else if url.is_none() {
+            Some("wire_mismatch")
+        } else if crate::metering::check_model_allowed(&model, req.allowed_models, req.key_models)
+            .is_err()
+        {
+            Some("model_not_allowed")
+        } else if !req.budget_admits(&model) {
+            Some("budget")
+        } else if Instant::now() >= req.deadline {
+            Some("time_budget")
+        } else {
+            None
+        };
+        if let Some(reason) = skip {
+            attempts.push(UpstreamAttempt::skipped(&model, &provider_id, reason));
+            continue;
+        }
+        let Some(url) = url else { continue };
+
+        let headers = if provider == *req.primary_provider {
+            req.primary_headers.clone()
+        } else {
+            match fetch_provider_credential(
+                &req.state.store,
+                req.workspace_id,
+                &provider,
+                req.require_provisioned,
+            )
+            .await
+            {
+                Some(cred) => {
+                    let mut h = req.base_headers.clone();
+                    insert_provider_credential(&mut h, &provider, req.protocol, &cred);
+                    h
+                }
+                None => {
+                    attempts.push(UpstreamAttempt::skipped(
+                        &model,
+                        &provider_id,
+                        "no_credential",
+                    ));
+                    continue;
+                }
+            }
+        };
+        let mut body = req.body_json.clone();
+        body["model"] = json!(model);
+        let body = axum::body::Bytes::from(serde_json::to_vec(&body).unwrap_or_default());
+
+        let outcome = crate::routing::retry::send_with_retry(
+            req.retry,
+            req.deadline,
+            &model,
+            &provider_id,
+            attempts,
+            || {
+                req.state
+                    .http_client
+                    .request(req.method.clone(), &url)
+                    .headers(headers.clone())
+                    .body(body.clone())
+                    .timeout(crate::routing::retry::ATTEMPT_TIMEOUT)
+                    .send()
+            },
+        )
+        .await;
+        if let Ok(response) = outcome.result {
+            if response.status().is_success() {
+                return Some(FallbackServed {
+                    response,
+                    model,
+                    provider,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Tell the caller what the retry layer did, on any response that went
+/// upstream: how many calls it took, and which model failed when a fallback
+/// answered. Absent on the ordinary one-call request, so presence is the
+/// signal, like the routed-from pair.
+fn disclose_upstream_calls(
+    headers: &mut axum::http::HeaderMap,
+    attempts: &[crate::routing::retry::UpstreamAttempt],
+    fallback: Option<&crate::routing::retry::UpstreamFallback>,
+) {
+    let calls = crate::routing::retry::calls_made(attempts);
+    if calls > 1 {
+        headers.insert(
+            "x-intutic-upstream-attempts",
+            axum::http::HeaderValue::from(calls),
+        );
+    }
+    if let Some(fb) = fallback {
+        if let Ok(v) = axum::http::HeaderValue::from_str(&fb.from_model) {
+            headers.insert("x-intutic-upstream-fallback-from", v);
+        }
+    }
 }
 
 /// The tool schemas a request advertises, in whichever shape the harness sent.
@@ -2834,21 +3197,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // Kept for the upstream fallback, which prices each target on this same
+    // prompt size before trying it (`try_fallbacks`).
+    let budget_prompt_chars = body_str.len();
     if let Some(ref key) = key_record {
-        let prompt_tokens = (body_str.len() as f64 / 4.0).max(1.0) as u32;
-        let max_tokens = body_json
-            .get("max_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(4096) as u32;
-        let estimated_cost = pricing::estimate_cost(&model, prompt_tokens, max_tokens);
-
-        if let Err(e) = check_budget(key, estimated_cost) {
-            tracing::warn!(workspace_id = %workspace_id, "Budget check failed: {}", e);
-            return json_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "BUDGET_EXCEEDED",
-                "Remaining budget is insufficient for this request's safety margin.",
-            );
+        let estimated_cost = estimated_request_cost(&model, budget_prompt_chars, &body_json);
+        if let Some(refused) = key_budget_refusal(key, &workspace_id, estimated_cost) {
+            return refused;
         }
     }
 
@@ -3621,6 +3976,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // Evaluate native budget gate: the machine's own cap, standalone only.
+    // When it is enforced, the fallback re-runs it per target with the
+    // target's model, on the same token estimate and remaining budget.
+    let machine_budget: Option<(u32, f64)> = (machine_budget_applies() && local_budget_enforced())
+        .then_some((
+            wasm_ctx.estimated_input_tokens,
+            wasm_ctx.budget_remaining_usd,
+        ));
     let budget_plugin = crate::plugins::budget_gate::BudgetGatePlugin::new();
     let machine_verdict = if machine_budget_applies() {
         budget_plugin.evaluate(&wasm_ctx)
@@ -3820,6 +4182,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 context_snapshot: context_snapshot_for_trace.clone(),
                 // Blocked before any upstream call was made.
                 upstream_error: None,
+                upstream_attempts: Vec::new(),
+                upstream_fallback: None,
                 graph: crate::telemetry::GraphTrace::from_node(
                     &wasm_ctx.node,
                     findings
@@ -4551,6 +4915,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 context_snapshot: context_snapshot_for_trace.clone(),
                 // Served from cache — no upstream call was made.
                 upstream_error: None,
+                upstream_attempts: Vec::new(),
+                upstream_fallback: None,
                 graph: crate::telemetry::GraphTrace::from_node(
                     &node_for_trace,
                     advisory_anomalies.clone(),
@@ -4714,7 +5080,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         None
     };
 
-    let target_provider = get_model_provider(&actual_model);
+    // `mut`, like `actual_model`: an upstream fallback that serves the request
+    // moves the response onto the target that answered.
+    let mut target_provider = get_model_provider(&actual_model);
     // Wire SHAPE, not upstream identity -- Mistral/OpenRouter are distinct
     // targets (own base URL, own credential) that happen to speak the exact
     // same OpenAI-compatible wire format `provider` (from_path, always
@@ -4725,7 +5093,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     //
     // `serves_natively` is that wire-shape match, plus DeepSeek on the
     // Anthropic wire (its Anthropic-compatible API, which dsh speaks).
-    let is_same_provider = target_provider.serves_natively(&provider);
+    let mut is_same_provider = target_provider.serves_natively(&provider);
 
     let host_header = headers
         .get("host")
@@ -4873,6 +5241,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // Kept before any credential is added: a fallback target on another
+    // provider starts from these and gets that provider's credential instead.
+    let uncredentialed_headers = fwd_headers.clone();
+
     // Inject credentials
     let mut creds_injected = false;
     if raw_token.starts_with("vk_") {
@@ -4931,51 +5303,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             );
         }
         if let Some(cred) = cred_opt {
-            match target_provider {
-                Provider::Anthropic => {
-                    if cred.starts_with("sk-ant-oat") {
-                        let bearer = format!("Bearer {}", cred);
-                        if let Ok(v) = reqwest::header::HeaderValue::from_str(&bearer) {
-                            fwd_headers.insert(
-                                reqwest::header::HeaderName::from_static("authorization"),
-                                v,
-                            );
-                        }
-                    } else {
-                        if let Ok(v) = reqwest::header::HeaderValue::from_str(&cred) {
-                            fwd_headers
-                                .insert(reqwest::header::HeaderName::from_static("x-api-key"), v);
-                        }
-                    }
-                    let v = reqwest::header::HeaderValue::from_static("2023-06-01");
-                    fwd_headers.insert(
-                        reqwest::header::HeaderName::from_static("anthropic-version"),
-                        v,
-                    );
-                }
-                // Mistral and OpenRouter both use plain OpenAI-style bearer
-                // auth (https://docs.mistral.ai/api/,
-                // https://openrouter.ai/docs/quickstart) -- same arm as
-                // OpenAI itself, not a coincidence.
-                Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
-                    let bearer = format!("Bearer {}", cred);
-                    if let Ok(v) = reqwest::header::HeaderValue::from_str(&bearer) {
-                        fwd_headers
-                            .insert(reqwest::header::HeaderName::from_static("authorization"), v);
-                    }
-                }
-                Provider::DeepSeek => {
-                    insert_deepseek_credential(&mut fwd_headers, &protocol, &cred)
-                }
-                Provider::Gemini => {
-                    if let Ok(v) = reqwest::header::HeaderValue::from_str(&cred) {
-                        fwd_headers.insert(
-                            reqwest::header::HeaderName::from_static("x-goog-api-key"),
-                            v,
-                        );
-                    }
-                }
-            }
+            insert_provider_credential(&mut fwd_headers, &target_provider, &protocol, &cred);
             creds_injected = true;
         }
     }
@@ -4996,51 +5324,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 fetch_provider_credential(&state.store, &workspace_id, &target_provider, false)
                     .await
             {
-                match target_provider {
-                    Provider::Anthropic => {
-                        if cred.starts_with("sk-ant-oat") {
-                            let bearer = format!("Bearer {}", cred);
-                            if let Ok(v) = reqwest::header::HeaderValue::from_str(&bearer) {
-                                fwd_headers.insert(
-                                    reqwest::header::HeaderName::from_static("authorization"),
-                                    v,
-                                );
-                            }
-                        } else {
-                            if let Ok(v) = reqwest::header::HeaderValue::from_str(&cred) {
-                                fwd_headers.insert(
-                                    reqwest::header::HeaderName::from_static("x-api-key"),
-                                    v,
-                                );
-                            }
-                        }
-                        let v = reqwest::header::HeaderValue::from_static("2023-06-01");
-                        fwd_headers.insert(
-                            reqwest::header::HeaderName::from_static("anthropic-version"),
-                            v,
-                        );
-                    }
-                    Provider::OpenAI | Provider::Mistral | Provider::OpenRouter => {
-                        let bearer = format!("Bearer {}", cred);
-                        if let Ok(v) = reqwest::header::HeaderValue::from_str(&bearer) {
-                            fwd_headers.insert(
-                                reqwest::header::HeaderName::from_static("authorization"),
-                                v,
-                            );
-                        }
-                    }
-                    Provider::DeepSeek => {
-                        insert_deepseek_credential(&mut fwd_headers, &protocol, &cred)
-                    }
-                    Provider::Gemini => {
-                        if let Ok(v) = reqwest::header::HeaderValue::from_str(&cred) {
-                            fwd_headers.insert(
-                                reqwest::header::HeaderName::from_static("x-goog-api-key"),
-                                v,
-                            );
-                        }
-                    }
-                }
+                insert_provider_credential(&mut fwd_headers, &target_provider, &protocol, &cred);
             }
         } else {
             if let Some(auth_val) = headers.get("authorization") {
@@ -5130,18 +5414,175 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         None
     };
 
-    let fwd_result = state
-        .http_client
-        .request(
-            reqwest::Method::from_bytes(method.as_str().as_bytes())
-                .unwrap_or(reqwest::Method::POST),
-            &upstream_url,
+    // ── Upstream call: retries, then fallbacks ──
+    //
+    // `routing::retry` has the rules: only an inference call is retried, only
+    // before a response head reaches the proxy, and a fallback only once the
+    // target's retries are spent on a retryable failure. What a fallback does
+    // NOT do is as deliberate:
+    //   - the session lock is never moved, so the next turn goes back to the
+    //     routed model and whatever prompt cache it holds;
+    //   - a fallback never answers for the routed arm: the arm takes the
+    //     failure, and the fallback's response earns it nothing;
+    //   - a target that cannot be served as-is — another wire shape, a model
+    //     the workspace or key does not allow, no credential for its provider —
+    //     is skipped and recorded, never translated or forced.
+    // Every call lands on the trace (`upstream_attempts`).
+    let (retry_cfg, fallback_map) =
+        if crate::routing::retry::is_retry_safe_endpoint(method.as_str(), &uri_path) {
+            effective_retry_policy(&state, &credential, &workspace_id).await
+        } else {
+            (
+                crate::routing::retry::RetryConfig {
+                    enabled: false,
+                    ..Default::default()
+                },
+                crate::routing::retry::FallbackMap::new(),
+            )
+        };
+    let retry_deadline = Instant::now() + std::time::Duration::from_millis(retry_cfg.budget_ms);
+    let send_method =
+        reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(reqwest::Method::POST);
+    let request_body = axum::body::Bytes::from(request_body);
+    let mut upstream_attempts: Vec<crate::routing::retry::UpstreamAttempt> = Vec::new();
+    let primary_outcome = crate::routing::retry::send_with_retry(
+        &retry_cfg,
+        retry_deadline,
+        &actual_model,
+        &provider_wire_id(&target_provider),
+        &mut upstream_attempts,
+        || {
+            state
+                .http_client
+                .request(send_method.clone(), &upstream_url)
+                .headers(fwd_headers.clone())
+                .body(request_body.clone())
+                .timeout(crate::routing::retry::ATTEMPT_TIMEOUT)
+                .send()
+        },
+    )
+    .await;
+    let mut fwd_result = primary_outcome.result;
+
+    let mut upstream_fallback: Option<crate::routing::retry::UpstreamFallback> = None;
+    if let (Some(primary_failure), Some(targets)) = (
+        primary_outcome.retryable,
+        // Not gated on `retry_cfg.enabled`: with retries off the one failed
+        // call is the model's last, and its configured fallbacks still run.
+        fallback_map.get(&actual_model),
+    ) {
+        let require_provisioned = raw_token.starts_with("vk_")
+            && crate::gateway::provisioned_key_required_for(
+                key_record.as_ref().and_then(|k| k.byok_required),
+            );
+        let served = try_fallbacks(
+            &FallbackRequest {
+                state: &state,
+                workspace_id: &workspace_id,
+                primary_model: &actual_model,
+                primary_provider: &target_provider,
+                inbound: &provider,
+                protocol: &protocol,
+                uri_path: &uri_path,
+                host_name,
+                method: &send_method,
+                body_json: &body_json,
+                base_headers: &uncredentialed_headers,
+                primary_headers: &fwd_headers,
+                require_provisioned,
+                allowed_models: allowed_models.as_deref(),
+                key_models,
+                key_record: key_record.as_ref(),
+                prompt_chars: budget_prompt_chars,
+                machine_budget,
+                retry: &retry_cfg,
+                deadline: retry_deadline,
+            },
+            targets,
+            &mut upstream_attempts,
         )
-        .headers(fwd_headers)
-        .body(request_body)
-        .timeout(std::time::Duration::from_secs(120))
-        .send()
         .await;
+        crate::metrics::record_upstream_fallback(
+            served.as_ref().map(|s| &s.provider).map(provider_wire_id),
+        );
+        if let Some(served) = served {
+            // Only a server-side failure counts against the arm, the same rule
+            // as the error paths below: a 429 is the account's rate limit, not
+            // the model's fault.
+            let arm_failed = match primary_failure {
+                crate::routing::retry::Retryable::Status(s) => s >= 500,
+                _ => true,
+            };
+            if arm_failed {
+                if bandit_active
+                    && state.reward_engine.cached_mode(&workspace_id) != Some(RewardMode::Local)
+                {
+                    let arm_key =
+                        format!("arm:{}:{}:{}", original_routed_model, sop_tier, task_type);
+                    let _ = state
+                        .store
+                        .incr_outage_failure(&workspace_id, &arm_key)
+                        .await;
+                }
+                if reward_eligible {
+                    spawn_reward_update(
+                        &state,
+                        &workspace_id,
+                        &original_routed_model,
+                        &sop_tier,
+                        &task_type,
+                        reward_cfg.clone(),
+                        RewardSignals {
+                            upstream_ok: false,
+                            latency_ms: start.elapsed().as_millis() as u32,
+                            token_anomaly: false,
+                            raw_cost_usd: 0.0,
+                            actual_cost_usd: 0.0,
+                            response_integrity: crate::routing::integrity::RIS_MAX,
+                        },
+                    );
+                }
+            }
+            reward_eligible = false;
+
+            // Said on the trace, not prevented: failing the request would cost
+            // more than one turn at full price, and the lock still points at
+            // the warm model for the next turn.
+            let cache_affinity_broken = pricing::model_family(&served.model)
+                != pricing::model_family(&actual_model)
+                && crate::routing::bandit::prefix_is_warm(
+                    &state
+                        .store
+                        .session_routing(&tool_scope_id)
+                        .await
+                        .unwrap_or_default(),
+                    &actual_model,
+                    chrono::Utc::now().timestamp(),
+                    &state.config.intutic_settings.routing,
+                );
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                from_model = %actual_model,
+                to_model = %served.model,
+                cache_affinity_broken,
+                "Upstream retries exhausted; served by a fallback target"
+            );
+            upstream_fallback = Some(crate::routing::retry::UpstreamFallback {
+                from_model: actual_model.clone(),
+                to_model: served.model.clone(),
+                to_provider: provider_wire_id(&served.provider),
+                cache_affinity_broken,
+            });
+            actual_model = served.model;
+            routed_from_to = (actual_model != model).then(|| (model.clone(), actual_model.clone()));
+            // A fallback is only ever a target that serves this wire natively.
+            is_same_provider = true;
+            target_provider = served.provider;
+            fwd_result = Ok(served.response);
+        }
+    }
+    crate::metrics::record_upstream_retries(&upstream_attempts);
+    let upstream_attempts = crate::routing::retry::for_trace(upstream_attempts);
 
     let mut upstream_resp = match fwd_result {
         Ok(r) => r,
@@ -5246,6 +5687,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     status: None,
                     kind: crate::telemetry::UpstreamErrorKind::TransportError,
                 }),
+                upstream_attempts: upstream_attempts.clone(),
+                upstream_fallback: upstream_fallback.clone(),
                 graph: crate::telemetry::GraphTrace::from_node(
                     &node_for_trace,
                     advisory_anomalies.clone(),
@@ -5256,7 +5699,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 let _ = trace_store.publish_trace(&trace).await;
             });
 
-            return json_error(StatusCode::BAD_GATEWAY, "upstream_error", &desc);
+            let mut response = json_error(StatusCode::BAD_GATEWAY, "upstream_error", &desc);
+            disclose_upstream_calls(response.headers_mut(), &upstream_attempts, None);
+            return response;
         }
     };
 
@@ -5515,6 +5960,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 response_injection_findings: Vec::new(),
                 context_snapshot: context_snapshot_for_trace.clone(),
                 upstream_error: computed_upstream_error,
+                upstream_attempts: upstream_attempts.clone(),
+                upstream_fallback: upstream_fallback.clone(),
                 graph: crate::telemetry::GraphTrace::from_node(
                     &node_for_trace,
                     advisory_anomalies.clone(),
@@ -5535,6 +5982,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     continue;
                 }
                 resp_builder = resp_builder.header(name, value);
+            }
+            if let Some(h) = resp_builder.headers_mut() {
+                disclose_upstream_calls(h, &upstream_attempts, None);
             }
             return resp_builder
                 .body(axum::body::Body::from(err_body))
@@ -5599,6 +6049,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // output was being kept for non-streaming traffic only, and agent
         // harnesses stream by default.
         let shadow_selection_clone = shadow_selection.clone();
+        let upstream_attempts_clone = upstream_attempts.clone();
+        let upstream_fallback_clone = upstream_fallback.clone();
         let task_type_clone = task_type.clone();
         let new_tool_calls_clone = new_tool_calls.clone();
         let change_manifest_clone = change_manifest.clone();
@@ -6520,6 +6972,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 status: None,
                                 kind: crate::telemetry::UpstreamErrorKind::TransportError,
                             }),
+                            upstream_attempts: upstream_attempts_clone.clone(),
+                            upstream_fallback: upstream_fallback_clone.clone(),
                             graph: crate::telemetry::GraphTrace::from_node(
                                 &node_for_trace,
                                 advisory_anomalies.clone(),
@@ -6888,11 +7342,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // gate's refusal, and nothing in it but text (a `CachedResponse`
             // holds text, so a tool call would replay as a finished answer
             // without the call). `accumulated_content` is the post-DLP text.
+            // Never a fallback's answer either: it came from a model the caller
+            // did not ask for. Served once with the fallback disclosed, it is
+            // fine; cached, it would be replayed to later requests for the
+            // asked-for model with nothing saying so.
             if let Some(cache_keys) = &response_cache_keys_clone {
                 if stream_complete
                     && !gate_tripped
                     && !stream_beyond_text
                     && !accumulated_content.is_empty()
+                    && upstream_fallback_clone.is_none()
                 {
                     let _ = crate::plugins::semantic_cache::write_cache(
                         crate::plugins::semantic_cache::ResponseProvenance::Served,
@@ -6937,7 +7396,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // Fire-and-forget: feeds a FUTURE request's prior_cache_read_ratio,
             // never this one's. A lost write just means the next request's
             // counterfactual falls back to cache-blind.
-            if let Some(bp) = cache_read_bp(&usage_acc) {
+            //
+            // Not after a fallback: the observation would be the fallback's,
+            // and recording it would replace the routed model's warm-cache
+            // evidence, which the next turn returns to.
+            if let Some(bp) =
+                cache_read_bp(&usage_acc).filter(|_| upstream_fallback_clone.is_none())
+            {
                 let _ = reward_store_clone
                     .record_session_cache(&tool_scope_id_clone, &actual_model_clone, bp)
                     .await;
@@ -7053,6 +7518,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // The stream completed (this is the success trace; a mid-stream
                 // transport failure returns earlier, from its own trace above).
                 upstream_error: None,
+                upstream_attempts: upstream_attempts_clone.clone(),
+                upstream_fallback: upstream_fallback_clone.clone(),
                 graph: crate::telemetry::GraphTrace::from_node(
                     &node_for_trace,
                     advisory_anomalies.clone(),
@@ -7104,6 +7571,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     headers_mut.insert("x-intutic-routing-fallback-from", v);
                 }
             }
+            disclose_upstream_calls(headers_mut, &upstream_attempts, upstream_fallback.as_ref());
         }
         return response
             .body(Body::from_stream(ReceiverStream::new(rx)))
@@ -7201,6 +7669,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     status: Some(upstream_status.as_u16()),
                     kind: crate::telemetry::UpstreamErrorKind::TransportError,
                 }),
+                upstream_attempts: upstream_attempts.clone(),
+                upstream_fallback: upstream_fallback.clone(),
                 graph: crate::telemetry::GraphTrace::from_node(
                     &node_for_trace,
                     advisory_anomalies.clone(),
@@ -7693,6 +8163,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // so a redacted (or withheld) response would be cached with the very
     // credential the client was shielded from; a refused or tool-calling
     // response is not plain text, and a `CachedResponse` replays text alone.
+    // Never a fallback's answer, for the reason the streaming path gives.
     if let Some(cache_keys) = &response_cache_keys {
         if !output_dlp_redacted
             && response_denial.is_none()
@@ -7700,6 +8171,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 .as_ref()
                 .is_some_and(crate::plugins::semantic_cache::is_text_only_response)
             && !accumulated_content.is_empty()
+            && upstream_fallback.is_none()
         {
             let _ = crate::plugins::semantic_cache::write_cache(
                 crate::plugins::semantic_cache::ResponseProvenance::Served,
@@ -7731,7 +8203,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Fire-and-forget: feeds a FUTURE request's prior_cache_read_ratio, never
     // this one's. A lost write just means the next request's counterfactual
     // falls back to cache-blind.
-    if let Some(bp) = cache_read_bp(&usage_final) {
+    //
+    // Not after a fallback, for the reason the streaming path gives.
+    if let Some(bp) = cache_read_bp(&usage_final).filter(|_| upstream_fallback.is_none()) {
         let _ = state
             .store
             .record_session_cache(&tool_scope_id, &actual_model, bp)
@@ -7773,7 +8247,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // capture is free on this path. The sampling roll, the 5% ceiling, the
     // concurrency cap and the streams-are-never-mirrored rule all live in
     // `should_mirror`.
-    if let Some((url, headers, body, candidate)) = mirror_plan {
+    //
+    // Not when a fallback answered: the pair would compare the candidate with
+    // a model neither of them was measured against.
+    if let Some((url, headers, body, candidate)) =
+        mirror_plan.filter(|_| upstream_fallback.is_none())
+    {
         let roll: f64 = rand::random::<f64>();
         // The slot IS the decision. `should_mirror` hands back the only
         // `MirrorSlot` that can exist, so there is no way to mirror without
@@ -8023,6 +8502,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // The request succeeded (this is the success trace; the 5xx/transport
         // failure sites above carry their own honest verdict and upstream_error).
         upstream_error: None,
+        upstream_attempts: upstream_attempts.clone(),
+        upstream_fallback: upstream_fallback.clone(),
         graph: crate::telemetry::GraphTrace::from_node(&node_for_trace, advisory_anomalies.clone()),
     };
 
@@ -8147,6 +8628,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 headers_mut.insert("x-intutic-routing-fallback-from", v);
             }
         }
+        disclose_upstream_calls(headers_mut, &upstream_attempts, upstream_fallback.as_ref());
         // A body the response gate or output DLP replaced with a refusal is
         // still a 200 assistant turn; these headers are how an SDK tells it
         // from the model's answer. The gate also runs over the DLP refusal and
@@ -11614,6 +12096,55 @@ mod tests {
                 b,
                 Some(own_key),
                 "ws_b's own provisioned key is unaffected by ws_a's absence"
+            );
+        }
+    }
+
+    /// A fallback target is held to the spend budgets the request passed,
+    /// priced for its own model, through the same entry point.
+    mod fallback_budget {
+        use super::super::*;
+
+        fn key(max_budget: f64, spend: f64) -> VirtualKeyRecord {
+            serde_json::from_value(serde_json::json!({
+                "token": "vk_test",
+                "max_budget": max_budget,
+                "spend": spend,
+                "models": [],
+            }))
+            .expect("a key record")
+        }
+
+        #[test]
+        fn the_estimate_is_priced_for_the_model_it_names() {
+            let body = serde_json::json!({"max_tokens": 1000});
+            let cheap = estimated_request_cost("gpt-4.1-nano", 40_000, &body);
+            let dear = estimated_request_cost("gpt-4", 40_000, &body);
+            assert!(dear > cheap * 100.0, "cheap={cheap} dear={dear}");
+        }
+
+        #[test]
+        fn a_budget_that_covers_the_model_admits_and_a_dearer_model_is_refused() {
+            let body = serde_json::json!({"max_tokens": 1000});
+            let k = key(0.10, 0.0);
+            let cheap = estimated_request_cost("gpt-4.1-nano", 40_000, &body);
+            let dear = estimated_request_cost("gpt-4", 40_000, &body);
+            assert!(key_budget_refusal(&k, "ws", cheap).is_none());
+            let refused = key_budget_refusal(&k, "ws", dear).expect("over budget");
+            assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+
+        /// The request's own check and the fallback's go through one function,
+        /// so a budget added to it (per key, per member) binds both.
+        #[test]
+        fn the_request_and_every_fallback_use_one_budget_check() {
+            let src = include_str!("proxy.rs");
+            let calls = src
+                .matches(&["key_budget_refusal", "(key,"].concat())
+                .count();
+            assert_eq!(calls, 2, "the request's check and the fallback's");
+            assert!(
+                src.contains(&["BudgetGatePlugin::verdict", "(model, tokens, remaining)"].concat())
             );
         }
     }

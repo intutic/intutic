@@ -1,0 +1,278 @@
+{
+  "$comment": "The workspace `upstreamRetry` setting as both readers see it: `schemaValid` is what the control plane's UpstreamRetrySettingsSchema accepts on write; `effective` is what the Rust proxy runs with after laying the setting over its built-in defaults (routing/retry.rs WorkspaceRetry::apply). Values the schema refuses can still reach the proxy from an older control plane or a hand-edited row, so the proxy's reading of them is pinned too.",
+  "cases": [
+    {
+      "name": "an empty setting keeps every default",
+      "setting": {},
+      "schemaValid": true,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 30000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {}
+      }
+    },
+    {
+      "name": "one knob changes only that knob",
+      "setting": {
+        "maxAttempts": 5
+      },
+      "schemaValid": true,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 5,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 30000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {}
+      }
+    },
+    {
+      "name": "retries can be switched off",
+      "setting": {
+        "enabled": false
+      },
+      "schemaValid": true,
+      "effective": {
+        "enabled": false,
+        "maxAttempts": 3,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 30000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {}
+      }
+    },
+    {
+      "name": "the status list is replaced, not merged",
+      "setting": {
+        "onStatus": [
+          503,
+          529
+        ]
+      },
+      "schemaValid": true,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 30000,
+        "onStatus": [
+          503,
+          529
+        ],
+        "fallbacks": {}
+      }
+    },
+    {
+      "name": "timing knobs",
+      "setting": {
+        "initialBackoffMs": 250,
+        "maxBackoffMs": 4000,
+        "budgetMs": 60000
+      },
+      "schemaValid": true,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "initialBackoffMs": 250,
+        "maxBackoffMs": 4000,
+        "budgetMs": 60000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {}
+      }
+    },
+    {
+      "name": "fallback targets by model, provider, or both",
+      "setting": {
+        "fallbacks": {
+          "claude-opus-4-1": [
+            {
+              "model": "claude-sonnet-4-5"
+            },
+            {
+              "model": "deepseek-chat",
+              "provider": "deepseek"
+            }
+          ],
+          "gpt-4o": [
+            {
+              "provider": "openrouter"
+            }
+          ]
+        }
+      },
+      "schemaValid": true,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 30000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {
+          "claude-opus-4-1": [
+            {
+              "model": "claude-sonnet-4-5"
+            },
+            {
+              "model": "deepseek-chat",
+              "provider": "deepseek"
+            }
+          ],
+          "gpt-4o": [
+            {
+              "provider": "openrouter"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "attempts above the ceiling are refused by the schema and clamped by the proxy",
+      "setting": {
+        "maxAttempts": 9
+      },
+      "schemaValid": false,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 5,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 30000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {}
+      }
+    },
+    {
+      "name": "a budget above the ceiling is clamped",
+      "setting": {
+        "budgetMs": 600000
+      },
+      "schemaValid": false,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 120000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {}
+      }
+    },
+    {
+      "name": "an unknown key makes the whole setting unreadable, so the defaults apply",
+      "setting": {
+        "retries": 3,
+        "maxAttempts": 4
+      },
+      "schemaValid": false,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 30000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {}
+      }
+    },
+    {
+      "name": "a target naming neither model nor provider is dropped",
+      "setting": {
+        "fallbacks": {
+          "gpt-4o": [
+            {},
+            {
+              "model": "gpt-4o-mini"
+            }
+          ]
+        }
+      },
+      "schemaValid": false,
+      "effective": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "initialBackoffMs": 500,
+        "maxBackoffMs": 8000,
+        "budgetMs": 30000,
+        "onStatus": [
+          429,
+          500,
+          502,
+          503,
+          504,
+          529
+        ],
+        "fallbacks": {
+          "gpt-4o": [
+            {
+              "model": "gpt-4o-mini"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

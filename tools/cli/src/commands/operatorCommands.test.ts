@@ -162,6 +162,18 @@ describe('intutic settings', () => {
     expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { piiDetectors: actions } })
   })
 
+  it('sends the retry setting from a file, and refuses one past the proxy ceilings naming the field, before any request', async () => {
+    await expectFailure(() => runSettingsSet('upstreamRetry', '{"maxAttempts":9}', {}), 'upstreamRetry.maxAttempts')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const setting = { budgetMs: 45000, fallbacks: { 'claude-opus-4-1': [{ model: 'claude-sonnet-4-5' }] } }
+    const file = join(scratch(), 'retry.json')
+    writeFileSync(file, JSON.stringify(setting))
+    fetchMock.mockReturnValue(reply(200, { updated: true, workspaceId: 'ws_test', settings: { upstreamRetry: setting } }))
+    await runSettingsSet('upstreamRetry', undefined, { file })
+    expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { upstreamRetry: setting } })
+  })
+
   it('refuses a value given both ways', async () => {
     await expectFailure(() => runSettingsSet('configBodyUpload', 'true', { file: 'x.json' }), 'not both')
   })

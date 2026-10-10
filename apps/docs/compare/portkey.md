@@ -18,7 +18,8 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Coding agents** | **43** supported harnesses: native hook gates in 18, in-process SDK gates in 17, and the proxies, a bridge or the orchestrated harness for the other eight | A Coding Agents governance offering with setup guides for Claude Code, Codex, Cursor, Cline, Roo Code, Goose, opencode, GitHub Copilot and others, plus an `npx portkey` setup CLI. Each agent points its model base URL, and optionally its MCP servers, at the gateway; nothing hooks the agent's local tool execution |
 | **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Deny (HTTP 446, or a 200 with `soft_deny_200` for clients such as Claude Code that treat 4xx as fatal), flag and allow (HTTP 246), log only, or trigger a retry or fallback on the result. No human approval workflow documented |
 | **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | Hosted MCP Gateway (generally available January 2026) for remote HTTP servers: sign-in through your identity provider or OAuth, OAuth 2.1 and credential injection to upstream servers, per-tool enable and disable, per-tool rate limits, full call logs, and MCP guardrails (deterministic checks and webhooks) since 2026-09-01. Local stdio servers must first be exposed over HTTP |
-| **Routing** | Thompson-sampling model routing per workspace that learns from cost, latency and upstream failures. Its quality signal catches broken, cut-off or empty answers only, not worse ones | Fallbacks, load balancing and conditional routing |
+| **Routing** | Thompson-sampling model routing per workspace that learns from cost, latency and upstream failures. Its quality signal catches broken, cut-off or empty answers only, not worse ones | Load balancing and conditional routing |
+| **Retries and fallbacks** | Retries on by default (429, 5xx, 529 and dropped connections, honouring `retry-after`, within a time budget), then ordered fallback targets per model; never once a stream has started | Retries of up to 5 attempts and fallback targets, set per config; fallbacks can trigger on any non-2xx status |
 | **Caching** | Exact and semantic cache, both off until a workspace turns them on; the semantic cache also needs an embedding service and TurboVec | Simple cache on every plan; semantic cache on select Enterprise plans per its docs, though its pricing page lists it under Production |
 | **Budgets** | Daily spend caps enforced before a request leaves; a loop run that exceeds its budget is stopped | Budget and rate limits on paid plans |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, verifiable in the browser or CLI | Request and response logs, kept 3 days on Developer and 30 days on Production; admin audit logs on Enterprise. No cryptographic sealing documented |
@@ -29,7 +30,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 
 ## Where Portkey is stronger
 
-- **Provider breadth and routing controls.** A mature gateway with fallbacks, load balancing and conditional routing across many providers.
+- **Provider breadth and routing controls.** A mature gateway with load balancing, conditional routing and nested fallback strategies across many providers. Intutic's fallbacks only go to a target that accepts the request in its original wire format.
 - **Gateway-level guardrails for any application.** Inline checks on every model call, whether or not the caller is an agent.
 - **Ecosystem.** About 25 partner guardrails (among them Prisma AIRS, Lakera, Pangea, Pillar, Lasso and Bedrock) plus a webhook guardrail, and prompt management with versioning and a playground. Intutic has neither, and its rules do not call third-party decision services.
 - **Central MCP authentication.** Its MCP Gateway signs agents in through your identity provider and injects OAuth or API credentials into upstream servers. Intutic's MCP proxy passes static headers to remote servers and brokers no OAuth.
@@ -48,7 +49,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 ## When to choose Portkey
 
 - You need one gateway for model traffic across many applications and providers.
-- Routing, fallbacks, caching and per-key budgets are the main requirements.
+- Load balancing, conditional routing, caching and per-key budgets are the main requirements.
 - You are standardising on Palo Alto Networks' Prisma AIRS.
 
 ## Use them together

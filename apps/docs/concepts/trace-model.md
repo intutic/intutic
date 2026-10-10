@@ -159,6 +159,8 @@ not a documentation one.
 | `taxonomyMetadata` | `traceIngestClassifier` at ingest | every probe, not just the winner |
 | `complianceScore` | the proxy | 0.0–1.0 rule alignment |
 | `toolResultBytesSaved` | the proxy | bytes the compactor removed from the response |
+| `upstreamAttempts` | the proxy | every upstream call when it [retried or fell back](/guide/intelligent-routing#retries-and-fallbacks); null for a single call |
+| `upstreamFallback` | the proxy | the fallback target that answered, and the model whose retries ran out |
 
 ### Waste patterns
 

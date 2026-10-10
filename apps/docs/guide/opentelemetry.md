@@ -35,6 +35,8 @@ The proxy exports a small, deliberate instrument set (`packages/proxy/src/metric
 | `snip_compacted` | counter | `input_type`, `strategy` | Compaction event count |
 | `egress_denied` / `egress_would_deny` | observable counters | — | Egress policy denials (enforcing and shadow) |
 | `policy_refusals` | counter | `source` ∈ anomaly\|wasm, `action` ∈ kill\|ask\|reask\|reask_exhausted | Requests governance actually refused |
+| `upstream_retries` | counter | `provider`, `outcome` (`http_529`, `timeout`, …) | Upstream calls the proxy [retried](/guide/intelligent-routing#retries-and-fallbacks), by the failure that prompted each |
+| `upstream_fallbacks` | counter | `result` ∈ served\|exhausted, `provider` | Requests that ran their fallback chain, and whether a target answered |
 
 No instrument carries a `workspace_id` or per-detector label — per-workspace accounting is the control plane's job, and unbounded label values are how a metrics pipeline becomes the outage. The Node components export the auto-instrumentation metric set (HTTP/Postgres/Valkey durations and the like); they register no custom instruments.
 
