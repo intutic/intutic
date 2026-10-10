@@ -32,7 +32,7 @@
 //! path can see them.
 //!
 //! The one argument-level rule, the destructive-SQL guard (`sql_guard:` in a
-//! SOP, TD-480), gets its arguments on a stream the other way: while it is in
+//! SOP), gets its arguments on a stream the other way: while it is in
 //! force, the lines of a *shell-tool* block are held back until the block ends
 //! and evaluated whole — see [`crate::plugins::sql_guard::StreamHold`]. Every
 //! other block, and every stream with no SQL guard declared, flows unheld.
@@ -124,7 +124,7 @@ pub enum DenialReason {
         decision: SsoGroupDecision,
     },
     /// A shell call that would run destructive SQL against a database the
-    /// role's `sql_allow_dsns:` does not admit (`plugins::sql_guard`, TD-480).
+    /// role's `sql_allow_dsns:` does not admit (`plugins::sql_guard`).
     DestructiveSql(SqlViolation),
     /// The body did not parse, so the gate could not show it carried no denied
     /// call. Only ever produced when `fail_closed` is set.
@@ -714,7 +714,7 @@ mod tests {
         assert!(gate_response(&open, None, &denied()).is_none());
     }
 
-    // ── Destructive-SQL guard (TD-480) ──────────────────────────────────
+    // ── Destructive-SQL guard ───────────────────────────────────────────
 
     fn sql_policy(
         severity: crate::plugins::sql_guard::SqlGuardSeverity,

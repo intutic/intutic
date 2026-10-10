@@ -76,7 +76,7 @@ async fn an_unservable_pick_falls_back_penalises_and_unlocks() {
 
     // Process-global on purpose — see the module doc.
     std::env::set_var("OPENAI_UPSTREAM_URL", upstream.uri());
-    // A virtual key is never forwarded upstream (TD-370): the request
+    // A virtual key is never forwarded upstream: the request
     // needs a provider key, so the operator fallback supplies a test one.
     std::env::set_var("OPENAI_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::remove_var("CONTROL_PLANE_URL");

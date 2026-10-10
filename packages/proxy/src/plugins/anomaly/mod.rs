@@ -1353,7 +1353,7 @@ mod coverage_tests {
         // 26: code_as_action joined — the in-blob analogue of forbid_with
         // secrets()+http_post, for the one-REPL-call-bundles-everything shape
         // that per-call gates cannot see into.
-        // 27: spend_trajectory — the local daily-cap projection (TD-481).
+        // 27: spend_trajectory — the local daily-cap projection.
         assert_eq!(
             ids.len(),
             27,

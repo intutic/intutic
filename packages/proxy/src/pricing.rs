@@ -13,8 +13,6 @@
 //! 2. Model-family prefix fallback: strip version suffix iteratively.
 //!    e.g. `claude-opus-4-5` → `claude-opus-4` → `claude-opus` → `claude`
 //! 3. Unknown model conservative estimate — logs WARN, never returns $0.
-//!
-//! LLD §31 WS-5OP (TD-130 graduation)
 
 use once_cell::sync::Lazy;
 use serde::Deserialize;
@@ -98,7 +96,7 @@ pub fn input_cost_per_1k(model: &str) -> f64 {
     lookup_price(model).input_cost_per_1k
 }
 
-/// Estimate cost in USD from a cache-aware [`TokenUsage`] (TD-347).
+/// Estimate cost in USD from a cache-aware [`TokenUsage`].
 ///
 /// Billing: `uncached_input` at `input_cost_per_1k`; `cache_read_input` at
 /// `cache_read_cost_per_1k`, falling back to `input_cost_per_1k` when the
@@ -291,7 +289,7 @@ mod tests {
         assert_ne!(model_family("gpt-4o-mini"), model_family("claude-opus-4-5"));
     }
 
-    /// The regression guard TD-347 exists to protect: with both cache
+    /// The regression guard for cache-aware pricing: with both cache
     /// buckets at zero, `estimate_cost_cached` must equal the plain
     /// cache-blind `estimate_cost` — for an exact-match model, a
     /// family-fallback model, and the unknown-model conservative estimate. A

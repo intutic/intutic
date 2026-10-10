@@ -1,4 +1,4 @@
-//! DSN-aware destructive-SQL rule for model-emitted shell commands (TD-480).
+//! DSN-aware destructive-SQL rule for model-emitted shell commands.
 //!
 //! # The gap this closes
 //!
@@ -53,7 +53,7 @@
 //!
 //! # Why a native rule and not a WASM rule
 //!
-//! TD-480 suggested a WASM rule with a DSN allowlist. Two things in this
+//! The obvious alternative is a WASM rule with a DSN allowlist. Two things in this
 //! codebase make that the worse fit. A WASM rule has no configuration input —
 //! its descriptor is `ruleId`, `name`, `sha256`, `priority`, `mode` — so a
 //! per-workspace allowlist would have to be compiled into the binary, one

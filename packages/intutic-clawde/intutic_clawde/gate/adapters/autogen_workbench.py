@@ -1,4 +1,4 @@
-"""Microsoft AutoGen adapter, in-process half: ``IntuticWorkbench`` (TD-374).
+"""Microsoft AutoGen adapter, in-process half: ``IntuticWorkbench``.
 
 ``autogen.py``'s ``IntuticInterventionHandler`` sees only runtime-routed
 messages. ``AssistantAgent`` (``autogen_agentchat.agents._assistant_agent``)

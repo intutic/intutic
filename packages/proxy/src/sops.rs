@@ -213,7 +213,7 @@ pub struct Sop {
     /// `Enforce` (default) or `Shadow` — see [`SopMode`].
     pub mode: SopMode,
     /// `sql_guard: refuse|warn` — the DSN-aware destructive-SQL rule
-    /// (`plugins::sql_guard`, TD-480). `None` means this SOP leaves it off.
+    /// (`plugins::sql_guard`). `None` means this SOP leaves it off.
     /// Set to `Refuse` when only `sql_allow_dsns:` is written, because
     /// declaring an allowlist is asking for the rule.
     pub sql_guard: Option<SqlGuardSeverity>,
@@ -631,7 +631,7 @@ fn parse_rules(front: &str, key: &str) -> (Vec<(String, String, bool)>, Vec<Stri
 /// title. Factored out of `read_dir_sops` so the *same* parser — one
 /// definition of what `deny_tools:` front matter means — serves both the
 /// local on-disk path and the per-workspace fetch path
-/// (`fetch_workspace_sops`, LLD #64 §6 increment 4): the control plane sends
+/// (`fetch_workspace_sops`): the control plane sends
 /// raw `{title, markdownContent}` pairs rather than a pre-parsed structured
 /// shape specifically so this is the only place YAML-frontmatter parsing
 /// happens, ever.
@@ -1200,13 +1200,13 @@ fn all_sops() -> Vec<Sop> {
     sops
 }
 
-// ── Per-workspace SOP resolution (LLD #64 §6 increment 4, TD-334) ─────────
+// ── Per-workspace SOP resolution ──────────────────────────────────────────
 //
 // Everything above this point is process-global: one `.intutic/sops`
 // directory (or `INTUTIC_SOPS_DIR` override) for the whole proxy process.
 // Correct for the shipped topology — one proxy per developer, or one proxy
-// per company in an enterprise self-hosted deployment — and TD-229's own
-// finding: wrong for a shared, multi-tenant gateway, where every tenant would
+// per company in an enterprise self-hosted deployment — but
+// wrong for a shared, multi-tenant gateway, where every tenant would
 // otherwise get the same policy, or none.
 //
 // This section adds a SECOND, workspace-keyed resolution path, consulted only
@@ -1243,7 +1243,7 @@ struct WorkspaceSopsResponse {
 struct WorkspaceCached {
     sops: Vec<Sop>,
     read_at: Instant,
-    /// The workspace's policy version at fetch time (TD-474 item 5); `None`
+    /// The workspace's policy version at fetch time; `None`
     /// when no version was readable, in which case only the TTL applies.
     version: Option<u64>,
 }
@@ -1287,7 +1287,7 @@ async fn fetch_workspace_sops(
             // Within the TTL AND the workspace's policy version has not moved
             // since the fetch (or no version is readable on either side): serve
             // the cache. A bumped version — a guardrail promoted or retired —
-            // refetches now rather than up to CACHE_TTL later (TD-474 item 5).
+            // refetches now rather than up to CACHE_TTL later.
             let version_moved =
                 matches!((policy_version, c.version), (Some(now), Some(then)) if now != then);
             if c.read_at.elapsed() < CACHE_TTL && !version_moved {
@@ -1421,7 +1421,7 @@ pub fn fingerprint_sop_set(workspace_id: &str, sops: &[Sop]) -> String {
 }
 
 /// Gateway-mode status piggyback for `heartbeat.rs`'s optional
-/// `sopCount`/`sopHash` fields (TD-341-adjacent status leg).
+/// `sopCount`/`sopHash` fields.
 pub(crate) struct SopStatusSnapshot {
     pub sop_count: u32,
     pub sop_hash: String,
@@ -1510,7 +1510,7 @@ pub struct GovernanceFields {
     pub risk_tier: Option<RiskLevel>,
     pub denied_tools: Vec<String>,
     /// `(tool, SOP title)` for every `deny_tools` entry, so a refusal can name
-    /// the SOP that declared it — the union above cannot (TD-474 item 6).
+    /// the SOP that declared it — the union above cannot.
     pub denied_tool_sources: Vec<(String, String)>,
     pub plan_steps: Vec<String>,
     pub scope_paths: Vec<String>,
@@ -1550,8 +1550,8 @@ pub fn split_by_mode(sops: &[Sop]) -> (Vec<Sop>, Vec<Sop>) {
 pub struct SopShadowReport {
     pub title: String,
     /// Where the SOP lives, so the control plane credits an org-scope title
-    /// against `org_sop_registry` rather than filing it as unknown (TD-474
-    /// item 8). Serialised as `"workspace"` / `"org"`; a control plane that
+    /// against `org_sop_registry` rather than filing it as unknown.
+    /// Serialised as `"workspace"` / `"org"`; a control plane that
     /// predates the field ignores it.
     pub scope: SopScope,
     /// False when this SOP's declared fields matched nothing on this request.
@@ -1673,7 +1673,7 @@ pub fn denied_tools_for_role(role: &str) -> Vec<String> {
 /// yields instead: a value no harness name, path or plan step can equal, so
 /// the detectors read it as "restricted to nothing" — a harness is refused,
 /// every path is out of scope, every step is off-plan — and the reason they
-/// render carries it, so the operator sees why (TD-474, 2026-09-23).
+/// render carries it, so the operator sees why.
 pub const NARROWED_TO_NOTHING: &str = "<none: workspace list disjoint from org ceiling>";
 
 /// Apply an org ceiling to a workspace list, never widening.
@@ -1938,7 +1938,7 @@ fn collect_denies(sops: &[Sop], role: &str) -> Vec<String> {
 
 /// Rendering split out so it can be tested without touching the filesystem.
 ///
-/// Provably permutation-invariant of its input slice (TD-348): sorts the
+/// Provably permutation-invariant of its input slice: sorts the
 /// applicable SOPs by title itself rather than trusting `sops` to already
 /// arrive title-sorted. Two of today's callers happen to hand it a
 /// pre-sorted slice — `read_dir_sops` and `fetch_workspace_sops` sort their
@@ -2011,14 +2011,14 @@ fn render(sops: &[Sop], role: &str) -> Option<String> {
 }
 
 /// Resolve the injected SOP advisory block for a request, preferring a
-/// still-unexpired session pin over a fresh render (TD-348 mitigation).
+/// still-unexpired session pin over a fresh render.
 ///
 /// `render` alone is a pure function of its input slice (see its doc
 /// comment), but the SLICE handed to it can itself change from one request
 /// to the next within the same session — a SOP edited, a tier flipped, a
 /// keyword override changed — so calling `render` fresh on every request
 /// still moves the injected prefix underneath `routing::bandit::
-/// route_model`'s session-locked model, exactly as TD-348 described. This
+/// route_model`'s session-locked model, defeating its KV-cache warmth. This
 /// function pins the RENDERED TEXT itself, independent of the model pin:
 /// once a session has a pin, every subsequent request in that session
 /// (until the pin's TTL elapses) serves the SAME bytes, regardless of what a
@@ -2026,11 +2026,11 @@ fn render(sops: &[Sop], role: &str) -> Option<String> {
 ///
 /// `max_age_secs == 0` is the escape hatch/kill-switch: always return
 /// `freshly_rendered` unpinned — exactly today's per-request
-/// render-and-inject behaviour, restored in full. Unlike TD-347's fix, this
+/// render-and-inject behaviour, restored in full. Unlike the cache-aware pricing fix, this
 /// one keeps a config off-switch on purpose: prompt content staleness for up
 /// to `max_age_secs` is a real, subjective product trade (see
 /// `RoutingConfig::sop_pin_max_age_secs`'s doc comment), not a correctness
-/// bug like the pricing defect TD-347 closed.
+/// bug like the cache-aware pricing defect.
 ///
 /// Otherwise: an existing unexpired pin for `scope` is served AS-IS — no
 /// fingerprint comparison, no "is this still fresh" check. Serving the
@@ -2098,7 +2098,7 @@ pub async fn resolve_injection_block(
 /// prompt is the more specific instruction and should be read last, closest to
 /// the task. Governance is the frame it sits inside.
 ///
-/// **KV-cache hazard (TD-348) — mitigated, not eliminated.** This still
+/// **KV-cache hazard — mitigated, not eliminated.** This still
 /// writes at `system[0]` (Anthropic/Gemini) or `messages[0]` (OpenAI Chat) on
 /// every request; this function is unchanged. What changed is what `block`
 /// now typically IS: `resolve_injection_block` (above) pins the rendered
@@ -2273,7 +2273,7 @@ mod tests {
         }
     }
 
-    // ── Per-workspace resolution (LLD #64 §6 increment 4, TD-334) ──────────
+    // ── Per-workspace resolution ───────────────────────────────────────────
 
     fn sop_with_risk(title: &str, roles: &[&str], risk: RiskLevel) -> Sop {
         Sop {
@@ -2613,7 +2613,7 @@ mod tests {
 }
 
 /// Pins down `render`'s permutation-invariance and truncation-naming
-/// properties (TD-348 step 1), plus the single most important correctness
+/// properties, plus the single most important correctness
 /// property of the whole pinning change: truncating the rendered advisory
 /// text must never affect enforcement.
 #[cfg(test)]
@@ -3059,7 +3059,7 @@ mod discovery_tests {
         );
     }
 
-    // ── sql_guard / sql_allow_dsns (TD-480) ─────────────────────────────
+    // ── sql_guard / sql_allow_dsns ──────────────────────────────────────
 
     #[test]
     fn sql_guard_parses_and_is_off_by_default() {
@@ -4097,7 +4097,7 @@ mod org_ceiling_tests {
     fn an_org_ceiling_applies_to_a_workspace_that_declared_nothing() {
         // An undeclared workspace list is unrestricted; the org ceiling is
         // what restricts it. Reading "nothing to narrow" as "no ceiling"
-        // silently widened this case to every harness (TD-474).
+        // silently widened this case to every harness.
         let org = Sop {
             allow_harnesses: vec!["claude-code".into()],
             ..sop(SopScope::Org, &[])
@@ -4292,7 +4292,7 @@ mod org_ceiling_tests {
     }
 }
 
-/// TD-474 item 5: a workspace's cached SOP set is served within `CACHE_TTL`
+/// A workspace's cached SOP set is served within `CACHE_TTL`
 /// only while the workspace's policy version has not moved. Deterministic
 /// without a server: an unreachable control plane makes a forced refetch
 /// return the fail-closed empty set, so "the cache was bypassed" is

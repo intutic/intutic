@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract tool-call sequences from public OpenHands trajectories (TD-248).
+"""Extract tool-call sequences from public OpenHands trajectories.
 
 NOT vendored and NOT run by CI. Run deliberately, then point
 `coding_agent_cycle_floor_test.rs` at the output:
@@ -10,7 +10,7 @@ NOT vendored and NOT run by CI. Run deliberately, then point
 
 Source: nebius/SWE-rebench-openhands-trajectories (CC-BY-4.0), read through the
 Hugging Face datasets-server rows API. Ten pages of 100 rows at offsets drawn
-with seed 248 — the sample the TD-248 numbers in PROVENANCE.md come from. The
+with seed 248 — the sample the cycle-floor numbers in PROVENANCE.md come from. The
 rows API is not pinned to a dataset revision, so a later run can differ if the
 dataset is republished; the numbers say which run they came from.
 

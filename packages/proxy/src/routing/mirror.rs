@@ -171,7 +171,7 @@ pub fn dlp_scrub(text: &str, pii: Option<&crate::dlp::PiiPolicy>) -> String {
 /// The transient, judge-at-ingest message published on mirror completion.
 ///
 /// **This is the one place in the mirror path that carries two full model
-/// responses at once.** TD-346 (see `docs/TECH_DEBT.md`) forbids persisting
+/// responses at once.** A standing rule forbids persisting
 /// raw model response text; storing an original/mirror response PAIR
 /// durably would be a far larger exception to that discipline than anything
 /// shipped under it so far. The decision made for this phase is
@@ -262,7 +262,7 @@ pub fn score_mirrored(
 ///
 /// The returned [`MirrorOutcome`] carries the mirrored response's raw text in
 /// [`MirrorOutcome::response_text`]. That is NOT a durable-storage exception —
-/// TD-346's discipline (never persist raw model response text) is unchanged.
+/// The discipline of never persisting raw model response text is unchanged.
 /// The caller's only sanctioned use of that field is: DLP-scrub it alongside
 /// the request text and the original (served) response text, and publish the
 /// three together as a TRANSIENT Valkey pub/sub message (`Store::
@@ -363,7 +363,7 @@ pub async fn run_mirror(
 
 /// Token counts from a provider response, whichever shape it uses.
 ///
-/// Deliberately CACHE-BLIND (TD-347): this reads [`crate::usage::TokenUsage`]'s
+/// Deliberately CACHE-BLIND: this reads [`crate::usage::TokenUsage`]'s
 /// `total_input()`, never a cache-discounted cost. A mirror candidate is, by
 /// definition, evaluating a model choice this session has never actually
 /// routed to — the whole point of mirroring is measuring what a DIFFERENT

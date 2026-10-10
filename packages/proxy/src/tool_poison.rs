@@ -20,8 +20,8 @@
 //! False positives: **0 of 10,753** real tool and parameter descriptions —
 //! 2,711 tool descriptions and 8,042 parameter descriptions from 14 BFCL v3
 //! splits, vendored at `tests/corpus/tooldesc/`. That number is the point.
-//! `TD-274` was held open on the claim that no public corpus of benign tool
-//! descriptions existed, and it does; the risk it names — "a tool description
+//! The detector was held back on the claim that no public corpus of benign tool
+//! descriptions existed, and it does; the feared risk — "a tool description
 //! legitimately says *do not call this before authenticating*" — is real, and
 //! is now measured rather than feared.
 //!
@@ -41,7 +41,7 @@
 //! which descriptions `scan`/`ToolPoisoningDetector` flag.
 //!
 //! `redact_body` mutates the request's tool descriptions in place, in the same
-//! spot and the same style DLP redaction already does (`proxy.rs`, TD-DLP-001):
+//! spot and the same style DLP redaction already does (`proxy.rs`):
 //! both representations of the body kept in sync, matched spans replaced with
 //! a placeholder rather than the request refused, because unlike a leaked
 //! credential a poisoned description can be stripped and the tool call still
@@ -66,7 +66,7 @@ use regex::RegexSet;
 /// worth stating. `cross-tool-shadowing` matches the specific redirect phrasings
 /// instead of a general "rather than X tool", because the general form fires on
 /// "run the backup tool first rather than using this tool on production" — a
-/// legitimate ordering note, and precisely the false positive `TD-274` predicted.
+/// legitimate ordering note, and precisely the predicted false positive.
 const PATTERNS: &[(&str, &str)] = &[
     (
         // Markup fencing an instruction block inside prose that is supposed to
@@ -409,7 +409,7 @@ mod tests {
         }
     }
 
-    // ── Redaction (TD-274's mitigation half) ──────────────────────────
+    // ── Redaction ─────────────────────────────────────────────────────
 
     /// Every documented shape gets redacted, and — the property that matters,
     /// not just "something changed" — a second scan of the redacted text

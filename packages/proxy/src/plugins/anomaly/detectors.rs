@@ -185,7 +185,7 @@ const MIN_CYCLE_REPEATS: usize = 4;
 /// anchor gate and squarely on this floor at 0.67 — and is the test that pins
 /// this number. This constant carries the entire false-positive story and was
 /// chosen by inspection; it is the one to tune against real traces.
-// `pub`, not `pub(crate)`: TD-248's corpus sweep
+// `pub`, not `pub(crate)`: the corpus sweep
 // (tests/anomaly_corpus_test.rs) references this constant directly rather
 // than hardcoding a second copy of "0.75" that could silently drift from the
 // one actually enforced.
@@ -355,14 +355,13 @@ pub struct CycleCoverageSample {
 }
 
 /// The coverage computation `detect()` runs, pulled out so it can be measured
-/// independently of `CYCLE_COVERAGE_FLOOR` — TD-248's corpus sweep computes
+/// independently of `CYCLE_COVERAGE_FLOOR` — the corpus sweep computes
 /// this once per trajectory and checks it against many candidate floors,
 /// which needs the ratio itself, not a bool already compared to one floor.
 ///
 /// `detect()` below is the only other caller. One computation, not the two
-/// copies of the survivor logic that TD-248 (`CYCLE_COVERAGE_FLOOR was chosen
-/// by inspection`) itself would have called out had this function and
-/// `detect()` drifted.
+/// copies of the survivor logic, which would silently diverge if this
+/// function and `detect()` drifted.
 pub fn landmark_cycle_coverage(tool_sequence: &[String]) -> Option<CycleCoverageSample> {
     let (anchors, symbols) = anchor_projection(tool_sequence);
     if anchors.len() < MIN_LANDMARK_ANCHORS {
@@ -865,7 +864,7 @@ const PLAN_DEVIATION_TOLERANCE: f64 = 0.4;
 
 /// Work outside the plan the SOP declared for this task.
 ///
-/// This is TD-221, and it is genuinely distinct from everything else here.
+/// This is genuinely distinct from everything else here.
 /// `denied_tools` is a global ban — "this role may never call `Bash`".
 /// `MissingPredecessorDetector` is an ordering invariant — "do not deploy before
 /// testing". Neither answers "the SOP said this task was these steps; is that what
@@ -1524,7 +1523,7 @@ impl AnomalyDetector for BudgetExhaustionDetector {
     }
 }
 
-// ── Local spend trajectory (TD-481) ─────────────────────────────────────────
+// ── Local spend trajectory ──────────────────────────────────────────────────
 
 /// Fraction of the local day before a projection means anything. At 09:00 a
 /// developer who has spent nothing yet and then runs one large request looks
@@ -1542,7 +1541,7 @@ const TRAJECTORY_MIN_UTILIZATION: f64 = 0.50;
 ///
 /// The control plane's rule is scored against the workspace's spend history
 /// and budget tiers, which a standalone proxy does not hold — that is why it
-/// was not ported with the other four (TD-481). What the proxy does hold is a
+/// was not ported with the other four. What the proxy does hold is a
 /// local daily cap (`~/.intutic/config.json` `maxDailyBudgetUsd`) and the
 /// day's ledger, and against those a projection IS well defined: spend so far
 /// divided by the fraction of the day elapsed is the end-of-day spend at the
@@ -1866,7 +1865,7 @@ impl AnomalyDetector for ToolPoisoningDetector {
         "tool_poisoning"
     }
 
-    /// Reuses `PromptInjection` rather than adding a variant, per `TD-273`: a
+    /// Reuses `PromptInjection` rather than adding a variant: a
     /// taxonomy value is not an identity, and `detector_id` is what
     /// distinguishes this from `prompt_injection` everywhere it matters.
     fn kind(&self) -> AnomalyKind {
@@ -3292,7 +3291,7 @@ mod tool_policy_tests {
         assert!(!r.contains("Read"));
     }
 
-    /// TD-474 item 6: the refusal names the SOP that declared the ban when the
+    /// The refusal names the SOP that declared the ban when the
     /// context carries the provenance, and keeps the old wording when it does
     /// not (a WASM guest or an older proxy builds no `denied_tool_sources`).
     #[test]
@@ -4509,7 +4508,7 @@ mod code_as_action_tests {
 
 /// The control plane replays SOP front-matter keys over captured request
 /// contexts to preview what a front-matter guardrail would have done
-/// (`services/control-plane/src/lib/sopKeyReplay.ts`, LLD #71 Wave 5). Its
+/// (`services/control-plane/src/lib/sopKeyReplay.ts`). Its
 /// semantics are a mirror of the detectors above, and a mirror drifts unless
 /// something holds the two together: this module runs the same vector file
 /// (`packages/shared-types/fixtures/sop-key-replay-vectors.json`) through

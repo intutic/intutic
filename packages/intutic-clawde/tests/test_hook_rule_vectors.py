@@ -1,4 +1,4 @@
-"""The Python SDK gate against the shared hook-rule vectors (LLD #71).
+"""The Python SDK gate against the shared hook-rule vectors.
 
 A generated hook rule is matched by the control plane's matchSopRule, the MCP
 proxy's PolicyClient.matchRule, the emitted harness gates and the two SDK

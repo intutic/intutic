@@ -67,7 +67,7 @@ const ROOT = new URL('../..', import.meta.url).pathname
  * checked.
  */
 // apps/docs is the published documentation tree; README.md is the other page a
-// prospect actually reads, and it sat outside every scan — TD-270 retracted the
+// prospect actually reads, and it sat outside every scan — a correction retracted the
 // sub-5ms claim from thirteen docs pages while the same figure stayed on the
 // README because the gate never opened it. A file root is scanned directly (see
 // the loop), so this covers the README in this repo and, since the script is

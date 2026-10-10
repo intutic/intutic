@@ -1,4 +1,4 @@
-"""Control-plane management client (LLD #69) -- org/team/gateway/credentials
+"""Control-plane management client -- org/team/gateway/credentials
 administration, as distinct from ClawdeClient's data-plane chat calls.
 
 Deliberately a separate class, not new methods on ClawdeClient:
@@ -91,7 +91,7 @@ class ControlPlaneClient:
         Closed by default in production (INTUTIC_PUBLIC_ORG_SIGNUP, off
         unless a deployment has built its own anonymous domain-verification
         story): creating a real org auto-provisions a real managed gateway
-        cell (LLD #71), so org creation now requires DNS domain-ownership
+        cell, so org creation now requires DNS domain-ownership
         proof, and an anonymous caller has no session to own a verification
         attempt against. Prefer start_domain_verification +
         check_domain_verification + create_org with an already-authenticated

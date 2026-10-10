@@ -1,4 +1,4 @@
-//! OTel metrics — the proxy's exported instrument set (TD-161).
+//! OTel metrics — the proxy's exported instrument set.
 //!
 //! Every instrument this crate exports is declared here, next to the test
 //! that pins its Prometheus exposition name, because the Grafana dashboard

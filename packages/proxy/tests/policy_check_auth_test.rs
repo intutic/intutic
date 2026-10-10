@@ -85,7 +85,7 @@ async fn policy_check_sends_the_virtual_key_and_never_a_provider_key() {
         .await;
 
     std::env::set_var("OPENAI_UPSTREAM_URL", upstream.uri());
-    // A virtual key is never forwarded upstream (TD-370): the request
+    // A virtual key is never forwarded upstream: the request
     // needs a provider key, so the operator fallback supplies a test one.
     std::env::set_var("OPENAI_API_KEY", ["test", "-operator-", "key"].concat());
     std::env::set_var("CONTROL_PLANE_URL", cp.uri());

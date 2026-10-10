@@ -5,7 +5,7 @@
  * SOP proof tree structures used by the SSL (Self-Supervised Learning)
  * synthesis pipeline.
  *
- * HLD §3.4 (SOP Registry), LLD 01-data-architecture §3.1, LLD #6
+ * HLD §3.4 (SOP Registry)
  *
  * @module
  */
@@ -124,7 +124,7 @@ export type SslCompileState = 'compiled' | 'stale' | 'uncompiled'
 /**
  * The typed shape of `sop_registry.provenance` (jsonb).
  *
- * Before LLD #71 the column carried exactly one key, `stale`, written by the
+ * Before policy guardrails the column carried exactly one key, `stale`, written by the
  * connector sync and the SOP service when an SSL recompile failed and the
  * previous good graph was kept, and read by `sopLifecycleService.ts`'s
  * REFINED → VALIDATED gate. That contract is unchanged: the gate reads only
@@ -194,7 +194,7 @@ export interface SopProofTree {
   synthesisScore: number
 }
 
-// ─── SOP Lifecycle Transition (LLD #6) ──────────────────────────────
+// ─── SOP Lifecycle Transition ──────────────────────────────
 
 /**
  * Audit record for a SOP lifecycle state transition.
@@ -240,7 +240,7 @@ export interface SopLifecycleTransition {
   createdAt: string
 }
 
-// ─── SOP Health Metrics (LLD #6) ────────────────────────────────────
+// ─── SOP Health Metrics ────────────────────────────────────
 
 /**
  * Aggregated health metrics snapshot for a SOP.
@@ -304,12 +304,12 @@ export interface SopHealthMetrics {
   } | null
 }
 
-// ─── Dream Cycle Queue (LLD #6) ─────────────────────────────────────
+// ─── Dream Cycle Queue ─────────────────────────────────────
 
 /**
  * A queued item in the Dream Cycle processing pipeline.
  *
- * Items originate from capability misses (LLD #5), decision mining
+ * Items originate from capability misses, decision mining
  * entries, or drift signals. Phase 1: queue management only.
  * Phase 3: LLM synthesis consumes the queue.
  *
@@ -369,13 +369,13 @@ export interface DreamCycleEnqueueInput {
   priority?: number
 }
 
-// ─── Gödel Probe (LLD #6) ───────────────────────────────────────────
+// ─── Gödel Probe ───────────────────────────────────────────
 
 /**
  * Result of a Gödel completeness probe evaluation.
  *
  * Evaluates a SOP against the 13-category quality rubric (HLD §3.7).
- * Distinct from the 12-category runtime anomaly taxonomy (LLD #5).
+ * Distinct from the 12-category runtime anomaly taxonomy.
  *
  * @see HLD §3.7 — Gödel Completeness Probe
  */
@@ -402,7 +402,7 @@ export interface GodelProbeResult {
   evaluatedAt: string
 }
 
-// ─── SOP Content Update (LLD #6) ────────────────────────────────────
+// ─── SOP Content Update ────────────────────────────────────
 
 /**
  * Partial content update for forking a new SOP version.
@@ -423,7 +423,7 @@ export interface SopContentUpdate {
   complexityTier?: ComplexityTier
 }
 
-// ─── SOP Lifecycle Transition Rules (LLD #6 §4.2) ──────────────────
+// ─── SOP Lifecycle Transition Rules ──────────────────
 
 /**
  * Result of a lifecycle state transition attempt.
@@ -467,7 +467,7 @@ export const VALID_SOP_TRANSITIONS: ReadonlyArray<{ from: SopLifecycleState; to:
  * in the UI at the moment someone changes a state, and it must describe the
  * system rather than the design.
  *
- * ## History (TD-277)
+ * ## History
  *
  * This value has been wrong in both directions. It first said
  * `HYPOTHESIZED: 'SHADOW'` and `REFINED: 'SHADOW'` while nothing evaluated
@@ -507,7 +507,7 @@ export const ENFORCEMENT_BY_STATE: Record<
   INVALIDATED: 'NONE',
 }
 
-// ─── SOP Graph (LLD #6 §4.3) ────────────────────────────────────────
+// ─── SOP Graph ────────────────────────────────────────
 
 /** Edge types in the SOP dependency graph. */
 export type SopEdgeType = 'DEPENDS_ON' | 'DERIVES_FROM' | 'VALIDATES'
@@ -520,7 +520,7 @@ export interface SopGraphEdge {
   metadata?: Record<string, unknown>
 }
 
-// ─── Cascade Invalidation (LLD #6 §4.4) ─────────────────────────────
+// ─── Cascade Invalidation ─────────────────────────────
 
 /** Preview of cascade invalidation impact (read-only). */
 export interface CascadeImpactResult {
@@ -538,7 +538,7 @@ export interface CascadeInvalidationResult {
   depth: number
 }
 
-// ─── Anti-Gaming Gate (LLD #6 §4.5 / HLD §7.6) ─────────────────────
+// ─── Anti-Gaming Gate (HLD §7.6) ─────────────────────
 
 /** Result of anti-gaming analysis on a SOP change. */
 export interface AntiGamingResult {
@@ -547,7 +547,7 @@ export interface AntiGamingResult {
   impactSummary: string
 }
 
-// ─── Plans (LLD #6 §4.6 / EU AI Act Art. 14) ────────────────────────
+// ─── Plans (EU AI Act Art. 14) ────────────────────────
 
 /**
  * Deviation types during plan execution, as the gates observe them against the
@@ -630,7 +630,7 @@ export interface StoredPlan {
   deviationLog: PlanDeviation[]
 }
 
-// ─── Decision Mining (LLD #6 §4.7 / HLD §7.4) ──────────────────────
+// ─── Decision Mining (HLD §7.4) ──────────────────────
 
 /** Recommendation types from decision mining analysis. */
 export type DecisionRecommendation =
@@ -648,7 +648,7 @@ export interface DecisionMiningAnalysis {
   recommendation: DecisionRecommendation
 }
 
-// ─── Gödel Guardrails (LLD #6 §4.8 / HLD §3.7) ─────────────────────
+// ─── Gödel Guardrails (HLD §3.7) ─────────────────────
 
 /** Gate result from Gödel scoring. */
 export type GodelGateResult = 'BLOCKED' | 'PENDING_REVIEW' | 'GENERATED'
@@ -660,7 +660,7 @@ export interface GodelScore {
   gateResult: GodelGateResult
 }
 
-// ─── Proof Tree Diff (LLD #6 §4.9) ──────────────────────────────────
+// ─── Proof Tree Diff ──────────────────────────────────
 
 /** Diff between two proof tree versions. */
 export interface ProofTreeDiff {

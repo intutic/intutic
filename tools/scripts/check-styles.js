@@ -101,7 +101,7 @@ const CUSTOM_PROPERTY = /^--[\w-]+$/;
 /** Replace every non-newline character of a match with a space, keeping offsets. */
 const blank = (s) => s.replace(/[^\n]/g, ' ');
 
-/** CSS with comment bodies blanked, so `LLD #40, #135` in a comment is not a colour. */
+/** CSS with comment bodies blanked, so `see #40, #135` in a comment is not a colour. */
 function blankCssComments(css) {
   return css.replace(/\/\*[\s\S]*?\*\//g, blank);
 }

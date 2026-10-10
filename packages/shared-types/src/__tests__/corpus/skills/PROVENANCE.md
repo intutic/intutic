@@ -1,8 +1,8 @@
 # Benign-skill corpus provenance
 
 350 real `SKILL.md` files, used by `../../skillScanCorpus.test.ts` to measure
-the false-positive rate of `scanSkillContent` (`src/skillScan.ts`). TD-358
-held skill-CONTENT enforcement at warn until this measurement existed.
+the false-positive rate of `scanSkillContent` (`src/skillScan.ts`). Skill-CONTENT
+enforcement was held at warn until this measurement existed.
 
 Every source is **external and public**, and none was written or chosen for
 this scanner. That is the property the measurement depends on, the same one

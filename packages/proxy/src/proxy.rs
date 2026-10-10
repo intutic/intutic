@@ -129,7 +129,7 @@ fn evaluate_sop_shadows(
         }
     };
 
-    // TD-485: what this request raises with NO SOP declared. The registry runs
+    // What this request raises with NO SOP declared. The registry runs
     // every detector over every inherited field, so without this baseline a
     // schema-drift or injection finding — nothing to do with any SOP — marked
     // every shadow SOP as would-act. On staging a Bash-only request was
@@ -245,7 +245,7 @@ fn spawn_reward_update(
 /// live docs during this pass, and shipping a guessed path is worse than
 /// not shipping it).
 ///
-/// `DeepSeek` (TD-370) is a distinct target too, but unlike Mistral and
+/// `DeepSeek` is a distinct target too, but unlike Mistral and
 /// OpenRouter it speaks TWO wire shapes natively: an OpenAI-compatible API
 /// under `https://api.deepseek.com` and an Anthropic-compatible one under
 /// `https://api.deepseek.com/anthropic`. dsh, DeepSeek's own harness, speaks
@@ -437,7 +437,7 @@ struct PolicyCheckResponse {
 /// only by the control plane's API-key middleware, and proxy auth runs before any
 /// control-plane call — so the proxy cannot warm its own cache. A key used only
 /// against the proxy therefore never validated, and a session whose control-plane
-/// traffic paused past the cache TTL began failing mid-run (TD-219).
+/// traffic paused past the cache TTL began failing mid-run.
 ///
 /// Called only on a cache MISS, so the steady-state hot path is unchanged: one
 /// Valkey GET, no HTTP. Hitting this endpoint also warms the cache as a side
@@ -541,7 +541,7 @@ async fn parse_key_context(
         // shape as the cached entry; empty when the key set none.
         models: crate::store::valkey::string_list(body.get("allowedModels")),
         expires: None,
-        // /auth/key-context is the AUTHORITATIVE org answer (LLD #71): the
+        // /auth/key-context is the AUTHORITATIVE org answer: the
         // cell org-pinning path lands here precisely when a cached entry
         // predates the field.
         org_id: body
@@ -647,7 +647,7 @@ fn session_credential_field(token: &str) -> Option<&'static str> {
 /// - `vk_<32 hex>_<workspaceId>` (`apiKeyService.createApiKey`). Any non-empty
 ///   workspace id: requiring a `ws_` prefix made every key for a workspace
 ///   whose id has another shape (demo and imported workspaces) answer 403 at
-///   the gateway (TD-495).
+///   the gateway.
 /// - Legacy `vk_<ws_…>_<32 chars>`.
 ///
 /// `None` for anything else, notably attenuated child keys (`vk_<nanoid(32)>`),
@@ -819,7 +819,7 @@ static PROXY_INSTANCE_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new
 /// gateway (`INTUTIC_GATEWAY_ID` set, or `INTUTIC_GATEWAY_REQUIRE_VK=true`, the
 /// two signals `main.rs` already reads) — and the control plane's
 /// `agent_sessions_resolved` view classifies a `gw` instance as an aggregate
-/// bucket, never a run (TD-231, Wave 5.5).
+/// bucket, never a run.
 ///
 /// This is NOT a claim about who the agent is, and it deliberately does not touch
 /// `tool_history_scope` or `judge_session_scope`. Their scoping is load-bearing —
@@ -1067,7 +1067,7 @@ struct FinalizeJudgeParams<'a> {
 
 /// The finalize-time judge note, routed to either the SaaS judge (today's
 /// behaviour, byte-for-byte unchanged) or a self-hosted gateway's local
-/// judge (LLD #68 §2 phase 2), based on `gateway::uses_local_judge()`.
+/// judge, based on `gateway::uses_local_judge()`.
 ///
 /// Factored out of what were two near-identical ~40-line blocks (streaming
 /// and non-streaming finalize) so the local-judge branch exists in exactly
@@ -1169,7 +1169,7 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
 }
 
 /// DeepSeek's own API model ids, matched exactly (case-insensitive) — the
-/// only names routed to `Provider::DeepSeek` (TD-370). `deepseek-chat` and
+/// only names routed to `Provider::DeepSeek`. `deepseek-chat` and
 /// `deepseek-reasoner` are DeepSeek's documented API ids; `deepseek-flash` is
 /// the id dsh 0.2 sends (`uat/evidence/live-verify/dsh-0.2.md`). Not a
 /// prefix: `deepseek-r1`, `deepseek-coder-v2-instruct` and the like are
@@ -1214,7 +1214,7 @@ fn estimate_model_cost(model: &str, input_tokens: u32, output_tokens: u32) -> f6
 }
 
 /// The two cost figures the reward engine and telemetry need for one request
-/// (TD-347, honest-counterfactual pass TD-445): `raw` — what the REQUESTED
+/// (cache-aware, with an honest counterfactual): `raw` — what the REQUESTED
 /// model would have cost — and `actual` — what the ROUTED model actually
 /// cost.
 ///
@@ -1325,7 +1325,7 @@ fn cache_read_bp(usage: &TokenUsage) -> Option<u32> {
 
 /// Resolves the upstream provider credential for a workspace's request.
 ///
-/// `require_provisioned` is threaded in explicitly (LLD #64 §4, Enforced
+/// `require_provisioned` is threaded in explicitly (for enforced
 /// BYO-key) rather than read from `gateway::requires_provisioned_key()`
 /// internally — that global installs once per process
 /// (`gateway::init_gateway_config`'s own doc comment), which makes it
@@ -1440,7 +1440,7 @@ fn deepseek_path(
 /// The upstream URL for a natively served request (`serves_natively`), or
 /// `None` when the target has no endpoint for this protocol.
 ///
-/// DeepSeek's URL is built from the PROTOCOL (TD-370): Messages go to its
+/// DeepSeek's URL is built from the PROTOCOL: Messages go to its
 /// Anthropic-compatible API under `/anthropic`
 /// (https://api-docs.deepseek.com/guides/anthropic_api), or to `/v1/messages`
 /// on a shared `UPSTREAM_URL` gateway, Chat Completions to
@@ -1868,7 +1868,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         return json_error(StatusCode::UNAUTHORIZED, "missing_key", "No API key provided. Configure your harness to use ANTHROPIC_BASE_URL/OPENAI_BASE_URL pointing to this proxy.");
     }
 
-    // L2 hosted-gateway front door (LLD #64 §2, TD-334 increment 2). Off by
+    // L2 hosted-gateway front door. Off by
     // default (single-tenant local proxy / enterprise self-hosted). When on
     // (a shared multi-tenant gateway), a non-vk_ bearer is refused here —
     // before workspace resolution or the credential-capture block below ever
@@ -2436,7 +2436,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 dlp_scan_input: dlp.enabled && dlp.scan_input,
                 dlp_scan_output: dlp.enabled && dlp.scan_output,
                 wasm_rule_count,
-                // TD-365: was unconditionally `true` on the theory that "the
+                // This was unconditionally `true` on the theory that "the
                 // proxy is on the path, so the gate is always present" — false
                 // for any harness whose blocking gate ships SDK-side (no
                 // on-disk hook file) or that delegates to a wrapped harness
@@ -2566,7 +2566,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // control-plane call, so the proxy cannot warm its own cache — a key used
         // exclusively against the proxy would never validate, and a session whose
         // control-plane traffic paused past the cache TTL would start failing
-        // mid-run (TD-219). Ask the control plane directly before giving up; that
+        // mid-run. Ask the control plane directly before giving up; that
         // call also warms the cache, so the miss does not repeat.
         ControlPlaneAuth::Rejected => {
             // Only virtual keys are eligible for the fallback. The control-plane
@@ -2736,7 +2736,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
-    // ── Step 2.7: cell org pinning (LLD #71) ─────────────────────────
+    // ── Step 2.7: cell org pinning ───────────────────────────────────
     //
     // A dedicated managed cell serves exactly one org. The pin evaluates the
     // AUTHENTICATED record's org — never a header, never the URL — and a
@@ -3157,7 +3157,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         Vec::new()
     };
 
-    // ── Tool-poisoning redaction (TD-274) ────────────────────────────
+    // ── Tool-poisoning redaction ─────────────────────────────────────
     //
     // `ToolPoisoningDetector` (plugins/anomaly/detectors.rs) has read the
     // corpus-validated patterns in `tool_poison.rs` since 2026-08-04, but only
@@ -3390,8 +3390,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // Resolve the SOP set to enforce for this node's role — the process-global
     // on-disk set everywhere (today's behaviour, unchanged), or a workspace-
-    // scoped control-plane fetch on a hosted gateway (LLD #64 §6 increment 4,
-    // TD-334 — closes TD-229's core gap: SOP policy was one process-global
+    // scoped control-plane fetch on a hosted gateway (which closes a gap:
+    // SOP policy was one process-global
     // directory, wrong once one proxy process serves many workspaces).
     // Resolved ONCE and reused for every SOP-derived field below plus the
     // governance block injected further down, rather than each field
@@ -3411,7 +3411,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // would-act evaluation happens separately, once the anomaly registry exists.
     let (enforcing_sops, shadow_mode_sops) = crate::sops::split_by_mode(&resolved_sops);
     let gov = crate::sops::governance_fields_from(&enforcing_sops, &node.agent_role);
-    // The destructive-SQL rule (TD-480), enforced on the response side below.
+    // The destructive-SQL rule, enforced on the response side below.
     // The shadow set is resolved apart from the enforcing one, so a shadow
     // SOP's allowlist can never widen an enforcing SOP's. Empty — the default
     // for every workspace that declares no `sql_guard:` — makes both response
@@ -3580,7 +3580,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // it must never do is gate a capability, which is why enforcement lives in
     // the detectors and WASM rules and neither consults the role.
     //
-    // Resolved through `resolve_injection_block` (TD-348) rather than
+    // Resolved through `resolve_injection_block` rather than
     // injecting `gov.governance_block` straight off this request's fresh
     // render: a session-scoped pin, held for up to
     // `routing.sop_pin_max_age_secs`, keeps this text's bytes stable across a
@@ -3978,7 +3978,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // header: no harness sets that header, so it was "unknown" for
                 // all traffic and `intutic:reask:unknown:{detector}` was one
                 // ladder shared by every tenant — workspace A's reasks
-                // escalated workspace B's to a 403 (TD-489).
+                // escalated workspace B's to a 403.
                 let attempts = state
                     .store
                     .incr_reask_attempt(&tool_scope_id, r.detector_id)
@@ -4117,7 +4117,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 reason, policy_id, ..
             } if !shadow_enforcement => {
                 let rule_id = policy_id.unwrap_or_else(|| "wasm".to_string());
-                // Same scope as the anomaly ladder above (TD-489).
+                // Same scope as the anomaly ladder above.
                 let attempts = state
                     .store
                     .incr_reask_attempt(&tool_scope_id, &rule_id)
@@ -4831,7 +4831,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         ) {
             continue;
         }
-        // ── DLP on forwarded headers (TD-211) ────────────────────────
+        // ── DLP on forwarded headers ─────────────────────────────────
         //
         // The strip-list above removes the auth headers this proxy manages,
         // but a client can put a secret in ANY header — a debug header
@@ -4888,7 +4888,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             require_provisioned,
         )
         .await;
-        // LLD #64 §4 — Enforced BYO-key. This is the actual gateway threat
+        // Enforced BYO-key. This is the actual gateway threat
         // model: a request authenticated with an Intutic `vk_` virtual key
         // (as opposed to a raw upstream credential passed straight through —
         // see the `!creds_injected` fallback below, a different case). A
@@ -4915,7 +4915,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // fall through to the raw-key passthrough below, which copied the
         // caller's `Authorization`/`x-api-key` — the `vk_` itself — to the
         // provider. No provider accepts it, so the call failed anyway; the
-        // key had still been handed to a third party (TD-370). Refused for
+        // key had still been handed to a third party. Refused for
         // every provider, with the same status as the enforced case above.
         if cred_opt.is_none() {
             return json_error(
@@ -4988,8 +4988,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // branch only runs when raw_token did NOT start with "vk_" (the
             // vk_ branch above already injected or returned early), so it is
             // a raw upstream credential passed directly by the caller for a
-            // cross-provider request -- a different mechanism than LLD #64
-            // §4's threat model (a workspace's `vk_` bound to its own
+            // cross-provider request -- a different mechanism than the
+            // enforced BYO-key threat model (a workspace's `vk_` bound to its own
             // provisioned key). Enforced BYO-key governs the vk_-authenticated
             // gateway path only.
             if let Some(cred) =
@@ -5115,7 +5115,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // "Same provider" is the requested model's provider, not the wire shape:
     // a Messages request routed from `claude-*` to `deepseek-*` is natively
     // served (DeepSeek speaks the Anthropic wire), but retrying it would send
-    // the Claude model id to DeepSeek with the DeepSeek key (TD-370).
+    // the Claude model id to DeepSeek with the DeepSeek key.
     let fallback_plan: Option<(String, reqwest::header::HeaderMap, Vec<u8>)> = if routed_from_to
         .is_some()
         && is_same_provider
@@ -5650,7 +5650,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let mut accumulated_content = String::new();
             let mut prompt_tokens = 0;
             let mut completion_tokens = 0;
-            // Cache-aware accumulator (TD-347) alongside the plain
+            // Cache-aware accumulator alongside the plain
             // prompt/completion counts above — `merge_from` overlays only the
             // fields a given event actually reports, so an Anthropic
             // `message_delta` (output only) cannot erase the cache buckets an
@@ -5684,7 +5684,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // The finding an SSO-group refusal adds to this stream's trace, so
             // the deciding rule id reaches the control plane.
             let mut gate_finding: Option<crate::telemetry::FindingWire> = None;
-            // ── Output DLP holdback (TD-210 follow-up) ────────────────────
+            // ── Output DLP holdback ───────────────────────────────────────
             // Decoded-text continuity across deltas. `None` when output DLP is
             // off or the holdback is configured to 0, so those deployments run
             // exactly the code they ran before — no buffer, no rescan, no
@@ -5713,7 +5713,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // site, which is what let `/v1/responses` be treated as chat
             // completions at four separate places.
             let stream_shape = delta_shape(&protocol_clone, &provider_clone);
-            // Destructive-SQL guard (TD-480): holds a shell-tool block until
+            // Destructive-SQL guard: holds a shell-tool block until
             // its arguments are complete. `None` when no SOP declares
             // `sql_guard:` or the response gate is off, so those streams run
             // exactly the code they ran before. Released lines are queued in
@@ -5744,7 +5744,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // entry. Same split logic, both branches, is the fix.
             macro_rules! judge_chunk_scan {
                 () => {
-                    // LLD #68 §2 phase 2: local judge is finalize-only, by
+                    // Local judge is finalize-only, by
                     // design -- no mid-stream chunk grading (see judge_local.rs's
                     // module doc for why). Skipping here, not merely routing
                     // elsewhere, means a local-judge gateway sends zero
@@ -5850,7 +5850,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 break;
                             };
 
-                            // ── Output DLP (TD-210) ─────────────────────────
+                            // ── Output DLP ──────────────────────────────────
                             // Scrubbed BEFORE the line is forwarded and BEFORE
                             // it is parsed into accumulated_content, so the
                             // client, the judge, the semantic cache and the
@@ -5900,7 +5900,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     )
                                 })
                             };
-                            // ── Destructive-SQL hold (TD-480) ───────────────
+                            // ── Destructive-SQL hold ────────────────────────
                             // After the name gate, so a denied tool is refused
                             // on its first line exactly as before; a held line
                             // goes no further until its block is complete.
@@ -6681,7 +6681,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
                     let trailing = accumulated_content[last_processed_len..].trim().to_string();
                     tracing::info!(trailing_content = %trailing, "Processing trailing content");
-                    // Same LLD #68 §2 phase 2 skip as judge_chunk_scan! above:
+                    // Same skip as judge_chunk_scan! above:
                     // local judge does finalize-only grading, so the trailing
                     // chunk this would otherwise send is never sent at all.
                     if !trailing.is_empty() && !crate::gateway::uses_local_judge() {
@@ -7238,7 +7238,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let resp_json: serde_json::Value = serde_json::from_slice(&resp_bytes).unwrap_or_default();
         let mut text = String::new();
 
-        // Provider-dispatched (TD-347), mirroring the same provider/protocol
+        // Provider-dispatched, mirroring the same provider/protocol
         // branching the text extraction below already does — Anthropic's
         // shape, then the Responses vs. chat-completions split within
         // OpenAI-wire, plus Gemini (which the text extraction below has no
@@ -7317,7 +7317,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         );
 
         // Parsed from the pre-translation UPSTREAM body, not `translated`
-        // (TD-347): `OpenAIAdapter::translate_response_to_openai` drops
+        // because `OpenAIAdapter::translate_response_to_openai` drops
         // cache fields when it builds the OpenAI-shape body the client
         // receives, and re-deriving from the original response avoids
         // growing that translator's client-visible wire contract as part
@@ -7369,7 +7369,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // and every one of them ran before the client saw anything at all
         // — unlike streaming's mid-stream grading, which overlaps with
         // bytes the client has already received. Local judge already
-        // skipped this (finalize-only, LLD #68 §2 phase 2); removing it
+        // skipped this (finalize-only); removing it
         // here just makes that the only path, for every judge.
         let judge_monitored_final = actual_model.clone();
 
@@ -7520,7 +7520,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let redacted = dlp::redact(&resp_str, &findings);
             // Reparse-or-refuse, matching the request path's guard.
             //
-            // The request path has had this since TD-210 and the response path
+            // The request path already had this and the response path
             // never did, so a redaction that landed across JSON scaffolding
             // shipped a corrupt body to the client — a confusing failure the
             // logs recorded as a successful redaction. The three outcomes are
@@ -7644,7 +7644,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     })
     .or_else(|| {
         // Argument-level: a shell call running destructive SQL against a
-        // database the role's `sql_allow_dsns:` does not admit (TD-480).
+        // database the role's `sql_allow_dsns:` does not admit.
         let (denial, notes) = crate::plugins::response_gate::gate_response_sql(
             &state.config.intutic_settings.response_gate,
             parsed_response.as_ref(),
@@ -7855,7 +7855,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
                     // ── Scrubbed transient comparison pair, for 7b's judge ──
                     //
-                    // TD-346 forbids persisting raw model response text
+                    // Policy forbids persisting raw model response text
                     // durably; storing an original+mirror response PAIR would
                     // be a far larger exception to that discipline than
                     // anything shipped under it so far. The decision made for
@@ -8436,7 +8436,7 @@ fn stream_delta_text(v: &serde_json::Value, shape: DeltaShape) -> Option<&str> {
 }
 
 /// The token usage one SSE payload carries, if any — normalized to
-/// [`TokenUsage`]'s disjoint billing buckets (TD-347).
+/// [`TokenUsage`]'s disjoint billing buckets.
 ///
 /// Each provider names its usage fields differently and puts them in a
 /// different place, and getting this wrong is not a reporting detail: with
@@ -9076,8 +9076,7 @@ mod tests {
     use super::*;
     use axum::http::HeaderMap;
 
-    /// TD-445 / the honest counterfactual (Wave 3.2 of the audit-remediation
-    /// programme): `request_costs` used to price `raw` cache-blind
+    /// The honest counterfactual: `request_costs` used to price `raw` cache-blind
     /// unconditionally while `actual` was cache-aware, which meant a warm
     /// turn where the router correctly left the request alone (`routed ==
     /// requested`) was billed full rate on the `raw` side and the
@@ -9457,7 +9456,7 @@ mod tests {
         assert_eq!(res, "WorkspaceB");
     }
 
-    // TD-495: a minted key names its workspace after `<32 hex>_` whatever the
+    // A minted key names its workspace after `<32 hex>_` whatever the
     // id's shape, and an attenuated child key names none.
     #[test]
     fn workspace_from_vk_accepts_any_minted_workspace_id() {
@@ -10474,7 +10473,7 @@ mod tests {
         assert_eq!(usage.output, Some(8));
     }
 
-    /// TD-370: only DeepSeek's own API ids route to DeepSeek. Untagged
+    /// Only DeepSeek's own API ids route to DeepSeek. Untagged
     /// self-hosted / Groq / Together names, OpenRouter names and
     /// Ollama-tagged models keep the destination they had before.
     #[test]
@@ -10506,7 +10505,7 @@ mod tests {
         assert!(!Provider::Mistral.serves_natively(&Provider::Anthropic));
     }
 
-    /// TD-370 (D3, D5a): a DeepSeek upstream URL comes from the protocol —
+    /// A DeepSeek upstream URL comes from the protocol —
     /// never from the inbound path or a client-named `Host` — and only
     /// Messages and Chat Completions have one.
     #[test]
@@ -10858,7 +10857,7 @@ mod tests {
     /// "unknown" for all traffic and both call sites keyed the ladder on it:
     /// `intutic:reask:unknown:{detector}` was one three-strike budget shared
     /// by every tenant of the proxy — workspace A's two reasks made workspace
-    /// B's first trip a hard block (TD-489).
+    /// B's first trip a hard block.
     #[tokio::test]
     async fn reask_allowances_are_never_shared_across_workspaces() {
         use crate::store::LocalStore;
@@ -10896,7 +10895,7 @@ mod tests {
         );
         assert!(
             !src.contains(raw.as_str()),
-            "a reask ladder keyed on the raw x-session-id header is shared across tenants (TD-489)",
+            "a reask ladder keyed on the raw x-session-id header is shared across tenants",
         );
     }
 
@@ -11050,7 +11049,7 @@ mod tests {
 
     /// A shared gateway pod's id must not wear a local process's shape: the
     /// control plane classifies `proxy…` as a per-run session and `gw…` as an
-    /// aggregate bucket (TD-231, Wave 5.5), and the prefix is the only thing on
+    /// aggregate bucket, and the prefix is the only thing on
     /// the trace that tells them apart.
     #[test]
     fn a_shared_gateway_mints_a_gw_prefix_and_a_local_proxy_does_not() {
@@ -11238,7 +11237,7 @@ mod tests {
         assert!(reports[0].findings.is_empty());
     }
 
-    /// TD-485, the staging case: the request drifted its tool contract and
+    /// The regression case: the request drifted its tool contract and
     /// called only Bash. `schema_drift` fires with or without any SOP, so it
     /// is not the WebFetch guardrail's finding and must not be credited to it.
     #[test]
@@ -11444,7 +11443,7 @@ mod tests {
     /// the field sat hardcoded while the SDK documented it as gateable and the
     /// SDK's own mock context supplied `"Critical"`.
     ///
-    /// Updated for LLD #64 §6 increment 4: `risk_tier_for_role(role)` (which
+    /// Updated for workspace-scoped SOPs: `risk_tier_for_role(role)` (which
     /// called the process-global `all_sops()` directly) was replaced by
     /// `gov.risk_tier`, resolved once via `governance_fields_from` against
     /// `all_sops_for_workspace` — the workspace-aware resolver a hosted
@@ -11525,7 +11524,7 @@ mod tests {
         );
     }
 
-    /// LLD #64 §4 — Enforced BYO-key. `fetch_provider_credential` is the one
+    /// Enforced BYO-key. `fetch_provider_credential` is the one
     /// place the decision is made; these tests exercise it directly against
     /// a real `MemoryStore` rather than through the full HTTP handler.
     mod enforced_byok {

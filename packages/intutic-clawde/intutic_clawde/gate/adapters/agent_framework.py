@@ -2,7 +2,7 @@
 ``install(agent)``.
 
 Microsoft Agent Framework (the ``agent-framework`` / ``agent-framework-core``
-PyPI packages, the AutoGen + Semantic Kernel successor tracked as TD-375) is a
+PyPI packages, the AutoGen + Semantic Kernel successor) is a
 NEW framework for onboarding purposes, not an upgrade of ``autogen.py``: it
 imports as ``agent_framework``, shares no API with ``autogen-core``'s
 ``InterventionHandler``, and has its own function-middleware chain.
@@ -57,7 +57,7 @@ chat-client-level, then ``Agent(middleware=[...])``, then
 middleware placed INSIDE this one could still rewrite
 ``context.arguments`` after the gate approved them; put
 ``IntuticFunctionMiddleware`` last if you also use argument-repair middleware.
-Same caveat as Strands' hook ordering (TD-421).
+Same caveat as Strands' hook ordering.
 
 Optional import: importing this module never fails even without
 agent-framework installed. Only instantiating ``IntuticFunctionMiddleware``

@@ -7,8 +7,8 @@
  *
  * `skillScan.ts` scans `SKILL.md` — markdown PROSE — for imperative
  * instruction shapes ("do not tell the user", "read ~/.ssh/id_rsa"). That
- * genre does not describe arbitrary source code, which is why TD-356
- * (`docs/TECH_DEBT.md`) explicitly deferred bundled-script scanning out of
+ * genre does not describe arbitrary source code, which is why bundled-script
+ * scanning was explicitly deferred out of
  * the phase that built `skillScan.ts`, rather than bolting a second, unrelated
  * detector onto it. This module is that deferred work, Phase S2. It reuses
  * `skillScan.ts`'s pattern shape ({@link SkillScanPattern}), its 3-category
@@ -138,7 +138,7 @@ export const MAX_SCRIPT_SCAN_BYTES = 262_144
 
 /**
  * 8 MiB. Largest bundled file the sync daemon will read to sha256-hash for
- * its `scripts` facet (TD-486). Larger than {@link MAX_SCRIPT_SCAN_BYTES} on
+ * its `scripts` facet. Larger than {@link MAX_SCRIPT_SCAN_BYTES} on
  * purpose: a file too big to content-scan is still worth a hash-only
  * VirusTotal lookup. A file over this cap is counted in `total` and neither
  * hashed nor scanned — the daemon re-walks every skill on every sync cycle,
@@ -165,9 +165,9 @@ export interface SkillScriptsFacet {
   /**
    * sha256 (lowercase hex) of each bundled file the daemon could read
    * within {@link MAX_SCRIPT_HASH_BYTES}, one entry per file in walk order
-   * (TD-486). Hashes only — file content never leaves the machine. The
+   * Hashes only — file content never leaves the machine. The
    * control plane joins VirusTotal verdicts to the skill on these. ABSENT
-   * (not empty) from a daemon build that predates TD-486; the control
+   * (not empty) from a daemon build that predates script hashing; the control
    * plane falls back to a name-keyed join only in that case. An empty
    * array means nothing was hashable, and gets no fallback.
    */

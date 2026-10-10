@@ -2,7 +2,7 @@
 /**
  * check-public-parity.js
  *
- * The open-core packages exist in two repositories. TD-298 unified eleven
+ * The open-core packages exist in two repositories. A fix that unified eleven
  * divergent harness protected-path lists here and never reached the public
  * tree, so the cross-harness tamper matrix it fixed stayed live in the repo
  * anyone can clone — while the entry read ✅ Resolved and both CIs were green.
@@ -40,7 +40,7 @@ const SHARED = [
   // the next one hides.
   'packages/anomaly-taxonomy',
   'packages/clawde-sdk',
-  // TD-446: existed byte-identical in both repos for a long time without
+  // Existed byte-identical in both repos for a long time without
   // being tracked here at all — CI could not have caught drift in either
   // direction. Added 2026-08-20; confirmed zero-diff at the time of adding.
   'packages/gate-js',
@@ -62,10 +62,10 @@ const SHARED = [
   'packages/vscode-extension',
   'packages/wasm-sdk',
   'tools/cli/src',
-  // The sandbox base image + entrypoint (LLD #63 §6) — genuinely shared, but
+  // The sandbox base image + entrypoint — genuinely shared, but
   // missed until now: this SHARED list is a manual enumeration, and a new
   // directory outside it is invisible to the parity check by construction,
-  // not because it was judged enterprise-only. Found when TD-333's
+  // not because it was judged enterprise-only. Found when an
   // attestation change to entrypoint.sh had silently drifted between repos.
   'tools/cli/resources',
   'tools/scripts',
@@ -178,7 +178,7 @@ if (drifted.length > 0) {
   console.error(`\n✖ ${drifted.length} shared file(s) have drifted between the two repos:\n`)
   for (const f of drifted) console.error(`    ${f}`)
   console.error(
-    '\nA fix that lands in one of two copies is not a fix. TD-298 unified eleven\n' +
+    '\nA fix that lands in one of two copies is not a fix. One that unified eleven\n' +
     'harness protected-path lists here and never reached the public tree, so the\n' +
     'gap it closed stayed open where anyone could clone it — for as long as the\n' +
     'registry read RESOLVED and both CIs were green.\n\n' +
