@@ -77,7 +77,7 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 403 | `LOOP_RUN_PENDING_REVIEW` | `hold` | The loop run is paused until a reviewer approves or rejects it |
 | 403 | `policy_held` | `hold` | A Rego or WASM rule held the request for approval; the error names the hold id |
 | 409 | `policy_reask` | `reask` | Revise the approach and try again; repeated attempts escalate to `policy_denied` |
-| 403 | `GOVERNANCE_UNAVAILABLE` | `kill` | A custom WASM or Rego rule reached no verdict (its deadline, its instruction budget, an error, or a result that is not a verdict). Refused whatever the proxy's fail setting, and refused again if the same request is retried; the message names the rule |
+| 403 | `GOVERNANCE_UNAVAILABLE` | `kill` | A governance check could not complete. Either a custom WASM or Rego rule reached no verdict (its deadline, its instruction budget, an error, or a result that is not a verdict): refused whatever the proxy's fail setting, and refused again if the same request is retried, the message naming the rule. Or, with the proxy failing closed, the workspace's PII detector setting could not be read |
 | 429 | `BUDGET_EXCEEDED` | `kill` | The key's remaining budget does not cover the request |
 | 429 | `OVERAGE_HARD_CAP_EXCEEDED` | `kill` | The daily spend cap is reached |
 | 402, or 200 | `COST_GATE_EXCEEDED` | `kill` | The request's estimated cost is over the workspace threshold: 402 on a stream, a 200 answer otherwise |

@@ -1621,7 +1621,7 @@ intutic rules test <module> --input <file...>
 |--------|-------------|
 | `--input <file...>` | JSON file(s), each holding one [input document](/guide/rego-policies#the-input-document) or an array of `{"name", "input", "expect"}` cases (required) |
 
-Prints each case's decision (`ALLOW`, `DENY`, `HOLD` or `REASK`), reason and risk tier. `expect` is optional; the command exits 1 when a case gets a decision other than the one it expects, or when evaluation fails. A native rule is refused, with a pointer to [`intutic policy test`](#intutic-policy-test).
+Prints each case's decision (`ALLOW`, `DENY`, `HOLD` or `REASK`), reason and risk tier. `expect` is optional; the command exits 1 when a case gets a decision other than the one it expects, or when evaluation fails. The rule runs under the proxies' instruction budget, so a rule that would run out of it in the proxy fails here too. A native rule is refused, with a pointer to [`intutic policy test`](#intutic-policy-test).
 
 ---
 

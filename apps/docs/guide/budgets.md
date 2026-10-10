@@ -70,7 +70,7 @@ Intutic's budget enforcer operates in two distinct modes depending on connection
 
 A connected proxy that cannot read Valkey (the in-memory cache that holds virtual keys and budget counters) cannot verify the caller's key or the workspace's spend, so it **refuses** the request rather than admit spend it cannot check:
 
-*   **Retryable refusals:** the proxy answers `503` with `AUTH_UNVERIFIABLE` (the key could not be checked) or `BUDGET_UNVERIFIABLE` (the spend could not be checked). The key may well be valid, so clients should retry rather than treat it as an authentication failure.
+*   **Retryable refusals:** the proxy answers `503` with `AUTH_UNVERIFIABLE` (the key could not be checked) or `BUDGET_UNVERIFIABLE` (the spend, or the workspace's daily cap, could not be checked: a proxy whose copy of the cap is missing asks the control plane for it and refuses only if it cannot get it; it never falls back to a default cap). The key may well be valid, so clients should retry rather than treat it as an authentication failure.
 *   **Automatic recovery:** once Valkey is reachable again, requests are admitted and checked as usual.
 
 ::: warning
