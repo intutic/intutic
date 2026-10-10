@@ -17,7 +17,11 @@
       "POST /intutic/attest-sandbox": "loopback endpoint the sandbox entrypoint calls; part of sandboxed execution, which predates this manifest"
     },
     "docsPages": {
-      "reference/workspace-settings.md": "the reference for every workspace settings key, which many features share; services/control-plane/__tests__/unit/settingsKeyParity.test.ts holds it to the settings schema"
+      "reference/workspace-settings.md": "the reference for every workspace settings key, which many features share; services/control-plane/__tests__/unit/settingsKeyParity.test.ts holds it to the settings schema",
+      "compare/noma.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",
+      "compare/palo-alto-networks.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",
+      "compare/pillar-security.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",
+      "compare/zenity.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature"
     }
   },
   "features": [
