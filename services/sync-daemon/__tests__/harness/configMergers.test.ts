@@ -329,6 +329,26 @@ describe('OpenClaw ~/.openclaw/openclaw.json', () => {
     await writeOpenclawHooks(root, 'http://127.0.0.1:4000', 'ws_test')
     expect(await fs.readFile(config, 'utf-8')).toBe('{ gateway: { port: 18789 } }\n')
   })
+
+  // An earlier writer ran `openclaw hooks check`: on a machine with OpenClaw
+  // installed, tests ran the developer's real binary, which took up to the 5 s
+  // test timeout and wrote ~/.openclaw/logs/config-health.json into the fake
+  // home. Writing the gate must not depend on what is installed.
+  it.skipIf(process.platform === 'win32')('runs no openclaw binary', async () => {
+    const bin = path.join(root, 'bin')
+    const ran = path.join(root, 'openclaw-ran')
+    await fs.mkdir(bin)
+    await fs.writeFile(path.join(bin, 'openclaw'), `#!/bin/sh\necho "$@" > '${ran}'\n`, { mode: 0o755 })
+    const prevPath = process.env.PATH
+    process.env.PATH = `${bin}${path.delimiter}${prevPath ?? ''}`
+    try {
+      await writeOpenclawHooks(root, 'http://127.0.0.1:4000', 'ws_test')
+    } finally {
+      process.env.PATH = prevPath
+    }
+    await expect(fs.access(ran)).rejects.toThrow()
+    await expect(fs.access(path.join(root, '.openclaw', 'logs', 'config-health.json'))).rejects.toThrow()
+  })
 })
 
 describe('Pi ~/.pi/agent/models.json', () => {
