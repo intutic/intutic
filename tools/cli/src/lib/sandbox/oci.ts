@@ -1,5 +1,5 @@
 /**
- * OciBackend — a genuinely-isolating container sandbox (LLD #63 §6).
+ * OciBackend — a genuinely-isolating container sandbox.
  *
  * The isolation envelope, and why each piece is here:
  *   --cap-drop=ALL                 start from zero capabilities

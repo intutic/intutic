@@ -13,7 +13,7 @@
  * tutorials still describe. The blocking gate ships SDK-side via
  * `intutic_clawde.gate.adapters.ag2.IntuticMiddleware`, an ag2
  * `BaseMiddleware.on_tool_execution`, matched to that current architecture
- * (see ag2.py's module doc; TD-376 tracks one unverified caveat).
+ * (see ag2.py's module doc; its exception propagation is unverified).
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module

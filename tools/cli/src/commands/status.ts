@@ -4,7 +4,6 @@
  * Displays auth state, detected harnesses, last sync time,
  * and config version.
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 
@@ -67,7 +66,7 @@ export async function runStatus(): Promise<void> {
 
     // dsh has no canonical config file to diff (see HARNESS_FILES.dsh in
     // configWriter.ts) and a real manual activation step after this daemon's
-    // automatic writes (TD-370) — worth its own status block rather than the
+    // automatic writes — worth its own status block rather than the
     // plain checkmark every other harness gets above.
     if (config.harnesses.includes('dsh')) {
       console.log('')

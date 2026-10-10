@@ -261,7 +261,7 @@ pub struct RequestContext {
     /// say which SOP declared the ban rather than "an SOP in force". Empty
     /// whenever `denied_tools` is; absent from a context built without SOP
     /// titles (a WASM guest or a test fixture), which is why the detector
-    /// falls back to the unattributed wording (TD-474 item 6).
+    /// falls back to the unattributed wording.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied_tool_sources: Vec<(String, String)>,
     /// The steps this node's SOPs declare its task should consist of.

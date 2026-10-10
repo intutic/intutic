@@ -230,7 +230,7 @@ describe('openai-agents adapter: dual-ecosystem JS-side detection (Python side c
     expect(content).not.toContain('pip install')
   })
 
-  it('names both gates when both ecosystems are present (TD-408 item 5)', async () => {
+  it('names both gates when both ecosystems are present', async () => {
     await writeFile(join(root, 'package.json'), pkgJson({ '@openai/agents': '^0.16.1' }), 'utf-8')
     await writeFile(join(root, 'requirements.txt'), 'openai-agents==0.20.0\n', 'utf-8')
     await openaiAgentsAdapter.writeConfig(root, [], PROXY_URL)

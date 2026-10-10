@@ -118,8 +118,8 @@ const PROCESS_SIGNATURES: Array<{
     // app bundle path, so that path fragment is the primary, most reliable
     // signal (mirrors `Cursor.app`/`Claude.app`/`Windsurf.app` above, not
     // the bare-word CLI pattern grok/muse needed). NOT independently
-    // verified against a real Xirp install — see xirp.ts's module doc and
-    // TD-390. The tmux-ancestry heuristic below is a separate, weaker
+    // verified against a real Xirp install — see xirp.ts's module doc.
+    // The tmux-ancestry heuristic below is a separate, weaker
     // signal this single-line regex scan cannot produce on its own (it has
     // no parent-PID data).
     patterns: [/\/Xirp\.app\//i],

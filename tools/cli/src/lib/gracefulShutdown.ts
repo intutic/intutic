@@ -1,5 +1,5 @@
 /**
- * Shutdown that actually ends the process (TD-484).
+ * Shutdown that actually ends the process.
  *
  * `intutic connect` trapped SIGTERM, logged "Shutting down", aborted its poll
  * loop, and then stayed alive: a daemon asked to stop kept polling its control

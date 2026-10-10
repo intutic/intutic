@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * TD-229: SOP policy became deliverable to the cluster proxy only once the
+ * SOP policy became deliverable to the cluster proxy only once the
  * manifests carried `INTUTIC_SOPS_DIR` and a non-optional `proxy-sops`
  * ConfigMap mount — wiring introduced by hand-editing YAML, with nothing to
  * catch a typo in a `configMapGenerator` reference, a broken overlay patch,
@@ -11,8 +11,8 @@
  * by hand.
  *
  * This renders every overlay with the exact tool that would consume it and
- * fails loudly on any error, then asserts the specific regression TD-229
- * documents — the SOPS env var and its ConfigMap mount — so a bad edit to
+ * fails loudly on any error, then asserts the specific regression that
+ * wiring is prone to — the SOPS env var and its ConfigMap mount — so a bad edit to
  * the proxy's k8s manifests fails here rather than silently shipping a proxy
  * that resolves zero SOPs.
  */
@@ -138,7 +138,7 @@ for (const overlay of overlays) {
   failures.push(...upstreamProblems(`overlay "${overlay}"`, overlayDocs))
   failures.push(...placeholderSecretProblems(`overlay "${overlay}"`, overlayDocs))
 
-  // The regression this gate exists to catch (TD-229): SOP policy silently
+  // The regression this gate exists to catch: SOP policy silently
   // undeliverable to the cluster proxy. Only assert on overlays that carry a
   // proxy deployment at all — a future overlay without one should not be
   // forced to declare SOPS wiring it has no use for.
@@ -152,7 +152,7 @@ for (const overlay of overlays) {
     if (!/^\s*- name:\s*INTUTIC_SOPS_DIR\s*$/m.test(rendered)) {
       failures.push(
         `overlay "${overlay}" renders a proxy Deployment with no INTUTIC_SOPS_DIR env var — ` +
-          `SOP policy would silently resolve to nothing in this cluster (TD-229).`,
+          `SOP policy would silently resolve to nothing in this cluster.`,
       )
     }
     // Same anchoring concern: the generated ConfigMap resource is named
@@ -168,12 +168,12 @@ for (const overlay of overlays) {
     if (!/^\s+name:\s*proxy-sops\s*$/m.test(rendered)) {
       failures.push(
         `overlay "${overlay}" renders a proxy Deployment with no proxy-sops volume mount — ` +
-          `INTUTIC_SOPS_DIR would point at a directory nothing populated (TD-229).`,
+          `INTUTIC_SOPS_DIR would point at a directory nothing populated.`,
       )
     }
   }
 
-  // LLD #64 / TD-334 increment 3: the hosted-gateway ingress must stay on its
+  // The hosted-gateway ingress must stay on its
   // OWN dedicated cert (`intutic-gateway-cert`), never merged into the
   // primary `intutic-ingress`'s pre-shared cert — that resource already
   // serves six live production domains (api/app/docs/intutic.ai/releases/www)
@@ -415,13 +415,13 @@ if (existsSync(HELM_DIR)) {
 
 if (!proxyChecked) {
   failures.push(
-    'no overlay rendered a proxy Deployment — the TD-229 regression check never ran. ' +
+    'no overlay rendered a proxy Deployment — the SOPS-wiring regression check never ran. ' +
       'A vacuous pass here is worse than no check.',
   )
 }
 if (!gatewayChecked) {
   failures.push(
-    'no overlay rendered an intutic-gateway-ingress — the LLD #64 / TD-334 cert-isolation ' +
+    'no overlay rendered an intutic-gateway-ingress — the gateway cert-isolation ' +
       'check never ran. A vacuous pass here is worse than no check.',
   )
 }

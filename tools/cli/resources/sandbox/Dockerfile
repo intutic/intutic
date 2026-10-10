@@ -1,4 +1,4 @@
-# Intutic sandbox base image (LLD #63 §6).
+# Intutic sandbox base image.
 #
 # A minimal, genuinely-isolating runtime for `intutic exec --sandbox`. It ships
 # only what the entrypoint needs to install the egress firewall and drop

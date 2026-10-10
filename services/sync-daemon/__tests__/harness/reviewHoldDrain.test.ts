@@ -9,7 +9,7 @@
  * first. Holds cluster — an agent that trips a review rule usually trips it
  * again on its next step — so the common case was the lossy one.
  *
- * **A 4xx must quarantine, not retain.** TD-310: the drain treats any non-2xx as
+ * **A 4xx must quarantine, not retain.** A drain that treats any non-2xx as
  * "keep the log and retry", which for a permanently-unacceptable batch means
  * re-sending it every cycle forever. The log never drains again and every later
  * record behind it is lost, silently. That logic is now shared with the hook

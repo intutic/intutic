@@ -1,5 +1,5 @@
 /**
- * Wire types for the Policy Clause Ledger (LLD #71): what
+ * Wire types for the Policy Clause Ledger: what
  * `/api/v1/policy-guardrails/*` returns, as the control plane, the dashboard
  * page and `intutic guardrails` all read it. The control plane's service
  * imports these rather than declaring its own, so a field cannot drift
@@ -16,7 +16,7 @@ export const GUARDRAIL_STATUSES = ['PROPOSED', 'SHADOW', 'ENFORCING', 'REJECTED'
 /**
  * Statuses in which a guardrail's citation is live — the ones conflicts are
  * reported for and the ones that keep the cited document from being written
- * back over (LLD #71, Wave 8). A rejected proposal does not freeze a source.
+ * back over. A rejected proposal does not freeze a source.
  */
 export const LIVE_GUARDRAIL_STATUSES = ['PROPOSED', 'SHADOW', 'ENFORCING'] as const
 
@@ -48,7 +48,7 @@ export function guardrailIdFromSopTitle(title: string): string | null {
 export type GuardrailStatus = (typeof GUARDRAIL_STATUSES)[number]
 
 /**
- * `workspace_setting` (TD-474 item 2) is the one target no rule endpoint
+ * `workspace_setting` is the one target no rule endpoint
  * projects: an `allowed_models` or `egress_allow` guardrail is written into
  * the workspace setting the proxy already enforces when a member promotes it,
  * and unwound when it is retired.
@@ -65,7 +65,7 @@ export const GUARDRAIL_EVENT_TYPES = [
   'SOURCE_STALE',
   'SOURCE_RECONFIRMED',
   'CITATION_REBOUND',
-  /** The stored render was recomputed by the current renderer (TD-478); shadow evidence gathered under the old render was reset. */
+  /** The stored render was recomputed by the current renderer; shadow evidence gathered under the old render was reset. */
   'RENDER_REBOUND',
   /** An authored guardrail's name or description changed in place; what it enforces did not. */
   'UPDATED',
@@ -165,7 +165,7 @@ export interface AuthoredGuardrailWriteResult {
   supersedes: string | null
 }
 
-/** The one promotion rule (LLD #71 decision 7), as `GET …/thresholds` reports it. */
+/** The one promotion rule, as `GET …/thresholds` reports it. */
 export interface GuardrailThresholds {
   minShadowEvaluations: number
   maxWouldActRate: number
@@ -217,7 +217,7 @@ export interface GuardrailSummary {
   shadowWouldAct: number
   enforcingFires: number
   sourceStale: boolean
-  /** wasm_rule only: the rule candidate this guardrail was handed to on shadow approval (LLD #71, Wave 7). */
+  /** wasm_rule only: the rule candidate this guardrail was handed to on shadow approval. */
   ruleCandidateId: string | null
   proposedAt: string
   shadowAt: string | null
@@ -385,7 +385,7 @@ export interface TokenCoverage {
 }
 
 /**
- * The ledger's two Jaccard lines (LLD #71): passages at or above the overlap
+ * The ledger's two Jaccard lines: passages at or above the overlap
  * line are recorded as OVERLAPS edges, and a retired passage's successor must
  * clear the near-identical line to be recorded as SUPERSEDES. One definition
  * for the ingest that writes the edges and the duplicates query that reads

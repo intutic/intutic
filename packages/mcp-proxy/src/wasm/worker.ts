@@ -18,7 +18,7 @@
  * and evaluated here too; its `evaluate` bytes are the Rego input document and
  * its reply carries `decision` instead of `code`.
  *
- * `files` is the per-evaluation referenced-files table (TD-441), posted only
+ * `files` is the per-evaluation referenced-files table, posted only
  * to a rule that imports `read_referenced_file`; it is rebuilt here into the
  * host-import state, so the main thread never shares memory with the guest.
  *
@@ -54,7 +54,7 @@ import { createHostImports, newHostImportState } from './hostImports.js'
 import { ReferencedFiles, type ReferencedFilesTable } from './referencedFiles.js'
 
 /**
- * Guest memory ceiling, `runner.rs`'s 16MB `StoreLimits` (TD-440). Enforced at
+ * Guest memory ceiling, `runner.rs`'s 16MB `StoreLimits`. Enforced at
  * load by `capDeclaredMemory`: the module's own memory is rewritten to declare
  * this as its maximum, so V8 refuses any `memory.grow` past it (the call
  * returns -1) instead of growing. A module whose initial size is already over

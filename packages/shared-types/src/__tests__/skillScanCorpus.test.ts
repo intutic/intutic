@@ -1,6 +1,6 @@
 /**
  * skillScan.ts against a benign-skill corpus — the false-positive measurement
- * TD-358 was held open for.
+ * skill-content enforcement was held at warn until it existed.
  *
  * `corpus/skills/` vendors 350 real `SKILL.md` files from four MIT/Apache-2.0
  * collections at pinned upstream commits (see `PROVENANCE.md` there). None was
@@ -107,7 +107,7 @@ function renderBaseline(hits: Hit[]): string {
     bySource.set(source, entry)
   }
   const lines: string[] = [
-    'skillScan.ts — benign-skill corpus baseline (TD-358)',
+    'skillScan.ts — benign-skill corpus baseline',
     '====================================================',
     '',
     'Produced by:',
@@ -146,7 +146,7 @@ function renderBaseline(hits: Hit[]): string {
   return lines.join('\n') + '\n'
 }
 
-describe('skillScan benign-skill corpus (TD-358)', () => {
+describe('skillScan benign-skill corpus', () => {
   it(`is vendored, intact, and at least ${MIN_CORPUS_SKILLS} skills`, () => {
     expect(skills.length).toBeGreaterThanOrEqual(MIN_CORPUS_SKILLS)
     const sums = readSums()

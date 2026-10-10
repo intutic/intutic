@@ -100,7 +100,7 @@ an independent measurement of the response-echo scan's real-world noise
 floor — it is a regression pin on our own regexes, authored by us, and
 nothing more.
 
-## SWE-rebench OpenHands trajectories — fetched, not vendored (TD-248)
+## SWE-rebench OpenHands trajectories — fetched, not vendored
 
 - **Source:** `nebius/SWE-rebench-openhands-trajectories` (67,074 OpenHands
   runs on SWE-rebench tasks, OpenAI-format `tool_calls`), read through the
@@ -120,7 +120,7 @@ nothing more.
 `exit_status` and `resolved` are the dataset's own. `AgentStuckInLoopError` is
 OpenHands' StuckDetector — a heuristic, not a human saying the run looped — and
 the 100-iteration cap is a budget, not a loop. There is no human-labelled
-"genuinely looping" set in this or any corpus surveyed for TD-248.
+"genuinely looping" set in this or any corpus surveyed for the cycle floor.
 
 ### Measured 2026-10-04 (seed-248 sample, 1,000 trajectories)
 

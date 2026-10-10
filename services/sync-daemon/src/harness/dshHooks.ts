@@ -54,9 +54,9 @@
  *     included. Node resolves it from the profile directory's own
  *     `node_modules` (the "two-anchor" resolution `profile.d.ts` documents
  *     for out-of-tree plugins) — which means `@intutic/gate` must actually be
- *     installed there; see {@link mergeProfileDependency} and the TD entry
+ *     installed there; see {@link mergeProfileDependency}
  *     for why this writer cannot run `pnpm install` on the user's behalf.
- *   - **LLM egress, re-verified against dsh 0.2.0-rc.2 (TD-370, 2026-10-03).**
+ *   - **LLM egress, re-verified against dsh 0.2.0-rc.2 (2026-10-03).**
  *     0.2 removed the harness-home `settings.yaml` document this writer used
  *     to merge into: `@deepseek-ai/dsh-settings` now imports a leftover
  *     `$DSH_HOME/settings.yaml` ONCE into whichever profile boots first
@@ -167,7 +167,7 @@ export async function listDshProfileDirs(dshHome: string): Promise<string[]> {
   return out
 }
 
-// ─── Coverage-gap detection (TD-370: the silent no-profile window) ────────
+// ─── Coverage-gap detection (the silent no-profile window) ────────────────
 
 /** Markers dsh leaves under `$DSH_HOME` even before any profile exists —
  *  mirrors `tools/cli/src/harness/dsh.ts`'s own `detect()` list, minus the
@@ -192,12 +192,12 @@ export interface DshCoverageGap {
   /** Number of EXISTING dsh profiles — see {@link listDshProfileDirs}. */
   profileCount: number
   /** `dshDetected && profileCount === 0`: dsh is present but nothing is
-   *  governed yet — TD-370's "silent no-profile window". */
+   *  governed yet — the "silent no-profile window". */
   gap: boolean
 }
 
 /**
- * Detects TD-370's "silent no-profile window": the stretch between `intutic
+ * Detects the "silent no-profile window": the stretch between `intutic
  * connect` and the user's first `dsh --profile <name>` run, during which dsh
  * is entirely ungoverned — {@link writeDshHooks} is a documented no-op with
  * nothing to register into yet — and, before this function existed, nothing
@@ -368,7 +368,7 @@ export async function mergeProfilePatch(profileDir: string, workspaceRoot: strin
  * `dsh: warning: 1 entry did not activate` / `intutic-governance
  * (@intutic/gate/dsh): failed to import` on stderr and the session then runs
  * UNGOVERNED — loud, but fail-OPEN (dsh's hard-fail list is global to the
- * launcher; a profile row cannot mark itself required). See the TD entry and
+ * launcher; a profile row cannot mark itself required). See
  * `apps/docs/integrations/dsh.md`.
  *
  * Adds the declaration only when the profile has none: an existing one was

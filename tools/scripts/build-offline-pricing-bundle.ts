@@ -5,7 +5,7 @@
  * Fetches the latest LiteLLM model_prices_and_context_window.json and extracts
  * a curated subset into packages/proxy/src/pricing/offline_bundle.json.
  *
- * As of LLD #70, the SAME fetch also emits
+ * The SAME fetch also emits
  * packages/shared-types/src/modelCatalog.generated.ts — the model catalog behind
  * the judge-model picker and the cohort wizard. One fetch, two artifacts, so the
  * two can never drift against each other by being regenerated at different times.
@@ -16,8 +16,6 @@
  *
  * The generated bundle is then baked into the proxy binary at build time via:
  *   include_str!("pricing/offline_bundle.json")
- *
- * LLD §31 WS-5OP — TD-130 graduation
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -91,7 +89,7 @@ const FAMILY_FALLBACKS: Record<string, { input_cost_per_1k: number; output_cost_
   'deepseek':      { input_cost_per_1k: 0.00027, output_cost_per_1k: 0.0011 },
 }
 
-// ─── Model catalog (LLD #70) ──────────────────────────────────────────────────
+// ─── Model catalog ────────────────────────────────────────────────────────────
 // Separate from the pricing bundle above: the bundle prices by family-prefix
 // match across ALL providers combined (it only ever needs "close enough" for an
 // unknown model-name variant); the catalog is per-provider and per-model, feeding
@@ -302,7 +300,7 @@ function writeModelCatalog(entries: ModelCatalogEntryData[], generatedAt: string
     '//',
     '// See packages/shared-types/src/modelCatalog.ts for the ModelCatalogEntry type',
     '// and the helpers (findCatalogModel, normalizeModelRef, selfHostedJudgeModelChoices) that',
-    '// consume this data. LLD #70.',
+    '// consume this data.',
     '',
     'export const MODEL_CATALOG_GENERATED = [',
     ...entries.map(serializeCatalogEntry),
@@ -375,7 +373,7 @@ async function main() {
     // read vs. a cache write, and LiteLLM only publishes the two fields when
     // the provider does. Same "omit rather than zero" discipline as output
     // cost above: a missing cache rate must fall through to full input-price
-    // billing (see TD-347), not silently read as "caching is free here".
+    // billing, not silently read as "caching is free here".
     const cacheRead = data.cache_read_input_token_cost
     const cacheWrite = data.cache_creation_input_token_cost
 

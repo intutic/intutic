@@ -1,5 +1,5 @@
 /**
- * governanceCoverage.ts — pin the enforcement-input mapping (TD-443).
+ * governanceCoverage.ts — pin the enforcement-input mapping.
  *
  * These mirror the four "enforcement input derivation" cases in
  * `services/control-plane/__tests__/unit/harnessGradeSweep.test.ts` (the

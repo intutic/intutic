@@ -1,5 +1,5 @@
 /**
- * The restore half of the rollback rung (TD-328).
+ * The restore half of the rollback rung.
  *
  * The CAPTURE half — the emitted gate body that writes these records — is
  * tested in `services/sync-daemon/__tests__/preImageCapture.test.ts`, against

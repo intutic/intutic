@@ -10,7 +10,7 @@
  */
 
 // ============================================
-// LLD #50: SSL Runtime Enforcement
+// SSL Runtime Enforcement
 // ============================================
 
 export interface SslSchedulingContext {
@@ -49,7 +49,7 @@ export interface SslGraphJson {
     steps: SslStep[]
     /**
      * Per step, the tools the compiler refused because the SOP text never
-     * names them (TD-477 part 1): a step "run the tests" compiled to
+     * names them: a step "run the tests" compiled to
      * `tools: ["Bash"]` when the SOP said nothing about Bash, and the
      * enforcer then treated any other tool as unauthorized. Kept for the
      * author; never evaluated.
@@ -138,7 +138,7 @@ export interface SslStepReport {
 }
 
 // ============================================
-// LLD #45: Governance Output Injection
+// Governance Output Injection
 // ============================================
 
 export type NotificationPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO'
@@ -184,7 +184,7 @@ export interface NotificationConfig {
 }
 
 // ============================================
-// LLD #47: Token Intelligence
+// Token Intelligence
 // ============================================
 
 export interface ToolCallTokenBreakdown {
@@ -227,7 +227,7 @@ export function getInputBucket(inputTokens: number): InputTokenBucket {
 }
 
 // ============================================
-// LLD #48: Auto-Classification & Optimization
+// Auto-Classification & Optimization
 // ============================================
 
 /**
@@ -324,7 +324,7 @@ export interface ProbeViolation {
 }
 
 // ============================================
-// LLD #49: Prompt Quality & Slash Commands
+// Prompt Quality & Slash Commands
 // ============================================
 
 export interface PromptQualityScore {
@@ -374,7 +374,7 @@ export interface SlashCommandResponse {
 }
 
 // ============================================
-// LLD #51: Harness Config & SkillOpt
+// Harness Config & SkillOpt
 // ============================================
 
 export interface HarnessConfigSnapshot {
@@ -408,7 +408,7 @@ export interface SkillOptSuggestion {
   workspaceId: string
   harnessType: string
   filePath: string
-  // 'apply_unconfirmed' / 'apply_failed' — TD-349: the daemon's apply-result
+  // 'apply_unconfirmed' / 'apply_failed' — the daemon's apply-result
   // ack is what confirms an edit actually landed; 'applied' means confirmed,
   // not merely queued. See services/control-plane/src/services/
   // skillOptService.ts's applyConfigEdit.

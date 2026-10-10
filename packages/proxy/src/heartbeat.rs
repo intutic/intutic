@@ -1,6 +1,6 @@
-//! heartbeat.rs — self-hosted gateway heartbeat client (LLD #66, gateway phase 4).
+//! heartbeat.rs — self-hosted gateway heartbeat client.
 //!
-//! A self-hosted deployment (Docker/Kubernetes/bare-metal, LLD #66 §1) is
+//! A self-hosted deployment (Docker/Kubernetes/bare-metal) is
 //! registered from the dashboard, which mints a `gwk_...` token
 //! (`services/control-plane/src/routes/gateways.ts`'s `POST /api/v1/gateways`).
 //! This module is what makes that registration *live*: once the operator sets
@@ -25,7 +25,7 @@
 //! never panics or blocks request handling, since a control-plane outage on
 //! the operator's side must not take down request serving on this pod.
 //!
-//! LLD #68 §3 — automatic rotation: each heartbeat response carries
+//! Automatic rotation: each heartbeat response carries
 //! `keyRotatedAt` (`services/control-plane/src/routes/gatewayHeartbeat.ts`).
 //! When the current token's age reaches `INTUTIC_GATEWAY_ROTATION_INTERVAL_DAYS`
 //! (default 30, well under the 24h `previousKeyExpiresAt` grace window used
@@ -35,7 +35,7 @@
 //! extends a long-lived process's effective credential lifetime; BY DEFAULT
 //! it does not persist the new token anywhere durable — a restart boots
 //! from whatever `INTUTIC_GATEWAY_TOKEN` the deployment's env holds, same
-//! limitation the control-plane route's own doc comment states (TD-341).
+//! limitation the control-plane route's own doc comment states.
 //!
 //! Opt-in exception: if `INTUTIC_GATEWAY_TOKEN_STATE_FILE` is set, every
 //! successful self-rotation also writes the new token to that path
@@ -60,7 +60,7 @@
 //! in-cluster K8s API — independent of, not a replacement for, the
 //! state-file write; a Kubernetes deployment sets both.
 //!
-//! Live config (LLD #66 phase 9): each heartbeat response also carries
+//! Live config: each heartbeat response also carries
 //! `desiredConfigVersion`, a counter the control plane bumps whenever an
 //! owner or admin changes this gateway's config (`intutic gateway config
 //! set`, i.e. `PATCH /api/v1/gateways/:id/config`). When it differs from the
@@ -222,7 +222,7 @@ struct HeartbeatBody {
     proxy_version: &'static str,
     #[serde(rename = "uptimeSeconds")]
     uptime_seconds: u64,
-    /// TD-341-adjacent status leg (gateway-mode only): a gateway-level
+    /// Status leg (gateway-mode only): a gateway-level
     /// aggregate SOP count across every workspace this process currently
     /// holds a fresh cache entry for — see `sops::sop_status_snapshot`.
     /// `skip_serializing_if` omits the key entirely rather than sending a
@@ -594,7 +594,7 @@ async fn self_rotate(
                         );
                     }
                 }
-                // Independent of the state-file write above (TD-341): a
+                // Independent of the state-file write above: a
                 // Kubernetes pod reschedule or rolling redeploy gets a fresh
                 // filesystem, so only a Secret patch survives that case. Same
                 // proportionate-warn posture -- the rotation already
@@ -822,7 +822,7 @@ mod tests {
         );
         std::env::remove_var("INTUTIC_GATEWAY_TOKEN_STATE_FILE");
 
-        // 8. TD-341: a state file holding a token that differs from
+        // 8. A state file holding a token that differs from
         //    INTUTIC_GATEWAY_TOKEN is preferred.
         //    Same directory-mutation discipline as write_token_state_file's
         //    own tests: a dedicated temp subdir, cleaned before and after.

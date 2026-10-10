@@ -119,7 +119,7 @@ done
 echo ""
 if [ "${#FAILED[@]}" -gt 0 ]; then
     echo "[download-grammars] ❌ Failed grammars: ${FAILED[*]}"
-    echo "[download-grammars]    These will use regex fallback. See TD-003 / TD-011."
+    echo "[download-grammars]    These will use regex fallback."
 fi
 if [ "${#BUILT[@]}" -gt 0 ]; then
     echo "[download-grammars] ✅ Built: ${BUILT[*]}"

@@ -4,7 +4,6 @@
  * Accepts newline-delimited JSON requests from MCP shims.
  * Methods: proxy.tool_call, proxy.health_check, policy.get, telemetry.flush
  *
- * LLD #28: MCP Daemon Mode, WS-5MCP
  * @module
  */
 import net  from 'node:net'

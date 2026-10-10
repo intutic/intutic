@@ -3,7 +3,6 @@
  *
  * Calls GET /api/v1/auth/me to fetch fresh identity info.
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

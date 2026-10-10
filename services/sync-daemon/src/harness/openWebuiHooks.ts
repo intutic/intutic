@@ -10,7 +10,6 @@
  *   - Logs every prompt (inlet) via dual-path: file append + urllib.request.
  *   - Generates incidentId via hashlib.sha1.
  *
- * LLD #14 — Phase 3 cross-harness defence (Gap 3, WS-B)
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
  *
  * @module

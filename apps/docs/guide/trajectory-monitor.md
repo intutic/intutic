@@ -14,7 +14,7 @@ request is answered whether or not the monitor has finished.
 | `ACTIVE` | The verdict suggests a `KILL` for that session, which the loop governor then applies. This is one of the two opt-in paths by which a judged finding can escalate to enforcement — see [Enforcement Actions](/concepts/enforcement-actions). | No |
 | `OFF` | The monitor does not run for the workspace. | No |
 
-The default is `PASSIVE`. An earlier design document (LLD 52) specified `OFF`;
+The default is `PASSIVE`. An earlier design document specified `OFF`;
 the platform has shipped with `PASSIVE` as the effective default since the
 monitor landed, and defaulting an unset value to `OFF` now would switch the
 monitor off platform-wide, so the code and this page say `PASSIVE`.

@@ -2,8 +2,6 @@
 //!
 //! Implements the Thompson Sampling arm selector, prompt classifier,
 //! session-locked routing, and fallback behavior.
-//!
-//! LLD #26 §4.1 — Thompson Sampling Selector
 
 use crate::pricing;
 use crate::store::{ControlPlaneCache, LocalStore, SessionRouting};
@@ -411,7 +409,7 @@ pub async fn route_model(
     // "Mostly", not "entirely" — though the gap is narrower than it used to
     // be. SOP content is still prepended at `system[0]` on every request
     // (`sops::inject_into_body`), which COULD shift the cached prefix even
-    // with the model held constant. TD-348 closed the practical case: the
+    // with the model held constant. Session pinning closed the practical case: the
     // rendered advisory text is now pinned per session
     // (`sops::resolve_injection_block`, keyed by the same scope this session
     // lock protects) for up to `RoutingConfig::sop_pin_max_age_secs`, so the

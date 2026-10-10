@@ -283,7 +283,7 @@ export {
   E_VALIDATION_FAILED,
   E_SIGNUP_DISABLED,
   E_DOMAIN_NOT_VERIFIED,
-  // Identity Federation (LLD #11)
+  // Identity Federation
   E_SSO_DISABLED,
   E_SSO_NO_MEMBERSHIP,
   E_OIDC_INVALID_STATE,
@@ -434,7 +434,7 @@ export type {
   TraceDagResult,
 } from './observability.js'
 
-// WS4: Enterprise Identity & Compliance (LLD #19)
+// WS4: Enterprise Identity & Compliance
 export {
   IssueOboTokenInputSchema,
   AttenuateTokenInputSchema,
@@ -537,7 +537,7 @@ export {
 
 // Phase 7: Intelligence Engine types (LLDs #45, #47, #48, #49, #50, #51)
 export type {
-  // LLD #50 — SSL Runtime Enforcement
+  // SSL Runtime Enforcement
   SslSchedulingContext,
   SslActivationResult,
   SslGraphJson,
@@ -551,27 +551,27 @@ export type {
   ConstraintViolation,
   ConstraintEvalResult,
   SslStepReport,
-  // LLD #45 — Governance Output Injection
+  // Governance Output Injection
   GovernanceNotification,
   NotificationConfig,
-  // LLD #47 — Token Intelligence
+  // Token Intelligence
   ToolCallTokenBreakdown,
   CostPrediction,
   TokenBaseline,
-  // LLD #48 — Auto-Classification & Optimization
+  // Auto-Classification & Optimization
   TraceClassificationContext,
   WastePattern,
   OptimizationRecommendation,
   LlmProbeResult,
   ProbeViolation,
-  // LLD #49 — Prompt Quality & Slash Commands
+  // Prompt Quality & Slash Commands
   PromptQualityScore,
   PromptQualityContext,
   ContextGap,
   DedupHint,
   SlashCommandRequest,
   SlashCommandResponse,
-  // LLD #51 — Harness Config & SkillOpt
+  // Harness Config & SkillOpt
   HarnessConfigSnapshot,
   ConfigEdit,
   ConfigEditWithTarget,
@@ -580,18 +580,18 @@ export type {
 } from './intelligence.js'
 
 export {
-  // LLD #45
+  // Governance Output Injection
   type NotificationPriority,
   type NotificationCategory,
-  // LLD #47
+  // Token Intelligence
   type InputTokenBucket,
   getInputBucket,
-  // LLD #48
+  // Auto-Classification & Optimization
   type WasteType,
   type RecommendationType,
 } from './intelligence.js'
 
-// LLD #45-slack: Notification Hub + Slack Adapter
+// Notification Hub + Slack Adapter
 export * from './notifications.js'
 
 // Restored Stripe billing & subscription types
@@ -600,10 +600,10 @@ export * from './billing.js'
 // Restored task management and alerting adapter types
 export * from './taskManagement.js'
 
-// LLD #67: multi-provider credential registry
+// Multi-provider credential registry
 export * from './providers.js'
 
-// LLD #70: model catalog & cohort wizard
+// Model catalog & cohort wizard
 export * from './modelCatalog.js'
 export * from './providerVerification.js'
 

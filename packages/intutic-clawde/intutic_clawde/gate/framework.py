@@ -135,7 +135,7 @@ def guard_tools(tools: Iterable[Any], *, gate: Optional[Gate] = None) -> list:
     for tool in tools:
         name = _tool_name(tool)
 
-        # `anthropic.lib.tools.beta_tool` objects (TD-427): `BaseFunctionTool`
+        # `anthropic.lib.tools.beta_tool` objects: `BaseFunctionTool`
         # captures `pydantic.validate_call(func)` at construction and `call()`
         # invokes THAT, never `.func`. Swapping `.func` below would look like a
         # gate and gate nothing. Refuse loudly, the way the TypeScript twin's

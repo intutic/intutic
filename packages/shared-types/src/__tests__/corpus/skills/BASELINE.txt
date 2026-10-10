@@ -1,4 +1,4 @@
-skillScan.ts — benign-skill corpus baseline (TD-358)
+skillScan.ts — benign-skill corpus baseline
 ====================================================
 
 Produced by:

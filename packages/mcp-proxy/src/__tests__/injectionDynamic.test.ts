@@ -1,4 +1,4 @@
-/** Workspace-delivered injection patterns on top of the floor (TD-436). */
+/** Workspace-delivered injection patterns on top of the floor. */
 import { describe, it, expect, afterEach } from 'vitest'
 import { scanText, setDynamicInjectionPatterns } from '../injection.js'
 

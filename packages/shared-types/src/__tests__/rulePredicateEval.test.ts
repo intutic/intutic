@@ -1,6 +1,6 @@
 /**
  * The TypeScript reading of a predicate mirrors the guest's defaults and the
- * renderer's guards (LLD #71, Wave 7). The binary-level parity is pinned in
+ * renderer's guards. The binary-level parity is pinned in
  * packages/wasm-sdk/__tests__/generatedRules.test.ts; this file pins the
  * semantics that do not need a compiler: absent fields read as the guest's
  * defaults, unknown is never "under the limit", an empty list is

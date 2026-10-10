@@ -1,5 +1,5 @@
 //! End-to-end proof that per-workspace SOP resolution genuinely isolates
-//! tenants (LLD #64 §6 increment 4, TD-334): two workspaces on the same
+//! tenants: two workspaces on the same
 //! gateway process get two different, non-leaking SOP sets, fetched from a
 //! real HTTP server (not a mock trait) standing in for the control plane.
 

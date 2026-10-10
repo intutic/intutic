@@ -103,7 +103,7 @@ export const SKILL_SURFACE_PATTERNS: readonly FixturePattern[] = [
     severity: 'warn',
     reason:
       'Write or edit targets a .agents/skills/** skill file — advisory only, pending a ' +
-      'false-positive measurement of scanSkillContent against real skill markdown (TD-358)',
+      'false-positive measurement of scanSkillContent against real skill markdown',
     matches: [
       ' .agents/skills/my-skill/SKILL.md ',
       ' .agents/skills/foo/resources/data.json ',
@@ -123,7 +123,7 @@ export const SKILL_SURFACE_PATTERNS: readonly FixturePattern[] = [
     severity: 'warn',
     reason:
       'Write or edit targets a .claude/skills/** skill file — advisory only, pending a ' +
-      'false-positive measurement of scanSkillContent against real skill markdown (TD-358)',
+      'false-positive measurement of scanSkillContent against real skill markdown',
     matches: [
       ' .claude/skills/my-skill/SKILL.md ',
       ' .claude/skills/foo/resources/data.json ',

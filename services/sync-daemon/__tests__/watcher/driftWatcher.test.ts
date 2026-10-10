@@ -4,8 +4,6 @@
  * Verifies that the filesystem watcher correctly detects mutations and deletions
  * of governed files and invokes the change callback.
  *
- * LLD #14 — Test Strategy
- *
  * @module
  */
 
@@ -66,7 +64,7 @@ describe('Drift Filesystem Watcher', () => {
     await node_fs.rm(tempDir, { recursive: true, force: true })
   })
 
-  it('reacts to the dsh profiles ROOT directory being CREATED (TD-370) — addDir, not just change/unlink', async () => {
+  it('reacts to the dsh profiles ROOT directory being CREATED — addDir, not just change/unlink', async () => {
     const dshHome = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-dsh-watch-'))
     const workspaceRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-dsh-watch-ws-'))
     const prevDshHomeEnv = process.env.DSH_HOME

@@ -302,7 +302,7 @@ fn test_hard_truncation_fires_on_overflow() {
     assert!(out.len() < input.len(), "Truncated output must be shorter");
 }
 
-// ─── TD-003: TypeScript WASM smoke test ───────────────────────────────────────
+// ─── TypeScript WASM smoke test ───────────────────────────────────────────────
 // Documents whether each grammar is currently loaded via WASM or regex fallback.
 // Does NOT assert a specific outcome — passes regardless of grammar build status.
 // Run this test and check output to verify grammar health.
@@ -349,7 +349,7 @@ fn test_td003_grammar_load_status_smoke() {
             "not detected"
         };
         println!(
-            "[TD-003] {}: language={:?}, skeleton_len={}/{}, status={}",
+            "[grammar] {}: language={:?}, skeleton_len={}/{}, status={}",
             name,
             detected,
             skeleton.len(),
@@ -359,7 +359,7 @@ fn test_td003_grammar_load_status_smoke() {
     }
 }
 
-// ─── TD-003: Grammar cache does not reload on second call ────────────────────
+// ─── Grammar cache does not reload on second call ────────────────────────────
 
 #[test]
 fn test_grammar_cache_hit_no_reload() {
@@ -377,7 +377,7 @@ fn test_grammar_cache_hit_no_reload() {
     );
 }
 
-// ─── TD-007: Thread-local parser is safe under concurrent access ──────────────
+// ─── Thread-local parser is safe under concurrent access ──────────────────────
 
 #[test]
 fn test_concurrent_parsing_no_panic() {
@@ -417,7 +417,7 @@ fn test_concurrent_parsing_no_panic() {
     }
 }
 
-// ─── TD-009: grammar_load_status() API ───────────────────────────────────────
+// ─── grammar_load_status() API ───────────────────────────────────────────────
 
 #[test]
 fn test_td009_grammar_load_status_api() {
@@ -442,7 +442,7 @@ fn test_td009_grammar_load_status_api() {
 
     // With .wasm files built and embedded, all should be Wasm
     for (lang, status) in &statuses {
-        println!("[TD-009] {lang}: {status:?}");
+        println!("[grammar-status] {lang}: {status:?}");
         assert_eq!(
             *status,
             GrammarStatus::Wasm,
@@ -451,7 +451,7 @@ fn test_td009_grammar_load_status_api() {
     }
 }
 
-// ─── TD-008: Incremental parse cache ─────────────────────────────────────────
+// ─── Incremental parse cache ─────────────────────────────────────────────────
 
 #[test]
 fn test_td008_incremental_cache_hit_skips_reparse() {
@@ -532,7 +532,7 @@ fn test_td008_cache_is_thread_local_isolated() {
     assert_eq!(t2_size, 0, "Thread 2 cache is isolated — should be empty");
 }
 
-// ─── TD-011: Java grammar quality corpus ─────────────────────────────────────
+// ─── Java grammar quality corpus ─────────────────────────────────────────────
 // Verifies that the Java tree-sitter WASM grammar produces meaningful skeletons
 // for realistic Java code patterns. Measures skeleton extraction rate and ratio.
 
@@ -570,13 +570,13 @@ fn test_td011_java_grammar_quality_corpus() {
         if ratio > 0.0 {
             extracted += 1;
             println!(
-                "[TD-011] java/{name}: {}/{} bytes ({:.1}% saved)",
+                "[java] java/{name}: {}/{} bytes ({:.1}% saved)",
                 skeleton.len(),
                 java_code.len(),
                 ratio * 100.0
             );
         } else {
-            println!("[TD-011] java/{name}: passthrough (no compression, check grammar)");
+            println!("[java] java/{name}: passthrough (no compression, check grammar)");
         }
     }
 
@@ -587,13 +587,13 @@ fn test_td011_java_grammar_quality_corpus() {
     };
 
     println!(
-        "[TD-011] Java corpus: {}/{} snippets extracted, {:.1}% overall compression",
+        "[java] Java corpus: {}/{} snippets extracted, {:.1}% overall compression",
         extracted,
         corpus.len(),
         total_ratio * 100.0
     );
 
-    // TD-011 quality gate: at least 6/8 snippets must produce a compressed skeleton
+    // Quality gate: at least 6/8 snippets must produce a compressed skeleton
     assert!(
         extracted >= 6,
         "Java grammar quality gate: expected >= 6/8 snippets to compress, got {}/8. \

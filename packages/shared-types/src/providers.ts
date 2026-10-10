@@ -1,5 +1,5 @@
 /**
- * Multi-provider credential registry (LLD #67, multi-provider key wizard).
+ * Multi-provider credential registry (multi-provider key wizard).
  *
  * `services/control-plane/src/routes/providerCredentials.ts` originally
  * hardcoded exactly 3 providers (anthropic/openai/gemini), each a single
@@ -156,7 +156,7 @@ export const PROVIDER_REGISTRY: ProviderDefinition[] = [
     routingLive: true,
   },
   {
-    // TD-370: the proxy routes DEEPSEEK_API_MODEL_IDS here, reading this blob
+    // The proxy routes DEEPSEEK_API_MODEL_IDS here, reading this blob
     // (`deepseek_config`) the same way it reads Mistral's and OpenRouter's.
     id: 'deepseek',
     displayName: 'DeepSeek',
@@ -182,8 +182,8 @@ export function isKnownProviderId(id: string): boolean {
 }
 
 /**
- * DeepSeek's own API model ids — the only names the proxy routes to DeepSeek
- * (TD-370), matched exactly and case-insensitively. Mirrors
+ * DeepSeek's own API model ids — the only names the proxy routes to DeepSeek,
+ * matched exactly and case-insensitively. Mirrors
  * `DEEPSEEK_API_MODELS` in `packages/proxy/src/proxy.rs`; the parity test
  * compares the two lists. Not a prefix: `deepseek-r1`,
  * `deepseek-coder-v2-instruct` and other open-weight names are served by
@@ -198,7 +198,7 @@ export const DEEPSEEK_API_MODEL_IDS = ['deepseek-chat', 'deepseek-reasoner', 'de
  * `packages/proxy/src/proxy.rs` — the proxy's routing decision is the ground
  * truth, and this exists so the control plane / dashboard can predict it
  * (e.g. the BYO judge model "Test" flow fast-failing on an unprovisioned
- * provider before making a real call, LLD #70). A parity unit test pins this
+ * provider before making a real call). A parity unit test pins this
  * against the Rust source; if the heuristic changes there, change it here in
  * the same commit.
  *

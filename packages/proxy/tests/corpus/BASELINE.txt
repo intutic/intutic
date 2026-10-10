@@ -17,7 +17,7 @@ WHAT `measured` MEANS
                       detector — PromptInjectionDetector returns None the moment
                       its findings list is empty, so it is a pass-through.
   external-tooldesc   measured against 10,753 real tool and parameter descriptions
-                      from 14 BFCL v3 splits. This is the corpus TD-274 was held
+                      from 14 BFCL v3 splits. This is the corpus the tool-poisoning gap was held
                       open for, on the claim that no public set of them existed.
                       Recall is NOT measured — there is no vendored corpus of real
                       poisoned descriptions, so no detection rate is claimed.

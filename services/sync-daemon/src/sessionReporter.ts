@@ -10,7 +10,7 @@
  * harness is first detected, and again whenever the repository, branch or
  * HEAD commit changes.
  *
- * WHICH row it reports them onto (TD-231, Wave 5.6): when a local proxy is
+ * WHICH row it reports them onto (Wave 5.6): when a local proxy is
  * reachable, the caller passes that process's `proxyInstanceId` and the
  * control plane puts the context on the proxy's OWN row — the
  * `ssp_<ws>_<harness>_<instance>` session it derives for that process's

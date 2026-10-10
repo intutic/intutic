@@ -1,7 +1,6 @@
 /**
  * SHA-256 hashing utilities.
  *
- * LLD #8 — Sync Daemon / CLI
  * @module
  */
 

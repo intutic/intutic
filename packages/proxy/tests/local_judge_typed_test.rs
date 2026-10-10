@@ -1,6 +1,6 @@
 //! End-to-end: `judge_local::local_judge` reads its typed-stage config from
-//! the environment and wires the free-text judge in behind it (LLD #72
-//! Phase 4). The cascade's own branches are unit-tested in `judge_local.rs`
+//! the environment and wires the free-text judge in behind it. The
+//! cascade's own branches are unit-tested in `judge_local.rs`
 //! with injected config; this file checks the env wiring against one
 //! wiremock LiteLLM that answers both kinds of request.
 //!

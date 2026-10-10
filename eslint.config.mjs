@@ -19,15 +19,15 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       // Off globally because the CLI writes to stdout by design and the
-      // daemon/db packages have not been swept yet — see TD-297. Where a
+      // daemon/db packages have not been swept yet. Where a
       // package claims a zero, the zero is enforced by an override below
       // rather than by the claim.
       'no-console': 'off',
     },
   },
   {
-    // TD-045/TD-046 asserted "0 console.* calls remain in control plane" and
-    // closed. Twenty-one had accumulated by the time anyone looked, because
+    // An earlier cleanup asserted "0 console.* calls remain in control plane"
+    // and closed. Twenty-one had accumulated by the time anyone looked, because
     // nothing held the invariant: this rule was off, and — more to the point —
     // `services/control-plane` had no `lint` script at all, so `turbo lint`
     // never opened one of its files. Both halves are fixed; either alone would

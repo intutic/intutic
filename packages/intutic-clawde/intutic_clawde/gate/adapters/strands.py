@@ -64,7 +64,7 @@ hook registry, a Strands hook lives on one ``Agent``'s ``HookRegistry`` —
 pass ``hooks=[IntuticHookProvider()]`` at construction or call
 ``install(agent)`` on an existing one, PER agent.
 
-**Multi-agent ``Graph``/``Swarm`` — ``install_multiagent()`` (TD-423).** Each
+**Multi-agent ``Graph``/``Swarm`` — ``install_multiagent()``.** Each
 node of a ``strands.multiagent`` orchestrator wraps its own executor
 (``Graph.nodes[id].executor`` is an ``AgentBase`` or a nested
 ``MultiAgentBase``; ``Swarm.nodes[id].executor`` is an ``Agent`` —
@@ -91,9 +91,9 @@ already approved. The callback therefore registers late
 (``HookOrder.SDK_LAST - 1 = 99``, after user-default hooks at 0 and the
 interventions system at 90) so it judges the final mutated ``tool_use`` —
 but a hook registered at order >= 99 could still mutate afterwards; Strands
-offers no "always last" guarantee. See TD-421.
+offers no "always last" guarantee.
 
-**``BidiAgent`` is covered by the same hook (TD-422).** Since strands-agents
+**``BidiAgent`` is covered by the same hook.** Since strands-agents
 1.55.0 the shared ``ToolExecutor._stream`` (``strands/tools/executors/
 _executor.py``, typed ``agent: "Agent | BidiAgent"``) fires the stable
 ``BeforeToolCallEvent`` for both agent kinds and honours ``cancel_tool``
@@ -183,7 +183,7 @@ class IntuticHookProvider:
         _require_strands("IntuticHookProvider")
         self._gate = gate
         # Late by default so the gate judges the FINAL tool_use after other
-        # hooks' mutations — see the module doc's ordering note (TD-421).
+        # hooks' mutations — see the module doc's ordering note.
         self._order: float = order if order is not None else HookOrder.SDK_LAST - 1
 
     def register_hooks(self, registry: "HookRegistry", **kwargs: Any) -> None:  # type: ignore[valid-type]

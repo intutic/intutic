@@ -11,7 +11,7 @@
  * adapter's own `beforeToolCall` function against a `FakeGate`, matching
  * `wrapTools.test.ts`'s style.
  *
- * TD-381 closer: the "real @mastra/core Agent.generate() integration" block
+ * The "real @mastra/core Agent.generate() integration" block
  * below drives the REAL `Agent.generate()` — @mastra/core's actual dispatch
  * loop, not a mocked-out one — with a stub `LanguageModelV4`
  * (`MockLanguageModelV4` from `ai/test`, also a real devDependency) that
@@ -132,8 +132,8 @@ describe('intuticHooks: no gate configured', () => {
 // REAL @mastra/core Agent.generate() integration — no API key, no network:
 // a stub LanguageModelV4 (MockLanguageModelV4 from `ai/test`) replays canned
 // responses and @mastra/core's actual Agent/tool-dispatch machinery does
-// everything else (tool resolution, hook wrapping, tool execution). Closes
-// TD-381's "what would close this" gap for the Mastra half.
+// everything else (tool resolution, hook wrapping, tool execution), so the
+// Mastra adapter is verified by a real agent run, not only structural typing.
 // ------------------------------------------------------------------------
 
 const USAGE = {

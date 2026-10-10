@@ -5,7 +5,7 @@
  * shaped directory, evaluated through the real `worker_threads` worker.
  *
  * Two purpose-built fixtures exercise paths no shipped rule needs to:
- * `infinite-loop` (stopped by the instruction budget, TD-440) and `math-random` (the
+ * `infinite-loop` (stopped by the instruction budget) and `math-random` (the
  * import-validation-at-load-time rejection — `Math.random()` compiles to
  * `env.seed`, outside the frozen 4-import set).
  *
@@ -148,7 +148,7 @@ describe('WasmRunner + real wasm-sdk drop-in rules', () => {
   }, 120_000)
 })
 
-describe('WasmRunner + read_referenced_file (TD-441) and the memory ceiling (TD-440)', () => {
+describe('WasmRunner + read_referenced_file and the memory ceiling', () => {
   // A rule that asks for the manifest the command names and blocks on a marker.
   const MANIFEST_RULE = [
     '@external("env", "read_referenced_file")',

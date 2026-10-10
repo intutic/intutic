@@ -1,5 +1,5 @@
 /**
- * Guardrail renderers and their parsers (LLD #71).
+ * Guardrail renderers and their parsers.
  *
  * Two artifacts come out of the IR, and both are read by code this package
  * does not own:

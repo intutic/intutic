@@ -74,7 +74,7 @@ to a pre-exec check everywhere else in this codebase). Governing the
 generated code text closes the CodeAgent gap that plain `guard_tools()`
 cannot reach at all (there are no discrete tool calls to wrap in `CodeAgent`
 mode); it does not make `CodeAgent` as tightly governed as `ToolCallingAgent`,
-where every argument to every call is inspected individually. See TD-377.
+where every argument to every call is inspected individually.
 
 `intutic_step_callback` is a smaller, deliberately optional addition. Gate
 enforcement and the real audit trail (`tool_blocked`/`tool_allowed` via hook

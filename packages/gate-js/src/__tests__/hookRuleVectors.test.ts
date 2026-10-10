@@ -1,5 +1,5 @@
 /**
- * The SDK gate is the fourth matcher a generated hook rule reaches (LLD #71):
+ * The SDK gate is the fourth matcher a generated hook rule reaches:
  * the control plane's `matchSopRule`, the MCP proxy's `PolicyClient.matchRule`
  * and the emitted harness gates already run the shared vector file; this runs
  * it through the gate-js rule parser and matcher, over the same serialisation

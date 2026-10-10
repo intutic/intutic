@@ -30,7 +30,6 @@
  *   reports as `antigravity`, so liveness, the AI inventory and SIEM can tell
  *   the two products apart (gateIdentity.ts in @intutic/shared-types).
  *
- * LLD #14 — Phase 3 cross-harness defence (Gap 3)
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
  * HLD §3.x  — Gemini CLI / Antigravity harness
  *

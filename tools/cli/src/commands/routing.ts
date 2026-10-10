@@ -9,7 +9,7 @@
  * of Phase 7a's mirror-tested comparison pairs
  * (`packages/proxy/src/routing/mirror.rs`, `mirrorAdoptionService.ts`). This
  * is a REPORTED signal for a human to read before deciding whether to adopt
- * a candidate model — see docs/TECH_DEBT.md TD-352: it supersedes, not
+ * a candidate model — it supersedes, not
  * fulfills, the older C6/C7 automatic-enforcement design. Nothing this
  * command prints changes routing.
  *

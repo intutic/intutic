@@ -1,5 +1,5 @@
-// First coverage TrajectoryBuffer.toSummary has ever had — added with TD-207,
-// whose fix changed exactly what this math consumes.
+// First coverage TrajectoryBuffer.toSummary has ever had — added with the
+// fix that changed exactly what this math consumes.
 //
 // Background: the proxy's trace:live events carried `toolName: <task type>`,
 // so every summary metric built on "tools" was actually built on a
@@ -49,7 +49,7 @@ describe('TrajectoryBuffer.toSummary', () => {
   })
 
   it('falls back to the legacy field only when NO event carries a tools array', () => {
-    // An old proxy: no event has `tools`. The pre-TD-207 behaviour is the
+    // An old proxy: no event has `tools`. The pre-fix behaviour is the
     // best available, and must not silently change under an old fleet.
     const buf = new TrajectoryBuffer('ses_t', 'ws_t')
     buf.push(event({ toolName: 'coding' }))

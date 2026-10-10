@@ -12,7 +12,7 @@ CrewAI tool.
 latest published release at the time this adapter was built; the TypeScript
 twin, `@intutic/gate/managed-agents`, was checked against
 ``@anthropic-ai/sdk@0.117.1`` — its latest) was downloaded and its shipped
-source read directly. Re-read against ``anthropic==1.11.0`` (TD-429 bump;
+source read directly. Re-read against ``anthropic==1.11.0`` (after the 1.x bump;
 the 1.x line keeps every ``beta.sessions`` name this module and its tests
 use) — see "1.x additions" below:
 
@@ -109,8 +109,7 @@ never runs. The correct pattern is to gate the underlying function BEFORE
     def read_internal_doc(doc_id: str) -> str:
         ...
 
-Decorator order matters: ``@guard`` must be the one closest to ``def``. See
-TD-427.
+Decorator order matters: ``@guard`` must be the one closest to ``def``.
 
 ## What this module does NOT cover at all — the sandbox tool BODY
 
@@ -392,7 +391,7 @@ class IntuticSessionConfirmer:
     ) -> Iterator[Dict[str, Any]]:
         """Catch up on anything already pending, then follow the live event
         stream, yielding each confirmation as it is sent, reconnecting when
-        the stream drops (TD-428).
+        the stream drops.
 
         Modelled on ``anthropic.lib.tools.SessionToolRunner``'s stream loop:
         open the stream first, then reconcile with ``poll()``; on end or

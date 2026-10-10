@@ -4,7 +4,7 @@
 # pinned SHA. Prints a summary and optionally bumps pins interactively.
 #
 # This is a REVIEW TOOL, not an auto-updater. Humans must review and approve
-# each SHA bump. See tech debt TD-005.
+# each SHA bump.
 #
 # Cadence: run quarterly (every ~3 months).
 #

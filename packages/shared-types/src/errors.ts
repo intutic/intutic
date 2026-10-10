@@ -105,7 +105,7 @@ export const E_DOMAIN_NOT_VERIFIED = 'DOMAIN_NOT_VERIFIED' as const
 /** Generic validation failure (legacy alias). */
 export const E_VALIDATION = 'E_VALIDATION' as const
 
-// ─── Identity Federation Error Codes (LLD #11) ─────────────────────
+// ─── Identity Federation Error Codes ─────────────────────
 
 /** SSO is not configured or disabled for this workspace. */
 export const E_SSO_DISABLED = 'SSO_DISABLED' as const
@@ -143,7 +143,7 @@ export const E_FEATURE_NOT_AVAILABLE = 'FEATURE_NOT_AVAILABLE' as const
  */
 export const E_SSL_NOT_ENFORCED = 'SSL_NOT_ENFORCED' as const
 
-// ─── WS4 — Enterprise Identity & Compliance (LLD #19) ───────────────
+// ─── WS4 — Enterprise Identity & Compliance ───────────────
 
 /**
  * Requested child capabilities are not a subset of the parent key's capabilities.
@@ -151,7 +151,7 @@ export const E_SSL_NOT_ENFORCED = 'SSL_NOT_ENFORCED' as const
  */
 export const E_ATTENUATION_CAP_VIOLATION = 'ATTENUATION_CAP_VIOLATION' as const
 
-// ─── WS5 — Monetization & Financial Ledger (LLD #20) ────────────────
+// ─── WS5 — Monetization & Financial Ledger ────────────────
 
 /**
  * Daily spend cap exceeded with hard enforcement mode active.
@@ -196,7 +196,7 @@ export type IntuticErrorCode =
   | typeof E_TOKEN_EXPIRED
   | typeof E_ALREADY_VERIFIED
   | typeof E_VALIDATION
-  // Identity Federation (LLD #11)
+  // Identity Federation
   | typeof E_SSO_DISABLED
   | typeof E_SSO_NO_MEMBERSHIP
   | typeof E_OIDC_INVALID_STATE
@@ -207,9 +207,9 @@ export type IntuticErrorCode =
   | typeof E_OFFBOARDING_IN_PROGRESS
   | typeof E_FEATURE_NOT_AVAILABLE
   | typeof E_SSL_NOT_ENFORCED
-  // WS4 — Enterprise Identity & Compliance (LLD #19)
+  // WS4 — Enterprise Identity & Compliance
   | typeof E_ATTENUATION_CAP_VIOLATION
-  // WS5 — Monetization & Financial Ledger (LLD #20)
+  // WS5 — Monetization & Financial Ledger
   | typeof E_OVERAGE_HARD_CAP_EXCEEDED
 
 // ─── Error Class ─────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 /**
- * The shared session window (Wave 5.3, TD-437): two proxy processes of one
+ * The shared session window (Wave 5.3): two proxy processes of one
  * harness session — modelled here as two `SessionState`s with the same scope
  * and separate stores — see each other's calls, share a reask ladder, and
  * fall back to their own window the moment Valkey is not there.
@@ -100,7 +100,7 @@ describe('ValkeySessionStore (shared across sibling processes)', () => {
       const A = new SessionState({ scope, store: a })
       const B = new SessionState({ scope, store: b })
       // read/write alternating across two processes: neither alone ever
-      // sees a cycle, which is exactly the blindness TD-437 recorded.
+      // sees a cycle, which is exactly the blindness of a per-process window.
       for (let i = 0; i < 3; i++) {
         A.recordCall('read')
         await A.flush()
