@@ -311,6 +311,18 @@ export interface ProviderCredentialStatus {
   updatedAt: string | null
 }
 
+/**
+ * The models a provider credential can reach, as the provider listed them
+ * when the stored key was last checked. `models` and `checkedAt` are `null`
+ * until a check has recorded a list (and stay so for providers that have no
+ * list, such as Azure OpenAI, whose list names base models, not deployments).
+ */
+export interface ProviderModelList {
+  provider: string
+  models: string[] | null
+  checkedAt: string | null
+}
+
 // ─── Operator API types: the rest of the CLI's control-plane surface ───
 //
 // Wire shapes, as the control plane sends them: camelCase except where the

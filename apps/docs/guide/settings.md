@@ -144,7 +144,20 @@ providers' models as `bedrock/<model id>`, `vertex/<model>` and `azure/<deployme
 A saved credential is checked against the provider straight away, and the card says what came back:
 verified, rejected (check the values and save again), or not verified when the provider could not
 be reached or the check cannot prove it. **Test** repeats the check for a provisioned credential, and
-`intutic credentials set` prints the same result. AWS Bedrock and Google Vertex AI are checked by a
+`intutic credentials set` prints the same result.
+
+Where the check is the provider's own list of models — Anthropic, OpenAI, Gemini, Mistral,
+OpenRouter, DeepSeek, Cohere and Ollama — a verified key's list is kept, and the card's **Models
+this key can reach** column shows it with when it was checked. Smart routing leaves out a
+candidate the key does not list. Replacing or removing the key, or a check the provider rejects,
+clears the list until the next successful check. Azure OpenAI lists base models rather than the
+deployments requests name, and Bedrock and Vertex AI checks prove identity, so those keep no list.
+The same list from the CLI or the API:
+
+```bash
+intutic credentials models anthropic
+# GET /api/v1/workspace/provider-credentials/anthropic/models
+``` AWS Bedrock and Google Vertex AI are checked by a
 signed AWS call or a Google token request, which prove the credential but not the model permissions
 the first request uses.
 
@@ -183,9 +196,9 @@ reaches a provider. An absent list and an explicitly empty list are treated iden
 "unrestricted" — there is no difference between never configuring this and configuring it with
 zero entries.
 
-See [Intelligent Model Routing](/guide/intelligent-routing) — when routing is enabled, the models
-it can actually pick from are the intersection of your `candidate_models` configuration and this
-allowlist, not either list alone.
+See [Intelligent Model Routing](/guide/intelligent-routing#which-models-a-request-can-be-routed-to) — when
+routing is enabled, it never picks a model this allowlist or the key's own list refuses, whatever
+the candidate list says.
 
 A single API key can be scoped below the workspace list: the **Allowed models (optional)** field
 under [Virtual API Keys](#virtual-api-keys) takes one model id per line, and the proxy enforces the *intersection*
@@ -287,9 +300,11 @@ Entries are per workspace and expire after 24 hours.
 
 The cache figures are **Cached answers**, **Cache hit rate** (exact and similar hits) and **Saved (USD)**.
 
-**Intelligent Model Routing**
+**Intelligent Model Routing** (experimental)
 
-*   **Enable Intelligent Model Routing** — chooses a model for every task with adaptive reinforcement learning. See [Intelligent Model Routing](/guide/intelligent-routing).
+*   **Enable Intelligent Model Routing** — lets the proxy choose among the candidate models for a request whose model is one of them, learning from each outcome (`ff_bandit_routing`). Off by default. See [Intelligent Model Routing](/guide/intelligent-routing).
+*   **Shadow Routing** — runs the same selection and records the model it would have picked, while every request is served with the model it asked for (`ff_shadow_routing`). The safe way to see what routing would do before turning it on.
+*   **Candidate Models** — the models the router may choose between for this workspace, one id per line, at most 16, saved with **Save Candidate Models** (`routingCandidates`). Empty uses the proxy's configured pool. Each request still only chooses among the candidates it can reach: see [Which models a request can be routed to](/guide/intelligent-routing#which-models-a-request-can-be-routed-to).
 *   **Configurable Task Trigger Words** — the comma-separated keywords the proxy uses to classify a prompt as testing, deployment, review or debugging; one field per task type, saved with **Save Keywords**.
 
 The router figures are:

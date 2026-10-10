@@ -179,6 +179,12 @@ export interface WorkspaceSettings {
   /** Feature flags for platform capabilities (Phase 5+) */
   featureFlags?: {
     ff_bandit_routing?: boolean
+    /**
+     * Run the router and record the model it would have picked, while every
+     * request is still served with the model it asked for. Read by the proxy
+     * from `workspace:feature_flags:{ws}`; the cost posture presets set it.
+     */
+    ff_shadow_routing?: boolean
     ff_response_cache_exact?: boolean
     ff_response_cache_semantic?: boolean
     /** Phase 5 — MetaClaw prompt evolution engine (Enterprise only) */
@@ -364,6 +370,17 @@ export interface WorkspaceSettings {
    * must not start refusing completions because a default changed.
    */
   allowedModels?: string[]
+
+  /**
+   * The models smart routing may choose between for this workspace.
+   * Distributed to the proxy under `workspace:routing_candidates:{workspaceId}`
+   * (same pattern as `allowedModels` above). Absent or empty means the proxy's
+   * own configured pool. Either way the proxy narrows the pool further to the
+   * models this workspace can actually reach: a provider it holds a
+   * credential for, the `allowedModels` allowlist, and the models a verified
+   * credential's provider listed.
+   */
+  routingCandidates?: string[]
 
   /**
    * Additive MCP server allowlist: server names the MCP governance proxy

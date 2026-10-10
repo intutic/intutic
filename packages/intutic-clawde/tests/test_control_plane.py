@@ -411,6 +411,17 @@ def test_url_encodes_path_segments(mock_request):
 
 
 @patch("requests.request")
+def test_list_provider_models_url_encodes_the_provider(mock_request):
+    mock_request.return_value = _mock_response()
+    client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")
+    client.list_provider_models("a b/c")
+
+    args, _ = mock_request.call_args
+    assert args[0] == "GET"
+    assert args[1] == "https://cp.example.com/api/v1/workspace/provider-credentials/a%20b%2Fc/models"
+
+
+@patch("requests.request")
 def test_raises_connection_error_on_non_2xx(mock_request):
     mock_request.return_value = _mock_response(status_code=403, text="Forbidden")
     client = ControlPlaneClient(api_key="vk_test", base_url="https://cp.example.com")

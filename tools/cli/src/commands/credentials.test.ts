@@ -15,7 +15,7 @@ vi.mock('../config/paths.js', () => ({
   resolveControlPlaneUrl: vi.fn(() => 'https://api.test.invalid'),
 }))
 
-import { runCredentialsList, runCredentialsSet, runCredentialsUnset } from './credentials.js'
+import { runCredentialsList, runCredentialsModels, runCredentialsSet, runCredentialsUnset } from './credentials.js'
 
 describe('intutic credentials', () => {
   let fetchMock: ReturnType<typeof vi.fn>
@@ -194,6 +194,87 @@ describe('intutic credentials', () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('https://api.test.invalid/api/v1/workspace/provider-credentials/anthropic')
     expect(init.method).toBe('DELETE')
+  })
+
+  it('set says how many models the verified key can reach and where to list them', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ provider: 'openai', routingLive: true, provisioned: true, lastFour: 'wxyz', updatedAt: '2026-10-10T00:00:00Z' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ provider: 'openai', status: 'valid', httpStatus: 200, detail: 'OpenAI accepted the credential', models: ['gpt-4.1', 'gpt-4.1-mini', 'o3'] }),
+      })
+
+    await runCredentialsSet('openai', { field: ['apiKey=openai-test-wxyz'] })
+
+    const printed = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+    expect(printed).toContain('3 models')
+    expect(printed).toContain('intutic credentials models openai')
+  })
+
+  it('set prints no model count when the verify answer lists none', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ provider: 'azure_openai', routingLive: true, provisioned: true, lastFour: 'wxyz', updatedAt: '2026-10-10T00:00:00Z' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ provider: 'azure_openai', status: 'valid', httpStatus: 200, detail: 'Azure OpenAI accepted the credential' }),
+      })
+
+    await runCredentialsSet('azure_openai', { field: ['apiKey=azure-test-wxyz', 'endpoint=https://foo.openai.azure.com'] })
+
+    const printed = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+    expect(printed).not.toContain('credentials models')
+  })
+
+  it('models hits GET .../provider-credentials/:provider/models and prints each model and when it was checked', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ provider: 'anthropic', models: ['claude-haiku-4-5', 'claude-sonnet-5-5'], checkedAt: '2026-10-10T09:30:00Z' }),
+    })
+
+    await runCredentialsModels('anthropic', {})
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.test.invalid/api/v1/workspace/provider-credentials/anthropic/models')
+    expect(init.method).toBe('GET')
+    const printed = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+    expect(printed).toContain('claude-haiku-4-5')
+    expect(printed).toContain('claude-sonnet-5-5')
+    expect(printed).toContain('2026-10-10T09:30:00Z')
+  })
+
+  it('models says none are discovered yet, and how to record them, when the list is null', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ provider: 'mistral', models: null, checkedAt: null }),
+    })
+
+    await runCredentialsModels('mistral', {})
+
+    const printed = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+    expect(printed).toMatch(/no models discovered/i)
+    expect(printed).toContain('intutic credentials set mistral')
+  })
+
+  it('models --json prints the response as returned', async () => {
+    const body = { provider: 'gemini', models: ['gemini-2.5-pro'], checkedAt: '2026-10-10T09:30:00Z' }
+    fetchMock.mockResolvedValue({ ok: true, json: async () => body })
+
+    await runCredentialsModels('gemini', { json: true })
+
+    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual(body)
+  })
+
+  it('models refuses an unknown provider before any request is sent', async () => {
+    await expect(runCredentialsModels('not-a-real-provider', {})).rejects.toThrow('process.exit(1)')
+    expect(fetchMock).not.toHaveBeenCalled()
+    const printed = errSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+    expect(printed).toContain('Unknown provider "not-a-real-provider"')
   })
 
   it('exits non-zero and reports the failure on a non-2xx response', async () => {

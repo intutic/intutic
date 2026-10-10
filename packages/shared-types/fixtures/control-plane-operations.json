@@ -815,6 +815,39 @@
       "returns": null
     },
     {
+      "ts": "listProviderModels",
+      "py": "list_provider_models",
+      "cli": "credentials models",
+      "args": [
+        "anthropic"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspace/provider-credentials/anthropic/models"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "provider": "anthropic",
+          "models": [
+            "claude-haiku-4-5",
+            "claude-opus-4-1",
+            "claude-sonnet-5-5"
+          ],
+          "checkedAt": "2026-10-10T09:30:00.000Z"
+        }
+      },
+      "returns": {
+        "provider": "anthropic",
+        "models": [
+          "claude-haiku-4-5",
+          "claude-opus-4-1",
+          "claude-sonnet-5-5"
+        ],
+        "checkedAt": "2026-10-10T09:30:00.000Z"
+      }
+    },
+    {
       "ts": "listMcpServers",
       "py": "list_mcp_servers",
       "cli": "mcp list",

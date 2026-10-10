@@ -9,7 +9,7 @@
 //! and skip when Valkey is absent.
 
 use intutic_proxy::config::{RewardConfig, RoutingConfig};
-use intutic_proxy::routing::bandit::route_model;
+use intutic_proxy::routing::bandit::{route_model, CandidatePool};
 use intutic_proxy::routing::reward::{apply_update, RewardEngine, RewardSignals};
 use intutic_proxy::store::valkey::sha256_hex;
 use intutic_proxy::store::{
@@ -235,6 +235,10 @@ async fn twenty_rewards_exit_cold_start_and_enable_sampling() {
             "gpt-4o".to_string(),
             "gemini-2.0-flash".to_string(),
         ];
+        let pool = CandidatePool {
+            requested_arm: "gpt-4o".to_string(),
+            arms: candidates.clone(),
+        };
         let decision = route_model(
             &store,
             &cp,
@@ -242,7 +246,7 @@ async fn twenty_rewards_exit_cold_start_and_enable_sampling() {
             &scope,
             "gpt-4o",
             "write a function to add two numbers",
-            &candidates,
+            Some(&pool),
             &RoutingConfig::default(),
         )
         .await

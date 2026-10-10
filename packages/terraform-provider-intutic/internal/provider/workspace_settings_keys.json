@@ -33,6 +33,7 @@
     "piiDetectors",
     "reviewHoldBypassEnabled",
     "reviewHoldBypassTtlMinutes",
+    "routingCandidates",
     "sandboxRequirement",
     "securityProbeSampleRate",
     "semanticSkillAnalysisEnabled",

@@ -1020,6 +1020,26 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// never become the accidental behavior of a Valkey read glitch either.
     async fn allowed_models(&self, workspace_id: &str) -> Option<Vec<String>>;
 
+    /// The workspace's own smart-routing candidates, read from
+    /// `workspace:routing_candidates:{workspace_id}` (the `routingCandidates`
+    /// workspace setting). `None` — no control plane, an unset key, a read
+    /// failure — means this proxy's `routing.candidate_models` applies, so a
+    /// Valkey blip falls back to the operator's pool rather than to no routing
+    /// or to a pool nobody chose. Defaults to `None` for caches that never
+    /// learned the key.
+    async fn routing_candidates(&self, _workspace_id: &str) -> Option<Vec<String>> {
+        None
+    }
+
+    /// The model ids the workspace's stored `provider` credential was seen to
+    /// list when it was last verified — `workspace:provider_models:{ws}`, field
+    /// `provider` (a provider registry id: `anthropic`, `openai`, `gemini`, …).
+    /// `None` when nothing was discovered, which the router reads as "no
+    /// evidence either way", never as "reaches nothing".
+    async fn provider_models(&self, _workspace_id: &str, _provider: &str) -> Option<Vec<String>> {
+        None
+    }
+
     /// `None` when no control plane manages this workspace. Fails open — a
     /// read error or timeout is indistinguishable from absence by design, so a
     /// Valkey blip cannot strand a workspace with all features off.

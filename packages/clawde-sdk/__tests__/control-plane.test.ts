@@ -335,6 +335,13 @@ describe('ControlPlaneClient', () => {
     expect(receivedPath).toBe('/api/v1/workspace/provider-credentials/a%20b%2Fc')
   })
 
+  it('listProviderModels() URL-encodes the provider segment before /models', async () => {
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    await client.listProviderModels('a b/c')
+    expect(receivedMethod).toBe('GET')
+    expect(receivedPath).toBe('/api/v1/workspace/provider-credentials/a%20b%2Fc/models')
+  })
+
   it('raises ClawdeConnectionError with the response body text on a non-2xx status', async () => {
     respondWithStatus = 403
     respondWithBody = { error: 'Forbidden' }

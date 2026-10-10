@@ -459,8 +459,14 @@ pub struct RoutingConfig {
     #[serde(default)]
     pub enabled: Option<bool>,
 
-    /// Candidate model pool for Thompson sampling. Requests for models outside
-    /// this pool bypass the bandit entirely.
+    /// Candidate model pool for Thompson sampling. A request enters routing
+    /// only when its model is a candidate, or a dated snapshot or `-latest`
+    /// alias of one (`routing::bandit::model_line`); anything else bypasses
+    /// the bandit entirely. A workspace's own `routingCandidates` setting
+    /// replaces this list for that workspace, and either list is narrowed per
+    /// request to the models the request can reach (`proxy::routing_pool`):
+    /// a translatable wire format, the model allowlists, the spend budgets, a
+    /// credential, and the models that credential was seen to list.
     ///
     /// When `model_list` is non-empty, candidates are validated against it at
     /// config load and unmatched names are DROPPED with an error log — see
@@ -532,15 +538,17 @@ pub struct RoutingConfig {
     /// bandit would otherwise select and have the upstream 404. Neither
     /// justification applies here: this field is never selected by the bandit
     /// (`route_model` never reads it), and the mirrored call never resolves an
-    /// upstream through `model_list` at all — `mirror_plan` reuses the primary
-    /// request's already-resolved `upstream_url`/credentials verbatim and only
-    /// swaps the JSON body's `"model"` field. The whole point of this knob is
-    /// to mirror-test a model release that has *not* been onboarded to
-    /// `model_list` yet; running it through that filter would silently drop it
-    /// at startup with no visible error the moment an operator configured
-    /// exactly the thing this field exists for. A typo'd name here still fails
-    /// safely: `run_mirror` treats a non-2xx or unreachable upstream as "not
-    /// scoreable" and drops it, same as any other mirror candidate.
+    /// upstream through `model_list` at all — it is resolved like a fallback
+    /// target (`proxy::resolve_target`): the candidate's own provider, URL and
+    /// credential, and skipped, with the reason counted, when the request's
+    /// format cannot reach it as-is or the workspace has no key for it. The
+    /// whole point of this knob is to mirror-test a model release that has
+    /// *not* been onboarded to `model_list` yet; running it through that filter
+    /// would silently drop it at startup with no visible error the moment an
+    /// operator configured exactly the thing this field exists for. A typo'd
+    /// name here still fails safely: `run_mirror` treats a non-2xx or
+    /// unreachable upstream as "not scoreable" and drops it, same as any other
+    /// mirror candidate.
     ///
     /// `None` (the default) leaves mirroring exactly as before: driven only by
     /// shadow disagreement, when `mode: shadow` is active.
@@ -717,11 +725,15 @@ fn default_json_entropy_threshold() -> f64 {
 fn default_code_skeleton_min_lines() -> usize {
     10
 }
+/// One current model per first-party provider, ids as the pricing bundle and
+/// model catalog name them. An Anthropic-format request can be routed only
+/// between the Claude and Gemini entries (there is no Messages → OpenAI
+/// translation); an OpenAI-format request between all three.
 fn default_candidate_models() -> Vec<String> {
     vec![
-        "claude-3-5-sonnet".to_string(),
-        "gpt-4o".to_string(),
-        "gemini-2.0-flash".to_string(),
+        "claude-sonnet-5-5".to_string(),
+        "gpt-4.1".to_string(),
+        "gemini-3.8-flash".to_string(),
     ]
 }
 fn default_sop_pin_max_age_secs() -> u64 {
@@ -911,7 +923,7 @@ intutic_settings: {}
         assert_eq!(routing.enabled, None);
         assert_eq!(
             routing.candidate_models,
-            vec!["claude-3-5-sonnet", "gpt-4o", "gemini-2.0-flash"]
+            vec!["claude-sonnet-5-5", "gpt-4.1", "gemini-3.8-flash"]
         );
         assert!(routing.anthropic_model_override.is_none());
         assert!(routing.reward.enabled);
@@ -989,6 +1001,20 @@ intutic_settings: {}
         assert!(gate.enabled, "an unspecified field must keep its default");
         assert!(!gate.fail_closed);
         let _ = std::fs::remove_file(file_path);
+    }
+
+    /// The default pool names models the pricing bundle knows exactly, so a
+    /// default pick is priced at its own rate and is a model that exists — a
+    /// stale default (the pool once named `claude-3-5-sonnet`) is routed to
+    /// until a provider retires it.
+    #[test]
+    fn default_candidates_are_models_the_pricing_bundle_names() {
+        let bundle: serde_json::Value =
+            serde_json::from_str(include_str!("pricing/offline_bundle.json")).unwrap();
+        let models = bundle["models"].as_object().unwrap();
+        for candidate in default_candidate_models() {
+            assert!(models.contains_key(&candidate), "{candidate}");
+        }
     }
 
     /// Explicit `routing:` block round-trips; unspecified reward fields keep defaults.

@@ -325,7 +325,6 @@
     "POST /api/v1/workspace/onboarding/complete",
     "POST /api/v1/workspace/org-sops",
     "POST /api/v1/workspace/posture",
-    "POST /api/v1/workspace/provider-credentials/:provider/verify",
     "POST /api/v1/workspaces/:workspaceId/skillopt/generate",
     "POST /api/v1/workspaces/:workspaceId/skills/report",
     "POST /scim/v2/Groups",

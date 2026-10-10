@@ -6,6 +6,7 @@
  *   - `intutic credentials list [--json]`
  *   - `intutic credentials set <provider> --field key=value [--field-file key=path ...]`
  *   - `intutic credentials unset <provider>`
+ *   - `intutic credentials models <provider> [--json]`
  *
  * Server side: services/control-plane/src/routes/providerCredentials.ts.
  * `list` reports every provider in the shared registry
@@ -36,6 +37,15 @@ interface VerifyResult {
   status: 'valid' | 'invalid' | 'unknown' | 'unsupported' | 'not_provisioned'
   httpStatus?: number
   detail: string
+  /** The model ids the provider listed for this key; only on `valid`, and only for providers with a list-models probe. */
+  models?: string[]
+}
+
+/** GET /api/v1/workspace/provider-credentials/:provider/models */
+interface ProviderModelList {
+  provider: string
+  models: string[] | null
+  checkedAt: string | null
 }
 
 interface CredentialStatusRow {
@@ -44,6 +54,15 @@ interface CredentialStatusRow {
   provisioned: boolean
   lastFour: string | null
   updatedAt: string | null
+}
+
+function requireProvider(provider: string) {
+  const def = getProviderDefinition(provider)
+  if (!def) {
+    log.error(`Unknown provider "${provider}". Must be one of: ${PROVIDER_REGISTRY.map((p) => p.id).join(', ')}`)
+    process.exit(1)
+  }
+  return def
 }
 
 async function getClient(opts: CredentialsCliOpts) {
@@ -132,11 +151,7 @@ export async function runCredentialsSet(
   // that has a missing field. The server (`providerCredentials.ts`) remains
   // the authoritative validator (length bounds, etc.) — this is a faster,
   // local UX check, not a replacement for it.
-  const def = getProviderDefinition(provider)
-  if (!def) {
-    log.error(`Unknown provider "${provider}". Must be one of: ${PROVIDER_REGISTRY.map((p) => p.id).join(', ')}`)
-    process.exit(1)
-  }
+  const def = requireProvider(provider)
   const knownKeys = new Set(def.fields.map((f) => f.key))
 
   const body: Record<string, string> = {}
@@ -205,6 +220,12 @@ export async function runCredentialsSet(
     else if (verification?.status === 'invalid') {
       log.warn(`  ${verification.detail}. Check the values and run this command again.`)
     } else if (verification) log.dim(`  Not verified: ${verification.detail}`)
+    if (verification?.models) {
+      log.dim(
+        `  The key can reach ${verification.models.length} model${verification.models.length === 1 ? '' : 's'}; ` +
+          `\`intutic credentials models ${provider}\` lists them.`,
+      )
+    }
     if (def.usageHint) log.dim(`  ${def.usageHint}`)
     if (!res.routingLive) {
       log.warn(
@@ -234,6 +255,43 @@ export async function runCredentialsUnset(
     )
   } catch (err) {
     log.error(`Failed to remove ${provider} credential: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+}
+
+/** `intutic credentials models <provider>` */
+export async function runCredentialsModels(provider: string, opts: CredentialsCliOpts): Promise<void> {
+  const def = requireProvider(provider)
+  const client = await getClient(opts)
+
+  try {
+    const res = await client.get<ProviderModelList>(
+      `/api/v1/workspace/provider-credentials/${encodeURIComponent(provider)}/models`,
+    )
+
+    if (opts.json) {
+      console.log(JSON.stringify(res, null, 2))
+      return
+    }
+
+    // The list is recorded when a saved key is checked against the provider,
+    // so `null` means no check has listed models yet, not that the key
+    // reaches none.
+    if (!res.models) {
+      log.dim(`No models discovered for ${def.displayName} yet.`)
+      log.dim(
+        `  \`intutic credentials set ${provider} --field ...\` checks the key against the provider and records the models it can reach.`,
+      )
+      return
+    }
+
+    log.header(`Intutic — ${def.displayName} models`)
+    if (res.checkedAt) log.field('Checked', res.checkedAt)
+    log.field('Models', String(res.models.length))
+    console.log('')
+    for (const model of res.models) console.log(`  ${model}`)
+  } catch (err) {
+    log.error(`Failed to list ${provider} models: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
   }
 }

@@ -21,6 +21,7 @@ import type {
   GatewayConfigResult,
   GatewayResolution,
   ProviderCredentialStatus,
+  ProviderModelList,
   WorkspaceSettings,
   WorkspaceSettingsUpdateResult,
   McpServerList,
@@ -409,6 +410,11 @@ export class ControlPlaneClient {
   /** DELETE /api/v1/workspace/provider-credentials/:provider */
   public async unsetProviderCredential(provider: string): Promise<void> {
     await this.request('DELETE', `/api/v1/workspace/provider-credentials/${encodeURIComponent(provider)}`)
+  }
+
+  /** GET /api/v1/workspace/provider-credentials/:provider/models */
+  public async listProviderModels(provider: string): Promise<ProviderModelList> {
+    return this.request('GET', `/api/v1/workspace/provider-credentials/${encodeURIComponent(provider)}/models`)
   }
 
   // ─── MCP server registry (`intutic mcp`) ───

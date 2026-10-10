@@ -554,9 +554,10 @@ async fn a_stream_cut_after_it_started_is_not_retried() {
 /// Retries exhausted on the routed model: the fallback chain runs in order —
 /// a target on another wire shape is skipped, a target on another provider
 /// is called with that provider's own credential — and the session lock is
-/// left on the routed model, whose prompt cache the next turn returns to.
+/// released rather than left on a model that just failed, without moving to
+/// the fallback: the next turn re-selects.
 #[tokio::test]
-async fn exhausted_retries_fall_back_in_order_and_keep_the_session_lock() {
+async fn exhausted_retries_fall_back_in_order_and_release_the_session_lock() {
     let _guard = serial();
     let openai = MockServer::start().await;
     Mock::given(method("POST"))
@@ -626,9 +627,14 @@ intutic_settings:
 
     let session = store.session_routing(&scope).await.expect("session");
     assert_eq!(
-        session.locked_model.as_deref(),
+        session.locked_model, None,
+        "a model that failed its retries must not stay locked in, and the \
+         lock must never move to the fallback"
+    );
+    assert_eq!(
+        session.last_model.as_deref(),
         Some("gpt-primary"),
-        "a fallback must never move the session lock"
+        "the re-selection keeps the failed pick's family as its tie-break"
     );
     std::env::remove_var("MISTRAL_UPSTREAM_URL");
     std::env::remove_var("MISTRAL_API_KEY");

@@ -2589,7 +2589,7 @@ intutic credentials set azure_openai \
   --field apiKey=<API_KEY>
 ```
 
-After saving, the command checks the credential against the provider (the same check as **Test** on the Provider Keys card) and prints whether it was verified, rejected, or could not be verified; `--json` includes it as `verification`. A rejected credential is still saved.
+After saving, the command checks the credential against the provider (the same check as **Test** on the Provider Keys card) and prints whether it was verified, rejected, or could not be verified; `--json` includes it as `verification`. A rejected credential is still saved. When the provider lists the models the key can reach, the command says how many; [`intutic credentials models`](#intutic-credentials-models) lists them.
 
 Requests then name the provider's models as `bedrock/<model id>`, `vertex/<model>` or `azure/<deployment>`; see [AWS Bedrock](/integrations/aws-bedrock), [Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai).
 
@@ -2614,6 +2614,36 @@ intutic credentials unset <provider> [options]
 
 If BYO-key enforcement is on, requests for this provider are refused after this until a new
 key is provisioned.
+
+---
+
+## `intutic credentials models <provider>` <Badge type="tip" text="Cloud" />
+
+The models a provider credential can reach, as the provider listed them when the key was last
+checked.
+
+```bash
+intutic credentials models <provider> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON instead of a report (`provider`, `models`, `checkedAt`) |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+The list is recorded when a saved key is checked and the provider answers with its models, so
+it follows the key: `intutic credentials set` (or **Test** on the Provider Keys card) records it,
+and replacing, removing or failing the check on the key clears it. Until then the command says
+no models have been discovered. Azure OpenAI, AWS Bedrock and Google Vertex AI keys have no
+list: Azure lists base models rather than the deployments requests name.
+
+**Example:**
+
+```bash
+intutic credentials models anthropic
+```
 
 ---
 

@@ -1281,6 +1281,18 @@ impl ValkeyControlPlaneCache {
     }
 }
 
+/// A model list read from the control plane, trimmed, without blanks; `None`
+/// when nothing is left. An empty list means "unset" to every reader here, so
+/// it must never reach them as a list that excludes everything.
+fn non_empty_model_list(models: Vec<String>) -> Option<Vec<String>> {
+    let models: Vec<String> = models
+        .into_iter()
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .collect();
+    (!models.is_empty()).then_some(models)
+}
+
 #[async_trait]
 impl ControlPlaneCache for ValkeyControlPlaneCache {
     async fn bandit_keywords(&self, workspace_id: &str) -> Option<serde_json::Value> {
@@ -1288,6 +1300,39 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         let key = format!("workspace:bandit_keywords:{}", workspace_id);
         match tokio::time::timeout(KEYWORDS_TIMEOUT, conn.get::<_, Option<String>>(&key)).await {
             Ok(Ok(Some(s))) => serde_json::from_str(&s).ok(),
+            _ => None,
+        }
+    }
+
+    async fn routing_candidates(&self, workspace_id: &str) -> Option<Vec<String>> {
+        let mut conn = self.conn();
+        let key = format!("workspace:routing_candidates:{}", workspace_id);
+        match tokio::time::timeout(KEYWORDS_TIMEOUT, conn.get::<_, Option<String>>(&key)).await {
+            Ok(Ok(Some(s))) => serde_json::from_str::<Vec<String>>(&s)
+                .ok()
+                .and_then(non_empty_model_list),
+            _ => None,
+        }
+    }
+
+    async fn provider_models(&self, workspace_id: &str, provider: &str) -> Option<Vec<String>> {
+        let mut conn = self.conn();
+        let key = format!("workspace:provider_models:{}", workspace_id);
+        match tokio::time::timeout(
+            KEYWORDS_TIMEOUT,
+            conn.hget::<_, _, Option<String>>(&key, provider),
+        )
+        .await
+        {
+            Ok(Ok(Some(s))) => {
+                #[derive(serde::Deserialize)]
+                struct Discovered {
+                    models: Vec<String>,
+                }
+                serde_json::from_str::<Discovered>(&s)
+                    .ok()
+                    .and_then(|d| non_empty_model_list(d.models))
+            }
             _ => None,
         }
     }

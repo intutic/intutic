@@ -24,13 +24,16 @@
  * of these shapes is adding one entry, not new plumbing.
  *
  * `routingLive: true` means `packages/proxy` actually forwards requests to
- * this provider today (`fetch_provider_credential` in `proxy.rs` knows its
- * field name). `routingLive: false` means the credential can be
- * pre-provisioned here, but nothing in the proxy calls it yet — routing
- * support is separate, real per-provider engineering (a new `Provider`
- * enum variant, `get_model_provider`, pricing in `pricing.rs`), not a
- * config change. The dashboard wizard must say so, not imply the key is
- * live the moment it's saved.
+ * this provider today: it has an upstream for it (`provider_from_wire_id` in
+ * `proxy.rs`, which a proxy test holds this flag to). Gemini models are served
+ * on the Messages, Chat Completions and Responses routes, through the
+ * Gemini API translation; the proxy refuses the native `/v1beta/models/…`
+ * route, whose model is named in the URL. `routingLive: false` means the
+ * credential can be pre-provisioned here, but nothing in the proxy calls it
+ * yet — routing support is separate, real per-provider engineering (a new
+ * `Provider` enum variant, `get_model_provider`, pricing in `pricing.rs`),
+ * not a config change. The dashboard wizard must say so, not imply the key
+ * is live the moment it's saved.
  *
  * @module
  */

@@ -1176,6 +1176,77 @@
           { "file": "services/control-plane/src/lib/planSkuMap.ts", "contains": "planAllowsMemberBudgets" }
         ]
       }
+    },
+    {
+      "id": "smart-routing-candidates",
+      "title": "Smart routing chooses only among the candidates a request can reach",
+      "plan": "Open-Core",
+      "surfaces": {
+        "api": [
+          { "ref": "PUT /api/v1/workspace/settings", "badge": false, "auth": "OWNER/ADMIN" },
+          { "file": "services/control-plane/src/routes/workspace.ts", "contains": "routingCandidates: z" },
+          { "file": "services/control-plane/src/services/workspaceSettingsService.ts", "contains": "workspace:routing_candidates:" }
+        ],
+        "dashboard": [
+          { "file": "apps/dashboard/src/components/settings/RoutingCachePanel.tsx", "contains": "routingCandidates" },
+          { "file": "apps/dashboard/src/components/settings/RoutingCachePanel.tsx", "contains": "ff_shadow_routing" }
+        ],
+        "cli": [
+          { "ref": "settings set", "badge": false },
+          { "file": "tools/cli/src/commands/operatorCommands.test.ts", "contains": "routingCandidates" }
+        ],
+        "gateSdk": { "none": "gates decide tool calls; which model serves a request is the proxy's" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "updateWorkspaceSettings" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "update_workspace_settings" }
+        ],
+        "mcpTools": { "none": "model calls, not MCP calls" },
+        "kitkat": { "none": "nothing for an agent to act on; the proxy chooses the model" },
+        "terraform": ["workspace_settings.routingCandidates"],
+        "docs": [
+          "guide/intelligent-routing.md#which-models-a-request-can-be-routed-to",
+          { "ref": "guide/intelligent-routing.md#try-it-in-shadow-mode-first", "badge": false },
+          { "ref": "guide/settings.md#smart-model-routing-response-cache", "badge": false },
+          { "ref": "reference/configuration.md#model-routing-intutic-settings-routing", "badge": false }
+        ],
+        "website": { "none": "the landing page names no routing internals" },
+        "events": ["siem:execution_traces"],
+        "enforcement": [
+          { "file": "packages/proxy/src/proxy.rs", "contains": "async fn routing_pool(" },
+          { "file": "packages/proxy/src/proxy.rs", "contains": "fn wire_route(" },
+          { "file": "packages/proxy/src/routing/bandit.rs", "contains": "pub fn model_line(" },
+          { "file": "packages/proxy/tests/smart_routing_test.rs" }
+        ]
+      }
+    },
+    {
+      "id": "provider-model-discovery",
+      "title": "The models a provider key can reach, recorded when the key is checked",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [
+          "GET /api/v1/workspace/provider-credentials/:provider/models",
+          { "ref": "POST /api/v1/workspace/provider-credentials/:provider/verify", "auth": "OWNER/ADMIN" }
+        ],
+        "dashboard": [{ "file": "apps/dashboard/src/components/settings/ProviderKeyWizard.tsx", "contains": "Models this key can reach" }],
+        "cli": ["credentials models"],
+        "gateSdk": { "none": "not agent-facing" },
+        "clawdeSdk": [
+          { "file": "packages/clawde-sdk/src/control-plane.ts", "contains": "listProviderModels" },
+          { "file": "packages/intutic-clawde/intutic_clawde/control_plane.py", "contains": "list_provider_models" }
+        ],
+        "mcpTools": { "none": "not agent-facing" },
+        "kitkat": { "none": "not agent-facing" },
+        "terraform": { "none": "a read-only list a key check produces; there is nothing to manage" },
+        "docs": ["guide/settings.md#provider-keys"],
+        "website": { "none": "an operator detail the docs carry" },
+        "events": { "none": "recorded on each check; no event is raised for it" },
+        "enforcement": [
+          { "file": "packages/shared-types/src/providerVerification.ts", "contains": "export function parseProviderModels(" },
+          { "file": "services/control-plane/src/lib/providerVerify.ts", "contains": "parseProviderModels" },
+          { "file": "packages/proxy/src/proxy.rs", "contains": "async fn key_lists(" }
+        ]
+      }
     }
   ]
 }

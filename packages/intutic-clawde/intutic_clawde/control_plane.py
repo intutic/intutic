@@ -351,6 +351,15 @@ class ControlPlaneClient:
         """DELETE /api/v1/workspace/provider-credentials/:provider"""
         self._request("DELETE", f"/api/v1/workspace/provider-credentials/{_quote(provider)}")
 
+    def list_provider_models(self, provider: str) -> Dict[str, Any]:
+        """GET /api/v1/workspace/provider-credentials/:provider/models -- the
+        models the stored key can reach, as the provider listed them when the
+        key was last checked: ``{"provider", "models", "checkedAt"}``, with
+        ``models`` and ``checkedAt`` None until a check has recorded a list."""
+        return self._request(
+            "GET", f"/api/v1/workspace/provider-credentials/{_quote(provider)}/models"
+        )
+
     # ─── MCP server registry (intutic mcp) ───
 
     def list_mcp_servers(self) -> McpServerList:

@@ -134,6 +134,15 @@ describe('intutic settings', () => {
     expect(printed()).toContain('mcpDefaultPolicy updated')
   })
 
+  // The routing pool has no CLI-side schema: the server's settings schema
+  // checks its entries, so the CLI only has to send a JSON array as an array.
+  it('set sends a JSON array value as an array (the routing candidate pool)', async () => {
+    const pool = ['claude-sonnet-5-5', 'gpt-4.1']
+    fetchMock.mockReturnValue(reply(200, { updated: true, workspaceId: 'ws_test', settings: { routingCandidates: pool } }))
+    await runSettingsSet('routingCandidates', '["claude-sonnet-5-5","gpt-4.1"]', {})
+    expect(sent()).toEqual({ url: `${BASE}/api/v1/workspace/settings`, method: 'PUT', body: { routingCandidates: pool } })
+  })
+
   it('set --file sends the file, and --json prints the response', async () => {
     const file = join(scratch(), 'budgets.json')
     const budgets = { budgets: [{ id: 'gh-daily', scope: 'server', server: 'github', period: 'day', limit: 500 }] }

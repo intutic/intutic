@@ -1496,6 +1496,16 @@ credentialsCmd
     await runCredentialsUnset(provider, opts)
   })
 
+credentialsCmd
+  .command('models <provider>')
+  .description('The models a provider credential can reach, as recorded when it was last checked')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (provider, opts) => {
+    const { runCredentialsModels } = await import('./commands/credentials.js')
+    await runCredentialsModels(provider, opts)
+  })
+
 // ── DCT Token Attenuation (LLD #19 §2.1, HLD §5.6 Patent Family A) ───────
 //
 // "CLI mints, dashboard audits": this is the mint/inspect half. See

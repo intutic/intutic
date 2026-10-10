@@ -51,6 +51,7 @@ pub const EGRESS_WOULD_DENY: &str = "egress_would_deny";
 pub const POLICY_REFUSALS: &str = "policy_refusals";
 pub const UPSTREAM_RETRIES: &str = "upstream_retries";
 pub const UPSTREAM_FALLBACKS: &str = "upstream_fallbacks";
+pub const ROUTING_TARGETS_SKIPPED: &str = "routing_targets_skipped";
 
 fn meter() -> Meter {
     opentelemetry::global::meter("intutic-proxy")
@@ -97,6 +98,9 @@ static RETRIES_COUNTER: LazyLock<Counter<u64>> =
 
 static FALLBACKS_COUNTER: LazyLock<Counter<u64>> =
     LazyLock::new(|| meter().u64_counter(UPSTREAM_FALLBACKS).build());
+
+static ROUTING_SKIPS_COUNTER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| meter().u64_counter(ROUTING_TARGETS_SKIPPED).build());
 
 /// One compaction event: histograms + count, all labelled the same way.
 /// Called beside (never instead of) the `snip.compacted` tracing line —
@@ -165,6 +169,21 @@ pub fn record_upstream_fallback(served_by: Option<String>) {
     FALLBACKS_COUNTER.add(1, &labels);
 }
 
+/// One model smart routing could not use for a request: `stage` is
+/// `candidate` (left out of the request's candidate pool) or `mirror` (a
+/// mirror copy not sent), `reason` the check it failed (`wire_mismatch`,
+/// `model_not_allowed`, `budget`, `no_credential`, `not_listed`, ...). Both
+/// label sets are small and fixed.
+pub fn record_routing_skip(stage: &'static str, reason: &'static str) {
+    ROUTING_SKIPS_COUNTER.add(
+        1,
+        &[
+            KeyValue::new("stage", stage),
+            KeyValue::new("reason", reason),
+        ],
+    );
+}
+
 /// Bridges the egress atomics (`egress_policy.rs`) as observable counters.
 /// The recording sites stay untouched — the callback reads the process-
 /// lifetime cumulative values, which is exactly the observable-counter
@@ -225,6 +244,7 @@ mod tests {
         record_policy_refusal("anomaly", "reask");
         record_upstream_retries(&[]);
         record_upstream_fallback(None);
+        record_routing_skip("candidate", "no_credential");
         let _handles = register_observables();
     }
 

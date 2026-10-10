@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 410 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 411 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -1095,6 +1095,7 @@ Every route the control plane serves: 410 routes, grouped by the source file tha
 | GET | `/api/v1/workspace/provider-credentials` | Authenticated | provisioning status, every registry provider |
 | DELETE | `/api/v1/workspace/provider-credentials/:provider` | OWNER/ADMIN | de-provision |
 | PUT | `/api/v1/workspace/provider-credentials/:provider` | OWNER/ADMIN | provision/rotate |
+| GET | `/api/v1/workspace/provider-credentials/:provider/models` | Authenticated | the models the provider listed the last time the credential verified as valid |
 | POST | `/api/v1/workspace/provider-credentials/:provider/verify` | OWNER/ADMIN | test the stored credential against the provider's own API |
 
 ### `providerIncidents.ts` <Badge type="tip" text="Cloud" />
@@ -1446,4 +1447,4 @@ The Intutic proxy (default port `4000`, set by `PORT`) serves these besides the 
 | GET | `/intutic/probes` | Loopback | The last scheduled guard self-test: `{ probes, total, failed, ran_at }`; `503` before the first run finishes |
 | POST | `/intutic/attest-sandbox` | The request's `Authorization` bearer, an Intutic key (`vk_…`) | Called from inside an `intutic exec --sandbox` container, whose firewall lets it reach only the proxy. Forwards `{ "sessionId": "…" }` to the control plane's `PATCH /api/v1/sessions/:sessionId/attest-sandbox` and answers `{ attested }`. `400` without `sessionId`, `401` without a bearer or with one that is not an Intutic key, `503` when no control plane is configured, `502` when it cannot be reached |
 
-`/v1beta/models/:model` (Gemini) is routed but not translated, so Gemini requests do not work through the proxy yet.
+`/v1beta/models/:model` (Gemini's own route) is refused with `400 unsupported_route`: the proxy reads a request's model from its body, and this route names it in the URL. Gemini models are served on `/v1/messages`, `/v1/chat/completions` and `/v1/responses`, translated to the Gemini API.

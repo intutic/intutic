@@ -273,6 +273,7 @@ In Python both signature checks need the `cryptography` package: `pip install 'i
 |  | `listProviderCredentials` | `list_provider_credentials` | `GET /api/v1/workspace/provider-credentials` | `intutic credentials list` |
 |  | `setProviderCredential` | `set_provider_credential` | `PUT /api/v1/workspace/provider-credentials/:provider` | `intutic credentials set` |
 |  | `unsetProviderCredential` | `unset_provider_credential` | `DELETE /api/v1/workspace/provider-credentials/:provider` | `intutic credentials unset` |
+|  | `listProviderModels` | `list_provider_models` | `GET /api/v1/workspace/provider-credentials/:provider/models` | `intutic credentials models` |
 | MCP server registry | `listMcpServers` | `list_mcp_servers` | `GET /api/v1/mcp/servers` | `intutic mcp list` |
 |  | `approveMcpServer` | `approve_mcp_server` | `POST /api/v1/mcp/servers/:serverId/status` | `intutic mcp approve` |
 |  | `blockMcpServer` | `block_mcp_server` | `POST /api/v1/mcp/servers/:serverId/status` | `intutic mcp block` |
@@ -391,6 +392,8 @@ await cp.setProviderCredential('azure_openai', { endpoint: 'https://my-resource.
 ```
 
 A chat call then names the model with the provider's prefix — `bedrock/anthropic.claude-opus-4-7`, `vertex/gemini-2.5-pro`, `azure/<deployment>` — through `ClawdeClient` unchanged. See [AWS Bedrock](/integrations/aws-bedrock), [Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai).
+
+`listProviderModels` (`list_provider_models`) returns `{ provider, models, checkedAt }`: the model ids the stored key can reach, as the provider listed them when the key was last checked. Both are `null` until a check has recorded a list, and stay `null` for Azure OpenAI, AWS Bedrock and Google Vertex AI, which have none.
 
 `getGatewayStatus` (`get_gateway_status`) reports `appliedConfigVersion`, the config version the gateway said it runs in its last heartbeat (`null` when it is unreachable or has not reported one), beside `desiredConfigVersion`, the version the latest config change produced. `getGatewayConfig` (`get_gateway_config`) returns the flags set on the gateway and that version, readable by any member of the gateway's org.
 

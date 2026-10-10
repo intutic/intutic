@@ -37,6 +37,7 @@ The proxy exports a small, deliberate instrument set (`packages/proxy/src/metric
 | `policy_refusals` | counter | `source` ∈ anomaly\|wasm, `action` ∈ kill\|ask\|reask\|reask_exhausted | Requests governance actually refused |
 | `upstream_retries` | counter | `provider`, `outcome` (`http_529`, `timeout`, …) | Upstream calls the proxy [retried](/guide/intelligent-routing#retries-and-fallbacks), by the failure that prompted each |
 | `upstream_fallbacks` | counter | `result` ∈ served\|exhausted, `provider` | Requests that ran their fallback chain, and whether a target answered |
+| `routing_targets_skipped` | counter | `stage` ∈ candidate\|mirror, `reason` (`wire_mismatch`, `model_not_allowed`, `budget`, `no_credential`, `not_listed`, …) | Models [smart routing](/guide/intelligent-routing#which-models-a-request-can-be-routed-to) left out of a request's choice, and mirror copies not sent, by the check that excluded them |
 
 No instrument carries a `workspace_id` or per-detector label — per-workspace accounting is the control plane's job, and unbounded label values are how a metrics pipeline becomes the outage. The Node components export the auto-instrumentation metric set (HTTP/Postgres/Valkey durations and the like); they register no custom instruments.
 
