@@ -61,6 +61,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # The push below authenticates with the provider-repo token in its
+          # URL. A persisted checkout token is sent as an extra header for
+          # every github.com URL and takes precedence, so the push went out
+          # as github-actions[bot] and the provider repository refused it.
+          persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
