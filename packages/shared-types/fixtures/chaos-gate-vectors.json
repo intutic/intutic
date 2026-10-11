@@ -138,12 +138,12 @@
       "name": "permission held, then denied, once",
       "plan": {
         "v": 1, "runId": "run_vectors07", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
-        "faults": [{ "id": "permission.deny_or_delay", "mode": "hold_then_deny", "delay_s": 5, "times": 1 }]
+        "faults": [{ "id": "permission.deny_or_delay", "mode": "hold_then_deny", "delay_s": 60, "times": 1 }]
       },
       "calls": [
         { "tool": "Bash", "input": { "command": "make deploy" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
-        { "tool": "Bash", "input": { "command": "make deploy" }, "advanceS": 4, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
-        { "tool": "Bash", "input": { "command": "make deploy" }, "advanceS": 1, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "Permission held for approval, then denied by approver [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "input": { "command": "make deploy" }, "advanceS": 30, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "input": { "command": "make deploy" }, "advanceS": 30, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "Permission held for approval, then denied by approver [E-INTUTIC-C0FFEE]" },
         { "tool": "Bash", "input": { "command": "make deploy" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
       ],
       "events": [
