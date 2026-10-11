@@ -147,8 +147,9 @@ async fn post(
     url: &str,
     body: Value,
 ) -> (StatusCode, reqwest::header::HeaderMap, String) {
+    // The proxy under test listens on loopback; plain HTTP is the point.
     let res = client
-        .post(url)
+        .post(url) // codeql[rust/non-https-url]
         .header("Authorization", vk())
         .header("x-workspace-id", "ws_chaos_test")
         .json(&body)
