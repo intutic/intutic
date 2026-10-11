@@ -57,6 +57,9 @@ export const GATE_REFUSAL_CODES = [
   'HOOK_GATE',
   // The call is too large to evaluate (limits.ts), before any tier runs.
   'COMMAND_TOO_LARGE',
+  // A chaos run's fault, injected after every tier allowed the call, or its
+  // unreadable plan (chaosGate.ts). Never a governance decision.
+  'CHAOS_FAULT',
   'E_UNPINNED_LATEST',
   'E_UNPINNED_TAG',
   'E_UNKNOWN_REGISTRY',

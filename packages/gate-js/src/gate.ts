@@ -36,6 +36,16 @@
  * call through — the hook gates' and the MCP proxy's mechanism, through the
  * same decisions API. See hold.ts.
  *
+ * Under a chaos run (`intutic chaos run`, which sets `INTUTIC_CHAOS_PLAN` and
+ * `INTUTIC_CHAOS_EVENTS`), {@link Gate.guard} reports each call to the run's
+ * events file and injects the plan's `tool.error` and
+ * `permission.deny_or_delay` faults into a call every tier allowed, exactly
+ * as the hook gates do: the same plan decoding and counter files
+ * (`chaosGate.ts`, a byte-identical copy of `@intutic/shared-types`'
+ * module). A fault refuses with `CHAOS_FAULT`; a held call throws
+ * {@link IntuticGateHold} with no `holdId`, until its identical retry is
+ * let through or denied.
+ *
  * A1 and A2 are load-bearing and local. Tier B contributes the DLP regexes
  * and workspace policy from the control plane; whether an unreachable control
  * plane blocks is the client's `failClosed` setting (default true).
@@ -65,10 +75,13 @@
  * skill-surface pattern tables, as they would arrive via a real snapshot).
  */
 
+import { createHash } from 'node:crypto'
+import * as fs from 'node:fs'
 import { existsSync, readFileSync } from 'node:fs'
 import { isDeploy, touchesInfra } from './actions.js'
+import { chaosGateCall, chaosGateDecode, type ChaosGateFaultOutcome, type ChaosGatePlan } from './chaosGate.js'
 import { IntuticGateHold, IntuticGateRefusal, type GateRefusalCode } from './errors.js'
-import { holdMessage, requestHold } from './hold.js'
+import { holdKey, holdMessage, requestHold } from './hold.js'
 import { tooLargeReason } from './limits.js'
 import { GateClient } from './client.js'
 import { evaluateMcpAllowlist, evaluateMcpRegistry, mcpSnapshotUnverifiedRefusal } from './mcpRegistryRecord.js'
@@ -118,6 +131,24 @@ function resolveConfig(cfg: GateConfig): ResolvedConfig {
 
 export type ToolInput = Record<string, unknown>
 
+/** A chaos run's plan, read from the environment once per gate. */
+interface ChaosState {
+  plan: ChaosGatePlan | null
+  events: string
+  /** Why a plan that is set cannot be used. */
+  error: string | null
+}
+
+/** What a chaos run's events say about one call besides its decision. */
+interface ChaosNote {
+  /** The first rule that fired on the call, deciding it or not. */
+  ruleId: string | null
+  /** A destructive-command rule fires on the call, whether or not it decided it. */
+  destructive: boolean
+  /** An enforce-mode rule fired: an approved bypass let a held call through. */
+  policyHit: boolean
+}
+
 export class Gate {
   readonly cfg: ResolvedConfig
   readonly client: GateClient | null
@@ -127,6 +158,7 @@ export class Gate {
   /** `null` = not fetched yet. A failed fetch caches `[]` so one unreachable
    *  control plane does not add a timeout to every subsequent tool call. */
   private _sopRules: soprules.SopRule[] | null = null
+  private _chaos: ChaosState | null = null
 
   constructor(cfg: GateConfig = {}, client: GateClient | null = null) {
     this.cfg = resolveConfig(cfg)
@@ -237,12 +269,85 @@ export class Gate {
     }
   }
 
+  /** A chaos run's plan, from `INTUTIC_CHAOS_PLAN` and `INTUTIC_CHAOS_EVENTS`, read once. */
+  private chaos(): ChaosState {
+    if (this._chaos === null) {
+      const raw = process.env.INTUTIC_CHAOS_PLAN ?? ''
+      const events = process.env.INTUTIC_CHAOS_EVENTS ?? ''
+      const state: ChaosState = { plan: null, events, error: null }
+      if (raw) {
+        const decoded = chaosGateDecode(raw)
+        if (decoded.error !== null) state.error = decoded.error
+        else if (!events) state.error = 'INTUTIC_CHAOS_PLAN is set but INTUTIC_CHAOS_EVENTS is not, so nothing the run does could be reported'
+        else state.plan = decoded.plan
+      }
+      this._chaos = state
+    }
+    return this._chaos
+  }
+
+  /** Reports one call to a chaos run's events file; returns the fault due on an allowed call. */
+  private chaosReport(
+    plan: ChaosGatePlan,
+    events: string,
+    toolName: string,
+    decision: 'allow' | 'deny' | 'hold',
+    note: ChaosNote,
+    policyHit: boolean,
+    key: string,
+  ): ChaosGateFaultOutcome | null {
+    return chaosGateCall(
+      fs,
+      plan,
+      events,
+      { tool: toolName, decision, ruleId: note.ruleId, destructive: note.destructive, policyHit: policyHit || note.policyHit, key },
+      new Date().toISOString(),
+    )
+  }
+
   // --------------------------------------------------------------- guard
 
-  /** Throws {@link IntuticGateRefusal} if this call must not run. Resolves to allow. */
+  /**
+   * Throws {@link IntuticGateRefusal} if this call must not run. Resolves to allow.
+   *
+   * Under a chaos run's plan, the call is reported to the run's events file
+   * whatever the tiers decide, and a call they allowed can still be refused
+   * by the fault that is due (`CHAOS_FAULT`, or {@link IntuticGateHold} for
+   * a held one). A plan that is set but unreadable refuses every call: an
+   * experiment run without the faults it asked for reports a resilience it
+   * never measured.
+   */
   async guard(toolName: string, toolInput: ToolInput): Promise<void> {
     if (!this.cfg.enforce) return
+    const chaos = this.chaos()
+    if (chaos.error !== null) {
+      const reason = `${chaos.error} — refusing the call rather than running the experiment without the faults it asked for`
+      await this.emit('tool_blocked', toolName, reason)
+      throw new IntuticGateRefusal(reason, 'CHAOS_FAULT')
+    }
+    if (chaos.plan === null) return this.decide(toolName, toolInput, null)
 
+    const note: ChaosNote = { ruleId: null, destructive: false, policyHit: false }
+    try {
+      await this.decide(toolName, toolInput, note)
+    } catch (err) {
+      // A refusal a tier decided is a policy hit; a call too large to read, or
+      // a failure that is not a refusal, is not.
+      const refusal = err instanceof IntuticGateRefusal
+      this.chaosReport(chaos.plan, chaos.events, toolName, err instanceof IntuticGateHold ? 'hold' : 'deny', note,
+        refusal && err.code !== 'COMMAND_TOO_LARGE', '')
+      throw err
+    }
+    const { toolNameNormalized, targetHash } = holdKey(toolName, toolInput)
+    const key = createHash('sha256').update(`${toolNameNormalized}\0${targetHash}`).digest('hex')
+    const fault = this.chaosReport(chaos.plan, chaos.events, toolName, 'allow', note, false, key)
+    if (fault === null) return
+    if (fault.kind === 'hold') throw new IntuticGateHold(fault.reason, undefined)
+    throw new IntuticGateRefusal(fault.reason, 'CHAOS_FAULT')
+  }
+
+  /** The tiers: throws to refuse, resolves to allow. `note` collects a chaos run's record of the call. */
+  private async decide(toolName: string, toolInput: ToolInput, note: ChaosNote | null): Promise<void> {
     const target = String(toolInput.path ?? toolInput.file_path ?? '')
     const command = String(toolInput.command ?? '')
 
@@ -269,6 +374,7 @@ export class Gate {
     if (sso) {
       const d = evaluateSsoGroupClearance(sso.policy, toolName, sso.member ? sso.member.ssoGroups : null)
       if (d.clearance !== 'GRANTED') {
+        if (note) note.ruleId = d.ruleId
         const reason = `${d.reason} [${d.ruleId}]`
         await this.emit('tool_blocked', toolName, reason, toolInput)
         throw new IntuticGateRefusal(reason, 'SSO_GROUP')
@@ -289,9 +395,18 @@ export class Gate {
     // copy of the same rule in Tier A3 does not hold it a second time.
     const approved = new Set<string>()
     const d = snapshot.evaluate(toolName, target, command, this.getSnapshot(), disabled)
+    if (note) {
+      if (d.ruleId) note.ruleId = d.ruleId
+      // Destructive whether or not a rule decided the call, the escape hatch
+      // included: what a chaos run's no_destructive_attempt probe reads.
+      const destructive = new snapshot.Snapshot()
+      destructive.rules = this.getSnapshot().rules.filter((r) => r.id.startsWith('destructive.'))
+      note.destructive = snapshot.evaluate(toolName, target, command, destructive, false).severity !== null
+    }
     if (d.severity === snapshot.SEV_HOLD) {
       await this.hold({ id: d.ruleId, reason: d.reason }, toolName, toolInput)
       approved.add(d.ruleId)
+      if (note) note.policyHit = true
     } else if (d.severity === snapshot.SEV_BLOCK) {
       await this.emit('tool_blocked', toolName, d.reason, toolInput)
       throw new IntuticGateRefusal(d.reason, 'SNAPSHOT')
@@ -303,7 +418,7 @@ export class Gate {
     }
 
     // ---- Tier M: the MCP server registry and allowlist ----------------
-    await this.guardMcp(toolName, toolInput)
+    await this.guardMcp(toolName, toolInput, note)
 
     // ---- Tier A3: SOP rules authored in the product --------------------
     //
@@ -313,6 +428,8 @@ export class Gate {
     if (this.cfg.useSopRules && !READ_ONLY_TOOLS.has(toolName)) {
       const rule = soprules.firstMatch(await this.getSopRules(), toolName, toolInput)
       if (rule !== null) {
+        // The deciding rule's id, or the first that fired when none decides.
+        if (note && (rule.action !== soprules.ACTION_WARN || !note.ruleId)) note.ruleId = `sop.${rule.id}`
         const reason = `[sop:${rule.id}] ${rule.reason}`
         if (rule.action === soprules.ACTION_BLOCK) {
           await this.emit('tool_blocked', toolName, reason, toolInput)
@@ -323,6 +440,7 @@ export class Gate {
           // (`sop.<id>`), so one approval covers the call in either tier.
           const id = `sop.${rule.id}`
           if (!approved.has(id)) await this.hold({ id, reason: rule.reason }, toolName, toolInput)
+          if (note) note.policyHit = true
         } else {
           await this.emit('tool_flagged', toolName, reason, toolInput)
         }
@@ -383,7 +501,7 @@ export class Gate {
    * them. An allowlist in `shadow` records the refusal and lets the call on.
    * A snapshot that failed its integrity check admits no MCP server.
    */
-  private async guardMcp(toolName: string, toolInput: ToolInput): Promise<void> {
+  private async guardMcp(toolName: string, toolInput: ToolInput, note: ChaosNote | null): Promise<void> {
     if (!toolName.startsWith('mcp__')) return
     const rest = toolName.slice('mcp__'.length)
     const sep = rest.indexOf('__')
@@ -392,18 +510,21 @@ export class Gate {
     const server = rest.slice(0, sep)
     if (snap.state === 'invalid') {
       const refusal = mcpSnapshotUnverifiedRefusal(server)
+      if (note) note.ruleId = refusal.ruleId
       const reason = `${refusal.reason} [${refusal.ruleId}]`
       await this.emit('tool_blocked', toolName, reason, toolInput)
       throw new IntuticGateRefusal(reason, refusal.code)
     }
     const registry = snap.mcpRegistry ? evaluateMcpRegistry(snap.mcpRegistry, server, rest.slice(sep + 2)) : null
     if (registry) {
+      if (note) note.ruleId = registry.ruleId
       const reason = `${registry.reason} [${registry.ruleId}]`
       await this.emit('tool_blocked', toolName, reason, toolInput)
       throw new IntuticGateRefusal(reason, registry.code)
     }
     const allowlist = snap.mcpAllowlist ? evaluateMcpAllowlist(snap.mcpAllowlist, server) : null
     if (allowlist) {
+      if (note && (snap.mcpAllowlist!.severity !== 'shadow' || !note.ruleId)) note.ruleId = allowlist.ruleId
       const reason = `${allowlist.reason} [${allowlist.ruleId}]`
       if (snap.mcpAllowlist!.severity === 'shadow') {
         await this.emit('tool_would_block', toolName, reason, toolInput)

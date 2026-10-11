@@ -1160,7 +1160,9 @@ function assertSkillContentArgSane(
  * ## What is deliberately allowed
  *
  * `rm -rf ./`, `rm -rf .`, `rm -rf *`, `rm -rf build/`, `rm -rf node_modules`
- * and `rm -rf /home/…` are all ordinary developer commands and all pass. That
+ * and `rm -rf /home/…` are all ordinary developer commands and all pass, as do
+ * paths below the home directory (`rm -rf ~/project/build`); the home directory
+ * itself, or everything in it, does not (`destructive.rm_rf_home`). That
  * is not an oversight to tighten later. A guard that blocks routine work
  * teaches the developer to run `chflags nouchg` on the hook — the exact bypass
  * `GOVERNANCE_BYPASS_PATTERNS` exists to stop. Blocking too much manufactures
@@ -1209,6 +1211,51 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
       { name: 'one long flag list, no root', prefix: ' rm', unit: ' -rf', suffix: ' x', held: false },
       { name: 'rm after rm', unit: ' rm -r', held: false },
       { name: 'root after a long flag list', prefix: ' rm', unit: ' -f', suffix: ' /', held: true },
+    ],
+  },
+  {
+    id: 'destructive.rm_rf_home',
+    // The home directory as `~`, `$HOME` or `${HOME}` (the last two optionally
+    // quoted), alone or as `<home>/` or `<home>/*`, then the end of a word.
+    source: ' rm( +-[a-zA-Z-]+)+ +(~|"?\\$(HOME|\\{HOME})"?)(/\\*?)?"?[ ;&|)]',
+    severity: 'block',
+    reason: 'Recursive delete of the home directory',
+    rationale:
+      'The home directory itself, or everything in it (`<home>/*`), never a path below it: ' +
+      '`rm -rf ~/project/build` has a character other than a space, `*`, a quote or a ' +
+      'command separator after `~/` and is allowed, and so is `rm -rf ./~tmp`, whose `~` ' +
+      'does not start the word. A quoted `"~"` is not matched: the shell does not expand ' +
+      'it, so it names a directory called `~`. Same flag shape as rm_rf_root. Does not ' +
+      'catch another user\'s home (`~alice`), the home reached through another variable ' +
+      'or `cd ~ && rm -rf *`, or a home that is not the first operand (`rm -rf build ~`).',
+    matches: [
+      ' rm -rf ~ ',
+      ' rm -rf ~/ ',
+      ' rm -rf ~/* ',
+      ' rm -fr ~ ',
+      ' rm -rf $HOME ',
+      ' rm -rf $HOME/ ',
+      ' rm -r -f "$HOME" ',
+      ' rm -rf "$HOME"/ ',
+      ' rm -rf "${HOME}/" ',
+      ' sudo rm -rf -- ~ ',
+      ' rm -rf ~; ls ',
+      ' rm -rf ~&& echo done ',
+    ],
+    notMatches: [
+      ' rm -rf ~/project/build ',
+      ' rm -rf ./~tmp ',
+      ' rm -rf ~tmp ',
+      ' rm -rf "~" ',
+      ' rm -rf $HOME/.cache/pip ',
+      ' rm -rf "$HOME/node_modules" ',
+      ' rm -rf $HOMEBREW_CACHE ',
+      ' ls ~ ',
+    ],
+    adversarial: [
+      { name: 'one long flag list, no home', prefix: ' rm', unit: ' -rf', suffix: ' x', held: false },
+      { name: 'rm after rm, a path below home', unit: ' rm -rf ~/x', held: false },
+      { name: 'home after a long flag list', prefix: ' rm', unit: ' -f', suffix: ' ~', held: true },
     ],
   },
   {

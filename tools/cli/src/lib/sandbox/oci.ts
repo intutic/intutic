@@ -47,7 +47,12 @@ export function buildOciArgs(runtime: OciRuntime, spec: SandboxSpec): string[] {
 
   // Immutable rootfs with writable scratch.
   args.push('--read-only')
-  for (const t of ['/tmp', '/run', '/home/sandbox']) args.push('--tmpfs', t)
+  // A tmpfs is mounted root-owned, mode 755 unless told otherwise, so the
+  // agent's own home would be read-only to the unprivileged user it runs as,
+  // and every agent that keeps state there (Claude Code's ~/.claude, an MCP
+  // proxy's pins) would fail. The entrypoint cannot chown it (no CAP_CHOWN),
+  // so it is mounted writable for whichever uid the image's `sandbox` user has.
+  args.push('--tmpfs', '/tmp', '--tmpfs', '/run', '--tmpfs', '/home/sandbox:mode=1777')
 
   // Resource bounds.
   args.push(`--pids-limit=${spec.pidsLimit}`)

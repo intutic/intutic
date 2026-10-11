@@ -4099,7 +4099,7 @@ intutic exec --sandbox -- <command> [args...]
 | Option | Description |
 |--------|-------------|
 | `--sandbox [kind]` | Run the agent in an isolated sandbox instead of directly on the host. `kind` is `oci` (default) or `firecracker`. See [Sandboxed Execution](/guide/sandboxed-execution) for what each backend actually isolates and requires. |
-| `--sandbox-image <image>` | Sandbox image — must contain the agent, `nftables`, and `capsh`. Default: `intutic/sandbox:<CLI version>`, built locally from the Dockerfile shipped with the CLI on first use; it has no agent, so extend it ([Sandboxed Execution](/guide/sandboxed-execution)). |
+| `--sandbox-image <image>` | Sandbox image — must contain the agent, `nftables`, and `capsh`. Default: `intutic/sandbox:<CLI version>`, built locally from the Dockerfile shipped with the CLI on first use; it has no agent, so extend it ([Sandboxed Execution](/guide/sandboxed-execution)). `intutic/sandbox:<CLI version>-node` adds Node.js and npm, the base for Node agents such as Claude Code, and is built on first use the same way. |
 | `--sandbox-memory <size>` | Sandbox memory cap, e.g. `2g`. Default: `2g`. |
 | `--sandbox-cpus <n>` | Sandbox CPU cap. Default: `2`. |
 | `--sandbox-pids <n>` | Sandbox max process count. Default: `512`. |
@@ -4160,11 +4160,11 @@ intutic chaos run <file> [--sandbox-image <image>] [--out <report.json>] [--keep
 
 | Option | Description |
 |--------|-------------|
-| `--sandbox-image <image>` | Sandbox image; must contain the agent. Overrides the experiment's `sandbox_image`. Default: the [`intutic exec --sandbox`](#intutic-exec) image. |
+| `--sandbox-image <image>` | Sandbox image; must contain the agent. Overrides the experiment's `sandbox_image`. Default: the [`intutic exec --sandbox`](#intutic-exec) image. For a Node agent, extend `intutic/sandbox:<CLI version>-node` ([Bring your agent](/guide/chaos-engineering#bring-your-agent)). |
 | `--out <report.json>` | Where to write the JSON report. Default: `intutic-chaos/report-<name>-<timestamp>.json` under the OS temp directory. The path is printed. |
 | `--keep` | Keep each repetition's git worktree instead of removing it. |
 
-Refuses to start without a clean git working tree (each repetition is a fresh worktree of `HEAD`) or without an available sandbox backend; it never runs the agent on the host. Runs `repeat` baseline repetitions, then `repeat` faulted ones, each behind a dedicated proxy on a free port. Exits 0 when the run is scored, 1 when it was aborted, 2 when it is invalid (the baseline failed `verify`).
+Refuses to start without a clean git working tree (each repetition is a fresh worktree of `HEAD`) or without an available sandbox backend; it never runs the agent on the host. Runs `repeat` baseline repetitions, then `repeat` faulted ones, each behind a dedicated proxy on a free port. Each worktree gets the project's generated gates, its Claude Code, Codex and Cursor project hook settings and the policy snapshot, with the project's path rewritten to `/work`; the output names what was carried in and warns when the project has no gates ([Bring your agent](/guide/chaos-engineering#bring-your-agent)). Exits 0 when the run is scored, 1 when it was aborted, 2 when it is invalid (the baseline failed `verify`).
 
 ---
 

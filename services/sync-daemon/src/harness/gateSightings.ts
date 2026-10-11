@@ -21,6 +21,7 @@
 
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 export const GATE_SIGHTINGS_RELATIVE_PATH = node_path.join('.intutic', 'events', 'gate-sightings.json')
 
@@ -99,9 +100,7 @@ export async function recordGateSightings(
   try {
     const file = node_path.join(workspaceRoot, GATE_SIGHTINGS_RELATIVE_PATH)
     await node_fs.mkdir(node_path.dirname(file), { recursive: true })
-    const tmp = `${file}.intutic-tmp`
-    await node_fs.writeFile(tmp, JSON.stringify(seen, null, 2) + '\n', 'utf-8')
-    await node_fs.rename(tmp, file)
+    await writeFileAtomic(file, JSON.stringify(seen, null, 2) + '\n')
   } catch {
     // The sighting is late until the gate's next event; the drain itself carries on.
   }

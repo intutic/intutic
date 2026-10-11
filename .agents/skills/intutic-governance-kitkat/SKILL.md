@@ -106,6 +106,9 @@ Continue without it, or tell the user what would have to change and who can chan
 ### Ran, but the result was withheld
 `RESULT_WITHHELD_DLP`, `RESULT_WITHHELD_INJECTION` (MCP proxy) and `OUTPUT_DLP` (proxy): the tool or model ran, and its output was not delivered. Do not run it again blindly, since it may already have had its effect; tell the user.
 
+### Injected by an experiment
+`CHAOS_FAULT`: a resilience experiment (`intutic chaos run`) failed this call on purpose, or could not start because its plan was unreadable. The reason is the failure it imitates and carries an `E-INTUTIC-` token: handle it as that failure, and tell the user what failed, quoting the token.
+
 ---
 
 ## 🛡️ Policy & Hook Verification

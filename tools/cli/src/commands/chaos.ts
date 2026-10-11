@@ -25,6 +25,7 @@ import { loadCredentials } from '../config/store.js'
 import { deriveIdentity } from '../lib/graphIdentity.js'
 import { log } from '../lib/logger.js'
 import { resolveProxyBinary } from '../lib/proxyBinary.js'
+import { resolveSnapshotRulesPath } from '../lib/policySnapshot.js'
 import { selectBackend } from '../lib/sandbox/index.js'
 import { loadExperiment } from '../lib/chaos/experiment.js'
 import { ChaosRefusal, runChaos, type ChaosDeps, type ChaosReport, type ProxyProcess } from '../lib/chaos/runner.js'
@@ -91,7 +92,17 @@ export async function runChaosRun(
   let report: ChaosReport
   try {
     report = await runChaos(
-      { experiment, cwd: process.cwd(), image, outPath, keep: Boolean(opts.keep) },
+      {
+        experiment,
+        cwd: process.cwd(),
+        image,
+        outPath,
+        keep: Boolean(opts.keep),
+        // Where this machine's gates read them, as the gates resolve it.
+        snapshotRules: resolveSnapshotRulesPath(),
+        approvedBypasses:
+          process.env.INTUTIC_APPROVED_BYPASSES || path.join(os.homedir(), '.intutic', 'hooks', 'approved-bypasses.jsonl'),
+      },
       await defaultDeps(),
     )
   } catch (err) {

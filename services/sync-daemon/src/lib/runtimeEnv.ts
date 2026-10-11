@@ -23,6 +23,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
+import { writeFileAtomic } from './atomicWrite.js'
 
 const log = createLogger('sync-runtime-env')
 
@@ -94,10 +95,8 @@ export async function writeRuntimeEnv(opts: RuntimeEnvOptions): Promise<void> {
     ``,
   ].join('\n')
 
-  const tmpPath = envPath + '.tmp'
-  await fs.writeFile(tmpPath, content, { encoding: 'utf-8' })
-  await fs.chmod(tmpPath, 0o600)
-  await fs.rename(tmpPath, envPath)
+  // 0600 from the moment the temp file exists: it holds the API key.
+  await writeFileAtomic(envPath, content, { mode: 0o600 })
 
   log.debug({ action: 'runtime_env_written', path: envPath }, 'Runtime env file refreshed')
 }

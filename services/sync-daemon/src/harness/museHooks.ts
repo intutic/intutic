@@ -46,6 +46,7 @@ import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-muse-hooks')
 
@@ -220,10 +221,8 @@ async function mergeMuseHooksJson(configPath: string, hookScriptPath: string): P
     hooks: nextHooks,
   }
 
-  const tmp = configPath + '.intutic-tmp'
   await fs.mkdir(path.dirname(configPath), { recursive: true })
-  await fs.writeFile(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, configPath)
+  await writeFileAtomic(configPath, JSON.stringify(merged, null, 2) + '\n')
 }
 
 /**
@@ -250,10 +249,8 @@ async function mergeMuseSettingsJson(settingsPath: string, managedHooksPath: str
     managed_hooks_path: managedHooksPath,
   }
 
-  const tmp = settingsPath + '.intutic-tmp'
   await fs.mkdir(path.dirname(settingsPath), { recursive: true })
-  await fs.writeFile(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, settingsPath)
+  await writeFileAtomic(settingsPath, JSON.stringify(merged, null, 2) + '\n')
 }
 
 /**
@@ -277,10 +274,7 @@ export async function writeMuseHooks(
   await fs.mkdir(path.join(workspaceRoot, '.intutic', 'events'), { recursive: true })
 
   const hookScriptPath = path.join(hookScriptDir, 'muse-check.js')
-  const tmpScript = hookScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, buildHookScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, buildHookScript(proxyUrl, workspaceRoot, workspaceId), { mode: 0o755 })
 
   // 1. Project-level: <root>/.muse/hooks.json
   const projectMuseDir = path.join(workspaceRoot, '.muse')

@@ -10,7 +10,7 @@ exports[`generated hook scripts > antigravity > matches the recorded output byte
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v19 ─────────────────────────────
+# ── Intutic fail-closed prelude v20 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -625,10 +625,15 @@ In short: a gate is a new process per tool call, so the plan is decoded on
 each call, plan_loaded is reported by whichever gate first creates
 EVENTS.gate-plan-loaded, and each fault's seen and hit counts are numbered
 empty files in EVENTS.gate-counters/, each number claimed with an exclusive
-create (O_CREAT | O_EXCL), which exactly one process wins.
+create (O_CREAT | O_EXCL), which exactly one process wins. A permission fault
+never sleeps: it holds the call as an approval hold does, in a
+FAULT.held.KEY.G file whose modification time is when, and the identical
+retry is held again until delay_s has passed, then allowed (delay) or denied
+(hold_then_deny) by the one retry that creates FAULT.released.KEY.G.
 
 The bash gates emit this file verbatim (services/sync-daemon/src/lib/chaosPy.ts
-holds a byte-identical copy, which a test compares), and every copy runs
+holds a byte-identical copy, which a test compares), intutic_clawde.gate's
+Gate.guard runs it in process, and every copy runs
 packages/shared-types/fixtures/chaos-gate-vectors.json. It must stay
 self-contained: the standard library only, no module state beyond the
 constants below, and no backtick or dollar-brace, which the TypeScript copy
@@ -642,6 +647,7 @@ import json
 import os
 import re
 import sys
+import time
 
 _CHAOS_FAULT_IDS = (
     "llm.rate_limit", "llm.upstream_5xx", "llm.context_trim", "llm.model_degrade", "tool.error", "tool.stale_data",
@@ -795,6 +801,46 @@ def chaos_claim(directory, prefix, limit):
         return -1
 
 
+def chaos_open_hold(directory, fault, key):
+    """The open hold of one fault on one call: (g, created), the number of
+    the newest FAULT.held.KEY.G file with no released twin and its
+    modification time in milliseconds; None when there is none or it cannot
+    be read."""
+    try:
+        held = str(fault) + ".held." + key + "."
+        names = os.listdir(directory)
+        g = 0
+        for name in names:
+            if name.startswith(held) and name[len(held):].isdigit():
+                g = max(g, int(name[len(held):]))
+        if g == 0 or (str(fault) + ".released." + key + "." + str(g)) in names:
+            return None
+        # In whole milliseconds, as now is: a hold is never younger than the call that reads it.
+        return g, os.stat(os.path.join(directory, held + str(g))).st_mtime_ns // 1000000
+    except OSError:
+        # No counters yet, or none readable: no hold to continue.
+        return None
+
+
+def chaos_release(directory, fault, key, g):
+    """Ends hold g with an exclusive create: True for the one caller that does."""
+    try:
+        os.close(os.open(os.path.join(directory, str(fault) + ".released." + key + "." + str(g)),
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        return True
+    except OSError:
+        # Another gate released it first, or it cannot be written.
+        return False
+
+
+def _chaos_ms(now):
+    # The ISO-8601 time a call is decided at, in milliseconds; the clock if unreadable.
+    try:
+        return round(datetime.datetime.fromisoformat(now.replace("Z", "+00:00")).timestamp() * 1000)
+    except (AttributeError, TypeError, ValueError):
+        return int(time.time() * 1000)
+
+
 def chaos_now():
     """The time as the JavaScript gates write it: <TIMESTAMP>."""
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -804,8 +850,11 @@ def chaos_call(plan, events_path, call, now):
     """Reports one call and returns the fault the gate must apply, or None.
 
     call: tool, decision (allow, deny, ask or hold, before any fault), ruleId,
-    destructive, policyHit. The fault: faultId, kind (deny, delay or
-    hold_then_deny), reason and delayS, as chaosGateCall returns it.
+    destructive, policyHit, and key: the call's digest in hex (its tool and
+    input, as the gate keys an approval hold), which a held call's retry
+    shares. The fault: faultId, kind (deny or hold) and reason, as
+    chaosGateCall returns it. now is the ISO-8601 time, and the clock a hold
+    is timed by.
     """
     lines = ""
     first = True
@@ -827,7 +876,32 @@ def chaos_call(plan, events_path, call, now):
     fault = None
     if call["decision"] == "allow":
         directory = events_path + ".gate-counters"
+        key = re.sub(r"[^0-9A-Za-z]", "", str(call.get("key") or ""))[:128] or "call"
+        now_ms = _chaos_ms(now)
+        tag = " [" + plan["canary"] + "]"
+        held = "Permission held for approval; retrying this exact call passes once it is approved" + tag
+        # The retry of a held call: still held until the delay has passed,
+        # then let through or denied by the one retry that releases it.
+        retry = False
         for f in plan["faults"]:
+            if f["id"] != "permission.deny_or_delay" or f["mode"] == "deny" or not chaos_matches(f["match"], call["tool"]):
+                continue
+            open_hold = chaos_open_hold(directory, f["index"], key)
+            if open_hold is None:
+                continue
+            retry = True
+            if f["delay_s"] > 0 and now_ms - open_hold[1] < f["delay_s"] * 1000:
+                fault = {"faultId": f["id"], "kind": "hold", "reason": held}
+            elif chaos_release(directory, f["index"], key, open_hold[0]):
+                if f["mode"] == "hold_then_deny":
+                    fault = {"faultId": f["id"], "kind": "deny",
+                             "reason": "Permission held for approval, then denied by approver" + tag}
+            else:
+                # Another gate released it first: this call is a new one.
+                retry = False
+                continue
+            break
+        for f in plan["faults"] if not retry else ():
             if not chaos_matches(f["match"], call["tool"]):
                 continue
             # An MCP tool's error is the MCP proxy's to inject; a gate injects the built-in side.
@@ -838,19 +912,18 @@ def chaos_call(plan, events_path, call, now):
                 continue
             if f["times"] is not None and chaos_claim(directory, str(f["index"]) + ".hit.", f["times"]) < 1:
                 continue
-            tag = " [" + plan["canary"] + "]"
             if f["id"] == "tool.error":
-                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag, "delayS": 0}
-            elif f["mode"] == "delay":
-                fault = {"faultId": f["id"], "kind": "delay", "reason": "", "delayS": f["delay_s"]}
-            elif f["mode"] == "hold_then_deny":
-                fault = {"faultId": f["id"], "kind": "hold_then_deny",
-                         "reason": "Permission held for approval, then denied by approver" + tag, "delayS": f["delay_s"]}
+                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag}
+            elif f["mode"] == "deny":
+                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag}
             else:
-                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag, "delayS": 0}
+                # Held from now: the hold's file is what its retries find.
+                if chaos_claim(directory, str(f["index"]) + ".held." + key + ".", None) < 1:
+                    continue
+                fault = {"faultId": f["id"], "kind": "hold", "reason": held}
             lines += chaos_event(plan, "fault_injected", [("faultId", f["id"]), ("call", seen), ("target", call["tool"])], now)
-        if fault is None or fault["kind"] == "delay":
-            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", True)], now)
+        if fault is None or fault["kind"] == "hold":
+            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", fault is None)], now)
     chaos_append(events_path, lines)
     return fault
 
@@ -866,19 +939,20 @@ def intutic_chaos_begin():
     return ""
 
 
-def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit):
+def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key=""):
     # Records one call as the gate decided it, before any fault; returns the
-    # fault to apply to an allowed call as "kind<TAB>delayS<TAB>reason", or "".
+    # fault to apply to an allowed call as "kind<TAB>reason" (kind deny or
+    # hold), or "". key is the call's digest, which a held call's retry shares.
     plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
     events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
     if error or not events:
         return ""
     call = {"tool": tool, "decision": decision, "ruleId": rule_id or None,
-            "destructive": destructive == "1", "policyHit": policy_hit == "1"}
+            "destructive": destructive == "1", "policyHit": policy_hit == "1", "key": key}
     fault = chaos_call(plan, events, call, chaos_now())
     if fault is None:
         return ""
-    return fault["kind"] + "\\t" + str(fault["delayS"]) + "\\t" + fault["reason"]
+    return fault["kind"] + "\\t" + fault["reason"]
 
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
@@ -1045,7 +1119,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v19 — harness: gemini-cli ────────────
+# ── Intutic gate body v20 — harness: gemini-cli ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -1068,13 +1142,14 @@ _intutic_chaos_rule=""
 _intutic_chaos_hit=0
 _intutic_chaos_destructive=0
 # Records this call as decided ($1: allow, deny or hold) and prints the fault
-# to apply to an allowed one, as kind, delay and reason, tab-separated.
+# to apply to an allowed one, as kind and reason, tab-separated. $2 is the
+# call's digest, which a held call's retry shares.
 intutic_chaos_decide() {
   [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ "$_intutic_chaos_done" = "0" ] || return 0
   python3 -c 'import os, sys
 lib = {}
 exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" || true
+sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" "\${2:-}" || true
 }
 # A rule fired without deciding the call (shadow, warn): its id, if none yet.
 intutic_chaos_note() {
@@ -1741,32 +1816,23 @@ case "\${TOOL:-}" in
 esac
 
 # ── Agent fault injection: the call is allowed ───────────────────────────────
-# Recorded as allowed, then the fault that is due, if any. A delay waits inside
-# this gate's 9 s deadline: a gate still running at it refuses the call,
-# and past the hook timeout most harnesses run the call anyway, so a longer
-# wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+# Recorded as allowed, then the fault that is due, if any. A permission delay
+# never waits here: the call is held, and its identical retry (the same key an
+# approval hold uses) passes, or is denied, once the delay has passed.
 if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ]; then
-  _intutic_fault="$(intutic_chaos_decide allow)"
+  _intutic_chaos_key="$( { printf '%s' "$INTUTIC_NTOOL"; printf '\\0'; printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
+  _intutic_fault="$(intutic_chaos_decide allow "$_intutic_chaos_key")"
   _intutic_chaos_done=1
   if [ -n "$_intutic_fault" ]; then
     _intutic_fault_kind="\${_intutic_fault%%$'\\t'*}"
-    _intutic_fault_rest="\${_intutic_fault#*$'\\t'}"
-    _intutic_fault_delay="\${_intutic_fault_rest%%$'\\t'*}"
-    _intutic_fault_reason="\${_intutic_fault_rest#*$'\\t'}"
-    if [ "$_intutic_fault_delay" -gt 0 ] 2>/dev/null; then
-      _intutic_fault_room=$(( 9 - SECONDS - 1 ))
-      [ "$_intutic_fault_room" -gt 0 ] || _intutic_fault_room=0
-      if [ "$_intutic_fault_delay" -gt "$_intutic_fault_room" ]; then
-        echo "[Intutic Governance] chaos: waiting \${_intutic_fault_room} s of the \${_intutic_fault_delay} s the plan asks for, to stay inside the hook timeout" >&2
-        _intutic_fault_delay="$_intutic_fault_room"
-      fi
-      sleep "$_intutic_fault_delay"
-    fi
-    if [ "$_intutic_fault_kind" != "delay" ]; then
-      # The fault's own text, carrying the plan's canary: what the agent reads.
+    _intutic_fault_reason="\${_intutic_fault#*$'\\t'}"
+    # The fault's own text, carrying the plan's canary: what the agent reads.
+    if [ "$_intutic_fault_kind" = "hold" ]; then
+      echo "[Intutic Governance] HELD: \${_intutic_fault_reason}" >&2
+    else
       echo "$_intutic_fault_reason" >&2
-      exit 2
     fi
+    exit 2
   fi
 fi
 # ── end Intutic gate body ────────────────────────────────────────────────────
@@ -1786,7 +1852,7 @@ exports[`generated hook scripts > goose > matches the recorded output byte for b
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v19 ─────────────────────────────
+# ── Intutic fail-closed prelude v20 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -2402,10 +2468,15 @@ In short: a gate is a new process per tool call, so the plan is decoded on
 each call, plan_loaded is reported by whichever gate first creates
 EVENTS.gate-plan-loaded, and each fault's seen and hit counts are numbered
 empty files in EVENTS.gate-counters/, each number claimed with an exclusive
-create (O_CREAT | O_EXCL), which exactly one process wins.
+create (O_CREAT | O_EXCL), which exactly one process wins. A permission fault
+never sleeps: it holds the call as an approval hold does, in a
+FAULT.held.KEY.G file whose modification time is when, and the identical
+retry is held again until delay_s has passed, then allowed (delay) or denied
+(hold_then_deny) by the one retry that creates FAULT.released.KEY.G.
 
 The bash gates emit this file verbatim (services/sync-daemon/src/lib/chaosPy.ts
-holds a byte-identical copy, which a test compares), and every copy runs
+holds a byte-identical copy, which a test compares), intutic_clawde.gate's
+Gate.guard runs it in process, and every copy runs
 packages/shared-types/fixtures/chaos-gate-vectors.json. It must stay
 self-contained: the standard library only, no module state beyond the
 constants below, and no backtick or dollar-brace, which the TypeScript copy
@@ -2419,6 +2490,7 @@ import json
 import os
 import re
 import sys
+import time
 
 _CHAOS_FAULT_IDS = (
     "llm.rate_limit", "llm.upstream_5xx", "llm.context_trim", "llm.model_degrade", "tool.error", "tool.stale_data",
@@ -2572,6 +2644,46 @@ def chaos_claim(directory, prefix, limit):
         return -1
 
 
+def chaos_open_hold(directory, fault, key):
+    """The open hold of one fault on one call: (g, created), the number of
+    the newest FAULT.held.KEY.G file with no released twin and its
+    modification time in milliseconds; None when there is none or it cannot
+    be read."""
+    try:
+        held = str(fault) + ".held." + key + "."
+        names = os.listdir(directory)
+        g = 0
+        for name in names:
+            if name.startswith(held) and name[len(held):].isdigit():
+                g = max(g, int(name[len(held):]))
+        if g == 0 or (str(fault) + ".released." + key + "." + str(g)) in names:
+            return None
+        # In whole milliseconds, as now is: a hold is never younger than the call that reads it.
+        return g, os.stat(os.path.join(directory, held + str(g))).st_mtime_ns // 1000000
+    except OSError:
+        # No counters yet, or none readable: no hold to continue.
+        return None
+
+
+def chaos_release(directory, fault, key, g):
+    """Ends hold g with an exclusive create: True for the one caller that does."""
+    try:
+        os.close(os.open(os.path.join(directory, str(fault) + ".released." + key + "." + str(g)),
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        return True
+    except OSError:
+        # Another gate released it first, or it cannot be written.
+        return False
+
+
+def _chaos_ms(now):
+    # The ISO-8601 time a call is decided at, in milliseconds; the clock if unreadable.
+    try:
+        return round(datetime.datetime.fromisoformat(now.replace("Z", "+00:00")).timestamp() * 1000)
+    except (AttributeError, TypeError, ValueError):
+        return int(time.time() * 1000)
+
+
 def chaos_now():
     """The time as the JavaScript gates write it: <TIMESTAMP>."""
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -2581,8 +2693,11 @@ def chaos_call(plan, events_path, call, now):
     """Reports one call and returns the fault the gate must apply, or None.
 
     call: tool, decision (allow, deny, ask or hold, before any fault), ruleId,
-    destructive, policyHit. The fault: faultId, kind (deny, delay or
-    hold_then_deny), reason and delayS, as chaosGateCall returns it.
+    destructive, policyHit, and key: the call's digest in hex (its tool and
+    input, as the gate keys an approval hold), which a held call's retry
+    shares. The fault: faultId, kind (deny or hold) and reason, as
+    chaosGateCall returns it. now is the ISO-8601 time, and the clock a hold
+    is timed by.
     """
     lines = ""
     first = True
@@ -2604,7 +2719,32 @@ def chaos_call(plan, events_path, call, now):
     fault = None
     if call["decision"] == "allow":
         directory = events_path + ".gate-counters"
+        key = re.sub(r"[^0-9A-Za-z]", "", str(call.get("key") or ""))[:128] or "call"
+        now_ms = _chaos_ms(now)
+        tag = " [" + plan["canary"] + "]"
+        held = "Permission held for approval; retrying this exact call passes once it is approved" + tag
+        # The retry of a held call: still held until the delay has passed,
+        # then let through or denied by the one retry that releases it.
+        retry = False
         for f in plan["faults"]:
+            if f["id"] != "permission.deny_or_delay" or f["mode"] == "deny" or not chaos_matches(f["match"], call["tool"]):
+                continue
+            open_hold = chaos_open_hold(directory, f["index"], key)
+            if open_hold is None:
+                continue
+            retry = True
+            if f["delay_s"] > 0 and now_ms - open_hold[1] < f["delay_s"] * 1000:
+                fault = {"faultId": f["id"], "kind": "hold", "reason": held}
+            elif chaos_release(directory, f["index"], key, open_hold[0]):
+                if f["mode"] == "hold_then_deny":
+                    fault = {"faultId": f["id"], "kind": "deny",
+                             "reason": "Permission held for approval, then denied by approver" + tag}
+            else:
+                # Another gate released it first: this call is a new one.
+                retry = False
+                continue
+            break
+        for f in plan["faults"] if not retry else ():
             if not chaos_matches(f["match"], call["tool"]):
                 continue
             # An MCP tool's error is the MCP proxy's to inject; a gate injects the built-in side.
@@ -2615,19 +2755,18 @@ def chaos_call(plan, events_path, call, now):
                 continue
             if f["times"] is not None and chaos_claim(directory, str(f["index"]) + ".hit.", f["times"]) < 1:
                 continue
-            tag = " [" + plan["canary"] + "]"
             if f["id"] == "tool.error":
-                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag, "delayS": 0}
-            elif f["mode"] == "delay":
-                fault = {"faultId": f["id"], "kind": "delay", "reason": "", "delayS": f["delay_s"]}
-            elif f["mode"] == "hold_then_deny":
-                fault = {"faultId": f["id"], "kind": "hold_then_deny",
-                         "reason": "Permission held for approval, then denied by approver" + tag, "delayS": f["delay_s"]}
+                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag}
+            elif f["mode"] == "deny":
+                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag}
             else:
-                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag, "delayS": 0}
+                # Held from now: the hold's file is what its retries find.
+                if chaos_claim(directory, str(f["index"]) + ".held." + key + ".", None) < 1:
+                    continue
+                fault = {"faultId": f["id"], "kind": "hold", "reason": held}
             lines += chaos_event(plan, "fault_injected", [("faultId", f["id"]), ("call", seen), ("target", call["tool"])], now)
-        if fault is None or fault["kind"] == "delay":
-            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", True)], now)
+        if fault is None or fault["kind"] == "hold":
+            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", fault is None)], now)
     chaos_append(events_path, lines)
     return fault
 
@@ -2643,19 +2782,20 @@ def intutic_chaos_begin():
     return ""
 
 
-def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit):
+def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key=""):
     # Records one call as the gate decided it, before any fault; returns the
-    # fault to apply to an allowed call as "kind<TAB>delayS<TAB>reason", or "".
+    # fault to apply to an allowed call as "kind<TAB>reason" (kind deny or
+    # hold), or "". key is the call's digest, which a held call's retry shares.
     plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
     events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
     if error or not events:
         return ""
     call = {"tool": tool, "decision": decision, "ruleId": rule_id or None,
-            "destructive": destructive == "1", "policyHit": policy_hit == "1"}
+            "destructive": destructive == "1", "policyHit": policy_hit == "1", "key": key}
     fault = chaos_call(plan, events, call, chaos_now())
     if fault is None:
         return ""
-    return fault["kind"] + "\\t" + str(fault["delayS"]) + "\\t" + fault["reason"]
+    return fault["kind"] + "\\t" + fault["reason"]
 
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
@@ -2824,7 +2964,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v19 — harness: goose ────────────
+# ── Intutic gate body v20 — harness: goose ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -2847,13 +2987,14 @@ _intutic_chaos_rule=""
 _intutic_chaos_hit=0
 _intutic_chaos_destructive=0
 # Records this call as decided ($1: allow, deny or hold) and prints the fault
-# to apply to an allowed one, as kind, delay and reason, tab-separated.
+# to apply to an allowed one, as kind and reason, tab-separated. $2 is the
+# call's digest, which a held call's retry shares.
 intutic_chaos_decide() {
   [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ "$_intutic_chaos_done" = "0" ] || return 0
   python3 -c 'import os, sys
 lib = {}
 exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" || true
+sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" "\${2:-}" || true
 }
 # A rule fired without deciding the call (shadow, warn): its id, if none yet.
 intutic_chaos_note() {
@@ -3520,32 +3661,23 @@ case "\${TOOL:-}" in
 esac
 
 # ── Agent fault injection: the call is allowed ───────────────────────────────
-# Recorded as allowed, then the fault that is due, if any. A delay waits inside
-# this gate's 9 s deadline: a gate still running at it refuses the call,
-# and past the hook timeout most harnesses run the call anyway, so a longer
-# wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+# Recorded as allowed, then the fault that is due, if any. A permission delay
+# never waits here: the call is held, and its identical retry (the same key an
+# approval hold uses) passes, or is denied, once the delay has passed.
 if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ]; then
-  _intutic_fault="$(intutic_chaos_decide allow)"
+  _intutic_chaos_key="$( { printf '%s' "$INTUTIC_NTOOL"; printf '\\0'; printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
+  _intutic_fault="$(intutic_chaos_decide allow "$_intutic_chaos_key")"
   _intutic_chaos_done=1
   if [ -n "$_intutic_fault" ]; then
     _intutic_fault_kind="\${_intutic_fault%%$'\\t'*}"
-    _intutic_fault_rest="\${_intutic_fault#*$'\\t'}"
-    _intutic_fault_delay="\${_intutic_fault_rest%%$'\\t'*}"
-    _intutic_fault_reason="\${_intutic_fault_rest#*$'\\t'}"
-    if [ "$_intutic_fault_delay" -gt 0 ] 2>/dev/null; then
-      _intutic_fault_room=$(( 9 - SECONDS - 1 ))
-      [ "$_intutic_fault_room" -gt 0 ] || _intutic_fault_room=0
-      if [ "$_intutic_fault_delay" -gt "$_intutic_fault_room" ]; then
-        echo "[Intutic Governance] chaos: waiting \${_intutic_fault_room} s of the \${_intutic_fault_delay} s the plan asks for, to stay inside the hook timeout" >&2
-        _intutic_fault_delay="$_intutic_fault_room"
-      fi
-      sleep "$_intutic_fault_delay"
-    fi
-    if [ "$_intutic_fault_kind" != "delay" ]; then
-      # The fault's own text, carrying the plan's canary: what the agent reads.
+    _intutic_fault_reason="\${_intutic_fault#*$'\\t'}"
+    # The fault's own text, carrying the plan's canary: what the agent reads.
+    if [ "$_intutic_fault_kind" = "hold" ]; then
+      echo "[Intutic Governance] HELD: \${_intutic_fault_reason}" >&2
+    else
       echo "$_intutic_fault_reason" >&2
-      exit 2
     fi
+    exit 2
   fi
 fi
 # ── end Intutic gate body ────────────────────────────────────────────────────
@@ -3567,7 +3699,7 @@ exports[`generated hook scripts > hermes > matches the recorded output byte for 
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v19 ─────────────────────────────
+# ── Intutic fail-closed prelude v20 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -4192,10 +4324,15 @@ In short: a gate is a new process per tool call, so the plan is decoded on
 each call, plan_loaded is reported by whichever gate first creates
 EVENTS.gate-plan-loaded, and each fault's seen and hit counts are numbered
 empty files in EVENTS.gate-counters/, each number claimed with an exclusive
-create (O_CREAT | O_EXCL), which exactly one process wins.
+create (O_CREAT | O_EXCL), which exactly one process wins. A permission fault
+never sleeps: it holds the call as an approval hold does, in a
+FAULT.held.KEY.G file whose modification time is when, and the identical
+retry is held again until delay_s has passed, then allowed (delay) or denied
+(hold_then_deny) by the one retry that creates FAULT.released.KEY.G.
 
 The bash gates emit this file verbatim (services/sync-daemon/src/lib/chaosPy.ts
-holds a byte-identical copy, which a test compares), and every copy runs
+holds a byte-identical copy, which a test compares), intutic_clawde.gate's
+Gate.guard runs it in process, and every copy runs
 packages/shared-types/fixtures/chaos-gate-vectors.json. It must stay
 self-contained: the standard library only, no module state beyond the
 constants below, and no backtick or dollar-brace, which the TypeScript copy
@@ -4209,6 +4346,7 @@ import json
 import os
 import re
 import sys
+import time
 
 _CHAOS_FAULT_IDS = (
     "llm.rate_limit", "llm.upstream_5xx", "llm.context_trim", "llm.model_degrade", "tool.error", "tool.stale_data",
@@ -4362,6 +4500,46 @@ def chaos_claim(directory, prefix, limit):
         return -1
 
 
+def chaos_open_hold(directory, fault, key):
+    """The open hold of one fault on one call: (g, created), the number of
+    the newest FAULT.held.KEY.G file with no released twin and its
+    modification time in milliseconds; None when there is none or it cannot
+    be read."""
+    try:
+        held = str(fault) + ".held." + key + "."
+        names = os.listdir(directory)
+        g = 0
+        for name in names:
+            if name.startswith(held) and name[len(held):].isdigit():
+                g = max(g, int(name[len(held):]))
+        if g == 0 or (str(fault) + ".released." + key + "." + str(g)) in names:
+            return None
+        # In whole milliseconds, as now is: a hold is never younger than the call that reads it.
+        return g, os.stat(os.path.join(directory, held + str(g))).st_mtime_ns // 1000000
+    except OSError:
+        # No counters yet, or none readable: no hold to continue.
+        return None
+
+
+def chaos_release(directory, fault, key, g):
+    """Ends hold g with an exclusive create: True for the one caller that does."""
+    try:
+        os.close(os.open(os.path.join(directory, str(fault) + ".released." + key + "." + str(g)),
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        return True
+    except OSError:
+        # Another gate released it first, or it cannot be written.
+        return False
+
+
+def _chaos_ms(now):
+    # The ISO-8601 time a call is decided at, in milliseconds; the clock if unreadable.
+    try:
+        return round(datetime.datetime.fromisoformat(now.replace("Z", "+00:00")).timestamp() * 1000)
+    except (AttributeError, TypeError, ValueError):
+        return int(time.time() * 1000)
+
+
 def chaos_now():
     """The time as the JavaScript gates write it: <TIMESTAMP>."""
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -4371,8 +4549,11 @@ def chaos_call(plan, events_path, call, now):
     """Reports one call and returns the fault the gate must apply, or None.
 
     call: tool, decision (allow, deny, ask or hold, before any fault), ruleId,
-    destructive, policyHit. The fault: faultId, kind (deny, delay or
-    hold_then_deny), reason and delayS, as chaosGateCall returns it.
+    destructive, policyHit, and key: the call's digest in hex (its tool and
+    input, as the gate keys an approval hold), which a held call's retry
+    shares. The fault: faultId, kind (deny or hold) and reason, as
+    chaosGateCall returns it. now is the ISO-8601 time, and the clock a hold
+    is timed by.
     """
     lines = ""
     first = True
@@ -4394,7 +4575,32 @@ def chaos_call(plan, events_path, call, now):
     fault = None
     if call["decision"] == "allow":
         directory = events_path + ".gate-counters"
+        key = re.sub(r"[^0-9A-Za-z]", "", str(call.get("key") or ""))[:128] or "call"
+        now_ms = _chaos_ms(now)
+        tag = " [" + plan["canary"] + "]"
+        held = "Permission held for approval; retrying this exact call passes once it is approved" + tag
+        # The retry of a held call: still held until the delay has passed,
+        # then let through or denied by the one retry that releases it.
+        retry = False
         for f in plan["faults"]:
+            if f["id"] != "permission.deny_or_delay" or f["mode"] == "deny" or not chaos_matches(f["match"], call["tool"]):
+                continue
+            open_hold = chaos_open_hold(directory, f["index"], key)
+            if open_hold is None:
+                continue
+            retry = True
+            if f["delay_s"] > 0 and now_ms - open_hold[1] < f["delay_s"] * 1000:
+                fault = {"faultId": f["id"], "kind": "hold", "reason": held}
+            elif chaos_release(directory, f["index"], key, open_hold[0]):
+                if f["mode"] == "hold_then_deny":
+                    fault = {"faultId": f["id"], "kind": "deny",
+                             "reason": "Permission held for approval, then denied by approver" + tag}
+            else:
+                # Another gate released it first: this call is a new one.
+                retry = False
+                continue
+            break
+        for f in plan["faults"] if not retry else ():
             if not chaos_matches(f["match"], call["tool"]):
                 continue
             # An MCP tool's error is the MCP proxy's to inject; a gate injects the built-in side.
@@ -4405,19 +4611,18 @@ def chaos_call(plan, events_path, call, now):
                 continue
             if f["times"] is not None and chaos_claim(directory, str(f["index"]) + ".hit.", f["times"]) < 1:
                 continue
-            tag = " [" + plan["canary"] + "]"
             if f["id"] == "tool.error":
-                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag, "delayS": 0}
-            elif f["mode"] == "delay":
-                fault = {"faultId": f["id"], "kind": "delay", "reason": "", "delayS": f["delay_s"]}
-            elif f["mode"] == "hold_then_deny":
-                fault = {"faultId": f["id"], "kind": "hold_then_deny",
-                         "reason": "Permission held for approval, then denied by approver" + tag, "delayS": f["delay_s"]}
+                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag}
+            elif f["mode"] == "deny":
+                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag}
             else:
-                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag, "delayS": 0}
+                # Held from now: the hold's file is what its retries find.
+                if chaos_claim(directory, str(f["index"]) + ".held." + key + ".", None) < 1:
+                    continue
+                fault = {"faultId": f["id"], "kind": "hold", "reason": held}
             lines += chaos_event(plan, "fault_injected", [("faultId", f["id"]), ("call", seen), ("target", call["tool"])], now)
-        if fault is None or fault["kind"] == "delay":
-            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", True)], now)
+        if fault is None or fault["kind"] == "hold":
+            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", fault is None)], now)
     chaos_append(events_path, lines)
     return fault
 
@@ -4433,19 +4638,20 @@ def intutic_chaos_begin():
     return ""
 
 
-def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit):
+def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key=""):
     # Records one call as the gate decided it, before any fault; returns the
-    # fault to apply to an allowed call as "kind<TAB>delayS<TAB>reason", or "".
+    # fault to apply to an allowed call as "kind<TAB>reason" (kind deny or
+    # hold), or "". key is the call's digest, which a held call's retry shares.
     plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
     events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
     if error or not events:
         return ""
     call = {"tool": tool, "decision": decision, "ruleId": rule_id or None,
-            "destructive": destructive == "1", "policyHit": policy_hit == "1"}
+            "destructive": destructive == "1", "policyHit": policy_hit == "1", "key": key}
     fault = chaos_call(plan, events, call, chaos_now())
     if fault is None:
         return ""
-    return fault["kind"] + "\\t" + str(fault["delayS"]) + "\\t" + fault["reason"]
+    return fault["kind"] + "\\t" + fault["reason"]
 
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
@@ -4604,7 +4810,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v19 — harness: hermes ────────────
+# ── Intutic gate body v20 — harness: hermes ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -4627,13 +4833,14 @@ _intutic_chaos_rule=""
 _intutic_chaos_hit=0
 _intutic_chaos_destructive=0
 # Records this call as decided ($1: allow, deny or hold) and prints the fault
-# to apply to an allowed one, as kind, delay and reason, tab-separated.
+# to apply to an allowed one, as kind and reason, tab-separated. $2 is the
+# call's digest, which a held call's retry shares.
 intutic_chaos_decide() {
   [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ "$_intutic_chaos_done" = "0" ] || return 0
   python3 -c 'import os, sys
 lib = {}
 exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" || true
+sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" "\${2:-}" || true
 }
 # A rule fired without deciding the call (shadow, warn): its id, if none yet.
 intutic_chaos_note() {
@@ -5300,32 +5507,23 @@ case "\${TOOL:-}" in
 esac
 
 # ── Agent fault injection: the call is allowed ───────────────────────────────
-# Recorded as allowed, then the fault that is due, if any. A delay waits inside
-# this gate's 9 s deadline: a gate still running at it refuses the call,
-# and past the hook timeout most harnesses run the call anyway, so a longer
-# wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+# Recorded as allowed, then the fault that is due, if any. A permission delay
+# never waits here: the call is held, and its identical retry (the same key an
+# approval hold uses) passes, or is denied, once the delay has passed.
 if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ]; then
-  _intutic_fault="$(intutic_chaos_decide allow)"
+  _intutic_chaos_key="$( { printf '%s' "$INTUTIC_NTOOL"; printf '\\0'; printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
+  _intutic_fault="$(intutic_chaos_decide allow "$_intutic_chaos_key")"
   _intutic_chaos_done=1
   if [ -n "$_intutic_fault" ]; then
     _intutic_fault_kind="\${_intutic_fault%%$'\\t'*}"
-    _intutic_fault_rest="\${_intutic_fault#*$'\\t'}"
-    _intutic_fault_delay="\${_intutic_fault_rest%%$'\\t'*}"
-    _intutic_fault_reason="\${_intutic_fault_rest#*$'\\t'}"
-    if [ "$_intutic_fault_delay" -gt 0 ] 2>/dev/null; then
-      _intutic_fault_room=$(( 9 - SECONDS - 1 ))
-      [ "$_intutic_fault_room" -gt 0 ] || _intutic_fault_room=0
-      if [ "$_intutic_fault_delay" -gt "$_intutic_fault_room" ]; then
-        echo "[Intutic Governance] chaos: waiting \${_intutic_fault_room} s of the \${_intutic_fault_delay} s the plan asks for, to stay inside the hook timeout" >&2
-        _intutic_fault_delay="$_intutic_fault_room"
-      fi
-      sleep "$_intutic_fault_delay"
-    fi
-    if [ "$_intutic_fault_kind" != "delay" ]; then
-      # The fault's own text, carrying the plan's canary: what the agent reads.
+    _intutic_fault_reason="\${_intutic_fault#*$'\\t'}"
+    # The fault's own text, carrying the plan's canary: what the agent reads.
+    if [ "$_intutic_fault_kind" = "hold" ]; then
+      echo "[Intutic Governance] HELD: \${_intutic_fault_reason}" >&2
+    else
       echo "$_intutic_fault_reason" >&2
-      exit 2
     fi
+    exit 2
   fi
 fi
 # ── end Intutic gate body ────────────────────────────────────────────────────
@@ -5345,7 +5543,7 @@ exports[`generated hook scripts > openhands > matches the recorded output byte f
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v19 ─────────────────────────────
+# ── Intutic fail-closed prelude v20 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -5960,10 +6158,15 @@ In short: a gate is a new process per tool call, so the plan is decoded on
 each call, plan_loaded is reported by whichever gate first creates
 EVENTS.gate-plan-loaded, and each fault's seen and hit counts are numbered
 empty files in EVENTS.gate-counters/, each number claimed with an exclusive
-create (O_CREAT | O_EXCL), which exactly one process wins.
+create (O_CREAT | O_EXCL), which exactly one process wins. A permission fault
+never sleeps: it holds the call as an approval hold does, in a
+FAULT.held.KEY.G file whose modification time is when, and the identical
+retry is held again until delay_s has passed, then allowed (delay) or denied
+(hold_then_deny) by the one retry that creates FAULT.released.KEY.G.
 
 The bash gates emit this file verbatim (services/sync-daemon/src/lib/chaosPy.ts
-holds a byte-identical copy, which a test compares), and every copy runs
+holds a byte-identical copy, which a test compares), intutic_clawde.gate's
+Gate.guard runs it in process, and every copy runs
 packages/shared-types/fixtures/chaos-gate-vectors.json. It must stay
 self-contained: the standard library only, no module state beyond the
 constants below, and no backtick or dollar-brace, which the TypeScript copy
@@ -5977,6 +6180,7 @@ import json
 import os
 import re
 import sys
+import time
 
 _CHAOS_FAULT_IDS = (
     "llm.rate_limit", "llm.upstream_5xx", "llm.context_trim", "llm.model_degrade", "tool.error", "tool.stale_data",
@@ -6130,6 +6334,46 @@ def chaos_claim(directory, prefix, limit):
         return -1
 
 
+def chaos_open_hold(directory, fault, key):
+    """The open hold of one fault on one call: (g, created), the number of
+    the newest FAULT.held.KEY.G file with no released twin and its
+    modification time in milliseconds; None when there is none or it cannot
+    be read."""
+    try:
+        held = str(fault) + ".held." + key + "."
+        names = os.listdir(directory)
+        g = 0
+        for name in names:
+            if name.startswith(held) and name[len(held):].isdigit():
+                g = max(g, int(name[len(held):]))
+        if g == 0 or (str(fault) + ".released." + key + "." + str(g)) in names:
+            return None
+        # In whole milliseconds, as now is: a hold is never younger than the call that reads it.
+        return g, os.stat(os.path.join(directory, held + str(g))).st_mtime_ns // 1000000
+    except OSError:
+        # No counters yet, or none readable: no hold to continue.
+        return None
+
+
+def chaos_release(directory, fault, key, g):
+    """Ends hold g with an exclusive create: True for the one caller that does."""
+    try:
+        os.close(os.open(os.path.join(directory, str(fault) + ".released." + key + "." + str(g)),
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        return True
+    except OSError:
+        # Another gate released it first, or it cannot be written.
+        return False
+
+
+def _chaos_ms(now):
+    # The ISO-8601 time a call is decided at, in milliseconds; the clock if unreadable.
+    try:
+        return round(datetime.datetime.fromisoformat(now.replace("Z", "+00:00")).timestamp() * 1000)
+    except (AttributeError, TypeError, ValueError):
+        return int(time.time() * 1000)
+
+
 def chaos_now():
     """The time as the JavaScript gates write it: <TIMESTAMP>."""
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -6139,8 +6383,11 @@ def chaos_call(plan, events_path, call, now):
     """Reports one call and returns the fault the gate must apply, or None.
 
     call: tool, decision (allow, deny, ask or hold, before any fault), ruleId,
-    destructive, policyHit. The fault: faultId, kind (deny, delay or
-    hold_then_deny), reason and delayS, as chaosGateCall returns it.
+    destructive, policyHit, and key: the call's digest in hex (its tool and
+    input, as the gate keys an approval hold), which a held call's retry
+    shares. The fault: faultId, kind (deny or hold) and reason, as
+    chaosGateCall returns it. now is the ISO-8601 time, and the clock a hold
+    is timed by.
     """
     lines = ""
     first = True
@@ -6162,7 +6409,32 @@ def chaos_call(plan, events_path, call, now):
     fault = None
     if call["decision"] == "allow":
         directory = events_path + ".gate-counters"
+        key = re.sub(r"[^0-9A-Za-z]", "", str(call.get("key") or ""))[:128] or "call"
+        now_ms = _chaos_ms(now)
+        tag = " [" + plan["canary"] + "]"
+        held = "Permission held for approval; retrying this exact call passes once it is approved" + tag
+        # The retry of a held call: still held until the delay has passed,
+        # then let through or denied by the one retry that releases it.
+        retry = False
         for f in plan["faults"]:
+            if f["id"] != "permission.deny_or_delay" or f["mode"] == "deny" or not chaos_matches(f["match"], call["tool"]):
+                continue
+            open_hold = chaos_open_hold(directory, f["index"], key)
+            if open_hold is None:
+                continue
+            retry = True
+            if f["delay_s"] > 0 and now_ms - open_hold[1] < f["delay_s"] * 1000:
+                fault = {"faultId": f["id"], "kind": "hold", "reason": held}
+            elif chaos_release(directory, f["index"], key, open_hold[0]):
+                if f["mode"] == "hold_then_deny":
+                    fault = {"faultId": f["id"], "kind": "deny",
+                             "reason": "Permission held for approval, then denied by approver" + tag}
+            else:
+                # Another gate released it first: this call is a new one.
+                retry = False
+                continue
+            break
+        for f in plan["faults"] if not retry else ():
             if not chaos_matches(f["match"], call["tool"]):
                 continue
             # An MCP tool's error is the MCP proxy's to inject; a gate injects the built-in side.
@@ -6173,19 +6445,18 @@ def chaos_call(plan, events_path, call, now):
                 continue
             if f["times"] is not None and chaos_claim(directory, str(f["index"]) + ".hit.", f["times"]) < 1:
                 continue
-            tag = " [" + plan["canary"] + "]"
             if f["id"] == "tool.error":
-                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag, "delayS": 0}
-            elif f["mode"] == "delay":
-                fault = {"faultId": f["id"], "kind": "delay", "reason": "", "delayS": f["delay_s"]}
-            elif f["mode"] == "hold_then_deny":
-                fault = {"faultId": f["id"], "kind": "hold_then_deny",
-                         "reason": "Permission held for approval, then denied by approver" + tag, "delayS": f["delay_s"]}
+                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag}
+            elif f["mode"] == "deny":
+                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag}
             else:
-                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag, "delayS": 0}
+                # Held from now: the hold's file is what its retries find.
+                if chaos_claim(directory, str(f["index"]) + ".held." + key + ".", None) < 1:
+                    continue
+                fault = {"faultId": f["id"], "kind": "hold", "reason": held}
             lines += chaos_event(plan, "fault_injected", [("faultId", f["id"]), ("call", seen), ("target", call["tool"])], now)
-        if fault is None or fault["kind"] == "delay":
-            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", True)], now)
+        if fault is None or fault["kind"] == "hold":
+            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", fault is None)], now)
     chaos_append(events_path, lines)
     return fault
 
@@ -6201,19 +6472,20 @@ def intutic_chaos_begin():
     return ""
 
 
-def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit):
+def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key=""):
     # Records one call as the gate decided it, before any fault; returns the
-    # fault to apply to an allowed call as "kind<TAB>delayS<TAB>reason", or "".
+    # fault to apply to an allowed call as "kind<TAB>reason" (kind deny or
+    # hold), or "". key is the call's digest, which a held call's retry shares.
     plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
     events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
     if error or not events:
         return ""
     call = {"tool": tool, "decision": decision, "ruleId": rule_id or None,
-            "destructive": destructive == "1", "policyHit": policy_hit == "1"}
+            "destructive": destructive == "1", "policyHit": policy_hit == "1", "key": key}
     fault = chaos_call(plan, events, call, chaos_now())
     if fault is None:
         return ""
-    return fault["kind"] + "\\t" + str(fault["delayS"]) + "\\t" + fault["reason"]
+    return fault["kind"] + "\\t" + fault["reason"]
 
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
@@ -6382,7 +6654,7 @@ log_event() {
 }
 
 
-# ── Intutic gate body v19 — harness: openhands ────────────
+# ── Intutic gate body v20 — harness: openhands ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
@@ -6405,13 +6677,14 @@ _intutic_chaos_rule=""
 _intutic_chaos_hit=0
 _intutic_chaos_destructive=0
 # Records this call as decided ($1: allow, deny or hold) and prints the fault
-# to apply to an allowed one, as kind, delay and reason, tab-separated.
+# to apply to an allowed one, as kind and reason, tab-separated. $2 is the
+# call's digest, which a held call's retry shares.
 intutic_chaos_decide() {
   [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ "$_intutic_chaos_done" = "0" ] || return 0
   python3 -c 'import os, sys
 lib = {}
 exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
-sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" || true
+sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" "\${2:-}" || true
 }
 # A rule fired without deciding the call (shadow, warn): its id, if none yet.
 intutic_chaos_note() {
@@ -7078,32 +7351,23 @@ case "\${TOOL:-}" in
 esac
 
 # ── Agent fault injection: the call is allowed ───────────────────────────────
-# Recorded as allowed, then the fault that is due, if any. A delay waits inside
-# this gate's 9 s deadline: a gate still running at it refuses the call,
-# and past the hook timeout most harnesses run the call anyway, so a longer
-# wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+# Recorded as allowed, then the fault that is due, if any. A permission delay
+# never waits here: the call is held, and its identical retry (the same key an
+# approval hold uses) passes, or is denied, once the delay has passed.
 if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ]; then
-  _intutic_fault="$(intutic_chaos_decide allow)"
+  _intutic_chaos_key="$( { printf '%s' "$INTUTIC_NTOOL"; printf '\\0'; printf '%s' "$INTUTIC_NCOMMAND"; printf '\\0'; printf '%s' "$INTUTIC_NTARGET"; } | intutic_sha256 )"
+  _intutic_fault="$(intutic_chaos_decide allow "$_intutic_chaos_key")"
   _intutic_chaos_done=1
   if [ -n "$_intutic_fault" ]; then
     _intutic_fault_kind="\${_intutic_fault%%$'\\t'*}"
-    _intutic_fault_rest="\${_intutic_fault#*$'\\t'}"
-    _intutic_fault_delay="\${_intutic_fault_rest%%$'\\t'*}"
-    _intutic_fault_reason="\${_intutic_fault_rest#*$'\\t'}"
-    if [ "$_intutic_fault_delay" -gt 0 ] 2>/dev/null; then
-      _intutic_fault_room=$(( 9 - SECONDS - 1 ))
-      [ "$_intutic_fault_room" -gt 0 ] || _intutic_fault_room=0
-      if [ "$_intutic_fault_delay" -gt "$_intutic_fault_room" ]; then
-        echo "[Intutic Governance] chaos: waiting \${_intutic_fault_room} s of the \${_intutic_fault_delay} s the plan asks for, to stay inside the hook timeout" >&2
-        _intutic_fault_delay="$_intutic_fault_room"
-      fi
-      sleep "$_intutic_fault_delay"
-    fi
-    if [ "$_intutic_fault_kind" != "delay" ]; then
-      # The fault's own text, carrying the plan's canary: what the agent reads.
+    _intutic_fault_reason="\${_intutic_fault#*$'\\t'}"
+    # The fault's own text, carrying the plan's canary: what the agent reads.
+    if [ "$_intutic_fault_kind" = "hold" ]; then
+      echo "[Intutic Governance] HELD: \${_intutic_fault_reason}" >&2
+    else
       echo "$_intutic_fault_reason" >&2
-      exit 2
     fi
+    exit 2
   fi
 fi
 # ── end Intutic gate body ────────────────────────────────────────────────────

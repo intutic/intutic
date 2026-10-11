@@ -12,6 +12,7 @@
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import { secretPatternAlternation } from '@intutic/shared-types'
+import { writeFileAtomic } from '@intutic/sync-daemon/lib/atomicWrite'
 import { log } from './logger.js'
 
 /** Marker line identifying a post-commit/post-checkout hook as ours — the overwrite guard. */
@@ -117,8 +118,8 @@ exit 0
  *
  * Reads the existing file first: absent, or already carrying `marker` (a
  * previous install of this same hook, safe to overwrite with the current
- * content — this is what makes a re-run idempotent), writes `content` and
- * marks it executable. Anything else is a hook this codebase did not write —
+ * content — this is what makes a re-run idempotent), writes `content`
+ * executable, atomically. Anything else is a hook this codebase did not write —
  * left standing untouched, with `warnMessage` logged so the operator knows
  * why the hook they expected is missing.
  *
@@ -141,8 +142,9 @@ async function writeHookIfOursOrAbsent(
     existing = null
   }
   if (existing === null || existing.includes(marker)) {
-    await node_fs.writeFile(hookPath, content, { encoding: 'utf-8', mode: 0o755 })
-    await node_fs.chmod(hookPath, 0o755)
+    // Atomic: git runs the hook at moments this does not choose, and a hook
+    // read half-written is a pre-commit secret scan that never ran.
+    await writeFileAtomic(hookPath, content, { mode: 0o755 })
     return true
   }
   log.warn(warnMessage)

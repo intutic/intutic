@@ -109,6 +109,7 @@ import { parseDocument, isMap } from 'yaml'
 import { GEMINI_CLI_GATE_ID, sanitizeMcpEndpoint } from '@intutic/shared-types'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { antigravityGateIdentities } from './antigravityProducts.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-mcp-autowrite')
 
@@ -500,7 +501,9 @@ async function writeJsonFile(filePath: string, data: unknown, workspaceRoot?: st
 
   if (workspaceRoot !== undefined) await keepOriginal(filePath, workspaceRoot)
   await node_fs.mkdir(node_path.dirname(filePath), { recursive: true })
-  await node_fs.writeFile(filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8')
+  // Through a symlink, as the plain write this was did: these are the person's
+  // own harness configs, which dotfile managers keep as links.
+  await writeFileAtomic(filePath, JSON.stringify(data, null, 2) + '\n', { followSymlink: true })
 }
 
 // ─── Target: Claude Code ─────────────────────────────────────────────────────
@@ -816,7 +819,7 @@ async function injectGooseAppendOnly(configPath: string, existingYaml: string, w
 
   await keepOriginal(configPath, node_os.homedir())
   await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
-  await node_fs.writeFile(configPath, text, 'utf-8')
+  await writeFileAtomic(configPath, text, { followSymlink: true })
   log.info({ action: 'goose_mcp_injected', mode: 'append_only_fallback' }, 'Goose config.yaml updated (append-only fallback)')
 }
 
@@ -919,7 +922,7 @@ async function injectGoose(workspaceId: string, workspaceRoot: string): Promise<
 
   await keepOriginal(configPath, workspaceRoot)
   await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
-  await node_fs.writeFile(configPath, doc.toString(), 'utf-8')
+  await writeFileAtomic(configPath, doc.toString(), { followSymlink: true })
   log.info({ action: 'goose_mcp_injected', mode: 'yaml' }, 'Goose config.yaml updated (structural YAML edit)')
 }
 
@@ -1015,7 +1018,7 @@ async function injectGrokConfigAppendOnly(
 
   await keepOriginal(configPath, workspaceRoot)
   await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
-  await node_fs.writeFile(configPath, text, 'utf-8')
+  await writeFileAtomic(configPath, text, { followSymlink: true })
   log.info({ action: 'grok_mcp_injected', mode: 'append_only_fallback' }, 'Grok config.toml updated (append-only fallback)')
 }
 
@@ -1091,9 +1094,7 @@ async function injectGrokConfig(configPath: string, workspaceId: string, workspa
   doc.mcp_servers = servers
   await keepOriginal(configPath, workspaceRoot)
   await node_fs.mkdir(node_path.dirname(configPath), { recursive: true })
-  const tmp = configPath + '.intutic-tmp'
-  await node_fs.writeFile(tmp, stringifyToml(doc), 'utf-8')
-  await node_fs.rename(tmp, configPath)
+  await writeFileAtomic(configPath, stringifyToml(doc))
   log.info({ action: 'grok_mcp_injected', path: configPath, mode: 'toml' }, 'Grok config.toml updated (structural TOML edit)')
 }
 
@@ -1250,9 +1251,7 @@ async function injectOpenCodeConfig(configPath: string, workspaceId: string, wor
   const indent = raw.match(/^([ \t]+)\S/m)?.[1] ?? 2
   // OpenCode entries cannot carry a marker, so disconnect needs the file as it was.
   await keepOriginal(configPath, workspaceRoot)
-  const tmp = configPath + '.intutic-tmp'
-  await node_fs.writeFile(tmp, JSON.stringify(config, null, indent) + '\n', 'utf-8')
-  await node_fs.rename(tmp, configPath)
+  await writeFileAtomic(configPath, JSON.stringify(config, null, indent) + '\n')
   log.info({ action: 'opencode_mcp_injected', path: configPath }, 'OpenCode opencode.json mcp block updated')
 }
 

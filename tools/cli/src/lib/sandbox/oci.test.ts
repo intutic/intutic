@@ -45,6 +45,14 @@ describe('buildOciArgs', () => {
     expect(args.join(' ')).toContain('-v /home/dev/project:/work')
   })
 
+  // A plain --tmpfs is root-owned 755: the unprivileged agent could not write
+  // its own home, so Claude Code (~/.claude) and the MCP proxy's pins failed.
+  it('gives the agent a writable home and scratch, and nothing else', () => {
+    const args = buildOciArgs('docker', spec())
+    const tmpfs = args.flatMap((a, i) => (a === '--tmpfs' ? [args[i + 1]] : []))
+    expect(tmpfs).toEqual(['/tmp', '/run', '/home/sandbox:mode=1777'])
+  })
+
   it('passes env by NAME, never by value (keeps secrets out of argv)', () => {
     const args = buildOciArgs('docker', spec())
     expect(args).toContain('--env')

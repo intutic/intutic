@@ -25,6 +25,7 @@ import { parseDocument, isMap, isSeq, type Document } from 'yaml'
 import { newIso } from '@intutic/id'
 import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed } from './gateBody.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-hermes-hooks')
 
@@ -174,9 +175,7 @@ async function mergeHermesConfig(hookScriptPath: string): Promise<void> {
     return
   }
 
-  const tmpPath = HERMES_CONFIG + '.intutic-tmp'
-  await fs.writeFile(tmpPath, merged, 'utf-8')
-  await fs.rename(tmpPath, HERMES_CONFIG)
+  await writeFileAtomic(HERMES_CONFIG, merged)
 }
 
 // ─── Governance skill template ────────────────────────────────────────────────
@@ -241,10 +240,7 @@ export async function writeHermesHooks(
   // ── 2. Write bash hook script ──────────────────────────────────────────────
 
   const hookScriptPath = path.join(globalHookDir, 'hermes-check.sh')
-  const tmpScript = hookScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, buildHermesCheckScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, buildHermesCheckScript(proxyUrl, workspaceRoot, workspaceId), { mode: 0o755 })
 
   log.info({ action: 'hermes_hook_script_written', path: hookScriptPath }, 'Hermes hook script written')
 
@@ -260,9 +256,7 @@ export async function writeHermesHooks(
   // ── 4. Write governance skill ──────────────────────────────────────────────
 
   const skill = buildGovernanceSkill(proxyUrl)
-  const tmpSkill = skillPath + '.intutic-tmp'
-  await fs.writeFile(tmpSkill, skill, 'utf-8')
-  await fs.rename(tmpSkill, skillPath)
+  await writeFileAtomic(skillPath, skill)
   await noteWritten(skillPath, workspaceRoot, skill)
 
   log.info(
@@ -279,9 +273,7 @@ export async function writeHermesHooks(
   ].join('\n') + '\n'
 
   const envFilePath = path.join(envDir, 'hermes.env')
-  const tmpEnv = envFilePath + '.intutic-tmp'
-  await fs.writeFile(tmpEnv, envSnippet, 'utf-8')
-  await fs.rename(tmpEnv, envFilePath)
+  await writeFileAtomic(envFilePath, envSnippet)
 
   log.info(
     { action: 'hermes_env_written', path: envFilePath },

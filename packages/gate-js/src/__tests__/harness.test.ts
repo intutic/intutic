@@ -871,12 +871,13 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
 
   /** Builds the stdin JSON envelope Claude Code's real PreToolUse hook sends,
    *  placing `fixture` on whichever field the pattern's subject reads —
-   *  mirrors fidelity.test.ts's `evaluateAgainst`. */
+   *  mirrors fidelity.test.ts's `evaluateAgainst`. A `phrase` rule
+   *  (destructive.sql_drop) matches words in the command. */
   function ctxFor(p: FixturePattern, fixture: string): unknown {
     const subject = p.subject ?? 'any'
     const toolName = subject === 'tool' ? fixture : 'shell'
     const path = subject === 'target' ? fixture : ''
-    const command = subject === 'command' || subject === 'any' ? fixture : ''
+    const command = subject === 'command' || subject === 'any' || subject === 'phrase' ? fixture : ''
     return { tool_name: toolName, tool_input: { command, path } }
   }
 
@@ -916,7 +917,7 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
         const subject = p.subject ?? 'any'
         const toolName = subject === 'tool' ? fixture : 'shell'
         const target = subject === 'target' ? fixture : ''
-        const command = subject === 'command' || subject === 'any' ? fixture : ''
+        const command = subject === 'command' || subject === 'any' || subject === 'phrase' ? fixture : ''
         const decision = evaluate(toolName, target, command, snap)
         expect(decision.severity, `expected ${p.id} to match ${JSON.stringify(fixture)}`).toBe(severityConst(p.severity))
 

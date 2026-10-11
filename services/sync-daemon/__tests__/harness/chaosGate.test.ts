@@ -14,7 +14,7 @@
  * (one process, many calls) on OpenClaw and Pi.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, readdirSync, statSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -29,13 +29,14 @@ const PACKAGES = join(HERE, '../../../../packages')
 
 interface VectorCall {
   tool: string
+  input?: Record<string, unknown>
+  advanceS?: number
   decision: string
   ruleId?: string | null
   destructive: boolean
   policyHit: boolean
   outcome: string
   reason?: string
-  delayS?: number
 }
 interface Vectors {
   valid: Array<{ name: string; plan: unknown; calls: VectorCall[]; events: Array<Record<string, unknown>> }>
@@ -173,7 +174,18 @@ function readEvents(events: string): Array<Record<string, unknown>> {
   })
 }
 
+/** Moves the clock forward: every counter file's modification time goes back by `seconds`. */
+function advanceClock(events: string, seconds: number): void {
+  const dir = events + '.gate-counters'
+  if (!seconds || !existsSync(dir)) return
+  for (const name of readdirSync(dir)) {
+    const t = statSync(join(dir, name)).mtimeMs / 1000 - seconds
+    utimesSync(join(dir, name), t, t)
+  }
+}
+
 const BASE = { v: 1, runId: 'run_gate_e2e', repetition: 1, canary: 'E-INTUTIC-C0FFEE' }
+const HELD = 'Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]'
 
 it('emits a byte-identical copy of intutic-clawde’s chaos.py', () => {
   const clawde = readFileSync(join(PACKAGES, 'intutic-clawde/intutic_clawde/gate/chaos.py'), 'utf-8')
@@ -192,15 +204,15 @@ describe.each(ENGINES)('the %s gate', (name) => {
     for (const v of REPLAYABLE) {
       const { events, env } = chaosEnv(v.plan)
       for (const [i, c] of v.calls.entries()) {
-        const out = await runGate(name, benign(c.tool), env)
+        advanceClock(events, c.advanceS ?? 0)
+        const out = await runGate(name, c.input ? call(c.tool, c.input) : benign(c.tool), env)
         const label = `${v.name} call ${i}: ${out.stderr.slice(-300)}`
         if (c.outcome === 'allow') {
           expect(out.code, label).toBe(0)
         } else {
           expect(out.code, label).toBe(2)
-          expect(out.stderr, label).toContain(c.reason)
+          expect(out.stderr, label).toContain(c.outcome === 'hold' ? `[Intutic Governance] HELD: ${c.reason}` : c.reason)
         }
-        if (c.delayS) expect(out.ms, label).toBeGreaterThanOrEqual(c.delayS * 1000 - 100)
       }
       expect(readEvents(events), v.name).toEqual(v.events)
     }
@@ -281,12 +293,26 @@ describe.each(ENGINES)('the %s gate', (name) => {
     ])
   }, 30_000)
 
-  it('shortens a delay longer than the hook timeout allows, and still allows', async () => {
+  it('holds a delay longer than any hook timeout without waiting, and lets the retry through after it', async () => {
     const { events, env } = chaosEnv({ ...BASE, faults: [{ id: 'permission.deny_or_delay', mode: 'delay', delay_s: 600 }] })
-    const out = await runGate(name, benign('Bash'), env)
-    expect(out.code, out.stderr).toBe(0)
-    expect(out.stderr).toContain('of the 600 s the plan asks for')
-    expect(readEvents(events).map((e) => e.type)).toEqual(['plan_loaded', 'gate_decision', 'fault_injected', 'tool_call'])
+    const held = await runGate(name, benign('Bash'), env)
+    expect(held.code, held.stderr).toBe(2)
+    expect(held.stderr).toContain(`[Intutic Governance] HELD: ${HELD}`)
+    expect(held.ms).toBeLessThan(5_000)
+    expect((await runGate(name, benign('Bash'), env)).code).toBe(2)
+    advanceClock(events, 600)
+    const retry = await runGate(name, benign('Bash'), env)
+    expect(retry.code, retry.stderr).toBe(0)
+    expect(readEvents(events).map((e) => [e.type, e.ok])).toEqual([
+      ['plan_loaded', undefined],
+      ['gate_decision', undefined],
+      ['fault_injected', undefined],
+      ['tool_call', false],
+      ['gate_decision', undefined],
+      ['tool_call', false],
+      ['gate_decision', undefined],
+      ['tool_call', true],
+    ])
   }, 30_000)
 })
 
@@ -307,6 +333,26 @@ describe('the stdout harnesses refuse a fault through their own contract', () =>
   it('antigravityCli: the documented fields only', async () => {
     const out = await runGate('antigravityCli', benign('Bash'), chaosEnv(plan).env)
     expect(JSON.parse(out.stdout.trim().split('\n').pop()!)).toEqual({ decision: 'deny', reason })
+  })
+
+  const hold = { ...BASE, faults: [{ id: 'permission.deny_or_delay', mode: 'delay', delay_s: 60 }] }
+
+  it('cline: a held call is a cancel with the hold code', async () => {
+    const out = await runGate('cline', benign('Bash'), chaosEnv(hold).env)
+    expect(JSON.parse(out.stdout.trim())).toEqual({ cancel: true, errorMessage: `[Intutic Governance] HELD: ${HELD}`, code: 'HELD', ruleId: null })
+  })
+
+  it('grok: a held call is a deny with the hold code', async () => {
+    const out = await runGate('grok', benign('Bash'), chaosEnv(hold).env)
+    expect(JSON.parse(out.stdout.trim())).toEqual({ decision: 'deny', reason: `[Intutic Governance] HELD: ${HELD}`, code: 'HELD', ruleId: null })
+  })
+
+  it('antigravityCli: a held call names its code in the reason', async () => {
+    const out = await runGate('antigravityCli', benign('Bash'), chaosEnv(hold).env)
+    expect(JSON.parse(out.stdout.trim().split('\n').pop()!)).toEqual({
+      decision: 'deny',
+      reason: `[Intutic Governance] HELD: ${HELD} (refusal code HELD)`,
+    })
   })
 
   it('cline: an unreadable plan refuses as a gate failure', async () => {
@@ -389,25 +435,28 @@ describe('the in-process plugins keep one record per call', () => {
     ])
   }, 30_000)
 
-  it('pi: a refusal by governance, then a held-then-denied call', async () => {
-    const { events, env } = chaosEnv({ ...BASE, faults: [{ id: 'permission.deny_or_delay', mode: 'hold_then_deny', delay_s: 1 }] })
-    const { results, ms } = await runPlugin(
+  it('pi: a refusal by governance, then a held call whose retry is denied', async () => {
+    const { events, env } = chaosEnv({ ...BASE, faults: [{ id: 'permission.deny_or_delay', mode: 'hold_then_deny' }] })
+    const { results } = await runPlugin(
       'pi',
       [
         { tool: 'write', args: { path: '.claude/settings.json', content: '{}' } },
+        { tool: 'bash', args: { command: 'ls' } },
         { tool: 'bash', args: { command: 'ls' } },
       ],
       env,
     )
     expect(results[0]).toMatch(/^\[Intutic Governance\] BLOCKED/)
-    expect(results[1]).toBe('[Intutic Governance] Permission held for approval, then denied by approver [E-INTUTIC-C0FFEE]')
-    expect(ms).toBeGreaterThanOrEqual(900)
+    expect(results[1]).toBe(`[Intutic Governance] HELD: ${HELD}`)
+    expect(results[2]).toBe('[Intutic Governance] Permission held for approval, then denied by approver [E-INTUTIC-C0FFEE]')
     const got = readEvents(events)
-    expect(got.map((e) => [e.type, e.tool ?? e.target, e.decision])).toEqual([
+    expect(got.map((e) => [e.type, e.tool ?? e.target, e.decision ?? e.ok])).toEqual([
       ['plan_loaded', undefined, undefined],
       ['gate_decision', 'write', 'deny'],
       ['gate_decision', 'bash', 'allow'],
       ['fault_injected', 'bash', undefined],
+      ['tool_call', 'bash', false],
+      ['gate_decision', 'bash', 'allow'],
     ])
     expect(got[1]!.policyHit).toBe(true)
   }, 30_000)

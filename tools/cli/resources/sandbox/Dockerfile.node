@@ -1,0 +1,19 @@
+# check=skip=InvalidDefaultArgInFrom
+# Intutic sandbox image with Node.js and npm.
+#
+# The base for agents that run on Node — Claude Code, Codex, Gemini CLI — and
+# for anything else in the sandbox that needs it: the JavaScript hook gates and
+# Node-based MCP servers. It is the default image plus `nodejs` and `npm` from
+# Alpine's packages, and nothing else: the entrypoint, the egress firewall, the
+# capability drop and the unprivileged `sandbox` user are inherited unchanged.
+#
+# Pass `--sandbox-image intutic/sandbox:<CLI version>-node` and the CLI builds
+# it on first use, FROM the default image, which it builds first if needed.
+# Bring your agent by extending that tag:
+#
+#   FROM intutic/sandbox:<CLI version>-node
+#   RUN npm install -g @anthropic-ai/claude-code
+ARG INTUTIC_SANDBOX_BASE
+FROM ${INTUTIC_SANDBOX_BASE}
+
+RUN apk add --no-cache nodejs npm

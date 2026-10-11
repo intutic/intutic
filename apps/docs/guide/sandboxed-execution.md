@@ -53,7 +53,7 @@ The isolation envelope:
 |---|---|
 | `--cap-drop=ALL` + a narrow `--cap-add` | Starts from zero Linux capabilities; only what the entrypoint needs to install the firewall and drop privilege is added back — the agent itself runs with an empty capability set |
 | `--security-opt=no-new-privileges` | No setuid-root escalation inside the container |
-| `--read-only` rootfs + `tmpfs` scratch | The container's filesystem can't be modified; `/tmp`, `/run`, and the sandbox home are writable scratch space only |
+| `--read-only` rootfs + `tmpfs` scratch | The container's filesystem can't be modified; `/tmp`, `/run`, and the sandbox home are writable scratch space only, emptied when the container exits |
 | `--pids-limit` / `--memory` / `--cpus` | Bounds on fork-bombs and resource exhaustion |
 | A default-deny egress firewall inside the container | Installed by the image's entrypoint before the agent starts; permits only the proxy (reached via `host.docker.internal`) and DNS |
 
@@ -78,9 +78,26 @@ docker build --build-arg INTUTIC_VERSION="$(intutic --version)" -t my-agent-sand
 intutic exec --sandbox --sandbox-image my-agent-sandbox -- python3 my_agent.py
 ```
 
+For an agent that runs on Node — Claude Code, Codex, Gemini CLI — start from
+`intutic/sandbox:<CLI version>-node` instead: the default image plus Node.js
+and npm, with the same entrypoint, firewall and capability drop. It is built
+on first use the same way, from the default image:
+
+```dockerfile
+ARG INTUTIC_VERSION
+FROM intutic/sandbox:${INTUTIC_VERSION}-node
+RUN npm install -g @anthropic-ai/claude-code
+```
+
+```bash
+intutic exec --sandbox --sandbox-image "intutic/sandbox:$(intutic --version)-node" -- node --version   # builds it once
+docker build --build-arg INTUTIC_VERSION="$(intutic --version)" -t my-agent-sandbox .
+intutic exec --sandbox --sandbox-image my-agent-sandbox -- claude
+```
+
 Any other image works too, as long as it has `nftables`, `capsh` and the
-entrypoint's behaviour; a name other than the default is pulled by Docker or
-Podman as usual.
+entrypoint's behaviour; a name other than the two built-in ones is pulled by
+Docker or Podman as usual.
 
 ### Firecracker microVMs (`--sandbox=firecracker`)
 

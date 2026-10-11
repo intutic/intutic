@@ -101,6 +101,7 @@ import { isSeq, parseDocument } from 'yaml'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { anthropicBaseUrl } from '@intutic/shared-types'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-dsh-hooks')
 
@@ -275,9 +276,7 @@ async function mergeProfilePatchAppendOnly(
 
   const text = (existingYaml || '[]').trimEnd() + '\n' + block + '\n'
   await fs.mkdir(path.dirname(patchPath), { recursive: true })
-  const tmp = patchPath + '.intutic-tmp'
-  await fs.writeFile(tmp, text, 'utf-8')
-  await fs.rename(tmp, patchPath)
+  await writeFileAtomic(patchPath, text)
   log.info({ action: 'dsh_patch_written', path: patchPath, mode: 'append_only_fallback' }, 'dsh cordis.patch.yml updated (append-only fallback)')
 }
 
@@ -345,9 +344,7 @@ export async function mergeProfilePatch(profileDir: string, workspaceRoot: strin
   if (!changed) return
 
   await fs.mkdir(profileDir, { recursive: true })
-  const tmp = patchPath + '.intutic-tmp'
-  await fs.writeFile(tmp, doc.toString(), 'utf-8')
-  await fs.rename(tmp, patchPath)
+  await writeFileAtomic(patchPath, doc.toString())
   log.info({ action: 'dsh_patch_written', path: patchPath, mode: 'yaml' }, 'dsh cordis.patch.yml updated (structural YAML edit)')
 }
 
@@ -397,9 +394,7 @@ export async function mergeProfileDependency(profileDir: string): Promise<void> 
 
   manifest.dependencies = { ...deps, '@intutic/gate': INTUTIC_GATE_VERSION_RANGE }
 
-  const tmp = manifestPath + '.intutic-tmp'
-  await fs.writeFile(tmp, JSON.stringify(manifest, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, manifestPath)
+  await writeFileAtomic(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
   log.info({ action: 'dsh_dependency_written', path: manifestPath }, 'dsh profile package.json dependency updated')
 }
 
@@ -469,9 +464,7 @@ export async function mergeProfileLlmRoute(profileDir: string, proxyUrl: string)
       '  config:',
       `    baseURL: ${JSON.stringify(proxyUrl)}`,
     ].join('\n')
-    const tmp = patchPath + '.intutic-tmp'
-    await fs.writeFile(tmp, (existingYaml || '[]').trimEnd() + '\n' + block + '\n', 'utf-8')
-    await fs.rename(tmp, patchPath)
+    await writeFileAtomic(patchPath, (existingYaml || '[]').trimEnd() + '\n' + block + '\n')
     log.info({ action: 'dsh_llm_route_written', path: patchPath, mode: 'append_only_fallback' }, 'dsh llm-deepseek route updated (append-only fallback)')
     return
   }
@@ -494,9 +487,7 @@ export async function mergeProfileLlmRoute(profileDir: string, proxyUrl: string)
   }
 
   await fs.mkdir(profileDir, { recursive: true })
-  const tmp = patchPath + '.intutic-tmp'
-  await fs.writeFile(tmp, doc.toString(), 'utf-8')
-  await fs.rename(tmp, patchPath)
+  await writeFileAtomic(patchPath, doc.toString())
   log.info({ action: 'dsh_llm_route_written', path: patchPath, mode: 'yaml' }, 'dsh llm-deepseek route updated (structural YAML edit)')
 }
 
@@ -565,9 +556,7 @@ async function writeDshInstallMd(dshHome: string, profileNames: string[]): Promi
 
   await keepOriginal(installPath, dshHome)
   await fs.mkdir(dshHome, { recursive: true })
-  const tmp = installPath + '.intutic-tmp'
-  await fs.writeFile(tmp, content, 'utf-8')
-  await fs.rename(tmp, installPath)
+  await writeFileAtomic(installPath, content)
   await noteWritten(installPath, dshHome, content)
   log.info({ action: 'dsh_install_md_written', path: installPath }, 'dsh INSTALL.md updated')
 }

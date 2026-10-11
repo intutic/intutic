@@ -2025,6 +2025,178 @@
       ]
     },
     {
+      "id": "destructive.rm_rf_home",
+      "subject": "command",
+      "flags": "-",
+      "line": "destructive.rm_rf_home\tblock\t-\tcommand\tRecursive delete of the home directory\t rm( +-[a-zA-Z-]+)+ +(~|\"?\\$(HOME|\\{HOME})\"?)(/\\*?)?\"?[ ;&|)]",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ~ "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ~/ "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ~/* "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -fr ~ "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf $HOME "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf $HOME/ "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -r -f \"$HOME\" "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf \"$HOME\"/ "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf \"${HOME}/\" "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " sudo rm -rf -- ~ "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ~; ls "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ~&& echo done "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ~/project/build "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ./~tmp "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ~tmp "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf \"~\" "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf $HOME/.cache/pip "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf \"$HOME/node_modules\" "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf $HOMEBREW_CACHE "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls ~ "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "one long flag list, no home",
+          "prefix": " rm",
+          "unit": " -rf",
+          "suffix": " x",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "rm after rm, a path below home",
+          "prefix": "",
+          "unit": " rm -rf ~/x",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "home after a long flag list",
+          "prefix": " rm",
+          "unit": " -f",
+          "suffix": " ~",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
       "id": "destructive.mkfs_device",
       "subject": "command",
       "flags": "s",

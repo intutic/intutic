@@ -126,6 +126,7 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Passed to the proxy the CLI starts |
 | `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | Where the CLI writes the policy snapshot the hook gate reads |
+| `INTUTIC_APPROVED_BYPASSES` | `~/.intutic/hooks/approved-bypasses.jsonl` | The approved-bypass list the hook gates read, which `intutic chaos run` copies into each repetition with the snapshot |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | Where `intutic policy install` puts WASM rules |
 | `INTUTIC_OPA_BIN` | `opa` on the `PATH` | The OPA binary `intutic rules build` compiles Rego with |
 | `N8N_URL` | `http://localhost:5678` | The n8n instance `intutic connect` configures |

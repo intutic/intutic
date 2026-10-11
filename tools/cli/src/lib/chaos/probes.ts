@@ -68,20 +68,48 @@ export function abortReason(
   return null
 }
 
+/** A harness names an MCP tool `mcp__<server>__<tool>`; the MCP proxy names it `<tool>`. */
+function toolName(name: string): string {
+  if (!name.startsWith('mcp__')) return name
+  const sep = name.indexOf('__', 5)
+  return sep === -1 ? name : name.slice(sep + 2)
+}
+
 /**
  * After the last `fault_injected`, did a `tool_call` with ok=true on the same
- * target come within `within` subsequent tool calls? A fault with no target
- * (an LLM fault) counts any successful tool call. Null when nothing was
+ * target come within `within` subsequent tool calls? Null when nothing was
  * injected: there was nothing to recover from.
+ *
+ * Read the way the components record calls:
+ * - a proxy fault's target is a model or a host, never a tool, so any
+ *   successful tool call counts;
+ * - the MCP proxy records the faulted call itself after the fault (an error,
+ *   a stale or an injected result), and that record is the fault, not a
+ *   recovery from it, so it is skipped;
+ * - with the MCP proxy in the run, a gate's record of an `mcp__` call only
+ *   says the gate let it through; the MCP proxy's record of the same call
+ *   carries the outcome, so the gate's is not counted twice;
+ * - `mcp__<server>__<tool>` and `<tool>` are the same target.
  */
 export function recoveredWithin(events: readonly ChaosEvent[], within: number): ProbeResult {
   let last = -1
   for (let i = 0; i < events.length; i++) if (events[i].type === 'fault_injected') last = i
   if (last < 0) return null
   const fault = events[last]
-  const target = fault.type === 'fault_injected' ? fault.target : undefined
-  const calls = events.slice(last + 1).filter((e) => e.type === 'tool_call').slice(0, Math.floor(within))
-  return calls.some((e) => e.type === 'tool_call' && e.ok && (target === undefined || e.tool === target))
+  if (fault.type !== 'fault_injected') return null
+  const target = fault.component === 'proxy' || fault.target === undefined ? undefined : toolName(fault.target)
+  const mcpRecords = events.some((e) => e.type === 'tool_call' && e.component === 'mcp-proxy')
+  const calls = events
+    .slice(last + 1)
+    .filter((e) => e.type === 'tool_call')
+    .filter((e) => !(mcpRecords && e.component === 'gate' && e.tool.startsWith('mcp__')))
+  if (fault.component === 'mcp-proxy') {
+    const own = calls.findIndex((e) => e.component === 'mcp-proxy' && e.tool === fault.target)
+    if (own !== -1) calls.splice(own, 1)
+  }
+  return calls
+    .slice(0, Math.floor(within))
+    .some((e) => e.ok && (target === undefined || toolName(e.tool) === target))
 }
 
 /**

@@ -50,20 +50,30 @@ A hold rule in A1 or A3 (a REQUIRE_APPROVAL: SOP, or a local review_before:
 token) raises IntuticGateHold after recording the hold for review, unless an
 approved bypass lets this exact call through — the hook gates' and the MCP
 proxy's mechanism, through the same decisions API. See hold.py.
+
+Under a chaos run (intutic chaos run, which sets INTUTIC_CHAOS_PLAN and
+INTUTIC_CHAOS_EVENTS), Gate.guard reports each call to the run's events file
+and injects the plan's tool.error and permission.deny_or_delay faults into a
+call every tier allowed, exactly as the hook gates do: the same decoding and
+counter files (chaos.py, which the bash gates emit verbatim). A fault raises
+IntuticGateRefusal with code CHAOS_FAULT; a held call raises IntuticGateHold
+with no hold_id, until its identical retry is let through or denied.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import json
 import os
 from dataclasses import dataclass
 from typing import Optional
 
 from ..errors import ClawdeError
-from . import imagecheck, mcp_registry, snapshot, soprules, sso_groups
+from . import chaos, imagecheck, mcp_registry, snapshot, soprules, sso_groups
 from .actions import is_deploy, touches_infra
 from .client import GateClient
-from .hold import hold_message, request_hold
+from .hold import hold_key, hold_message, request_hold
 from .limits import too_large_reason
 
 
@@ -93,6 +103,9 @@ GATE_REFUSAL_CODES = (
     "HOOK_GATE",
     # The call is too large to evaluate (limits.py), before any tier runs.
     "COMMAND_TOO_LARGE",
+    # A chaos run's fault, injected after every tier allowed the call, or its
+    # unreadable plan (chaos.py). Never a governance decision.
+    "CHAOS_FAULT",
     imagecheck.E_UNPINNED_LATEST,
     imagecheck.E_UNPINNED_TAG,
     imagecheck.E_UNKNOWN_REGISTRY,
@@ -162,6 +175,9 @@ class Gate:
         # None = not fetched yet. A failed fetch caches [] so one unreachable
         # control plane does not add a 3s timeout to every subsequent tool call.
         self._sop_rules: Optional[list] = None
+        # A chaos run's plan, events path and why the plan cannot be used: read
+        # from the environment on the first call.
+        self._chaos: Optional[tuple] = None
 
     # ------------------------------------------------------------ loading
 
@@ -240,13 +256,75 @@ class Gate:
         if snap.state != "ok":
             self._emit(f"snapshot_{snap.state}", tool, snap.health_message)
 
+    def _chaos_state(self) -> tuple:
+        """A chaos run's (plan, events, error), from INTUTIC_CHAOS_PLAN and
+        INTUTIC_CHAOS_EVENTS, read once."""
+        if self._chaos is None:
+            raw = os.environ.get("INTUTIC_CHAOS_PLAN", "")
+            events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
+            plan, error = None, None
+            if raw:
+                plan, error = chaos.chaos_decode(raw)
+                if error is None and not events:
+                    plan, error = None, ("INTUTIC_CHAOS_PLAN is set but INTUTIC_CHAOS_EVENTS is not, "
+                                         "so nothing the run does could be reported")
+            self._chaos = (plan, events, error)
+        return self._chaos
+
     # --------------------------------------------------------------- guard
 
     def guard(self, tool_name: str, tool_input: dict) -> None:
-        """Raise IntuticGateRefusal if this call must not run. Return to allow."""
+        """Raise IntuticGateRefusal if this call must not run. Return to allow.
+
+        Under a chaos run's plan, the call is reported to the run's events file
+        whatever the tiers decide, and a call they allowed can still be refused
+        by the fault that is due (CHAOS_FAULT, or IntuticGateHold for a held
+        one). A plan that is set but unreadable refuses every call: an
+        experiment run without the faults it asked for reports a resilience it
+        never measured.
+        """
         if not self.cfg.enforce:
             return
+        plan, events, error = self._chaos_state()
+        if error is not None:
+            reason = (error + " — refusing the call rather than running the experiment "
+                      "without the faults it asked for")
+            self._emit("tool_blocked", tool_name, reason)
+            raise IntuticGateRefusal(reason, "CHAOS_FAULT")
+        if plan is None:
+            self._decide(tool_name, tool_input, None)
+            return
 
+        note = {"ruleId": None, "destructive": False, "policyHit": False}
+
+        def report(decision: str, policy_hit: bool, key: str = ""):
+            return chaos.chaos_call(plan, events, {
+                "tool": tool_name, "decision": decision, "ruleId": note["ruleId"],
+                "destructive": note["destructive"], "policyHit": policy_hit or note["policyHit"], "key": key,
+            }, chaos.chaos_now())
+
+        try:
+            self._decide(tool_name, tool_input, note)
+        except IntuticGateRefusal as exc:
+            # A refusal a tier decided is a policy hit; a call too large to read is not.
+            report("hold" if isinstance(exc, IntuticGateHold) else "deny", exc.code != "COMMAND_TOO_LARGE")
+            raise
+        except BaseException:
+            report("deny", False)
+            raise
+        tool_name_normalized, target_hash = hold_key(tool_name, tool_input)
+        fault = report("allow", False, hashlib.sha256(
+            (tool_name_normalized + "\0" + target_hash).encode("utf-8")).hexdigest())
+        if fault is None:
+            return
+        if fault["kind"] == "hold":
+            raise IntuticGateHold(fault["reason"], None)
+        raise IntuticGateRefusal(fault["reason"], "CHAOS_FAULT")
+
+    def _decide(self, tool_name: str, tool_input: dict, note: Optional[dict]) -> None:
+        """The tiers: raises to refuse, returns to allow. note collects a chaos
+        run's record of the call: the rule that fired, whether a destructive
+        rule fires, and whether an approved bypass let a hold through."""
         target = tool_input.get("path") or tool_input.get("file_path") or ""
         command = tool_input.get("command") or ""
 
@@ -270,6 +348,8 @@ class Gate:
         if record is not None:
             d = sso_groups.evaluate(record.policy, tool_name, record.member_groups)
             if d.clearance != sso_groups.GRANTED:
+                if note is not None:
+                    note["ruleId"] = d.rule_id
                 reason = f"{d.reason} [{d.rule_id}]"
                 self._emit("tool_blocked", tool_name, reason, tool_input)
                 raise IntuticGateRefusal(reason, "SSO_GROUP")
@@ -285,9 +365,19 @@ class Gate:
         # register's copy of the same rule in Tier A3 does not hold it again.
         approved: set[str] = set()
         d = snapshot.evaluate(tool_name, target, command, self.snapshot(), disabled)
+        if note is not None:
+            if d.rule_id:
+                note["ruleId"] = d.rule_id
+            # Destructive whether or not a rule decided the call, the escape
+            # hatch included: what a chaos run's no_destructive_attempt reads.
+            destructive = dataclasses.replace(
+                self.snapshot(), rules=[r for r in self.snapshot().rules if r.id.startswith("destructive.")])
+            note["destructive"] = snapshot.evaluate(tool_name, target, command, destructive, False).severity is not None
         if d.severity == snapshot.SEV_HOLD:
             self._hold(d.rule_id, d.reason, tool_name, tool_input)
             approved.add(d.rule_id)
+            if note is not None:
+                note["policyHit"] = True
         elif d.severity == snapshot.SEV_BLOCK:
             self._emit("tool_blocked", tool_name, d.reason, tool_input)
             raise IntuticGateRefusal(d.reason, "SNAPSHOT")
@@ -297,7 +387,7 @@ class Gate:
             self._emit("tool_would_block", tool_name, d.reason, tool_input)
 
         # ---- Tier M: the MCP server registry and allowlist ----------------
-        self._guard_mcp(tool_name, tool_input)
+        self._guard_mcp(tool_name, tool_input, note)
 
         # ---- Tier A3: SOP rules authored in the product --------------------
         #
@@ -307,6 +397,9 @@ class Gate:
         if self.cfg.use_sop_rules and tool_name not in READ_ONLY_TOOLS:
             rule = soprules.first_match(self.sop_rules(), tool_name, tool_input)
             if rule is not None:
+                # The deciding rule's id, or the first that fired when none decides.
+                if note is not None and (rule.action != soprules.ACTION_WARN or not note["ruleId"]):
+                    note["ruleId"] = f"sop.{rule.id}"
                 reason = f"[sop:{rule.id}] {rule.reason}"
                 if rule.action == soprules.ACTION_BLOCK:
                     self._emit("tool_blocked", tool_name, reason, tool_input)
@@ -318,6 +411,8 @@ class Gate:
                     hold_rule_id = f"sop.{rule.id}"
                     if hold_rule_id not in approved:
                         self._hold(hold_rule_id, rule.reason, tool_name, tool_input)
+                    if note is not None:
+                        note["policyHit"] = True
                 else:
                     self._emit("tool_flagged", tool_name, reason, tool_input)
 
@@ -368,7 +463,7 @@ class Gate:
         if tool_name not in READ_ONLY_TOOLS:
             self._emit("tool_allowed", tool_name, "", tool_input)
 
-    def _guard_mcp(self, tool_name: str, tool_input: dict) -> None:
+    def _guard_mcp(self, tool_name: str, tool_input: dict, note: Optional[dict] = None) -> None:
         """Raise when the workspace's MCP server registry or allowlist refuses
         an mcp__<server>__<tool> call: the registry first, as every gate orders
         them. An allowlist in shadow records the refusal and lets the call on.
@@ -379,18 +474,24 @@ class Gate:
         snap = self.snapshot()
         if snap.state == "invalid":
             code, rule_id, reason = mcp_registry.unverified_refusal(call[0])
+            if note is not None:
+                note["ruleId"] = rule_id
             self._emit("tool_blocked", tool_name, f"{reason} [{rule_id}]", tool_input)
             raise IntuticGateRefusal(f"{reason} [{rule_id}]", code)
         if snap.mcp_registry is not None:
             refusal = mcp_registry.evaluate_registry(snap.mcp_registry, call[0], call[1])
             if refusal is not None:
                 code, rule_id, reason = refusal
+                if note is not None:
+                    note["ruleId"] = rule_id
                 self._emit("tool_blocked", tool_name, f"{reason} [{rule_id}]", tool_input)
                 raise IntuticGateRefusal(f"{reason} [{rule_id}]", code)
         if snap.mcp_allowlist is not None:
             refusal = mcp_registry.evaluate_allowlist(snap.mcp_allowlist, call[0])
             if refusal is not None:
                 code, rule_id, reason = refusal
+                if note is not None and (snap.mcp_allowlist["severity"] != "shadow" or not note["ruleId"]):
+                    note["ruleId"] = rule_id
                 if snap.mcp_allowlist["severity"] == "shadow":
                     self._emit("tool_would_block", tool_name, f"{reason} [{rule_id}]", tool_input)
                     return

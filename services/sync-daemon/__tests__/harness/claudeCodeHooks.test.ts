@@ -115,6 +115,28 @@ describe('Claude Code PreToolUse Hooks Compiler', () => {
     }
   })
 
+  it("keeps the project's own deny rules, and drops Intutic's when the SOP that made them goes", async () => {
+    const tempRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hooks-deny-'))
+    try {
+      const settingsPath = node_path.join(tempRoot, '.claude', 'settings.json')
+      await node_fs.mkdir(node_path.dirname(settingsPath), { recursive: true })
+      await node_fs.writeFile(settingsPath, JSON.stringify({ permissions: { deny: ['Read(./.env)'], allow: ['Bash(ls)'] } }))
+      const deny = async () => JSON.parse(await node_fs.readFile(settingsPath, 'utf-8')).permissions.deny as string[]
+
+      await updatePreToolUseHooks(tempRoot, mockSops)
+      expect(await deny()).toEqual(expect.arrayContaining(['Read(./.env)', 'Bash', 'Bash(*drop database*)']))
+
+      await updatePreToolUseHooks(tempRoot, mockSops.slice(0, 1))
+      const after = await deny()
+      expect(after).toEqual(expect.arrayContaining(['Read(./.env)', 'Bash']))
+      expect(after).not.toContain('Write')
+      expect(after).not.toContain('Bash(*drop database*)')
+      expect(JSON.parse(await node_fs.readFile(settingsPath, 'utf-8')).permissions.allow).toEqual(['Bash(ls)'])
+    } finally {
+      await node_fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
   it('leaves a settings.json that is not plain JSON untouched', async () => {
     const tempRoot = await node_fs.mkdtemp(node_path.join(node_os.tmpdir(), 'intutic-hooks-jsonc-'))
     try {

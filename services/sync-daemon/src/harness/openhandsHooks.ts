@@ -21,6 +21,7 @@ import { newIso } from '@intutic/id'
 import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed } from './gateBody.js'
 import { parse as parseToml } from 'smol-toml'
 import { anthropicBaseUrl, openaiBaseUrl, HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-openhands-hooks')
 
@@ -143,16 +144,11 @@ log_event "tool_allowed" "\$TOOL_NAME" ""
 exit 0
 `
 
-  const tmpScript = hookScriptPath + '.oh-tmp'
-  await fs.writeFile(tmpScript, hookScript, 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, hookScript, { mode: 0o755 })
 
   // ── .openhands/hooks.json ──────────────────────────────────────────
   const hooksJson = JSON.stringify(openHandsHooksConfig(hookScriptPath), null, 2) + '\n'
-  const tmpHooks = hooksPath + '.intutic-tmp'
-  await fs.writeFile(tmpHooks, hooksJson, 'utf-8')
-  await fs.rename(tmpHooks, hooksPath)
+  await writeFileAtomic(hooksPath, hooksJson)
   await noteWritten(hooksPath, workspaceRoot, hooksJson)
 
   log.info({ action: 'openhands_hooks_written', path: hooksPath }, 'OpenHands hooks written')
@@ -184,10 +180,8 @@ async function mergeUserOpenHandsConfig(proxyUrl: string): Promise<void> {
     return
   }
   if (next === raw) return
-  const tmpConfig = configPath + '.intutic-tmp'
   await keepOriginal(configPath, os.homedir())
-  await fs.writeFile(tmpConfig, next, 'utf-8')
-  await fs.rename(tmpConfig, configPath)
+  await writeFileAtomic(configPath, next)
   log.info({ action: 'openhands_config_written', path: configPath }, 'OpenHands config.toml updated with proxy base_url')
 }
 

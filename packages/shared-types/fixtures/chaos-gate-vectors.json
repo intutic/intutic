@@ -1,5 +1,5 @@
 {
-  "_comment": "Fault injection in the hook gates (chaosGate.ts, intutic_clawde/gate/chaos.py and every hook gate that emits them). A valid case is a plan and a run of calls, each with the decision governance made before any fault; replayed in order against a fresh events file, each call ends as `outcome` (with the refusal `reason` and the `delayS` the gate waits, when a fault applies), and the events file holds `events` in order: each line also carries `ts` (ISO-8601), the plan's `runId` and `component` gate. An invalid case is a plan (base64url-encoded by the runner) or a raw environment value that every gate refuses to load, failing closed; every invalid plan is also one ChaosPlanSchema rejects, and every valid one one it accepts.",
+  "_comment": "Fault injection in the hook gates (chaosGate.ts, intutic_clawde/gate/chaos.py and every hook gate that emits them). A valid case is a plan and a run of calls, each with the decision governance made before any fault; replayed in order against a fresh events file, each call ends as `outcome` (with the refusal `reason` when a fault applies: `deny`, or `hold` for a call a permission fault holds), and the events file holds `events` in order: each line also carries `ts` (ISO-8601), the plan's `runId` and `component` gate. An invalid case is a plan (base64url-encoded by the runner) or a raw environment value that every gate refuses to load, failing closed; every invalid plan is also one ChaosPlanSchema rejects, and every valid one one it accepts. A call's `input` is its tool input (a runner that cannot send one sends a harmless input of its own for the tool, the same every time): two calls with the same tool and input are the same call, so the second is the retry of the first when it was held. A call's `advanceS` moves the clock that many seconds forward before it is made: a runner moves the modification time of every file in `<events>.gate-counters/` back by that much.",
   "valid": [
     {
       "name": "no faults: every call is reported, plan_loaded once",
@@ -106,38 +106,98 @@
       ]
     },
     {
-      "name": "permission delayed, then allowed",
+      "name": "permission delayed: held, held again before the delay, allowed after it, and held again as a new call",
       "plan": {
         "v": 1, "runId": "run_vectors06", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
-        "faults": [{ "id": "permission.deny_or_delay", "match": { "tool": "Write" }, "mode": "delay", "delay_s": 1 }]
+        "faults": [{ "id": "permission.deny_or_delay", "match": { "tool": "Write" }, "mode": "delay", "delay_s": 30 }]
       },
       "calls": [
-        { "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow", "delayS": 1 },
-        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
+        { "tool": "Write", "input": { "file_path": "notes.txt", "content": "hello" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
+        { "tool": "Write", "input": { "file_path": "notes.txt", "content": "hello" }, "advanceS": 10, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "input": { "command": "ls -la" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" },
+        { "tool": "Write", "input": { "file_path": "notes.txt", "content": "hello" }, "advanceS": 25, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" },
+        { "tool": "Write", "input": { "file_path": "notes.txt", "content": "hello" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" }
       ],
       "events": [
         { "type": "plan_loaded", "faults": 1 },
         { "type": "gate_decision", "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false },
         { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 1, "target": "Write" },
-        { "type": "tool_call", "tool": "Write", "ok": true },
+        { "type": "tool_call", "tool": "Write", "ok": false },
+        { "type": "gate_decision", "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Write", "ok": false },
         { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
-        { "type": "tool_call", "tool": "Bash", "ok": true }
+        { "type": "tool_call", "tool": "Bash", "ok": true },
+        { "type": "gate_decision", "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Write", "ok": true },
+        { "type": "gate_decision", "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 2, "target": "Write" },
+        { "type": "tool_call", "tool": "Write", "ok": false }
       ]
     },
     {
       "name": "permission held, then denied, once",
       "plan": {
         "v": 1, "runId": "run_vectors07", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
-        "faults": [{ "id": "permission.deny_or_delay", "mode": "hold_then_deny", "delay_s": 1, "times": 1 }]
+        "faults": [{ "id": "permission.deny_or_delay", "mode": "hold_then_deny", "delay_s": 60, "times": 1 }]
       },
       "calls": [
-        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "Permission held for approval, then denied by approver [E-INTUTIC-C0FFEE]", "delayS": 1 },
-        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
+        { "tool": "Bash", "input": { "command": "make deploy" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "input": { "command": "make deploy" }, "advanceS": 30, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "input": { "command": "make deploy" }, "advanceS": 30, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "Permission held for approval, then denied by approver [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "input": { "command": "make deploy" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
       ],
       "events": [
         { "type": "plan_loaded", "faults": 1 },
         { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
         { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 1, "target": "Bash" },
+        { "type": "tool_call", "tool": "Bash", "ok": false },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": false },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true }
+      ]
+    },
+    {
+      "name": "a delay of 0: held once, and the immediate identical retry allowed",
+      "plan": {
+        "v": 1, "runId": "run_vectors10", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
+        "faults": [{ "id": "permission.deny_or_delay", "match": { "tool": "Bash" }, "mode": "delay", "times": 1 }]
+      },
+      "calls": [
+        { "tool": "Bash", "input": { "command": "ls -la" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "input": { "command": "ls -la" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 1 },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 1, "target": "Bash" },
+        { "type": "tool_call", "tool": "Bash", "ok": false },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true }
+      ]
+    },
+    {
+      "name": "a different call is neither the held call's retry nor its release",
+      "plan": {
+        "v": 1, "runId": "run_vectors11", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
+        "faults": [{ "id": "permission.deny_or_delay", "match": { "tool": "Bash" }, "mode": "delay", "delay_s": 60, "times": 1 }]
+      },
+      "calls": [
+        { "tool": "Bash", "input": { "command": "npm test" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "input": { "command": "npm run lint" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" },
+        { "tool": "Bash", "input": { "command": "npm test" }, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "hold", "reason": "Permission held for approval; retrying this exact call passes once it is approved [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "input": { "command": "npm test" }, "advanceS": 60, "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 1 },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 1, "target": "Bash" },
+        { "type": "tool_call", "tool": "Bash", "ok": false },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": false },
         { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
         { "type": "tool_call", "tool": "Bash", "ok": true }
       ]

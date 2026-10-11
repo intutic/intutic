@@ -52,6 +52,7 @@ import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-pi-hooks')
@@ -263,9 +264,7 @@ export async function writePiHooks(
   if (existingModels !== null) {
     await keepOriginal(modelsPath, workspaceRoot)
     await fs.mkdir(path.dirname(modelsPath), { recursive: true })
-    const tmp = modelsPath + '.intutic-tmp'
-    await fs.writeFile(tmp, JSON.stringify(mergePiModels(existingModels, proxyUrl), null, 2) + '\n', 'utf-8')
-    await fs.rename(tmp, modelsPath)
+    await writeFileAtomic(modelsPath, JSON.stringify(mergePiModels(existingModels, proxyUrl), null, 2) + '\n')
     log.info({ action: 'pi_models_written', path: modelsPath }, 'Pi models.json written')
   }
 }

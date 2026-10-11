@@ -56,6 +56,7 @@ import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitJsGate, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-openclaw-hooks')
 
@@ -318,9 +319,7 @@ export async function writeOpenclawHooks(
 
   await keepOriginal(configPath, workspaceRoot)
   await fs.mkdir(path.dirname(configPath), { recursive: true })
-  const tmp = configPath + '.intutic-tmp'
-  await fs.writeFile(tmp, JSON.stringify(mergeOpenclawConfig(existing, pluginPath), null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, configPath)
+  await writeFileAtomic(configPath, JSON.stringify(mergeOpenclawConfig(existing, pluginPath), null, 2) + '\n')
   log.info({ action: 'openclaw_config_merged', path: configPath }, 'Listed the Intutic plugin in ~/.openclaw/openclaw.json')
 }
 

@@ -24,6 +24,7 @@ import { hardenGoosePlugin, unharden } from './gooseHardener.js'
 import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 import { parseDocument, isMap, isScalar } from 'yaml'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-goose-hooks')
 
@@ -89,9 +90,7 @@ export async function writeGooseHooks(proxyUrl: string, workspaceRoot = os.homed
   ] as const) {
     // Unharden before writing (in case we're refreshing an existing install)
     await unharden(file)
-    const tmp = file + '.intutic-tmp'
-    await fs.writeFile(tmp, content, 'utf-8')
-    await fs.rename(tmp, file)
+    await writeFileAtomic(file, content)
     await noteWritten(file, workspaceRoot, content)
   }
 
@@ -173,10 +172,7 @@ log_event "tool_allowed" "\$TOOL" ""
 exit 0
 `
 
-  const tmpScript = checkScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, checkScript, 'utf-8')
-  await fs.rename(tmpScript, checkScriptPath)
-  await fs.chmod(checkScriptPath, 0o755)
+  await writeFileAtomic(checkScriptPath, checkScript, { mode: 0o755 })
   await noteWritten(checkScriptPath, workspaceRoot, checkScript)
 
   // Apply immutable flags after writing
@@ -247,11 +243,9 @@ async function mergeGooseConfig(proxyUrl: string): Promise<void> {
   }
   if (existing === raw) return
 
-  const tmpConfig = GOOSE_CONFIG + '.intutic-tmp'
   await keepOriginal(GOOSE_CONFIG, os.homedir())
   await fs.mkdir(path.dirname(GOOSE_CONFIG), { recursive: true })
-  await fs.writeFile(tmpConfig, existing, 'utf-8')
-  await fs.rename(tmpConfig, GOOSE_CONFIG)
+  await writeFileAtomic(GOOSE_CONFIG, existing)
 
   log.info({ action: 'goose_config_written', path: GOOSE_CONFIG }, 'Goose config.yaml updated with proxy host')
 }

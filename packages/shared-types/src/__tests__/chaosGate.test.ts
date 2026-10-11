@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -7,9 +8,10 @@ import { ChaosEventSchema, FAULT_IDS, decodeChaosPlan, encodeChaosPlan, ChaosPla
 import { CHAOS_GATE_JS_SOURCE, chaosGateCall, chaosGateDecode, type ChaosGateCall } from '../chaosGate.js'
 
 interface VectorCall extends ChaosGateCall {
+  input?: Record<string, unknown>
+  advanceS?: number
   outcome: string
   reason?: string
-  delayS?: number
 }
 interface Vectors {
   valid: Array<{ name: string; plan: unknown; calls: VectorCall[]; events: Array<Record<string, unknown>> }>
@@ -29,19 +31,30 @@ function rawOf(v: { plan?: unknown; raw?: string }): string {
   return v.raw ?? encodeAny(v.plan)
 }
 
+/** Moves the clock forward: every counter file's modification time goes back by `seconds`. */
+function advanceClock(events: string, seconds: number): void {
+  const dir = events + '.gate-counters'
+  if (!seconds || !existsSync(dir)) return
+  for (const name of readdirSync(dir)) {
+    const t = statSync(join(dir, name)).mtimeMs / 1000 - seconds
+    utimesSync(join(dir, name), t, t)
+  }
+}
+
 /** Replays a case against a fresh events file: what each call ended as, and the events. */
 function replay(raw: string, calls: VectorCall[]) {
   const dir = mkdtempSync(join(tmpdir(), 'chaos-gate-'))
   const events = join(dir, 'events.jsonl')
   const outcomes = calls.map((c) => {
+    advanceClock(events, c.advanceS ?? 0)
     // Decoded on every call, as a gate process does.
     const decoded = chaosGateDecode(raw)
     if (!decoded.plan) throw new Error(decoded.error)
-    const fault = chaosGateCall(fs, decoded.plan, events, c, new Date().toISOString())
+    // Any digest of the tool and its input: an identical call has the same one.
+    const key = createHash('sha256').update(c.tool + '\0' + JSON.stringify(c.input ?? null)).digest('hex')
+    const fault = chaosGateCall(fs, decoded.plan, events, { ...c, key }, new Date().toISOString())
     if (!fault) return { outcome: c.decision }
-    return fault.kind === 'delay'
-      ? { outcome: 'allow', delayS: fault.delayS }
-      : { outcome: 'deny', reason: fault.reason, ...(fault.delayS ? { delayS: fault.delayS } : {}) }
+    return { outcome: fault.kind, reason: fault.reason }
   })
   const lines = readFileSync(events, 'utf8').split('\n').filter(Boolean)
   return { outcomes, lines }
@@ -55,7 +68,6 @@ describe('chaos gate vectors', () => {
       v.calls.map((c) => ({
         outcome: c.outcome,
         ...(c.reason !== undefined ? { reason: c.reason } : {}),
-        ...(c.delayS !== undefined ? { delayS: c.delayS } : {}),
       })),
     )
     const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)

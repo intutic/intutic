@@ -19,6 +19,7 @@ import { decideCase, loadMeteredRegoRule } from './rules.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient, type ApiClient } from '../lib/api.js'
+import { writeFileAtomic } from '@intutic/sync-daemon/lib/atomicWrite'
 import { resolveSnapshotRulesPath, SNAPSHOT_RULES_FILE } from '../lib/policySnapshot.js'
 import type { EnforcementAction, InterventionMode, RiskCategory } from '@intutic/shared-types'
 
@@ -948,7 +949,9 @@ export async function runPolicyInstall(opts: {
   const dest = path.join(dir, fileName)
   try {
     await fs.mkdir(dir, { recursive: true })
-    await fs.writeFile(dest, wasmBuffer)
+    // Atomic: the proxies load this directory while running, and a rule read
+    // half-written refuses every call it governs.
+    await writeFileAtomic(dest, wasmBuffer)
   } catch (err) {
     log.error(`Failed to install rule to "${dest}": ${errMessage(err)}`)
     process.exit(1)

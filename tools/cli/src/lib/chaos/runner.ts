@@ -4,7 +4,9 @@
  *
  * Per repetition the runner
  *   1. adds a detached worktree of HEAD (so every repetition starts from the
- *      same commit),
+ *      same commit) and carries the project's generated gates, hook settings
+ *      and policy snapshot into it, host paths rewritten to `/work`
+ *      ({@link prepareWorkspace}),
  *   2. starts a dedicated proxy on a free port with the plan and the host path
  *      of the events file, and waits for its health endpoint,
  *   3. runs the agent in the sandbox with the plan, the in-sandbox events
@@ -44,6 +46,7 @@ import {
   type ProbeReport,
   type ProbeResult,
 } from './probes.js'
+import { prepareWorkspace, SANDBOX_ROOT, type PreparedWorkspace } from './workspace.js'
 
 /** Where the runner's files live inside a repetition's workspace. */
 export const CHAOS_DIR = '.intutic-chaos'
@@ -105,6 +108,10 @@ export interface ChaosRunOptions {
   pollMs?: number
   /** How long the proxy gets to answer its health endpoint. */
   healthTimeoutMs?: number
+  /** The host's policy snapshot, copied into each repetition for its gates. */
+  snapshotRules?: string
+  /** The host's approved-bypass list, copied in the same way. */
+  approvedBypasses?: string
 }
 
 export interface RepetitionReport {
@@ -143,6 +150,8 @@ export interface ChaosReport {
 interface RepetitionOutcome {
   report: RepetitionReport
   events: ChaosEvent[]
+  /** What carrying the gates in did; absent when the worktree was never made. */
+  prepared?: PreparedWorkspace
 }
 
 /** Run an experiment end to end and write its report. */
@@ -184,6 +193,7 @@ export async function runChaos(opts: ChaosRunOptions, deps: ChaosDeps): Promise<
     deps.log.info(`Repetition ${i + 1}/${experiment.repeat * 2} (${baseline ? 'baseline' : 'faulted'})`)
     const outcome = await runRepetition(i, baseline, opts, deps, path.join(artifactsRoot, `rep-${i}`))
     repetitions.push(outcome)
+    if (outcome.prepared && !repetitions.some((r) => r !== outcome && r.prepared)) logPrepared(outcome.prepared, deps)
     if (outcome.report.error) {
       stopReason = `runner error in repetition ${i}: ${outcome.report.error}`
       break
@@ -227,6 +237,8 @@ export async function runChaos(opts: ChaosRunOptions, deps: ChaosDeps): Promise<
   if (experiment.probes.some((p) => p.id === 'cost_multiplier_below') && faulted.length && !(baselineMeanCost && baselineMeanCost > 0)) {
     warnings.push('cost_multiplier_below: the baseline cost was 0 (no llm_usage events), so the probe was not evaluated')
   }
+  // Every repetition is prepared from the same project, so one says it.
+  warnings.push(...(repetitions.find((r) => r.prepared)?.prepared?.warnings ?? []))
   const malformed = repetitions.reduce((s, r) => s + r.report.malformedEvents, 0)
   if (malformed) warnings.push(`${malformed} malformed event line${malformed > 1 ? 's' : ''} ignored`)
   if (skippedFaulted) warnings.push('faulted repetitions skipped: a baseline repetition failed verify')
@@ -295,6 +307,7 @@ async function runRepetition(
   const eventsPath = path.join(chaosDir, 'events.jsonl')
   let worktreeAdded = false
   let proxy: ProxyProcess | undefined
+  let prepared: PreparedWorkspace | undefined
 
   try {
     await deps.git.worktreeAdd(opts.cwd, workspace)
@@ -305,6 +318,19 @@ async function runRepetition(
     await fs.chmod(chaosDir, 0o777)
     await fs.writeFile(eventsPath, '', { mode: 0o666 })
     await fs.chmod(eventsPath, 0o666)
+    // The gates count calls in files under `<events>.gate-counters/`
+    // (chaosGate.ts). Made here for the same reason: a directory the sandbox
+    // user creates is its own, and on a Linux host the runner, another uid,
+    // could not then delete what is in it, so the worktree would stay behind.
+    await fs.mkdir(`${eventsPath}.gate-counters`, { mode: 0o777 })
+    await fs.chmod(`${eventsPath}.gate-counters`, 0o777)
+    prepared = await prepareWorkspace({
+      hostRoot: opts.cwd,
+      workspace,
+      policyDir: path.join(CHAOS_DIR, 'policy'),
+      snapshotRules: opts.snapshotRules,
+      approvedBypasses: opts.approvedBypasses,
+    })
 
     const port = await deps.freePort()
     proxy = deps.startProxy({
@@ -320,6 +346,8 @@ async function runRepetition(
       // Anything inside the sandbox that asks where the proxy is (the gates,
       // a nested `intutic`) reaches this repetition's proxy.
       INTUTIC_PROXY_URL: `http://${base.INTUTIC_SANDBOX_PROXY_HOST ?? 'host.docker.internal'}:${port}`,
+      // Where the gates find the snapshot and bypass list carried in.
+      ...prepared.env,
       [CHAOS_PLAN_ENV]: plan,
       [CHAOS_EVENTS_ENV]: SANDBOX_EVENTS_PATH,
     }
@@ -407,7 +435,20 @@ async function runRepetition(
   const { events, malformed } = parseChaosEvents(await readOr(report.eventsPath, await readOr(eventsPath, '')))
   report.malformedEvents = malformed
   report.costUsd = repetitionCost(events)
-  return { report, events }
+  return { report, events, prepared }
+}
+
+/** Say what carrying the gates in did, once per run. */
+function logPrepared(p: PreparedWorkspace, deps: ChaosDeps): void {
+  if (p.copied.length) deps.log.info(`Carried into each repetition from the project: ${p.copied.join(', ')}`)
+  if (p.rewritten.length) {
+    deps.log.info(`Rewrote host paths to ${SANDBOX_ROOT} in each repetition's copy of: ${p.rewritten.join(', ')}`)
+  }
+  if (p.settings.length && !p.settings.some((s) => p.rewritten.includes(s))) {
+    deps.log.dim(`Hook settings carried unchanged (no host paths in them): ${p.settings.join(', ')}`)
+  }
+  if (p.snapshot) deps.log.info(`Policy snapshot for the gates: ${p.snapshot}`)
+  for (const w of p.warnings) deps.log.warn(w)
 }
 
 /** Wait for the proxy's health endpoint; fail if it exits first or never answers. */

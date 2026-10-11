@@ -27,6 +27,7 @@ import * as os from 'node:os'
 import { parseDocument, isMap, isSeq } from 'yaml'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-continue-config')
 
@@ -98,9 +99,7 @@ export async function mergeContinueConfig(configPath: string, apiBase: string): 
     // A user-level file: its record lives under the home directory.
     await keepOriginal(configPath, os.homedir())
     await fs.mkdir(path.dirname(configPath), { recursive: true })
-    const tmp = configPath + '.intutic-tmp'
-    await fs.writeFile(tmp, result.content, 'utf-8')
-    await fs.rename(tmp, configPath)
+    await writeFileAtomic(configPath, result.content)
   }
   log.info({ action: 'continue_config_merged', path: configPath, routed: result.routed }, 'Continue models routed through the Intutic proxy')
   return result.routed

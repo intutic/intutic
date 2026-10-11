@@ -61,6 +61,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { mergeXmlComponentOptions } from './jetbrainsXmlConfig.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-windsurf-jetbrains-proxy')
 
@@ -124,12 +125,6 @@ async function readFileOrNull(filePath: string): Promise<string | null> {
   } catch {
     return null
   }
-}
-
-async function writeFileAtomic(filePath: string, content: string): Promise<void> {
-  const tmp = filePath + '.intutic-tmp'
-  await fs.writeFile(tmp, content, 'utf-8')
-  await fs.rename(tmp, filePath)
 }
 
 /**

@@ -43,6 +43,7 @@ import { parseDocument, isMap, isSeq, isScalar, YAMLSeq, type Document } from 'y
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
 import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-aider-merger')
 
@@ -190,19 +191,15 @@ export async function mergeAiderConfig(
   const sopsPath = path.join(path.dirname(configPath), AIDER_SOPS_FILE)
   if (sopsText) {
     await fs.mkdir(path.dirname(sopsPath), { recursive: true })
-    const tmpSops = sopsPath + '.intutic-tmp'
-    await fs.writeFile(tmpSops, sopsText + '\n', 'utf-8')
-    await fs.rename(tmpSops, sopsPath)
+    await writeFileAtomic(sopsPath, sopsText + '\n')
   } else {
     await fs.rm(sopsPath, { force: true })
   }
 
-  const tmpPath = configPath + '.intutic-tmp'
   // The config sits at the workspace root, so its directory is the workspace.
   await keepOriginal(configPath, path.dirname(configPath))
   await fs.mkdir(path.dirname(configPath), { recursive: true })
-  await fs.writeFile(tmpPath, content, 'utf-8')
-  await fs.rename(tmpPath, configPath)
+  await writeFileAtomic(configPath, content)
 
   log.info(
     { action: 'aider_config_written', path: configPath, stripped },
@@ -234,7 +231,5 @@ export async function ensureAiderReadEntry(configPath: string, entry: string): P
   if (read.items.some((item) => (isScalar(item) ? item.value : item) === entry)) return
   read.add(entry)
   await keepOriginal(configPath, path.dirname(configPath))
-  const tmpPath = configPath + '.intutic-tmp'
-  await fs.writeFile(tmpPath, doc.toString(), 'utf-8')
-  await fs.rename(tmpPath, configPath)
+  await writeFileAtomic(configPath, doc.toString())
 }

@@ -38,6 +38,7 @@ import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-cline-hooks')
 
@@ -268,12 +269,10 @@ process.stdin.on('end', () => {
 });
 `
 
-  const tmpScript = checkScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, checkScript, 'utf-8')
-  await fs.rename(tmpScript, checkScriptPath)
   // Executable is what enables the hook: Cline creates new hook files 0644,
-  // i.e. toggled off.
-  await fs.chmod(checkScriptPath, 0o755)
+  // i.e. toggled off. Set before the rename, so the gate is never in place
+  // switched off (the settings guard would take that for tampering).
+  await writeFileAtomic(checkScriptPath, checkScript, { mode: 0o755 })
   await noteWritten(checkScriptPath, workspaceRoot, checkScript)
 
   log.info({ action: 'cline_hooks_written', path: checkScriptPath }, 'Cline PreToolUse governance hook written')

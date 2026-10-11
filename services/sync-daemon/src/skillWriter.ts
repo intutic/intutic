@@ -25,6 +25,7 @@
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import { keepOriginal, noteWritten } from './disconnect/originals.js'
+import { writeFileAtomic } from './lib/atomicWrite.js'
 
 /** Workspace-relative path the rule-author skill is written to. */
 export const RULE_AUTHOR_SKILL_PATH = node_path.join(
@@ -224,6 +225,9 @@ Continue without it, or tell the user what would have to change and who can chan
 ### Ran, but the result was withheld
 \`RESULT_WITHHELD_DLP\`, \`RESULT_WITHHELD_INJECTION\` (MCP proxy) and \`OUTPUT_DLP\` (proxy): the tool or model ran, and its output was not delivered. Do not run it again blindly, since it may already have had its effect; tell the user.
 
+### Injected by an experiment
+\`CHAOS_FAULT\`: a resilience experiment (\`intutic chaos run\`) failed this call on purpose, or could not start because its plan was unreadable. The reason is the failure it imitates and carries an \`E-INTUTIC-\` token: handle it as that failure, and tell the user what failed, quoting the token.
+
 ---
 
 ## 🛡️ Policy & Hook Verification
@@ -260,7 +264,7 @@ export async function writeBundledSkills(workspaceRoot: string): Promise<string[
     // directories it needed) and can tell a later edit apart.
     await keepOriginal(dest, workspaceRoot)
     await node_fs.mkdir(node_path.dirname(dest), { recursive: true })
-    await node_fs.writeFile(dest, skill.content, 'utf-8')
+    await writeFileAtomic(dest, skill.content)
     await noteWritten(dest, workspaceRoot, skill.content)
     written.push(dest)
   }

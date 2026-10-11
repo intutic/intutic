@@ -28,6 +28,7 @@ import * as os from 'node:os'
 import { parse as parseToml } from 'smol-toml'
 import { createLogger } from '@intutic/logger'
 import { keepOriginal } from '../disconnect/originals.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-codex-config')
 
@@ -105,9 +106,7 @@ export async function mergeCodexConfig(configPath: string, baseUrl: string): Pro
   // A user-level file: its record lives under the home directory.
   await keepOriginal(configPath, os.homedir())
   await fs.mkdir(path.dirname(configPath), { recursive: true })
-  const tmp = configPath + '.intutic-tmp'
-  await fs.writeFile(tmp, next, 'utf-8')
-  await fs.rename(tmp, configPath)
+  await writeFileAtomic(configPath, next)
   log.info({ action: 'codex_config_merged', path: configPath }, `Set ${KEY} in Codex config`)
   return true
 }

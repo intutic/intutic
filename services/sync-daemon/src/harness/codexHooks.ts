@@ -34,6 +34,7 @@ import { newIso } from '@intutic/id'
 import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-codex-hooks')
 
@@ -210,9 +211,7 @@ async function mergeCodexHooksJson(configPath: string, hookScriptPath: string): 
     },
   }
 
-  const tmp = configPath + '.intutic-tmp'
-  await fs.writeFile(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, configPath)
+  await writeFileAtomic(configPath, JSON.stringify(merged, null, 2) + '\n')
 }
 
 /**
@@ -237,10 +236,7 @@ export async function writeCodexHooks(
   // Named after its writer — see the note in claudeCodeHooks.ts about two
   // writers overwriting one `pre-tool-check.js`.
   const hookScriptPath = path.join(hookScriptDir, 'codex-check.js')
-  const tmpScript = hookScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, buildHookScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, buildHookScript(proxyUrl, workspaceRoot, workspaceId), { mode: 0o755 })
 
   // 1. Project-level: <root>/.codex/hooks.json
   const projectCodexDir = path.join(workspaceRoot, '.codex')

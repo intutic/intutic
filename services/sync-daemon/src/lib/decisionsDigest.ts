@@ -66,6 +66,7 @@ import { claudeCodeReadsAgentsMd } from '../harness/claudeAgentsMd.js'
 import { openclawAgentWorkspace } from '../harness/openclawHooks.js'
 import { ensureAiderReadEntry } from '../harness/aiderConfigMerger.js'
 import { forgetOriginal, readOriginal, writeOwnedFile } from '../disconnect/originals.js'
+import { writeFileAtomic } from './atomicWrite.js'
 
 const log = createLogger('sync-decisions-digest')
 
@@ -261,11 +262,7 @@ export async function retireClaudeMdDigest(workspaceRoot: string): Promise<void>
       log.info({ action: 'decisions_claude_md_removed', path: file }, 'Removed the CLAUDE.md an earlier version created for the decisions log')
       return
     }
-    const mode = (await fs.stat(file)).mode & 0o7777
-    const tmp = `${file}.intutic-tmp`
-    await fs.writeFile(tmp, next, 'utf-8')
-    await fs.chmod(tmp, mode)
-    await fs.rename(tmp, file)
+    await writeFileAtomic(file, next)
     log.info({ action: 'decisions_claude_md_section_removed', path: file }, 'Took the decisions-log section out of CLAUDE.md')
   }
   await retireRulesFile(file, workspaceRoot)

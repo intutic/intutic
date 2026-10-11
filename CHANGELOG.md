@@ -25,12 +25,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a workspace. `intutic chaos validate` and `intutic chaos list` check an
   experiment and print the fault catalog; three example experiments ship with
   the CLI. See the chaos engineering guide.
+- **The gate SDKs take part in chaos runs.** `@intutic/gate` and
+  `intutic_clawde.gate` honour a chaos plan like the hook gates; an injected
+  failure refuses with the new gate code `CHAOS_FAULT`. A permission delay
+  works like an approval hold: the first matching call is refused as held
+  (`HELD`) and the identical retry passes once `delay_s` has elapsed, or is
+  refused for `hold_then_deny`.
+- **A Node sandbox image**, `intutic/sandbox:<version>-node`, built on demand
+  as the base for agents that need Node; and `intutic chaos run` carries a
+  project's generated gates, snapshot and hook settings into each repetition,
+  rewritten for `/work`, so a real harness finds its gates in the sandbox.
 
 ### Changed
 
-- **Gate bodies are v19** (`GATE_VERSION` 19). The sync daemon regenerates
+- **Gate bodies are v20** (`GATE_VERSION` 20). The sync daemon regenerates
   every hook gate on its next cycle; outside a chaos run the gates decide
   exactly as before.
+
+### Fixed
+
+- **Gate scripts and harness settings are replaced atomically.** The sync
+  daemon and the CLI wrote them in place, so a harness could run a
+  half-written gate; for Claude Code a gate that crashes with an exit code
+  other than 2 does not block, so the call could proceed ungoverned. Gate
+  scripts are also executable from the moment they appear (a Cline gate was
+  briefly in place without its mode, which switched the hook off), and
+  `runtime.env` is created owner-only instead of being narrowed afterwards.
+- **A project's own Claude Code deny rules survive a sync.** The project's
+  `.claude/settings.json` deny list was replaced by Intutic's on every cycle;
+  only rules an earlier sync wrote are swapped now.
+- **No false tamper reports from the daemon's own writes**: regenerating the
+  hardened goose plugin no longer files a SECURITY override incident, and the
+  policy snapshot self-heal no longer "restores" a refresh in progress.
+- **`rm -rf ~` and `rm -rf $HOME` are in the destructive tier** (rule
+  `destructive.rm_rf_home`); a subdirectory of home is not matched.
+- **Tool-description poisoning catches an order to run a destructive
+  command** (recursive delete of `/` or home, `mkfs`, `dd` to a device,
+  `DROP DATABASE`, a download piped into a shell, a fork bomb), with no new
+  false positives on the 10,753-description benign corpus.
 
 ## [2.4.0] - 2026-10-11
 

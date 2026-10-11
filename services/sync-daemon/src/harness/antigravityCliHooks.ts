@@ -51,6 +51,7 @@ import { newIso } from '@intutic/id'
 import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-antigravity-cli-hooks')
 
@@ -203,10 +204,7 @@ export async function writeAntigravityCliHooks(
   ])
 
   const hookScriptPath = path.join(hookScriptDir, ANTIGRAVITY_CLI_GATE)
-  const tmpScript = hookScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, buildHookScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, buildHookScript(proxyUrl, workspaceRoot, workspaceId), { mode: 0o755 })
   log.info({ action: 'antigravity_cli_hook_script_written', path: hookScriptPath }, 'Antigravity hook script written')
 
   const existing = await readJsonObjectForMerge(hooksFile)
@@ -214,8 +212,6 @@ export async function writeAntigravityCliHooks(
 
   // Only Intutic's own key is replaced; every hook the user registered stays.
   const merged = { ...existing, [ANTIGRAVITY_HOOK_NAME]: buildAntigravityHookEntry(hookScriptPath) }
-  const tmp = hooksFile + '.intutic-tmp'
-  await fs.writeFile(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, hooksFile)
+  await writeFileAtomic(hooksFile, JSON.stringify(merged, null, 2) + '\n')
   log.info({ action: 'antigravity_cli_hooks_written', path: hooksFile }, 'Merged Intutic PreToolUse hook into ~/.gemini/config/hooks.json')
 }
