@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-11
+
+Everything that reached `main` since 2.3.0. Upgrade the proxy before the
+control plane: stored provider keys are now encrypted at rest under
+`ENCRYPTION_KEY`, which the proxy now needs to open them (the Helm chart and
+Compose file pass it); with Helm, roll out the new proxy image and wait for it
+before `helm upgrade`. Check these behaviour changes before upgrading: upstream
+retries are on by default, so a client's own retries for 429, 5xx, 529 and
+dropped connections are no longer needed; `incident.created` notifications
+carry the incident's own severity instead of always CRITICAL, so a rule
+filtered on CRITICAL no longer receives HIGH, MEDIUM or LOW incidents; a
+refused custom rule is filed as `WASM_RULE_REFUSED` and other proxy system
+reports as `SYSTEM_ANOMALY` (incidents filed before 2.4.0 keep
+`SCOPE_VIOLATION`); `PUT /api/v1/budget` is a partial update in which `null`
+returns a field to its default; and smart routing's default candidates are now
+`claude-sonnet-5-5`, `gpt-4.1` and `gemini-3.8-flash`, so a proxy with a
+non-empty `model_list` must name them.
+
+### Security
+
+- **Provider keys are encrypted at rest.** AES-256-GCM envelope encryption,
+  a data key per value, under `ENCRYPTION_KEY`. Rotating `ENCRYPTION_KEY`
+  (with `ENCRYPTION_KEY_PREVIOUS` set to the old key) re-encrypts every stored
+  secret, Slack tokens included. Every change to a provider key is recorded as
+  a credential change, streamed as a SIEM source and sent as
+  `credential.changed`.
+- **Credential exchanges refuse plain HTTP.** A token, identity or workload
+  identity federation URL that is not `https` is refused before any credential
+  is sent; only loopback and the cloud metadata addresses may use `http`.
+
+### Added
+
+- **Upstream retries and fallbacks.** 429, 5xx, 529 and connection errors are
+  retried up to three calls per model with full-jitter backoff inside a
+  30-second budget, honouring `Retry-After`, never after a stream has started
+  and never for a spend-limit 429. Ordered fallback targets per model can
+  change the model, the provider or both, including the same Claude model on
+  Anthropic's API, Bedrock or Vertex AI; each target is checked against the
+  spend budgets. Attempts are recorded on the trace and returned as
+  `x-intutic-upstream-*` headers and the SDKs' `upstream` field; set per
+  workspace with `upstreamRetry`.
+- **Spend budgets per key and per member.** Daily and monthly budgets, hard or
+  soft, per virtual key and (Biz Org and up) per member, an enforceable monthly
+  workspace cap, and key rate limits: requests per minute exact across proxy
+  replicas, tokens per minute from usage (`RATE_LIMITED`). CLI
+  `intutic budget keys|key|members|member`, the `budget_alerts` SIEM source,
+  and Terraform `intutic_workspace_budget` / `intutic_member_budget`.
+- **AWS Bedrock, Google Vertex AI and Azure OpenAI / AI Foundry upstreams**,
+  with SigV4, application default credentials and workload identity
+  federation, and Entra; credential verification; AWS SSO and assume-role
+  profiles; Terraform `intutic_provider_credential`.
+- **First-party Gemini routes.** Gemini requests on the Messages, Chat and
+  Responses routes are translated to Gemini's API, so Gemini is shown as
+  routable again (2.3.0 marked it not routable).
+- **Provider model discovery.** Checking a provider key records the models it
+  lists: `GET /api/v1/workspace/provider-credentials/:provider/models`, "Models
+  this key can reach" in the dashboard, `intutic credentials models`, and the
+  SDKs' `listProviderModels` / `list_provider_models`. The Anthropic check now
+  lists models instead of sending a one-token message.
+- **The MCP proxy enforces the workspace's uploaded WASM and Rego rules**, and
+  its shadow evaluations count toward promotion; a refused rule version files
+  one incident across both proxies.
+- **Incidents by type** in the API (400 on an unknown type), the dashboard, the
+  CLI (`intutic incidents list|show`), the SDKs (`listIncidents` /
+  `list_incidents`, `getIncident` / `get_incident`) and the MCP tool
+  `intutic_list_incidents`.
+- **The SDKs cover every CLI operator API** (124 methods each), and verify
+  evidence archives and sealed trace roots offline.
+- **Smart routing per workspace.** `routingCandidates` sets the candidate list
+  (dashboard, `intutic settings set`, SDKs, Terraform); a dated snapshot or
+  `-latest` alias of a candidate enters routing; Shadow Routing has its own
+  toggle; routing is marked experimental; `routing_targets_skipped` counts
+  candidates a request could not reach.
+
+### Changed
+
+- **Smart routing only picks a model the request can reach**: one whose wire
+  format has a translation both ways (Claude Code requests are never sent to
+  OpenAI models), that the model allowlists and spend budgets allow, that has a
+  provider credential and that the workspace key lists. A session lock outside
+  the request's pool is ignored, and a routed pick that fails releases the lock
+  instead of pinning the scope to it for 24 hours. Requests on Gemini's
+  `/v1beta/models/…` route, and any request whose model's format cannot be
+  translated, are refused with `400 unsupported_route` instead of being
+  forwarded untranslated.
+- **Mirror copies go to the candidate's own provider** with its own
+  credential; an unreachable candidate is skipped and counted.
+- **`intutic budget set`** sends only the flags given; `--daily default`
+  returns the daily cap to its default.
+
+### Fixed
+
+- The hard-coded `gemini-1.5-pro` cross-provider URL is gone; Gemini picks are
+  sent under the chosen model.
+- The documented routing allowlist claim is corrected, and the fictional "Model
+  Routing Tiers" section is removed from the docs.
+
 ## [2.3.0] - 2026-10-10
 
 Everything that reached `main` since 2.2.0. Self-hosted gateway operators
