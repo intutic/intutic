@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { generateKeyPairSync, sign as nodeSign, createPublicKey, KeyObject } from 'node:crypto'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -225,6 +225,32 @@ describe('verifyRootSignature', () => {
       'unverifiable',
     )
   })
+})
+
+/**
+ * Roots the control plane's own rootSigner sealed (`__fixtures__/integrity-roots.json`,
+ * with the keys it published in `integrity-jwks.json`), and the cases both
+ * SDKs' verifiers run against them too, so all three reach the same verdict.
+ */
+describe('verifyRootSignature, against the roots the control plane sealed', () => {
+  const FIXTURES = join(__dirname, '__fixtures__')
+  const fixture = JSON.parse(readFileSync(join(FIXTURES, 'integrity-roots.json'), 'utf8'))
+  const published: SigningJwks = JSON.parse(readFileSync(join(FIXTURES, 'integrity-jwks.json'), 'utf8'))
+  const keySets: Record<string, SigningJwks | null> = {
+    published,
+    activeOnly: { keys: published.keys.filter((k) => k['kid'] === fixture.activeKeyId) },
+    empty: { keys: [] },
+    brokenActive: { keys: published.keys.map((k) => (k['kid'] === fixture.activeKeyId ? { ...k, x: 'AAAA' } : k)) },
+    none: null,
+  }
+
+  for (const c of fixture.cases as Array<{ name: string; root: string; set: Record<string, unknown>; delete: string[]; jwks: string; expect: string }>) {
+    it(`${c.expect}: ${c.name}`, () => {
+      const root: Record<string, unknown> = { ...fixture.roots[c.root], ...c.set }
+      for (const field of c.delete) delete root[field]
+      expect(verifyRootSignature(root as unknown as SignedRootRow, keySets[c.jwks]!)).toBe(c.expect)
+    })
+  }
 })
 
 describe('keyPublication', () => {

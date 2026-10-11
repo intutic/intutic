@@ -247,6 +247,9 @@ async fn main() -> anyhow::Result<()> {
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
     let config = config::load_config(&config_path)?;
     tracing::info!("Config loaded from {}", config_path);
+    // `model_list` entries that name a cloud model (`bedrock/…`, `vertex/…`,
+    // `azure/…`) become aliases the router resolves (`cloud::resolve`).
+    intutic_proxy::cloud::install_aliases(&config.model_list);
 
     // Install the L1 egress policy before the first request. The
     // mode is logged at boot so an operator running in Enforce sees it in the
@@ -485,8 +488,34 @@ async fn main() -> anyhow::Result<()> {
         std::sync::Arc<dyn store::ControlPlaneCache>,
     ) = match &valkey {
         Some(conn) => {
-            let store: std::sync::Arc<dyn store::LocalStore> =
-                std::sync::Arc::new(store::ValkeyStore::new(conn.clone()));
+            // Provider credentials in Valkey are sealed by the control plane
+            // under ENCRYPTION_KEY (credential_crypto.rs); without it, an
+            // encrypted credential is refused rather than sent upstream.
+            let credential_keys = intutic_proxy::credential_crypto::CredentialKeyring::from_env();
+            // Announced with or without a key: a proxy that holds none must
+            // still hold the control plane back from sealing what it reads.
+            store::spawn_credential_key_announcer(
+                conn.clone(),
+                credential_keys
+                    .as_ref()
+                    .map(|k| k.ids())
+                    .unwrap_or_default(),
+            );
+            match &credential_keys {
+                Some(keys) => {
+                    tracing::info!(
+                        key_id = keys.current_id(),
+                        "provider credential encryption key loaded"
+                    );
+                }
+                None if managed => tracing::warn!(
+                    "ENCRYPTION_KEY is not set: provider credentials the control plane stored encrypted cannot be used"
+                ),
+                None => {}
+            }
+            let store: std::sync::Arc<dyn store::LocalStore> = std::sync::Arc::new(
+                store::ValkeyStore::new(conn.clone()).with_credential_keyring(credential_keys),
+            );
             // Upgrading from standalone must not reset the workspace to cold
             // start. Seeds only arms Valkey does not already have, so this is a
             // no-op on every boot after the first.

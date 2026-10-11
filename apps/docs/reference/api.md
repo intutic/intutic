@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 404 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 411 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -612,7 +612,7 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/audit/timeline` | OWNER/ADMIN | Sign-ins, enforcement verdicts, resolved decisions and incidents, settings changes, detector adjudications and MCP server registry decisions for a workspace over a date range. |
+| GET | `/api/v1/audit/timeline` | OWNER/ADMIN | Sign-ins, enforcement verdicts, resolved decisions and incidents, settings changes, detector adjudications, MCP server registry decisions, evidence downloads and credential changes for a workspace over a date range. |
 
 ### `auth.ts` <Badge type="tip" text="Cloud" />
 
@@ -662,6 +662,10 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 | PUT | `/api/v1/budget` | OWNER/ADMIN | Update budget settings |
 | GET | `/api/v1/budget/alerts` | Authenticated | Budget alert history |
 | POST | `/api/v1/budget/alerts/:alertId/acknowledge` | OWNER/ADMIN/EM | Acknowledge an alert |
+| GET | `/api/v1/budget/keys` | OWNER/ADMIN/EM; anyone else (own keys) | Each virtual key's budgets, rate limit and spend |
+| GET | `/api/v1/budget/members` | OWNER/ADMIN/EM; anyone else (themselves) | <Badge type="warning" text="Biz Org+" /> Each member's budgets and spend, and the default member budget |
+| DELETE | `/api/v1/budget/members/:memberId` | OWNER/ADMIN | <Badge type="warning" text="Biz Org+" /> Remove a member's budgets, or the default member budget |
+| PUT | `/api/v1/budget/members/:memberId` | OWNER/ADMIN | <Badge type="warning" text="Biz Org+" /> Set a member's budgets, or the default member budget |
 
 ### `compliance.ts` <Badge type="tip" text="Cloud" />
 
@@ -929,6 +933,7 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 | GET | `/api/v1/keys` | Authenticated | List API keys for the workspace |
 | POST | `/api/v1/keys` | Authenticated | Create a new API key |
 | DELETE | `/api/v1/keys/:id` | Authenticated | Revoke an API key |
+| PATCH | `/api/v1/keys/:id` | OWNER/ADMIN | Set a key's spend budgets and rate limit |
 
 ### `loops.ts` <Badge type="tip" text="Cloud" />
 
@@ -1090,6 +1095,7 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 | GET | `/api/v1/workspace/provider-credentials` | Authenticated | provisioning status, every registry provider |
 | DELETE | `/api/v1/workspace/provider-credentials/:provider` | OWNER/ADMIN | de-provision |
 | PUT | `/api/v1/workspace/provider-credentials/:provider` | OWNER/ADMIN | provision/rotate |
+| GET | `/api/v1/workspace/provider-credentials/:provider/models` | Authenticated | the models the provider listed the last time the credential verified as valid |
 | POST | `/api/v1/workspace/provider-credentials/:provider/verify` | OWNER/ADMIN | test the stored credential against the provider's own API |
 
 ### `providerIncidents.ts` <Badge type="tip" text="Cloud" />
@@ -1345,6 +1351,7 @@ Every route the control plane serves: 404 routes, grouped by the source file tha
 | GET | `/api/v1/wasm-rules/:ruleId` | Authenticated |  |
 | PUT | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN |  |
 | POST | `/api/v1/wasm-rules/:ruleId/replay` | OWNER/ADMIN/EM |  |
+| GET | `/api/v1/wasm-rules/binaries/:sha256` | Authenticated |  |
 
 ### `workspace.ts` <Badge type="tip" text="Cloud" />
 
@@ -1440,4 +1447,4 @@ The Intutic proxy (default port `4000`, set by `PORT`) serves these besides the 
 | GET | `/intutic/probes` | Loopback | The last scheduled guard self-test: `{ probes, total, failed, ran_at }`; `503` before the first run finishes |
 | POST | `/intutic/attest-sandbox` | The request's `Authorization` bearer, an Intutic key (`vk_…`) | Called from inside an `intutic exec --sandbox` container, whose firewall lets it reach only the proxy. Forwards `{ "sessionId": "…" }` to the control plane's `PATCH /api/v1/sessions/:sessionId/attest-sandbox` and answers `{ attested }`. `400` without `sessionId`, `401` without a bearer or with one that is not an Intutic key, `503` when no control plane is configured, `502` when it cannot be reached |
 
-`/v1beta/models/:model` (Gemini) is routed but not translated, so Gemini requests do not work through the proxy yet.
+`/v1beta/models/:model` (Gemini's own route) is refused with `400 unsupported_route`: the proxy reads a request's model from its body, and this route names it in the URL. Gemini models are served on `/v1/messages`, `/v1/chat/completions` and `/v1/responses`, translated to the Gemini API.

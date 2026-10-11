@@ -20,7 +20,7 @@
 //! their units (`_bytes`, `_ratio` semantics).
 //!
 //! Labels are low-cardinality by policy: `input_type`/`strategy` for snip,
-//! `source`/`action` for refusals. Never `workspace_id`, `session_id`, or
+//! `source`/`action` for refusals, `provider`/`outcome` for upstream retries. Never `workspace_id`, `session_id`, or
 //! `detector_id` — per-workspace accounting is the control plane's job, and
 //! unbounded label values are how a metrics pipeline becomes the outage.
 //!
@@ -49,6 +49,9 @@ pub const SNIP_COMPACTED: &str = "snip_compacted";
 pub const EGRESS_DENIED: &str = "egress_denied";
 pub const EGRESS_WOULD_DENY: &str = "egress_would_deny";
 pub const POLICY_REFUSALS: &str = "policy_refusals";
+pub const UPSTREAM_RETRIES: &str = "upstream_retries";
+pub const UPSTREAM_FALLBACKS: &str = "upstream_fallbacks";
+pub const ROUTING_TARGETS_SKIPPED: &str = "routing_targets_skipped";
 
 fn meter() -> Meter {
     opentelemetry::global::meter("intutic-proxy")
@@ -90,6 +93,15 @@ static COMPACTED_COUNTER: LazyLock<Counter<u64>> =
 static REFUSALS_COUNTER: LazyLock<Counter<u64>> =
     LazyLock::new(|| meter().u64_counter(POLICY_REFUSALS).build());
 
+static RETRIES_COUNTER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| meter().u64_counter(UPSTREAM_RETRIES).build());
+
+static FALLBACKS_COUNTER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| meter().u64_counter(UPSTREAM_FALLBACKS).build());
+
+static ROUTING_SKIPS_COUNTER: LazyLock<Counter<u64>> =
+    LazyLock::new(|| meter().u64_counter(ROUTING_TARGETS_SKIPPED).build());
+
 /// One compaction event: histograms + count, all labelled the same way.
 /// Called beside (never instead of) the `snip.compacted` tracing line —
 /// `check-cache-telemetry.sh` still reads the log fields.
@@ -121,6 +133,53 @@ pub fn record_policy_refusal(source: &'static str, action: &'static str) {
         &[
             KeyValue::new("source", source),
             KeyValue::new("action", action),
+        ],
+    );
+}
+
+/// One count per retry the proxy made, labelled by the provider and the
+/// failure that prompted it (`http_529`, `timeout`, ...). An attempt that was
+/// not followed by another call — the final one, or one the policy stopped —
+/// is not a retry and is not counted.
+pub fn record_upstream_retries(attempts: &[crate::routing::retry::UpstreamAttempt]) {
+    for a in attempts.iter().filter(|a| a.backoff_ms.is_some()) {
+        RETRIES_COUNTER.add(
+            1,
+            &[
+                KeyValue::new("provider", a.provider.clone()),
+                KeyValue::new("outcome", a.outcome.clone()),
+            ],
+        );
+    }
+}
+
+/// One count per request that ran its fallback chain: `result` is `served`
+/// with the answering target's provider, or `exhausted` when none answered.
+pub fn record_upstream_fallback(served_by: Option<String>) {
+    let labels = match served_by {
+        Some(provider) => [
+            KeyValue::new("result", "served"),
+            KeyValue::new("provider", provider),
+        ],
+        None => [
+            KeyValue::new("result", "exhausted"),
+            KeyValue::new("provider", "none"),
+        ],
+    };
+    FALLBACKS_COUNTER.add(1, &labels);
+}
+
+/// One model smart routing could not use for a request: `stage` is
+/// `candidate` (left out of the request's candidate pool) or `mirror` (a
+/// mirror copy not sent), `reason` the check it failed (`wire_mismatch`,
+/// `model_not_allowed`, `budget`, `no_credential`, `not_listed`, ...). Both
+/// label sets are small and fixed.
+pub fn record_routing_skip(stage: &'static str, reason: &'static str) {
+    ROUTING_SKIPS_COUNTER.add(
+        1,
+        &[
+            KeyValue::new("stage", stage),
+            KeyValue::new("reason", reason),
         ],
     );
 }
@@ -183,6 +242,9 @@ mod tests {
     fn recording_without_a_provider_is_a_noop_not_a_panic() {
         record_snip_compaction("json", "json_aware", 1000, 400, 0.6);
         record_policy_refusal("anomaly", "reask");
+        record_upstream_retries(&[]);
+        record_upstream_fallback(None);
+        record_routing_skip("candidate", "no_credential");
         let _handles = register_observables();
     }
 

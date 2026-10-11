@@ -92,6 +92,9 @@ pub struct IntuticSettings {
     /// L2 hosted-gateway front door — vk_-only enforcement.
     #[serde(default)]
     pub gateway: crate::gateway::GatewayConfig,
+    /// Cloud upstreams — Bedrock, Vertex AI, Azure OpenAI (`crate::cloud`).
+    #[serde(default)]
+    pub providers: crate::cloud::config::ProvidersConfig,
 }
 
 /// Refusing a forbidden tool call in the model's *response*, before the client
@@ -456,8 +459,14 @@ pub struct RoutingConfig {
     #[serde(default)]
     pub enabled: Option<bool>,
 
-    /// Candidate model pool for Thompson sampling. Requests for models outside
-    /// this pool bypass the bandit entirely.
+    /// Candidate model pool for Thompson sampling. A request enters routing
+    /// only when its model is a candidate, or a dated snapshot or `-latest`
+    /// alias of one (`routing::bandit::model_line`); anything else bypasses
+    /// the bandit entirely. A workspace's own `routingCandidates` setting
+    /// replaces this list for that workspace, and either list is narrowed per
+    /// request to the models the request can reach (`proxy::routing_pool`):
+    /// a translatable wire format, the model allowlists, the spend budgets, a
+    /// credential, and the models that credential was seen to list.
     ///
     /// When `model_list` is non-empty, candidates are validated against it at
     /// config load and unmatched names are DROPPED with an error log — see
@@ -504,8 +513,8 @@ pub struct RoutingConfig {
     /// An explicit, operator-directed mirror candidate — independent of
     /// `mode`/shadow routing.
     ///
-    /// Before this field existed, `mirror_plan` (see `proxy.rs`) could only be
-    /// built from `shadow_selection`, which is itself only populated when
+    /// Before this field existed, the mirror candidate (`mirror_candidate` in
+    /// `proxy.rs`) could only come from `shadow_selection`, which is itself only populated when
     /// `mode: shadow` is active AND the bandit's selection for this request
     /// happened to disagree with what was served. That makes mirroring
     /// structurally unreachable for the case an operator actually wants: "test
@@ -513,7 +522,7 @@ pub struct RoutingConfig {
     /// model may not be one the bandit would ever pick — it may not even be a
     /// bandit candidate at all.
     ///
-    /// When set, `proxy.rs` builds `mirror_plan` from this model for a sampled
+    /// When set, `proxy.rs` mirrors this model for a sampled
     /// fraction of ALL eligible non-streaming traffic (still governed by
     /// `mirror_sample_rate` and the same concurrency/rate ceilings in
     /// `routing::mirror`), regardless of what shadow routing decided. If both
@@ -529,15 +538,17 @@ pub struct RoutingConfig {
     /// bandit would otherwise select and have the upstream 404. Neither
     /// justification applies here: this field is never selected by the bandit
     /// (`route_model` never reads it), and the mirrored call never resolves an
-    /// upstream through `model_list` at all — `mirror_plan` reuses the primary
-    /// request's already-resolved `upstream_url`/credentials verbatim and only
-    /// swaps the JSON body's `"model"` field. The whole point of this knob is
-    /// to mirror-test a model release that has *not* been onboarded to
-    /// `model_list` yet; running it through that filter would silently drop it
-    /// at startup with no visible error the moment an operator configured
-    /// exactly the thing this field exists for. A typo'd name here still fails
-    /// safely: `run_mirror` treats a non-2xx or unreachable upstream as "not
-    /// scoreable" and drops it, same as any other mirror candidate.
+    /// upstream through `model_list` at all — it is resolved like a fallback
+    /// target (`proxy::resolve_target`): the candidate's own provider, URL and
+    /// credential, and skipped, with the reason counted, when the request's
+    /// format cannot reach it as-is or the workspace has no key for it. The
+    /// whole point of this knob is to mirror-test a model release that has
+    /// *not* been onboarded to `model_list` yet; running it through that filter
+    /// would silently drop it at startup with no visible error the moment an
+    /// operator configured exactly the thing this field exists for. A typo'd
+    /// name here still fails safely: `run_mirror` treats a non-2xx or
+    /// unreachable upstream as "not scoreable" and drops it, same as any other
+    /// mirror candidate.
     ///
     /// `None` (the default) leaves mirroring exactly as before: driven only by
     /// shadow disagreement, when `mode: shadow` is active.
@@ -607,6 +618,19 @@ pub struct RoutingConfig {
 
     #[serde(default)]
     pub reward: RewardConfig,
+
+    /// Retrying a provider call that failed before any response reached the
+    /// client — `routing::retry` has the rules. On by default. A workspace's
+    /// `upstreamRetry` setting overrides these field by field.
+    #[serde(default)]
+    pub retry: crate::routing::retry::RetryConfig,
+
+    /// Where a request goes when its model's retries are exhausted: ordered
+    /// targets keyed by the model that was sent upstream. Empty by default —
+    /// a fallback serves a model the caller did not ask for, so it is opted
+    /// into per model, never implied.
+    #[serde(default)]
+    pub fallbacks: crate::routing::retry::FallbackMap,
 }
 
 impl Default for RoutingConfig {
@@ -629,6 +653,8 @@ impl Default for RoutingConfig {
             cache_guard_min_read_bp: default_cache_guard_min_read_bp(),
             cache_guard_cold_start_prompt_bytes: default_cache_guard_cold_start_prompt_bytes(),
             reward: RewardConfig::default(),
+            retry: crate::routing::retry::RetryConfig::default(),
+            fallbacks: crate::routing::retry::FallbackMap::new(),
         }
     }
 }
@@ -699,11 +725,15 @@ fn default_json_entropy_threshold() -> f64 {
 fn default_code_skeleton_min_lines() -> usize {
     10
 }
+/// One current model per first-party provider, ids as the pricing bundle and
+/// model catalog name them. An Anthropic-format request can be routed only
+/// between the Claude and Gemini entries (there is no Messages → OpenAI
+/// translation); an OpenAI-format request between all three.
 fn default_candidate_models() -> Vec<String> {
     vec![
-        "claude-3-5-sonnet".to_string(),
-        "gpt-4o".to_string(),
-        "gemini-2.0-flash".to_string(),
+        "claude-sonnet-5-5".to_string(),
+        "gpt-4.1".to_string(),
+        "gemini-3.8-flash".to_string(),
     ]
 }
 fn default_sop_pin_max_age_secs() -> u64 {
@@ -783,6 +813,15 @@ pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
                 }
             }
         }
+    }
+
+    // Out-of-range retry values are clamped and unusable fallback targets
+    // dropped here, once, rather than on every request.
+    {
+        let routing = &mut config.intutic_settings.routing;
+        routing.retry = routing.retry.clone().bounded();
+        routing.fallbacks =
+            crate::routing::retry::sanitize_fallbacks(std::mem::take(&mut routing.fallbacks));
     }
 
     // ── Candidate-pool validation: the read that makes `model_list` real ──
@@ -884,7 +923,7 @@ intutic_settings: {}
         assert_eq!(routing.enabled, None);
         assert_eq!(
             routing.candidate_models,
-            vec!["claude-3-5-sonnet", "gpt-4o", "gemini-2.0-flash"]
+            vec!["claude-sonnet-5-5", "gpt-4.1", "gemini-3.8-flash"]
         );
         assert!(routing.anthropic_model_override.is_none());
         assert!(routing.reward.enabled);
@@ -962,6 +1001,20 @@ intutic_settings: {}
         assert!(gate.enabled, "an unspecified field must keep its default");
         assert!(!gate.fail_closed);
         let _ = std::fs::remove_file(file_path);
+    }
+
+    /// The default pool names models the pricing bundle knows exactly, so a
+    /// default pick is priced at its own rate and is a model that exists — a
+    /// stale default (the pool once named `claude-3-5-sonnet`) is routed to
+    /// until a provider retires it.
+    #[test]
+    fn default_candidates_are_models_the_pricing_bundle_names() {
+        let bundle: serde_json::Value =
+            serde_json::from_str(include_str!("pricing/offline_bundle.json")).unwrap();
+        let models = bundle["models"].as_object().unwrap();
+        for candidate in default_candidate_models() {
+            assert!(models.contains_key(&candidate), "{candidate}");
+        }
     }
 
     /// Explicit `routing:` block round-trips; unspecified reward fields keep defaults.

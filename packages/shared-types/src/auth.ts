@@ -8,6 +8,13 @@
 
 import { z } from 'zod'
 import type { WorkspaceRole } from './enums.js'
+import {
+  KeyRateLimitSchema,
+  SpendBudgetListSchema,
+  type HardBudgetWire,
+  type KeyRateLimit,
+  type SpendBudget,
+} from './spendBudgets.js'
 
 // ─── Auth Context ────────────────────────────────────────────────────
 
@@ -49,6 +56,21 @@ export interface AuthContext {
    * absence there means "required", never "exempt".
    */
   byokRequired?: boolean
+  /**
+   * The `vk_` key's id (`api_keys.key_id`). The proxy names the key's spend
+   * counters and rate-limit counters with it; absent on a session JWT.
+   */
+  keyId?: string
+  /**
+   * Every hard spend budget that covers this key's calls — the workspace's,
+   * the key's own and its owner's member budgets — which the proxy checks
+   * before a request leaves. Soft budgets are not listed: they only alert.
+   * Absent on an entry written before the field existed, where the proxy
+   * keeps the workspace daily cap it read before.
+   */
+  hardBudgets?: HardBudgetWire[]
+  /** The key's requests-per-minute and tokens-per-minute limits, when it has either. */
+  rateLimit?: KeyRateLimit
 }
 
 // ─── JWT ─────────────────────────────────────────────────────────────
@@ -332,7 +354,29 @@ export interface CreateApiKeyResult {
   allowedModels: string[] | null
   expiresAt: string | null
   createdAt: string
+  /** The key's own spend budgets; empty when it has none. */
+  budgets: SpendBudget[]
+  /** The key's per-minute limits; both `null` when it has none. */
+  rateLimit: KeyRateLimit
 }
+
+/**
+ * `PATCH /api/v1/keys/:id` — replace a key's spend budgets and/or rate limit.
+ * The only way to set them: any member creates their own keys, and only an
+ * OWNER or ADMIN may say what a key can spend, so a key is created unlimited
+ * and limited afterwards.
+ * A field left out is unchanged; `budgets: []` removes every budget, and a
+ * `rateLimit` field set to `null` removes that limit.
+ */
+export const UpdateApiKeyInputSchema = z
+  .object({
+    budgets: SpendBudgetListSchema.optional(),
+    rateLimit: KeyRateLimitSchema.optional(),
+  })
+  .strict()
+  .refine((v) => v.budgets !== undefined || v.rateLimit !== undefined, 'nothing to change: send budgets or rateLimit')
+
+export type UpdateApiKeyInput = z.infer<typeof UpdateApiKeyInputSchema>
 
 /** Safe projection of an API key (no key_hash, no plaintext). */
 export interface ApiKeyInfo {
@@ -348,6 +392,10 @@ export interface ApiKeyInfo {
   createdAt: string
   /** An automation key, exempt from the SSO-recency window (see `CreateApiKeyInputSchema`). */
   isServiceAccount: boolean
+  /** The key's own spend budgets; empty when it has none. */
+  budgets: SpendBudget[]
+  /** The key's per-minute limits; both `null` when it has none. */
+  rateLimit: KeyRateLimit
 }
 
 // ─── Dashboard Summary ──────────────────────────────────────────────

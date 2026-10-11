@@ -43,7 +43,12 @@ intutic_settings:
   # in Valkey is authoritative and this block's `enabled` is ignored.
   # routing:
   #   enabled: true
-  #   candidate_models: ["claude-3-5-sonnet", "gpt-4o", "gemini-2.0-flash"]
+  #   # The models the router may choose between. A workspace's own
+  #   # routingCandidates setting replaces this list for that workspace, and
+  #   # each request only ever sees the candidates it can reach: one in a
+  #   # format the request can be translated to (an Anthropic-format request
+  #   # never goes to an OpenAI model), allowed, within budget, with a key.
+  #   candidate_models: ["claude-sonnet-5-5", "gpt-4.1", "gemini-3.8-flash"]
   #   # Uncomment to restore the pre-v1.6 behavior of pinning every
   #   # Anthropic-bound request to a single model:
   #   # anthropic_model_override: "claude-opus-4-8"
@@ -94,6 +99,27 @@ intutic_settings:
   #     # because response integrity is scored — rewarding cheapness without a
   #     # quality signal is how a router learns to save money by being wrong.
   #     cost_penalty: 0.2
+  #
+  #   # Retrying a provider call that failed before any response reached the
+  #   # client: 429, 500, 502, 503, 504, 529, timeouts and dropped connections.
+  #   # ON by default with these values; a stream that has started is never
+  #   # retried. A provider's retry-after is honoured when it fits the budget.
+  #   retry:
+  #     enabled: true
+  #     max_attempts: 3          # per model, first call included (max 5)
+  #     initial_backoff_ms: 500  # full jitter, doubling per attempt...
+  #     max_backoff_ms: 8000     # ...up to this
+  #     budget_ms: 30000         # the whole request: calls, waits, fallbacks
+  #     on_status: [429, 500, 502, 503, 504, 529]
+  #
+  #   # Ordered targets per model, tried once that model's retries run out.
+  #   # Empty by default. Only targets that take the request in its original
+  #   # wire format are used; the session lock is never moved.
+  #   fallbacks:
+  #     claude-opus-4-1:
+  #       - model: claude-sonnet-4-5
+  #       - model: deepseek-chat
+  #         provider: deepseek
 
   # Directory scanned for locally installed WASM rules (default ~/.intutic/wasm;
   # the INTUTIC_WASM_DIR env var takes precedence).

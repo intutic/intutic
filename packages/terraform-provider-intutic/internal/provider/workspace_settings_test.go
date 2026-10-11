@@ -118,3 +118,18 @@ func TestPiiDetectorsIsOneSettingComparedWhole(t *testing.T) {
 		t.Fatalf("differing = %v", diff)
 	}
 }
+
+// The provider checks setting names, not values: upstreamRetry's fallbacks go
+// to the API as written, so a target on a cloud provider (bedrock, vertex,
+// azure, as config.yaml names them) is validated by the API's schema alone.
+func TestUpstreamRetryFallbacksPassThroughWhole(t *testing.T) {
+	prior := obj(t, `{"upstreamRetry": {"maxAttempts": 4}}`)
+	next := obj(t, `{"upstreamRetry": {"maxAttempts": 4, "fallbacks": {"claude-sonnet-4-5-20250929": [{"provider": "bedrock"}, {"provider": "vertex"}], "gpt-4o": [{"provider": "azure"}]}}}`)
+	if p := validateSettingsKeys(next); len(p) != 0 {
+		t.Fatalf("upstreamRetry must be a known key, got %v", p)
+	}
+	want := `{"upstreamRetry":{"maxAttempts":4,"fallbacks":{"claude-sonnet-4-5-20250929":[{"provider":"bedrock"},{"provider":"vertex"}],"gpt-4o":[{"provider":"azure"}]}}}`
+	if got := changedSettings(prior, next).String(); got != want {
+		t.Fatalf("body = %s", got)
+	}
+}

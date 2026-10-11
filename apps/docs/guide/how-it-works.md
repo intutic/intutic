@@ -133,6 +133,8 @@ The Autonomous Reasoning Engine detects 12 categories of runtime anomalies. It r
 | `WORKFLOW_BUDGET_BREACH` | Multi-step workflow over budget |
 | `WORKFLOW_GOAL_DRIFT` | Workflow deviating from stated objective |
 
+An incident can also have a [system incident type](/guide/concepts#incident-types), which is not an anomaly: `WASM_RULE_REFUSED` when a proxy refused to load a version of a custom filter, and `SYSTEM_ANOMALY` when a proxy could not reach the LLM provider or a semantic cache dependency.
+
 ## FinOps Ledger
 
 Every execution trace records:
@@ -141,7 +143,7 @@ Every execution trace records:
 - Enforcement action applied
 - Token utility classification (`USEFUL` or `WASTED`)
 
-Spend is capped per workspace: the proxy enforces the daily cap on every request, and the monthly cap raises alerts. See [Budgets](/guide/budgets#per-workspace-budgets).
+Spend is limited by the workspace's daily and monthly caps and by budgets on virtual keys and members, each one refusing requests or alerting only; the proxy checks the ones that refuse on every request. See [Budgets](/guide/budgets#setting-up-budget-limits).
 
 ## Sync Daemon
 

@@ -125,10 +125,13 @@ export interface LoadedRuleMeta {
   bytes: Uint8Array
 }
 
+/** Why a module did not compile or load: the reasons a compile can reach, never a missing binary or a hash mismatch. */
+export type CompileFailureReason = Exclude<RuleLoadFailureReason, 'missing' | 'hash_mismatch'>
+
 export type CompileOutcome =
   | { ok: true; readsReferencedFiles: boolean; rego: boolean }
   /** `reason` names the failure as the Rust proxy and the control plane do (`RULE_LOAD_FAILURE_REASONS`). */
-  | { ok: false; error: string; reason: RuleLoadFailureReason; unsupportedImports?: string[] }
+  | { ok: false; error: string; reason: CompileFailureReason; unsupportedImports?: string[] }
 
 /** What `WasmLoader` needs from the worker to load/unload a rule — implemented by `WasmRunner`. */
 export interface CompileBridge {

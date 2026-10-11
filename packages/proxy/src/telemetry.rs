@@ -127,6 +127,20 @@ pub struct ExecutionTrace {
     /// died with it. This field is that knowledge, made durable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_error: Option<UpstreamError>,
+    /// Every upstream call this request made, in order — retries and fallback
+    /// targets, skipped targets included with the reason (`routing::retry`).
+    ///
+    /// Empty, and skipped on the wire, for the ordinary request that took one
+    /// call and was not stopped by anything: the rest of the trace already
+    /// says all there is to say about it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub upstream_attempts: Vec<crate::routing::retry::UpstreamAttempt>,
+    /// The fallback target that served this request after the routed model's
+    /// retries ran out. `actual_model_routed` names the same model; this adds
+    /// which model failed, the provider that answered, and whether the switch
+    /// cost a warm prompt cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_fallback: Option<crate::routing::retry::UpstreamFallback>,
     pub output_tokens: u32,
     pub raw_cost_usd: f64,
     pub actual_cost_usd: f64,
@@ -496,6 +510,8 @@ mod tests {
             response_integrity: None,
             quality_fault: None,
             upstream_error: None,
+            upstream_attempts: Vec::new(),
+            upstream_fallback: None,
             output_tokens: 0,
             raw_cost_usd: 0.0,
             actual_cost_usd: 0.0,
@@ -858,6 +874,72 @@ mod tests {
              failure sites this phase adds a trace to (initial connection \
              failure, non-streaming body-read failure, mid-stream chunk \
              failure) — found fewer than 8 mentions"
+        );
+    }
+
+    /// The retry fields stay off the wire for the ordinary request, and carry
+    /// the attempt list and the serving fallback when there is one.
+    #[test]
+    fn upstream_attempts_and_fallback_are_omitted_when_absent() {
+        use crate::routing::retry::{UpstreamAttempt, UpstreamFallback};
+        let mut trace = base_trace();
+        let v = serde_json::to_value(&trace).unwrap();
+        assert!(v.get("upstream_attempts").is_none());
+        assert!(v.get("upstream_fallback").is_none());
+
+        trace.upstream_attempts = vec![
+            UpstreamAttempt {
+                model: "claude-sonnet-4-5".to_string(),
+                provider: "anthropic".to_string(),
+                outcome: "http_529".to_string(),
+                status: Some(529),
+                latency_ms: 40,
+                backoff_ms: Some(250),
+                server_delay: true,
+                stopped: None,
+            },
+            UpstreamAttempt::skipped("gpt-4o", "openai", "wire_mismatch"),
+        ];
+        trace.upstream_fallback = Some(UpstreamFallback {
+            from_model: "claude-sonnet-4-5".to_string(),
+            to_model: "deepseek-chat".to_string(),
+            to_provider: "deepseek".to_string(),
+            cache_affinity_broken: false,
+        });
+        let v = serde_json::to_value(&trace).unwrap();
+        assert_eq!(v["upstream_attempts"][0]["outcome"], "http_529");
+        assert_eq!(v["upstream_attempts"][0]["backoff_ms"], 250);
+        assert_eq!(v["upstream_attempts"][0]["server_delay"], true);
+        assert!(v["upstream_attempts"][0].get("stopped").is_none());
+        assert_eq!(v["upstream_attempts"][1]["outcome"], "skipped");
+        assert_eq!(v["upstream_attempts"][1]["stopped"], "wire_mismatch");
+        assert!(v["upstream_attempts"][1].get("status").is_none());
+        assert!(v["upstream_attempts"][1].get("server_delay").is_none());
+        assert_eq!(v["upstream_fallback"]["to_provider"], "deepseek");
+        assert!(
+            v["upstream_fallback"]
+                .get("cache_affinity_broken")
+                .is_none(),
+            "false is the absence of the event, so it is omitted"
+        );
+    }
+
+    /// The struct makes every site name the fields; this pins that each site
+    /// that went upstream carries the request's own attempts rather than an
+    /// empty list: the transport failure, the error passthrough, the
+    /// mid-stream failure, the streaming success, the body-read failure and
+    /// the non-streaming success.
+    #[test]
+    fn every_upstream_trace_site_carries_its_attempts() {
+        let src = include_str!("proxy.rs");
+        let carried = src.matches("upstream_attempts: upstream_attempts").count();
+        assert_eq!(
+            carried, 6,
+            "found {carried} trace sites carrying upstream_attempts"
+        );
+        assert_eq!(
+            src.matches("upstream_fallback: upstream_fallback").count(),
+            6
         );
     }
 

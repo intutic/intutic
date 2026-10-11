@@ -92,7 +92,9 @@ async fn a_5xx_from_the_provider_still_reaches_the_caller_unchanged() {
         .respond_with(ResponseTemplate::new(503).set_body_json(serde_json::json!({
             "error": {"type": "overloaded_error", "message": "Overloaded"}
         })))
-        .expect(1)
+        // A 503 is retryable: the default policy makes three calls before the
+        // provider's own answer is passed through (`routing::retry`).
+        .expect(3)
         .mount(&upstream)
         .await;
 

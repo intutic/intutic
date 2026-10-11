@@ -13,12 +13,15 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | [`intutic_policy`](/reference/terraform/resources/policy) | Enforcement policies: what the proxy does when an agent calls a matching tool | `/api/v1/policies` |
 | [`intutic_guardrail`](/reference/terraform/resources/guardrail) | Policy guardrails you author: a rule in the Guardrail IR, held to the same checks as one extracted from a policy document | `/api/v1/policy-guardrails/guardrails` |
 | [`intutic_workspace_settings`](/reference/terraform/resources/workspace_settings) | Workspace settings, only the keys you set | `/api/v1/workspace/settings` |
-| [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`) | `/api/v1/keys` |
+| [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`), with their spend budgets and rate limits | `/api/v1/keys` |
+| [`intutic_workspace_budget`](/reference/terraform/resources/workspace_budget) | The workspace's daily and monthly spend caps, and whether each refuses requests | `/api/v1/budget` |
+| [`intutic_member_budget`](/reference/terraform/resources/member_budget) | A member's spend budgets, or the default member budget (Biz Org and above) | `/api/v1/budget/members` |
 | [`intutic_gateway`](/reference/terraform/resources/gateway) | Self-hosted gateway registrations and their live config | `/api/v1/gateways` |
 | [`intutic_notification_rule`](/reference/terraform/resources/notification_rule) | Slack, email, webhook and PagerDuty notification rules | `/api/v1/notifications/rules` |
 | [`intutic_mcp_server_decision`](/reference/terraform/resources/mcp_server_decision) | Approve or block an MCP server, and switch its tools off | `/api/v1/mcp/servers` |
 | [`intutic_siem_destination`](/reference/terraform/resources/siem_destination) | [SIEM export](/guide/siem-export) destinations: syslog, webhook, Splunk, Datadog, GCS and S3 (Biz Org and above) | `/api/v1/siem/destinations` |
 | [`intutic_wasm_rule`](/reference/terraform/resources/wasm_rule) | [Custom filters](/guide/wasm-rules): native WASM rules and Rego policies, uploaded to the workspace (Biz Org and above) | `/api/v1/wasm-rules` |
+| [`intutic_provider_credential`](/reference/terraform/resources/provider_credential) | The workspace's own provider credentials, cloud providers included: AWS Bedrock, Google Vertex AI, Azure OpenAI | `/api/v1/workspace/provider-credentials` |
 
 Two data sources read the [workspace](/reference/terraform/data-sources/workspace) the key belongs to and its [members](/reference/terraform/data-sources/members). Every resource supports `terraform import`.
 
@@ -132,7 +135,7 @@ resource "intutic_notification_rule" "incidents" {
 
 **MCP review holds are respected.** When a high-risk change to a server's tool set returns it to review, Terraform does not approve it again over the hold: the apply stops and names the change. Review it in the MCP registry and approve it there, and the next plan is clean. Blocking a held server works. An MCP server must have been reported by a proxy before it can be decided on; to allow one in advance, list it in the `mcpAllowedServers` setting.
 
-**Secrets.** A virtual key, a gateway token and a webhook signing secret are returned once, when created, and kept in state as sensitive values for you to pass on, for example into a CI secret or a Kubernetes secret. Keep the state in an encrypted backend. An imported key, token or secret is null, since the API cannot return it again. Credentials you supply (a PagerDuty routing key, a SIEM destination's `secret_config`) read back masked; the plan compares them through the mask, so it stays empty until one is changed outside Terraform.
+**Secrets.** A virtual key, a gateway token and a webhook signing secret are returned once, when created, and kept in state as sensitive values for you to pass on, for example into a CI secret or a Kubernetes secret. Keep the state in an encrypted backend. An imported key, token or secret is null, since the API cannot return it again. Credentials you supply (a PagerDuty routing key, a SIEM destination's `secret_config`, a provider credential's `fields`) read back masked; the plan compares them through the mask, so it stays empty until one is changed outside Terraform.
 
 **Destroy.** Destroying a SOP or a policy soft-deletes it, keeping its version history. Destroying a guardrail retires it, undoing what it wrote if it was an enforcing allowed-models or egress guardrail, and keeps its history. Destroying a virtual key or a gateway revokes it. Destroying an MCP server decision returns the server to the approval queue and switches its tools back on. Destroying a SIEM destination deactivates it: the API keeps every destination, so it stays listed, switched off. Destroying a custom filter deletes it.
 
@@ -183,5 +186,5 @@ The API cannot change an uploaded rule's bytes, so a rebuilt file replaces the r
 - `intutic_guardrail` manages guardrails you author. A guardrail extracted from a policy document cannot be managed or imported: it changes when its document does, and you move it through the [guardrail review](/guide/policy-guardrails).
 - Approving a guardrail for shadow and promoting it are review decisions, not Terraform actions.
 - Org-wide SOPs, members and roles, SSO and SCIM are managed in the dashboard.
-- Spend caps are not managed by the provider. A workspace that has not saved a daily cap is held to $100 a day; set caps on Settings › Billing › Budget Limits or with `PUT /api/v1/budget` (see [Budgets](/guide/budgets#per-workspace-budgets)).
+- Spend caps are not managed by the provider. A workspace that has not saved a daily cap is held to $100 a day; set caps on Settings › Billing › Budget Limits or with `PUT /api/v1/budget` (see [Budgets](/guide/budgets#workspace-caps)).
 - A virtual key belongs to the member whose key runs Terraform, and Terraform sees only that member's keys.

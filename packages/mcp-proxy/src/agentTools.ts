@@ -11,8 +11,29 @@
  * @module
  */
 
-import { budgetWindow, describeMcpBudget, type McpBudgetPolicy } from '@intutic/shared-types'
+import { INCIDENT_TYPES, budgetWindow, describeMcpBudget, type McpBudgetPolicy } from '@intutic/shared-types'
+import { z } from 'zod'
 import { budgetCounterKey } from './budget.js'
+
+/**
+ * `intutic_list_incidents`'s arguments. `type` is checked against the same
+ * list `GET /api/v1/incidents` checks it against, so an agent is told the
+ * valid types instead of receiving the control plane's 400.
+ */
+export const LIST_INCIDENTS_ARGS = {
+  limit: z.number().int().min(1).max(50).default(10).describe('Number of incidents to return (1–50)'),
+  type: z
+    .enum(INCIDENT_TYPES)
+    .optional()
+    .describe('Only incidents of this type: an anomaly type such as SCOPE_VIOLATION, or WASM_RULE_REFUSED or SYSTEM_ANOMALY'),
+}
+
+/** The control-plane path `intutic_list_incidents` reads. */
+export function incidentListPath(workspaceId: string, args: { limit: number; type?: string }): string {
+  const q = new URLSearchParams({ workspaceId, limit: String(args.limit) })
+  if (args.type) q.set('type', args.type)
+  return `/api/v1/incidents?${q}`
+}
 
 /** One control-plane read, never thrown: a failure degrades a tool's answer, it does not crash the server. */
 export type ControlPlaneResult =

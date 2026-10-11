@@ -108,6 +108,22 @@ describe('PolicyClient and the daemon snapshot answer', () => {
     expect(client.getRegistry()).toBeUndefined()
   })
 
+  it("takes the workspace's custom rules from a full answer only: the snapshot carries none", async () => {
+    const rules = [{ ruleId: 'wasm_1', name: 'no-prod', sha256: 'a'.repeat(64), priority: 10, mode: 'ENFORCE' }]
+    const client = daemonClient()
+    answer = SNAPSHOT
+    await client.refresh()
+    expect(client.getWasmRules()).toBeUndefined()
+
+    answer = { ...FULL, wasmRules: rules }
+    await client.refresh()
+    expect(client.getWasmRules()).toEqual(rules)
+
+    answer = SNAPSHOT
+    await client.refresh()
+    expect(client.getWasmRules()).toEqual(rules)
+  })
+
   it('a full answer after the snapshot replaces everything again', async () => {
     const client = daemonClient()
     answer = SNAPSHOT
