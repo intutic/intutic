@@ -512,11 +512,13 @@ export function handleHarnessLine(
           { action: 'tool_blocked', toolName, reason: decision.reason },
           'Tool call blocked by governance proxy'
         )
+        // Recorded before the answer goes out, as on the allowed path: a
+        // reader that acts on the answer must find the event already written.
+        chaos?.injector.emit({ type: 'tool_call', tool: toolName, ok: false })
         writeFrame(buildBlockResponse(msg.id, decision.reason, blockData(decision)))
-        chaos?.injector.emit({ type: 'tool_call', tool: toolName, ok: false })
       } else if (decision.action === 'hold') {
-        writeFrame(buildHoldResponse(msg.id, decision.reason, decision.holdId, decision.ruleId))
         chaos?.injector.emit({ type: 'tool_call', tool: toolName, ok: false })
+        writeFrame(buildHoldResponse(msg.id, decision.reason, decision.holdId, decision.ruleId))
       } else {
         // Allow: the response now needs inspecting on the way back —
         // registered BEFORE forwarding, or a fast server could answer
