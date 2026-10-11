@@ -31,7 +31,10 @@ intutic chaos run registry-down.yaml --sandbox-image my-agent-sandbox
   into an allow. Your rules stay in force for the whole run.
 - **A cost ceiling is mandatory.** Every repetition runs a real agent against
   a real model and spends real tokens. An experiment without a
-  `cost_usd_above` abort condition is rejected.
+  `cost_usd_above` abort condition is rejected. The agent authenticates with
+  its own provider keys: `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from your
+  shell are passed into the sandbox by name, and each repetition's standalone
+  proxy forwards them upstream. Your Intutic login is never used for a run.
 - **Each repetition starts from the same commit.** The run requires a clean
   git working tree and gives every repetition a fresh worktree of `HEAD`, so
   uncommitted changes would reach none of them.
