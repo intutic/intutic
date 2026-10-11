@@ -7,8 +7,8 @@
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
 use intutic_proxy::{
-    config, dlp, egress_policy, firewall, gateway, heartbeat, proxy, router, routing, sops, store,
-    telemetry, wasm,
+    chaos, config, dlp, egress_policy, firewall, gateway, heartbeat, proxy, router, routing, sops,
+    store, telemetry, wasm,
 };
 
 use std::net::SocketAddr;
@@ -242,6 +242,24 @@ async fn main() -> anyhow::Result<()> {
     // Resolve the SOP set now, so an empty one is reported at boot rather than
     // silently at whichever request happens to arrive first.
     sops::report_at_startup();
+
+    // A chaos plan, when the chaos runner started this process for one
+    // repetition. A set but invalid plan refuses the boot: running with the
+    // plan silently ignored would score the agent against faults that never
+    // fired.
+    match chaos::init_from_env() {
+        Ok(Some(c)) => tracing::warn!(
+            run_id = %c.plan().run_id,
+            repetition = c.plan().repetition,
+            faults = c.plan().faults.len(),
+            "Chaos plan loaded — this proxy injects faults into allowed requests"
+        ),
+        Ok(None) => {}
+        Err(e) => {
+            tracing::error!(error = %e, "Chaos: refusing to start");
+            anyhow::bail!(e);
+        }
+    }
 
     // Load configuration
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());

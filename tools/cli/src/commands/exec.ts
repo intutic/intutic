@@ -32,7 +32,7 @@ import {
   type GraphIdentity,
 } from '../lib/graphIdentity.js'
 import { log } from '../lib/logger.js'
-import { selectBackend, type SandboxKind, type SandboxSpec } from '../lib/sandbox/index.js'
+import { selectBackend, type SandboxBackend, type SandboxKind, type SandboxSpec } from '../lib/sandbox/index.js'
 import pc from 'picocolors'
 import { localProxyPort } from '../lib/localProxy.js'
 
@@ -268,24 +268,32 @@ export async function runExec(
   })
 }
 
+/** Why a sandbox launch was refused before anything ran. */
+export class SandboxUnavailableError extends Error {
+  constructor(
+    message: string,
+    /** `health` means the backend cannot run on this host. */
+    readonly stage: 'select' | 'health' | 'image',
+  ) {
+    super(message)
+  }
+}
+
 /**
- * Run the agent inside an isolated sandbox whose only egress is the proxy.
- *
- * Inside the sandbox `localhost` is the sandbox, not the host — so the proxy
- * env is rebuilt against the host-gateway alias, and the sandbox's egress
- * firewall is opened to exactly that address plus DNS (and any `--sandbox-allow`
- * CIDRs). Secrets are passed by env-var *name*, so they never appear in the
- * container runtime's argv.
+ * The environment a sandboxed agent receives, for a proxy listening on the
+ * host's `port`. Inside the sandbox `localhost` is the sandbox, not the host —
+ * so the proxy env is built against the host-gateway alias. The values are
+ * handed to the runtime process and referenced by *name*, so secrets never
+ * appear in the container runtime's argv.
  */
-async function runSandboxed(
-  commandAndArgs: string[],
+export function sandboxProxyEnv(
   creds: IntuticCredentials | null,
   identity: GraphIdentity,
-  opts: SandboxExecOptions,
-): Promise<void> {
-  const port = String(localProxyPort())
-  const proxyUrlOverride = `http://${PROXY_HOST_ALIAS}:${port}`
-  const proxyEnv = buildProxyEnv(creds?.apiKey, identity, proxyUrlOverride)
+  port: string,
+  allow: string[],
+): { env: Record<string, string>; proxyUrl: string } {
+  const proxyUrl = `http://${PROXY_HOST_ALIAS}:${port}`
+  const proxyEnv = buildProxyEnv(creds?.apiKey, identity, proxyUrl)
 
   // The values the runtime will read for the `--env NAME` references.
   //
@@ -302,35 +310,93 @@ async function runSandboxed(
     ...proxyEnv,
     INTUTIC_SANDBOX_PROXY_HOST: PROXY_HOST_ALIAS,
     INTUTIC_SANDBOX_PROXY_PORT: port,
-    ...(opts.allow.length ? { INTUTIC_SANDBOX_ALLOW: opts.allow.join(',') } : {}),
+    ...(allow.length ? { INTUTIC_SANDBOX_ALLOW: allow.join(',') } : {}),
   }
+  return { env, proxyUrl }
+}
 
-  let backend
+/**
+ * Select the backend, check it can run here and get `image` ready. Throws
+ * {@link SandboxUnavailableError} rather than falling back: an unavailable
+ * backend is never swapped for running the agent ungoverned on the host.
+ * `env` is held by reference, so variables added later still reach the run.
+ */
+export async function readySandbox(
+  kind: SandboxKind,
+  env: Record<string, string>,
+  image: string,
+): Promise<SandboxBackend> {
+  let backend: SandboxBackend
   try {
-    backend = selectBackend(opts.kind, env)
+    backend = selectBackend(kind, env)
   } catch (err) {
-    log.error(`Sandbox unavailable: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
+    throw new SandboxUnavailableError(`Sandbox unavailable: ${err instanceof Error ? err.message : String(err)}`, 'select')
   }
 
   const health = await backend.health()
   if (!health.available) {
-    // Honesty rule: never silently fall back to running the agent
-    // ungoverned on the host — say what is unavailable and stop.
-    log.error(`Sandbox backend '${backend.name}' is not available: ${health.detail}`)
-    log.dim('Start Docker (or Podman), or drop --sandbox to run on the host.')
-    process.exit(1)
+    throw new SandboxUnavailableError(`Sandbox backend '${backend.name}' is not available: ${health.detail}`, 'health')
   }
 
   try {
-    await backend.prepare?.(opts.image)
+    await backend.prepare?.(image)
   } catch (err) {
-    log.error(`Sandbox image unavailable: ${err instanceof Error ? err.message : String(err)}`)
+    throw new SandboxUnavailableError(`Sandbox image unavailable: ${err instanceof Error ? err.message : String(err)}`, 'image')
+  }
+  return backend
+}
+
+/** The spec for one sandboxed command: the env goes in by name only. */
+export function sandboxSpec(
+  command: string[],
+  workdir: string,
+  env: Record<string, string>,
+  opts: SandboxExecOptions,
+  extra: Pick<SandboxSpec, 'tty'> & Partial<Pick<SandboxSpec, 'name' | 'onStdout' | 'signal'>>,
+): SandboxSpec {
+  return {
+    command,
+    workdir,
+    image: opts.image,
+    envKeys: Object.keys(env),
+    proxyHostAlias: PROXY_HOST_ALIAS,
+    allowCidrs: opts.allow,
+    memory: opts.memory,
+    cpus: opts.cpus,
+    pidsLimit: opts.pidsLimit,
+    ...extra,
+  }
+}
+
+/**
+ * Run the agent inside an isolated sandbox whose only egress is the proxy.
+ *
+ * The sandbox's egress firewall is opened to exactly the proxy plus DNS (and
+ * any `--sandbox-allow` CIDRs).
+ */
+async function runSandboxed(
+  commandAndArgs: string[],
+  creds: IntuticCredentials | null,
+  identity: GraphIdentity,
+  opts: SandboxExecOptions,
+): Promise<void> {
+  const { env, proxyUrl } = sandboxProxyEnv(creds, identity, String(localProxyPort()), opts.allow)
+
+  let backend: SandboxBackend
+  try {
+    backend = await readySandbox(opts.kind, env, opts.image)
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err))
+    // Honesty rule: never silently fall back to running the agent
+    // ungoverned on the host — say what is unavailable and stop.
+    if (err instanceof SandboxUnavailableError && err.stage === 'health') {
+      log.dim('Start Docker (or Podman), or drop --sandbox to run on the host.')
+    }
     process.exit(1)
   }
 
   log.info(`Sandbox: ${backend.name} · image ${opts.image} · egress locked to the proxy`)
-  log.dim(`Proxy (from sandbox): ${proxyUrlOverride}`)
+  log.dim(`Proxy (from sandbox): ${proxyUrl}`)
   const [exe, ...rest] = commandAndArgs
   log.info(`Launching in sandbox: ${pc.bold(exe)} ${rest.join(' ')}`)
   console.log('')
@@ -349,18 +415,7 @@ async function runSandboxed(
   const sessionId = creds ? await openSandboxSession(creds, identity, backend.name) : null
   if (sessionId) env.INTUTIC_SESSION_ID = sessionId
 
-  const spec: SandboxSpec = {
-    command: commandAndArgs,
-    workdir: process.cwd(),
-    image: opts.image,
-    envKeys: Object.keys(env),
-    proxyHostAlias: PROXY_HOST_ALIAS,
-    allowCidrs: opts.allow,
-    memory: opts.memory,
-    cpus: opts.cpus,
-    pidsLimit: opts.pidsLimit,
-    tty: Boolean(process.stdout.isTTY),
-  }
+  const spec = sandboxSpec(commandAndArgs, process.cwd(), env, opts, { tty: Boolean(process.stdout.isTTY) })
 
   const code = await backend.run(spec)
 

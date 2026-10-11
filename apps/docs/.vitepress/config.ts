@@ -150,6 +150,7 @@ sidebarGuide.push({
     { text: 'Rego Policies (Open-Core)', link: '/guide/rego-policies' },
     { text: 'Graph Guardrails (Open-Core)', link: '/guide/graph-guardrails' },
     { text: 'Sandboxed Execution (Open-Core)', link: '/guide/sandboxed-execution' },
+    { text: 'Chaos Engineering for Agents (Open-Core)', link: '/guide/chaos-engineering' },
     { text: 'Governance Controls Checklist (Open-Core)', link: '/guide/governance-controls' },
     { text: 'Skill Scanning (Open-Core)', link: '/guide/skill-scanning' },
     { text: 'MCP Server Governance (Open-Core)', link: '/guide/mcp-governance' },

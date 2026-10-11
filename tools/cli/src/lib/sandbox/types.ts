@@ -33,6 +33,12 @@ export interface SandboxSpec {
   pidsLimit: number
   /** Allocate a TTY (interactive agents). */
   tty: boolean
+  /** Container name, so the run can be stopped by name (`docker kill`). */
+  name?: string
+  /** Receive the agent's stdout instead of inheriting it (stderr stays inherited). */
+  onStdout?: (chunk: Buffer) => void
+  /** Stop the sandbox when this aborts; `run` then resolves with the exit code it got. */
+  signal?: AbortSignal
 }
 
 /** Health of a backend on this host. */

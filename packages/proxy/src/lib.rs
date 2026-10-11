@@ -1,3 +1,5 @@
+/// Agent fault injection for `intutic chaos run` — inert unless a plan is set
+pub mod chaos;
 pub mod commands;
 pub mod config;
 /// The caller's credential, typed by where it may be sent

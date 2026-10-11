@@ -204,6 +204,11 @@ fn spawn_reward_update(
     cfg: crate::config::RewardConfig,
     signals: RewardSignals,
 ) {
+    // A chaos run's failures are injected on purpose: teaching routing from
+    // them would steer real traffic away from models that did nothing wrong.
+    if crate::chaos::active().is_some() {
+        return;
+    }
     let engine = Arc::clone(&state.reward_engine);
     let store = Arc::clone(&state.store);
     let workspace_id = workspace_id.to_string();
@@ -1848,6 +1853,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let protocol = crate::protocol::detect(&uri_path);
     let headers = request.headers().clone();
     let method = request.method().clone();
+    // The host a chaos egress fault is matched against: the host of an
+    // absolute-form (plain forward) request, or the provider host a
+    // TLS-intercepted request names in `Host`. A request addressed to this
+    // proxy as its base URL has neither. Only read when a plan is loaded.
+    let chaos_request_host: Option<String> = crate::chaos::active().and_then(|_| {
+        request.uri().host().map(str::to_string).or_else(|| {
+            headers
+                .get("host")
+                .and_then(|v| v.to_str().ok())
+                .map(|h| h.split(':').next().unwrap_or(h))
+                .filter(|h| crate::hostname_filter::is_ai_provider_host(h))
+                .map(str::to_string)
+        })
+    });
 
     let harness_type: String = resolve_harness_type(&headers, &provider);
 
@@ -5130,6 +5149,46 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         None
     };
 
+    // ── Chaos fault stage ────────────────────────────────────────────
+    //
+    // Only when the chaos runner started this process with a plan. It sits
+    // here, after the last governance decision (the forwarded-header DLP and
+    // the credential refusals just above) and before the one upstream send,
+    // because a fault must never loosen governance: every request that
+    // reaches this line has been allowed by the budget gate, the policy
+    // check, SOP and WASM rules and DLP, and a request any of them blocked
+    // returned long before it. From here a fault can only fail the call,
+    // delay it or change what is sent. A response-cache hit returned above
+    // too: it makes no upstream call, so there is nothing to fault.
+    let mut request_body = request_body;
+    let mut chaos_stream_cut: Option<crate::chaos::StreamCut> = None;
+    let mut chaos_degraded = false;
+    if let Some(chaos) = crate::chaos::active() {
+        let upstream_host = reqwest::Url::parse(&upstream_url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string));
+        let call = crate::chaos::LlmCall {
+            model: &model,
+            upstream_host: upstream_host.as_deref(),
+            request_host: chaos_request_host.as_deref(),
+            streaming: body_json.get("stream").and_then(|v| v.as_bool()) == Some(true),
+            anthropic_shape: protocol == Protocol::Anthropic,
+        };
+        match chaos.apply_llm(&call, &mut request_body) {
+            crate::chaos::LlmDecision::Respond(resp) => return resp,
+            crate::chaos::LlmDecision::Forward(faults) => {
+                chaos_stream_cut = faults.stream_cut;
+                if let Some(to_model) = faults.degraded_to {
+                    // Priced, traced and reported as the model that served
+                    // it. No arm learns from it: the bandit did not pick it.
+                    actual_model = to_model;
+                    reward_eligible = false;
+                    chaos_degraded = true;
+                }
+            }
+        }
+    }
+
     let fwd_result = state
         .http_client
         .request(
@@ -6933,6 +6992,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 final_completion_tokens,
                 prior_cache_read_ratio,
             );
+            if let Some(chaos) = crate::chaos::active() {
+                chaos.record_usage(
+                    &actual_model_clone,
+                    final_prompt_tokens,
+                    final_completion_tokens,
+                    actual_cost_usd,
+                );
+            }
 
             // Fire-and-forget: feeds a FUTURE request's prior_cache_read_ratio,
             // never this one's. A lost write just means the next request's
@@ -7105,15 +7172,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 }
             }
         }
-        return response
-            .body(Body::from_stream(ReceiverStream::new(rx)))
-            .unwrap_or_else(|_| {
-                json_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "build_error",
-                    "Failed to build streaming response",
-                )
-            });
+        let stream_body = match chaos_stream_cut {
+            Some(cut) => Body::from_stream(cut.apply(ReceiverStream::new(rx))),
+            None => Body::from_stream(ReceiverStream::new(rx)),
+        };
+        return response.body(stream_body).unwrap_or_else(|_| {
+            json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "build_error",
+                "Failed to build streaming response",
+            )
+        });
     }
 
     // ── Step 7: DLP scan — output (non-streaming flow) ────────────────
@@ -7727,6 +7796,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         final_completion_tokens,
         prior_cache_read_ratio,
     );
+    if let Some(chaos) = crate::chaos::active() {
+        chaos.record_usage(
+            &actual_model,
+            final_prompt_tokens,
+            final_completion_tokens,
+            actual_cost_usd,
+        );
+    }
 
     // Fire-and-forget: feeds a FUTURE request's prior_cache_read_ratio, never
     // this one's. A lost write just means the next request's counterfactual
@@ -8159,6 +8236,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             refusal.apply(headers_mut);
         }
     }
+    // A degraded call answers under the model id the agent asked for, so the
+    // swap is silent the way a provider-side degradation would be.
+    let final_body = if chaos_degraded {
+        crate::chaos::restore_model(&final_body, &model).unwrap_or(final_body)
+    } else {
+        final_body
+    };
     response.body(Body::from(final_body)).unwrap_or_else(|_| {
         json_error(
             StatusCode::INTERNAL_SERVER_ERROR,

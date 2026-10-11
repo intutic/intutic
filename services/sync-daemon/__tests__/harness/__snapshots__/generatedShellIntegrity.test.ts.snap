@@ -10,7 +10,7 @@ exports[`generated hook scripts > antigravity > matches the recorded output byte
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v18 ─────────────────────────────
+# ── Intutic fail-closed prelude v19 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -23,6 +23,12 @@ intutic_fail_closed() {
   set +eu
   trap - EXIT
   [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
+  # A chaos run's record of a call the gate refused, held or crashed on (the
+  # gate body records an allowed one where it ends). It cannot change the
+  # exit status: everything it prints is discarded.
+  if [ "$_intutic_exit_rc" != "0" ] && [ "\${INTUTIC_CHAOS_ACTIVE:-0}" = "1" ] && command -v intutic_chaos_decide >/dev/null 2>&1; then
+    intutic_chaos_decide "\${_intutic_chaos_decision:-deny}" >/dev/null 2>&1
+  fi
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -610,6 +616,270 @@ def intutic_mcp_unverified(tool):
     call = split_mcp_tool_name(tool)
     return "\\t".join(unverified_refusal(call[0])) if call else ""
 
+
+"""Fault injection in the hook gates, for chaos runs (intutic chaos run).
+
+A transliteration of packages/shared-types/src/chaosGate.ts; read that
+module's docstring for the counter files and why every count lives on disk.
+In short: a gate is a new process per tool call, so the plan is decoded on
+each call, plan_loaded is reported by whichever gate first creates
+EVENTS.gate-plan-loaded, and each fault's seen and hit counts are numbered
+empty files in EVENTS.gate-counters/, each number claimed with an exclusive
+create (O_CREAT | O_EXCL), which exactly one process wins.
+
+The bash gates emit this file verbatim (services/sync-daemon/src/lib/chaosPy.ts
+holds a byte-identical copy, which a test compares), and every copy runs
+packages/shared-types/fixtures/chaos-gate-vectors.json. It must stay
+self-contained: the standard library only, no module state beyond the
+constants below, and no backtick or dollar-brace, which the TypeScript copy
+cannot hold.
+"""
+
+import base64
+import binascii
+import datetime
+import json
+import os
+import re
+import sys
+
+_CHAOS_FAULT_IDS = (
+    "llm.rate_limit", "llm.upstream_5xx", "llm.context_trim", "llm.model_degrade", "tool.error", "tool.stale_data",
+    "mcp.toolset_change", "permission.deny_or_delay", "inject.tool_result", "egress.dns_fail", "egress.credential_401",
+)
+_CHAOS_B64URL = re.compile(r"^[A-Za-z0-9_-]+={0,2}$")
+_CHAOS_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+_CHAOS_CANARY = re.compile(r"^E-INTUTIC-[0-9A-F]{4,16}$")
+
+
+def _chaos_int(v, low, high):
+    # JSON numbers as JavaScript reads them: 2.0 is the integer 2. A bool is not a number.
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    if isinstance(v, float):
+        if not v.is_integer():
+            return None
+        v = int(v)
+    return v if low <= v <= high else None
+
+
+def chaos_decode(raw):
+    """(plan, None), or (None, why it is not one)."""
+    def invalid(why):
+        return None, "INTUTIC_CHAOS_PLAN is not a valid plan: " + why
+    try:
+        if not isinstance(raw, str) or not _CHAOS_B64URL.match(raw):
+            raise ValueError("alphabet")
+        b64 = raw.rstrip("=")
+        data = json.loads(base64.urlsafe_b64decode(b64 + "=" * ((4 - len(b64) % 4) % 4)).decode("utf-8"))
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return None, "INTUTIC_CHAOS_PLAN is not base64url-encoded JSON"
+    if not isinstance(data, dict):
+        return invalid("not a JSON object")
+    v = data.get("v")
+    if isinstance(v, bool) or v != 1:
+        return invalid("version " + json.dumps(v) + ", and a gate reads only version 1")
+    run_id = data.get("runId")
+    if not isinstance(run_id, str) or not _CHAOS_RUN_ID.match(run_id):
+        return invalid("runId")
+    canary = data.get("canary")
+    if not isinstance(canary, str) or not _CHAOS_CANARY.match(canary):
+        return invalid("canary")
+    raw_faults = data.get("faults")
+    if not isinstance(raw_faults, list) or len(raw_faults) > 50:
+        return invalid("faults")
+    faults = []
+    for i, f in enumerate(raw_faults):
+        at = "faults[" + str(i) + "]"
+        if not isinstance(f, dict) or not isinstance(f.get("id"), str) or f["id"] not in _CHAOS_FAULT_IDS:
+            return invalid(at + ".id")
+        if f["id"] not in ("tool.error", "permission.deny_or_delay"):
+            continue
+        match = None
+        if "match" in f:
+            if not isinstance(f["match"], dict):
+                return invalid(at + ".match")
+            for k, mv in f["match"].items():
+                if k not in ("tool", "host", "model") or not isinstance(mv, str) or not mv:
+                    return invalid(at + ".match." + k)
+            match = f["match"]
+        after_calls = 0
+        if "after_calls" in f:
+            after_calls = _chaos_int(f["after_calls"], 0, 10000)
+            if after_calls is None:
+                return invalid(at + ".after_calls")
+        times = None
+        if "times" in f:
+            times = _chaos_int(f["times"], 1, 10000)
+            if times is None:
+                return invalid(at + ".times")
+        fault = {
+            "index": i, "id": f["id"], "match": match, "after_calls": after_calls, "times": times,
+            "message": "tool failed", "mode": "deny", "delay_s": 0,
+        }
+        if f["id"] == "tool.error" and "message" in f:
+            # Lengths in UTF-16 code units, as JavaScript counts them.
+            m = f["message"]
+            if not isinstance(m, str) or not 1 <= len(m.encode("utf-16-le", "surrogatepass")) // 2 <= 2000:
+                return invalid(at + ".message")
+            fault["message"] = m
+        if f["id"] == "permission.deny_or_delay":
+            if "mode" in f:
+                if f["mode"] not in ("deny", "delay", "hold_then_deny"):
+                    return invalid(at + ".mode")
+                fault["mode"] = f["mode"]
+            if "delay_s" in f:
+                delay_s = _chaos_int(f["delay_s"], 0, 600)
+                if delay_s is None:
+                    return invalid(at + ".delay_s")
+                fault["delay_s"] = delay_s
+        faults.append(fault)
+    return {"runId": run_id, "canary": canary, "faults": faults}, None
+
+
+def chaos_matches(match, tool):
+    """Whether a fault's match covers a gate call, which has a tool and nothing else."""
+    if not match:
+        return True
+    if "host" in match or "model" in match:
+        return False
+    p = match.get("tool")
+    if p is None:
+        return True
+    return tool.endswith(p[1:]) if p.startswith("*") else tool == p
+
+
+def chaos_event(plan, type_, fields, now):
+    """One events-file line: ts, runId, component, type, then the fields that are set."""
+    event = {"ts": now, "runId": plan["runId"], "component": "gate", "type": type_}
+    for k, v in fields:
+        if v is not None:
+            event[k] = v
+    return json.dumps(event, separators=(",", ":"), ensure_ascii=False) + "\\n"
+
+
+def chaos_append(events_path, lines):
+    """Appends whole lines in one write. An I/O error is reported, never raised."""
+    try:
+        fd = os.open(events_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, lines.encode("utf-8"))
+        finally:
+            os.close(fd)
+    except OSError as e:
+        sys.stderr.write("[Intutic Governance] chaos: could not append to " + events_path + ": " + str(e) + "\\n")
+
+
+def chaos_claim(directory, prefix, limit):
+    """Claims the next numbered file DIRECTORY/PREFIXn with an exclusive create.
+
+    Returns n, 0 when every number up to limit is taken, or -1 on an I/O
+    error, after saying so.
+    """
+    try:
+        # Beside the events file, never creating its directory: the runner did.
+        try:
+            os.mkdir(directory)
+        except FileExistsError:
+            pass
+        n = sum(1 for name in os.listdir(directory) if name.startswith(prefix)) + 1
+        while limit is None or n <= limit:
+            try:
+                os.close(os.open(os.path.join(directory, prefix + str(n)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+                return n
+            except FileExistsError:
+                n += 1
+        return 0
+    except OSError as e:
+        sys.stderr.write("[Intutic Governance] chaos: could not count calls in " + directory + ": " + str(e) + "\\n")
+        return -1
+
+
+def chaos_now():
+    """The time as the JavaScript gates write it: <TIMESTAMP>."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def chaos_call(plan, events_path, call, now):
+    """Reports one call and returns the fault the gate must apply, or None.
+
+    call: tool, decision (allow, deny, ask or hold, before any fault), ruleId,
+    destructive, policyHit. The fault: faultId, kind (deny, delay or
+    hold_then_deny), reason and delayS, as chaosGateCall returns it.
+    """
+    lines = ""
+    first = True
+    try:
+        os.close(os.open(events_path + ".gate-plan-loaded", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+    except FileExistsError:
+        first = False
+    except OSError:
+        pass
+    if first:
+        lines += chaos_event(plan, "plan_loaded", [("faults", len(plan["faults"]))], now)
+    lines += chaos_event(plan, "gate_decision", [
+        ("tool", call["tool"]),
+        ("decision", call["decision"]),
+        ("ruleId", call.get("ruleId") or None),
+        ("destructive", bool(call.get("destructive"))),
+        ("policyHit", bool(call.get("policyHit"))),
+    ], now)
+    fault = None
+    if call["decision"] == "allow":
+        directory = events_path + ".gate-counters"
+        for f in plan["faults"]:
+            if not chaos_matches(f["match"], call["tool"]):
+                continue
+            # An MCP tool's error is the MCP proxy's to inject; a gate injects the built-in side.
+            if f["id"] == "tool.error" and call["tool"].startswith("mcp__"):
+                continue
+            seen = chaos_claim(directory, str(f["index"]) + ".seen.", None)
+            if fault is not None or seen < 1 or seen <= f["after_calls"]:
+                continue
+            if f["times"] is not None and chaos_claim(directory, str(f["index"]) + ".hit.", f["times"]) < 1:
+                continue
+            tag = " [" + plan["canary"] + "]"
+            if f["id"] == "tool.error":
+                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag, "delayS": 0}
+            elif f["mode"] == "delay":
+                fault = {"faultId": f["id"], "kind": "delay", "reason": "", "delayS": f["delay_s"]}
+            elif f["mode"] == "hold_then_deny":
+                fault = {"faultId": f["id"], "kind": "hold_then_deny",
+                         "reason": "Permission held for approval, then denied by approver" + tag, "delayS": f["delay_s"]}
+            else:
+                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag, "delayS": 0}
+            lines += chaos_event(plan, "fault_injected", [("faultId", f["id"]), ("call", seen), ("target", call["tool"])], now)
+        if fault is None or fault["kind"] == "delay":
+            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", True)], now)
+    chaos_append(events_path, lines)
+    return fault
+
+
+
+def intutic_chaos_begin():
+    # Why the chaos run's plan cannot be used, or "" when it can.
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    if error:
+        return error
+    if not os.environ.get("INTUTIC_CHAOS_EVENTS"):
+        return "INTUTIC_CHAOS_PLAN is set but INTUTIC_CHAOS_EVENTS is not, so nothing the run does could be reported"
+    return ""
+
+
+def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit):
+    # Records one call as the gate decided it, before any fault; returns the
+    # fault to apply to an allowed call as "kind<TAB>delayS<TAB>reason", or "".
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
+    if error or not events:
+        return ""
+    call = {"tool": tool, "decision": decision, "ruleId": rule_id or None,
+            "destructive": destructive == "1", "policyHit": policy_hit == "1"}
+    fault = chaos_call(plan, events, call, chaos_now())
+    if fault is None:
+        return ""
+    return fault["kind"] + "\\t" + str(fault["delayS"]) + "\\t" + fault["reason"]
+
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
 
@@ -775,12 +1045,57 @@ log_event() {
 }
 
 
-# ── Intutic gate body v18 — harness: gemini-cli ────────────
+# ── Intutic gate body v19 — harness: gemini-cli ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
 # were previously passed in and dropped on the floor: opts.harness was declared
 # on the option type, supplied by all thirteen writers, and read nowhere.
+
+# ── Agent fault injection (intutic chaos run) ────────────────────────────────
+# Only when INTUTIC_CHAOS_PLAN is set: a chaos experiment's runner sets it, with
+# INTUTIC_CHAOS_EVENTS, in the sandbox the agent runs in, and this gate inherits
+# both. The work is chaos.py in INTUTIC_PY_LIB, the transliteration of
+# chaosGate.ts in @intutic/shared-types, which explains the counter files kept
+# beside the events file. An allowed call is recorded where this body ends,
+# where its fault is applied; a refused, held or crashed one by the exit trap.
+# A fault applies only to an allowed call. Scoped to the bare invocation, like
+# the envelope refusal below.
+INTUTIC_CHAOS_ACTIVE=0
+_intutic_chaos_done=0
+_intutic_chaos_decision=deny
+_intutic_chaos_rule=""
+_intutic_chaos_hit=0
+_intutic_chaos_destructive=0
+# Records this call as decided ($1: allow, deny or hold) and prints the fault
+# to apply to an allowed one, as kind, delay and reason, tab-separated.
+intutic_chaos_decide() {
+  [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ "$_intutic_chaos_done" = "0" ] || return 0
+  python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" || true
+}
+# A rule fired without deciding the call (shadow, warn): its id, if none yet.
+intutic_chaos_note() {
+  [ -n "$_intutic_chaos_rule" ] || _intutic_chaos_rule="$1"
+}
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_CHAOS_PLAN:-}" ]; then
+  # A plan that is set but unreadable refuses, as an unreadable payload does:
+  # an experiment run without the faults it asked for reports a resilience it
+  # never measured.
+  _intutic_chaos_err="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_begin"]())' 2>/dev/null || echo "INTUTIC_CHAOS_PLAN could not be read")"
+  if [ -n "$_intutic_chaos_err" ]; then
+    _intutic_chaos_err="\${_intutic_chaos_err} — refusing the call rather than running the experiment without the faults it asked for"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_chaos_err}" >&2
+    log_event "tool_blocked" "\${TOOL:-unknown}" "\${_intutic_chaos_err}" || true
+    exit 2
+  fi
+  INTUTIC_CHAOS_ACTIVE=1
+fi
 
 # Refuse an unreadable envelope before any rule is consulted.
 #
@@ -1094,24 +1409,20 @@ intutic_hold() {
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
 # would otherwise be tested against "Write" and quietly match nothing.
-intutic_apply() {
-  local rec="$1"
+#
+# Whether a rule fires on this call sets _intutic_fires to 1 or 0; the function
+# always returns 0, so it runs under set -e like the rest of the gate. With $2
+# "quiet" it records nothing: a chaos run's destructive check probes rules
+# without deciding by them.
+intutic_rule_fires() {
+  local rec="$1" quiet="\${2:-}"
   local rid rsev rflags rsubj rreason rsrc rargb64 s hit
+  _intutic_fires=0
   # Seven variables over a six- or seven-field record: a v3 line leaves rargb64
   # empty, which is exactly "no argument condition". The base64 column cannot
   # contain a tab, so the last variable never absorbs a separator.
   IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
   [ -z "$rsrc" ] && return 0
-  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
-  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
-  # for, and one environment variable disarming them would make the switch the
-  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
-  # writer assigns: destructive.* versus sop.*
-  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
-    case "$rid" in
-      destructive.*) return 0 ;;
-    esac
-  fi
   local _subs=() _ci=
   case "$rflags" in *i*) _ci=i ;; esac
   # A subject the screen below cleared for this case is left out: no pattern
@@ -1192,18 +1503,41 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
 ' "$rargb64" "\${TOOL_INPUT_JSON:-}" 2>/dev/null || _intutic_arg_rc=$?
     if [ "$_intutic_arg_rc" = "1" ]; then
       return 0
-    elif [ "$_intutic_arg_rc" != "0" ]; then
+    elif [ "$_intutic_arg_rc" != "0" ] && [ -z "$quiet" ]; then
       log_event "rule_downgraded" "\${TOOL:-}" "argPattern for \${rid} did not compile in python re — rule enforced name-only" || true
     fi
   fi
+  _intutic_fires=1
+}
+
+intutic_apply() {
+  local rec="$1"
+  local rid rsev rflags rsubj rreason rsrc rargb64
+  IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
+  [ -z "$rsrc" ] && return 0
+  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
+  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
+  # for, and one environment variable disarming them would make the switch the
+  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
+  # writer assigns: destructive.* versus sop.*
+  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
+    case "$rid" in
+      destructive.*) return 0 ;;
+    esac
+  fi
+  intutic_rule_fires "$rec"
+  [ "$_intutic_fires" = "1" ] || return 0
   if [ "$rsev" = "shadow" ]; then
+    intutic_chaos_note "$rid"
     log_event "tool_would_block" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
     return 0
   fi
   if [ "$rsev" = "hold" ]; then
     # Not a permanent denial: the action is legitimate, someone asked to see
     # it first. A bypass they approved lets this exact call through once.
+    _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
     if intutic_hold "$rid" "$rreason"; then return 0; fi
+    _intutic_chaos_decision=hold
     exit 2
   fi
   if [ "$rsev" = "warn" ]; then
@@ -1219,12 +1553,14 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
     # telemetry.
     _intutic_verb="\${INTUTIC_NCOMMAND# }"
     _intutic_verb="\${_intutic_verb%% *}"
+    intutic_chaos_note "$rid"
     log_event "tool_flagged" "\${TOOL:-}" "\${rreason} [\${rid}] verb=\${_intutic_verb}" || true
     return 0
   fi
   # The rule's own reason, not a generic one: hookEvents.resolveSeverity reads
   # this text for "governance-protected" to file the incident CRITICAL.
   local reason="\${rreason} [\${rid}]"
+  _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
   echo "[Intutic Governance] BLOCKED: \${reason}" >&2
   log_event "tool_blocked" "\${TOOL:-}" "\${reason}"
   exit 2
@@ -1294,6 +1630,19 @@ intutic_unscreened() {
   [ "\${!v:-}" != "1" ]
 }
 
+# A chaos run's no_destructive_attempt probe: whether a destructive.* rule
+# matches this call, whether or not it decides it, the escape hatch included.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+    case "$_rec" in
+      destructive.*)
+        intutic_rule_fires "$_rec" quiet
+        if [ "$_intutic_fires" = "1" ]; then _intutic_chaos_destructive=1; break; fi
+        ;;
+    esac
+  done
+fi
+
 for _rec in "\${INTUTIC_FLOOR[@]}"; do
   intutic_apply "$_rec"
 done
@@ -1325,6 +1674,7 @@ sys.stdout.write(lib["intutic_mcp_unverified"](sys.argv[1]))' "\${TOOL:-}" 2>/de
         _intutic_unv_rid="policy_snapshot"
         _intutic_unv_reason="POLICY_SNAPSHOT_UNVERIFIED — the policy snapshot failed its integrity check and admits no MCP server"
       fi
+      _intutic_chaos_rule="$_intutic_unv_rid"; _intutic_chaos_hit=1
       echo "[Intutic Governance] BLOCKED: \${_intutic_unv_reason} [\${_intutic_unv_rid}]" >&2
       log_event "tool_blocked" "\${TOOL:-}" "\${_intutic_unv_reason} [\${_intutic_unv_rid}]"
       exit 2
@@ -1348,6 +1698,7 @@ exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
 sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2]))' "$INTUTIC_MCP_REGISTRY" "\${TOOL:-}" 2>/dev/null || true)"
       if [ -n "$_intutic_reg" ]; then
         IFS=$'\\t' read -r _ _intutic_reg_rid _intutic_reg_reason <<< "$_intutic_reg"
+        _intutic_chaos_rule="$_intutic_reg_rid"; _intutic_chaos_hit=1
         echo "[Intutic Governance] BLOCKED: \${_intutic_reg_reason} [\${_intutic_reg_rid}]" >&2
         log_event "tool_blocked" "\${TOOL:-}" "\${_intutic_reg_reason} [\${_intutic_reg_rid}]"
         exit 2
@@ -1375,8 +1726,10 @@ case "\${TOOL:-}" in
         *)
           _intutic_mcp_reason="MCP server \\"$_intutic_mcp_server\\" is not on the MCP server allowlist for this workspace [mcp_allowlist]"
           if [ "$INTUTIC_MCP_SEVERITY" = "shadow" ]; then
+            intutic_chaos_note mcp_allowlist
             log_event "tool_would_block" "\${TOOL:-}" "$_intutic_mcp_reason" || true
           else
+            _intutic_chaos_rule=mcp_allowlist; _intutic_chaos_hit=1
             echo "[Intutic Governance] BLOCKED: $_intutic_mcp_reason" >&2
             log_event "tool_blocked" "\${TOOL:-}" "$_intutic_mcp_reason"
             exit 2
@@ -1386,6 +1739,36 @@ case "\${TOOL:-}" in
     fi
     ;;
 esac
+
+# ── Agent fault injection: the call is allowed ───────────────────────────────
+# Recorded as allowed, then the fault that is due, if any. A delay waits inside
+# this gate's 9 s deadline: a gate still running at it refuses the call,
+# and past the hook timeout most harnesses run the call anyway, so a longer
+# wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ]; then
+  _intutic_fault="$(intutic_chaos_decide allow)"
+  _intutic_chaos_done=1
+  if [ -n "$_intutic_fault" ]; then
+    _intutic_fault_kind="\${_intutic_fault%%$'\\t'*}"
+    _intutic_fault_rest="\${_intutic_fault#*$'\\t'}"
+    _intutic_fault_delay="\${_intutic_fault_rest%%$'\\t'*}"
+    _intutic_fault_reason="\${_intutic_fault_rest#*$'\\t'}"
+    if [ "$_intutic_fault_delay" -gt 0 ] 2>/dev/null; then
+      _intutic_fault_room=$(( 9 - SECONDS - 1 ))
+      [ "$_intutic_fault_room" -gt 0 ] || _intutic_fault_room=0
+      if [ "$_intutic_fault_delay" -gt "$_intutic_fault_room" ]; then
+        echo "[Intutic Governance] chaos: waiting \${_intutic_fault_room} s of the \${_intutic_fault_delay} s the plan asks for, to stay inside the hook timeout" >&2
+        _intutic_fault_delay="$_intutic_fault_room"
+      fi
+      sleep "$_intutic_fault_delay"
+    fi
+    if [ "$_intutic_fault_kind" != "delay" ]; then
+      # The fault's own text, carrying the plan's canary: what the agent reads.
+      echo "$_intutic_fault_reason" >&2
+      exit 2
+    fi
+  fi
+fi
 # ── end Intutic gate body ────────────────────────────────────────────────────
 
 log_event "tool_allowed" "$TOOL_NAME" ""
@@ -1403,7 +1786,7 @@ exports[`generated hook scripts > goose > matches the recorded output byte for b
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v18 ─────────────────────────────
+# ── Intutic fail-closed prelude v19 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -1416,6 +1799,12 @@ intutic_fail_closed() {
   set +eu
   trap - EXIT
   [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
+  # A chaos run's record of a call the gate refused, held or crashed on (the
+  # gate body records an allowed one where it ends). It cannot change the
+  # exit status: everything it prints is discarded.
+  if [ "$_intutic_exit_rc" != "0" ] && [ "\${INTUTIC_CHAOS_ACTIVE:-0}" = "1" ] && command -v intutic_chaos_decide >/dev/null 2>&1; then
+    intutic_chaos_decide "\${_intutic_chaos_decision:-deny}" >/dev/null 2>&1
+  fi
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -2004,6 +2393,270 @@ def intutic_mcp_unverified(tool):
     call = split_mcp_tool_name(tool)
     return "\\t".join(unverified_refusal(call[0])) if call else ""
 
+
+"""Fault injection in the hook gates, for chaos runs (intutic chaos run).
+
+A transliteration of packages/shared-types/src/chaosGate.ts; read that
+module's docstring for the counter files and why every count lives on disk.
+In short: a gate is a new process per tool call, so the plan is decoded on
+each call, plan_loaded is reported by whichever gate first creates
+EVENTS.gate-plan-loaded, and each fault's seen and hit counts are numbered
+empty files in EVENTS.gate-counters/, each number claimed with an exclusive
+create (O_CREAT | O_EXCL), which exactly one process wins.
+
+The bash gates emit this file verbatim (services/sync-daemon/src/lib/chaosPy.ts
+holds a byte-identical copy, which a test compares), and every copy runs
+packages/shared-types/fixtures/chaos-gate-vectors.json. It must stay
+self-contained: the standard library only, no module state beyond the
+constants below, and no backtick or dollar-brace, which the TypeScript copy
+cannot hold.
+"""
+
+import base64
+import binascii
+import datetime
+import json
+import os
+import re
+import sys
+
+_CHAOS_FAULT_IDS = (
+    "llm.rate_limit", "llm.upstream_5xx", "llm.context_trim", "llm.model_degrade", "tool.error", "tool.stale_data",
+    "mcp.toolset_change", "permission.deny_or_delay", "inject.tool_result", "egress.dns_fail", "egress.credential_401",
+)
+_CHAOS_B64URL = re.compile(r"^[A-Za-z0-9_-]+={0,2}$")
+_CHAOS_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+_CHAOS_CANARY = re.compile(r"^E-INTUTIC-[0-9A-F]{4,16}$")
+
+
+def _chaos_int(v, low, high):
+    # JSON numbers as JavaScript reads them: 2.0 is the integer 2. A bool is not a number.
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    if isinstance(v, float):
+        if not v.is_integer():
+            return None
+        v = int(v)
+    return v if low <= v <= high else None
+
+
+def chaos_decode(raw):
+    """(plan, None), or (None, why it is not one)."""
+    def invalid(why):
+        return None, "INTUTIC_CHAOS_PLAN is not a valid plan: " + why
+    try:
+        if not isinstance(raw, str) or not _CHAOS_B64URL.match(raw):
+            raise ValueError("alphabet")
+        b64 = raw.rstrip("=")
+        data = json.loads(base64.urlsafe_b64decode(b64 + "=" * ((4 - len(b64) % 4) % 4)).decode("utf-8"))
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return None, "INTUTIC_CHAOS_PLAN is not base64url-encoded JSON"
+    if not isinstance(data, dict):
+        return invalid("not a JSON object")
+    v = data.get("v")
+    if isinstance(v, bool) or v != 1:
+        return invalid("version " + json.dumps(v) + ", and a gate reads only version 1")
+    run_id = data.get("runId")
+    if not isinstance(run_id, str) or not _CHAOS_RUN_ID.match(run_id):
+        return invalid("runId")
+    canary = data.get("canary")
+    if not isinstance(canary, str) or not _CHAOS_CANARY.match(canary):
+        return invalid("canary")
+    raw_faults = data.get("faults")
+    if not isinstance(raw_faults, list) or len(raw_faults) > 50:
+        return invalid("faults")
+    faults = []
+    for i, f in enumerate(raw_faults):
+        at = "faults[" + str(i) + "]"
+        if not isinstance(f, dict) or not isinstance(f.get("id"), str) or f["id"] not in _CHAOS_FAULT_IDS:
+            return invalid(at + ".id")
+        if f["id"] not in ("tool.error", "permission.deny_or_delay"):
+            continue
+        match = None
+        if "match" in f:
+            if not isinstance(f["match"], dict):
+                return invalid(at + ".match")
+            for k, mv in f["match"].items():
+                if k not in ("tool", "host", "model") or not isinstance(mv, str) or not mv:
+                    return invalid(at + ".match." + k)
+            match = f["match"]
+        after_calls = 0
+        if "after_calls" in f:
+            after_calls = _chaos_int(f["after_calls"], 0, 10000)
+            if after_calls is None:
+                return invalid(at + ".after_calls")
+        times = None
+        if "times" in f:
+            times = _chaos_int(f["times"], 1, 10000)
+            if times is None:
+                return invalid(at + ".times")
+        fault = {
+            "index": i, "id": f["id"], "match": match, "after_calls": after_calls, "times": times,
+            "message": "tool failed", "mode": "deny", "delay_s": 0,
+        }
+        if f["id"] == "tool.error" and "message" in f:
+            # Lengths in UTF-16 code units, as JavaScript counts them.
+            m = f["message"]
+            if not isinstance(m, str) or not 1 <= len(m.encode("utf-16-le", "surrogatepass")) // 2 <= 2000:
+                return invalid(at + ".message")
+            fault["message"] = m
+        if f["id"] == "permission.deny_or_delay":
+            if "mode" in f:
+                if f["mode"] not in ("deny", "delay", "hold_then_deny"):
+                    return invalid(at + ".mode")
+                fault["mode"] = f["mode"]
+            if "delay_s" in f:
+                delay_s = _chaos_int(f["delay_s"], 0, 600)
+                if delay_s is None:
+                    return invalid(at + ".delay_s")
+                fault["delay_s"] = delay_s
+        faults.append(fault)
+    return {"runId": run_id, "canary": canary, "faults": faults}, None
+
+
+def chaos_matches(match, tool):
+    """Whether a fault's match covers a gate call, which has a tool and nothing else."""
+    if not match:
+        return True
+    if "host" in match or "model" in match:
+        return False
+    p = match.get("tool")
+    if p is None:
+        return True
+    return tool.endswith(p[1:]) if p.startswith("*") else tool == p
+
+
+def chaos_event(plan, type_, fields, now):
+    """One events-file line: ts, runId, component, type, then the fields that are set."""
+    event = {"ts": now, "runId": plan["runId"], "component": "gate", "type": type_}
+    for k, v in fields:
+        if v is not None:
+            event[k] = v
+    return json.dumps(event, separators=(",", ":"), ensure_ascii=False) + "\\n"
+
+
+def chaos_append(events_path, lines):
+    """Appends whole lines in one write. An I/O error is reported, never raised."""
+    try:
+        fd = os.open(events_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, lines.encode("utf-8"))
+        finally:
+            os.close(fd)
+    except OSError as e:
+        sys.stderr.write("[Intutic Governance] chaos: could not append to " + events_path + ": " + str(e) + "\\n")
+
+
+def chaos_claim(directory, prefix, limit):
+    """Claims the next numbered file DIRECTORY/PREFIXn with an exclusive create.
+
+    Returns n, 0 when every number up to limit is taken, or -1 on an I/O
+    error, after saying so.
+    """
+    try:
+        # Beside the events file, never creating its directory: the runner did.
+        try:
+            os.mkdir(directory)
+        except FileExistsError:
+            pass
+        n = sum(1 for name in os.listdir(directory) if name.startswith(prefix)) + 1
+        while limit is None or n <= limit:
+            try:
+                os.close(os.open(os.path.join(directory, prefix + str(n)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+                return n
+            except FileExistsError:
+                n += 1
+        return 0
+    except OSError as e:
+        sys.stderr.write("[Intutic Governance] chaos: could not count calls in " + directory + ": " + str(e) + "\\n")
+        return -1
+
+
+def chaos_now():
+    """The time as the JavaScript gates write it: <TIMESTAMP>."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def chaos_call(plan, events_path, call, now):
+    """Reports one call and returns the fault the gate must apply, or None.
+
+    call: tool, decision (allow, deny, ask or hold, before any fault), ruleId,
+    destructive, policyHit. The fault: faultId, kind (deny, delay or
+    hold_then_deny), reason and delayS, as chaosGateCall returns it.
+    """
+    lines = ""
+    first = True
+    try:
+        os.close(os.open(events_path + ".gate-plan-loaded", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+    except FileExistsError:
+        first = False
+    except OSError:
+        pass
+    if first:
+        lines += chaos_event(plan, "plan_loaded", [("faults", len(plan["faults"]))], now)
+    lines += chaos_event(plan, "gate_decision", [
+        ("tool", call["tool"]),
+        ("decision", call["decision"]),
+        ("ruleId", call.get("ruleId") or None),
+        ("destructive", bool(call.get("destructive"))),
+        ("policyHit", bool(call.get("policyHit"))),
+    ], now)
+    fault = None
+    if call["decision"] == "allow":
+        directory = events_path + ".gate-counters"
+        for f in plan["faults"]:
+            if not chaos_matches(f["match"], call["tool"]):
+                continue
+            # An MCP tool's error is the MCP proxy's to inject; a gate injects the built-in side.
+            if f["id"] == "tool.error" and call["tool"].startswith("mcp__"):
+                continue
+            seen = chaos_claim(directory, str(f["index"]) + ".seen.", None)
+            if fault is not None or seen < 1 or seen <= f["after_calls"]:
+                continue
+            if f["times"] is not None and chaos_claim(directory, str(f["index"]) + ".hit.", f["times"]) < 1:
+                continue
+            tag = " [" + plan["canary"] + "]"
+            if f["id"] == "tool.error":
+                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag, "delayS": 0}
+            elif f["mode"] == "delay":
+                fault = {"faultId": f["id"], "kind": "delay", "reason": "", "delayS": f["delay_s"]}
+            elif f["mode"] == "hold_then_deny":
+                fault = {"faultId": f["id"], "kind": "hold_then_deny",
+                         "reason": "Permission held for approval, then denied by approver" + tag, "delayS": f["delay_s"]}
+            else:
+                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag, "delayS": 0}
+            lines += chaos_event(plan, "fault_injected", [("faultId", f["id"]), ("call", seen), ("target", call["tool"])], now)
+        if fault is None or fault["kind"] == "delay":
+            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", True)], now)
+    chaos_append(events_path, lines)
+    return fault
+
+
+
+def intutic_chaos_begin():
+    # Why the chaos run's plan cannot be used, or "" when it can.
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    if error:
+        return error
+    if not os.environ.get("INTUTIC_CHAOS_EVENTS"):
+        return "INTUTIC_CHAOS_PLAN is set but INTUTIC_CHAOS_EVENTS is not, so nothing the run does could be reported"
+    return ""
+
+
+def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit):
+    # Records one call as the gate decided it, before any fault; returns the
+    # fault to apply to an allowed call as "kind<TAB>delayS<TAB>reason", or "".
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
+    if error or not events:
+        return ""
+    call = {"tool": tool, "decision": decision, "ruleId": rule_id or None,
+            "destructive": destructive == "1", "policyHit": policy_hit == "1"}
+    fault = chaos_call(plan, events, call, chaos_now())
+    if fault is None:
+        return ""
+    return fault["kind"] + "\\t" + str(fault["delayS"]) + "\\t" + fault["reason"]
+
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
 
@@ -2171,12 +2824,57 @@ log_event() {
 }
 
 
-# ── Intutic gate body v18 — harness: goose ────────────
+# ── Intutic gate body v19 — harness: goose ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
 # were previously passed in and dropped on the floor: opts.harness was declared
 # on the option type, supplied by all thirteen writers, and read nowhere.
+
+# ── Agent fault injection (intutic chaos run) ────────────────────────────────
+# Only when INTUTIC_CHAOS_PLAN is set: a chaos experiment's runner sets it, with
+# INTUTIC_CHAOS_EVENTS, in the sandbox the agent runs in, and this gate inherits
+# both. The work is chaos.py in INTUTIC_PY_LIB, the transliteration of
+# chaosGate.ts in @intutic/shared-types, which explains the counter files kept
+# beside the events file. An allowed call is recorded where this body ends,
+# where its fault is applied; a refused, held or crashed one by the exit trap.
+# A fault applies only to an allowed call. Scoped to the bare invocation, like
+# the envelope refusal below.
+INTUTIC_CHAOS_ACTIVE=0
+_intutic_chaos_done=0
+_intutic_chaos_decision=deny
+_intutic_chaos_rule=""
+_intutic_chaos_hit=0
+_intutic_chaos_destructive=0
+# Records this call as decided ($1: allow, deny or hold) and prints the fault
+# to apply to an allowed one, as kind, delay and reason, tab-separated.
+intutic_chaos_decide() {
+  [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ "$_intutic_chaos_done" = "0" ] || return 0
+  python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" || true
+}
+# A rule fired without deciding the call (shadow, warn): its id, if none yet.
+intutic_chaos_note() {
+  [ -n "$_intutic_chaos_rule" ] || _intutic_chaos_rule="$1"
+}
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_CHAOS_PLAN:-}" ]; then
+  # A plan that is set but unreadable refuses, as an unreadable payload does:
+  # an experiment run without the faults it asked for reports a resilience it
+  # never measured.
+  _intutic_chaos_err="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_begin"]())' 2>/dev/null || echo "INTUTIC_CHAOS_PLAN could not be read")"
+  if [ -n "$_intutic_chaos_err" ]; then
+    _intutic_chaos_err="\${_intutic_chaos_err} — refusing the call rather than running the experiment without the faults it asked for"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_chaos_err}" >&2
+    log_event "tool_blocked" "\${TOOL:-unknown}" "\${_intutic_chaos_err}" || true
+    exit 2
+  fi
+  INTUTIC_CHAOS_ACTIVE=1
+fi
 
 # Refuse an unreadable envelope before any rule is consulted.
 #
@@ -2490,24 +3188,20 @@ intutic_hold() {
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
 # would otherwise be tested against "Write" and quietly match nothing.
-intutic_apply() {
-  local rec="$1"
+#
+# Whether a rule fires on this call sets _intutic_fires to 1 or 0; the function
+# always returns 0, so it runs under set -e like the rest of the gate. With $2
+# "quiet" it records nothing: a chaos run's destructive check probes rules
+# without deciding by them.
+intutic_rule_fires() {
+  local rec="$1" quiet="\${2:-}"
   local rid rsev rflags rsubj rreason rsrc rargb64 s hit
+  _intutic_fires=0
   # Seven variables over a six- or seven-field record: a v3 line leaves rargb64
   # empty, which is exactly "no argument condition". The base64 column cannot
   # contain a tab, so the last variable never absorbs a separator.
   IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
   [ -z "$rsrc" ] && return 0
-  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
-  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
-  # for, and one environment variable disarming them would make the switch the
-  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
-  # writer assigns: destructive.* versus sop.*
-  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
-    case "$rid" in
-      destructive.*) return 0 ;;
-    esac
-  fi
   local _subs=() _ci=
   case "$rflags" in *i*) _ci=i ;; esac
   # A subject the screen below cleared for this case is left out: no pattern
@@ -2588,18 +3282,41 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
 ' "$rargb64" "\${TOOL_INPUT_JSON:-}" 2>/dev/null || _intutic_arg_rc=$?
     if [ "$_intutic_arg_rc" = "1" ]; then
       return 0
-    elif [ "$_intutic_arg_rc" != "0" ]; then
+    elif [ "$_intutic_arg_rc" != "0" ] && [ -z "$quiet" ]; then
       log_event "rule_downgraded" "\${TOOL:-}" "argPattern for \${rid} did not compile in python re — rule enforced name-only" || true
     fi
   fi
+  _intutic_fires=1
+}
+
+intutic_apply() {
+  local rec="$1"
+  local rid rsev rflags rsubj rreason rsrc rargb64
+  IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
+  [ -z "$rsrc" ] && return 0
+  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
+  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
+  # for, and one environment variable disarming them would make the switch the
+  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
+  # writer assigns: destructive.* versus sop.*
+  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
+    case "$rid" in
+      destructive.*) return 0 ;;
+    esac
+  fi
+  intutic_rule_fires "$rec"
+  [ "$_intutic_fires" = "1" ] || return 0
   if [ "$rsev" = "shadow" ]; then
+    intutic_chaos_note "$rid"
     log_event "tool_would_block" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
     return 0
   fi
   if [ "$rsev" = "hold" ]; then
     # Not a permanent denial: the action is legitimate, someone asked to see
     # it first. A bypass they approved lets this exact call through once.
+    _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
     if intutic_hold "$rid" "$rreason"; then return 0; fi
+    _intutic_chaos_decision=hold
     exit 2
   fi
   if [ "$rsev" = "warn" ]; then
@@ -2615,12 +3332,14 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
     # telemetry.
     _intutic_verb="\${INTUTIC_NCOMMAND# }"
     _intutic_verb="\${_intutic_verb%% *}"
+    intutic_chaos_note "$rid"
     log_event "tool_flagged" "\${TOOL:-}" "\${rreason} [\${rid}] verb=\${_intutic_verb}" || true
     return 0
   fi
   # The rule's own reason, not a generic one: hookEvents.resolveSeverity reads
   # this text for "governance-protected" to file the incident CRITICAL.
   local reason="\${rreason} [\${rid}]"
+  _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
   echo "[Intutic Governance] BLOCKED: \${reason}" >&2
   log_event "tool_blocked" "\${TOOL:-}" "\${reason}"
   exit 2
@@ -2690,6 +3409,19 @@ intutic_unscreened() {
   [ "\${!v:-}" != "1" ]
 }
 
+# A chaos run's no_destructive_attempt probe: whether a destructive.* rule
+# matches this call, whether or not it decides it, the escape hatch included.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+    case "$_rec" in
+      destructive.*)
+        intutic_rule_fires "$_rec" quiet
+        if [ "$_intutic_fires" = "1" ]; then _intutic_chaos_destructive=1; break; fi
+        ;;
+    esac
+  done
+fi
+
 for _rec in "\${INTUTIC_FLOOR[@]}"; do
   intutic_apply "$_rec"
 done
@@ -2721,6 +3453,7 @@ sys.stdout.write(lib["intutic_mcp_unverified"](sys.argv[1]))' "\${TOOL:-}" 2>/de
         _intutic_unv_rid="policy_snapshot"
         _intutic_unv_reason="POLICY_SNAPSHOT_UNVERIFIED — the policy snapshot failed its integrity check and admits no MCP server"
       fi
+      _intutic_chaos_rule="$_intutic_unv_rid"; _intutic_chaos_hit=1
       echo "[Intutic Governance] BLOCKED: \${_intutic_unv_reason} [\${_intutic_unv_rid}]" >&2
       log_event "tool_blocked" "\${TOOL:-}" "\${_intutic_unv_reason} [\${_intutic_unv_rid}]"
       exit 2
@@ -2744,6 +3477,7 @@ exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
 sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2]))' "$INTUTIC_MCP_REGISTRY" "\${TOOL:-}" 2>/dev/null || true)"
       if [ -n "$_intutic_reg" ]; then
         IFS=$'\\t' read -r _ _intutic_reg_rid _intutic_reg_reason <<< "$_intutic_reg"
+        _intutic_chaos_rule="$_intutic_reg_rid"; _intutic_chaos_hit=1
         echo "[Intutic Governance] BLOCKED: \${_intutic_reg_reason} [\${_intutic_reg_rid}]" >&2
         log_event "tool_blocked" "\${TOOL:-}" "\${_intutic_reg_reason} [\${_intutic_reg_rid}]"
         exit 2
@@ -2771,8 +3505,10 @@ case "\${TOOL:-}" in
         *)
           _intutic_mcp_reason="MCP server \\"$_intutic_mcp_server\\" is not on the MCP server allowlist for this workspace [mcp_allowlist]"
           if [ "$INTUTIC_MCP_SEVERITY" = "shadow" ]; then
+            intutic_chaos_note mcp_allowlist
             log_event "tool_would_block" "\${TOOL:-}" "$_intutic_mcp_reason" || true
           else
+            _intutic_chaos_rule=mcp_allowlist; _intutic_chaos_hit=1
             echo "[Intutic Governance] BLOCKED: $_intutic_mcp_reason" >&2
             log_event "tool_blocked" "\${TOOL:-}" "$_intutic_mcp_reason"
             exit 2
@@ -2782,6 +3518,36 @@ case "\${TOOL:-}" in
     fi
     ;;
 esac
+
+# ── Agent fault injection: the call is allowed ───────────────────────────────
+# Recorded as allowed, then the fault that is due, if any. A delay waits inside
+# this gate's 9 s deadline: a gate still running at it refuses the call,
+# and past the hook timeout most harnesses run the call anyway, so a longer
+# wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ]; then
+  _intutic_fault="$(intutic_chaos_decide allow)"
+  _intutic_chaos_done=1
+  if [ -n "$_intutic_fault" ]; then
+    _intutic_fault_kind="\${_intutic_fault%%$'\\t'*}"
+    _intutic_fault_rest="\${_intutic_fault#*$'\\t'}"
+    _intutic_fault_delay="\${_intutic_fault_rest%%$'\\t'*}"
+    _intutic_fault_reason="\${_intutic_fault_rest#*$'\\t'}"
+    if [ "$_intutic_fault_delay" -gt 0 ] 2>/dev/null; then
+      _intutic_fault_room=$(( 9 - SECONDS - 1 ))
+      [ "$_intutic_fault_room" -gt 0 ] || _intutic_fault_room=0
+      if [ "$_intutic_fault_delay" -gt "$_intutic_fault_room" ]; then
+        echo "[Intutic Governance] chaos: waiting \${_intutic_fault_room} s of the \${_intutic_fault_delay} s the plan asks for, to stay inside the hook timeout" >&2
+        _intutic_fault_delay="$_intutic_fault_room"
+      fi
+      sleep "$_intutic_fault_delay"
+    fi
+    if [ "$_intutic_fault_kind" != "delay" ]; then
+      # The fault's own text, carrying the plan's canary: what the agent reads.
+      echo "$_intutic_fault_reason" >&2
+      exit 2
+    fi
+  fi
+fi
 # ── end Intutic gate body ────────────────────────────────────────────────────
 
 
@@ -2801,7 +3567,7 @@ exports[`generated hook scripts > hermes > matches the recorded output byte for 
 # Workspace: ws_test
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v18 ─────────────────────────────
+# ── Intutic fail-closed prelude v19 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -2814,6 +3580,12 @@ intutic_fail_closed() {
   set +eu
   trap - EXIT
   [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
+  # A chaos run's record of a call the gate refused, held or crashed on (the
+  # gate body records an allowed one where it ends). It cannot change the
+  # exit status: everything it prints is discarded.
+  if [ "$_intutic_exit_rc" != "0" ] && [ "\${INTUTIC_CHAOS_ACTIVE:-0}" = "1" ] && command -v intutic_chaos_decide >/dev/null 2>&1; then
+    intutic_chaos_decide "\${_intutic_chaos_decision:-deny}" >/dev/null 2>&1
+  fi
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -3411,6 +4183,270 @@ def intutic_mcp_unverified(tool):
     call = split_mcp_tool_name(tool)
     return "\\t".join(unverified_refusal(call[0])) if call else ""
 
+
+"""Fault injection in the hook gates, for chaos runs (intutic chaos run).
+
+A transliteration of packages/shared-types/src/chaosGate.ts; read that
+module's docstring for the counter files and why every count lives on disk.
+In short: a gate is a new process per tool call, so the plan is decoded on
+each call, plan_loaded is reported by whichever gate first creates
+EVENTS.gate-plan-loaded, and each fault's seen and hit counts are numbered
+empty files in EVENTS.gate-counters/, each number claimed with an exclusive
+create (O_CREAT | O_EXCL), which exactly one process wins.
+
+The bash gates emit this file verbatim (services/sync-daemon/src/lib/chaosPy.ts
+holds a byte-identical copy, which a test compares), and every copy runs
+packages/shared-types/fixtures/chaos-gate-vectors.json. It must stay
+self-contained: the standard library only, no module state beyond the
+constants below, and no backtick or dollar-brace, which the TypeScript copy
+cannot hold.
+"""
+
+import base64
+import binascii
+import datetime
+import json
+import os
+import re
+import sys
+
+_CHAOS_FAULT_IDS = (
+    "llm.rate_limit", "llm.upstream_5xx", "llm.context_trim", "llm.model_degrade", "tool.error", "tool.stale_data",
+    "mcp.toolset_change", "permission.deny_or_delay", "inject.tool_result", "egress.dns_fail", "egress.credential_401",
+)
+_CHAOS_B64URL = re.compile(r"^[A-Za-z0-9_-]+={0,2}$")
+_CHAOS_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+_CHAOS_CANARY = re.compile(r"^E-INTUTIC-[0-9A-F]{4,16}$")
+
+
+def _chaos_int(v, low, high):
+    # JSON numbers as JavaScript reads them: 2.0 is the integer 2. A bool is not a number.
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    if isinstance(v, float):
+        if not v.is_integer():
+            return None
+        v = int(v)
+    return v if low <= v <= high else None
+
+
+def chaos_decode(raw):
+    """(plan, None), or (None, why it is not one)."""
+    def invalid(why):
+        return None, "INTUTIC_CHAOS_PLAN is not a valid plan: " + why
+    try:
+        if not isinstance(raw, str) or not _CHAOS_B64URL.match(raw):
+            raise ValueError("alphabet")
+        b64 = raw.rstrip("=")
+        data = json.loads(base64.urlsafe_b64decode(b64 + "=" * ((4 - len(b64) % 4) % 4)).decode("utf-8"))
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return None, "INTUTIC_CHAOS_PLAN is not base64url-encoded JSON"
+    if not isinstance(data, dict):
+        return invalid("not a JSON object")
+    v = data.get("v")
+    if isinstance(v, bool) or v != 1:
+        return invalid("version " + json.dumps(v) + ", and a gate reads only version 1")
+    run_id = data.get("runId")
+    if not isinstance(run_id, str) or not _CHAOS_RUN_ID.match(run_id):
+        return invalid("runId")
+    canary = data.get("canary")
+    if not isinstance(canary, str) or not _CHAOS_CANARY.match(canary):
+        return invalid("canary")
+    raw_faults = data.get("faults")
+    if not isinstance(raw_faults, list) or len(raw_faults) > 50:
+        return invalid("faults")
+    faults = []
+    for i, f in enumerate(raw_faults):
+        at = "faults[" + str(i) + "]"
+        if not isinstance(f, dict) or not isinstance(f.get("id"), str) or f["id"] not in _CHAOS_FAULT_IDS:
+            return invalid(at + ".id")
+        if f["id"] not in ("tool.error", "permission.deny_or_delay"):
+            continue
+        match = None
+        if "match" in f:
+            if not isinstance(f["match"], dict):
+                return invalid(at + ".match")
+            for k, mv in f["match"].items():
+                if k not in ("tool", "host", "model") or not isinstance(mv, str) or not mv:
+                    return invalid(at + ".match." + k)
+            match = f["match"]
+        after_calls = 0
+        if "after_calls" in f:
+            after_calls = _chaos_int(f["after_calls"], 0, 10000)
+            if after_calls is None:
+                return invalid(at + ".after_calls")
+        times = None
+        if "times" in f:
+            times = _chaos_int(f["times"], 1, 10000)
+            if times is None:
+                return invalid(at + ".times")
+        fault = {
+            "index": i, "id": f["id"], "match": match, "after_calls": after_calls, "times": times,
+            "message": "tool failed", "mode": "deny", "delay_s": 0,
+        }
+        if f["id"] == "tool.error" and "message" in f:
+            # Lengths in UTF-16 code units, as JavaScript counts them.
+            m = f["message"]
+            if not isinstance(m, str) or not 1 <= len(m.encode("utf-16-le", "surrogatepass")) // 2 <= 2000:
+                return invalid(at + ".message")
+            fault["message"] = m
+        if f["id"] == "permission.deny_or_delay":
+            if "mode" in f:
+                if f["mode"] not in ("deny", "delay", "hold_then_deny"):
+                    return invalid(at + ".mode")
+                fault["mode"] = f["mode"]
+            if "delay_s" in f:
+                delay_s = _chaos_int(f["delay_s"], 0, 600)
+                if delay_s is None:
+                    return invalid(at + ".delay_s")
+                fault["delay_s"] = delay_s
+        faults.append(fault)
+    return {"runId": run_id, "canary": canary, "faults": faults}, None
+
+
+def chaos_matches(match, tool):
+    """Whether a fault's match covers a gate call, which has a tool and nothing else."""
+    if not match:
+        return True
+    if "host" in match or "model" in match:
+        return False
+    p = match.get("tool")
+    if p is None:
+        return True
+    return tool.endswith(p[1:]) if p.startswith("*") else tool == p
+
+
+def chaos_event(plan, type_, fields, now):
+    """One events-file line: ts, runId, component, type, then the fields that are set."""
+    event = {"ts": now, "runId": plan["runId"], "component": "gate", "type": type_}
+    for k, v in fields:
+        if v is not None:
+            event[k] = v
+    return json.dumps(event, separators=(",", ":"), ensure_ascii=False) + "\\n"
+
+
+def chaos_append(events_path, lines):
+    """Appends whole lines in one write. An I/O error is reported, never raised."""
+    try:
+        fd = os.open(events_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, lines.encode("utf-8"))
+        finally:
+            os.close(fd)
+    except OSError as e:
+        sys.stderr.write("[Intutic Governance] chaos: could not append to " + events_path + ": " + str(e) + "\\n")
+
+
+def chaos_claim(directory, prefix, limit):
+    """Claims the next numbered file DIRECTORY/PREFIXn with an exclusive create.
+
+    Returns n, 0 when every number up to limit is taken, or -1 on an I/O
+    error, after saying so.
+    """
+    try:
+        # Beside the events file, never creating its directory: the runner did.
+        try:
+            os.mkdir(directory)
+        except FileExistsError:
+            pass
+        n = sum(1 for name in os.listdir(directory) if name.startswith(prefix)) + 1
+        while limit is None or n <= limit:
+            try:
+                os.close(os.open(os.path.join(directory, prefix + str(n)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+                return n
+            except FileExistsError:
+                n += 1
+        return 0
+    except OSError as e:
+        sys.stderr.write("[Intutic Governance] chaos: could not count calls in " + directory + ": " + str(e) + "\\n")
+        return -1
+
+
+def chaos_now():
+    """The time as the JavaScript gates write it: <TIMESTAMP>."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def chaos_call(plan, events_path, call, now):
+    """Reports one call and returns the fault the gate must apply, or None.
+
+    call: tool, decision (allow, deny, ask or hold, before any fault), ruleId,
+    destructive, policyHit. The fault: faultId, kind (deny, delay or
+    hold_then_deny), reason and delayS, as chaosGateCall returns it.
+    """
+    lines = ""
+    first = True
+    try:
+        os.close(os.open(events_path + ".gate-plan-loaded", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+    except FileExistsError:
+        first = False
+    except OSError:
+        pass
+    if first:
+        lines += chaos_event(plan, "plan_loaded", [("faults", len(plan["faults"]))], now)
+    lines += chaos_event(plan, "gate_decision", [
+        ("tool", call["tool"]),
+        ("decision", call["decision"]),
+        ("ruleId", call.get("ruleId") or None),
+        ("destructive", bool(call.get("destructive"))),
+        ("policyHit", bool(call.get("policyHit"))),
+    ], now)
+    fault = None
+    if call["decision"] == "allow":
+        directory = events_path + ".gate-counters"
+        for f in plan["faults"]:
+            if not chaos_matches(f["match"], call["tool"]):
+                continue
+            # An MCP tool's error is the MCP proxy's to inject; a gate injects the built-in side.
+            if f["id"] == "tool.error" and call["tool"].startswith("mcp__"):
+                continue
+            seen = chaos_claim(directory, str(f["index"]) + ".seen.", None)
+            if fault is not None or seen < 1 or seen <= f["after_calls"]:
+                continue
+            if f["times"] is not None and chaos_claim(directory, str(f["index"]) + ".hit.", f["times"]) < 1:
+                continue
+            tag = " [" + plan["canary"] + "]"
+            if f["id"] == "tool.error":
+                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag, "delayS": 0}
+            elif f["mode"] == "delay":
+                fault = {"faultId": f["id"], "kind": "delay", "reason": "", "delayS": f["delay_s"]}
+            elif f["mode"] == "hold_then_deny":
+                fault = {"faultId": f["id"], "kind": "hold_then_deny",
+                         "reason": "Permission held for approval, then denied by approver" + tag, "delayS": f["delay_s"]}
+            else:
+                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag, "delayS": 0}
+            lines += chaos_event(plan, "fault_injected", [("faultId", f["id"]), ("call", seen), ("target", call["tool"])], now)
+        if fault is None or fault["kind"] == "delay":
+            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", True)], now)
+    chaos_append(events_path, lines)
+    return fault
+
+
+
+def intutic_chaos_begin():
+    # Why the chaos run's plan cannot be used, or "" when it can.
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    if error:
+        return error
+    if not os.environ.get("INTUTIC_CHAOS_EVENTS"):
+        return "INTUTIC_CHAOS_PLAN is set but INTUTIC_CHAOS_EVENTS is not, so nothing the run does could be reported"
+    return ""
+
+
+def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit):
+    # Records one call as the gate decided it, before any fault; returns the
+    # fault to apply to an allowed call as "kind<TAB>delayS<TAB>reason", or "".
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
+    if error or not events:
+        return ""
+    call = {"tool": tool, "decision": decision, "ruleId": rule_id or None,
+            "destructive": destructive == "1", "policyHit": policy_hit == "1"}
+    fault = chaos_call(plan, events, call, chaos_now())
+    if fault is None:
+        return ""
+    return fault["kind"] + "\\t" + str(fault["delayS"]) + "\\t" + fault["reason"]
+
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
 
@@ -3568,12 +4604,57 @@ log_event() {
 }
 
 
-# ── Intutic gate body v18 — harness: hermes ────────────
+# ── Intutic gate body v19 — harness: hermes ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
 # were previously passed in and dropped on the floor: opts.harness was declared
 # on the option type, supplied by all thirteen writers, and read nowhere.
+
+# ── Agent fault injection (intutic chaos run) ────────────────────────────────
+# Only when INTUTIC_CHAOS_PLAN is set: a chaos experiment's runner sets it, with
+# INTUTIC_CHAOS_EVENTS, in the sandbox the agent runs in, and this gate inherits
+# both. The work is chaos.py in INTUTIC_PY_LIB, the transliteration of
+# chaosGate.ts in @intutic/shared-types, which explains the counter files kept
+# beside the events file. An allowed call is recorded where this body ends,
+# where its fault is applied; a refused, held or crashed one by the exit trap.
+# A fault applies only to an allowed call. Scoped to the bare invocation, like
+# the envelope refusal below.
+INTUTIC_CHAOS_ACTIVE=0
+_intutic_chaos_done=0
+_intutic_chaos_decision=deny
+_intutic_chaos_rule=""
+_intutic_chaos_hit=0
+_intutic_chaos_destructive=0
+# Records this call as decided ($1: allow, deny or hold) and prints the fault
+# to apply to an allowed one, as kind, delay and reason, tab-separated.
+intutic_chaos_decide() {
+  [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ "$_intutic_chaos_done" = "0" ] || return 0
+  python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" || true
+}
+# A rule fired without deciding the call (shadow, warn): its id, if none yet.
+intutic_chaos_note() {
+  [ -n "$_intutic_chaos_rule" ] || _intutic_chaos_rule="$1"
+}
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_CHAOS_PLAN:-}" ]; then
+  # A plan that is set but unreadable refuses, as an unreadable payload does:
+  # an experiment run without the faults it asked for reports a resilience it
+  # never measured.
+  _intutic_chaos_err="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_begin"]())' 2>/dev/null || echo "INTUTIC_CHAOS_PLAN could not be read")"
+  if [ -n "$_intutic_chaos_err" ]; then
+    _intutic_chaos_err="\${_intutic_chaos_err} — refusing the call rather than running the experiment without the faults it asked for"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_chaos_err}" >&2
+    log_event "tool_blocked" "\${TOOL:-unknown}" "\${_intutic_chaos_err}" || true
+    exit 2
+  fi
+  INTUTIC_CHAOS_ACTIVE=1
+fi
 
 # Refuse an unreadable envelope before any rule is consulted.
 #
@@ -3887,24 +4968,20 @@ intutic_hold() {
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
 # would otherwise be tested against "Write" and quietly match nothing.
-intutic_apply() {
-  local rec="$1"
+#
+# Whether a rule fires on this call sets _intutic_fires to 1 or 0; the function
+# always returns 0, so it runs under set -e like the rest of the gate. With $2
+# "quiet" it records nothing: a chaos run's destructive check probes rules
+# without deciding by them.
+intutic_rule_fires() {
+  local rec="$1" quiet="\${2:-}"
   local rid rsev rflags rsubj rreason rsrc rargb64 s hit
+  _intutic_fires=0
   # Seven variables over a six- or seven-field record: a v3 line leaves rargb64
   # empty, which is exactly "no argument condition". The base64 column cannot
   # contain a tab, so the last variable never absorbs a separator.
   IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
   [ -z "$rsrc" ] && return 0
-  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
-  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
-  # for, and one environment variable disarming them would make the switch the
-  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
-  # writer assigns: destructive.* versus sop.*
-  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
-    case "$rid" in
-      destructive.*) return 0 ;;
-    esac
-  fi
   local _subs=() _ci=
   case "$rflags" in *i*) _ci=i ;; esac
   # A subject the screen below cleared for this case is left out: no pattern
@@ -3985,18 +5062,41 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
 ' "$rargb64" "\${TOOL_INPUT_JSON:-}" 2>/dev/null || _intutic_arg_rc=$?
     if [ "$_intutic_arg_rc" = "1" ]; then
       return 0
-    elif [ "$_intutic_arg_rc" != "0" ]; then
+    elif [ "$_intutic_arg_rc" != "0" ] && [ -z "$quiet" ]; then
       log_event "rule_downgraded" "\${TOOL:-}" "argPattern for \${rid} did not compile in python re — rule enforced name-only" || true
     fi
   fi
+  _intutic_fires=1
+}
+
+intutic_apply() {
+  local rec="$1"
+  local rid rsev rflags rsubj rreason rsrc rargb64
+  IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
+  [ -z "$rsrc" ] && return 0
+  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
+  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
+  # for, and one environment variable disarming them would make the switch the
+  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
+  # writer assigns: destructive.* versus sop.*
+  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
+    case "$rid" in
+      destructive.*) return 0 ;;
+    esac
+  fi
+  intutic_rule_fires "$rec"
+  [ "$_intutic_fires" = "1" ] || return 0
   if [ "$rsev" = "shadow" ]; then
+    intutic_chaos_note "$rid"
     log_event "tool_would_block" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
     return 0
   fi
   if [ "$rsev" = "hold" ]; then
     # Not a permanent denial: the action is legitimate, someone asked to see
     # it first. A bypass they approved lets this exact call through once.
+    _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
     if intutic_hold "$rid" "$rreason"; then return 0; fi
+    _intutic_chaos_decision=hold
     exit 2
   fi
   if [ "$rsev" = "warn" ]; then
@@ -4012,12 +5112,14 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
     # telemetry.
     _intutic_verb="\${INTUTIC_NCOMMAND# }"
     _intutic_verb="\${_intutic_verb%% *}"
+    intutic_chaos_note "$rid"
     log_event "tool_flagged" "\${TOOL:-}" "\${rreason} [\${rid}] verb=\${_intutic_verb}" || true
     return 0
   fi
   # The rule's own reason, not a generic one: hookEvents.resolveSeverity reads
   # this text for "governance-protected" to file the incident CRITICAL.
   local reason="\${rreason} [\${rid}]"
+  _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
   echo "[Intutic Governance] BLOCKED: \${reason}" >&2
   log_event "tool_blocked" "\${TOOL:-}" "\${reason}"
   exit 2
@@ -4087,6 +5189,19 @@ intutic_unscreened() {
   [ "\${!v:-}" != "1" ]
 }
 
+# A chaos run's no_destructive_attempt probe: whether a destructive.* rule
+# matches this call, whether or not it decides it, the escape hatch included.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+    case "$_rec" in
+      destructive.*)
+        intutic_rule_fires "$_rec" quiet
+        if [ "$_intutic_fires" = "1" ]; then _intutic_chaos_destructive=1; break; fi
+        ;;
+    esac
+  done
+fi
+
 for _rec in "\${INTUTIC_FLOOR[@]}"; do
   intutic_apply "$_rec"
 done
@@ -4118,6 +5233,7 @@ sys.stdout.write(lib["intutic_mcp_unverified"](sys.argv[1]))' "\${TOOL:-}" 2>/de
         _intutic_unv_rid="policy_snapshot"
         _intutic_unv_reason="POLICY_SNAPSHOT_UNVERIFIED — the policy snapshot failed its integrity check and admits no MCP server"
       fi
+      _intutic_chaos_rule="$_intutic_unv_rid"; _intutic_chaos_hit=1
       echo "[Intutic Governance] BLOCKED: \${_intutic_unv_reason} [\${_intutic_unv_rid}]" >&2
       log_event "tool_blocked" "\${TOOL:-}" "\${_intutic_unv_reason} [\${_intutic_unv_rid}]"
       exit 2
@@ -4141,6 +5257,7 @@ exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
 sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2]))' "$INTUTIC_MCP_REGISTRY" "\${TOOL:-}" 2>/dev/null || true)"
       if [ -n "$_intutic_reg" ]; then
         IFS=$'\\t' read -r _ _intutic_reg_rid _intutic_reg_reason <<< "$_intutic_reg"
+        _intutic_chaos_rule="$_intutic_reg_rid"; _intutic_chaos_hit=1
         echo "[Intutic Governance] BLOCKED: \${_intutic_reg_reason} [\${_intutic_reg_rid}]" >&2
         log_event "tool_blocked" "\${TOOL:-}" "\${_intutic_reg_reason} [\${_intutic_reg_rid}]"
         exit 2
@@ -4168,8 +5285,10 @@ case "\${TOOL:-}" in
         *)
           _intutic_mcp_reason="MCP server \\"$_intutic_mcp_server\\" is not on the MCP server allowlist for this workspace [mcp_allowlist]"
           if [ "$INTUTIC_MCP_SEVERITY" = "shadow" ]; then
+            intutic_chaos_note mcp_allowlist
             log_event "tool_would_block" "\${TOOL:-}" "$_intutic_mcp_reason" || true
           else
+            _intutic_chaos_rule=mcp_allowlist; _intutic_chaos_hit=1
             echo "[Intutic Governance] BLOCKED: $_intutic_mcp_reason" >&2
             log_event "tool_blocked" "\${TOOL:-}" "$_intutic_mcp_reason"
             exit 2
@@ -4179,6 +5298,36 @@ case "\${TOOL:-}" in
     fi
     ;;
 esac
+
+# ── Agent fault injection: the call is allowed ───────────────────────────────
+# Recorded as allowed, then the fault that is due, if any. A delay waits inside
+# this gate's 9 s deadline: a gate still running at it refuses the call,
+# and past the hook timeout most harnesses run the call anyway, so a longer
+# wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ]; then
+  _intutic_fault="$(intutic_chaos_decide allow)"
+  _intutic_chaos_done=1
+  if [ -n "$_intutic_fault" ]; then
+    _intutic_fault_kind="\${_intutic_fault%%$'\\t'*}"
+    _intutic_fault_rest="\${_intutic_fault#*$'\\t'}"
+    _intutic_fault_delay="\${_intutic_fault_rest%%$'\\t'*}"
+    _intutic_fault_reason="\${_intutic_fault_rest#*$'\\t'}"
+    if [ "$_intutic_fault_delay" -gt 0 ] 2>/dev/null; then
+      _intutic_fault_room=$(( 9 - SECONDS - 1 ))
+      [ "$_intutic_fault_room" -gt 0 ] || _intutic_fault_room=0
+      if [ "$_intutic_fault_delay" -gt "$_intutic_fault_room" ]; then
+        echo "[Intutic Governance] chaos: waiting \${_intutic_fault_room} s of the \${_intutic_fault_delay} s the plan asks for, to stay inside the hook timeout" >&2
+        _intutic_fault_delay="$_intutic_fault_room"
+      fi
+      sleep "$_intutic_fault_delay"
+    fi
+    if [ "$_intutic_fault_kind" != "delay" ]; then
+      # The fault's own text, carrying the plan's canary: what the agent reads.
+      echo "$_intutic_fault_reason" >&2
+      exit 2
+    fi
+  fi
+fi
 # ── end Intutic gate body ────────────────────────────────────────────────────
 
 log_event "tool_allowed" "$TOOL_NAME" ""
@@ -4196,7 +5345,7 @@ exports[`generated hook scripts > openhands > matches the recorded output byte f
 # Generated: <TIMESTAMP>
 set -euo pipefail
 
-# ── Intutic fail-closed prelude v18 ─────────────────────────────
+# ── Intutic fail-closed prelude v19 ─────────────────────────────
 # Any exit status other than the two deliberate verdicts (0 = allow, 2 = block)
 # means this gate crashed rather than decided. The harness would read exit 1 as
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
@@ -4209,6 +5358,12 @@ intutic_fail_closed() {
   set +eu
   trap - EXIT
   [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
+  # A chaos run's record of a call the gate refused, held or crashed on (the
+  # gate body records an allowed one where it ends). It cannot change the
+  # exit status: everything it prints is discarded.
+  if [ "$_intutic_exit_rc" != "0" ] && [ "\${INTUTIC_CHAOS_ACTIVE:-0}" = "1" ] && command -v intutic_chaos_decide >/dev/null 2>&1; then
+    intutic_chaos_decide "\${_intutic_chaos_decision:-deny}" >/dev/null 2>&1
+  fi
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -4796,6 +5951,270 @@ def intutic_mcp_unverified(tool):
     call = split_mcp_tool_name(tool)
     return "\\t".join(unverified_refusal(call[0])) if call else ""
 
+
+"""Fault injection in the hook gates, for chaos runs (intutic chaos run).
+
+A transliteration of packages/shared-types/src/chaosGate.ts; read that
+module's docstring for the counter files and why every count lives on disk.
+In short: a gate is a new process per tool call, so the plan is decoded on
+each call, plan_loaded is reported by whichever gate first creates
+EVENTS.gate-plan-loaded, and each fault's seen and hit counts are numbered
+empty files in EVENTS.gate-counters/, each number claimed with an exclusive
+create (O_CREAT | O_EXCL), which exactly one process wins.
+
+The bash gates emit this file verbatim (services/sync-daemon/src/lib/chaosPy.ts
+holds a byte-identical copy, which a test compares), and every copy runs
+packages/shared-types/fixtures/chaos-gate-vectors.json. It must stay
+self-contained: the standard library only, no module state beyond the
+constants below, and no backtick or dollar-brace, which the TypeScript copy
+cannot hold.
+"""
+
+import base64
+import binascii
+import datetime
+import json
+import os
+import re
+import sys
+
+_CHAOS_FAULT_IDS = (
+    "llm.rate_limit", "llm.upstream_5xx", "llm.context_trim", "llm.model_degrade", "tool.error", "tool.stale_data",
+    "mcp.toolset_change", "permission.deny_or_delay", "inject.tool_result", "egress.dns_fail", "egress.credential_401",
+)
+_CHAOS_B64URL = re.compile(r"^[A-Za-z0-9_-]+={0,2}$")
+_CHAOS_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+_CHAOS_CANARY = re.compile(r"^E-INTUTIC-[0-9A-F]{4,16}$")
+
+
+def _chaos_int(v, low, high):
+    # JSON numbers as JavaScript reads them: 2.0 is the integer 2. A bool is not a number.
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    if isinstance(v, float):
+        if not v.is_integer():
+            return None
+        v = int(v)
+    return v if low <= v <= high else None
+
+
+def chaos_decode(raw):
+    """(plan, None), or (None, why it is not one)."""
+    def invalid(why):
+        return None, "INTUTIC_CHAOS_PLAN is not a valid plan: " + why
+    try:
+        if not isinstance(raw, str) or not _CHAOS_B64URL.match(raw):
+            raise ValueError("alphabet")
+        b64 = raw.rstrip("=")
+        data = json.loads(base64.urlsafe_b64decode(b64 + "=" * ((4 - len(b64) % 4) % 4)).decode("utf-8"))
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return None, "INTUTIC_CHAOS_PLAN is not base64url-encoded JSON"
+    if not isinstance(data, dict):
+        return invalid("not a JSON object")
+    v = data.get("v")
+    if isinstance(v, bool) or v != 1:
+        return invalid("version " + json.dumps(v) + ", and a gate reads only version 1")
+    run_id = data.get("runId")
+    if not isinstance(run_id, str) or not _CHAOS_RUN_ID.match(run_id):
+        return invalid("runId")
+    canary = data.get("canary")
+    if not isinstance(canary, str) or not _CHAOS_CANARY.match(canary):
+        return invalid("canary")
+    raw_faults = data.get("faults")
+    if not isinstance(raw_faults, list) or len(raw_faults) > 50:
+        return invalid("faults")
+    faults = []
+    for i, f in enumerate(raw_faults):
+        at = "faults[" + str(i) + "]"
+        if not isinstance(f, dict) or not isinstance(f.get("id"), str) or f["id"] not in _CHAOS_FAULT_IDS:
+            return invalid(at + ".id")
+        if f["id"] not in ("tool.error", "permission.deny_or_delay"):
+            continue
+        match = None
+        if "match" in f:
+            if not isinstance(f["match"], dict):
+                return invalid(at + ".match")
+            for k, mv in f["match"].items():
+                if k not in ("tool", "host", "model") or not isinstance(mv, str) or not mv:
+                    return invalid(at + ".match." + k)
+            match = f["match"]
+        after_calls = 0
+        if "after_calls" in f:
+            after_calls = _chaos_int(f["after_calls"], 0, 10000)
+            if after_calls is None:
+                return invalid(at + ".after_calls")
+        times = None
+        if "times" in f:
+            times = _chaos_int(f["times"], 1, 10000)
+            if times is None:
+                return invalid(at + ".times")
+        fault = {
+            "index": i, "id": f["id"], "match": match, "after_calls": after_calls, "times": times,
+            "message": "tool failed", "mode": "deny", "delay_s": 0,
+        }
+        if f["id"] == "tool.error" and "message" in f:
+            # Lengths in UTF-16 code units, as JavaScript counts them.
+            m = f["message"]
+            if not isinstance(m, str) or not 1 <= len(m.encode("utf-16-le", "surrogatepass")) // 2 <= 2000:
+                return invalid(at + ".message")
+            fault["message"] = m
+        if f["id"] == "permission.deny_or_delay":
+            if "mode" in f:
+                if f["mode"] not in ("deny", "delay", "hold_then_deny"):
+                    return invalid(at + ".mode")
+                fault["mode"] = f["mode"]
+            if "delay_s" in f:
+                delay_s = _chaos_int(f["delay_s"], 0, 600)
+                if delay_s is None:
+                    return invalid(at + ".delay_s")
+                fault["delay_s"] = delay_s
+        faults.append(fault)
+    return {"runId": run_id, "canary": canary, "faults": faults}, None
+
+
+def chaos_matches(match, tool):
+    """Whether a fault's match covers a gate call, which has a tool and nothing else."""
+    if not match:
+        return True
+    if "host" in match or "model" in match:
+        return False
+    p = match.get("tool")
+    if p is None:
+        return True
+    return tool.endswith(p[1:]) if p.startswith("*") else tool == p
+
+
+def chaos_event(plan, type_, fields, now):
+    """One events-file line: ts, runId, component, type, then the fields that are set."""
+    event = {"ts": now, "runId": plan["runId"], "component": "gate", "type": type_}
+    for k, v in fields:
+        if v is not None:
+            event[k] = v
+    return json.dumps(event, separators=(",", ":"), ensure_ascii=False) + "\\n"
+
+
+def chaos_append(events_path, lines):
+    """Appends whole lines in one write. An I/O error is reported, never raised."""
+    try:
+        fd = os.open(events_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, lines.encode("utf-8"))
+        finally:
+            os.close(fd)
+    except OSError as e:
+        sys.stderr.write("[Intutic Governance] chaos: could not append to " + events_path + ": " + str(e) + "\\n")
+
+
+def chaos_claim(directory, prefix, limit):
+    """Claims the next numbered file DIRECTORY/PREFIXn with an exclusive create.
+
+    Returns n, 0 when every number up to limit is taken, or -1 on an I/O
+    error, after saying so.
+    """
+    try:
+        # Beside the events file, never creating its directory: the runner did.
+        try:
+            os.mkdir(directory)
+        except FileExistsError:
+            pass
+        n = sum(1 for name in os.listdir(directory) if name.startswith(prefix)) + 1
+        while limit is None or n <= limit:
+            try:
+                os.close(os.open(os.path.join(directory, prefix + str(n)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+                return n
+            except FileExistsError:
+                n += 1
+        return 0
+    except OSError as e:
+        sys.stderr.write("[Intutic Governance] chaos: could not count calls in " + directory + ": " + str(e) + "\\n")
+        return -1
+
+
+def chaos_now():
+    """The time as the JavaScript gates write it: <TIMESTAMP>."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def chaos_call(plan, events_path, call, now):
+    """Reports one call and returns the fault the gate must apply, or None.
+
+    call: tool, decision (allow, deny, ask or hold, before any fault), ruleId,
+    destructive, policyHit. The fault: faultId, kind (deny, delay or
+    hold_then_deny), reason and delayS, as chaosGateCall returns it.
+    """
+    lines = ""
+    first = True
+    try:
+        os.close(os.open(events_path + ".gate-plan-loaded", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+    except FileExistsError:
+        first = False
+    except OSError:
+        pass
+    if first:
+        lines += chaos_event(plan, "plan_loaded", [("faults", len(plan["faults"]))], now)
+    lines += chaos_event(plan, "gate_decision", [
+        ("tool", call["tool"]),
+        ("decision", call["decision"]),
+        ("ruleId", call.get("ruleId") or None),
+        ("destructive", bool(call.get("destructive"))),
+        ("policyHit", bool(call.get("policyHit"))),
+    ], now)
+    fault = None
+    if call["decision"] == "allow":
+        directory = events_path + ".gate-counters"
+        for f in plan["faults"]:
+            if not chaos_matches(f["match"], call["tool"]):
+                continue
+            # An MCP tool's error is the MCP proxy's to inject; a gate injects the built-in side.
+            if f["id"] == "tool.error" and call["tool"].startswith("mcp__"):
+                continue
+            seen = chaos_claim(directory, str(f["index"]) + ".seen.", None)
+            if fault is not None or seen < 1 or seen <= f["after_calls"]:
+                continue
+            if f["times"] is not None and chaos_claim(directory, str(f["index"]) + ".hit.", f["times"]) < 1:
+                continue
+            tag = " [" + plan["canary"] + "]"
+            if f["id"] == "tool.error":
+                fault = {"faultId": f["id"], "kind": "deny", "reason": f["message"] + tag, "delayS": 0}
+            elif f["mode"] == "delay":
+                fault = {"faultId": f["id"], "kind": "delay", "reason": "", "delayS": f["delay_s"]}
+            elif f["mode"] == "hold_then_deny":
+                fault = {"faultId": f["id"], "kind": "hold_then_deny",
+                         "reason": "Permission held for approval, then denied by approver" + tag, "delayS": f["delay_s"]}
+            else:
+                fault = {"faultId": f["id"], "kind": "deny", "reason": "Permission denied by approver" + tag, "delayS": 0}
+            lines += chaos_event(plan, "fault_injected", [("faultId", f["id"]), ("call", seen), ("target", call["tool"])], now)
+        if fault is None or fault["kind"] == "delay":
+            lines += chaos_event(plan, "tool_call", [("tool", call["tool"]), ("ok", True)], now)
+    chaos_append(events_path, lines)
+    return fault
+
+
+
+def intutic_chaos_begin():
+    # Why the chaos run's plan cannot be used, or "" when it can.
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    if error:
+        return error
+    if not os.environ.get("INTUTIC_CHAOS_EVENTS"):
+        return "INTUTIC_CHAOS_PLAN is set but INTUTIC_CHAOS_EVENTS is not, so nothing the run does could be reported"
+    return ""
+
+
+def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit):
+    # Records one call as the gate decided it, before any fault; returns the
+    # fault to apply to an allowed call as "kind<TAB>delayS<TAB>reason", or "".
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
+    if error or not events:
+        return ""
+    call = {"tool": tool, "decision": decision, "ruleId": rule_id or None,
+            "destructive": destructive == "1", "policyHit": policy_hit == "1"}
+    fault = chaos_call(plan, events, call, chaos_now())
+    if fault is None:
+        return ""
+    return fault["kind"] + "\\t" + str(fault["delayS"]) + "\\t" + fault["reason"]
+
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
 
@@ -4963,12 +6382,57 @@ log_event() {
 }
 
 
-# ── Intutic gate body v18 — harness: openhands ────────────
+# ── Intutic gate body v19 — harness: openhands ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
 #
 # The harness name and version are stamped so this file identifies itself. Both
 # were previously passed in and dropped on the floor: opts.harness was declared
 # on the option type, supplied by all thirteen writers, and read nowhere.
+
+# ── Agent fault injection (intutic chaos run) ────────────────────────────────
+# Only when INTUTIC_CHAOS_PLAN is set: a chaos experiment's runner sets it, with
+# INTUTIC_CHAOS_EVENTS, in the sandbox the agent runs in, and this gate inherits
+# both. The work is chaos.py in INTUTIC_PY_LIB, the transliteration of
+# chaosGate.ts in @intutic/shared-types, which explains the counter files kept
+# beside the events file. An allowed call is recorded where this body ends,
+# where its fault is applied; a refused, held or crashed one by the exit trap.
+# A fault applies only to an allowed call. Scoped to the bare invocation, like
+# the envelope refusal below.
+INTUTIC_CHAOS_ACTIVE=0
+_intutic_chaos_done=0
+_intutic_chaos_decision=deny
+_intutic_chaos_rule=""
+_intutic_chaos_hit=0
+_intutic_chaos_destructive=0
+# Records this call as decided ($1: allow, deny or hold) and prints the fault
+# to apply to an allowed one, as kind, delay and reason, tab-separated.
+intutic_chaos_decide() {
+  [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ "$_intutic_chaos_done" = "0" ] || return 0
+  python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" || true
+}
+# A rule fired without deciding the call (shadow, warn): its id, if none yet.
+intutic_chaos_note() {
+  [ -n "$_intutic_chaos_rule" ] || _intutic_chaos_rule="$1"
+}
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_CHAOS_PLAN:-}" ]; then
+  # A plan that is set but unreadable refuses, as an unreadable payload does:
+  # an experiment run without the faults it asked for reports a resilience it
+  # never measured.
+  _intutic_chaos_err="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_begin"]())' 2>/dev/null || echo "INTUTIC_CHAOS_PLAN could not be read")"
+  if [ -n "$_intutic_chaos_err" ]; then
+    _intutic_chaos_err="\${_intutic_chaos_err} — refusing the call rather than running the experiment without the faults it asked for"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_chaos_err}" >&2
+    log_event "tool_blocked" "\${TOOL:-unknown}" "\${_intutic_chaos_err}" || true
+    exit 2
+  fi
+  INTUTIC_CHAOS_ACTIVE=1
+fi
 
 # Refuse an unreadable envelope before any rule is consulted.
 #
@@ -5282,24 +6746,20 @@ intutic_hold() {
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
 # would otherwise be tested against "Write" and quietly match nothing.
-intutic_apply() {
-  local rec="$1"
+#
+# Whether a rule fires on this call sets _intutic_fires to 1 or 0; the function
+# always returns 0, so it runs under set -e like the rest of the gate. With $2
+# "quiet" it records nothing: a chaos run's destructive check probes rules
+# without deciding by them.
+intutic_rule_fires() {
+  local rec="$1" quiet="\${2:-}"
   local rid rsev rflags rsubj rreason rsrc rargb64 s hit
+  _intutic_fires=0
   # Seven variables over a six- or seven-field record: a v3 line leaves rargb64
   # empty, which is exactly "no argument condition". The base64 column cannot
   # contain a tab, so the last variable never absorbs a separator.
   IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
   [ -z "$rsrc" ] && return 0
-  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
-  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
-  # for, and one environment variable disarming them would make the switch the
-  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
-  # writer assigns: destructive.* versus sop.*
-  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
-    case "$rid" in
-      destructive.*) return 0 ;;
-    esac
-  fi
   local _subs=() _ci=
   case "$rflags" in *i*) _ci=i ;; esac
   # A subject the screen below cleared for this case is left out: no pattern
@@ -5380,18 +6840,41 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
 ' "$rargb64" "\${TOOL_INPUT_JSON:-}" 2>/dev/null || _intutic_arg_rc=$?
     if [ "$_intutic_arg_rc" = "1" ]; then
       return 0
-    elif [ "$_intutic_arg_rc" != "0" ]; then
+    elif [ "$_intutic_arg_rc" != "0" ] && [ -z "$quiet" ]; then
       log_event "rule_downgraded" "\${TOOL:-}" "argPattern for \${rid} did not compile in python re — rule enforced name-only" || true
     fi
   fi
+  _intutic_fires=1
+}
+
+intutic_apply() {
+  local rec="$1"
+  local rid rsev rflags rsubj rreason rsrc rargb64
+  IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
+  [ -z "$rsrc" ] && return 0
+  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
+  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
+  # for, and one environment variable disarming them would make the switch the
+  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
+  # writer assigns: destructive.* versus sop.*
+  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
+    case "$rid" in
+      destructive.*) return 0 ;;
+    esac
+  fi
+  intutic_rule_fires "$rec"
+  [ "$_intutic_fires" = "1" ] || return 0
   if [ "$rsev" = "shadow" ]; then
+    intutic_chaos_note "$rid"
     log_event "tool_would_block" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
     return 0
   fi
   if [ "$rsev" = "hold" ]; then
     # Not a permanent denial: the action is legitimate, someone asked to see
     # it first. A bypass they approved lets this exact call through once.
+    _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
     if intutic_hold "$rid" "$rreason"; then return 0; fi
+    _intutic_chaos_decision=hold
     exit 2
   fi
   if [ "$rsev" = "warn" ]; then
@@ -5407,12 +6890,14 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
     # telemetry.
     _intutic_verb="\${INTUTIC_NCOMMAND# }"
     _intutic_verb="\${_intutic_verb%% *}"
+    intutic_chaos_note "$rid"
     log_event "tool_flagged" "\${TOOL:-}" "\${rreason} [\${rid}] verb=\${_intutic_verb}" || true
     return 0
   fi
   # The rule's own reason, not a generic one: hookEvents.resolveSeverity reads
   # this text for "governance-protected" to file the incident CRITICAL.
   local reason="\${rreason} [\${rid}]"
+  _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
   echo "[Intutic Governance] BLOCKED: \${reason}" >&2
   log_event "tool_blocked" "\${TOOL:-}" "\${reason}"
   exit 2
@@ -5482,6 +6967,19 @@ intutic_unscreened() {
   [ "\${!v:-}" != "1" ]
 }
 
+# A chaos run's no_destructive_attempt probe: whether a destructive.* rule
+# matches this call, whether or not it decides it, the escape hatch included.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+    case "$_rec" in
+      destructive.*)
+        intutic_rule_fires "$_rec" quiet
+        if [ "$_intutic_fires" = "1" ]; then _intutic_chaos_destructive=1; break; fi
+        ;;
+    esac
+  done
+fi
+
 for _rec in "\${INTUTIC_FLOOR[@]}"; do
   intutic_apply "$_rec"
 done
@@ -5513,6 +7011,7 @@ sys.stdout.write(lib["intutic_mcp_unverified"](sys.argv[1]))' "\${TOOL:-}" 2>/de
         _intutic_unv_rid="policy_snapshot"
         _intutic_unv_reason="POLICY_SNAPSHOT_UNVERIFIED — the policy snapshot failed its integrity check and admits no MCP server"
       fi
+      _intutic_chaos_rule="$_intutic_unv_rid"; _intutic_chaos_hit=1
       echo "[Intutic Governance] BLOCKED: \${_intutic_unv_reason} [\${_intutic_unv_rid}]" >&2
       log_event "tool_blocked" "\${TOOL:-}" "\${_intutic_unv_reason} [\${_intutic_unv_rid}]"
       exit 2
@@ -5536,6 +7035,7 @@ exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
 sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2]))' "$INTUTIC_MCP_REGISTRY" "\${TOOL:-}" 2>/dev/null || true)"
       if [ -n "$_intutic_reg" ]; then
         IFS=$'\\t' read -r _ _intutic_reg_rid _intutic_reg_reason <<< "$_intutic_reg"
+        _intutic_chaos_rule="$_intutic_reg_rid"; _intutic_chaos_hit=1
         echo "[Intutic Governance] BLOCKED: \${_intutic_reg_reason} [\${_intutic_reg_rid}]" >&2
         log_event "tool_blocked" "\${TOOL:-}" "\${_intutic_reg_reason} [\${_intutic_reg_rid}]"
         exit 2
@@ -5563,8 +7063,10 @@ case "\${TOOL:-}" in
         *)
           _intutic_mcp_reason="MCP server \\"$_intutic_mcp_server\\" is not on the MCP server allowlist for this workspace [mcp_allowlist]"
           if [ "$INTUTIC_MCP_SEVERITY" = "shadow" ]; then
+            intutic_chaos_note mcp_allowlist
             log_event "tool_would_block" "\${TOOL:-}" "$_intutic_mcp_reason" || true
           else
+            _intutic_chaos_rule=mcp_allowlist; _intutic_chaos_hit=1
             echo "[Intutic Governance] BLOCKED: $_intutic_mcp_reason" >&2
             log_event "tool_blocked" "\${TOOL:-}" "$_intutic_mcp_reason"
             exit 2
@@ -5574,6 +7076,36 @@ case "\${TOOL:-}" in
     fi
     ;;
 esac
+
+# ── Agent fault injection: the call is allowed ───────────────────────────────
+# Recorded as allowed, then the fault that is due, if any. A delay waits inside
+# this gate's 9 s deadline: a gate still running at it refuses the call,
+# and past the hook timeout most harnesses run the call anyway, so a longer
+# wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ]; then
+  _intutic_fault="$(intutic_chaos_decide allow)"
+  _intutic_chaos_done=1
+  if [ -n "$_intutic_fault" ]; then
+    _intutic_fault_kind="\${_intutic_fault%%$'\\t'*}"
+    _intutic_fault_rest="\${_intutic_fault#*$'\\t'}"
+    _intutic_fault_delay="\${_intutic_fault_rest%%$'\\t'*}"
+    _intutic_fault_reason="\${_intutic_fault_rest#*$'\\t'}"
+    if [ "$_intutic_fault_delay" -gt 0 ] 2>/dev/null; then
+      _intutic_fault_room=$(( 9 - SECONDS - 1 ))
+      [ "$_intutic_fault_room" -gt 0 ] || _intutic_fault_room=0
+      if [ "$_intutic_fault_delay" -gt "$_intutic_fault_room" ]; then
+        echo "[Intutic Governance] chaos: waiting \${_intutic_fault_room} s of the \${_intutic_fault_delay} s the plan asks for, to stay inside the hook timeout" >&2
+        _intutic_fault_delay="$_intutic_fault_room"
+      fi
+      sleep "$_intutic_fault_delay"
+    fi
+    if [ "$_intutic_fault_kind" != "delay" ]; then
+      # The fault's own text, carrying the plan's canary: what the agent reads.
+      echo "$_intutic_fault_reason" >&2
+      exit 2
+    fi
+  fi
+fi
 # ── end Intutic gate body ────────────────────────────────────────────────────
 
 log_event "tool_allowed" "$TOOL_NAME" ""

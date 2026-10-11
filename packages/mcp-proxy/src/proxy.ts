@@ -55,6 +55,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { watchWasmDir, type WasmDirWatcher } from './wasm/watch.js'
+import type { ChaosInjector } from './chaos.js'
 
 const log = createLogger('mcp-governance-proxy')
 
@@ -138,6 +139,15 @@ function writeFrame(frame: unknown): void {
 export interface PendingRequest {
   method: 'tools/call' | 'tools/list' | 'resources/read'
   toolName?: string
+  /** A chaos `inject.tool_result` chosen for this call: appended to the server's result (chaos.ts). */
+  inject?: { payload: string; call: number }
+}
+
+/** What `handleHarnessLine` needs to inject faults when a chaos plan is loaded (chaos.ts). */
+export interface ChaosHooks {
+  injector: ChaosInjector
+  /** Hand a synthesized upstream line to the response path, as if the server had sent it. */
+  respond: (line: string) => void
 }
 
 /** The outcome of inspecting one server→harness line. */
@@ -458,6 +468,7 @@ export function handleHarnessLine(
   interceptor: ToolCallInterceptor,
   forward: (line: string) => void,
   session?: SessionState,
+  chaos?: ChaosHooks,
 ): void {
   const trimmed = line.trim()
   if (!trimmed) return
@@ -493,8 +504,10 @@ export function handleHarnessLine(
           'Tool call blocked by governance proxy'
         )
         writeFrame(buildBlockResponse(msg.id, decision.reason, blockData(decision)))
+        chaos?.injector.emit({ type: 'tool_call', tool: toolName, ok: false })
       } else if (decision.action === 'hold') {
         writeFrame(buildHoldResponse(msg.id, decision.reason, decision.holdId, decision.ruleId))
+        chaos?.injector.emit({ type: 'tool_call', tool: toolName, ok: false })
       } else {
         // Allow: the response now needs inspecting on the way back —
         // registered BEFORE forwarding, or a fast server could answer
@@ -508,6 +521,21 @@ export function handleHarnessLine(
         // tool_diversity_collapse, or an agent could be penalized for calls
         // that never ran.
         session?.recordCall(toolName)
+        // Chaos faults stand in for the upstream server, so they are
+        // considered only here, after governance allowed the call, and
+        // their results go back through the response path like a real one.
+        if (chaos && decision.action === 'allow' && msg.id !== null && msg.id !== undefined) {
+          const fault = chaos.injector.onAllowedCall(toolName, () =>
+            writeFrame({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }),
+          )
+          if (fault?.kind === 'respond') {
+            chaos.respond(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: fault.result }))
+            return
+          }
+          if (fault?.kind === 'append') {
+            pending.set(msg.id, { method: 'tools/call', toolName, inject: { payload: fault.payload, call: fault.call } })
+          }
+        }
         forward(line)
       }
     }).catch((err) => {
@@ -555,7 +583,11 @@ export class McpGovernanceProxy {
   private readonly registryObserver: RegistryObserver | undefined
   private realServer: node_child.ChildProcess | null = null
 
-  constructor(private readonly config: ProxyConfig) {
+  constructor(
+    private readonly config: ProxyConfig,
+    /** The loaded chaos plan's injector; null (no plan) leaves every path as it is. */
+    private readonly chaos: ChaosInjector | null = null,
+  ) {
     this.policy = new PolicyClient(
       config.controlPlaneUrl,
       config.apiKey,
@@ -631,6 +663,17 @@ export class McpGovernanceProxy {
    */
   getSessionState(): SessionState {
     return this.session
+  }
+
+  /**
+   * The chaos hooks for `handleHarnessLine`, bound to this proxy's response
+   * path and `pending` map; undefined without a plan. Shared by stdio mode
+   * and `remoteBridge.ts` for the same reason `getInterceptor` is.
+   */
+  chaosHooks(pending: Map<string | number, PendingRequest>): ChaosHooks | undefined {
+    const injector = this.chaos
+    if (!injector) return undefined
+    return { injector, respond: (line) => void this.handleServerLine(line, pending) }
   }
 
   /**
@@ -889,6 +932,14 @@ export class McpGovernanceProxy {
     // Results are redacted with the workspace's PII detector actions too —
     // a resources/read answer can arrive before any tools/call set them.
     setWorkspacePii(this.policy.getPiiDetectors())
+    // A chaos plan's response-side faults rewrite the upstream line first,
+    // so every check below inspects the faulted response.
+    let chaosToolCall: string | undefined
+    if (this.chaos) {
+      const faulted = this.chaos.faultServerLine(rawLine, pending)
+      rawLine = faulted.line
+      chaosToolCall = faulted.toolCall
+    }
     const outcome = processServerLine(
       rawLine,
       pending,
@@ -930,6 +981,7 @@ export class McpGovernanceProxy {
         }
       }
     }
+    if (chaosToolCall !== undefined) this.chaos?.recordToolCall(chaosToolCall, outcome.line)
     if (outcome.redactedTool) {
       log.warn(
         {
@@ -1131,11 +1183,12 @@ export class McpGovernanceProxy {
     // remoteBridge.ts's remote bridge mode — only `forward` differs: here it
     // writes to the spawned child process's stdin.
     const rl = node_readline.createInterface({ input: process.stdin, terminal: false })
+    const chaosHooks = this.chaosHooks(pending)
 
     rl.on('line', (line) => {
       handleHarnessLine(line, pending, this.interceptor, (l) => {
         realServer.stdin!.write(l + '\n')
-      }, this.session)
+      }, this.session, chaosHooks)
     })
 
     rl.on('close', () => {

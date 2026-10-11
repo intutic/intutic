@@ -1,0 +1,215 @@
+{
+  "_comment": "Fault injection in the hook gates (chaosGate.ts, intutic_clawde/gate/chaos.py and every hook gate that emits them). A valid case is a plan and a run of calls, each with the decision governance made before any fault; replayed in order against a fresh events file, each call ends as `outcome` (with the refusal `reason` and the `delayS` the gate waits, when a fault applies), and the events file holds `events` in order: each line also carries `ts` (ISO-8601), the plan's `runId` and `component` gate. An invalid case is a plan (base64url-encoded by the runner) or a raw environment value that every gate refuses to load, failing closed; every invalid plan is also one ChaosPlanSchema rejects, and every valid one one it accepts.",
+  "valid": [
+    {
+      "name": "no faults: every call is reported, plan_loaded once",
+      "plan": { "v": 1, "runId": "run_vectors01", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [] },
+      "calls": [
+        { "tool": "Bash", "decision": "allow", "ruleId": null, "destructive": false, "policyHit": false, "outcome": "allow" },
+        { "tool": "Write", "decision": "deny", "ruleId": "protected_path.claude_settings", "destructive": false, "policyHit": true, "outcome": "deny" },
+        { "tool": "Bash", "decision": "allow", "ruleId": "destructive.rm_rf", "destructive": true, "policyHit": false, "outcome": "allow" },
+        { "tool": "Edit", "decision": "hold", "ruleId": "sop.local.review_before.Edit", "destructive": false, "policyHit": true, "outcome": "hold" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 0 },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true },
+        { "type": "gate_decision", "tool": "Write", "decision": "deny", "ruleId": "protected_path.claude_settings", "destructive": false, "policyHit": true },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "ruleId": "destructive.rm_rf", "destructive": true, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true },
+        { "type": "gate_decision", "tool": "Edit", "decision": "hold", "ruleId": "sop.local.review_before.Edit", "destructive": false, "policyHit": true }
+      ]
+    },
+    {
+      "name": "tool.error after one matching call, once",
+      "plan": {
+        "v": 1, "runId": "run_vectors02", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
+        "faults": [{ "id": "tool.error", "match": { "tool": "Bash" }, "after_calls": 1, "times": 1, "message": "command not found: make" }]
+      },
+      "calls": [
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" },
+        { "tool": "Edit", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" },
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "command not found: make [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 1 },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true },
+        { "type": "gate_decision", "tool": "Edit", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Edit", "ok": true },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "tool.error", "call": 2, "target": "Bash" },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true }
+      ]
+    },
+    {
+      "name": "a refused call is never faulted and is not one of the fault's calls",
+      "plan": {
+        "v": 1, "runId": "run_vectors03", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
+        "faults": [{ "id": "tool.error" }]
+      },
+      "calls": [
+        { "tool": "Bash", "decision": "deny", "ruleId": "destructive.rm_rf", "destructive": true, "policyHit": true, "outcome": "deny" },
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "tool failed [E-INTUTIC-C0FFEE]" },
+        { "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "tool failed [E-INTUTIC-C0FFEE]" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 1 },
+        { "type": "gate_decision", "tool": "Bash", "decision": "deny", "ruleId": "destructive.rm_rf", "destructive": true, "policyHit": true },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "tool.error", "call": 1, "target": "Bash" },
+        { "type": "gate_decision", "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "tool.error", "call": 2, "target": "Write" }
+      ]
+    },
+    {
+      "name": "a tool pattern that starts with * matches by suffix",
+      "plan": {
+        "v": 1, "runId": "run_vectors04", "repetition": 1, "canary": "E-INTUTIC-0A1B",
+        "faults": [{ "id": "tool.error", "match": { "tool": "*Edit" }, "times": 2, "message": "file changed on disk" }]
+      },
+      "calls": [
+        { "tool": "MultiEdit", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "file changed on disk [E-INTUTIC-0A1B]" },
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" },
+        { "tool": "Edit", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "file changed on disk [E-INTUTIC-0A1B]" },
+        { "tool": "NotebookEdit", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 1 },
+        { "type": "gate_decision", "tool": "MultiEdit", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "tool.error", "call": 1, "target": "MultiEdit" },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true },
+        { "type": "gate_decision", "tool": "Edit", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "tool.error", "call": 2, "target": "Edit" },
+        { "type": "gate_decision", "tool": "NotebookEdit", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "NotebookEdit", "ok": true }
+      ]
+    },
+    {
+      "name": "permission denied by the approver, after an ask passes through untouched",
+      "plan": {
+        "v": 1, "runId": "run_vectors05", "repetition": 2, "canary": "E-INTUTIC-C0FFEE",
+        "faults": [{ "id": "permission.deny_or_delay" }]
+      },
+      "calls": [
+        { "tool": "Bash", "decision": "ask", "destructive": false, "policyHit": false, "outcome": "ask" },
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "Permission denied by approver [E-INTUTIC-C0FFEE]" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 1 },
+        { "type": "gate_decision", "tool": "Bash", "decision": "ask", "destructive": false, "policyHit": false },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 1, "target": "Bash" }
+      ]
+    },
+    {
+      "name": "permission delayed, then allowed",
+      "plan": {
+        "v": 1, "runId": "run_vectors06", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
+        "faults": [{ "id": "permission.deny_or_delay", "match": { "tool": "Write" }, "mode": "delay", "delay_s": 1 }]
+      },
+      "calls": [
+        { "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow", "delayS": 1 },
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 1 },
+        { "type": "gate_decision", "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 1, "target": "Write" },
+        { "type": "tool_call", "tool": "Write", "ok": true },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true }
+      ]
+    },
+    {
+      "name": "permission held, then denied, once",
+      "plan": {
+        "v": 1, "runId": "run_vectors07", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
+        "faults": [{ "id": "permission.deny_or_delay", "mode": "hold_then_deny", "delay_s": 1, "times": 1 }]
+      },
+      "calls": [
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "Permission held for approval, then denied by approver [E-INTUTIC-C0FFEE]", "delayS": 1 },
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 1 },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 1, "target": "Bash" },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true }
+      ]
+    },
+    {
+      "name": "two faults: each counts every call it matches, and the first one due injects",
+      "plan": {
+        "v": 1, "runId": "run_vectors08", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
+        "faults": [
+          { "id": "tool.error", "match": { "tool": "Bash" }, "after_calls": 1 },
+          { "id": "permission.deny_or_delay", "times": 1 }
+        ]
+      },
+      "calls": [
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "Permission denied by approver [E-INTUTIC-C0FFEE]" },
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "tool failed [E-INTUTIC-C0FFEE]" },
+        { "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 2 },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 1, "target": "Bash" },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "tool.error", "call": 2, "target": "Bash" },
+        { "type": "gate_decision", "tool": "Write", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Write", "ok": true }
+      ]
+    },
+    {
+      "name": "another component's faults, a host match and an MCP tool's error are not a gate's to inject",
+      "plan": {
+        "v": 1, "runId": "run_vectors09", "repetition": 1, "canary": "E-INTUTIC-C0FFEE",
+        "faults": [
+          { "id": "llm.rate_limit", "retry_after_s": 5 },
+          { "id": "tool.error", "match": { "host": "api.github.com" } },
+          { "id": "tool.error", "match": { "tool": "mcp__github__create_issue" } },
+          { "id": "permission.deny_or_delay", "match": { "tool": "mcp__github__create_issue" }, "after_calls": 1 }
+        ]
+      },
+      "calls": [
+        { "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" },
+        { "tool": "mcp__github__create_issue", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "allow" },
+        { "tool": "mcp__github__create_issue", "decision": "allow", "destructive": false, "policyHit": false, "outcome": "deny", "reason": "Permission denied by approver [E-INTUTIC-C0FFEE]" }
+      ],
+      "events": [
+        { "type": "plan_loaded", "faults": 3 },
+        { "type": "gate_decision", "tool": "Bash", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "Bash", "ok": true },
+        { "type": "gate_decision", "tool": "mcp__github__create_issue", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "tool_call", "tool": "mcp__github__create_issue", "ok": true },
+        { "type": "gate_decision", "tool": "mcp__github__create_issue", "decision": "allow", "destructive": false, "policyHit": false },
+        { "type": "fault_injected", "faultId": "permission.deny_or_delay", "call": 2, "target": "mcp__github__create_issue" }
+      ]
+    }
+  ],
+  "invalid": [
+    { "name": "not base64url", "raw": "not a plan!" },
+    { "name": "base64url text that is not JSON", "raw": "aGVsbG8" },
+    { "name": "a JSON array", "plan": [] },
+    { "name": "version 2", "plan": { "v": 2, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [] } },
+    { "name": "runId too short", "plan": { "v": 1, "runId": "abc", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [] } },
+    { "name": "canary in lower case", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-c0ffee", "faults": [] } },
+    { "name": "faults not a list", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": {} } },
+    { "name": "a fault the catalog does not know", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "tool.explode" }] } },
+    { "name": "an empty tool.error message", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "tool.error", "message": "" }] } },
+    { "name": "a tool match that is not text", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "tool.error", "match": { "tool": 3 } }] } },
+    { "name": "a match field no fault has", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "permission.deny_or_delay", "match": { "path": "/etc" } }] } },
+    { "name": "times 0", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "tool.error", "times": 0 }] } },
+    { "name": "a negative after_calls", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "tool.error", "after_calls": -1 }] } },
+    { "name": "a fractional delay", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "permission.deny_or_delay", "mode": "delay", "delay_s": 1.5 }] } },
+    { "name": "a delay over 600 s", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "permission.deny_or_delay", "mode": "delay", "delay_s": 601 }] } },
+    { "name": "a mode the fault does not have", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "permission.deny_or_delay", "mode": "ask" }] } },
+    { "name": "times that is not a number", "plan": { "v": 1, "runId": "run_invalid", "repetition": 0, "canary": "E-INTUTIC-C0FFEE", "faults": [{ "id": "permission.deny_or_delay", "times": "2" }] } }
+  ]
+}

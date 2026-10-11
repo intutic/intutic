@@ -58,6 +58,7 @@ import {
 } from './protectedPaths.js'
 import {
   ARGUMENTS_SIZE_LIMIT,
+  CHAOS_GATE_JS_SOURCE,
   COMMAND_SIZE_LIMIT,
   gateDeadlineMs,
   type HookGateHarness,
@@ -69,6 +70,7 @@ import {
   PHRASES_JS_SOURCE,
   SEQUENCE_JS_SOURCE,
 } from '@intutic/shared-types'
+import { CHAOS_PY_SOURCE } from '../lib/chaosPy.js'
 import { MCP_REGISTRY_PY_SOURCE } from '../lib/mcpRegistryPy.js'
 import { PHRASES_PY_SOURCE } from '../lib/phrasesPy.js'
 import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
@@ -239,8 +241,17 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * a call at the size limit had forked a hundred `grep`s and spent seconds of
  * a loaded machine before any rule could match. The `.rules` format is
  * unchanged.
+ *
+ * v19: agent fault injection. When a chaos run's runner sets
+ * `INTUTIC_CHAOS_PLAN` and `INTUTIC_CHAOS_EVENTS` in the agent's sandbox, the
+ * JS and bash gates report every call (`plan_loaded`, `gate_decision`,
+ * `tool_call`) to the events file and inject the plan's `tool.error` and
+ * `permission.deny_or_delay` faults into calls they allowed
+ * (`@intutic/shared-types` chaosGate.ts; `chaos.py` in the bash gates). A
+ * plan that is set but unreadable refuses the call. Without the variables
+ * nothing changes; the `.rules` format is unchanged.
  */
-export const GATE_VERSION = 18
+export const GATE_VERSION = 19
 
 /**
  * The refusal codes a hook gate's JSON decision carries, as `code` beside the
@@ -266,7 +277,11 @@ export const GATE_VERSION = 18
  * - `GATE_DEADLINE`: the gate did not decide within its harness's deadline
  *   (`gateDeadlineMs` in `@intutic/shared-types`);
  * - `UNREADABLE_CALL`: the payload held no tool call the gate could read;
- * - `GATE_CRASHED`: the gate failed while deciding.
+ * - `GATE_CRASHED`: the gate failed while deciding, or a chaos run's
+ *   `INTUTIC_CHAOS_PLAN` is set but unreadable.
+ *
+ * A fault a chaos run injects into an allowed call is not a refusal by
+ * governance: its JSON decision carries `code: null` and `ruleId: null`.
  */
 export const HOOK_REFUSAL_CODES = [
   'BUILT_IN_RULE',
@@ -345,6 +360,8 @@ export const REVIEW_REQUEST_VERSION = 1
  *   decision on an MCP call.
  * - `intutic_mcp_unverified(tool)` — the refusal of an MCP call on a
  *   snapshot that failed its integrity check.
+ * - `intutic_chaos_begin()` and `intutic_chaos_call(...)` — a chaos run's
+ *   plan check and per-call record and fault ({@link CHAOS_PY_SOURCE}).
  *
  * The classifier used to be `grep -E` with a gap regex over the normalised
  * command, and bash's own pattern substitution on it took a minute on a long
@@ -392,6 +409,34 @@ def intutic_mcp_unverified(tool):
     # is not an MCP call.
     call = split_mcp_tool_name(tool)
     return "\\t".join(unverified_refusal(call[0])) if call else ""
+
+
+${CHAOS_PY_SOURCE}
+
+
+def intutic_chaos_begin():
+    # Why the chaos run's plan cannot be used, or "" when it can.
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    if error:
+        return error
+    if not os.environ.get("INTUTIC_CHAOS_EVENTS"):
+        return "INTUTIC_CHAOS_PLAN is set but INTUTIC_CHAOS_EVENTS is not, so nothing the run does could be reported"
+    return ""
+
+
+def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit):
+    # Records one call as the gate decided it, before any fault; returns the
+    # fault to apply to an allowed call as "kind<TAB>delayS<TAB>reason", or "".
+    plan, error = chaos_decode(os.environ.get("INTUTIC_CHAOS_PLAN", ""))
+    events = os.environ.get("INTUTIC_CHAOS_EVENTS", "")
+    if error or not events:
+        return ""
+    call = {"tool": tool, "decision": decision, "ruleId": rule_id or None,
+            "destructive": destructive == "1", "policyHit": policy_hit == "1"}
+    fault = chaos_call(plan, events, call, chaos_now())
+    if fault is None:
+        return ""
+    return fault["kind"] + "\\t" + str(fault["delayS"]) + "\\t" + fault["reason"]
 `
 
 /**
@@ -579,6 +624,12 @@ intutic_fail_closed() {
   set +eu
   trap - EXIT
   [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
+  # A chaos run's record of a call the gate refused, held or crashed on (the
+  # gate body records an allowed one where it ends). It cannot change the
+  # exit status: everything it prints is discarded.
+  if [ "$_intutic_exit_rc" != "0" ] && [ "\${INTUTIC_CHAOS_ACTIVE:-0}" = "1" ] && command -v intutic_chaos_decide >/dev/null 2>&1; then
+    intutic_chaos_decide "\${_intutic_chaos_decision:-deny}" >/dev/null 2>&1
+  fi
   if [ "$_intutic_exit_rc" = "0" ] || [ "$_intutic_exit_rc" = "2" ]; then
     exit "$_intutic_exit_rc"
   fi
@@ -808,6 +859,7 @@ const SCREEN_SUBJECTS: ReadonlyArray<readonly [string, string]> = [
 export function emitShellGate(opts: ShellGateOptions): string {
   const log = opts.logFn ?? 'log_event'
   const floor = staticFloorPatterns()
+  const deadlineS = Math.floor(gateDeadlineMs(opts.harness) / 1000)
   return `
 # ── Intutic gate body v${GATE_VERSION} — harness: ${opts.harness} ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
@@ -815,6 +867,51 @@ export function emitShellGate(opts: ShellGateOptions): string {
 # The harness name and version are stamped so this file identifies itself. Both
 # were previously passed in and dropped on the floor: opts.harness was declared
 # on the option type, supplied by all thirteen writers, and read nowhere.
+
+# ── Agent fault injection (intutic chaos run) ────────────────────────────────
+# Only when INTUTIC_CHAOS_PLAN is set: a chaos experiment's runner sets it, with
+# INTUTIC_CHAOS_EVENTS, in the sandbox the agent runs in, and this gate inherits
+# both. The work is chaos.py in INTUTIC_PY_LIB, the transliteration of
+# chaosGate.ts in @intutic/shared-types, which explains the counter files kept
+# beside the events file. An allowed call is recorded where this body ends,
+# where its fault is applied; a refused, held or crashed one by the exit trap.
+# A fault applies only to an allowed call. Scoped to the bare invocation, like
+# the envelope refusal below.
+INTUTIC_CHAOS_ACTIVE=0
+_intutic_chaos_done=0
+_intutic_chaos_decision=deny
+_intutic_chaos_rule=""
+_intutic_chaos_hit=0
+_intutic_chaos_destructive=0
+# Records this call as decided ($1: allow, deny or hold) and prints the fault
+# to apply to an allowed one, as kind, delay and reason, tab-separated.
+intutic_chaos_decide() {
+  [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ "$_intutic_chaos_done" = "0" ] || return 0
+  python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_call"](*sys.argv[1:]))' "\${TOOL:-unknown}" "$1" "$_intutic_chaos_rule" "$_intutic_chaos_destructive" "$_intutic_chaos_hit" || true
+}
+# A rule fired without deciding the call (shadow, warn): its id, if none yet.
+intutic_chaos_note() {
+  [ -n "$_intutic_chaos_rule" ] || _intutic_chaos_rule="$1"
+}
+if [ -z "\${1:-}" ] && [ -n "\${INTUTIC_CHAOS_PLAN:-}" ]; then
+  # A plan that is set but unreadable refuses, as an unreadable payload does:
+  # an experiment run without the faults it asked for reports a resilience it
+  # never measured.
+  _intutic_chaos_err="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_chaos_begin"]())' 2>/dev/null || echo "INTUTIC_CHAOS_PLAN could not be read")"
+  if [ -n "$_intutic_chaos_err" ]; then
+    _intutic_chaos_err="\${_intutic_chaos_err} — refusing the call rather than running the experiment without the faults it asked for"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_chaos_err}" >&2
+    ${log} "tool_blocked" "\${TOOL:-unknown}" "\${_intutic_chaos_err}" || true
+    exit 2
+  fi
+  INTUTIC_CHAOS_ACTIVE=1
+fi
 
 # Refuse an unreadable envelope before any rule is consulted.
 #
@@ -1072,24 +1169,20 @@ intutic_hold() {
 # A rule declares which part of the call it matches. \`any\` means command and
 # target — never the tool name, because a pattern like \`\\.claude/settings\\.json\`
 # would otherwise be tested against "Write" and quietly match nothing.
-intutic_apply() {
-  local rec="$1"
+#
+# Whether a rule fires on this call sets _intutic_fires to 1 or 0; the function
+# always returns 0, so it runs under set -e like the rest of the gate. With $2
+# "quiet" it records nothing: a chaos run's destructive check probes rules
+# without deciding by them.
+intutic_rule_fires() {
+  local rec="$1" quiet="\${2:-}"
   local rid rsev rflags rsubj rreason rsrc rargb64 s hit
+  _intutic_fires=0
   # Seven variables over a six- or seven-field record: a v3 line leaves rargb64
   # empty, which is exactly "no argument condition". The base64 column cannot
   # contain a tab, so the last variable never absorbs a separator.
   IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
   [ -z "$rsrc" ] && return 0
-  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
-  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
-  # for, and one environment variable disarming them would make the switch the
-  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
-  # writer assigns: destructive.* versus sop.*
-  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
-    case "$rid" in
-      destructive.*) return 0 ;;
-    esac
-  fi
   local _subs=() _ci=
   case "$rflags" in *i*) _ci=i ;; esac
   # A subject the screen below cleared for this case is left out: no pattern
@@ -1170,18 +1263,41 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
 ' "$rargb64" "\${TOOL_INPUT_JSON:-}" 2>/dev/null || _intutic_arg_rc=$?
     if [ "$_intutic_arg_rc" = "1" ]; then
       return 0
-    elif [ "$_intutic_arg_rc" != "0" ]; then
+    elif [ "$_intutic_arg_rc" != "0" ] && [ -z "$quiet" ]; then
       ${log} "rule_downgraded" "\${TOOL:-}" "argPattern for \${rid} did not compile in python re — rule enforced name-only" || true
     fi
   fi
+  _intutic_fires=1
+}
+
+intutic_apply() {
+  local rec="$1"
+  local rid rsev rflags rsubj rreason rsrc rargb64
+  IFS=$'\\t' read -r rid rsev rflags rsubj rreason rsrc rargb64 <<< "$rec"
+  [ -z "$rsrc" ] && return 0
+  # The escape hatch skips the DESTRUCTIVE family only. It is not a way to turn
+  # off a workspace's own BLOCK: SOP rules — those are what the customer asked
+  # for, and one environment variable disarming them would make the switch the
+  # first thing an agent sets. Keyed on the rule-id family, which the snapshot
+  # writer assigns: destructive.* versus sop.*
+  if [ "$INTUTIC_GUARDS_DISABLED" = "1" ]; then
+    case "$rid" in
+      destructive.*) return 0 ;;
+    esac
+  fi
+  intutic_rule_fires "$rec"
+  [ "$_intutic_fires" = "1" ] || return 0
   if [ "$rsev" = "shadow" ]; then
+    intutic_chaos_note "$rid"
     ${log} "tool_would_block" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
     return 0
   fi
   if [ "$rsev" = "hold" ]; then
     # Not a permanent denial: the action is legitimate, someone asked to see
     # it first. A bypass they approved lets this exact call through once.
+    _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
     if intutic_hold "$rid" "$rreason"; then return 0; fi
+    _intutic_chaos_decision=hold
     exit 2
   fi
   if [ "$rsev" = "warn" ]; then
@@ -1197,12 +1313,14 @@ sys.exit(0 if rx.search(sys.argv[2]) else 1)
     # telemetry.
     _intutic_verb="\${INTUTIC_NCOMMAND# }"
     _intutic_verb="\${_intutic_verb%% *}"
+    intutic_chaos_note "$rid"
     ${log} "tool_flagged" "\${TOOL:-}" "\${rreason} [\${rid}] verb=\${_intutic_verb}" || true
     return 0
   fi
   # The rule's own reason, not a generic one: hookEvents.resolveSeverity reads
   # this text for "governance-protected" to file the incident CRITICAL.
   local reason="\${rreason} [\${rid}]"
+  _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
   echo "[Intutic Governance] BLOCKED: \${reason}" >&2
   ${log} "tool_blocked" "\${TOOL:-}" "\${reason}"
   exit 2
@@ -1253,6 +1371,19 @@ intutic_unscreened() {
   [ "\${!v:-}" != "1" ]
 }
 
+# A chaos run's no_destructive_attempt probe: whether a destructive.* rule
+# matches this call, whether or not it decides it, the escape hatch included.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ] && [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+    case "$_rec" in
+      destructive.*)
+        intutic_rule_fires "$_rec" quiet
+        if [ "$_intutic_fires" = "1" ]; then _intutic_chaos_destructive=1; break; fi
+        ;;
+    esac
+  done
+fi
+
 for _rec in "\${INTUTIC_FLOOR[@]}"; do
   intutic_apply "$_rec"
 done
@@ -1284,6 +1415,7 @@ sys.stdout.write(lib["intutic_mcp_unverified"](sys.argv[1]))' "\${TOOL:-}" 2>/de
         _intutic_unv_rid="policy_snapshot"
         _intutic_unv_reason="POLICY_SNAPSHOT_UNVERIFIED — the policy snapshot failed its integrity check and admits no MCP server"
       fi
+      _intutic_chaos_rule="$_intutic_unv_rid"; _intutic_chaos_hit=1
       echo "[Intutic Governance] BLOCKED: \${_intutic_unv_reason} [\${_intutic_unv_rid}]" >&2
       ${log} "tool_blocked" "\${TOOL:-}" "\${_intutic_unv_reason} [\${_intutic_unv_rid}]"
       exit 2
@@ -1307,6 +1439,7 @@ exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
 sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2]))' "$INTUTIC_MCP_REGISTRY" "\${TOOL:-}" 2>/dev/null || true)"
       if [ -n "$_intutic_reg" ]; then
         IFS=$'\\t' read -r _ _intutic_reg_rid _intutic_reg_reason <<< "$_intutic_reg"
+        _intutic_chaos_rule="$_intutic_reg_rid"; _intutic_chaos_hit=1
         echo "[Intutic Governance] BLOCKED: \${_intutic_reg_reason} [\${_intutic_reg_rid}]" >&2
         ${log} "tool_blocked" "\${TOOL:-}" "\${_intutic_reg_reason} [\${_intutic_reg_rid}]"
         exit 2
@@ -1334,8 +1467,10 @@ case "\${TOOL:-}" in
         *)
           _intutic_mcp_reason="MCP server \\"$_intutic_mcp_server\\" is not on the MCP server allowlist for this workspace [mcp_allowlist]"
           if [ "$INTUTIC_MCP_SEVERITY" = "shadow" ]; then
+            intutic_chaos_note mcp_allowlist
             ${log} "tool_would_block" "\${TOOL:-}" "$_intutic_mcp_reason" || true
           else
+            _intutic_chaos_rule=mcp_allowlist; _intutic_chaos_hit=1
             echo "[Intutic Governance] BLOCKED: $_intutic_mcp_reason" >&2
             ${log} "tool_blocked" "\${TOOL:-}" "$_intutic_mcp_reason"
             exit 2
@@ -1345,6 +1480,36 @@ case "\${TOOL:-}" in
     fi
     ;;
 esac
+
+# ── Agent fault injection: the call is allowed ───────────────────────────────
+# Recorded as allowed, then the fault that is due, if any. A delay waits inside
+# this gate's ${deadlineS} s deadline: a gate still running at it refuses the call,
+# and past the hook timeout most harnesses run the call anyway, so a longer
+# wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+if [ "$INTUTIC_CHAOS_ACTIVE" = "1" ]; then
+  _intutic_fault="$(intutic_chaos_decide allow)"
+  _intutic_chaos_done=1
+  if [ -n "$_intutic_fault" ]; then
+    _intutic_fault_kind="\${_intutic_fault%%$'\\t'*}"
+    _intutic_fault_rest="\${_intutic_fault#*$'\\t'}"
+    _intutic_fault_delay="\${_intutic_fault_rest%%$'\\t'*}"
+    _intutic_fault_reason="\${_intutic_fault_rest#*$'\\t'}"
+    if [ "$_intutic_fault_delay" -gt 0 ] 2>/dev/null; then
+      _intutic_fault_room=$(( ${deadlineS} - SECONDS - 1 ))
+      [ "$_intutic_fault_room" -gt 0 ] || _intutic_fault_room=0
+      if [ "$_intutic_fault_delay" -gt "$_intutic_fault_room" ]; then
+        echo "[Intutic Governance] chaos: waiting \${_intutic_fault_room} s of the \${_intutic_fault_delay} s the plan asks for, to stay inside the hook timeout" >&2
+        _intutic_fault_delay="$_intutic_fault_room"
+      fi
+      sleep "$_intutic_fault_delay"
+    fi
+    if [ "$_intutic_fault_kind" != "delay" ]; then
+      # The fault's own text, carrying the plan's canary: what the agent reads.
+      echo "$_intutic_fault_reason" >&2
+      exit 2
+    fi
+  fi
+fi
 # ── end Intutic gate body ────────────────────────────────────────────────────
 `
 }
@@ -1487,6 +1652,85 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
 }`
 
 /**
+ * A chaos run's side of the JS gates, defined once: the plan, this call's
+ * record, and the fault to apply to an allowed call.
+ *
+ * `intuticChaosBegin` starts a call's record in `intuticGate`; rules that
+ * fire without deciding note themselves (`intuticChaosNote`); every refusal
+ * and the allow at the end report the decision (`intuticChaosDecide`), which
+ * returns the fault due. Nothing here throws: a fault the gate cannot inject
+ * or report is said on stderr, and the call is decided as governance decided
+ * it.
+ */
+const JS_CHAOS_HELPERS = `// ── Agent fault injection (intutic chaos run) ───────────────────────────────
+// Only when INTUTIC_CHAOS_PLAN is set: a chaos experiment's runner sets it,
+// with INTUTIC_CHAOS_EVENTS, in the sandbox the agent runs in, and this gate
+// inherits both. Emitted from @intutic/shared-types chaosGate.ts, which
+// explains the counter files kept beside the events file. A fault applies only
+// to a call this gate allowed: it never turns a refusal or a hold into an allow.
+${CHAOS_GATE_JS_SOURCE}
+
+var _intuticChaosState = null;
+var _intuticChaosCall = null;
+
+/** The plan, read once per process: { plan, events, error }. */
+function intuticChaos() {
+  if (_intuticChaosState) return _intuticChaosState;
+  var raw = process.env.INTUTIC_CHAOS_PLAN || '', events = process.env.INTUTIC_CHAOS_EVENTS || '';
+  var s = { plan: null, events: events, error: null };
+  if (raw) {
+    var d = chaosGateDecode(raw);
+    if (d.error) s.error = d.error;
+    else if (!events) s.error = 'INTUTIC_CHAOS_PLAN is set but INTUTIC_CHAOS_EVENTS is not, so nothing the run does could be reported';
+    else s.plan = d.plan;
+  }
+  _intuticChaosState = s;
+  return s;
+}
+
+/** Starts this call's record, unless the last gate run said more of the same call follows. */
+function intuticChaosBegin(toolName) {
+  if (_intuticChaosCall && _intuticChaosCall.more) { _intuticChaosCall.more = false; return; }
+  _intuticChaosCall = { tool: String(toolName == null ? '' : toolName), ruleId: null, destructive: false, policyHit: false, more: false };
+}
+
+/** A rule fired on this call without deciding it (shadow, warn, an approved bypass). */
+function intuticChaosNote(ruleId, policyHit) {
+  var c = _intuticChaosCall;
+  if (!c) return;
+  if (ruleId && !c.ruleId) c.ruleId = ruleId;
+  if (policyHit) c.policyHit = true;
+}
+
+/**
+ * Reports this call as the gate decided it, before any fault (allow, deny or
+ * hold), and returns the fault to apply to an allowed call, or null.
+ */
+function intuticChaosDecide(toolName, decision, ruleId, policyHit) {
+  var c = _intuticChaosCall;
+  _intuticChaosCall = null;
+  try {
+    var s = intuticChaos();
+    if (!s.plan) return null;
+    return chaosGateCall(require('fs'), s.plan, s.events, {
+      tool: c ? c.tool : String(toolName == null ? '' : toolName),
+      decision: decision,
+      ruleId: ruleId || (c ? c.ruleId : null),
+      destructive: !!(c && c.destructive),
+      policyHit: !!policyHit || !!(c && c.policyHit),
+    }, new Date().toISOString());
+  } catch (e) {
+    try { console.error('[Intutic Governance] chaos: ' + String((e && e.message) || e)); } catch (e2) {}
+    return null;
+  }
+}
+
+/** Waits ms milliseconds: the gate decides synchronously, so it blocks. */
+function intuticChaosSleep(ms) {
+  if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}`
+
+/**
  * The JavaScript gate body.
  *
  * Emits a self-contained `intuticGate()` that the writer calls. Refuses through
@@ -1503,15 +1747,19 @@ export function emitJsGate(opts: JsGateOptions): string {
    * `code` and `ruleId` are JavaScript expressions: a JSON decision carries
    * them ({@link HOOK_REFUSAL_CODES}), and `extra` adds fields such as `holdId`.
    */
-  const refuseWith = (code: string, ruleId: string, extra = '') => {
+  const refuseWith = (code: string, ruleId: string, extra = '', tool = 'toolName') => {
     const fields = `code: ${code}, ruleId: ${ruleId}${extra ? `, ${extra}` : ''}`
+    // A chaos run's record of the refusal, first: every contract below ends
+    // the call. A refusal a rule decided is a policy hit.
+    const chaos = `      intuticChaosDecide(${tool}, '${code === "'HELD'" ? 'hold' : 'deny'}', ${ruleId}, ${ruleId} != null);\n`
     if (opts.contract === 'stdout-decision-deny' && opts.documentedFieldsOnly) {
       return (
+        chaos +
         `      process.stdout.write(JSON.stringify({ decision: 'deny', reason: reason + ' (refusal code ' + ${code} + ')' }) + '\\n');\n` +
         `      process.exit(0);`
       )
     }
-    return opts.contract === 'stdout-cancel'
+    return chaos + (opts.contract === 'stdout-cancel'
       // Cline shows a cancel's `errorMessage`; it has no `reason` field.
       ? `      process.stdout.write(JSON.stringify({ cancel: true, errorMessage: reason, ${fields} }) + '\\n');\n` +
           `      process.exit(0);`
@@ -1522,8 +1770,27 @@ export function emitJsGate(opts: JsGateOptions): string {
           // The envelope guard's reason already carries the prefix; a rule's
           // reason does not. One message shape either way.
           ? `      throw new Error(String(reason).indexOf('[Intutic Governance]') === 0 ? String(reason) : '[Intutic Governance] BLOCKED: ' + reason);`
-          : `      process.exit(2);`
+          : `      process.exit(2);`)
   }
+
+  /**
+   * A fault a chaos run injects into an allowed call, for a `reason` in scope:
+   * the fault's own text with the plan's canary, through this harness's
+   * contract. Not a refusal by governance, so a JSON decision carries
+   * `code: null`; the in-process contracts prefix the text so the host's
+   * wrapper passes it on as it is rather than as a gate fault.
+   */
+  const refuseFault =
+    `      try { console.error(reason); } catch (e) {}\n` +
+    (opts.contract === 'stdout-cancel'
+      ? `      process.stdout.write(JSON.stringify({ cancel: true, errorMessage: reason, code: null, ruleId: null }) + '\\n');\n` +
+        `      process.exit(0);`
+      : opts.contract === 'stdout-decision-deny'
+        ? `      process.stdout.write(JSON.stringify(${opts.documentedFieldsOnly ? `{ decision: 'deny', reason: reason }` : `{ decision: 'deny', reason: reason, code: null, ruleId: null }`}) + '\\n');\n` +
+          `      process.exit(0);`
+        : opts.contract === 'throw'
+          ? `      throw new Error('[Intutic Governance] ' + reason);`
+          : `      process.exit(2);`)
 
   return `
 // ── Intutic gate body v${GATE_VERSION} — harness: ${opts.harness} ────────────
@@ -1542,6 +1809,8 @@ ${NORMALISE_CONTRACT.jsSource}
 ${JS_SNAPSHOT_LOADER}
 
 ${jsHoldHelpers(opts.reviewRequestFile)}
+
+${JS_CHAOS_HELPERS}
 
 /**
  * Refuses a parsed payload that carries no recognisable tool-call envelope.
@@ -1573,7 +1842,7 @@ function intuticGuardEnvelope(ctx, keys, record) {
     'refusing rather than allowing a call the gate cannot read.';
   try { console.error(reason); } catch (e) {}
   try { record('tool_blocked', 'unknown', reason); } catch (e) {}
-${refuseWith("'UNREADABLE_CALL'", 'null')}
+${refuseWith("'UNREADABLE_CALL'", 'null', '', "'unknown'")}
 }
 
 /**
@@ -1610,7 +1879,19 @@ ${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}
  * matchSopRule and the intutic-clawde gate port pin — and the gate serializes
  * it itself so no writer can hand it a differently-shaped string.
  */
-function intuticGate(toolName, target, command, record, workspaceId, toolInput, sessionId) {
+function intuticGate(toolName, target, command, record, workspaceId, toolInput, sessionId, more) {
+  var _callStart = Date.now();
+  // A chaos run's record of this call (see intuticChaosDecide). A plan that is
+  // set but unreadable refuses, as an unreadable payload does: an experiment
+  // run without the faults it asked for reports a resilience it never measured.
+  intuticChaosBegin(toolName);
+  var _chaos = intuticChaos();
+  if (_chaos.error) {
+    var reason = _chaos.error + ' — refusing the call rather than running the experiment without the faults it asked for';
+    try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+    try { record('tool_blocked', toolName, reason); } catch (e) {}
+${refuseWith("'GATE_CRASHED'", 'null')}
+  }
   // Too large to evaluate inside the hook timeout (gateLimits.ts in
   // @intutic/shared-types): refused before any rule reads the call.
   var _commandBytes = Buffer.byteLength(String(command == null ? '' : command), 'utf8');
@@ -1643,7 +1924,7 @@ ${
     return _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId);
   };
   try {
-    return require('vm').runInThisContext('__intuticGateRules()', { timeout: _deadlineMs });
+    require('vm').runInThisContext('__intuticGateRules()', { timeout: _deadlineMs });
   } catch (err) {
     if (!err || err.code !== 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw err;
     var reason = 'GATE_DEADLINE — the gate did not finish evaluating this call within ${deadlineMs / 1000} s, and refuses it rather than let the hook timeout allow it';
@@ -1651,6 +1932,60 @@ ${
     try { record('tool_blocked', toolName, reason); } catch (e) {}
 ${refuseWith("'GATE_DEADLINE'", 'null')}
   }
+
+  // The call is allowed. A writer that runs this once per target of one call
+  // (OpenClaw's apply_patch) passes more for all but the last, so the
+  // call is reported, and faulted, once.
+  if (more) {
+    if (_intuticChaosCall) _intuticChaosCall.more = true;
+    return;
+  }
+  var _fault = intuticChaosDecide(toolName, 'allow', null, false);
+  if (!_fault) return;
+  if (_fault.delayS > 0) {
+    // Inside this gate's deadline: a gate still running at it refuses, and
+    // past the hook timeout most harnesses run the call anyway, so a longer
+    // wait would turn a delay into a refusal, or a hold-then-deny into an allow.
+    var _roomMs = Math.max(0, ${deadlineMs} - ${opts.contract === 'throw' ? '(Date.now() - _callStart)' : 'Math.round(process.uptime() * 1000)'} - 500);
+    var _waitMs = _fault.delayS * 1000;
+    if (_waitMs > _roomMs) {
+      try { console.error('[Intutic Governance] chaos: waiting ' + Math.floor(_roomMs / 1000) + ' s of the ' + _fault.delayS + ' s the plan asks for, to stay inside the hook timeout'); } catch (e) {}
+      _waitMs = _roomMs;
+    }
+    intuticChaosSleep(_waitMs);
+  }
+  if (_fault.kind === 'delay') return;
+  var reason = _fault.reason;
+${refuseFault}
+}
+
+/**
+ * The subjects of this call a rule matches, before its argument condition:
+ * for a phrase rule, the command when its phrases are in it. The context c
+ * holds the call's subject strings, and the phrase matcher's words once
+ * computed.
+ */
+function intuticRuleSubjects(rule, c) {
+  // A phrase rule's source is |-separated phrases matched as words against
+  // the raw command — never as a regex, which backtracks on crafted input.
+  if (rule.subject === 'phrase') {
+    if (c.words === null) c.words = phraseText(c.command);
+    return intuticPhraseRule(rule.re.source, c.words) ? [c.nCommand] : [];
+  }
+  // Each field is tested separately rather than concatenated — joining them
+  // lets a pattern match across the seam between two innocuous values.
+  const subjects =
+    rule.subject === 'tool' ? [c.nTool]
+    : rule.subject === 'command' ? [c.nCommand]
+    : rule.subject === 'target' ? [c.nTarget]
+    // The serialized tool input, un-normalised: a content rule (the
+    // secrets.* floor) matches the bytes a Write would put on disk. The
+    // same string the WHERE argPattern machinery tests, so the two content
+    // subjects cannot drift.
+    : rule.subject === 'content' ? [c.toolInputJson]
+    : rule.subject === 'action' ? [c.nActions]
+    : [c.nCommand, c.nTarget];
+  return subjects.filter(function (subject) { return intuticRuleMatches(rule, subject); });
 }
 
 function _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId) {
@@ -1700,6 +2035,11 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
     try { record('snapshot_' + snap.state, toolName, _msg); } catch (e) {}
   }
+  // A chaos run's no_destructive_attempt probe reads every destructive.* rule,
+  // the ones the escape hatch skips below included.
+  const _chaosDestructive = intuticChaos().plan
+    ? snap.rules.filter(function (r) { return r.id.indexOf('destructive.') === 0; })
+    : [];
   if (disabled) snap.rules = snap.rules.filter(function (r) { return r.id.indexOf('destructive.') !== 0; });
   // JSON.stringify(tool_input) — no replacer, no spacing — matching matchSopRule.
   // stringify(undefined) is undefined, hence the fallbacks; a throw cannot
@@ -1713,31 +2053,18 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
   // The space-padded action tokens the command classifies to, for \`action\`
   // subject rules (" action:deploy ").
   const nActions = intuticActions(toolName, command);
-  var words = null;
+  const ctx = { command: command, words: null, nCommand: nCommand, nTarget: nTarget, nTool: nTool,
+    toolInputJson: toolInputJson, nActions: nActions };
+  for (const rule of _chaosDestructive) {
+    // A rule whose argument condition did not compile fires name-only, as below.
+    if (intuticRuleSubjects(rule, ctx).length > 0 && (rule.argDowngraded || !rule.argRe || rule.argRe.test(toolInputJson))) {
+      if (_intuticChaosCall) _intuticChaosCall.destructive = true;
+      break;
+    }
+  }
   const rules = INTUTIC_FLOOR.concat(snap.rules);
   for (const rule of rules) {
-    // A phrase rule's source is |-separated phrases matched as words against
-    // the raw command — never as a regex, which backtracks on crafted input.
-    if (rule.subject === 'phrase') {
-      if (words === null) words = phraseText(command);
-      if (!intuticPhraseRule(rule.re.source, words)) continue;
-    }
-    // Each field is tested separately rather than concatenated — joining them
-    // lets a pattern match across the seam between two innocuous values.
-    const subjects =
-      rule.subject === 'phrase' ? [nCommand]
-      : rule.subject === 'tool' ? [nTool]
-      : rule.subject === 'command' ? [nCommand]
-      : rule.subject === 'target' ? [nTarget]
-      // The serialized tool input, un-normalised: a content rule (the
-      // secrets.* floor) matches the bytes a Write would put on disk. The
-      // same string the WHERE argPattern machinery tests, so the two content
-      // subjects cannot drift.
-      : rule.subject === 'content' ? [toolInputJson]
-      : rule.subject === 'action' ? [nActions]
-      : [nCommand, nTarget];
-    for (const subject of subjects) {
-      if (rule.subject !== 'phrase' && !intuticRuleMatches(rule, subject)) continue;
+    for (const subject of intuticRuleSubjects(rule, ctx)) {
       // The argument condition of a WHERE rule: the tool-name half has
       // matched, and the rule fires only if the argPattern also matches the
       // serialized tool input. A pattern that failed to compile at load time
@@ -1754,6 +2081,7 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
       }
       if (rule.severity === 'shadow') {
         // Certain rule, deliberately not acted on. Counted apart from warn.
+        intuticChaosNote(rule.id, false);
         try { record('tool_would_block', toolName, rule.reason + ' [' + rule.id + ']'); } catch (e) {}
         continue;
       }
@@ -1762,7 +2090,7 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
         // see it first. An approved bypass lets this exact call through once;
         // otherwise the hold is recorded for review and the call refused.
         const held = intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId);
-        if (held.bypassed) continue;
+        if (held.bypassed) { intuticChaosNote(rule.id, true); continue; }
         const reason = '[Intutic Governance] HELD: ' + rule.reason + ' [' + rule.id + '] ' + intuticHoldHint(held.holdId);
 ${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId')}
       }
@@ -1771,6 +2099,7 @@ ${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId')}
         // first token. The verb is what makes a flag triageable as true or false
         // positive; without it the promotion rule this tier exists to serve is
         // not measurable. Arguments and paths stay out — that is DLP's job.
+        intuticChaosNote(rule.id, false);
         try {
           record('tool_flagged', toolName,
             rule.reason + ' [' + rule.id + '] verb=' + nCommand.trim().split(' ')[0]);
@@ -1835,6 +2164,7 @@ ${refuseWith('_reg.code', '_reg.ruleId')}
       // and the throw contract would hit a ReferenceError here.
       var reason = _mcp.reason + ' [' + _mcp.ruleId + ']';
       if (snap.mcpAllowlist.severity === 'shadow') {
+        intuticChaosNote(_mcp.ruleId, false);
         try { record('tool_would_block', toolName, reason); } catch (e) {}
       } else {
         try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
