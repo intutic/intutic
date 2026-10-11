@@ -646,5 +646,10 @@ async fn a_chaos_run_writes_nothing_to_the_shared_trace_log() {
     let logs = home.join(".intutic").join("logs");
     let written = std::fs::read_dir(&logs).map(|d| d.count()).unwrap_or(0);
     let _ = std::fs::remove_dir_all(&home);
-    assert_eq!(written, 0, "no trace file may appear under {}", logs.display());
+    assert_eq!(
+        written,
+        0,
+        "no trace file may appear under {}",
+        logs.display()
+    );
 }

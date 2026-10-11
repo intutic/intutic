@@ -134,7 +134,9 @@ traffic, judged by a person:
   promotable only with an explicit acknowledgement, recorded on the event.
 - **Generated WASM rules and rule candidates**: at least 200 shadow
   evaluations and a would-block rate of at most 1 %, per rule, by an
-  authenticated member.
+  authenticated member. Both proxies count: each LLM request and each MCP
+  tool call the rule is evaluated on is one evaluation, so a rule that only
+  governs MCP tools earns promotion on MCP traffic.
 - **Detector findings**: adjudicated on the Findings page; the meter counts
   adjudicated findings, not total findings.
 

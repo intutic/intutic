@@ -4,7 +4,8 @@
  * budget.test.ts, against Valkey.
  */
 import { describe, it, expect } from 'vitest'
-import { budgetRemaining, holdStatus, registryStatus } from '../agentTools.js'
+import { z } from 'zod'
+import { LIST_INCIDENTS_ARGS, budgetRemaining, holdStatus, incidentListPath, registryStatus } from '../agentTools.js'
 
 const HOLD = 'hold_abc_0a1b2c3d'
 const future = new Date(Date.now() + 60_000).toISOString()
@@ -79,5 +80,26 @@ describe('intutic_mcp_budget_remaining', () => {
     expect(report).toEqual([
       { budgetId: 'gh', counts: 'calls to github: 10 per hour', period: 'hour', limit: 10, used: null, remaining: null, resetAt: '2026-10-08T15:00:00.000Z' },
     ])
+  })
+})
+
+describe('intutic_list_incidents', () => {
+  const args = z.object(LIST_INCIDENTS_ARGS)
+
+  it('takes a type the control plane knows, system incident types included', () => {
+    expect(args.parse({ type: 'SYSTEM_ANOMALY' })).toEqual({ limit: 10, type: 'SYSTEM_ANOMALY' })
+    expect(args.parse({ type: 'WASM_RULE_REFUSED', limit: 5 })).toEqual({ limit: 5, type: 'WASM_RULE_REFUSED' })
+    expect(args.parse({})).toEqual({ limit: 10 })
+  })
+
+  it('refuses a type the control plane would refuse, naming the valid ones', () => {
+    const r = args.safeParse({ type: 'NOT_A_TYPE' })
+    expect(r.success).toBe(false)
+    expect(JSON.stringify(r.error?.issues)).toContain('SCOPE_VIOLATION')
+  })
+
+  it('sends the type to the incidents route only when given', () => {
+    expect(incidentListPath('ws_1', { limit: 10 })).toBe('/api/v1/incidents?workspaceId=ws_1&limit=10')
+    expect(incidentListPath('ws_1', { limit: 5, type: 'SYSTEM_ANOMALY' })).toBe('/api/v1/incidents?workspaceId=ws_1&limit=5&type=SYSTEM_ANOMALY')
   })
 })

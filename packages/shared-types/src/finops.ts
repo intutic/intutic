@@ -264,6 +264,39 @@ export interface TraceStep {
   timestamp: string
 }
 
+/**
+ * One upstream call the LLM proxy made for a request: a retry of the routed
+ * model or a fallback target. `outcome` is `ok`, `http_<status>`, `timeout`,
+ * `connect_error`, `transport_error`, or `skipped` for a fallback target that
+ * was not called; `stopped` says why no further call was made (`max_attempts`,
+ * `time_budget`, `retry_after_exceeds_budget`, `provider_declined`,
+ * `quota_exhausted`) or, for a skipped target, why it was skipped
+ * (`same_target`, `wire_mismatch`, `model_not_allowed`, `budget` — priced
+ * for its model, the request would not fit a spend budget — `no_credential`,
+ * `unknown_provider`, `time_budget`).
+ */
+export interface UpstreamAttempt {
+  model: string
+  provider: string
+  outcome: string
+  status?: number
+  latencyMs: number
+  /** The wait before the next call. */
+  backoffMs?: number
+  /** True when that wait was the provider's own `retry-after`. */
+  serverDelay?: boolean
+  stopped?: string
+}
+
+/** The fallback target that served a request after the routed model's retries ran out. */
+export interface UpstreamFallback {
+  fromModel: string
+  toModel: string
+  toProvider: string
+  /** True when the routed model's prompt cache was warm and the fallback is another model family. */
+  cacheAffinityBroken?: boolean
+}
+
 /** Full detail of a single trace. */
 export interface TraceDetail {
   traceId: string
@@ -324,6 +357,13 @@ export interface TraceDetail {
    * it back is what the shadow-routing savings report aggregates.
    */
   routingShadowModel?: string | null
+  /**
+   * Every upstream call the proxy made when it retried or ran fallbacks, in
+   * order (migration 216). Null for the ordinary request that took one call.
+   */
+  upstreamAttempts?: UpstreamAttempt[] | null
+  /** The fallback target that served the request, or null when none did (migration 216). */
+  upstreamFallback?: UpstreamFallback | null
   /** True when the request was served under a valid break-glass token, global or scoped (migration 170). */
   breakGlass?: boolean
   /** The approval this trace ran under; what it skipped is that approval's `policyId`. */

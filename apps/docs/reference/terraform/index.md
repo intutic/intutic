@@ -47,6 +47,7 @@ provider "intutic" {
 - [intutic_mcp_server_decision](./resources/mcp_server_decision)
 - [intutic_siem_destination](./resources/siem_destination)
 - [intutic_wasm_rule](./resources/wasm_rule)
+- [intutic_provider_credential](./resources/provider_credential)
 
 ## Data sources
 

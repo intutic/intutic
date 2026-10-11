@@ -39,9 +39,37 @@ describe('probeProviderCredential', () => {
     expect(res.detail).not.toContain('sk-ant-super-secret-value')
   })
 
-  it('unsupported: bedrock has no probe defined', async () => {
-    const res = await probeProviderCredential('bedrock', { awsAccessKeyId: 'x', awsSecretAccessKey: 'y', awsRegion: 'us-east-1' })
-    expect(res.status).toBe('unsupported')
+  it('bedrock: a signed STS call; an unrecognised key is invalid', async () => {
+    fetchMock.mockResolvedValue({ status: 403, headers: new Headers({ 'x-amzn-errortype': 'InvalidClientTokenId' }) })
+    const res = await probeProviderCredential('bedrock', {
+      awsAccessKeyId: 'AKIDTEST',
+      awsSecretAccessKey: ['test', '-secret-', 'value'].join(''),
+      awsRegion: 'us-east-1',
+    })
+    expect(res.status).toBe('invalid')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://sts.us-east-1.amazonaws.com/')
+    expect((init.headers as Record<string, string>).authorization).toMatch(/^AWS4-HMAC-SHA256 Credential=AKIDTEST\//)
+    expect(res.detail).not.toContain('test-secret-value')
+  })
+
+  it('bedrock: a valid key says what was proven', async () => {
+    fetchMock.mockResolvedValue({ status: 200, headers: new Headers() })
+    const res = await probeProviderCredential('bedrock', {
+      awsAccessKeyId: 'AKIDTEST',
+      awsSecretAccessKey: 'secret',
+      awsRegion: 'us-east-1',
+    })
+    expect(res.status).toBe('valid')
+    expect(res.detail).toContain('Bedrock model access is checked on the first request')
+  })
+
+  it('vertex: an unusable private key is invalid without any request', async () => {
+    const res = await probeProviderCredential('vertex_ai', {
+      projectId: 'p',
+      serviceAccountJson: JSON.stringify({ type: 'service_account', client_email: 'a@b', private_key: 'nope' }),
+    })
+    expect(res.status).toBe('invalid')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

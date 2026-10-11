@@ -24,8 +24,20 @@ class ClawdeBlockedError(ClawdeVerdictError):
     again. `verdict` is `kill`, `reask` or `hold`, `code` the proxy's refusal
     code, `rule_id` the rule that decided when the proxy names one (every
     refusal it answers with a 200 does), and the message its reason."""
-    def __init__(self, verdict: str, code: str, status: int, message: str, rule_id: Optional[str] = None):
+    def __init__(
+        self,
+        verdict: str,
+        code: str,
+        status: int,
+        message: str,
+        rule_id: Optional[str] = None,
+        retry_after_seconds: Optional[int] = None,
+    ):
         super().__init__(verdict, message)
         self.code = code
         self.status = status
         self.rule_id = rule_id
+        #: Seconds until the refusal stops applying, from the proxy's
+        #: `Retry-After`: set on RATE_LIMITED (the next minute) and
+        #: BUDGET_EXCEEDED (the budget's reset); None when retrying will not help.
+        self.retry_after_seconds = retry_after_seconds

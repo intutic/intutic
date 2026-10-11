@@ -12,7 +12,8 @@ import { ToolCallInterceptor } from '../interceptor.js'
 import { configurePii } from '../dlp.js'
 import { PolicyClient, UNRESTRICTED_REGISTRY, parseSsoGroupPolicy } from '../policy.js'
 import type { McpPrincipal, McpRegistryPolicy, SopRule, SsoGroupPolicy } from '../policy.js'
-import { GovernanceEmitter, type DetectionFinding } from '../emitter.js'
+import { GovernanceEmitter, type DetectionFinding, type EventKind, type RuleEventDetail } from '../emitter.js'
+import type { BudgetEventDetail } from '../budget.js'
 import { SessionState } from '../session.js'
 import type { WasmRunner, WasmVerdict } from '../wasm/runner.js'
 import * as node_path from 'node:path'
@@ -127,20 +128,22 @@ class StubPolicyClient extends PolicyClient {
 }
 
 class StubEmitter extends GovernanceEmitter {
-  readonly emitted: Array<{ kind: string; toolName: string; toolInput: unknown; reason?: string; severity?: string; finding?: DetectionFinding }> = []
+  readonly emitted: Array<{ kind: string; toolName: string; toolInput: unknown; reason?: string; severity?: string; finding?: DetectionFinding; rule?: RuleEventDetail }> = []
 
   constructor() {
     super('http://localhost:0', '', node_path.join(node_os.homedir(), '.intutic-test', 'events.jsonl'), 'test-ws')
   }
 
   override emit(
-    kind: 'tool_allowed' | 'tool_blocked' | 'tool_redacted' | 'injection_detected' | 'anomaly_detected' | 'tool_held' | 'hold_approved_bypass_used',
+    kind: EventKind,
     toolName: string,
     toolInput: unknown,
     reason?: string,
     finding?: DetectionFinding,
+    _budget?: BudgetEventDetail,
+    rule?: RuleEventDetail,
   ): void {
-    this.emitted.push({ kind, toolName, toolInput, reason, severity: finding?.severity, finding })
+    this.emitted.push({ kind, toolName, toolInput, reason, severity: finding?.severity, finding, ...(rule ? { rule } : {}) })
   }
 }
 
@@ -529,6 +532,8 @@ describe('ToolCallInterceptor', () => {
           if (verdict instanceof Error) throw verdict
           return verdict
         },
+        syncCloudRules: async () => {},
+        cloudRulesLoaded: () => true,
       }
       return stub as unknown as WasmRunner
     }
@@ -574,6 +579,87 @@ describe('ToolCallInterceptor', () => {
       expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'wasm' })
       expect((decision as { reason: string }).reason).toContain('worker gone')
     })
+  })
+
+  describe("the workspace's control-plane rules", () => {
+    const DESCRIPTORS = [{ ruleId: 'wasm_1', name: 'no-prod', sha256: 'a'.repeat(64), priority: 10, mode: 'ENFORCE' as const }]
+
+    /** A runner whose control-plane rules are loaded or not, recording what it was asked to sync. */
+    function runner(loaded: boolean, synced: unknown[]): WasmRunner {
+      const stub = {
+        evaluate: async () => ({ code: 'allow' }),
+        syncCloudRules: async (descriptors: unknown) => {
+          synced.push(descriptors)
+        },
+        cloudRulesLoaded: () => loaded,
+      }
+      return stub as unknown as WasmRunner
+    }
+
+    class RulesPolicy extends StubPolicyClient {
+      override getWasmRules() {
+        return DESCRIPTORS
+      }
+    }
+
+    it("reports the shadowed rules' evaluations, whatever the call's outcome", async () => {
+      const stub = {
+        evaluate: async (_input: unknown, shadowOut?: Array<{ ruleId: string; wouldAct: boolean }>) => {
+          shadowOut?.push({ ruleId: 'wasm_candidate', wouldAct: true }, { ruleId: 'wasm_other', wouldAct: false })
+          return { code: 'block', reason: 'no', ruleId: 'wasm_enforced' }
+        },
+        syncCloudRules: async () => {},
+        cloudRulesLoaded: () => true,
+      } as unknown as WasmRunner
+      const interceptor = new ToolCallInterceptor(new StubPolicyClient(), emitter, true, 'shell', 'warn', undefined, 'off', {}, stub, 'test-ws')
+      expect((await interceptor.decide('Bash', { command: 'ls' })).action).toBe('block')
+      expect(emitter.emitted.map((e) => e.kind)).toEqual(['wasm_shadow_evaluated', 'tool_blocked'])
+      expect(emitter.emitted[0]!.rule).toEqual({
+        wasmShadowReports: [{ ruleId: 'wasm_candidate', wouldAct: true }, { ruleId: 'wasm_other', wouldAct: false }],
+      })
+    })
+
+    it('sends no shadow event for a call no shadowed rule evaluated', async () => {
+      const interceptor = new ToolCallInterceptor(new RulesPolicy(), emitter, true, 'shell', 'warn', undefined, 'off', {}, runner(true, []), 'test-ws')
+      await interceptor.decide('Bash', { command: 'ls' })
+      expect(emitter.emitted.map((e) => e.kind)).toEqual(['tool_allowed'])
+    })
+
+    it("syncs the runner to the policy's descriptors before evaluating", async () => {
+      const synced: unknown[] = []
+      const interceptor = new ToolCallInterceptor(new RulesPolicy(), emitter, false, 'shell', 'warn', undefined, 'off', {}, runner(true, synced), 'test-ws')
+      expect((await interceptor.decide('Bash', { command: 'ls' })).action).toBe('allow')
+      expect(synced).toEqual([DESCRIPTORS])
+    })
+
+    it.each([
+      ['locally closed', false, undefined],
+      ['closed by the workspace', true, false],
+    ] as Array<[string, boolean, boolean | undefined]>)(
+      'refuses while they have never loaded, %s',
+      async (_name, localFailOpen, workspaceFailOpen) => {
+        const policy = new StubPolicyClient()
+        policy.failOpen = workspaceFailOpen
+        const interceptor = new ToolCallInterceptor(policy, emitter, localFailOpen, 'shell', 'warn', undefined, 'off', {}, runner(false, []), 'test-ws')
+        const decision = await interceptor.decide('Bash', { command: 'ls' })
+        expect(decision).toMatchObject({ action: 'block', code: 'GOVERNANCE_UNAVAILABLE', ruleId: 'mcpProxyFailBehavior' })
+        expect((decision as { reason: string }).reason).toContain("custom rules have not loaded")
+        expect(emitter.emitted.map((e) => e.kind)).toEqual(['tool_blocked'])
+      },
+    )
+
+    it.each([
+      ['locally open', true, undefined],
+      ['open by the workspace', false, true],
+    ] as Array<[string, boolean, boolean | undefined]>)(
+      'judges the call by the rules that did load while they have not, %s',
+      async (_name, localFailOpen, workspaceFailOpen) => {
+        const policy = new StubPolicyClient()
+        policy.failOpen = workspaceFailOpen
+        const interceptor = new ToolCallInterceptor(policy, emitter, localFailOpen, 'shell', 'warn', undefined, 'off', {}, runner(false, []), 'test-ws')
+        expect((await interceptor.decide('Bash', { command: 'ls' })).action).toBe('allow')
+      },
+    )
   })
 
   describe('anomaly detection (Phase 2)', () => {

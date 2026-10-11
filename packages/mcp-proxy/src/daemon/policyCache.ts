@@ -111,6 +111,13 @@ export interface ResolvedPolicy {
    */
   piiDetectors?: unknown
   /**
+   * The workspace's custom rule descriptors (`wasmRules`), carried as sent for
+   * the same reason as `piiDetectors`: `PolicyClient` reads them with the
+   * reader the per-session mode uses. Absent from an older control plane and
+   * from the snapshot seed.
+   */
+  wasmRules?: unknown
+  /**
    * True on the entry `seedFromSnapshot` built from the sync daemon's local
    * snapshot, which carries only part of the policy. A proxy that already
    * loaded a full policy takes only the rules from such an entry (see
@@ -201,6 +208,7 @@ type PolicyResponseBody = Pick<
   | 'mcpProxyFailBehavior'
   | 'mcpBudgets'
   | 'piiDetectors'
+  | 'wasmRules'
 >
 
 /**
@@ -285,6 +293,7 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
         : undefined,
     mcpBudgets: parseMcpBudgetPolicy(parsed['mcpBudgets']),
     piiDetectors: parsed['piiDetectors'],
+    wasmRules: parsed['wasmRules'],
   }
 }
 
@@ -347,6 +356,7 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
             mcpProxyFailBehavior: parsed.mcpProxyFailBehavior,
             mcpBudgets:       parsed.mcpBudgets,
             piiDetectors:     parsed.piiDetectors,
+            wasmRules:        parsed.wasmRules,
             cachedAt:         Date.now(),
             configVersion:    versionAtFetch,
           })

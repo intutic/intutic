@@ -312,6 +312,16 @@ describe('ControlPlaneClient', () => {
     expect(res.routingLive).toBe(false)
   })
 
+  it('setProviderCredential() sends every field of a multi-field cloud credential', async () => {
+    respondWithBody = { provider: 'bedrock', routingLive: true, provisioned: true, lastFour: 'WXYZ', updatedAt: '2026-10-09' }
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    const fields = { awsRegion: 'us-east-1', awsAccessKeyId: 'AKIA' + 'EXAMPLEWXYZ', awsSecretAccessKey: 'x'.repeat(40) }
+    const res = await client.setProviderCredential('bedrock', fields)
+    expect(receivedPath).toBe('/api/v1/workspace/provider-credentials/bedrock')
+    expect(receivedBody).toEqual(fields)
+    expect(res.routingLive).toBe(true)
+  })
+
   it('unsetProviderCredential() sends DELETE to /api/v1/workspace/provider-credentials/:provider', async () => {
     const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
     await client.unsetProviderCredential('openrouter')
@@ -323,6 +333,13 @@ describe('ControlPlaneClient', () => {
     const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
     await client.unsetProviderCredential('a b/c')
     expect(receivedPath).toBe('/api/v1/workspace/provider-credentials/a%20b%2Fc')
+  })
+
+  it('listProviderModels() URL-encodes the provider segment before /models', async () => {
+    const client = new ControlPlaneClient({ apiKey: 'vk_test', baseUrl })
+    await client.listProviderModels('a b/c')
+    expect(receivedMethod).toBe('GET')
+    expect(receivedPath).toBe('/api/v1/workspace/provider-credentials/a%20b%2Fc/models')
   })
 
   it('raises ClawdeConnectionError with the response body text on a non-2xx status', async () => {

@@ -13,7 +13,7 @@
  * @module
  */
 
-import { buildVerificationProbe, classifyProbeResponse, getProviderDefinition, type ProbeVerdict } from '@intutic/shared-types'
+import { buildVerificationProbeAsync, classifyProbe, getProviderDefinition, type ProbeVerdict } from '@intutic/shared-types'
 
 export interface ProviderProbeOutcome {
   status: ProbeVerdict | 'unsupported'
@@ -24,7 +24,7 @@ export interface ProviderProbeOutcome {
 /**
  * Verify a credential the caller holds locally (not yet, or not necessarily,
  * saved anywhere). `fields` matches the provider's registry field shape,
- * e.g. `{apiKey: '...'}` for Anthropic, `{apiKey, endpoint, deploymentName}`
+ * e.g. `{apiKey: '...'}` for Anthropic, `{apiKey, endpoint}`
  * for Azure OpenAI.
  */
 export async function probeProviderCredential(
@@ -37,11 +37,18 @@ export async function probeProviderCredential(
     return { status: 'unsupported', detail: `Unknown provider '${providerId}'` }
   }
 
-  const probe = buildVerificationProbe(providerId, fields)
+  const probe = await buildVerificationProbeAsync(providerId, fields)
   if (!probe) {
     return {
       status: 'unsupported',
       detail: `${def.displayName} cannot be verified automatically yet — double-check the credential by hand`,
+    }
+  }
+
+  if (probe.localVerdict) {
+    return {
+      status: probe.localVerdict,
+      detail: `${def.displayName}: ${probe.validDetail ?? 'the credential cannot be used'}`,
     }
   }
 
@@ -52,13 +59,15 @@ export async function probeProviderCredential(
       ...(probe.body ? { body: probe.body } : {}),
       signal: AbortSignal.timeout(timeoutMs),
     })
-    const verdict = classifyProbeResponse(res.status)
+    const verdict = classifyProbe(probe, res.status, res.headers)
     return {
       status: verdict,
       httpStatus: res.status,
       detail:
         verdict === 'valid'
-          ? `${def.displayName} credential looks valid`
+          ? probe.validDetail
+            ? `${def.displayName}: ${probe.validDetail}`
+            : `${def.displayName} credential looks valid`
           : verdict === 'invalid'
             ? `${def.displayName} rejected the credential (HTTP ${res.status})`
             : `${def.displayName} returned HTTP ${res.status} — could not confirm either way`,

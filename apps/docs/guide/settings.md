@@ -105,13 +105,15 @@ Create keys (`vk_` prefix) for developers and their agents to reach the Intutic 
 - **Revoke** a compromised key immediately
 
 There is no in-place rotation: create a new key, move clients to it, then revoke the old one.
+Creating and revoking a key is recorded with who did it on the
+[audit timeline](/guide/audit-timeline#what-it-shows); the key itself is stored only as a hash.
 
 ### Provider Keys
 
-Provision your workspace's own upstream API key for each model provider — Anthropic, OpenAI,
-Mistral, OpenRouter, and DeepSeek route today; Gemini and other providers can be configured ahead of
-their routing support (see below). A Gemini key saved now is the one the gateway uses once Gemini
-routing ships. Configuring your own key means requests bill against your
+Provision your workspace's own upstream credential for each model provider — Anthropic, OpenAI,
+Gemini, Mistral, OpenRouter, DeepSeek, [AWS Bedrock](/integrations/aws-bedrock),
+[Google Vertex AI](/integrations/google-vertex-ai) and [Azure OpenAI](/integrations/azure-openai),
+with more providers pre-configurable ahead of their routing support (see below). Configuring your own key means requests bill against your
 provider account directly rather than Intutic's shared operator key.
 
 Each provider row shows a **Live** or **Not yet routable** badge. **Live** means the gateway
@@ -132,9 +134,37 @@ intutic credentials set anthropic --field apiKey=sk-ant-...
 intutic credentials unset anthropic
 ```
 
-A provider needing more than one field (e.g. Azure OpenAI: endpoint, deployment, key) takes a
-repeated `--field key=value` flag, one per field — the wizard's dynamic form and the CLI submit
-the same shape.
+A provider needing more than one field takes a repeated `--field key=value` flag, one per field,
+and `--field-file key=path` reads a value from a file — the wizard's dynamic form and the CLI
+submit the same shape. AWS Bedrock takes a region and either an access key pair or a Bedrock API
+key; Google Vertex AI a project, an optional location and a service-account key; Azure OpenAI the
+resource endpoint, which must be an Azure host over `https`, and its key. Requests name these
+providers' models as `bedrock/<model id>`, `vertex/<model>` and `azure/<deployment>`.
+
+A saved credential is checked against the provider straight away, and the card says what came back:
+verified, rejected (check the values and save again), or not verified when the provider could not
+be reached or the check cannot prove it. **Test** repeats the check for a provisioned credential, and
+`intutic credentials set` prints the same result.
+
+Where the check is the provider's own list of models — Anthropic, OpenAI, Gemini, Mistral,
+OpenRouter, DeepSeek, Cohere and Ollama — a verified key's list is kept, and the card's **Models
+this key can reach** column shows it with when it was checked. Smart routing leaves out a
+candidate the key does not list. Replacing or removing the key, or a check the provider rejects,
+clears the list until the next successful check. Azure OpenAI lists base models rather than the
+deployments requests name, and Bedrock and Vertex AI checks prove identity, so those keep no list.
+The same list from the CLI or the API:
+
+```bash
+intutic credentials models anthropic
+# GET /api/v1/workspace/provider-credentials/anthropic/models
+``` AWS Bedrock and Google Vertex AI are checked by a
+signed AWS call or a Google token request, which prove the credential but not the model permissions
+the first request uses.
+
+Keys are encrypted before they are stored, and only the last four characters are ever shown
+again (see [Stored credentials](/security#stored-credentials)). Adding, replacing and removing a
+key is recorded with who did it on the [audit timeline](/guide/audit-timeline#what-it-shows) and
+sends the `credential.changed` notification.
 
 **Guided setup**, on the Provider Keys card, walks through provisioning a provider and verifying
 it against the provider's own API in one flow. See
@@ -166,9 +196,9 @@ reaches a provider. An absent list and an explicitly empty list are treated iden
 "unrestricted" — there is no difference between never configuring this and configuring it with
 zero entries.
 
-See [Intelligent Model Routing](/guide/intelligent-routing) — when routing is enabled, the models
-it can actually pick from are the intersection of your `candidate_models` configuration and this
-allowlist, not either list alone.
+See [Intelligent Model Routing](/guide/intelligent-routing#which-models-a-request-can-be-routed-to) — when
+routing is enabled, it never picks a model this allowlist or the key's own list refuses, whatever
+the candidate list says.
 
 A single API key can be scoped below the workspace list: the **Allowed models (optional)** field
 under [Virtual API Keys](#virtual-api-keys) takes one model id per line, and the proxy enforces the *intersection*
@@ -270,9 +300,11 @@ Entries are per workspace and expire after 24 hours.
 
 The cache figures are **Cached answers**, **Cache hit rate** (exact and similar hits) and **Saved (USD)**.
 
-**Intelligent Model Routing**
+**Intelligent Model Routing** (experimental)
 
-*   **Enable Intelligent Model Routing** — chooses a model for every task with adaptive reinforcement learning. See [Intelligent Model Routing](/guide/intelligent-routing).
+*   **Enable Intelligent Model Routing** — lets the proxy choose among the candidate models for a request whose model is one of them, learning from each outcome (`ff_bandit_routing`). Off by default. See [Intelligent Model Routing](/guide/intelligent-routing).
+*   **Shadow Routing** — runs the same selection and records the model it would have picked, while every request is served with the model it asked for (`ff_shadow_routing`). The safe way to see what routing would do before turning it on.
+*   **Candidate Models** — the models the router may choose between for this workspace, one id per line, at most 16, saved with **Save Candidate Models** (`routingCandidates`). Empty uses the proxy's configured pool. Each request still only chooses among the candidates it can reach: see [Which models a request can be routed to](/guide/intelligent-routing#which-models-a-request-can-be-routed-to).
 *   **Configurable Task Trigger Words** — the comma-separated keywords the proxy uses to classify a prompt as testing, deployment, review or debugging; one field per task type, saved with **Save Keywords**.
 
 The router figures are:
@@ -280,6 +312,16 @@ The router figures are:
 - **Convergence** — the convergence ratio, as a percentage.
 - **Routing decisions** — the number of routing observations.
 - **Active Intelligent Routing Configurations** — a table of each configuration's ID, model, security level, task type, requests handled and performance score.
+
+### Retries & Fallbacks
+
+How the proxy handles an overloaded or rate-limited provider for this workspace: the workspace setting `upstreamRetry`, laid over each proxy's own `config.yaml` field by field.
+
+*   **Retry failed provider calls** — on by default; takes effect at once. Off makes one call per model, and fallback targets still run after it fails.
+*   **Calls per model** and **Time budget (ms)** — blank keeps each proxy's value (3 calls, 30,000 ms by default).
+*   **Fallback targets** — JSON mapping a model to up to five targets, tried in order once its retries run out. A target names a `model`, a `provider`, or both; the providers are the ones [`config.yaml` takes](/reference/configuration#fallbacks-intutic-settings-routing-fallbacks), Bedrock, Vertex AI and Azure OpenAI included.
+
+**Save retry settings** writes the fields; **Use each proxy's config** clears the setting. See [Retries and fallbacks](/guide/intelligent-routing#retries-and-fallbacks).
 
 ### Contracted Model Rates
 
@@ -299,7 +341,9 @@ Usage against your plan, invoices, and the spend caps that stop a runaway agent.
 - **Enterprise trial** — for an Owner on an eligible workspace, a banner offers **Start 14-day enterprise trial**; during a trial it shows the days remaining and **Talk to Sales**.
 - **Governed Request Usage** — Governed Requests this month against the requests your plan includes (for an organization's plan, counted across all its workspaces), any overage and its charge, the rate per 1,000 Governed Requests your workspace is billed at, and a daily trend.
 - **Billing History & Invoices** — invoices Stripe issued to this workspace, newest first.
-- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)** and **Alert at (% of cap)** fields, saved with **Save limits** (Owners and Admins; other roles see the caps read-only); and **Budget alerts**, each with **Acknowledge** (Owners, Admins and EMs). A workspace that has not saved a daily cap shows the $100 default under the field, which the proxy enforces until you save your own. See [Budgets & FinOps](/guide/budgets).
+- **Budget Limits** — meters for **Spent this month** and **Spent today** against their caps; the **Daily cap (USD)**, **Monthly cap (USD)**, **Over the daily cap** and **Over the monthly cap** (refuse requests, or alert only) and **Alert at (% of cap)** fields, saved with **Save limits**, which saves only the fields you changed, and **Use the $100.00 default daily cap** once a daily cap is saved (Owners and Admins; other roles see the caps read-only); **Block at the plan's daily cap**; and **Budget alerts**, each naming the workspace cap, key or member it is about, with **Acknowledge** (Owners, Admins and EMs). See [Budgets & FinOps](/guide/budgets). A workspace that has not saved a daily cap shows the $100 default under the field, which the proxy enforces until you save your own. See [Budgets & FinOps](/guide/budgets).
+- **Key budgets and rate limits** — every live virtual key with its owner, its spend today and this month against its own budgets, and its requests and tokens per minute; **Edit** sets them (Owners and Admins). EMs see every key, other roles their own. See [Key budgets](/guide/budgets#key-budgets).
+- **Member budgets** <Badge type="warning" text="Biz Org+" /> — the default member budget and each member's spend against the budgets that apply to them; **Edit default** and **Edit** set them (Owners and Admins). See [Member budgets](/guide/budgets#member-budgets).
 
 ### Changing plan {#changing-plan}
 
@@ -395,7 +439,7 @@ The **Event Type** list offers only the events the control plane sends:
 
 | Event type | Label in the dashboard |
 |------------|------------------------|
-| `incident.created` | Incident Created |
+| `incident.created` | Incident Created: sent at the incident's own severity, so ticking HIGH and CRITICAL leaves out MEDIUM and LOW incidents. Before 2.4.0 every incident was sent at CRITICAL. See [incident types](/guide/concepts#incident-types) |
 | `judge.review.queued` | Judge Review Waiting |
 | `anomaly.detected` | Anomaly Detected |
 | `anomaly.finding` | Detector Finding (incl. advisory): every detector finding, allowed or blocked; pair it with a severity filter |
@@ -413,8 +457,8 @@ The **Event Type** list offers only the events the control plane sends:
 | `mcp.server.tool_toggled` | MCP Server Tool Switched On or Off: MEDIUM when a tool is switched off, INFO when on |
 | `mcp.budget.threshold` | MCP Call Budget Threshold Reached: once per budget per period |
 | `mcp.budget.exceeded` | MCP Call Budget Exceeded: once per budget per period, on the first refused call |
-| `finops.budget.threshold` | Budget Threshold Reached |
-| `finops.budget.exceeded` | Budget Exceeded |
+| `finops.budget.threshold` | Budget Threshold Reached: a workspace cap, key budget or member budget reached the alert threshold; once per budget per day or month. Carries `scope`, the key's or member's id and `enforcement` |
+| `finops.budget.exceeded` | Budget Exceeded: a workspace cap, key budget or member budget reached its limit; once per budget per day or month |
 | `plan.deviation.detected` | Plan Deviation Detected |
 | `trial.expired_downgraded` | Trial Expired |
 | `gateway.stale.detected` | Self-Hosted Gateway Unreachable |
@@ -432,6 +476,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `scim.group.changed` | Group Changed via SCIM: your identity provider created, changed or deleted a group; MEDIUM for a deletion, INFO otherwise |
 | `webhook.secret.rotated` | Webhook Signing Secret Replaced: an owner or admin replaced the signing secret of a notification webhook, a SIEM webhook destination or the GitHub pull-request webhook. Says whose and who, never the secret |
 | `evidence.exported` | Compliance Evidence Downloaded: a member downloaded the SOC 2 evidence archive, a framework coverage report as a file, or the human-oversight export; INFO. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
+| `credential.changed` | API Key or Provider Key Changed: a virtual key, gateway token or SCIM token was created, rotated or revoked, or a provider key was added, replaced or removed. Says which credential, what happened and who did it, never the value; INFO for a new virtual key, gateway token or SCIM token, MEDIUM otherwise. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
 

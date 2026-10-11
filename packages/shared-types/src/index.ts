@@ -20,6 +20,10 @@ export {
   HARNESS_HEADLINE_COUNT,
   ExecutionMode,
   IncidentStatus,
+  IncidentType,
+  INCIDENT_TYPES,
+  isIncidentType,
+  SystemIncidentType,
   PlanLifecycleState,
   PlanExecutionOutcome,
   SopLifecycleState,
@@ -73,6 +77,8 @@ export type {
   TraceStep,
   TraceFindingSummary,
   ChangeManifestEntry,
+  UpstreamAttempt,
+  UpstreamFallback,
 } from './finops.js'
 
 
@@ -321,6 +327,7 @@ export {
   InviteMemberInputSchema,
   UpdateRoleInputSchema,
   CreateApiKeyInputSchema,
+  UpdateApiKeyInputSchema,
   SignupInputSchema,
   OrgSignupInputSchema,
   VerifyEmailInputSchema,
@@ -340,6 +347,7 @@ export type {
   WorkspaceMemberInfo,
   InviteMemberInput,
   CreateApiKeyInput,
+  UpdateApiKeyInput,
   CreateApiKeyResult,
   ApiKeyInfo,
   DashboardSummary,
@@ -509,6 +517,28 @@ export type {
   McpBudgetCall,
   McpBudgetCharge,
 } from './mcpBudgets.js'
+// LLM spend budgets (workspace, virtual key, member) and key rate limits
+export {
+  SpendBudgetSchema,
+  SpendBudgetListSchema,
+  KeyRateLimitSchema,
+  spendBudgetWindow,
+  describeSpendBudget,
+  SPEND_BUDGET_PERIODS,
+  SPEND_BUDGET_SCOPES,
+  MAX_SPEND_BUDGET_USD,
+  MAX_KEY_RPM,
+  MAX_KEY_TPM,
+  MEMBER_BUDGET_DEFAULT,
+} from './spendBudgets.js'
+export type {
+  SpendBudget,
+  SpendBudgetPeriod,
+  SpendBudgetEnforcement,
+  SpendBudgetScope,
+  KeyRateLimit,
+  HardBudgetWire,
+} from './spendBudgets.js'
 export {
   scoreToolSetChange,
   normalizeToolDefinition,
@@ -606,6 +636,7 @@ export * from './providers.js'
 // Model catalog & cohort wizard
 export * from './modelCatalog.js'
 export * from './providerVerification.js'
+export * from './cloudProbe.js'
 
 
 
@@ -616,6 +647,12 @@ export {
   explainWasmImport,
   type WasmHostImport,
 } from './wasmHost.js'
+export {
+  parseWasmRuleDescriptors,
+  type WasmRuleDescriptor,
+  type WasmRuleDescriptorsParse,
+  type WasmRuleMode,
+} from './wasmRuleDescriptor.js'
 
 // Rego policies compiled by OPA, run as rules (packages/proxy/src/wasm/opa.rs).
 export * from './regoRules.js'
@@ -681,6 +718,18 @@ export {
   secretPatternAlternation,
   type SecretValuePattern,
 } from './secretPatterns.js'
+
+export {
+  DEFAULT_UPSTREAM_RETRY,
+  DEFAULT_UPSTREAM_RETRY_STATUSES,
+  UPSTREAM_PROVIDERS,
+  UPSTREAM_RETRY_LIMITS,
+  UpstreamFallbackTargetSchema,
+  UpstreamRetrySettingsSchema,
+  type UpstreamFallbackTarget,
+  type UpstreamProvider,
+  type UpstreamRetrySettings,
+} from './upstreamRetry.js'
 
 export {
   PII_ACTIONS,

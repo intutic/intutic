@@ -257,6 +257,10 @@ pub struct MemoryStore {
     /// No TTL here. The process lifetime is shorter than the one-hour window
     /// the Valkey path uses, so the restart is the expiry.
     reask_attempts: Mutex<HashMap<String, u32>>,
+    /// Per-key rate counters, keyed by `key_limits::rate_counter_keys`, each
+    /// with the minute it counts. A proxy without Valkey is one process, so
+    /// these are the whole count; old minutes are dropped as new ones start.
+    rate_counters: Mutex<HashMap<String, (i64, u64)>>,
     /// Pinned SOP advisory blocks, keyed by [`PinScope::storage_key`].
     /// Memory-only, same as the response cache above — a pin outlives one
     /// request but never the process, which matches its purpose (holding a
@@ -994,6 +998,49 @@ impl LocalStore for MemoryStore {
 
     async fn loop_review_cleared(&self, _loop_run_id: &str) -> Option<String> {
         None
+    }
+
+    async fn admit_rate(
+        &self,
+        key_id: &str,
+        limit: crate::key_limits::RateLimit,
+        minute: i64,
+    ) -> crate::key_limits::RateDecision {
+        use crate::key_limits::{rate_counter_keys, RateDecision, RateLimitKind};
+        let Ok(mut counters) = lock(&self.rate_counters, "rate-counters") else {
+            return RateDecision::Unavailable;
+        };
+        counters.retain(|_, (m, _)| *m >= minute);
+        let (rpm_key, tpm_key) = rate_counter_keys(key_id, minute);
+        if let Some(tpm) = limit.tpm {
+            let used = counters.get(&tpm_key).map_or(0, |(_, n)| *n);
+            if used >= tpm {
+                return RateDecision::Limited {
+                    kind: RateLimitKind::Tokens,
+                    limit: tpm,
+                    used,
+                };
+            }
+        }
+        if let Some(rpm) = limit.rpm {
+            let entry = counters.entry(rpm_key).or_insert((minute, 0));
+            if entry.1 >= rpm {
+                return RateDecision::Limited {
+                    kind: RateLimitKind::Requests,
+                    limit: rpm,
+                    used: entry.1,
+                };
+            }
+            entry.1 += 1;
+        }
+        RateDecision::Admitted
+    }
+
+    async fn add_rate_tokens(&self, key_id: &str, tokens: u64, minute: i64) {
+        if let Ok(mut counters) = lock(&self.rate_counters, "rate-counters") {
+            let (_, tpm_key) = crate::key_limits::rate_counter_keys(key_id, minute);
+            counters.entry(tpm_key).or_insert((minute, 0)).1 += tokens;
+        }
     }
 
     async fn add_workflow_spend(&self, loop_run_id: &str, amount: f64) -> Option<f64> {

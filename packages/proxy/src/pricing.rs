@@ -150,7 +150,7 @@ pub fn estimate_cost_cached(model: &str, usage: &crate::usage::TokenUsage) -> f6
 /// absent from the offline pricing bundle) — callers should treat that as "no
 /// family signal", not an error.
 pub fn model_family(model: &str) -> Option<String> {
-    let m = model.to_lowercase();
+    let m = crate::cloud::pricing_name(model).to_lowercase();
     let reg = &*REGISTRY;
     let parts: Vec<&str> = m.split('-').collect();
     for len in (1..=parts.len()).rev() {
@@ -165,7 +165,9 @@ pub fn model_family(model: &str) -> Option<String> {
 // ─── Internal helpers ─────────────────────────────────────────────────
 
 fn lookup_price(model: &str) -> ModelPrice {
-    let m = model.to_lowercase();
+    // A cloud model id (`bedrock/us.anthropic.claude-…-v1:0`) prices as the
+    // vendor model it wraps; see `cloud::pricing_name`.
+    let m = crate::cloud::pricing_name(model).to_lowercase();
     let reg = &*REGISTRY;
 
     // 1. Exact match
@@ -231,6 +233,28 @@ mod tests {
         assert!((cost - 0.015).abs() < 1e-9, "cost={cost}");
         // Must not be zero
         assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn cloud_model_ids_price_as_the_vendor_model() {
+        let direct = estimate_cost("claude-sonnet-4-5-20250929", 1000, 1000);
+        for cloud in [
+            "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "vertex/claude-sonnet-4-5@20250929",
+        ] {
+            assert!(
+                (estimate_cost(cloud, 1000, 1000) - direct).abs() < 1e-12,
+                "{cloud}"
+            );
+        }
+        assert!(
+            (estimate_cost("azure/gpt-4o", 1000, 1000) - estimate_cost("gpt-4o", 1000, 1000)).abs()
+                < 1e-12
+        );
+        assert_eq!(
+            model_family("bedrock/anthropic.claude-opus-4-7"),
+            model_family("claude-opus-4-7")
+        );
     }
 
     #[test]

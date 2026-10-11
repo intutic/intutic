@@ -55,7 +55,7 @@ list is a trial or a degraded preview of a paid feature:
 | Bandit arm state | `~/.intutic/bandit-state.json` | `bandit:{workspaceId}` in Valkey — shared and durable |
 | Who updates routing arms | this proxy, deterministically | the control plane's judge, if it claims the workspace |
 | Feature flags | `config.yaml` | control plane, authoritative |
-| Auth & budgets | local daily spend cap | workspace virtual keys; a workspace daily spend cap enforced on every request, and a monthly cap that raises alerts |
+| Auth & budgets | local daily spend cap | workspace virtual keys; [spend budgets](/guide/budgets#setting-up-budget-limits) per workspace, per virtual key and (Biz Org and up) per member, by UTC day and month, each one refusing requests or alerting only; requests-per-minute and tokens-per-minute limits per key |
 | Response cache | per-process | shared across every proxy in the workspace |
 | Team dashboard | — | web UI: spend, audits, compliance scores |
 | Ticket board integration (Jira/Linear) | — | cost attribution to a ticket key |
@@ -90,6 +90,7 @@ list. In short:
 | [SOP Optimizer](/guide/metaclaw) | | ✓ | ✓ | ✓ |
 | [Evaluator Sandbox](/guide/evaluator-sandbox) | | ✓ | ✓ | ✓ |
 | [Fleet analytics](/guide/budgets#dashboard-widgets): cost by developer, team, branch and commit | | ✓ | ✓ | ✓ |
+| [Member spend budgets](/guide/budgets#member-budgets) | | ✓ | ✓ | ✓ |
 | [SIEM export](/guide/siem-export) | | ✓ | ✓ | ✓ |
 | [SCIM provisioning](/guide/scim) | | | ✓ | ✓ |
 | Data residency (Cloud: US; EU on request) | | | ✓ | ✓ |
@@ -97,7 +98,7 @@ list. In short:
 | Runs in your VPC or an air-gapped network | | | | ✓ |
 
 The 14-day Free trial includes Policy Guardrails, single sign-on, SCIM,
-Custom Filters, the SOP Optimizer, fleet analytics, SIEM export and data
+Custom Filters, the SOP Optimizer, fleet analytics, member spend budgets, SIEM export and data
 residency; the 14-day Enterprise
 trial adds the Evaluator Sandbox and SOP write-back. Plan changes take effect
 at the next sync-daemon handshake; no CLI or proxy binary change is needed on

@@ -63,7 +63,7 @@ The commercial control plane deploys an internal Python `litellm` container. It 
 The **Intelligent Model Routing** engine — **Adaptive Reinforcement Selection** over a Thompson-sampling arm set — ships in the open-core Rust proxy and is shared by both deployments, optimizing cost vs. capability dynamically. In standalone open-core mode the proxy learns arm state itself from the local deterministic reward loop; the commercial control plane takes over arm learning to layer on the cloud refinements described below (LLM-as-a-judge classification refinement, daily decay, and outage penalties). 
 
 ### Adaptive Selection & Candidate Selection
-* **Candidate Pool:** The router evaluates a core pool of high-capability candidate models: `claude-3-5-sonnet`, `gpt-4o`, and `gemini-2.0-flash`.
+* **Candidate Pool:** The router chooses among the proxy's `candidate_models` (by default `claude-sonnet-5-5`, `gpt-4.1` and `gemini-3.8-flash`) or the workspace's own `routingCandidates`, narrowed per request to the candidates that request can reach: a format it can be translated to, allowed, within budget and with a credential. See [Which models a request can be routed to](/guide/intelligent-routing#which-models-a-request-can-be-routed-to).
 * **Automatic Bypass:** If a client explicitly requests a custom, specialized, or low-cost local model (e.g. `llama-3-8b`), the router automatically bypasses intelligent routing selection to prevent upgrading cheap requests to expensive frontier models.
 * **Cold-Start Fallback:** If a workspace has fewer than 20 cumulative requests handled, the routing model remains inactive to gather baseline observations first.
 

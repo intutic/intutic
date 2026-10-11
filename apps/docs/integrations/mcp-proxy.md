@@ -120,7 +120,7 @@ variants:
 5. **DLP scan** — blocks a request whose arguments contain a credential-shaped value or a destructive command pattern (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`). Command patterns are matched against each argument string as the tool receives it, object keys included, and the SQL keywords may be separated by any whitespace, a line continuation, a block or `--` comment, or an escaped `\n` / `\t`: `DROP/**/TABLE` and `DROP` and `TABLE` on separate lines are blocked. The scan reads text, not SQL, so a quoted mention such as `SELECT 'drop table'` is blocked too — a quoted string is also how a shell command carries the real statement.
 6. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` holds the call for a person's approval (`hold` above).
 7. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
-8. **Anomaly detectors** and **WASM rules**, native or [Rego](/guide/rego-policies) — see the session-scope note below. A Rego rule's hold takes the same path as a `require_approval` rule.
+8. **Anomaly detectors** and **WASM rules**, native or [Rego](/guide/rego-policies) — see the session-scope note and [Custom rules](#custom-rules) below. A Rego rule's hold takes the same path as a `require_approval` rule.
 9. **Call budgets** (`mcpBudgets`) — counts the call in Valkey against every budget that covers it, and refuses it when one is used up. Last, so a call another step refuses spends nothing. See [Call budgets](/guide/mcp-governance#call-budgets).
 
 The DLP scan also runs the enabled [PII detectors](/guide/policies#pii-detectors):
@@ -160,7 +160,7 @@ Every refusal is a JSON-RPC `-32603` error whose message is written for the agen
 | `REASK_EXHAUSTED` | The detector id, or `wasm:<rule id>` | The same detector or rule refused three attempts, so it now blocks outright |
 | `BUDGET_EXCEEDED` | The budget id | An MCP call budget covering this call is used up until `resetAt` |
 | `BUDGET_UNAVAILABLE` | `mcpProxyFailBehavior` | A call budget covers this call but could not be checked, and the proxy fails closed |
-| `GOVERNANCE_UNAVAILABLE` | `mcpProxyFailBehavior`, `piiDetectors`, `wasm:<rule id>` or `wasm` | A governance check could not complete; the reason names it. With `mcpProxyFailBehavior` or `piiDetectors`, the control plane's policy, the PII setting or the DLP scan was unavailable and the proxy fails closed. With `wasm:<rule id>` or `wasm`, a custom WASM or Rego rule reached no verdict (cause `deadline`, `budget`, `error`, `result`, or `quarantined` after three runaways in a row): refused whatever the fail setting, and refused again if retried with the same input |
+| `GOVERNANCE_UNAVAILABLE` | `mcpProxyFailBehavior`, `piiDetectors`, `wasm:<rule id>` or `wasm` | A governance check could not complete; the reason names it. With `mcpProxyFailBehavior` or `piiDetectors`, the control plane's policy, the workspace's custom rules, the PII setting or the DLP scan was unavailable and the proxy fails closed. With `wasm:<rule id>` or `wasm`, a custom WASM or Rego rule reached no verdict (cause `deadline`, `budget`, `error`, `result`, or `quarantined` after three runaways in a row): refused whatever the fail setting, and refused again if retried with the same input |
 | `TOFU_UNAVAILABLE` | `mcpProxyFailBehavior` | The server's pinned tool definitions could not be read or written, and the proxy fails closed |
 | `TOOL_DEFINITIONS_CHANGED` | `tofu.<server>` | The server's tool definitions changed since they were first pinned, and the proxy fails closed |
 | `RESULT_WITHHELD_DLP` | `dlp.<pattern>` | The tool ran, but its result held sensitive data that could not be redacted safely, so it was not delivered |
@@ -209,6 +209,41 @@ the fail setting. The setting is for an unreachable control plane, which an
 agent cannot cause; a rule's deadline or budget an agent can exhaust by
 padding its arguments — see [When a rule reaches no
 verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict).
+
+### Custom rules
+
+The proxy runs the [custom rules](/guide/wasm-rules) in the local rules
+directory (`~/.intutic/wasm/`, or `INTUTIC_WASM_DIR`), each named
+`local:<file name>` and run in priority order, lower first. It rescans the
+directory when a file changes, and on every policy refresh.
+
+<!-- ENTERPRISE_ONLY_START -->
+It also runs the workspace's uploaded rules — from **Policies › Custom
+Filters**, `POST /api/v1/wasm-rules` or Terraform's `intutic_wasm_rule` — the
+same rules the LLM proxy enforces, under the same ids (`wasm_…`). Both sets run
+as one list by priority; on equal priority an uploaded rule runs first, as in
+the LLM proxy.
+
+The uploaded rules arrive with the workspace policy the proxy already fetches
+(`wasmRules` on `GET /api/v1/sop/rules`, or through the MCP daemon, which
+refetches when the rule set changes), so a change takes effect at the proxy's
+next policy refresh, within 60 seconds. Each module is fetched once, by the
+SHA-256 its descriptor names (`GET /api/v1/wasm-rules/binaries/:sha256`), and
+loaded only if its bytes hash to it. A version whose module is missing, does
+not match its hash or cannot load is not loaded: the proxy raises an incident
+for the workspace, once per version, and the version of that rule it already
+runs, if any, stays in force. A rule in **Shadow** mode is evaluated and never
+decides a call; what it would have done is reported for each call
+(`wasm_shadow_evaluated`) and counts toward its promotion, as the LLM proxy's
+shadow reports do.
+
+Until the uploaded rules have loaded — the control plane unreachable since the
+proxy started — whether one of them refuses a call is unknown, and the fail
+setting decides: fail-closed refuses the call with `GOVERNANCE_UNAVAILABLE`
+(`ruleId` `mcpProxyFailBehavior`), and fail-open judges it by the local rules.
+Once loaded, they stay in force through a later outage. A loaded rule that
+reaches no verdict refuses the call whatever the setting, as above.
+<!-- ENTERPRISE_ONLY_END -->
 
 **The RESPONSE direction is a separate code path** (`processServerLine`,
 `src/proxy.ts`), because by the time a result comes back the call has already

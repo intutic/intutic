@@ -64,7 +64,8 @@ the server says it is ready:
 A rule that never fired in shadow can be promoted only with an explicit
 acknowledgement that no observed traffic exercised it, and that caveat is
 recorded on the promotion event. WASM guardrails follow the candidate
-pipeline's own bar instead: 200 shadow evaluations and at most 1 % would-block.
+pipeline's own bar instead: 200 shadow evaluations, counted in the LLM proxy
+and the MCP proxy alike, and at most 1 % would-block.
 There is no workspace setting, plan flag or feature flag that promotes a
 guardrail on its own; a test pins that none exists.
 

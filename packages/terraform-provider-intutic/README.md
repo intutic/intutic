@@ -1,6 +1,6 @@
 # Terraform Provider for Intutic
 
-Manage an Intutic workspace's SOPs, enforcement policies, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters and MCP server decisions with Terraform. Built on the [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework).
+Manage an Intutic workspace's SOPs, enforcement policies, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters, upstream provider credentials and MCP server decisions with Terraform. Built on the [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework).
 
 - Guide: [Manage Intutic with Terraform](https://docs.intutic.ai/guide/terraform)
 - Reference: [`docs/`](docs/) (the Registry's format) and [docs.intutic.ai/reference/terraform](https://docs.intutic.ai/reference/terraform/)

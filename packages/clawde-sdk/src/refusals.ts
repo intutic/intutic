@@ -32,6 +32,7 @@ export const PROXY_REFUSALS: Readonly<Record<string, { status: number; verdict: 
   GOVERNANCE_UNAVAILABLE: { status: 403, verdict: 'kill' },
   BUDGET_EXCEEDED: { status: 429, verdict: 'kill' },
   OVERAGE_HARD_CAP_EXCEEDED: { status: 429, verdict: 'kill' },
+  RATE_LIMITED: { status: 429, verdict: 'kill' },
   COST_GATE_EXCEEDED: { status: 402, verdict: 'kill' },
   dlp_policy_violation: { status: 400, verdict: 'kill' },
   TOOL_DENIED: { status: 200, verdict: 'kill' },

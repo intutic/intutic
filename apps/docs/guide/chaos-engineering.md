@@ -116,6 +116,8 @@ prints where:
 
 ## Fault catalog
 
+The proxy's own [upstream retries](/guide/intelligent-routing#retries-and-fallbacks) do not apply to an injected `llm.rate_limit` or `llm.upstream_5xx`: the fault reaches the agent as the failure would once those retries were spent, which is the case the agent has to handle.
+
 | Fault | Injected by | Safety | Effect | Options |
 |-------|-------------|--------|--------|---------|
 | `llm.rate_limit` | proxy | fail-safe | the model call returns 429 | `retry_after_s` (default 5) |

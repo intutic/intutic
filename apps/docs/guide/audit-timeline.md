@@ -16,6 +16,7 @@ One list per day (UTC), newest first. Each event carries a type badge, a title, 
 | **Adjudication** | A detector finding's ruling (true or false positive), with the anomaly kind, attributed to whoever ruled |
 | **MCP server** | An [MCP server registry](/guide/mcp-governance#the-registry) decision (approved, blocked, returned to the approval queue, a tool switched on or off) or a scored change to a server's tools, attributed to the owner or admin who decided, or to the risk scorer |
 | **Evidence export** | A compliance evidence download: the SOC 2 evidence archive, a framework coverage report (with its framework) or the human-oversight export, the format, the period and whether it was signed, attributed to whoever downloaded it |
+| **Credential** | A virtual key, self-hosted gateway token or SCIM token created, rotated or revoked, or a provider key added, replaced or removed: which credential (its id and name, never its value) and what happened, attributed to whoever did it, or to `system:offboarding` for keys revoked when a member was offboarded and `system:gateway-rotation` for a gateway token rotated on its schedule |
 
 Events with no timestamp, such as a decision that has not been decided yet, are left out. A person is named only when the record links to a workspace member. Most proxy traffic carries no authenticated member, so an enforcement row often has no "by" line.
 
@@ -35,7 +36,7 @@ The page reads one endpoint:
 GET /api/v1/audit/timeline?workspaceId=<id>&date=YYYY-MM-DD
 ```
 
-`date` is a UTC calendar day. You can instead pass `from` and `to` as ISO-8601 datetimes (inclusive), which take precedence over `date`; with neither, the range is today (UTC). The response holds separate arrays for logins, enforcement, decisions, incidents, settings changes, detector adjudications, MCP server changes (`mcpServerChanges`) and evidence exports (`evidenceExports`).
+`date` is a UTC calendar day. You can instead pass `from` and `to` as ISO-8601 datetimes (inclusive), which take precedence over `date`; with neither, the range is today (UTC). The response holds separate arrays for logins, enforcement, decisions, incidents, settings changes, detector adjudications, MCP server changes (`mcpServerChanges`), evidence exports (`evidenceExports`) and credential changes (`credentialChanges`).
 
 ## Related
 

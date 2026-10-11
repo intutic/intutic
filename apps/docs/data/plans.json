@@ -48,6 +48,7 @@
       "Custom WASM policy rules",
       "SIEM export",
       "Cost per developer, branch and pull request",
+      "Spend budgets per member",
       "3-year trace retention"
     ]
   },

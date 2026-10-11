@@ -1,14 +1,19 @@
 /// Agent fault injection for `intutic chaos run` — inert unless a plan is set
 pub mod chaos;
+/// Cloud-hosted upstreams: AWS Bedrock, Google Vertex AI, Azure OpenAI
+pub mod cloud;
 pub mod commands;
 pub mod config;
 /// The caller's credential, typed by where it may be sent
 pub mod credential;
+/// Envelope encryption for the provider credentials stored in Valkey
+pub mod credential_crypto;
 pub mod dlp;
 pub mod graph;
 pub mod injection;
 /// The per-key `/auth/key-context` answer the workspace policy rides on
 pub mod key_context;
+pub mod key_limits;
 pub mod manifest;
 pub mod memory;
 pub mod metering;
