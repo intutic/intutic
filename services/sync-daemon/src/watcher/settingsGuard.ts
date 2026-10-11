@@ -329,13 +329,14 @@ export async function guardSettingsFile(
   // their tampering here, to the Goose writer.
   if (changedPath.includes(path.join('.agents', 'plugins', 'intutic-governance'))) {
     if (skip.has('goose')) return false
+    // Holding exactly what the writer last put there: the daemon's own
+    // regeneration (it unhardens, writes and hardens again, and the watcher
+    // sees the change after), not an override. Checked before the immutable
+    // flag, because where the flag cannot be set (Linux without root) the
+    // file is never immutable and the restore path below would treat every
+    // regeneration, a gate upgrade included, as tampering too.
+    if (await isLastWritten(changedPath, workspaceRoot)) return false
     if (await isImmutable(changedPath)) {
-      // Hardened and holding exactly what the writer last put there: the
-      // daemon's own regeneration (it unhardens, writes and hardens again, and
-      // the watcher sees the change after), not an override. Reported as one,
-      // every regeneration, a gate upgrade included, filed a SECURITY incident
-      // wherever the immutable flag holds.
-      if (await isLastWritten(changedPath, workspaceRoot)) return false
       log.error(
         { action: 'governance_override_attempt', path: changedPath },
         'SECURITY: Immutable Goose governance file was modified — OS immutable flag bypassed. Emitting incident.',
