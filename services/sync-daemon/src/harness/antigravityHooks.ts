@@ -45,6 +45,7 @@ import { newIso } from '@intutic/id'
 import { GEMINI_CLI_GATE_ID, HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-antigravity-hooks')
 
@@ -184,10 +185,7 @@ export async function writeAntigravityHooks(
   // ── 2. Write hook script ───────────────────────────────────────────────────
 
   const hookScriptPath = path.join(hookScriptDir, 'antigravity-check.sh')
-  const tmpScript = hookScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, buildAntigravityCheckScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, buildAntigravityCheckScript(proxyUrl, workspaceRoot, workspaceId), { mode: 0o755 })
 
   log.info({ action: 'antigravity_hook_script_written', path: hookScriptPath }, 'Antigravity hook script written')
 
@@ -225,9 +223,7 @@ export async function writeAntigravityHooks(
     },
   }
 
-  const tmpSettings = geminiSettings + '.intutic-tmp'
-  await fs.writeFile(tmpSettings, JSON.stringify(mergedSettings, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmpSettings, geminiSettings)
+  await writeFileAtomic(geminiSettings, JSON.stringify(mergedSettings, null, 2) + '\n')
 
   log.info(
     { action: 'antigravity_settings_written', path: geminiSettings },

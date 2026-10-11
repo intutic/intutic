@@ -506,7 +506,7 @@ the same reasons:
 
 | Rule | Points | When |
 |---|---|---|
-| Description poisoned | 60 | A new or changed description matches one of the seven [tool-poisoning patterns](/concepts/circuit-breaker) (hidden instruction blocks, concealment from the user, credential side channels, …) it did not match before |
+| Description poisoned | 60 | A new or changed description matches one of the eight [tool-poisoning patterns](/concepts/circuit-breaker) (hidden instruction blocks, concealment from the user, credential side channels, orders to run a destructive command, …) it did not match before |
 | New tool with a capability | 20–40 each | A new tool's name or description implies command execution (40), credential access (40), network access (25) or writing data (20) |
 | Capability gained | 20–40 each | A changed tool now implies one of those capabilities and did not before |
 | Confirmation removed | 35 | A changed tool lost an argument such as `confirm` or `dry_run`, stopped requiring it, or it no longer defaults to `true` |

@@ -50,9 +50,10 @@ import { writeN8nHooks } from '../harness/n8nHooks.js'
 import { writeOpenWebuiHooks } from '../harness/openWebuiHooks.js'
 import { GATE_ARTIFACTS } from '../harness/gateArtifacts.js'
 import { isImmutable } from '../harness/gooseHardener.js'
-import { readOriginal } from '../disconnect/originals.js'
+import { readOriginal, sha256 } from '../disconnect/originals.js'
 import { DEFAULT_SNAPSHOT_DIR, SNAPSHOT_JSON, SNAPSHOT_RULES, restoreVerifiedSnapshot } from '../lib/policySnapshot.js'
 import { repairHookSettings } from './vscodeHookSettings.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-settings-guard')
 
@@ -329,6 +330,12 @@ export async function guardSettingsFile(
   if (changedPath.includes(path.join('.agents', 'plugins', 'intutic-governance'))) {
     if (skip.has('goose')) return false
     if (await isImmutable(changedPath)) {
+      // Hardened and holding exactly what the writer last put there: the
+      // daemon's own regeneration (it unhardens, writes and hardens again, and
+      // the watcher sees the change after), not an override. Reported as one,
+      // every regeneration, a gate upgrade included, filed a SECURITY incident
+      // wherever the immutable flag holds.
+      if (await isLastWritten(changedPath, workspaceRoot)) return false
       log.error(
         { action: 'governance_override_attempt', path: changedPath },
         'SECURITY: Immutable Goose governance file was modified — OS immutable flag bypassed. Emitting incident.',
@@ -519,7 +526,7 @@ async function guardVsCodeHookSettings(filePath: string, workspaceRoot: string):
   const repaired = repairHookSettings(raw, workspaceRoot)
   if (!repaired) return false
   try {
-    await fs.writeFile(filePath, repaired.text, 'utf-8')
+    await writeFileAtomic(filePath, repaired.text, { followSymlink: true })
   } catch (err) {
     log.error({ action: 'vscode_hook_settings_restore_failed', path: filePath, err }, 'Could not restore the VS Code hook settings')
   }
@@ -613,6 +620,17 @@ function gateRegistrations(workspaceRoot: string): GateRegistration[] {
     // OpenClaw rewrites its own config; its marker is the listed plugin path.
     { harness: 'openclaw', file: path.join(home, '.openclaw', 'openclaw.json'), gate: openclawPlugin, marker: openclawPlugin },
   ]
+}
+
+/** Whether `file` holds the bytes Intutic last wrote to it, by the disconnect ledger. */
+async function isLastWritten(file: string, workspaceRoot: string): Promise<boolean> {
+  const written = (await readOriginal(file, workspaceRoot))?.writtenSha256
+  if (!written) return false
+  try {
+    return sha256(await fs.readFile(file)) === written
+  } catch {
+    return false
+  }
 }
 
 /**

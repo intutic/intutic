@@ -9,8 +9,8 @@
  * - the LLM proxy, which injects the `llm.*` and `egress.*` faults;
  * - the MCP proxy, which injects the MCP side of `tool.error` plus
  *   `tool.stale_data`, `mcp.toolset_change` and `inject.tool_result`;
- * - the hook gates, which inject `permission.deny_or_delay` and the
- *   built-in-tool side of `tool.error`.
+ * - the gates — the hook gates and the in-process gate SDKs — which inject
+ *   `permission.deny_or_delay` and the built-in-tool side of `tool.error`.
  *
  * The runner hands each component a plan through {@link CHAOS_PLAN_ENV} and an
  * events file through {@link CHAOS_EVENTS_ENV}. Both are plain environment
@@ -149,6 +149,14 @@ export const FaultSchema = z.discriminatedUnion('id', [
       id: z.literal('permission.deny_or_delay'),
       ...common,
       mode: z.enum(['deny', 'delay', 'hold_then_deny']).default('deny'),
+      /**
+       * `delay` and `hold_then_deny`: how long a held call stays held. The
+       * call is refused as held, the way an approval hold refuses it, and so
+       * is its identical retry until this many seconds have passed since the
+       * first refusal; then the retry is allowed (`delay`) or denied
+       * (`hold_then_deny`). Nothing waits: 0 holds the call once and allows
+       * (or denies) the first retry.
+       */
       delay_s: z.number().int().min(0).max(600).default(0),
     })
     .strict(),

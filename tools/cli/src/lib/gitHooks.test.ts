@@ -49,6 +49,21 @@ function withIntuticShim(binDir: string, env: NodeJS.ProcessEnv): NodeJS.Process
   return { ...env, PATH: `${binDir}:${env.PATH ?? ''}` }
 }
 
+/**
+ * Installs the hooks for a suite that makes real commits, then removes the
+ * post-commit hook. That hook backgrounds `intutic sync-context`, which
+ * writes `.intutic/git-context.json` into the repo after `git commit` has
+ * returned — whenever `intutic` is on PATH (an installed CLI, or the shim
+ * below). The test's cleanup then raced it: `rmSync` of the repo failed with
+ * ENOTEMPTY when the child created `.intutic/` mid-removal. These suites test
+ * pre-commit; the post-commit hook is covered by the marker tests below,
+ * which never commit.
+ */
+async function installForCommits(repo: string): Promise<void> {
+  expect(await installGitHooks(repo)).toBe(true)
+  fs.rmSync(path.join(repo, '.git', 'hooks', 'post-commit'))
+}
+
 describe('pre-commit secret scan', { timeout: 60_000 }, () => {
   let repo: string
 
@@ -57,7 +72,7 @@ describe('pre-commit secret scan', { timeout: 60_000 }, () => {
     git(repo, 'init', '-q')
     git(repo, 'config', 'user.email', 't@t.local')
     git(repo, 'config', 'user.name', 't')
-    expect(await installGitHooks(repo)).toBe(true)
+    await installForCommits(repo)
   })
   afterEach(() => {
     fs.rmSync(repo, { recursive: true, force: true })
@@ -238,7 +253,7 @@ const cliBuilt = fs.existsSync(CLI_ENTRY)
     git(repo, 'init', '-q')
     git(repo, 'config', 'user.email', 't@t.local')
     git(repo, 'config', 'user.name', 't')
-    expect(await installGitHooks(repo)).toBe(true)
+    await installForCommits(repo)
   })
 
   afterEach(() => {

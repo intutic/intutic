@@ -31,6 +31,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
+import { writeFileAtomic } from './atomicWrite.js'
 
 const log = createLogger('sync-egress-policy')
 
@@ -131,10 +132,7 @@ export async function writeEgressPolicy(
 
   await fs.mkdir(cacheDir, { recursive: true })
   const target = path.join(cacheDir, EGRESS_POLICY_FILE)
-  const tmp = target + '.tmp'
-  await fs.writeFile(tmp, text, { encoding: 'utf-8' })
-  await fs.chmod(tmp, 0o444)
-  await fs.rename(tmp, target)
+  await writeFileAtomic(target, text, { mode: 0o444 })
 
   log.debug({ action: 'egress_policy_written', digest, mode: policy.mode, count: policy.allow.length, dir: cacheDir }, 'Egress policy cache refreshed')
   return { digest, mode: policy.mode }

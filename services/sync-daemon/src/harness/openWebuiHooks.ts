@@ -22,6 +22,7 @@ import { createLogger } from '@intutic/logger'
 import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitPythonGate } from './gateBody.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-open-webui-hooks')
 
@@ -211,9 +212,7 @@ export async function writeOpenWebuiHooks(
   // ── 2. Write Python filter (atomic) ───────────────────────────────────────
 
   const filter = buildOpenWebuiFilter(workspaceId, proxyUrl)
-  const tmpFilter = filterPath + '.intutic-tmp'
-  await fs.writeFile(tmpFilter, filter, 'utf-8')
-  await fs.rename(tmpFilter, filterPath)
+  await writeFileAtomic(filterPath, filter)
   await noteWritten(filterPath, workspaceRoot, filter)
 
   log.info(
@@ -234,9 +233,7 @@ export async function writeOpenWebuiHooks(
   ].filter((l) => l !== '').join('\n') + '\n'
 
   const envFilePath = path.join(envDir, 'open-webui.env')
-  const tmpEnv = envFilePath + '.intutic-tmp'
-  await fs.writeFile(tmpEnv, envContent, 'utf-8')
-  await fs.rename(tmpEnv, envFilePath)
+  await writeFileAtomic(envFilePath, envContent)
 
   log.info(
     { action: 'open_webui_env_written', path: envFilePath },

@@ -27,6 +27,7 @@ import { emitRedactor } from './holdRedaction.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { keepOriginal, noteWritten, readOriginal } from '../disconnect/originals.js'
 import { recordGateSightings } from './gateSightings.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-claude-hooks')
 
@@ -505,7 +506,9 @@ process.stdin.on('end', () => {
   // both harnesses the second writer silently overwrote the first and one
   // harness ran the other's gate. `generatedGateBehaviour.test.ts` asserts the
   // artifact set is a partition, so the collision cannot come back unnoticed.
-  await node_fs.writeFile(node_path.join(hookScriptDir, 'claude-code-check.js'), hookScriptContent, 'utf-8')
+  // Atomic: Claude Code blocks only on exit 2, so a hook that ran a
+  // half-written gate and crashed would let the call through.
+  await writeFileAtomic(node_path.join(hookScriptDir, 'claude-code-check.js'), hookScriptContent)
 
   // Write local settings config
   const localClaudeDir = node_path.join(workspaceRoot, '.claude')
@@ -517,18 +520,26 @@ process.stdin.on('end', () => {
   // reported) rather than replaced with only the Intutic keys.
   const existingLocal = await readJsonObjectForMerge(localSettingsPath)
   if (existingLocal !== null) {
+    // The project's own deny rules stay. Only Intutic's are replaced: those an
+    // earlier sync wrote (the ledger records each) give way to the current set.
+    // This was `deny: denyRules`, which dropped every rule the project had.
+    const earlier = (await readOriginal(localSettingsPath, workspaceRoot))?.meta?.['intuticDeny']
+    const ours = new Set(toStringArray(earlier))
     const mergedLocal = {
       ...existingLocal,
       permissions: {
         ...(existingLocal.permissions as Record<string, unknown>),
-        deny: denyRules,
+        deny: Array.from(new Set([
+          ...toStringArray((existingLocal.permissions as Record<string, unknown> | undefined)?.['deny']).filter((rule) => !ours.has(rule)),
+          ...denyRules,
+        ])),
       },
       hooks: {
         ...(existingLocal.hooks as Record<string, unknown>),
         PreToolUse: mergePreToolUse((existingLocal.hooks as Record<string, unknown> | undefined)?.['PreToolUse'], newSettings.hooks.PreToolUse),
       },
     }
-    await node_fs.writeFile(localSettingsPath, JSON.stringify(mergedLocal, null, 2) + '\n', 'utf-8')
+    await writeFileAtomic(localSettingsPath, JSON.stringify(mergedLocal, null, 2) + '\n', { followSymlink: true })
     await noteDenyRules(localSettingsPath, workspaceRoot, denyRules)
   }
 
@@ -576,7 +587,7 @@ process.stdin.on('end', () => {
     },
   }
 
-  await node_fs.writeFile(globalSettingsPath, JSON.stringify(mergedGlobal, null, 2) + '\n', 'utf-8')
+  await writeFileAtomic(globalSettingsPath, JSON.stringify(mergedGlobal, null, 2) + '\n', { followSymlink: true })
   await noteDenyRules(globalSettingsPath, workspaceRoot, denyRules)
   log.info({ action: 'hooks_written' }, 'Successfully updated settings.json hooks globally and locally')
 }

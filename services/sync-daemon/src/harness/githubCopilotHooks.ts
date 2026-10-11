@@ -47,6 +47,7 @@ import { writeOwnedFile } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-github-copilot-hooks')
 
@@ -212,10 +213,7 @@ export async function writeGithubCopilotHooks(
   await fs.mkdir(path.join(workspaceRoot, '.intutic', 'events'), { recursive: true })
 
   const hookScriptPath = path.join(hookScriptDir, 'github-copilot-check.js')
-  const tmpScript = hookScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, buildHookScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, buildHookScript(proxyUrl, workspaceRoot, workspaceId), { mode: 0o755 })
 
   const config = buildHookConfig(hookScriptPath)
 

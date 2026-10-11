@@ -35,10 +35,24 @@ let tmp: string
 
 beforeEach(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'chaos-runner-test-'))
+  // The project as `intutic connect` leaves it: a gate naming its own host
+  // path, the Claude Code settings that register it, and a snapshot.
+  await fs.mkdir(path.join(tmp, '.intutic', 'hooks'), { recursive: true })
+  await fs.writeFile(path.join(tmp, '.intutic', 'hooks', 'claude-code-check.js'), `const LOG = '${tmp}/.intutic/events/hook-events.jsonl'\n`)
+  await fs.mkdir(path.join(tmp, '.claude'), { recursive: true })
+  await fs.writeFile(path.join(tmp, '.claude', 'settings.json'), JSON.stringify(claudeSettings(tmp), null, 2))
+  await fs.mkdir(path.join(tmp, 'home'), { recursive: true })
+  await fs.writeFile(path.join(tmp, 'home', 'policy-snapshot.rules'), '#digest x\n')
 })
 afterEach(async () => {
   await fs.rm(tmp, { recursive: true, force: true })
 })
+
+function claudeSettings(root: string) {
+  return {
+    hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: `node ${root}/.intutic/hooks/claude-code-check.js` }] }] },
+  }
+}
 
 function line(obj: Record<string, unknown>): string {
   return JSON.stringify({ ts: '2026-10-10T00:00:00Z', ...obj }) + '\n'
@@ -124,7 +138,17 @@ const defaultAgent: AgentScript = async (call, hostEvents) => {
 
 function run(deps: ChaosDeps, over: Partial<Parameters<typeof runChaos>[0]> = {}): Promise<ChaosReport> {
   return runChaos(
-    { experiment, cwd: tmp, image: 'img', outPath: path.join(tmp, 'out', 'report.json'), keep: false, pollMs: 10, healthTimeoutMs: 300, ...over },
+    {
+      experiment,
+      cwd: tmp,
+      image: 'img',
+      outPath: path.join(tmp, 'out', 'report.json'),
+      keep: false,
+      pollMs: 10,
+      healthTimeoutMs: 300,
+      snapshotRules: path.join(tmp, 'home', 'policy-snapshot.rules'),
+      ...over,
+    },
     deps,
   )
 }
@@ -198,6 +222,20 @@ describe('runChaos', () => {
     expect(written.verdict.kind).toBe('scored')
     expect(written.malformedEvents).toBe(4)
     expect(written.warnings).toContain('4 malformed event lines ignored')
+  })
+
+  // The sandbox user is another uid on a Linux host: whatever it creates in
+  // the events directory must stay removable by the runner.
+  it('makes the events file and the gates\' counter directory writable for the sandbox user', async () => {
+    const modes: number[] = []
+    const { deps } = fakeDeps({
+      agent: async (_call, hostEvents) => {
+        modes.push((await fs.stat(hostEvents)).mode & 0o777, (await fs.stat(`${hostEvents}.gate-counters`)).mode & 0o777)
+        return { code: 0 }
+      },
+    })
+    await run(deps, { experiment: { ...experiment, repeat: 1 } })
+    expect(modes).toEqual([0o666, 0o777, 0o666, 0o777])
   })
 
   it('keeps the worktrees with --keep', async () => {
@@ -285,5 +323,52 @@ describe('runChaos', () => {
     ])
     // failure_surfaced was not evaluated: nothing was injected.
     expect(report.probes.find((p) => p.id === 'failure_surfaced')?.evaluated).toBe(0)
+  })
+
+  it('carries the gates, hook settings and snapshot into each worktree, pointed at /work', async () => {
+    const seen: Array<{ settings: string; gate: string; snapshot: string; env: Record<string, string> }> = []
+    const agent: AgentScript = async (call, hostEvents) => {
+      seen.push({
+        settings: await fs.readFile(path.join(call.workdir, '.claude', 'settings.json'), 'utf-8'),
+        gate: await fs.readFile(path.join(call.workdir, '.intutic', 'hooks', 'claude-code-check.js'), 'utf-8'),
+        snapshot: await fs.readFile(path.join(call.workdir, '.intutic-chaos', 'policy', 'policy-snapshot.rules'), 'utf-8'),
+        env: call.env,
+      })
+      return defaultAgent(call, hostEvents)
+    }
+    const info: string[] = []
+    const { deps } = fakeDeps({ agent })
+    deps.log.info = (m) => info.push(m)
+    const report = await run(deps)
+
+    expect(seen).toHaveLength(4)
+    for (const s of seen) {
+      expect(JSON.parse(s.settings)).toEqual(claudeSettings('/work'))
+      expect(s.gate).toBe(`const LOG = '/work/.intutic/events/hook-events.jsonl'\n`)
+      expect(s.snapshot).toBe('#digest x\n')
+      expect(s.env.INTUTIC_SNAPSHOT_RULES).toBe('/work/.intutic-chaos/policy/policy-snapshot.rules')
+      expect(s.env.INTUTIC_APPROVED_BYPASSES).toBeUndefined()
+    }
+    // Said once, naming what was rewritten.
+    expect(info.filter((m) => m.startsWith('Rewrote host paths'))).toEqual([
+      'Rewrote host paths to /work in each repetition\'s copy of: .claude/settings.json, .intutic/hooks/claude-code-check.js',
+    ])
+    // Only defaultAgent's own junk lines: nothing about the gates.
+    expect(report.warnings).toEqual(['4 malformed event lines ignored'])
+    // The project itself is untouched.
+    expect(JSON.parse(await fs.readFile(path.join(tmp, '.claude', 'settings.json'), 'utf-8'))).toEqual(claudeSettings(tmp))
+  })
+
+  it('warns when the project has no generated gates', async () => {
+    await fs.rm(path.join(tmp, '.intutic'), { recursive: true })
+    const { deps } = fakeDeps()
+    const report = await run(deps)
+    expect(report.warnings.filter((w) => !/malformed/.test(w))).toEqual([expect.stringMatching(/^no generated gates in .*\.intutic\/hooks \(has `intutic connect` run/)])
+  })
+
+  it('warns when the gates have no snapshot to read', async () => {
+    const { deps } = fakeDeps()
+    const report = await run(deps, { snapshotRules: path.join(tmp, 'nowhere.rules') })
+    expect(report.warnings.filter((w) => !/malformed/.test(w))).toEqual([expect.stringMatching(/^no policy snapshot at .*nowhere\.rules/)])
   })
 })

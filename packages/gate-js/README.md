@@ -59,6 +59,7 @@ vocabulary.
 | `McpRegistryRecord`, `McpAllowlistRecord` | `mcpRegistryRecord.ts` | Tier M: the snapshot's MCP server registry and allowlist (`Snapshot.mcpRegistry`, `Snapshot.mcpAllowlist`), decided as the hook gates and the MCP proxy decide them; a byte-identical copy of `@intutic/shared-types`' module. |
 | `classify`, `isDeploy`, `isTest`, `touchesInfra` | `actions.ts` | Command classifier shared by A2's deploy trigger. |
 | `canonicalJson`, `holdKey`, `holdMessage` | `hold.ts` | The hold helpers: key-sorted JSON, the tool name and argument hash an approved hold is matched on, and the message a held call carries. |
+| (internal) | `chaosGate.ts` | A chaos run's plan, counters and faults, which `Gate.guard` applies when `INTUTIC_CHAOS_PLAN` is set (`CHAOS_FAULT`, or `IntuticGateHold` for a held call); a byte-identical copy of `@intutic/shared-types`' module, as the hook gates emit it. |
 | `COMMAND_SIZE_LIMIT`, `ARGUMENTS_SIZE_LIMIT`, `GATE_DEADLINE_MS` | `limits.ts` | A command over 256 KiB or arguments over 1 MiB are refused with `COMMAND_TOO_LARGE` before any tier runs. `GATE_DEADLINE_MS` (9000) is how long the hook script `intuticSandboxBootstrap()` writes may evaluate, from process start, before it refuses with `GATE_DEADLINE`: one second under that hook entry's 10-second timeout, so a slow rule is refused rather than left to the harness. |
 
 The snapshot must carry the `#digest <hash>` line the sync daemon writes (the

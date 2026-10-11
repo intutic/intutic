@@ -9,7 +9,9 @@ packages/shared-types/src/__tests__/chaosGate.test.ts.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -31,25 +33,34 @@ def raw_of(v: dict) -> str:
     return v["raw"] if "raw" in v else encode(v["plan"])
 
 
+def advance_clock(events: str, seconds: float) -> None:
+    """Moves the clock forward: every counter file's modification time goes back by seconds."""
+    directory = events + ".gate-counters"
+    if not seconds or not os.path.isdir(directory):
+        return
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        t = os.stat(path).st_mtime - seconds
+        os.utime(path, (t, t))
+
+
 @pytest.mark.parametrize("v", VECTORS["valid"], ids=[v["name"] for v in VECTORS["valid"]])
 def test_valid(tmp_path: Path, v: dict) -> None:
     events = str(tmp_path / "events.jsonl")
     outcomes = []
     for c in v["calls"]:
+        advance_clock(events, c.get("advanceS", 0))
         # Decoded on every call, as a gate process does.
         plan, error = chaos.chaos_decode(encode(v["plan"]))
         assert error is None
-        fault = chaos.chaos_call(plan, events, c, chaos.chaos_now())
+        # Any digest of the tool and its input: an identical call has the same one.
+        key = hashlib.sha256((c["tool"] + "\0" + json.dumps(c.get("input"))).encode("utf-8")).hexdigest()
+        fault = chaos.chaos_call(plan, events, dict(c, key=key), chaos.chaos_now())
         if fault is None:
             outcomes.append({"outcome": c["decision"]})
-        elif fault["kind"] == "delay":
-            outcomes.append({"outcome": "allow", "delayS": fault["delayS"]})
         else:
-            out = {"outcome": "deny", "reason": fault["reason"]}
-            if fault["delayS"]:
-                out["delayS"] = fault["delayS"]
-            outcomes.append(out)
-    expected = [{k: c[k] for k in ("outcome", "reason", "delayS") if k in c} for c in v["calls"]]
+            outcomes.append({"outcome": fault["kind"], "reason": fault["reason"]})
+    expected = [{k: c[k] for k in ("outcome", "reason") if k in c} for c in v["calls"]]
     assert outcomes == expected
 
     lines = [json.loads(line) for line in Path(events).read_text(encoding="utf-8").splitlines() if line]

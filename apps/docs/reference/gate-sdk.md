@@ -93,6 +93,17 @@ A hold needs the control plane, to look for an approval and to record the reques
 
 `new Gate(config)` with no `GateClient` (`Gate(GateConfig())` in Python) runs the local tiers, the ones the table above marks as needing no client, and nothing else: there is no SOP-rule fetch, no hook-gate call, and no events are sent. Use this for local, offline enforcement against the snapshot the daemon already wrote.
 
+### Chaos runs
+
+Under [`intutic chaos run`](/guide/chaos-engineering), which sets `INTUTIC_CHAOS_PLAN` and `INTUTIC_CHAOS_EVENTS` in the agent's environment, `guard()` takes part in the experiment exactly as the harness hook gates do, with the same plan decoding, the same counter files and the same events:
+
+- Every call is reported to the run's events file (`plan_loaded` once per run, then `gate_decision` with the tier's verdict, the deciding rule, whether a destructive-command rule fires on the call and whether a rule hit; `tool_call` for a call that goes ahead or is held).
+- A call every tier allowed can then be refused by the fault that is due. `tool.error` and `permission.deny_or_delay` in `deny` mode throw `IntuticGateRefusal` with `code` `CHAOS_FAULT` and the fault's message, which carries the run's canary. `delay` and `hold_then_deny` throw `IntuticGateHold` (`HELD`, no `holdId`) until the identical retry, the same tool and arguments compared as a hold compares them, comes after `delay_s`; that retry is let through or refused with `CHAOS_FAULT`. See [How a permission delay works](/guide/chaos-engineering#how-a-permission-delay-works).
+- A fault never applies to a call a tier refused or held, and it never turns one into an allow.
+- A plan that is set but unreadable, or set without an events file, refuses every call with `CHAOS_FAULT`.
+
+Without the plan nothing changes, and `enforce: false` (`enforce=False`) skips the experiment along with every tier.
+
 ### Fail-closed defaults
 
 - A `GateClient` that cannot reach the hook gate, or gets a non-2xx answer, reports a block. Pass `failClosed: false` (`fail_closed=False`) to treat that tier as advisory.
@@ -147,6 +158,7 @@ A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Go
 | `SOP_RULE` | A block rule in the SOP register matched |
 | `HOOK_GATE` | The control plane's hook gate refused the call, or could not be reached while `failClosed` is on |
 | `COMMAND_TOO_LARGE` | The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls |
+| `CHAOS_FAULT` | A chaos experiment (`intutic chaos run`) injected this failure into a call governance allowed, and the reason carries the run's `E-INTUTIC-` canary; or the experiment set a plan the gate cannot read. Not a governance decision ([Chaos runs](#chaos-runs)) |
 | `E_UNPINNED_LATEST` | A deploy uses an image tagged `latest` |
 | `E_UNPINNED_TAG` | A deploy uses an image by tag where the allowlist requires a digest |
 | `E_UNKNOWN_REGISTRY` | A deploy uses an image from a registry the allowlist does not name |

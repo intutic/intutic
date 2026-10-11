@@ -28,6 +28,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { parseDocument, isMap, isNode, isScalar, type Document } from 'yaml'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { forgetOriginal, readOriginal, sha256, type OriginalRecord } from './originals.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 export interface PlannedChange {
   path: string
@@ -114,19 +115,9 @@ export async function readText(file: string): Promise<string | null> {
   }
 }
 
+/** `mode` omitted keeps the file's own. */
 async function writeAtomic(file: string, content: string | Buffer, mode?: number): Promise<void> {
-  let keepMode = mode
-  if (keepMode === undefined) {
-    try {
-      keepMode = (await node_fs.stat(file)).mode & 0o7777
-    } catch {
-      keepMode = undefined
-    }
-  }
-  const tmp = `${file}.intutic-disconnect-tmp`
-  await node_fs.writeFile(tmp, content)
-  if (keepMode !== undefined) await node_fs.chmod(tmp, keepMode)
-  await node_fs.rename(tmp, file)
+  await writeFileAtomic(file, content, { mode })
 }
 
 /** Deletes `file`, then each directory in `dirs` (deepest first) that is left empty. */

@@ -14,6 +14,7 @@ import { execFile as _execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { HarnessType as HarnessTypes, rulesFileOf } from '@intutic/shared-types'
 import type { HarnessType, SyncSopEntry, ConfigEdit } from '@intutic/shared-types'
+import { writeFileAtomic } from './lib/atomicWrite.js'
 
 const execFile = promisify(_execFile)
 
@@ -323,7 +324,8 @@ export async function applyConfigEdits(
 /**
  * Write content to a file atomically.
  *
- * Writes to a `.tmp` sibling first, then renames to the target path.
+ * Writes to a temp sibling first, then renames to the target path
+ * (`lib/atomicWrite.ts`).
  * This prevents partial/corrupt files if the process is interrupted mid-write.
  *
  * If bypassEnforcementTier === 'immutable', clears the macOS user-immutable
@@ -344,9 +346,7 @@ export async function atomicWrite(
     await clearImmutable(filePath)
   }
 
-  const tmpPath = `${filePath}.tmp`
-  await node_fs.writeFile(tmpPath, content, 'utf-8')
-  await node_fs.rename(tmpPath, filePath)
+  await writeFileAtomic(filePath, content)
 
   // Re-set immutable flag after writing (macOS only, opt-in)
   if (bypassEnforcementTier === 'immutable') {

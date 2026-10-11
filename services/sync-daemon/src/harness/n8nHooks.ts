@@ -31,6 +31,7 @@ import * as os from 'node:os'
 import { createLogger } from '@intutic/logger'
 import { newIso } from '@intutic/id'
 import { emitN8nWorkflowGate } from './gateBody.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-n8n-hooks')
 
@@ -354,9 +355,7 @@ export async function writeN8nHooks(
   // ── 1b. Write the blocking external-hook gate (atomic) ────────────────────
 
   const hookPath = path.join(hooksDir, 'n8n-governance-hook.js')
-  const tmpHook = hookPath + '.intutic-tmp'
-  await fs.writeFile(tmpHook, buildN8nGovernanceHook(proxyUrl, workspaceId), 'utf-8')
-  await fs.rename(tmpHook, hookPath)
+  await writeFileAtomic(hookPath, buildN8nGovernanceHook(proxyUrl, workspaceId))
 
   log.info(
     { action: 'n8n_governance_hook_written', path: hookPath },
@@ -367,9 +366,7 @@ export async function writeN8nHooks(
 
   const workflowPath = path.join(n8nDir, 'governance-workflow.json')
   const workflow = buildN8nWorkflow(proxyUrl, workspaceId)
-  const tmpWorkflow = workflowPath + '.intutic-tmp'
-  await fs.writeFile(tmpWorkflow, JSON.stringify(workflow, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmpWorkflow, workflowPath)
+  await writeFileAtomic(workflowPath, JSON.stringify(workflow, null, 2) + '\n')
 
   log.info(
     { action: 'n8n_workflow_written', path: workflowPath },
@@ -379,9 +376,7 @@ export async function writeN8nHooks(
   // ── 2b. Write INSTALL.md (atomic) ─────────────────────────────────────────
 
   const installPath = path.join(n8nDir, 'INSTALL.md')
-  const tmpInstall = installPath + '.intutic-tmp'
-  await fs.writeFile(tmpInstall, buildInstallMd(hookPath, workflowPath), 'utf-8')
-  await fs.rename(tmpInstall, installPath)
+  await writeFileAtomic(installPath, buildInstallMd(hookPath, workflowPath))
 
   // ── 3. Write .intutic/env/n8n.env (atomic) ────────────────────────────────
 
@@ -399,9 +394,7 @@ export async function writeN8nHooks(
   ].filter((l) => l !== '').join('\n') + '\n'
 
   const envFilePath = path.join(envDir, 'n8n.env')
-  const tmpEnv = envFilePath + '.intutic-tmp'
-  await fs.writeFile(tmpEnv, envContent, 'utf-8')
-  await fs.rename(tmpEnv, envFilePath)
+  await writeFileAtomic(envFilePath, envContent)
 
   log.info(
     { action: 'n8n_env_written', path: envFilePath },

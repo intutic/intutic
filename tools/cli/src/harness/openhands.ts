@@ -16,13 +16,14 @@
  */
 
 import { join, dirname } from 'node:path'
-import { access, readFile, writeFile, rename, mkdir } from 'node:fs/promises'
+import { access, readFile, mkdir } from 'node:fs/promises'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { writeOpenHandsHooks, mergeOpenHandsToml, isOpenHandsConfig } from '@intutic/sync-daemon/harness/openhandsHooks'
 import { keepOriginal } from '@intutic/sync-daemon'
+import { writeFileAtomic } from '@intutic/sync-daemon/lib/atomicWrite'
 import { log } from '../lib/logger.js'
 import { writeOwnRulesFile } from './rulesFiles.js'
 
@@ -67,11 +68,9 @@ export const openhandsAdapter: IHarnessAdapter = {
     if (merged === null) {
       log.warn(`${configPath} is not valid TOML — left untouched`)
     } else if (merged !== raw) {
-      const tmpPath = configPath + '.intutic-tmp'
       await keepOriginal(configPath, workspaceRoot)
       await mkdir(dirname(configPath), { recursive: true })
-      await writeFile(tmpPath, merged, 'utf-8')
-      await rename(tmpPath, configPath)
+      await writeFileAtomic(configPath, merged, { followSymlink: true })
       written = configPath
     }
 

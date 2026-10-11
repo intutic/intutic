@@ -223,7 +223,7 @@ export interface WorkspaceSettings {
      * `buildSnapshotRules` (`services/sync-daemon/src/lib/policySnapshot.ts`)
      * applies it as a per-rule override on the next sync cycle — independent
      * of `DESTRUCTIVE_TIER_SEVERITY`, the evidence-gated promotion ramp that
-     * governs the OTHER six `DESTRUCTIVE_COMMAND_PATTERNS` entries.
+     * governs the eight block-severity `DESTRUCTIVE_COMMAND_PATTERNS` entries.
      * `destructive.sql_drop` was never part of that ramp (its own static
      * definition is `severity: 'warn'`, not `'block'`, so the ramp's ternary
      * never reaches it) — its rationale is a genuinely different one
@@ -233,7 +233,7 @@ export interface WorkspaceSettings {
      * MCP path anyway, accepting the dev-DSN false-positive risk explicitly.
      * `false` by default; `true` in the `strict` security posture preset
      * (`posturePresets.ts`) — never auto-promoted by traffic evidence the
-     * way the six-pattern ramp is.
+     * way the block-pattern ramp is.
      */
     ff_sql_drop_strict_block?: boolean
   }

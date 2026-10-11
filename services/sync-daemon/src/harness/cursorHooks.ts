@@ -35,6 +35,7 @@ import { newIso } from '@intutic/id'
 import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-cursor-hooks')
 
@@ -278,10 +279,7 @@ export async function writeCursorHooks(
   const hookScriptPath = path.join(hookScriptDir, 'cursor-check.js')
 
   // Write the hook script
-  const tmpScript = hookScriptPath + '.cursor-tmp'
-  await fs.writeFile(tmpScript, buildHookScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, buildHookScript(proxyUrl, workspaceRoot, workspaceId), { mode: 0o755 })
 
   // 1. Project-level: .cursor/hooks.json
   const projectCursorDir = path.join(workspaceRoot, '.cursor')
@@ -323,7 +321,5 @@ async function mergeHooksJsonFile(filePath: string, hookScriptPath: string): Pro
 }
 
 async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
-  const tmp = filePath + '.intutic-tmp'
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, filePath)
+  await writeFileAtomic(filePath, JSON.stringify(data, null, 2) + '\n')
 }

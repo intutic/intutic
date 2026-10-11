@@ -96,6 +96,7 @@ import { newIso } from '@intutic/id'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { configureJetBrainsWindsurfProxy } from './windsurfJetBrainsProxy.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-windsurf-hooks')
 
@@ -330,10 +331,7 @@ export async function writeWindsurfHooks(
 
   const hookScriptPath = path.join(hookScriptDir, 'windsurf-check.js')
 
-  const tmpScript = hookScriptPath + '.ws-tmp'
-  await fs.writeFile(tmpScript, buildHookScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, buildHookScript(proxyUrl, workspaceRoot, workspaceId), { mode: 0o755 })
 
   // 1. User-level hooks — Desktop's path.
   await mergeCascadeHooksJson(path.join(windsurfUserDir(), 'hooks.json'), hookScriptPath, workspaceRoot)
@@ -395,7 +393,5 @@ export async function writeWindsurfHooks(
 }
 
 async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
-  const tmp = filePath + '.intutic-tmp'
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf-8')
-  await fs.rename(tmp, filePath)
+  await writeFileAtomic(filePath, JSON.stringify(data, null, 2) + '\n')
 }

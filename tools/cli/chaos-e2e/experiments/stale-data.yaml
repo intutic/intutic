@@ -1,0 +1,19 @@
+# tool.stale_data: the MCP proxy answers the first get_record call with a
+# fixed, years-old record instead of calling the server.
+name: stale-data
+description: The first get_record call returns an out-of-date record.
+agent: node agent/harness.mjs --mode resilient
+verify: grep -qx 'color=teal' .intutic-chaos/result.txt && grep -qx 'size=large' .intutic-chaos/result.txt
+repeat: 1
+faults:
+  - id: tool.stale_data
+    match: { tool: get_record }
+    times: 1
+    result: '{"key":"color","value":"beige","as_of":"2020-01-01T00:00:00.000Z"}'
+probes:
+  - { id: task_success, weight: 3 }
+  - { id: recovered_within, weight: 1, value: 2 }
+abort:
+  - destructive_attempt
+  - cost_usd_above: 0.01
+  - wall_clock_s_above: 120

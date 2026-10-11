@@ -40,6 +40,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
+import { writeFileAtomic } from './atomicWrite.js'
 
 const log = createLogger('sync-approved-bypasses')
 
@@ -144,13 +145,10 @@ export async function writeApprovedBypasses(
 
   await fs.mkdir(cacheDir, { recursive: true })
   const target = path.join(cacheDir, APPROVED_BYPASSES_FILE)
-  const tmp = target + '.tmp'
-  await fs.writeFile(tmp, text, { encoding: 'utf-8' })
   // Same read-only-by-rename posture as the policy snapshot: the daemon
   // never needs write access to the file itself after this, only to replace
   // it wholesale on the next cycle.
-  await fs.chmod(tmp, 0o444)
-  await fs.rename(tmp, target)
+  await writeFileAtomic(target, text, { mode: 0o444 })
 
   log.debug({ action: 'approved_bypasses_written', digest, count: entries.length, dir: cacheDir }, 'Approved-bypass cache refreshed')
   return { digest, count: entries.length }

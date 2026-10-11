@@ -2,7 +2,7 @@
  * toolPoison.ts — Tool-description poisoning patterns.
  *
  * Direct TypeScript port of `packages/proxy/src/tool_poison.rs`'s `scan`
- * function and its seven named patterns. This is a SEPARATE pattern set from
+ * function and its named patterns. This is a SEPARATE pattern set from
  * the MCP proxy's `injection.ts`, on purpose: `tool_poison.rs`'s own module
  * doc records that it tried reusing `injection::scan` for this and measured
  * that its five patterns match ZERO of the tool-poisoning payloads — they are
@@ -21,12 +21,13 @@
  * module's own `gating_never_changes_a_verdict` test), and the volume of tool
  * descriptions scanned here is orders of magnitude below the Rust proxy's
  * request path. The pattern SOURCE TEXT below is unchanged from the Rust
- * `PATTERNS` array.
+ * `PATTERNS` array, `/` escaped as `\/` for a regex literal;
+ * `__tests__/toolPoison.test.ts` reads the Rust file and holds the two equal.
  *
  @module
  */
 
-interface ToolPoisonPattern {
+export interface ToolPoisonPattern {
   name: string
   regex: RegExp
 }
@@ -38,7 +39,7 @@ interface ToolPoisonPattern {
  * RegexSet performance regression" shape the MCP proxy's `injection.ts` documents, not the
  * `dlp.rs` shape that regressed.
  */
-const PATTERNS: readonly ToolPoisonPattern[] = [
+export const TOOL_POISON_PATTERNS: readonly ToolPoisonPattern[] = [
   {
     name: 'hidden-instruction-block',
     regex: /<\s*(important|secret|system|hidden|instructions?)\s*>/i,
@@ -72,6 +73,15 @@ const PATTERNS: readonly ToolPoisonPattern[] = [
     name: 'tool-scoped-instruction-override',
     regex: /\b(ignore|disregard|override)\b[^.!?]{0,40}\b(other\s+tools?|previous\s+tools?|system\s+prompt)\b/i,
   },
+  {
+    // An order to run a command that destroys the machine or its data: a
+    // recursive delete of the filesystem root or the home directory (never a
+    // path below either), formatting or raw-writing a block device, dropping a
+    // database, piping a download into a shell, a fork bomb.
+    name: 'destructive-command-instruction',
+    regex:
+      /\b(run|execute|exec|invoke|issue|type|enter|paste)\b[^.!?]{0,40}(\brm\s+-[a-z-]*[rf][a-z-]*\s+(-\S+\s+){0,4}["'`]?(\/\*?|~\/?\*?|\$\{?home\}?\/?\*?)(["'`;&|)\s]|$)|\bmkfs\b|\bdd\s[^.!?]{0,60}\bof=\/dev\/|\bdrop\s+(database|schema)\b|\b(curl|wget)\s[^|\n]{0,120}\|\s*(sudo\s+)?(ba|z|da|k)?sh\b|:\(\)\s*\{\s*:\s*\|\s*:)/i,
+  },
 ]
 
 /**
@@ -81,7 +91,7 @@ const PATTERNS: readonly ToolPoisonPattern[] = [
 export function scanToolDescription(description: string): string[] {
   if (!description) return []
   const found: string[] = []
-  for (const { name, regex } of PATTERNS) {
+  for (const { name, regex } of TOOL_POISON_PATTERNS) {
     if (regex.test(description)) found.push(name)
   }
   return found

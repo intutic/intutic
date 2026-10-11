@@ -59,6 +59,10 @@
     "./harness/dshHooks": {
       "import": "./dist/harness/dshHooks.js",
       "types": "./dist/harness/dshHooks.d.ts"
+    },
+    "./lib/atomicWrite": {
+      "import": "./dist/lib/atomicWrite.js",
+      "types": "./dist/lib/atomicWrite.d.ts"
     }
   },
   "typesVersions": {

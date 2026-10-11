@@ -32,6 +32,7 @@ import { createLogger } from '@intutic/logger'
 import { keepOriginal, readOriginal, sha256 } from '../disconnect/originals.js'
 import { DisconnectPlan, reverseOwnedFile } from '../disconnect/plan.js'
 import { startsWithRulesHeader } from '../disconnect/recognise.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-rules-section')
 
@@ -106,10 +107,8 @@ export async function writeRulesSection(
   markers: SectionMarkers = RULES_MARKERS,
 ): Promise<void> {
   let current = ''
-  let mode: number | undefined
   try {
     current = await fs.readFile(filePath, 'utf-8')
-    mode = (await fs.stat(filePath)).mode & 0o7777
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       log.warn({ action: 'rules_section_skipped', path: filePath, error: String(err) }, `Could not read ${filePath} — left untouched`)
@@ -123,10 +122,8 @@ export async function writeRulesSection(
 
   await keepOriginal(filePath, workspaceRoot)
   await fs.mkdir(path.dirname(filePath), { recursive: true })
-  const tmp = `${filePath}.intutic-tmp`
-  await fs.writeFile(tmp, next, 'utf-8')
-  if (mode !== undefined) await fs.chmod(tmp, mode)
-  await fs.rename(tmp, filePath)
+  // Keeps the file's mode, as the in-place edit a person makes would.
+  await writeFileAtomic(filePath, next)
   log.info({ action: 'rules_section_written', path: filePath, marker: markers.start }, `Wrote the Intutic section of ${filePath}`)
 }
 

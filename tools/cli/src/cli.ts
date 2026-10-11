@@ -861,7 +861,7 @@ program
   // cap-drop, no-new-privileges, read-only rootfs, resource caps,
   // and a default-deny egress firewall the agent cannot undo.
   .option('--sandbox [kind]', 'Run the agent in an isolated sandbox (kind: oci | firecracker; default oci)')
-  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent + nftables + capsh); the default is built locally on first use', DEFAULT_SANDBOX_IMAGE)
+  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent + nftables + capsh); the default, and its <default>-node variant with Node.js for agents such as Claude Code, are built locally on first use', DEFAULT_SANDBOX_IMAGE)
   .option('--sandbox-memory <size>', 'Sandbox memory cap (e.g. 2g)', '2g')
   .option('--sandbox-cpus <n>', 'Sandbox CPU cap', '2')
   .option('--sandbox-pids <n>', 'Sandbox max process count', '512')
@@ -911,7 +911,7 @@ chaos
   .command('run')
   .description('Run an experiment: baseline then faulted repetitions, each in a sandbox behind its own proxy')
   .argument('<file>', 'Experiment file (YAML)')
-  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent); overrides the experiment\'s sandbox_image')
+  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent; extend intutic/sandbox:<version>-node for Node agents); overrides the experiment\'s sandbox_image')
   .option('--out <report.json>', 'Where to write the JSON report (default: under the OS temp dir)')
   .option('--keep', 'Keep each repetition\'s git worktree instead of removing it')
   .action(async (file: string, opts: { sandboxImage?: string; out?: string; keep?: boolean }) => {

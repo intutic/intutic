@@ -254,6 +254,9 @@ export const BACKTRACKING_ALLOWLIST: Readonly<Record<string, string>> = {
     '`( +-[a-zA-Z-]+)+`: every repetition must begin with a space and the inner run cannot ' +
     'contain one, so there is one way to split the flags; each ` rm` start does work linear in ' +
     'its own flag list and stops at the next ` rm`.',
+  'destructive.rm_rf_home':
+    'The same `( +-[a-zA-Z-]+)+` flag list as destructive.rm_rf_root, for the same reason; ' +
+    'what follows it is a fixed-length run of optional single characters.',
   'skill_content.*':
     'The argPattern wrapper `"key":"(?:[^"\\\\]|\\\\.)*?(?:P)` scans one JSON string lazily and ' +
     'tries P at each position. It starts only at a key, which can appear unescaped in ' +

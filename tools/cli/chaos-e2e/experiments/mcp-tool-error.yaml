@@ -1,0 +1,20 @@
+# tool.error on the MCP side: the MCP proxy answers the first get_record call
+# with an error instead of calling the server.
+name: mcp-tool-error
+description: The first get_record call through the MCP proxy fails.
+agent: node agent/harness.mjs --mode resilient
+verify: grep -qx 'color=teal' .intutic-chaos/result.txt && grep -qx 'size=large' .intutic-chaos/result.txt
+repeat: 1
+faults:
+  - id: tool.error
+    match: { tool: get_record }
+    times: 1
+    message: records backend unavailable
+probes:
+  - { id: task_success, weight: 3 }
+  - { id: failure_surfaced, weight: 2 }
+  - { id: recovered_within, weight: 1, value: 2 }
+abort:
+  - destructive_attempt
+  - cost_usd_above: 0.01
+  - wall_clock_s_above: 120

@@ -75,6 +75,7 @@ import { keepOriginal, writeOwnedFile } from '../disconnect/originals.js'
 import { HOOK_GATE_TIMEOUTS, openaiBaseUrl } from '@intutic/shared-types'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 const log = createLogger('sync-grok-hooks')
 
@@ -268,9 +269,7 @@ async function mergeGrokConfigTomlAppendOnly(
   if (text === existingRaw) return
 
   await fs.mkdir(path.dirname(configPath), { recursive: true })
-  const tmp = configPath + '.intutic-tmp'
-  await fs.writeFile(tmp, text, 'utf-8')
-  await fs.rename(tmp, configPath)
+  await writeFileAtomic(configPath, text)
   log.info(
     { action: 'grok_config_written', path: configPath, mode: 'append_only_fallback' },
     'Grok config.toml updated (append-only fallback — did not parse as TOML)',
@@ -345,9 +344,7 @@ async function mergeGrokConfigToml(configPath: string, proxyUrl: string, workspa
   doc.model = model
   await keepOriginal(configPath, workspaceRoot)
   await fs.mkdir(path.dirname(configPath), { recursive: true })
-  const tmp = configPath + '.intutic-tmp'
-  await fs.writeFile(tmp, stringifyToml(doc), 'utf-8')
-  await fs.rename(tmp, configPath)
+  await writeFileAtomic(configPath, stringifyToml(doc))
   log.info({ action: 'grok_config_written', path: configPath, mode: 'toml' }, 'Grok config.toml updated (structural TOML edit)')
 }
 
@@ -371,10 +368,7 @@ export async function writeGrokHooks(
   await fs.mkdir(path.join(workspaceRoot, '.intutic', 'events'), { recursive: true })
 
   const hookScriptPath = path.join(hookScriptDir, 'grok-check.js')
-  const tmpScript = hookScriptPath + '.intutic-tmp'
-  await fs.writeFile(tmpScript, buildHookScript(proxyUrl, workspaceRoot, workspaceId), 'utf-8')
-  await fs.rename(tmpScript, hookScriptPath)
-  await fs.chmod(hookScriptPath, 0o755)
+  await writeFileAtomic(hookScriptPath, buildHookScript(proxyUrl, workspaceRoot, workspaceId), { mode: 0o755 })
 
   const registration = JSON.stringify(buildHookRegistration(hookScriptPath), null, 2) + '\n'
 

@@ -72,6 +72,7 @@ import {
   type SsoGroupPolicy,
 } from '@intutic/shared-types'
 import { toRulesLine, GATE_VERSION, RULES_COLUMNS } from '../harness/gateBody.js'
+import { writeFileAtomic } from './atomicWrite.js'
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
   SKILL_CONTENT_PATTERNS,
@@ -114,7 +115,7 @@ export function snapshotRulesVerify(text: string): boolean {
 /**
  * Whether the destructive tier ships as `block` or as `warn`.
  *
- * `warn`. These seven patterns qualify for `block` on the merits — every one is
+ * `warn`. These eight patterns qualify for `block` on the merits — every one is
  * unrecoverable without a reinstall or a backup — but they have never run
  * against real developer traffic, and they would land on thirteen harnesses at
  * once. A false positive here does not merely annoy: the fastest workaround
@@ -139,7 +140,7 @@ export const DESTRUCTIVE_TIER_SEVERITY: 'block' | 'warn' = 'warn'
  *
  * `block` — deliberately not following `DESTRUCTIVE_TIER_SEVERITY`'s warn-first
  * ramp, because the thing that ramp is buying time for does not exist on this
- * surface. `DESTRUCTIVE_COMMAND_PATTERNS` rides at `warn` because those seven
+ * surface. `DESTRUCTIVE_COMMAND_PATTERNS` rides at `warn` because those eight
  * families are unmeasured against real developer traffic and a false positive
  * has a real cost (see that constant's own comment). `SKILL_SURFACE_PATTERNS`
  * is not that kind of rule: it does not run `scanSkillContent` or judge
@@ -622,7 +623,7 @@ export function buildSnapshotRules(policy: ResolvedPolicy, localHoldTokens: read
     // part of `DESTRUCTIVE_TIER_SEVERITY`'s promotion (its own static
     // `severity` is `'warn'`, not `'block'`, so that ternary never reaches
     // it), and this flag is opt-in per workspace, not evidence-gated the way
-    // the six-pattern ramp is. Shadow mode still wins over both: SILENT_LOG
+    // the block-pattern ramp is. Shadow mode still wins over both: SILENT_LOG
     // means observe-only across the whole dynamic tier, no exceptions.
     if (p.id === 'destructive.sql_drop' && !shadow && policy.sqlDropStrictBlock) {
       return { ...p, severity: 'block' as const }
@@ -785,6 +786,14 @@ export async function writePolicySnapshot(
   snapshotDir: string = DEFAULT_SNAPSHOT_DIR,
   localHoldTokens: readonly string[] = [],
 ): Promise<{ digest: string; ruleCount: number }> {
+  return oneAtATime(() => writeSnapshotFiles(policy, snapshotDir, localHoldTokens))
+}
+
+async function writeSnapshotFiles(
+  policy: ResolvedPolicy,
+  snapshotDir: string,
+  localHoldTokens: readonly string[],
+): Promise<{ digest: string; ruleCount: number }> {
   const rules = buildSnapshotRules(policy, localHoldTokens)
   // One timestamp shared by both artifacts. Two `new Date()` calls would put
   // different values in the JSON and the .rules, so a reader comparing them
@@ -908,10 +917,10 @@ export async function writePolicySnapshot(
   // write ends with the new snapshot in force, never the old one.
   const verifiedDir = path.join(snapshotDir, VERIFIED_SNAPSHOT_DIR)
   await fs.mkdir(verifiedDir, { recursive: true, mode: 0o700 })
-  await writeAtomic(path.join(verifiedDir, SNAPSHOT_JSON), json)
-  await writeAtomic(path.join(verifiedDir, SNAPSHOT_RULES), rulesText)
-  await writeAtomic(path.join(snapshotDir, SNAPSHOT_JSON), json)
-  await writeAtomic(path.join(snapshotDir, SNAPSHOT_RULES), rulesText)
+  await writeFileAtomic(path.join(verifiedDir, SNAPSHOT_JSON), json, READ_ONLY)
+  await writeFileAtomic(path.join(verifiedDir, SNAPSHOT_RULES), rulesText, READ_ONLY)
+  await writeFileAtomic(path.join(snapshotDir, SNAPSHOT_JSON), json, READ_ONLY)
+  await writeFileAtomic(path.join(snapshotDir, SNAPSHOT_RULES), rulesText, READ_ONLY)
 
   log.debug(
     { action: 'policy_snapshot_written', digest, ruleCount: rules.length, dir: snapshotDir },
@@ -920,15 +929,24 @@ export async function writePolicySnapshot(
   return { digest, ruleCount: rules.length }
 }
 
-async function writeAtomic(target: string, content: string): Promise<void> {
-  const tmp = target + '.tmp'
-  await fs.writeFile(tmp, content, { encoding: 'utf-8' })
-  // 0444: the daemon replaces this by rename, so it never needs write access to
-  // the file itself, and a read-only file is one more small obstacle to an agent
-  // editing it in place. The real protection is that every gate refuses to touch
-  // `.intutic/hooks` at all.
-  await fs.chmod(tmp, 0o444)
-  await fs.rename(tmp, target)
+// 0444: the daemon replaces these by rename, so it never needs write access to
+// the file itself, and a read-only file is one more small obstacle to an agent
+// editing it in place. The real protection is that every gate refuses to touch
+// `.intutic/hooks` at all.
+const READ_ONLY = { mode: 0o444 } as const
+
+/**
+ * Snapshot writes and the self-heal below run one at a time. A write replaces
+ * the verified copy before the live one, so a self-heal run between the two
+ * (the drift watcher starts one whenever the live snapshot changes, and the
+ * next sync can be writing by then) found them different, put the copy back
+ * and reported the daemon's own refresh as tampering.
+ */
+let snapshotQueue: Promise<unknown> = Promise.resolve()
+function oneAtATime<T>(run: () => Promise<T>): Promise<T> {
+  const next = snapshotQueue.then(run, run)
+  snapshotQueue = next.catch(() => undefined)
+  return next
 }
 
 /**
@@ -947,6 +965,10 @@ async function writeAtomic(target: string, content: string): Promise<void> {
 export async function restoreVerifiedSnapshot(
   snapshotDir: string = DEFAULT_SNAPSHOT_DIR,
 ): Promise<'intact' | 'restored' | 'unverifiable'> {
+  return oneAtATime(() => restoreVerifiedFiles(snapshotDir))
+}
+
+async function restoreVerifiedFiles(snapshotDir: string): Promise<'intact' | 'restored' | 'unverifiable'> {
   const read = (file: string) => fs.readFile(file, 'utf-8').catch(() => null)
   const verifiedDir = path.join(snapshotDir, VERIFIED_SNAPSHOT_DIR)
   const [liveRules, liveJson, keptRules, keptJson] = await Promise.all([
@@ -960,8 +982,8 @@ export async function restoreVerifiedSnapshot(
   }
   if (liveRules === keptRules && liveJson === keptJson) return 'intact'
   try {
-    await writeAtomic(path.join(snapshotDir, SNAPSHOT_JSON), keptJson)
-    await writeAtomic(path.join(snapshotDir, SNAPSHOT_RULES), keptRules)
+    await writeFileAtomic(path.join(snapshotDir, SNAPSHOT_JSON), keptJson, READ_ONLY)
+    await writeFileAtomic(path.join(snapshotDir, SNAPSHOT_RULES), keptRules, READ_ONLY)
   } catch (err) {
     log.warn({ action: 'policy_snapshot_restore_failed', err }, 'Could not restore the verified policy snapshot')
     return liveRules !== null && snapshotRulesVerify(liveRules) ? 'intact' : 'unverifiable'

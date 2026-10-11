@@ -12,15 +12,17 @@ import {
 
 const base = { ts: '2026-10-10T00:00:00Z', runId: 'run-abcdef' }
 const planLoaded = (component: ChaosEvent['component']): ChaosEvent => ({ ...base, component, type: 'plan_loaded', faults: 1 })
-const injected = (faultId: 'tool.error' | 'egress.dns_fail' | 'inject.tool_result', target?: string): ChaosEvent => ({
+type InjectedId = 'tool.error' | 'tool.stale_data' | 'egress.dns_fail' | 'llm.rate_limit' | 'inject.tool_result' | 'permission.deny_or_delay'
+/** A fault_injected event, from the component that injects that fault unless told otherwise. */
+const injected = (faultId: InjectedId, target?: string, component?: ChaosEvent['component']): ChaosEvent => ({
   ...base,
-  component: 'proxy',
+  component: component ?? (faultId.startsWith('egress.') || faultId.startsWith('llm.') ? 'proxy' : faultId === 'tool.error' || faultId.startsWith('permission.') ? 'gate' : 'mcp-proxy'),
   type: 'fault_injected',
   faultId,
   call: 1,
   ...(target ? { target } : {}),
 })
-const toolCall = (tool: string, ok: boolean): ChaosEvent => ({ ...base, component: 'gate', type: 'tool_call', tool, ok })
+const toolCall = (tool: string, ok: boolean, component: ChaosEvent['component'] = 'gate'): ChaosEvent => ({ ...base, component, type: 'tool_call', tool, ok })
 const gate = (over: { destructive?: boolean; policyHit?: boolean } = {}): ChaosEvent => ({
   ...base,
   component: 'gate',
@@ -112,6 +114,39 @@ describe('recoveredWithin', () => {
 
   it('accepts any successful tool call when the fault has no target', () => {
     expect(recoveredWithin([injected('egress.dns_fail'), toolCall('Read', true)], 1)).toBe(true)
+  })
+
+  // The proxy names a model or a host as the target, which no tool call ever
+  // matches: recovery from a proxy fault is any successful tool call.
+  it('accepts any successful tool call after a proxy fault, whatever it targeted', () => {
+    expect(recoveredWithin([injected('llm.rate_limit', 'claude-sonnet-5-5'), toolCall('Bash', true)], 1)).toBe(true)
+    expect(recoveredWithin([injected('egress.dns_fail', 'registry.npmjs.org'), toolCall('Bash', false)], 1)).toBe(false)
+  })
+
+  // The MCP proxy records the faulted call after the fault; a stale or
+  // injected result is recorded ok, which used to pass the probe by itself.
+  it('does not count the MCP proxy\'s record of the faulted call as recovery', () => {
+    const faulted = [injected('tool.stale_data', 'get_record'), toolCall('get_record', true, 'mcp-proxy')]
+    expect(recoveredWithin(faulted, 3)).toBe(false)
+    expect(recoveredWithin([...faulted, toolCall('get_record', true, 'mcp-proxy')], 1)).toBe(true)
+    const errored = [injected('tool.error', 'get_record', 'mcp-proxy'), toolCall('get_record', false, 'mcp-proxy'), toolCall('get_record', true, 'mcp-proxy')]
+    expect(recoveredWithin(errored, 1)).toBe(true)
+  })
+
+  // Claude Code puts an MCP call to its gate as mcp__<server>__<tool>, then
+  // the MCP proxy records the same call as <tool>, with its outcome.
+  it('counts an MCP call once, by the MCP proxy\'s record, under either name', () => {
+    const retried = [
+      injected('tool.error', 'get_record', 'mcp-proxy'),
+      toolCall('get_record', false, 'mcp-proxy'),
+      toolCall('mcp__records__get_record', true),
+      toolCall('get_record', true, 'mcp-proxy'),
+    ]
+    expect(recoveredWithin(retried, 1)).toBe(true)
+    const denied = [injected('permission.deny_or_delay', 'mcp__records__get_record'), toolCall('mcp__records__get_record', true), toolCall('get_record', true, 'mcp-proxy')]
+    expect(recoveredWithin(denied, 1)).toBe(true)
+    // Without the MCP proxy, the gate's record is the only one and counts.
+    expect(recoveredWithin([injected('permission.deny_or_delay', 'mcp__records__get_record'), toolCall('mcp__records__get_record', true)], 1)).toBe(true)
   })
 
   it('is not evaluated when nothing was injected', () => {

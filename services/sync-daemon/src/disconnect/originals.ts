@@ -37,6 +37,7 @@ import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
 import * as node_crypto from 'node:crypto'
+import { writeFileAtomic } from '../lib/atomicWrite.js'
 
 export interface OriginalRecord {
   /** Absolute path of the file this record is for. */
@@ -136,7 +137,7 @@ export async function keepOriginal(filePath: string, workspaceRoot: string): Pro
       record.mode = mode
     }
     await ensureLedgerDir(ledgerDir(root))
-    if (content !== null) await node_fs.writeFile(`${base}.orig`, content, { mode: 0o600 })
+    if (content !== null) await writeFileAtomic(`${base}.orig`, content, { mode: 0o600 })
     await node_fs.writeFile(`${base}.json`, JSON.stringify(record, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
   } catch {
     // Best-effort; see the module doc.
@@ -161,9 +162,7 @@ export async function noteWritten(
     if (content !== null) next.writtenSha256 = sha256(content)
     if (meta) next.meta = { ...(record.meta ?? {}), ...meta }
     if (JSON.stringify(next) === JSON.stringify(record)) return
-    const tmp = `${base}.${process.pid}.tmp`
-    await node_fs.writeFile(tmp, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 })
-    await node_fs.rename(tmp, `${base}.json`)
+    await writeFileAtomic(`${base}.json`, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 })
   } catch {
     // Best-effort; see the module doc.
   }
@@ -177,10 +176,7 @@ export async function noteWritten(
 export async function writeOwnedFile(filePath: string, workspaceRoot: string, content: string, mode?: number): Promise<void> {
   await keepOriginal(filePath, workspaceRoot)
   await node_fs.mkdir(node_path.dirname(filePath), { recursive: true })
-  const tmp = `${filePath}.intutic-tmp`
-  await node_fs.writeFile(tmp, content, 'utf-8')
-  if (mode !== undefined) await node_fs.chmod(tmp, mode)
-  await node_fs.rename(tmp, filePath)
+  await writeFileAtomic(filePath, content, { mode })
   await noteWritten(filePath, workspaceRoot, content)
 }
 
@@ -254,9 +250,7 @@ export async function noteProxyUrl(url: string): Promise<void> {
     const known = await knownProxyUrls()
     if (!url || known.includes(url)) return
     await ensureLedgerDir(ledgerDir(node_os.homedir()))
-    const tmp = `${proxyUrlsPath()}.${process.pid}.tmp`
-    await node_fs.writeFile(tmp, JSON.stringify([...known, url], null, 2) + '\n', { mode: 0o600 })
-    await node_fs.rename(tmp, proxyUrlsPath())
+    await writeFileAtomic(proxyUrlsPath(), JSON.stringify([...known, url], null, 2) + '\n', { mode: 0o600 })
   } catch {
     // Best-effort; see the module doc.
   }
