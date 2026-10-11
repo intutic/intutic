@@ -21,8 +21,7 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pc from 'picocolors'
 import { FAULT_CATALOG, FAULT_IDS, type RunVerdict } from '@intutic/shared-types'
-import { loadCredentials } from '../config/store.js'
-import { deriveIdentity } from '../lib/graphIdentity.js'
+import { deriveIdentity, type GraphIdentity } from '../lib/graphIdentity.js'
 import { log } from '../lib/logger.js'
 import { resolveProxyBinary } from '../lib/proxyBinary.js'
 import { resolveSnapshotRulesPath } from '../lib/policySnapshot.js'
@@ -150,9 +149,19 @@ export function printSummary(report: ChaosReport): void {
   log.field('Report', report.reportPath)
 }
 
+/**
+ * The sandbox environment for a repetition. Never the workspace login: each
+ * repetition's proxy runs standalone, so it cannot resolve an Intutic key, and
+ * handing one to the agent in place of its provider keys would fail every
+ * model call (every baseline, so every run, invalid). The agent keeps its own
+ * provider keys, passed by name, and the standalone proxy forwards them.
+ */
+export function chaosSandboxEnv(identity: GraphIdentity, port: number): Record<string, string> {
+  return sandboxProxyEnv(null, identity, String(port), []).env
+}
+
 /** The real sandbox, proxy binary and git. */
 async function defaultDeps(): Promise<ChaosDeps> {
-  const creds = await loadCredentials()
   const identity = deriveIdentity()
   const sandboxOpts = (image: string): SandboxExecOptions => ({
     kind: 'oci',
@@ -174,7 +183,7 @@ async function defaultDeps(): Promise<ChaosDeps> {
       const spec = sandboxSpec(command, workdir, env, sandboxOpts(image), { tty: false, name, onStdout, signal })
       return selectBackend('oci', env).run(spec)
     },
-    sandboxEnv: (port) => sandboxProxyEnv(creds, identity, String(port), []).env,
+    sandboxEnv: (port) => chaosSandboxEnv(identity, port),
     startProxy: ({ port, env, logPath }) => startProxy(port, env, logPath),
     async proxyHealthy(port) {
       try {
@@ -211,7 +220,8 @@ async function defaultDeps(): Promise<ChaosDeps> {
  */
 function startProxy(port: number, env: Record<string, string>, logPath: string): ProxyProcess {
   const out = fs.openSync(logPath, 'a')
-  const { CONTROL_PLANE_URL: _controlPlane, ...inherited } = process.env
+  const inherited = { ...process.env }
+  delete inherited.CONTROL_PLANE_URL
   const child = spawn(resolveProxyBinary(), [], {
     stdio: ['ignore', out, out],
     env: { ...inherited, INTUTIC_STANDALONE: '1', ...env },
