@@ -156,6 +156,12 @@ pub fn add_local_spend(amount: f64) {
 const MAX_TRACE_LOG_BYTES: u64 = 64 * 1024 * 1024;
 
 pub fn log_offline_trace(trace: &serde_json::Value) {
+    // A chaos run's traces stay out of the shared log: the sync daemon uploads
+    // it to the connected workspace, where injected failures would read as
+    // real ones. The run keeps its own record in the chaos events file.
+    if crate::chaos::active().is_some() {
+        return;
+    }
     let dir = intutic_dir().join("logs");
     let _ = fs::create_dir_all(&dir);
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();

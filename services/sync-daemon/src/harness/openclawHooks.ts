@@ -172,7 +172,9 @@ function intuticEvaluate(event, ctx) {
   const direct = params.path || params.file_path || params.filePath || params.target || '';
   const derived = event && Array.isArray(event.derivedPaths) ? event.derivedPaths.filter((p) => typeof p === 'string' && p) : [];
   const targets = derived.length > 0 ? (direct ? [direct].concat(derived) : derived) : [direct];
-  for (const target of targets) intuticGate(tool, target, command, logEvent, _intuticWsId, params, _intuticSessionId);
+  // One call: every target but the last tells the gate more of it follows, so
+  // a chaos run reports and faults the call once.
+  targets.forEach((target, i) => intuticGate(tool, target, command, logEvent, _intuticWsId, params, _intuticSessionId, i < targets.length - 1));
   logEvent('tool_allowed', tool, '');
 }
 

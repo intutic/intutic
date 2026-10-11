@@ -1,3 +1,5 @@
+/// Agent fault injection for `intutic chaos run` — inert unless a plan is set
+pub mod chaos;
 /// Cloud-hosted upstreams: AWS Bedrock, Google Vertex AI, Azure OpenAI
 pub mod cloud;
 pub mod commands;

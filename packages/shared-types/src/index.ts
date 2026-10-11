@@ -832,3 +832,47 @@ export {
   type RuleLoadFailureReason,
 } from './ruleLoadFailures.js'
 export { GATE_DECISION_VERDICTS, type GateDecisionVerdict } from './gateDecisions.js'
+
+export {
+  CHAOS_PLAN_ENV,
+  CHAOS_EVENTS_ENV,
+  CHAOS_PLAN_VERSION,
+  FAULT_IDS,
+  FAULT_CATALOG,
+  PROBE_IDS,
+  FaultSchema,
+  ChaosPlanSchema,
+  ChaosEventSchema,
+  ExperimentSchema,
+  FaultCounter,
+  encodeChaosPlan,
+  decodeChaosPlan,
+  matchesPattern,
+  faultMatches,
+  faultMessage,
+  parseChaosEvents,
+  resilienceScore,
+} from './chaos.js'
+export {
+  chaosGateDecode,
+  chaosGateMatches,
+  chaosGateEvent,
+  chaosGateAppend,
+  chaosGateClaim,
+  chaosGateCall,
+  CHAOS_GATE_JS_SOURCE,
+} from './chaosGate.js'
+export type { ChaosGateFault, ChaosGatePlan, ChaosGateCall, ChaosGateFaultOutcome, ChaosGateFs } from './chaosGate.js'
+export type {
+  FaultId,
+  Fault,
+  FaultMatch,
+  FaultSafety,
+  ChaosComponent,
+  ChaosPlan,
+  ChaosEvent,
+  Experiment,
+  ProbeId,
+  ProbeOutcome,
+  RunVerdict,
+} from './chaos.js'

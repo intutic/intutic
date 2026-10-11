@@ -4142,6 +4142,58 @@ intutic exec -- python my_agent.py
 
 ---
 
+## `intutic chaos run`
+
+Run a chaos experiment: the agent with a known fault injected, in the sandbox, scored. See [Chaos Engineering for Agents](/guide/chaos-engineering).
+
+```bash
+intutic chaos run <file> [--sandbox-image <image>] [--out <report.json>] [--keep]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `file` | Experiment file (YAML) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--sandbox-image <image>` | Sandbox image; must contain the agent. Overrides the experiment's `sandbox_image`. Default: the [`intutic exec --sandbox`](#intutic-exec) image. |
+| `--out <report.json>` | Where to write the JSON report. Default: `intutic-chaos/report-<name>-<timestamp>.json` under the OS temp directory. The path is printed. |
+| `--keep` | Keep each repetition's git worktree instead of removing it. |
+
+Refuses to start without a clean git working tree (each repetition is a fresh worktree of `HEAD`) or without an available sandbox backend; it never runs the agent on the host. Runs `repeat` baseline repetitions, then `repeat` faulted ones, each behind a dedicated proxy on a free port. Exits 0 when the run is scored, 1 when it was aborted, 2 when it is invalid (the baseline failed `verify`).
+
+---
+
+## `intutic chaos validate`
+
+Check a chaos experiment file against the experiment schema and print each error with the path of the field.
+
+```bash
+intutic chaos validate <file>
+```
+
+| Argument | Description |
+|----------|-------------|
+| `file` | Experiment file (YAML) |
+
+Exits 1 when the file is invalid.
+
+---
+
+## `intutic chaos list`
+
+Print the fault catalog: each fault, the component that injects it (proxy, MCP proxy or gate) and its safety class (fail-safe or mutating), and where the example experiments are.
+
+```bash
+intutic chaos list
+```
+
+---
+
 ## `intutic env persist`
 
 Persist `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL` at the OS level so new terminals and applications reach the proxy.

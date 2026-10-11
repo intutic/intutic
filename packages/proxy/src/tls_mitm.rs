@@ -76,6 +76,16 @@ pub async fn handle_connect(req: Request<Body>) -> Response<Body> {
         }
     }
 
+    // Chaos egress faults, only on a CONNECT the policy above let through: a
+    // denied host was answered already and never reaches a fault. See
+    // `Chaos::apply_connect` for why a credential fault on an opaque tunnel
+    // refuses the CONNECT instead of answering inside it.
+    if let Some(chaos) = crate::chaos::active() {
+        if let Some(refusal) = chaos.apply_connect(&host, should_mitm) {
+            return refusal;
+        }
+    }
+
     let has_upgrade = req
         .extensions()
         .get::<hyper::upgrade::OnUpgrade>()

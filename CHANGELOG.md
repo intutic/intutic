@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent chaos engineering.** `intutic chaos run <experiment>` runs an agent
+  in the sandbox with a known fault injected by the component already on that
+  path, checks what the agent did next and scores it. The LLM proxy injects
+  rate limits, upstream errors and stream cuts, context trims, silent model
+  downgrades, and DNS and 401 failures on a host; the MCP proxy injects tool
+  errors, stale data, tool-set changes and planted tool-result text; the hook
+  gates inject permission denials and delays and built-in tool errors. Faults
+  apply only to calls governance allowed, every injected error carries a
+  canary, and deterministic probes (task success across repetitions,
+  destructive attempts, whether the failure was surfaced, policy hits, cost
+  multiplier, recovery) give a weighted resilience score. A run whose baseline
+  fails, or in which no fault fired, is reported as invalid. Chaos runs record
+  no routing rewards, write nothing to the local trace log and never report to
+  a workspace. `intutic chaos validate` and `intutic chaos list` check an
+  experiment and print the fault catalog; three example experiments ship with
+  the CLI. See the chaos engineering guide.
+
+### Changed
+
+- **Gate bodies are v19** (`GATE_VERSION` 19). The sync daemon regenerates
+  every hook gate on its next cycle; outside a chaos run the gates decide
+  exactly as before.
+
 ## [2.4.0] - 2026-10-11
 
 Everything that reached `main` since 2.3.0. Upgrade the proxy before the

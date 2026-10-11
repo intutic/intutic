@@ -162,9 +162,11 @@ export class FirecrackerBackend implements SandboxBackend {
     ]
     return new Promise((resolve) => {
       const child = spawn('bash', args, {
-        stdio: 'inherit',
+        stdio: spec.onStdout ? ['inherit', 'pipe', 'inherit'] : 'inherit',
         env: { ...process.env, ...this.env },
       })
+      if (spec.onStdout) child.stdout?.on('data', spec.onStdout)
+      spec.signal?.addEventListener('abort', () => child.kill('SIGTERM'), { once: true })
       child.on('error', (err) => {
         log.error(`firecracker launch failed: ${err.message}`)
         resolve(127)

@@ -1251,6 +1251,7 @@
           { "file": "packages/proxy/src/proxy.rs", "contains": "async fn key_lists(" }
         ]
       }
-    }
+    },
+    {"id": "agent-chaos", "title": "Agent fault injection: chaos experiments run in the sandbox and scored", "plan": "Open-Core", "surfaces": {"api": {"none": "runs locally from the CLI; nothing is sent to a control plane"}, "dashboard": {"none": "local only: no run history is kept anywhere a dashboard could read"}, "cli": ["chaos run --sandbox-image --out --keep", "chaos validate", "chaos list"], "gateSdk": {"none": "the gate SDKs call no chaos code"}, "clawdeSdk": {"none": "the chat client runs no experiments"}, "mcpTools": {"none": "experiments are started from the CLI, not by an agent"}, "kitkat": {"none": "the skill does not run experiments"}, "terraform": {"none": "experiment files live in the repository, not in workspace settings"}, "docs": ["guide/chaos-engineering.md#safety-rules", "guide/chaos-engineering.md#fault-catalog", "guide/chaos-engineering.md#probes-and-scoring", "guide/chaos-engineering.md#limits"], "website": {"none": "not described on the website"}, "events": {"none": "chaos events go to a per-repetition file, not to notifications or SIEM export"}, "enforcement": [{"file": "packages/shared-types/src/chaos.ts", "contains": "FAULT_CATALOG"}, {"file": "tools/cli/src/lib/chaos/runner.ts", "contains": "readySandbox"}, {"file": "packages/proxy/src/chaos.rs", "contains": "pub fn apply_llm"}, {"file": "packages/proxy/src/chaos.rs", "contains": "pub fn apply_connect"}, {"file": "packages/mcp-proxy/src/chaos.ts", "contains": "export class ChaosInjector"}, {"file": "services/sync-daemon/src/lib/chaosPy.ts", "contains": "CHAOS_PY_SOURCE"}, {"file": "packages/shared-types/src/chaosGate.ts"}]}}
   ]
 }

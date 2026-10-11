@@ -40,6 +40,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
+import type { ChaosInjector } from './chaos.js'
 
 const log = createLogger('mcp-remote-bridge')
 
@@ -80,7 +81,7 @@ function buildRemoteTransport(config: ProxyConfig): Transport {
  * block rather than calling `process.exit` itself, so both failure modes
  * surface through one place with one log shape.
  */
-export async function runRemoteProxy(config: ProxyConfig): Promise<void> {
+export async function runRemoteProxy(config: ProxyConfig, chaos: ChaosInjector | null = null): Promise<void> {
   if (config.remoteUrl === undefined) {
     throw new Error('runRemoteProxy called without config.remoteUrl')
   }
@@ -96,13 +97,14 @@ export async function runRemoteProxy(config: ProxyConfig): Promise<void> {
     'Starting MCP governance remote bridge',
   )
 
-  const proxy = new McpGovernanceProxy(config)
+  const proxy = new McpGovernanceProxy(config, chaos)
   const interceptor = proxy.getInterceptor()
   const session = proxy.getSessionState()
 
   // Requests whose responses this proxy must inspect on the way back — same
   // role, same shape, as `runProxy`'s own `pending` map.
   const pending = new Map<string | number, PendingRequest>()
+  const chaosHooks = proxy.chaosHooks(pending)
 
   const transport = buildRemoteTransport(config)
 
@@ -194,7 +196,7 @@ export async function runRemoteProxy(config: ProxyConfig): Promise<void> {
           'Failed to send message to remote MCP server',
         )
       })
-    }, session)
+    }, session, chaosHooks)
   })
 
   rl.on('close', () => {

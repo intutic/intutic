@@ -33,6 +33,7 @@ export type OciRuntime = 'docker' | 'podman'
  */
 export function buildOciArgs(runtime: OciRuntime, spec: SandboxSpec): string[] {
   const args: string[] = ['run', '--rm']
+  if (spec.name) args.push('--name', spec.name)
   // -i always (pipe stdin); -t only when we have a real terminal.
   args.push(spec.tty ? '-it' : '-i')
 
@@ -106,10 +107,17 @@ export class OciBackend implements SandboxBackend {
     log.dim(`sandbox: ${this.runtime} ${args.slice(0, 12).join(' ')} …`)
     return new Promise((resolve) => {
       const child = spawn(this.runtime, args, {
-        stdio: 'inherit',
+        stdio: spec.onStdout ? ['inherit', 'pipe', 'inherit'] : 'inherit',
         // Values for the `--env NAME` references live here, not in argv.
         env: { ...process.env, ...this.env },
       })
+      if (spec.onStdout) child.stdout?.on('data', spec.onStdout)
+      // Killing the `docker run` client can leave the container running, so
+      // stop it by name when there is one.
+      spec.signal?.addEventListener('abort', () => {
+        if (spec.name) spawn(this.runtime, ['kill', spec.name], { stdio: 'ignore' }).on('error', () => {})
+        child.kill('SIGTERM')
+      }, { once: true })
       child.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'ENOENT') {
           log.error(`Sandbox runtime '${this.runtime}' not found. Install Docker or Podman.`)

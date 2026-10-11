@@ -884,6 +884,41 @@ program
     }
   })
 
+// Agent fault injection: run an agent with a known fault injected, in the
+// sandbox only, and score what it did.
+const chaos = program
+  .command('chaos')
+  .description('Run an agent with a known fault injected, in the sandbox, and score what it did')
+
+chaos
+  .command('validate')
+  .description('Check a chaos experiment file')
+  .argument('<file>', 'Experiment file (YAML)')
+  .action(async (file: string) => {
+    const { runChaosValidate } = await import('./commands/chaos.js')
+    await runChaosValidate(file)
+  })
+
+chaos
+  .command('list')
+  .description('List the fault catalog: each fault, the component that injects it and its safety class')
+  .action(async () => {
+    const { runChaosList } = await import('./commands/chaos.js')
+    runChaosList()
+  })
+
+chaos
+  .command('run')
+  .description('Run an experiment: baseline then faulted repetitions, each in a sandbox behind its own proxy')
+  .argument('<file>', 'Experiment file (YAML)')
+  .option('--sandbox-image <image>', 'Sandbox image (must contain the agent); overrides the experiment\'s sandbox_image')
+  .option('--out <report.json>', 'Where to write the JSON report (default: under the OS temp dir)')
+  .option('--keep', 'Keep each repetition\'s git worktree instead of removing it')
+  .action(async (file: string, opts: { sandboxImage?: string; out?: string; keep?: boolean }) => {
+    const { runChaosRun } = await import('./commands/chaos.js')
+    await runChaosRun(file, opts)
+  })
+
 
 const traces = program
   .command('traces')
