@@ -124,6 +124,25 @@ describe('PolicyClient and the daemon snapshot answer', () => {
     expect(client.getWasmRules()).toEqual(rules)
   })
 
+  it('takes interventionMode from the daemon, and keeps the loaded mode through a snapshot answer', async () => {
+    const client = daemonClient()
+    answer = { ...SNAPSHOT, interventionMode: 'OPAQUE' }
+    await client.refresh()
+    expect(client.isOpaque()).toBe(true)
+
+    answer = { ...FULL, interventionMode: 'OPAQUE' }
+    await client.refresh()
+    expect(client.isOpaque()).toBe(true)
+
+    answer = SNAPSHOT
+    await client.refresh()
+    expect(client.isOpaque()).toBe(true)
+
+    answer = FULL
+    await client.refresh()
+    expect(client.isOpaque()).toBe(false)
+  })
+
   it('a full answer after the snapshot replaces everything again', async () => {
     const client = daemonClient()
     answer = SNAPSHOT

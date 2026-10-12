@@ -168,6 +168,8 @@ Every refusal is a JSON-RPC `-32603` error whose message is written for the agen
 
 The two `RESULT_WITHHELD_*` codes answer a call that already ran; every other code means the call did not run.
 
+In a workspace whose [intervention mode](/guide/policies#intervention-modes) is Opaque, a refusal on workspace policy keeps its JSON-RPC code and `error.data.code`, but its message is *"Blocked by workspace policy. Ask a workspace admin if you need this action."* and its `ruleId` is empty. That covers every code above except the operational ones: `REGISTRY_UNAVAILABLE`, `BUDGET_EXCEEDED`, `BUDGET_UNAVAILABLE`, `TOFU_UNAVAILABLE`, `TOOL_DEFINITIONS_CHANGED` and a `GOVERNANCE_UNAVAILABLE` that names no custom rule. A hold keeps its `status` and `holdId`, and a withheld result still says the call ran. The events the proxy reports keep the full reason.
+
 ### Anomaly-detection session scope
 
 The sequence detectors (`consecutive_repeat`, `ping_pong_cycle`, `landmark_cycle`,

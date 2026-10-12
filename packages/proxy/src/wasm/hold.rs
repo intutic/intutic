@@ -184,17 +184,24 @@ async fn find_bypass(
 
 /// What the agent is told about a hold.
 pub fn refusal(outcome: &HoldOutcome, rule_id: &str, reason: &str) -> String {
+    // An empty rule id names no rule: an OPAQUE workspace's hold, whose reason
+    // is the generic sentence and which still names the hold.
+    let named = if rule_id.is_empty() {
+        reason.to_string()
+    } else {
+        format!("{reason} [{rule_id}]")
+    };
     match outcome {
         HoldOutcome::Held {
             hold_id,
             recorded: true,
         } => format!(
-            "HELD for approval: {reason} [{rule_id}]. Hold id: {hold_id}. An approver can run: \
+            "HELD for approval: {named}. Hold id: {hold_id}. An approver can run: \
              intutic decision approve {hold_id} (or reject it). Retry this exact call after it \
              is approved."
         ),
         HoldOutcome::Held { .. } => format!(
-            "HELD for approval: {reason} [{rule_id}], but the hold could not be recorded (no \
+            "HELD for approval: {named}, but the hold could not be recorded (no \
              Intutic control plane reachable, or the request was not made with an Intutic \
              virtual key), so there is nothing to approve yet."
         ),
@@ -403,5 +410,24 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn an_opaque_hold_names_the_hold_and_not_the_rule() {
+        let held = HoldOutcome::Held {
+            hold_id: "hold_1".into(),
+            recorded: true,
+        };
+        let opaque = refusal(&held, "", crate::refusal::OPAQUE_MESSAGE);
+        assert!(opaque.starts_with(&format!(
+            "HELD for approval: {}. Hold id: hold_1.",
+            crate::refusal::OPAQUE_MESSAGE
+        )));
+        assert!(opaque.contains("intutic decision approve hold_1"));
+        assert!(!opaque.contains('['));
+        let named = refusal(&held, "wasm.r1", "needs a reviewer");
+        assert!(
+            named.starts_with("HELD for approval: needs a reviewer [wasm.r1]. Hold id: hold_1.")
+        );
     }
 }

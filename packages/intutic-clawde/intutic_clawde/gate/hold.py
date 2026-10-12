@@ -133,15 +133,17 @@ def _base36(n: int) -> str:
 def hold_message(rule_reason: str, rule_id: str, outcome: HoldOutcome) -> str:
     """What the agent is told — the one place this package words a hold. Says
     who can approve, and that a retry passes only with the bypass setting on,
-    because "retry after approval" alone is false under the default settings."""
+    because "retry after approval" alone is false under the default settings.
+    An empty rule_id names no rule: an OPAQUE workspace's hold (opaque.py)."""
+    named = f"{rule_reason} [{rule_id}]" if rule_id else rule_reason
     if not outcome.recorded:
         return (
-            f"HELD for approval: {rule_reason} [{rule_id}], but the hold could not be recorded "
+            f"HELD for approval: {named}, but the hold could not be recorded "
             f"(Intutic control plane unreachable), so there is nothing to approve yet. Do not retry "
             f"until the control plane is reachable; the retry then asks for approval."
         )
     return (
-        f"HELD for approval: {rule_reason} [{rule_id}]. Hold id: {outcome.hold_id}. "
+        f"HELD for approval: {named}. Hold id: {outcome.hold_id}. "
         f"An owner, admin or engineering manager can approve it with: intutic decision approve "
         f"{outcome.hold_id} (or reject it), or from the Slack card. Retry this exact call after "
         f"approval only if the workspace's review-hold bypass (reviewHoldBypassEnabled) is on; "

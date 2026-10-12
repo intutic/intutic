@@ -1,5 +1,6 @@
 {
   "_comment": "Every refusal code an agent or SDK can receive, per surface. The Rust proxy (packages/proxy/src/refusal.rs), both clawde SDKs (PROXY_REFUSALS), both gate SDKs (GATE_REFUSAL_CODES), the MCP proxy (MCP_REFUSAL_CODES), the hook gates' JSON decisions (HOOK_REFUSAL_CODES in the sync daemon's gateBody.ts), the reference tables in apps/docs and the Kitkat skill are each checked against this file. Add a code here first, then to every implementation the checks name.",
+  "opaqueMessage": "Blocked by workspace policy. Ask a workspace admin if you need this action.",
   "proxy": {
     "header": "x-intutic-refusal",
     "ruleHeader": "x-intutic-refusal-rule",

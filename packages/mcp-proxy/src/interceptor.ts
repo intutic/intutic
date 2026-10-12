@@ -61,6 +61,19 @@ function block(code: Block['code'], ruleId: string, reason: string, detail?: Rec
   return detail ? { action: 'block', reason, code, ruleId, detail } : { action: 'block', reason, code, ruleId }
 }
 
+/**
+ * What an agent reads of a hold: `held` (the rule's reason and id, or in an
+ * OPAQUE workspace the generic sentence), and the hold id with how to get it
+ * approved — or, when `holdId` is empty, that the hold could not be recorded.
+ */
+export function holdReason(held: string, holdId: string): string {
+  return holdId
+    ? `HELD for approval: ${held}. Hold id: ${holdId}. ` + holdApprovalHint(holdId)
+    : `HELD for approval: ${held}, but the hold could not be recorded ` +
+        `(Intutic control plane unreachable), so there is nothing to approve yet. Retry once the ` +
+        `control plane is reachable to request approval.`
+}
+
 /** Every governance check that cannot complete refuses with this, when the proxy fails closed. */
 const FAIL_CLOSED_REASON =
   'Governance check failed — Intutic control plane unreachable. ' +
@@ -166,6 +179,15 @@ export class ToolCallInterceptor {
   }
 
   /**
+   * Whether the workspace is OPAQUE: the refusal frames show the agent a
+   * refusal on policy without its rule (refusals.ts). Decisions and the
+   * events emitted for them keep the full reason either way.
+   */
+  get opaque(): boolean {
+    return this.policy.isOpaque()
+  }
+
+  /**
    * Applies the shared reask ladder (Phase 2 anomaly detectors AND Phase 3
    * WASM rules both use this): a session-lifetime attempt counter keyed by
    * `key`, `REASK_MAX_ATTEMPTS` (3) tries before hardening into an
@@ -211,12 +233,7 @@ export class ToolCallInterceptor {
       return null
     }
 
-    const reason = outcome.recorded
-      ? `HELD for approval: ${rule.reason} [${rule.id}]. Hold id: ${outcome.holdId}. ` +
-        holdApprovalHint(outcome.holdId)
-      : `HELD for approval: ${rule.reason} [${rule.id}], but the hold could not be recorded ` +
-        `(Intutic control plane unreachable), so there is nothing to approve yet. Retry once the ` +
-        `control plane is reachable to request approval.`
+    const reason = holdReason(`${rule.reason} [${rule.id}]`, outcome.recorded ? outcome.holdId : '')
     log.warn({ action: 'tool_held', toolName, ruleId: rule.id, holdId: outcome.holdId, recorded: outcome.recorded }, reason)
     this.emitter.emit('tool_held', toolName, toolInput, `${rule.reason} [${rule.id}]`)
     return { action: 'hold', reason, holdId: outcome.recorded ? outcome.holdId : '', ruleId: rule.id }

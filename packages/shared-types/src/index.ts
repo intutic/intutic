@@ -688,6 +688,14 @@ export {
 } from './holdMessages.js'
 
 export {
+  OPAQUE_REFUSAL_MESSAGE,
+  INTERVENTION_MODE_RECORD_TAG,
+  isOpaqueInterventionMode,
+  encodeInterventionModeRecord,
+  isOpaqueInterventionModeRecord,
+} from './opaqueRefusal.js'
+
+export {
   SECRET_VALUE_PATTERNS,
   secretPatternAlternation,
   type SecretValuePattern,

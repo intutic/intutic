@@ -1,11 +1,11 @@
 //! The proxy's per-key read of `GET /api/v1/auth/key-context`.
 //!
-//! Two pieces of workspace policy reach the proxy on that route, which it
-//! already calls to validate a virtual key: the SSO group policy for the
-//! response gate (`sso_groups`) and the workspace's PII detector actions
-//! (`dlp::workspace`). Both read the same answer, fetched once per key and
-//! cached here for [`CACHE_TTL`], so adding a field to the route never adds a
-//! request.
+//! Workspace policy reaches the proxy on that route, which it already calls
+//! to validate a virtual key: the SSO group policy for the response gate
+//! (`sso_groups`), the workspace's PII detector actions (`dlp::workspace`)
+//! and its intervention mode ([`intervention_mode`]). All read the same
+//! answer, fetched once per key and cached here for [`CACHE_TTL`], so adding
+//! a field to the route never adds a request.
 //!
 //! A standalone proxy has no control plane, so nothing here runs.
 
@@ -114,6 +114,14 @@ pub async fn fetch(
     Ok(answer)
 }
 
+/// The workspace's intervention mode from a key-context body
+/// (`interventionMode`). Absent — a control plane older than the field — or
+/// null (it could not be read) is TRANSPARENT, so such a control plane
+/// changes nothing about what agents are told.
+pub fn intervention_mode(body: &Value) -> crate::refusal::InterventionMode {
+    crate::refusal::InterventionMode::parse(body.get("interventionMode").and_then(Value::as_str))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +163,28 @@ mod tests {
             .unwrap()
             .expect("the workspace names a detector");
         assert_eq!(pii.action_of("pii.card"), Some("block"));
+    }
+
+    #[test]
+    fn the_intervention_mode_defaults_to_transparent() {
+        use crate::refusal::InterventionMode;
+        let mode = |v: Value| intervention_mode(&v);
+        assert_eq!(
+            mode(serde_json::json!({"interventionMode": "OPAQUE"})),
+            InterventionMode::Opaque
+        );
+        assert_eq!(
+            mode(serde_json::json!({"interventionMode": "SILENT_LOG"})),
+            InterventionMode::SilentLog
+        );
+        assert_eq!(
+            mode(serde_json::json!({"workspaceId": "ws_old"})),
+            InterventionMode::Transparent
+        );
+        assert_eq!(
+            mode(serde_json::json!({"interventionMode": null})),
+            InterventionMode::Transparent
+        );
     }
 
     #[tokio::test]

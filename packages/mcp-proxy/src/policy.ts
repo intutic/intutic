@@ -12,6 +12,7 @@ import { callDaemonSocket } from './daemonClient.js'
 import { HttpStatusError, httpRequest } from './httpJson.js'
 import type { ResolvedPolicy } from './daemon/policyCache.js'
 import {
+  isOpaqueInterventionMode,
   parseMcpBudgetPolicy,
   parseWasmRuleDescriptors,
   parseWorkspacePiiDetectors,
@@ -259,6 +260,13 @@ export class PolicyClient {
    * seed carries none — and then kept through refreshes that fail.
    */
   private wasmRules: WasmRuleDescriptor[] | undefined
+  /**
+   * Whether the workspace's intervention mode (`interventionMode`) is OPAQUE:
+   * a refusal on workspace policy is shown to the agent without its rule
+   * (refusals.ts). A policy that does not carry the field — an older control
+   * plane or daemon — is TRANSPARENT, the schema default.
+   */
+  private opaque = false
   /** The first refresh `start()` kicks off, so the first tool call can wait for it. */
   private firstRefresh: Promise<void> | null = null
   private lastRefreshAttemptAt = 0
@@ -358,6 +366,11 @@ export class PolicyClient {
     return this.wasmRules
   }
 
+  /** Whether refusals on workspace policy hide their rule from the agent (see the field). */
+  isOpaque(): boolean {
+    return this.opaque
+  }
+
   /** The workspace's fail-open choice, or `undefined` to fall back to the local setting (see the field). */
   getFailOpen(): boolean | undefined {
     return this.failOpen
@@ -455,6 +468,7 @@ export class PolicyClient {
     const failBehavior = source['mcpProxyFailBehavior']
     this.failOpen = failBehavior === 'open' ? true : failBehavior === 'closed' ? false : undefined
     this.piiDetectors = parseWorkspacePiiDetectors(source['piiDetectors'])
+    this.opaque = isOpaqueInterventionMode(source['interventionMode'])
     if (this.piiDetectors.kind === 'unreadable') {
       log.warn({ action: 'pii_detectors_unreadable', reason: this.piiDetectors.reason }, 'Workspace PII detector actions unreadable')
     }
@@ -537,7 +551,9 @@ export class PolicyClient {
           // the snapshot lacks — a daemon restart as a way to disarm curation.
           // So once a control-plane policy has loaded, a snapshot answer
           // updates the rules and nothing else; before that, it is the best
-          // policy there is.
+          // policy there is. The snapshot does carry `interventionMode`, but
+          // the same holds for it: the loaded mode stays until the control
+          // plane answers again, so an older snapshot cannot change it.
           if (policy.fromSnapshot && this.loadedFromControlPlane) {
             log.info({ action: 'policy_snapshot_rules_only', ruleCount: this.rules.length }, 'Daemon answered from its snapshot; kept the loaded curation')
             return

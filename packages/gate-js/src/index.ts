@@ -62,11 +62,13 @@ export {
   serialiseToolInput,
   supportsArgPatterns,
   fetchRules,
+  fetchRegister,
+  parseRegister,
   ACTION_BLOCK,
   ACTION_WARN,
   ACTION_APPROVAL,
 } from './soprules.js'
-export type { SopRule } from './soprules.js'
+export type { SopRegister, SopRule } from './soprules.js'
 
 export { wrapTool, wrapTools } from './wrapTools.js'
 export type { AnyFn, ExecutableTool, WrapToolOptions } from './wrapTools.js'

@@ -114,11 +114,17 @@ func (r *policyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Validators:  []validator.String{stringvalidator.OneOf(policyActions...)},
 			},
 			"intervention_mode": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString("TRANSPARENT"),
-				Description: "One of `TRANSPARENT` (default), `OPAQUE`, `SILENT_LOG`.",
-				Validators:  []validator.String{stringvalidator.OneOf(policyModes...)},
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("TRANSPARENT"),
+				Description: "What the agent is told when a call is refused; the active policy with the lowest `priority` sets it for the whole workspace. " +
+					"`TRANSPARENT` (default): the refusal names the rule and its reason. " +
+					"`OPAQUE`: the same calls are refused with the same refusal codes, but the agent is told only " +
+					"\"Blocked by workspace policy. Ask a workspace admin if you need this action.\"; " +
+					"audit records keep the rule. " +
+					"`SILENT_LOG`: the local hook gates let a call a workspace rule would block run and report it as `tool_would_block`; " +
+					"built-in protections, SSO group rules and the MCP server registry still refuse, and the hosted hook gate and the proxies enforce as usual.",
+				Validators: []validator.String{stringvalidator.OneOf(policyModes...)},
 			},
 			"priority": schema.Int64Attribute{
 				Optional:    true,

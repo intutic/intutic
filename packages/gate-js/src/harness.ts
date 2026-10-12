@@ -86,6 +86,7 @@ import { createHash } from 'node:crypto'
 import { active as activeGate, type Gate, type ToolInput } from './gate.js'
 import { IntuticGateRefusal } from './errors.js'
 import { MCP_ALLOWLIST_JS_SOURCE, MCP_REGISTRY_JS_SOURCE, MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE } from './mcpRegistryRecord.js'
+import { INTERVENTION_MODE_RECORD_TAG, OPAQUE_REFUSAL_MESSAGE } from './opaqueRefusal.js'
 import { PHRASES_JS_SOURCE } from './phrases.js'
 import { SEQUENCE_JS_SOURCE } from './sequence.js'
 import { ARGUMENTS_SIZE_LIMIT, COMMAND_SIZE_LIMIT, GATE_DEADLINE_MS, HOOK_TIMEOUT_SECONDS } from './limits.js'
@@ -772,6 +773,9 @@ const crypto = require('crypto');
 
 const RULES_PATH = path.join(__dirname, ${JSON.stringify(rulesFileName)});
 const WORKSPACE_ID = ${JSON.stringify(workspaceId)};
+// What an OPAQUE workspace's agent is told of a refusal on its policy, in place
+// of the rule (opaqueRefusal.ts).
+const OPAQUE_MESSAGE = ${JSON.stringify(OPAQUE_REFUSAL_MESSAGE)};
 
 function normalise(v) {
   const s = v === null || v === undefined ? '' : String(v);
@@ -784,7 +788,9 @@ function stringList(v) {
 
 /** The snapshot: its rules, MCP records and whether it verified. */
 function loadSnapshot() {
-  const out = { rules: [], state: 'absent', mcpRegistry: null, mcpAllowlist: null };
+  // opaque: the @intervention_mode record of an OPAQUE workspace. Kept on a
+  // snapshot that fails its check: it only ever hides text.
+  const out = { rules: [], state: 'absent', mcpRegistry: null, mcpAllowlist: null, opaque: false };
   let text;
   try {
     text = fs.readFileSync(RULES_PATH, 'utf-8');
@@ -814,6 +820,10 @@ function loadSnapshot() {
           approvedServers: stringList(r.approvedServers), blockedServers: stringList(r.blockedServers),
           heldServers: stringList(r.heldServers), disabledTools: disabled };
       } catch (e) { /* a damaged record is no registry */ }
+      continue;
+    }
+    if (f[0] === '${INTERVENTION_MODE_RECORD_TAG}' && f.length === 2) {
+      out.opaque = f[1] === 'OPAQUE';
       continue;
     }
     if (f[0] === '@mcp_allowlist' && f.length === 3) {
@@ -904,7 +914,8 @@ function evaluateMcp(toolName, snap) {
   const server = rest.slice(0, sep);
   if (snap.state === 'invalid') {
     const u = mcpSnapshotUnverifiedRefusal(server);
-    return { severity: 'block', reason: u.reason + ' [' + u.ruleId + ']', code: u.code };
+    // Says nothing about the workspace's policy, so an OPAQUE workspace sees it too.
+    return { severity: 'block', reason: u.reason + ' [' + u.ruleId + ']', code: u.code, operational: true };
   }
   const r = snap.mcpRegistry ? evaluateMcpRegistry(snap.mcpRegistry, server, rest.slice(sep + 2)) : null;
   if (r) return { severity: 'block', reason: r.reason + ' [' + r.ruleId + ']', code: r.code };
@@ -952,18 +963,20 @@ process.stdin.on('end', () => {
         ${GATE_DEADLINE_MS} + ' ms, so the call is refused rather than left to the hook timeout');
       process.exit(2);
     }
+    // An OPAQUE workspace's agent reads the generic sentence, not the rule.
+    const shown = decision && snap.opaque && !decision.operational ? OPAQUE_MESSAGE : decision && decision.reason;
     if (decision && (decision.severity === 'warn' || decision.severity === 'shadow')) {
       console.error('[Intutic Guardrail] FLAGGED (' + decision.severity + '): ' + decision.reason);
     } else if (decision && decision.severity === 'hold') {
       // A hold asks a person first, and this script cannot reach the control
       // plane to ask: it refuses, as every gate does with a hold it cannot record.
-      console.error('[Intutic Guardrail] HELD for approval: ' + decision.reason +
+      console.error('[Intutic Guardrail] HELD for approval: ' + shown +
         ' — approval cannot be requested from inside this sandbox, so the call is refused.');
       process.exit(2);
     } else if (decision) {
       // block, or a severity this script does not know: never an allow. An
       // MCP refusal names its code, as the other gates' refusals do.
-      console.error('[Intutic Guardrail] BLOCKED: ' + (decision.code ? decision.code + ': ' : '') + decision.reason);
+      console.error('[Intutic Guardrail] BLOCKED: ' + (decision.code ? decision.code + ': ' : '') + shown);
       process.exit(2);
     }
     process.exit(0);
