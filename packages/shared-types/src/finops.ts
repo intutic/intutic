@@ -180,30 +180,6 @@ export interface CostBreakdown {
   cacheSavings: number
 }
 
-// ─── 4D Attribution ──────────────────────────────────────────────────
-
-/**
- * Four-dimensional attribution key for FinOps rollup.
- *
- * Maps to the `finops_attribution_4d` materialized view's grouping dimensions:
- * Person × Harness × App × Agent Chain.
- *
- * HLD §3.19, LLD §3.1 — finops_attribution_4d materialized view
- */
-export interface Attribution4D {
-  /** User/person identifier. */
-  personId: string
-
-  /** Harness/IDE type that produced the cost. */
-  harnessType: string
-
-  /** Optional application identifier. */
-  appId?: string
-
-  /** Optional agent chain identifier. */
-  agentChainId?: string
-}
-
 // ─── Trace Query & List ──────────────────────────────────────────────
 
 /** Summary row for listing traces in the UI. */

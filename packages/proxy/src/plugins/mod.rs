@@ -44,17 +44,11 @@ use crate::wasm::context::{RequestContext, Verdict};
 ///
 /// - [`name`](IntuticPlugin::name) must be a stable, kebab-case identifier
 ///   (e.g. `"budget-gate"`) used in telemetry spans and audit logs.
-/// - [`priority`](IntuticPlugin::priority) determines execution order:
-///   **lower values run first**. Security-critical gates (DLP) should use
-///   single-digit priorities.
 /// - [`evaluate`](IntuticPlugin::evaluate) must be **pure** — no I/O, no
 ///   mutations. Side-effects belong in the proxy pipeline, not in plugins.
 pub trait IntuticPlugin: Send + Sync {
     /// Stable identifier for telemetry and audit logs.
     fn name(&self) -> &str;
-
-    /// Execution priority — lower values run first.
-    fn priority(&self) -> u8;
 
     /// Evaluate the request context and return a governance verdict.
     fn evaluate(&self, ctx: &RequestContext) -> Verdict;

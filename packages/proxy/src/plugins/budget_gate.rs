@@ -91,12 +91,6 @@ impl IntuticPlugin for BudgetGatePlugin {
         "budget-gate"
     }
 
-    /// Priority 10 — runs early because budget checks are cheap and
-    /// can save expensive downstream work (DLP scanning, PCAS lookup).
-    fn priority(&self) -> u8 {
-        10
-    }
-
     /// Estimate request cost and compare against remaining budget.
     ///
     /// # Algorithm
