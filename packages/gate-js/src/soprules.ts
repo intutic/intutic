@@ -35,6 +35,8 @@
  * run is safe.
  */
 
+import { isOpaqueInterventionMode } from './opaqueRefusal.js'
+
 export const FETCH_TIMEOUT_MS = 3_000
 
 // Actions the control plane can return. Anything else is ignored rather than
@@ -121,6 +123,26 @@ export function parseRules(payload: unknown): SopRule[] {
 }
 
 /**
+ * The register as `GET /api/v1/sop/rules` answers it: the rules, and whether
+ * the workspace's intervention mode is OPAQUE (`interventionMode`, absent from
+ * a control plane that predates it, which reads as not OPAQUE). The gate uses
+ * the mode when there is no policy snapshot to read it from.
+ */
+export interface SopRegister {
+  rules: SopRule[]
+  opaque: boolean
+}
+
+/** {@link parseRules}, and the `interventionMode` beside them. */
+export function parseRegister(payload: unknown): SopRegister {
+  const mode =
+    payload !== null && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).interventionMode
+      : undefined
+  return { rules: parseRules(payload), opaque: isOpaqueInterventionMode(mode) }
+}
+
+/**
  * Fetch active VALIDATED rules, or `null` if they could not be fetched.
  *
  * `null` and `[]` mean different things and the caller must not conflate
@@ -134,6 +156,17 @@ export async function fetchRules(
   workspaceId: string,
   timeoutMs: number = FETCH_TIMEOUT_MS,
 ): Promise<SopRule[] | null> {
+  const register = await fetchRegister(baseUrl, apiKey, workspaceId, timeoutMs)
+  return register === null ? null : register.rules
+}
+
+/** {@link fetchRules} with the workspace's mode: `null` if the register did not answer. */
+export async function fetchRegister(
+  baseUrl: string,
+  apiKey: string,
+  workspaceId: string,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<SopRegister | null> {
   const qs = new URLSearchParams({ workspaceId, active: 'true' })
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -148,7 +181,7 @@ export async function fetchRules(
     })
     if (!res.ok) return null
     const raw = await res.text()
-    return parseRules(raw ? JSON.parse(raw) : {})
+    return parseRegister(raw ? JSON.parse(raw) : {})
   } catch {
     return null
   } finally {

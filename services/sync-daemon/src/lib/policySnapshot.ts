@@ -61,7 +61,9 @@ import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
 import {
+  encodeInterventionModeRecord,
   encodeMcpAllowlistRecord,
+  isOpaqueInterventionMode,
   encodeMcpRegistryRecord,
   encodeSsoGroupRecord,
   evaluateSsoGroupClearance,
@@ -550,7 +552,7 @@ async function requestResolvedPolicy(
 
 /**
  * SILENT_LOG means observe, do not intervene (docs/guides/policies.md: the
- * call is permitted to run, the trace is tagged for audit). It demotes the
+ * call runs and the gate reports it as `tool_would_block`). It demotes the
  * dynamic tier to the advisory severity — it does NOT reach the static floor,
  * which stays enforced. If one settings string could disarm the floor, the
  * floor would not be a floor.
@@ -822,7 +824,15 @@ async function writeSnapshotFiles(
   // would admit none.
   const mcpServers = sanitizeMcpServerNames(policy.mcpAllowedServers)
   const mcpSeverity: 'shadow' | 'block' = isSilentLogMode(policy) ? 'shadow' : 'block'
+  // An OPAQUE workspace: every gate refuses on workspace policy without
+  // naming the rule (OPAQUE_REFUSAL_MESSAGE in @intutic/shared-types). One
+  // line inside the digest, written only for OPAQUE, so a TRANSPARENT or
+  // SILENT_LOG snapshot is byte-identical to one written before the mode
+  // existed. Unlike SILENT_LOG it changes no rule's severity: what is refused
+  // is unchanged, only what the agent is told.
+  const opaque = isOpaqueInterventionMode(policy.interventionMode)
   const lines = [
+    ...(opaque ? [encodeInterventionModeRecord()] : []),
     ...(ssoGroups ? [encodeSsoGroupRecord(ssoGroups)] : []),
     ...(mcpRegistry ? [encodeMcpRegistryRecord(mcpRegistry)] : []),
     ...(mcpServers.length > 0 ? [encodeMcpAllowlistRecord({ severity: mcpSeverity, servers: mcpServers })] : []),

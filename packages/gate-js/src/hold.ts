@@ -73,15 +73,18 @@ function newHoldId(): string {
  * default settings.
  */
 export function holdMessage(ruleReason: string, ruleId: string, outcome: { holdId: string; recorded: boolean }): string {
+  // An empty rule id names no rule: an OPAQUE workspace's hold, whose reason
+  // is the generic sentence (opaqueRefusal.ts).
+  const named = ruleId ? `${ruleReason} [${ruleId}]` : ruleReason
   if (!outcome.recorded) {
     return (
-      `HELD for approval: ${ruleReason} [${ruleId}], but the hold could not be recorded ` +
+      `HELD for approval: ${named}, but the hold could not be recorded ` +
       `(Intutic control plane unreachable), so there is nothing to approve yet. Do not retry ` +
       `until the control plane is reachable; the retry then asks for approval.`
     )
   }
   return (
-    `HELD for approval: ${ruleReason} [${ruleId}]. Hold id: ${outcome.holdId}. ` +
+    `HELD for approval: ${named}. Hold id: ${outcome.holdId}. ` +
     `An owner, admin or engineering manager can approve it with: intutic decision approve ` +
     `${outcome.holdId} (or reject it), or from the Slack card. Retry this exact call after ` +
     `approval only if the workspace's review-hold bypass (reviewHoldBypassEnabled) is on; ` +

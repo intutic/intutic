@@ -30,8 +30,9 @@ curl -X PUT "$INTUTIC_CONTROL_PLANE_URL/api/v1/workspace/settings" \
   -d '{"trajectory_monitor_mode": "ACTIVE"}'
 ```
 
-`ACTIVE` is available on Enterprise plans. Turning it on does not change any
-verdict already recorded; it changes what the next bad verdict does.
+A workspace owner or admin can set any of the three modes, on any plan.
+Turning `ACTIVE` on does not change any verdict already recorded; it changes
+what the next bad verdict does.
 
 ## What `ACTIVE` escalates, and what it does not
 

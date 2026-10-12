@@ -37,7 +37,7 @@ resource "intutic_policy" "no_force_push" {
 
 - `conditions` (String) Extra match conditions as a JSON object, for example `jsonencode({ ... })`.
 - `description` (String)
-- `intervention_mode` (String) One of `TRANSPARENT` (default), `OPAQUE`, `SILENT_LOG`.
+- `intervention_mode` (String) What the agent is told when a call is refused; the active policy with the lowest `priority` sets it for the whole workspace. `TRANSPARENT` (default): the refusal names the rule and its reason. `OPAQUE`: the same calls are refused with the same refusal codes, but the agent is told only "Blocked by workspace policy. Ask a workspace admin if you need this action."; audit records keep the rule. `SILENT_LOG`: the local hook gates let a call a workspace rule would block run and report it as `tool_would_block`; built-in protections, SSO group rules and the MCP server registry still refuse, and the hosted hook gate and the proxies enforce as usual.
 - `is_active` (Boolean) Whether the policy is enforced. Defaults to true.
 - `priority` (Number) 0–10000; the lowest number wins. Defaults to 100.
 - `risk_category` (String) One of `NONE` (default), `DESTRUCTIVE`, `CREDENTIAL_ACCESS`.

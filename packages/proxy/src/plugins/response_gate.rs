@@ -109,7 +109,7 @@ use crate::commands::WireProvider;
 use crate::config::ResponseGateConfig;
 use crate::plugins::anomaly::AnomalyKind;
 use crate::plugins::sql_guard::{self, SqlGuardPolicy, SqlViolation};
-use crate::refusal::{tool_rule_id, Code, Refusal};
+use crate::refusal::{tool_rule_id, Code, InterventionMode, Refusal};
 use crate::sso_groups::{Clearance, SsoGroupDecision, SsoGroupGate};
 
 /// Why the gate refused a response.
@@ -182,6 +182,35 @@ impl Denial {
                 Refusal::new(Code::ResponseUnparseable, "response_gate.fail_closed")
             }
         }
+    }
+
+    /// The mode this refusal is shown to the agent under. Every denial but
+    /// [`DenialReason::Unparseable`] names a rule (the tool an SOP denies, the
+    /// SSO group rule, the SQL guard's DSN list) and follows the workspace's
+    /// mode. An unparseable body is not a rule's decision but a check that
+    /// could not run, and its message tells the agent to retry, so it reads
+    /// the same in every mode.
+    fn shown_under(&self, mode: InterventionMode) -> InterventionMode {
+        match self.reason {
+            DenialReason::Unparseable => InterventionMode::Transparent,
+            _ => mode,
+        }
+    }
+
+    /// [`Denial::refusal`] as an agent in a workspace under `mode` may see it:
+    /// under OPAQUE, the rule id is dropped and the code kept
+    /// ([`Refusal::for_mode`]).
+    pub fn refusal_for(&self, mode: InterventionMode) -> Refusal {
+        self.refusal().for_mode(self.shown_under(mode))
+    }
+
+    /// [`Denial::agent_message`] as an agent in a workspace under `mode` is
+    /// told it ([`InterventionMode::agent_text`]). The operator's log line,
+    /// [`Denial::log_message`], and the trace's finding keep the reason whole.
+    pub fn agent_text(&self, mode: InterventionMode) -> String {
+        self.shown_under(mode)
+            .agent_text(&self.agent_message())
+            .to_string()
     }
 
     /// Operator-facing one-liner. Deliberately the same vocabulary as the
@@ -447,8 +476,16 @@ pub fn gate_stream_line(
 /// The safety property is unchanged either way: the returned body contains no
 /// `tool_use` block and no `tool_calls` array, so there is nothing executable
 /// left for the client to run.
-pub fn refusal_body(provider: WireProvider, model: &str, denial: &Denial) -> Value {
-    crate::commands::non_streaming_body(provider, model, &denial.agent_message())
+///
+/// `mode` is the workspace's intervention mode: under OPAQUE the agent reads
+/// the generic refusal ([`Denial::agent_text`]).
+pub fn refusal_body(
+    provider: WireProvider,
+    model: &str,
+    denial: &Denial,
+    mode: InterventionMode,
+) -> Value {
+    crate::commands::non_streaming_body(provider, model, &denial.agent_text(mode))
 }
 
 /// The bytes to append instead of the withheld event, on the streaming path.
@@ -467,12 +504,15 @@ pub fn refusal_body(provider: WireProvider, model: &str, denial: &Denial) -> Val
 /// the block this refusal opens. `commands::streaming_body` is not reusable
 /// either: it emits a whole stream starting at `message_start`, and a second
 /// `message_start` mid-message is not a stream any client can parse.
-pub fn refusal_tail(provider: WireProvider, denial: &Denial) -> String {
-    let text = denial.agent_message();
+///
+/// `mode` is the workspace's intervention mode, as for [`refusal_body`]; under
+/// OPAQUE the marker's `rule` is empty too ([`Denial::refusal_for`]).
+pub fn refusal_tail(provider: WireProvider, denial: &Denial, mode: InterventionMode) -> String {
+    let text = denial.agent_text(mode);
     let idx = denial.block_index;
     // First, so a client that stops reading at the terminal event has
     // already passed it.
-    let marker = denial.refusal().stream_marker(&text);
+    let marker = denial.refusal_for(mode).stream_marker(&text);
 
     let events = match provider {
         WireProvider::Anthropic => {
@@ -608,7 +648,12 @@ mod tests {
     fn refusal_body_carries_no_executable_tool_call() {
         let body = anthropic_response("bash");
         let d = gate_response(&cfg(), Some(&body), &denied()).unwrap();
-        let out = refusal_body(WireProvider::Anthropic, "claude-x", &d);
+        let out = refusal_body(
+            WireProvider::Anthropic,
+            "claude-x",
+            &d,
+            InterventionMode::Transparent,
+        );
 
         assert!(
             crate::routing::integrity::response_tool_calls(&out).is_empty(),
@@ -624,7 +669,12 @@ mod tests {
             "the refusal leaked the blocked arguments"
         );
 
-        let openai_out = refusal_body(WireProvider::OpenAI, "gpt-x", &d);
+        let openai_out = refusal_body(
+            WireProvider::OpenAI,
+            "gpt-x",
+            &d,
+            InterventionMode::Transparent,
+        );
         assert!(
             crate::routing::integrity::response_tool_calls(&openai_out).is_empty(),
             "the OpenAI refusal body still contains a tool call: {openai_out}"
@@ -739,7 +789,12 @@ mod tests {
         let d = d.expect("must refuse");
         assert!(matches!(d.reason, DenialReason::DestructiveSql(_)));
         assert!(notes.is_empty());
-        let out = refusal_body(WireProvider::OpenAI, "gpt-x", &d);
+        let out = refusal_body(
+            WireProvider::OpenAI,
+            "gpt-x",
+            &d,
+            InterventionMode::Transparent,
+        );
         assert!(crate::routing::integrity::response_tool_calls(&out).is_empty());
         assert!(out.to_string().contains("postgres://db.prod/app"));
 
@@ -861,7 +916,7 @@ mod tests {
     #[test]
     fn anthropic_refusal_tail_is_well_formed_and_terminates() {
         let d = gate_stream_line(&cfg(), ANTHROPIC_TOOL_LINE, &denied()).unwrap();
-        let tail = refusal_tail(WireProvider::Anthropic, &d);
+        let tail = refusal_tail(WireProvider::Anthropic, &d, InterventionMode::Transparent);
 
         assert!(
             tail.contains("event: message_stop"),
@@ -902,7 +957,7 @@ mod tests {
     #[test]
     fn openai_refusal_tail_is_well_formed_and_terminates() {
         let d = gate_stream_line(&cfg(), OPENAI_TOOL_LINE, &denied()).unwrap();
-        let tail = refusal_tail(WireProvider::OpenAI, &d);
+        let tail = refusal_tail(WireProvider::OpenAI, &d, InterventionMode::Transparent);
 
         assert!(
             tail.ends_with("data: [DONE]\n\n"),
@@ -958,7 +1013,12 @@ mod tests {
             reason: DenialReason::Tools(vec!["Bash".into()]),
             block_index: 0,
         };
-        let out = refusal_body(WireProvider::OpenAIResponses, "gpt-5", &d);
+        let out = refusal_body(
+            WireProvider::OpenAIResponses,
+            "gpt-5",
+            &d,
+            InterventionMode::Transparent,
+        );
         assert_eq!(out["object"], "response");
         assert_eq!(out["output"][0]["content"][0]["type"], "output_text");
         assert!(out["output"][0]["content"][0]["text"]
@@ -1031,7 +1091,11 @@ mod tests {
     #[test]
     fn responses_refusal_tail_is_well_formed_and_terminates() {
         let d = gate_stream_line(&cfg(), RESPONSES_TOOL_LINE, &denied()).unwrap();
-        let tail = refusal_tail(WireProvider::OpenAIResponses, &d);
+        let tail = refusal_tail(
+            WireProvider::OpenAIResponses,
+            &d,
+            InterventionMode::Transparent,
+        );
 
         assert!(
             tail.contains("event: response.completed"),
@@ -1133,8 +1197,8 @@ mod tests {
     fn gemini_tail_follows_the_openai_shape() {
         let d = gate_stream_line(&cfg(), OPENAI_TOOL_LINE, &denied()).unwrap();
         assert_eq!(
-            refusal_tail(WireProvider::Gemini, &d),
-            refusal_tail(WireProvider::OpenAI, &d)
+            refusal_tail(WireProvider::Gemini, &d, InterventionMode::Transparent),
+            refusal_tail(WireProvider::OpenAI, &d, InterventionMode::Transparent)
         );
     }
 
@@ -1149,7 +1213,7 @@ mod tests {
         let mut out = String::new();
         for line in lines {
             if let Some(d) = gate_stream_line(&cfg(), line, &denied()) {
-                out.push_str(&refusal_tail(provider, &d));
+                out.push_str(&refusal_tail(provider, &d, InterventionMode::Transparent));
                 return (out, true);
             }
             out.push_str(line);
@@ -1316,6 +1380,68 @@ mod tests {
         assert!(!u.agent_message().is_empty());
     }
 
+    // ── Intervention mode ───────────────────────────────────────────────
+
+    /// OPAQUE: the agent reads the generic sentence and no rule id, under the
+    /// same code; the operator's log line and the trace's finding still name
+    /// the rule. TRANSPARENT and SILENT_LOG send what they always did.
+    #[test]
+    fn opaque_hides_the_rule_from_the_agent_and_not_from_the_record() {
+        use crate::refusal::OPAQUE_MESSAGE;
+        let body = openai_response("Bash", r#"{"command":"ls"}"#);
+        let gate = sso_gate(Some(&["eng"]));
+        let d = gate_response_sso_groups(&cfg(), Some(&body), Some(&gate)).expect("must refuse");
+        let rule = "sso_group.high_risk.Bash";
+
+        assert_eq!(d.agent_text(InterventionMode::Opaque), OPAQUE_MESSAGE);
+        let opaque = d.refusal_for(InterventionMode::Opaque);
+        assert_eq!(opaque.code, Code::SsoGroup);
+        assert_eq!(opaque.rule, "");
+        let out = refusal_body(WireProvider::OpenAI, "gpt-x", &d, InterventionMode::Opaque);
+        assert_eq!(out["choices"][0]["message"]["content"], OPAQUE_MESSAGE);
+        assert!(!out.to_string().contains(rule), "{out}");
+        let tail = refusal_tail(WireProvider::Anthropic, &d, InterventionMode::Opaque);
+        assert!(!tail.contains(rule), "{tail}");
+        assert!(tail.contains(r#""code":"SSO_GROUP""#), "{tail}");
+        assert!(tail.contains(r#""rule":"""#), "{tail}");
+
+        // The record keeps the reason whole.
+        assert!(d.log_message().contains(rule), "{}", d.log_message());
+        let finding = crate::telemetry::FindingWire::from_sso_group_denial(&d).expect("a finding");
+        assert_eq!(finding.rule_id.as_deref(), Some(rule));
+
+        for mode in [InterventionMode::Transparent, InterventionMode::SilentLog] {
+            assert_eq!(d.agent_text(mode), d.agent_message());
+            assert_eq!(d.refusal_for(mode), d.refusal());
+            assert_eq!(
+                refusal_tail(WireProvider::OpenAI, &d, mode),
+                refusal_tail(WireProvider::OpenAI, &d, InterventionMode::Transparent)
+            );
+        }
+    }
+
+    /// A deny-listed tool and a destructive SQL call name their rule too.
+    #[test]
+    fn opaque_covers_every_rule_denial_but_an_unparseable_body() {
+        use crate::refusal::OPAQUE_MESSAGE;
+        let d = gate_stream_line(&cfg(), ANTHROPIC_TOOL_LINE, &denied()).unwrap();
+        assert_eq!(d.agent_text(InterventionMode::Opaque), OPAQUE_MESSAGE);
+        assert_eq!(d.refusal_for(InterventionMode::Opaque).rule, "");
+        assert_eq!(
+            d.refusal_for(InterventionMode::Opaque).code,
+            Code::ToolDenied
+        );
+
+        // Not a rule's decision: the check could not run, and the agent is
+        // told to retry, in every mode.
+        let u = Denial {
+            reason: DenialReason::Unparseable,
+            block_index: 0,
+        };
+        assert_eq!(u.agent_text(InterventionMode::Opaque), u.agent_message());
+        assert_eq!(u.refusal_for(InterventionMode::Opaque), u.refusal());
+    }
+
     // ── SSO-group clearance ─────────────────────────────────────────────
 
     fn sso_gate(member_groups: Option<&[&str]>) -> SsoGroupGate {
@@ -1352,7 +1478,12 @@ mod tests {
         );
         assert!(d.agent_message().contains("[sso_group.high_risk.Bash]"));
 
-        let out = refusal_body(WireProvider::OpenAI, "gpt-x", &d);
+        let out = refusal_body(
+            WireProvider::OpenAI,
+            "gpt-x",
+            &d,
+            InterventionMode::Transparent,
+        );
         assert!(crate::routing::integrity::response_tool_calls(&out).is_empty());
         assert!(!out.to_string().contains("\"command\""));
     }
@@ -1443,7 +1574,7 @@ mod tests {
         let anthropic = r#"data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}}"#;
         let d = gate_stream_line_sso_groups(&cfg(), anthropic, Some(&gate)).expect("must refuse");
         assert_eq!(d.block_index, 1);
-        let tail = refusal_tail(WireProvider::Anthropic, &d);
+        let tail = refusal_tail(WireProvider::Anthropic, &d, InterventionMode::Transparent);
         assert!(tail.contains("[sso_group.high_risk.Bash]"));
         assert!(!tail.contains("\"tool_use\""));
         assert_payloads_parse(&tail);
@@ -1524,7 +1655,7 @@ mod tests {
                 WireProvider::OpenAIResponses,
                 WireProvider::Gemini,
             ] {
-                let tail = refusal_tail(provider, &d);
+                let tail = refusal_tail(provider, &d, InterventionMode::Transparent);
                 let first = tail.lines().next().unwrap();
                 let json = first
                     .strip_prefix(crate::refusal::STREAM_MARKER)

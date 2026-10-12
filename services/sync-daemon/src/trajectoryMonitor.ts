@@ -1,13 +1,15 @@
 /**
- * Trajectory Monitor — Daemon-side session watcher (Worker Thread).
+ * Trajectory Monitor — Daemon-side session watcher.
  *
- * Runs inside the sync-daemon as a Node.js Worker thread. Subscribes to
- * Valkey pub/sub `trace:live:{sessionId}` channels, buffers events in a
- * sliding window, and submits trajectory summaries to the control plane
- * for analysis.
+ * Runs in the `intutic connect` process, not a Worker thread:
+ * `tools/cli/src/commands/connect.ts` subscribes to the Valkey pub/sub
+ * `trace:live:*` channels and passes each event to `handleTraceEvent`. Events
+ * are buffered per session in a sliding window, and trajectory summaries are
+ * submitted to the control plane for analysis.
  *
  * Key guarantees:
- * - Non-blocking: Worker thread isolation, fire-and-forget analysis
+ * - Non-blocking: summaries go out asynchronously on a timer, with a 10s
+ *   HTTP timeout, and the monitor is separate from the proxy process
  * - No LLM calls on developer machine (all judgment is server-side)
  * - Cooldown rate limiter: 1 analysis request per minute per session
  *
@@ -34,6 +36,24 @@ const log = createLogger('trajectory-monitor')
  * `saveOffline` was previously called with no ceiling at all.
  */
 const MAX_OFFLINE_TRAJECTORIES_BYTES = 16 * 1024 * 1024
+
+/**
+ * Whether a summary the control plane refused with `status` may be accepted
+ * later, and so belongs in the offline spool.
+ *
+ * A 4xx is the control plane's answer about the summary or the caller (a
+ * malformed body, a VIEWER key, a workspace that is not the key's), and the
+ * same line would be refused on every retry until the spool's size cap — so it
+ * is dropped. 408 and 429 are about timing and are retried, as are 5xx and
+ * network errors. 401 is retried too: the control plane answers 401 for any
+ * failure in its auth middleware, a database error on a key-cache miss
+ * included, and `/healthz` (the drain's reachability probe) does not touch the
+ * database, so a 401 can mean "down", not "never".
+ */
+export function isRetryableRefusal(status: number): boolean {
+  if (status < 400 || status >= 500) return true
+  return status === 401 || status === 408 || status === 429
+}
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -260,8 +280,8 @@ export class TrajectoryMonitor {
       void this.submitAllSummaries()
     }, submitIntervalMs)
 
-    // Note: Valkey subscription is handled by the sync-daemon's existing
-    // Redis subscriber. Events are forwarded to this worker via postMessage.
+    // Note: the Valkey subscription lives in the caller (`connect.ts`), which
+    // passes each trace:live event to handleTraceEvent.
   }
 
   /**
@@ -374,6 +394,13 @@ export class TrajectoryMonitor {
       buffer.markSubmitted()
 
       if (!res.ok) {
+        if (!isRetryableRefusal(res.status)) {
+          log.warn(
+            { sessionId: buffer.sessionId, status: res.status },
+            `Trajectory submission refused: ${res.status}, dropped (a retry would be refused too)`,
+          )
+          return
+        }
         log.warn(
           { sessionId: buffer.sessionId, status: res.status },
           `Trajectory submission failed: ${res.status}, buffering offline`,
@@ -437,8 +464,10 @@ export class TrajectoryMonitor {
       const remaining: string[] = []
 
       for (const line of lines) {
+        let sessionId: unknown
         try {
           const summary = JSON.parse(line)
+          sessionId = (summary as { sessionId?: unknown } | null)?.sessionId
           const res = await fetch(
             `${this.config.controlPlaneUrl}/api/v1/trajectory/analyze`,
             {
@@ -452,7 +481,14 @@ export class TrajectoryMonitor {
             }
           )
           if (!res.ok) {
-            remaining.push(line)
+            if (isRetryableRefusal(res.status)) {
+              remaining.push(line)
+            } else {
+              log.warn(
+                { sessionId: typeof sessionId === 'string' ? sessionId : undefined, status: res.status },
+                `Offline trajectory refused: ${res.status}, dropped from the spool (a retry would be refused too)`,
+              )
+            }
           }
         } catch {
           remaining.push(line)

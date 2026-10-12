@@ -46,6 +46,7 @@ from typing import Optional
 from . import sso_groups as sso
 from . import actions
 from . import mcp_registry
+from . import opaque as opaque_mode
 from .phrases import has_phrase, phrase_text
 from .sequence import compile_sequence, sequence_match
 
@@ -95,6 +96,11 @@ class Snapshot:
     # never set, so neither can be vouched for.
     mcp_registry: Optional[dict] = None
     mcp_allowlist: Optional[dict] = None
+    # An OPAQUE workspace (the @intervention_mode record): a refusal on
+    # workspace policy tells the agent opaque.OPAQUE_REFUSAL_MESSAGE, not the
+    # rule. Kept on a snapshot that fails its integrity check; it only ever
+    # hides text, never allows a call.
+    opaque: bool = False
 
     @property
     def health_message(self) -> str:
@@ -164,6 +170,9 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
             continue
         if line.startswith(mcp_registry.MCP_ALLOWLIST_RECORD_TAG + "\t"):
             snap.mcp_allowlist = mcp_registry.decode_allowlist_record(line)
+            continue
+        if line.startswith(opaque_mode.INTERVENTION_MODE_RECORD_TAG + "\t"):
+            snap.opaque = opaque_mode.is_opaque_record(line)
             continue
         f = line.split("\t")
         # Column order: id, severity, flags, subject, reason, source(regex).

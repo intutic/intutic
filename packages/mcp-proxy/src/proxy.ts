@@ -34,7 +34,7 @@ import { createStderrLogger as createLogger } from './stderrLog.js'
 import type { ProxyConfig } from './config.js'
 import { PolicyClient } from './policy.js'
 import { GovernanceEmitter, detectionFinding } from './emitter.js'
-import { ToolCallInterceptor, type Block } from './interceptor.js'
+import { ToolCallInterceptor, holdReason, type Block } from './interceptor.js'
 import {
   LIST_INCIDENTS_ARGS,
   budgetRemaining,
@@ -44,7 +44,7 @@ import {
   readControlPlane,
   registryStatus,
 } from './agentTools.js'
-import type { RefusalData } from './refusals.js'
+import { isOpaqueRefusal, opaqueRefusalData, type RefusalData } from './refusals.js'
 import { redactText as redactMcpText, setWorkspacePii } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns, type InjectionSource } from './injection.js'
 import { toolPoisoning, dlpEscalation, type AnomalyFinding } from './anomaly/index.js'
@@ -58,7 +58,7 @@ import { checkTofu, decideTofuAction } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
 import { callerIdentity, type CallerIdentity } from './identity.js'
-import { normalizeToolDefinition, type McpToolDefinition } from '@intutic/shared-types'
+import { OPAQUE_REFUSAL_MESSAGE, normalizeToolDefinition, type McpToolDefinition } from '@intutic/shared-types'
 import { PACKAGE_VERSION } from './version.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -88,19 +88,49 @@ interface McpToolsCallParams {
 }
 
 /**
- * Build a JSON-RPC 2.0 error response for a blocked tool call. `data` names
- * the refusal for a client that reads it programmatically (refusals.ts).
+ * A refusal frame, the one place that decides what the agent is told. In an
+ * OPAQUE workspace (`opaque`) a refusal on workspace policy
+ * (`isOpaqueRefusal`) is sent as `opaqueMessage`, built around
+ * `OPAQUE_REFUSAL_MESSAGE`, with `opaqueRefusalData`: the same JSON-RPC code
+ * and `error.data.code`, no rule. Otherwise `message` and `data`, exactly as
+ * before the mode existed. Only the frame changes; logs and emitted events
+ * keep the full reason.
  */
-function buildBlockResponse(id: string | number | null, reason: string, data: RefusalData): JsonRpcResponse {
+function refusalResponse(
+  id: string | number | null,
+  data: RefusalData,
+  opaque: boolean,
+  message: string,
+  opaqueMessage: string,
+): JsonRpcResponse {
+  const hide = opaque && isOpaqueRefusal(data)
   return {
     jsonrpc: '2.0',
     id,
     error: {
       code: -32603, // Internal error (closest standard code to "blocked")
-      message: `[Intutic Governance] Tool call blocked: ${reason}`,
-      data,
+      message: hide ? opaqueMessage : message,
+      data: hide ? opaqueRefusalData(data) : data,
     },
   }
+}
+
+const BLOCKED = '[Intutic Governance] Tool call blocked: '
+
+/**
+ * A withheld result in an OPAQUE workspace: not which pattern, but still that
+ * the call already ran, so the agent does not run it again expecting output.
+ */
+const RESULT_WITHHELD_OPAQUE =
+  `[Intutic Governance] Result withheld: ${OPAQUE_REFUSAL_MESSAGE} The tool call already ran; ` +
+  `its output was not delivered.`
+
+/**
+ * Build a JSON-RPC 2.0 error response for a blocked tool call. `data` names
+ * the refusal for a client that reads it programmatically (refusals.ts).
+ */
+function buildBlockResponse(id: string | number | null, reason: string, data: RefusalData, opaque: boolean): JsonRpcResponse {
+  return refusalResponse(id, data, opaque, BLOCKED + reason, BLOCKED + OPAQUE_REFUSAL_MESSAGE)
 }
 
 /** The `error.data` of a block decision: its code, rule id and detail. */
@@ -114,16 +144,15 @@ function blockData(decision: Block): RefusalData {
  * the hold id in `data` for a client that reads it programmatically — empty
  * when the hold could not be recorded, so there is nothing to approve yet.
  */
-function buildHoldResponse(id: string | number | null, reason: string, holdId: string, ruleId: string): JsonRpcResponse {
-  return {
-    jsonrpc: '2.0',
+function buildHoldResponse(id: string | number | null, reason: string, holdId: string, ruleId: string, opaque: boolean): JsonRpcResponse {
+  return refusalResponse(
     id,
-    error: {
-      code: -32603,
-      message: `[Intutic Governance] Tool call ${reason}`,
-      data: { code: 'HELD', ruleId, status: 'pending_approval', holdId } satisfies RefusalData,
-    },
-  }
+    { code: 'HELD', ruleId, status: 'pending_approval', holdId },
+    opaque,
+    `[Intutic Governance] Tool call ${reason}`,
+    // An OPAQUE workspace's hold names the hold, not the rule.
+    `[Intutic Governance] Tool call ${holdReason(OPAQUE_REFUSAL_MESSAGE, holdId)}`,
+  )
 }
 
 /**
@@ -259,6 +288,8 @@ export function processServerLine(
   injectionAction: 'warn' | 'block' = 'warn',
   injectionPatterns: readonly string[] = [],
   disabledTools: readonly string[] = [],
+  /** The workspace is OPAQUE: a withheld result does not say which pattern withheld it. */
+  opaque = false,
 ): ServerLineOutcome {
   // Workspace-supplied injection patterns, on top of the floor.
   // Idempotent when the list has not changed, so this is cheap per line.
@@ -298,18 +329,15 @@ export function processServerLine(
         resultObj = JSON.parse(redacted) as Record<string, unknown>
         resultText = redacted
       } catch {
-        const withheld: JsonRpcResponse = {
-          jsonrpc: '2.0',
-          id: msg.id,
-          error: {
-            code: -32603,
-            message:
-              `[Intutic Governance] Result withheld: it contained sensitive data ` +
-              `whose redaction did not survive re-parsing. The tool ran; its output ` +
-              `was not delivered. (${findings.map((f) => f.description).join('; ')})`,
-            data: { code: 'RESULT_WITHHELD_DLP', ruleId: `dlp.${findings[0]?.pattern ?? 'output'}` } satisfies RefusalData,
-          },
-        }
+        const withheld = refusalResponse(
+          msg.id,
+          { code: 'RESULT_WITHHELD_DLP', ruleId: `dlp.${findings[0]?.pattern ?? 'output'}` },
+          opaque,
+          `[Intutic Governance] Result withheld: it contained sensitive data ` +
+            `whose redaction did not survive re-parsing. The tool ran; its output ` +
+            `was not delivered. (${findings.map((f) => f.description).join('; ')})`,
+          RESULT_WITHHELD_OPAQUE,
+        )
         return { line: JSON.stringify(withheld), redactedTool, redactions }
       }
     }
@@ -327,18 +355,15 @@ export function processServerLine(
         // Response-side block never claims the CALL was refused — it
         // already ran. Only the delivered output is withheld, worded the
         // same way the DLP reparse-withheld frame above is.
-        const withheldInjection: JsonRpcResponse = {
-          jsonrpc: '2.0',
-          id: msg.id,
-          error: {
-            code: -32603,
-            message:
-              `[Intutic Governance] Result withheld: it triggered prompt-injection ` +
-              `pattern(s) (${injectionPatterns.join(', ')}). The tool call already ran; ` +
-              `its output was not delivered.`,
-            data: { code: 'RESULT_WITHHELD_INJECTION', ruleId: 'injection.tool_result' } satisfies RefusalData,
-          },
-        }
+        const withheldInjection = refusalResponse(
+          msg.id,
+          { code: 'RESULT_WITHHELD_INJECTION', ruleId: 'injection.tool_result' },
+          opaque,
+          `[Intutic Governance] Result withheld: it triggered prompt-injection ` +
+            `pattern(s) (${injectionPatterns.join(', ')}). The tool call already ran; ` +
+            `its output was not delivered.`,
+          RESULT_WITHHELD_OPAQUE,
+        )
         return {
           line: JSON.stringify(withheldInjection),
           redactedTool,
@@ -515,10 +540,10 @@ export function handleHarnessLine(
         // Recorded before the answer goes out, as on the allowed path: a
         // reader that acts on the answer must find the event already written.
         chaos?.injector.emit({ type: 'tool_call', tool: toolName, ok: false })
-        writeFrame(buildBlockResponse(msg.id, decision.reason, blockData(decision)))
+        writeFrame(buildBlockResponse(msg.id, decision.reason, blockData(decision), interceptor.opaque))
       } else if (decision.action === 'hold') {
         chaos?.injector.emit({ type: 'tool_call', tool: toolName, ok: false })
-        writeFrame(buildHoldResponse(msg.id, decision.reason, decision.holdId, decision.ruleId))
+        writeFrame(buildHoldResponse(msg.id, decision.reason, decision.holdId, decision.ruleId, interceptor.opaque))
       } else {
         // Allow: the response now needs inspecting on the way back —
         // registered BEFORE forwarding, or a fast server could answer
@@ -967,6 +992,7 @@ export class McpGovernanceProxy {
       injectionAction,
       this.policy.getInjectionPatterns(),
       this.policy.getRegistry()?.disabledTools[this.config.serverName] ?? [],
+      this.policy.isOpaque(),
     )
     if (outcome.injectionFindings) {
       for (const finding of outcome.injectionFindings) {
@@ -1092,6 +1118,7 @@ export class McpGovernanceProxy {
                 `~/.intutic/mcp-pins/). Blocked by workspace policy (fail-closed mode). ` +
                 `Contact your administrator or update mcpProxyFailBehavior to open.`,
               { code: 'TOFU_UNAVAILABLE', ruleId: 'mcpProxyFailBehavior' },
+              this.interceptor.opaque,
             ),
           )
           return
@@ -1133,7 +1160,7 @@ export class McpGovernanceProxy {
 
         if (action.block) {
           writeFrame(
-            buildBlockResponse(outcome.toolsListMsgId ?? null, reason, { code: 'TOOL_DEFINITIONS_CHANGED', ruleId: `tofu.${serverName}` }),
+            buildBlockResponse(outcome.toolsListMsgId ?? null, reason, { code: 'TOOL_DEFINITIONS_CHANGED', ruleId: `tofu.${serverName}` }, this.interceptor.opaque),
           )
           return
         }

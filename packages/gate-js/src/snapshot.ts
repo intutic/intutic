@@ -64,6 +64,7 @@ import {
   type McpRegistryRecord,
 } from './mcpRegistryRecord.js'
 import { decodeSsoGroupRecord, SSO_GROUP_RECORD_TAG, type SsoGroupRecord } from './ssoGroups.js'
+import { INTERVENTION_MODE_RECORD_TAG, isOpaqueInterventionModeRecord } from './opaqueRefusal.js'
 import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
 import { classify } from './actions.js'
 import { compileSequence, sequenceMatch } from './sequence.js'
@@ -136,6 +137,13 @@ export class Snapshot {
    * check, as {@link mcpRegistry} is.
    */
   mcpAllowlist: McpAllowlistRecord | null = null
+  /**
+   * The workspace is OPAQUE (the `@intervention_mode` record): a refusal on
+   * workspace policy tells the agent `OPAQUE_REFUSAL_MESSAGE`, not the rule,
+   * and the event keeps the rule. Kept on a snapshot that fails its integrity
+   * check, since it only ever hides text and never allows a call.
+   */
+  opaque = false
 
   get healthMessage(): string {
     switch (this.state) {
@@ -218,6 +226,10 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
     }
     if (line.startsWith(`${MCP_ALLOWLIST_RECORD_TAG}\t`)) {
       snap.mcpAllowlist = decodeMcpAllowlistRecord(line)
+      continue
+    }
+    if (line.startsWith(`${INTERVENTION_MODE_RECORD_TAG}\t`)) {
+      snap.opaque = isOpaqueInterventionModeRecord(line)
       continue
     }
 
