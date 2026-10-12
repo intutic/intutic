@@ -65,7 +65,7 @@ When interacting with model providers through the Intutic proxy, agents can issu
 
 #### 3. Policy Verification & Automated E2E Judging
 * **`@intutic verify <prompt>`**: Audits the prompt pre-flight against active SOPs and guidelines, returning pass/fail verdicts before submitting requests to the LLM.
-* **`@intutic review <prompt>`**: Evaluates prompt quality, actionability, and ambiguity scores.
+* **`@intutic review <prompt>`**: Quick heuristic check of the prompt (length, action verbs, SOP or policy reference) with a letter grade and suggestions.
 * **`@intutic judge <prompt>`**: Runs real-time LLM-as-a-judge compliance checkers on model responses out-of-band.
 * **`@intutic status`**: Displays active session statistics, spent token budget, and average compliance score.
 * **`@intutic budget`**: Displays daily spend limits and remaining quota.
