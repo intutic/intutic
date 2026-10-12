@@ -28,6 +28,12 @@ export interface TaskProviderCredentials {
   authToken: string
   /** Project, team or routing key within the provider. */
   projectKey: string
+  /**
+   * Jira Cloud only: the email of the Atlassian account the API token belongs
+   * to. Jira Cloud authenticates an API token as Basic `email:token`. A
+   * connection stores it as `metadata.accountEmail`.
+   */
+  accountEmail?: string
   /** Additional provider-specific config. */
   metadata?: Record<string, unknown>
 }
@@ -86,6 +92,10 @@ export interface TaskManagementAdapter {
 
   /**
    * Search for open tasks.
+   *
+   * Rejects when the provider cannot be asked (unreachable, refused, timed
+   * out), so a caller can tell "nothing open" from "could not ask".
+   *
    * @param workspaceId - Intutic workspace ID, for logging
    * @param filters - Optional filters (status, priority, labels, assignee)
    * @returns List of matching external tasks

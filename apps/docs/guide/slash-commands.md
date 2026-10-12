@@ -58,8 +58,8 @@ Suggests prompt adjustments or corrective prompt cards based on recent anomalies
 * **Output (Healthy)**: General optimization recommendations (e.g. conciseness, model budgeting, guidelines collapsing).
 
 ### 3. `/intutic initialize`
-Begins manual session cost attribution by listing the top open or in-progress tasks from the connected integrations (Jira, Linear, PagerDuty).
-* **Mechanism**: Queries external task managers registered for the workspace, runs a lightweight LLM-as-a-judge check matching current repository context (active branch name or files) to recommend the most relevant task, caches options in Valkey, and displays a numbered list of tasks.
+Begins manual session cost attribution by listing the open tickets on the workspace's Jira and Linear connections.
+* **Mechanism**: Asks each Jira and Linear connection for its open tickets, in parallel, and lists up to 10 per connection, most recently updated first. A tracker that errors or takes longer than 5 seconds is skipped and named ("Couldn't reach Linear (ENG)") while the rest are listed. If the session's git branch names one of the listed tickets (`feature/PROJ-101-…`), that ticket is marked Recommended; this is the same branch parse that tags sessions, with no model call. PagerDuty incidents are not listed, since the command cannot tell which incidents are yours. The options are cached in Valkey for 30 minutes so `/intutic start <n>` can resolve them.
 * **Output**:
   ```markdown
   ### 🔑 Initialize Intutic Session cost attribution
