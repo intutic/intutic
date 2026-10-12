@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { handler, composeRequestInterceptor, checkToolCall, readConfig } from './handler.js'
 import type {
   McpRequestInterceptorEvent,
@@ -6,6 +9,24 @@ import type {
   McpInterceptorOutput,
   JsonRpcErrorBody,
 } from './types.js'
+
+interface ResponseVector {
+  name: string
+  response: { status: number; body: unknown } | null
+  failClosed: boolean
+  expect: { allowed: boolean }
+}
+
+// The answers the gate SDKs' clients are held to; the gateway check answers in
+// the same `{ allowed, reason, code }` shape and the same statuses.
+const VECTORS = (
+  JSON.parse(
+    readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../../packages/shared-types/fixtures/hook-gate-response-vectors.json'),
+      'utf8',
+    ),
+  ) as { vectors: ResponseVector[] }
+).vectors
 
 const CONTROL_PLANE_URL = 'https://control-plane.example.com'
 const API_KEY = 'vk_test_key_1234567890'
@@ -201,6 +222,53 @@ describe('AgentCore Gateway interceptor Lambda handler', () => {
 
       const result = await handler(toolsCallEvent())
       expect(result.mcp.transformedGatewayResponse).toBeDefined()
+    })
+  })
+
+  describe('reads the control plane\'s answer as the shared hook-gate vectors say', () => {
+    it.each(VECTORS.map((v) => [v.name, v] as const))('%s', async (_name, v) => {
+      if (!v.failClosed) process.env.INTUTIC_FAIL_OPEN = 'true'
+      const fetchMock = v.response
+        ? vi.fn().mockResolvedValue({
+            ok: v.response.status >= 200 && v.response.status < 300,
+            status: v.response.status,
+            json: async () => v.response!.body,
+          })
+        : vi.fn().mockRejectedValue(new TypeError('fetch failed'))
+      vi.stubGlobal('fetch', fetchMock)
+
+      const event = toolsCallEvent()
+      const result = await handler(event)
+      if (v.expect.allowed) {
+        expect(result.mcp.transformedGatewayResponse).toBeUndefined()
+        expect(result.mcp.transformedGatewayRequest?.body).toEqual(event.mcp.gatewayRequest.body)
+      } else {
+        expect(result.mcp.transformedGatewayResponse).toBeDefined()
+      }
+    })
+
+    it('names GOVERNANCE_UNAVAILABLE in the denial when failing closed', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ allowed: false, code: 'GOVERNANCE_UNAVAILABLE', reason: 'Governance check unavailable' }),
+      }))
+      const result = await handler(toolsCallEvent())
+      const errorBody = result.mcp.transformedGatewayResponse!.body as JsonRpcErrorBody
+      expect(errorBody.error.message).toContain('governance check unavailable (GOVERNANCE_UNAVAILABLE)')
+      expect(errorBody.error.message).toContain('failing closed')
+    })
+
+    it('denies a 400 INVALID_REQUEST even with INTUTIC_FAIL_OPEN=true', async () => {
+      process.env.INTUTIC_FAIL_OPEN = 'true'
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ allowed: false, code: 'INVALID_REQUEST', reason: 'toolName missing or invalid.' }),
+      }))
+      const result = await handler(toolsCallEvent())
+      const errorBody = result.mcp.transformedGatewayResponse!.body as JsonRpcErrorBody
+      expect(errorBody.error.message).toContain('INVALID_REQUEST')
     })
   })
 

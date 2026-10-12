@@ -59,13 +59,18 @@ request body the gate cannot read is refused with HTTP 400 and `code: INVALID_RE
 The [gate SDKs](/reference/gate-sdk#fail-closed-defaults) decide on `GOVERNANCE_UNAVAILABLE`
 as they do when the control plane is unreachable, by their `failClosed` setting, which
 refuses by default. Each check that could not run is logged and counted in the
-`hook_gate_unavailable` metric, by check and by outcome (`refused` or `allowed_shadow`).
+`governance_check_unavailable` metric, by surface, check and outcome (`refused` or
+`allowed_shadow`). The [AgentCore gateway check](/integrations/agentcore) and the
+[QM security screen](/integrations/qm) follow the same rules in their own response shapes.
 
-::: warning Not every harness consults the gate
-`POST /api/v1/hook-gate` is called synchronously by the goose and OpenHands hook writers. The
-Claude Code, Cursor, Cline, Claude Desktop, Windsurf, pi and openclaw integrations decide
-locally and report to the control plane asynchronously, which keeps their tool path free of a
-network round-trip. Everything on this page describes the gate. The local path enforces the
+::: warning The harness hook gates do not consult the gate
+`POST /api/v1/hook-gate` is called synchronously by the [gate SDKs](/reference/gate-sdk)
+(`@intutic/gate` and `intutic_clawde.gate`, and the framework adapters built on them) when they
+have a control-plane client, by the TrueForge bridge, and by any integration of your own. No
+harness hook gate calls it: Claude Code, Cursor, Cline, goose, OpenHands and every other
+hook-gated harness decide locally and report to the control plane asynchronously
+(`POST /api/v1/hook-events`), which keeps their tool path free of a network round-trip.
+Everything on this page describes the gate. The local path enforces the
 protected-path and shell-bypass guards written into the generated hook script, plus the policy
 snapshot the sync daemon refreshes: the workspace's `BLOCK:` and `REQUIRE_APPROVAL:` rules, its
 SSO group policy, decided for the member the snapshot was issued to, and its MCP server registry

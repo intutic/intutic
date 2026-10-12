@@ -23,8 +23,11 @@
  * # Fail-open vs fail-closed on a control-plane failure
  *
  * Defaults to FAIL CLOSED (deny) when the control-plane call itself fails —
- * times out, network-errors, or returns a non-2xx/unparseable body, as
- * `/api/v1/hook-gate` and the gate SDKs do. A Gateway an operator explicitly
+ * times out, network-errors, returns a non-2xx/unparseable body, or answers
+ * `GOVERNANCE_UNAVAILABLE` because one of its own checks could not run — as
+ * `/api/v1/hook-gate` and the gate SDKs do. A 400 (`INVALID_REQUEST`) is a
+ * denial whatever `INTUTIC_FAIL_OPEN` says: the request is wrong, not the
+ * control plane down. A shadow-mode workspace's degraded allow is an allow. A Gateway an operator explicitly
  * wired an interceptor onto is a production governance boundary — see
  * apps/docs/integrations/agentcore.md for the reasoning and the
  * `INTUTIC_FAIL_OPEN=true` escape hatch for operators who have judged their
@@ -91,15 +94,22 @@ export function readConfig(): InterceptorConfig {
 export interface GatewayCheckResponse {
   allowed: boolean
   reason?: string
+  /** `GOVERNANCE_UNAVAILABLE` on a shadow workspace's degraded allow; `INVALID_REQUEST` on a 400. */
+  code?: string
+  degraded?: boolean
 }
+
+/** The control plane's code for a call whose checks could not run. */
+const GOVERNANCE_UNAVAILABLE = 'GOVERNANCE_UNAVAILABLE'
 
 /**
  * Call `POST /api/v1/integrations/agentcore/gateway-check`
  * (services/control-plane/src/routes/agentcoreGateway.ts) for a verdict.
  *
- * Never throws for an ordinary "the call was denied" outcome — only for a
- * genuine failure to get an answer at all (network error, timeout,
- * non-2xx, unparseable body), which the caller maps to `config.failOpen`.
+ * Never throws for an ordinary "the call was denied" outcome, nor for a 400
+ * (`INVALID_REQUEST`, returned as a denial) — only for a genuine failure to
+ * get a verdict (network error, timeout, non-2xx, unparseable body, or
+ * `GOVERNANCE_UNAVAILABLE`), which the caller maps to `config.failOpen`.
  */
 export async function checkToolCall(
   config: InterceptorConfig,
@@ -125,6 +135,14 @@ export async function checkToolCall(
     })
 
     if (!res.ok) {
+      const errorBody = (await res.json().catch(() => null)) as { code?: unknown; reason?: unknown } | null
+      if (res.status === 400) {
+        const why = typeof errorBody?.reason === 'string' ? errorBody.reason : 'HTTP 400'
+        return { allowed: false, code: 'INVALID_REQUEST', reason: `the control plane rejected the request (INVALID_REQUEST): ${why}` }
+      }
+      if (errorBody?.code === GOVERNANCE_UNAVAILABLE) {
+        throw new Error(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`)
+      }
       throw new Error(`gateway-check returned HTTP ${res.status}`)
     }
 
@@ -136,8 +154,11 @@ export async function checkToolCall(
     ) {
       throw new Error('gateway-check returned an unparseable body')
     }
-
-    return body as GatewayCheckResponse
+    const verdict = body as GatewayCheckResponse
+    if (!verdict.allowed && verdict.code === GOVERNANCE_UNAVAILABLE) {
+      throw new Error(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`)
+    }
+    return verdict
   } finally {
     clearTimeout(timer)
   }

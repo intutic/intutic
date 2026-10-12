@@ -57,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   used to be allowed), and an answer with no boolean `allowed` counts as no
   verdict (it used to be read as an allow). Both clients are held to the
   shared `hook-gate-response-vectors.json`.
+- **The AgentCore interceptor decides `GOVERNANCE_UNAVAILABLE` the same
+  way.** The control plane's AgentCore gateway check now refuses with a 403
+  `GOVERNANCE_UNAVAILABLE` when its DLP scan or SOP rules cannot run (a
+  degraded allow in shadow mode), and the interceptor Lambda decides that by
+  `INTUTIC_FAIL_OPEN`, closed by default; a 400 `INVALID_REQUEST` is denied
+  whatever that setting says. The QM security screen answers the same outage
+  with a strict score, since QM's client lets any non-2xx through as
+  unscreened.
 - **Gate bodies are v20** (`GATE_VERSION` 20). The sync daemon regenerates
   every hook gate on its next cycle; outside a chaos run the gates decide
   exactly as before.
