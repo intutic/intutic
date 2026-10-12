@@ -143,7 +143,7 @@ describe('OPAQUE refusal frames', () => {
     const opaque = setup(true, (p) => { p.rules = [approval] }, holds)
     const frame = await frameFor(opaque.interceptor)
     expect(frame.error.code).toBe(-32603)
-    expect(frame.error.message).toMatch(new RegExp(`^\\[Intutic Governance\\] Tool call HELD for approval: ${OPAQUE_REFUSAL_MESSAGE.replace(/\./g, '\\.')}\\. Hold id: hold_123\\. `))
+    expect(frame.error.message.startsWith(`[Intutic Governance] Tool call HELD for approval: ${OPAQUE_REFUSAL_MESSAGE}. Hold id: hold_123. `)).toBe(true)
     expect(frame.error.message).not.toContain('ledger edits')
     expect(frame.error.message).not.toContain('sop_no_ledger')
     expect(frame.error.data).toEqual({ code: 'HELD', ruleId: '', status: 'pending_approval', holdId: 'hold_123' })
