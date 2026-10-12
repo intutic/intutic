@@ -444,6 +444,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `anomaly.detected` | Anomaly Detected |
 | `anomaly.finding` | Detector Finding (incl. advisory): every detector finding, allowed or blocked; pair it with a severity filter |
 | `trajectory.alert` | Trajectory Drift Alert |
+| `anomaly.drift.detected` | Guideline Compliance Drifted: an enforced guideline's compliance moved 0.15 or more from its baseline in the hourly check; once per drift. HIGH when compliance fell (the guideline is also queued for a rewrite), INFO when it rose. See [Behavioral Drift](/guide/drift-detection#behavioral-drift) |
 | `anomaly.capability_miss` | Capability Miss (ungoverned task) |
 | `sop.integrity.drift` | Guideline Integrity Drift |
 | `sop.stale.detected` | Guideline Went Stale |
@@ -484,7 +485,7 @@ Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leav
 
 Prevent alert noise by setting a cooldown period (in minutes) for each rule. Consecutive identical alerts inside the cooldown window are suppressed.
 
-The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule; the same goes for the other events that can be INFO (registry approvals, SCIM changes, rejections, evidence downloads). **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
+The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule; the same goes for the other events that can be INFO (registry approvals, SCIM changes, rejections, evidence downloads, rising guideline compliance). **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
 
 **Show Delivery Log** lists each time a rule sent, failed or was filtered, with the event and channel.
 

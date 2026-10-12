@@ -31,17 +31,22 @@ export const NOTIFICATION_EVENT_TYPES = [
   'incident.escalated',
   'sop.status_changed',
   'session.ended',
-  'adapter.write_back.failed',
   'decision.pending',
   /** An OWNER, ADMIN or EM approved a held decision, in Slack or through the API and CLI. Carries `entryId`, `reviewerId` and `via`. */
   'decision.approved',
   /** An OWNER, ADMIN or EM rejected a held decision, in Slack or through the API and CLI. */
   'decision.rejected',
-  'ssl.enforcement.violation',
-  'context_gap.auto_injected',
   'trajectory.alert',
   // ── Calibration & drift (Q10 orphan audit) ──
   'calibration.threshold_breach',
+  /**
+   * An enforced SOP's rolling compliance moved 0.15 or more from its stored
+   * baseline (`behavioralDriftService.ts`, the hourly SOP health sweep). Once per
+   * drift: the baseline is recaptured when it fires. Carries `sopId`,
+   * `driftScore`, `driftDirection` (`DEGRADING` or `IMPROVING`),
+   * `baselineCompliance` and `currentCompliance`. HIGH when degrading, INFO when
+   * improving.
+   */
   'anomaly.drift.detected',
   'anomaly.capability_miss',
   'anomaly.trust.updated',
