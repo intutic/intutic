@@ -49,7 +49,8 @@ which decays on anomalies and boosts on clean runs.
 
 By default the ring is scored deterministically; when the control plane's judge
 is configured, an LLM-as-judge pass can override per-facet scores with a semantic assessment of
-which SOP rules and primitives apply to each agent, harness and connection.
+which SOP rules and primitives apply to each agent, harness and connection. The judge pass runs
+on Self-serve, Biz Org, Enterprise and Self-host, and in the 14-day trials; on Free the deterministic score is the score.
 
 ## Reopening a session
 

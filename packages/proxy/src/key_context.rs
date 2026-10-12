@@ -2,8 +2,9 @@
 //!
 //! Workspace policy reaches the proxy on that route, which it already calls
 //! to validate a virtual key: the SSO group policy for the response gate
-//! (`sso_groups`), the workspace's PII detector actions (`dlp::workspace`)
-//! and its intervention mode ([`intervention_mode`]). All read the same
+//! (`sso_groups`), the workspace's PII detector actions (`dlp::workspace`),
+//! its intervention mode ([`intervention_mode`]) and whether its plan includes
+//! LLM judging ([`llm_judge_enabled`]). All read the same
 //! answer, fetched once per key and cached here for [`CACHE_TTL`], so adding
 //! a field to the route never adds a request.
 //!
@@ -122,6 +123,14 @@ pub fn intervention_mode(body: &Value) -> crate::refusal::InterventionMode {
     crate::refusal::InterventionMode::parse(body.get("interventionMode").and_then(Value::as_str))
 }
 
+/// Whether the workspace's plan includes server-side LLM judging, from a
+/// key-context body (`llmJudgeEnabled`). Only an explicit `false` turns the
+/// judge off: absent (a control plane older than the field) or null (the plan
+/// could not be read) keeps judging exactly as before the field existed.
+pub fn llm_judge_enabled(body: &Value) -> bool {
+    body.get("llmJudgeEnabled").and_then(Value::as_bool) != Some(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,6 +194,18 @@ mod tests {
             mode(serde_json::json!({"interventionMode": null})),
             InterventionMode::Transparent
         );
+    }
+
+    #[test]
+    fn only_an_explicit_false_turns_the_llm_judge_off() {
+        let judge = |v: Value| llm_judge_enabled(&v);
+        assert!(!judge(serde_json::json!({"llmJudgeEnabled": false})));
+        assert!(judge(serde_json::json!({"llmJudgeEnabled": true})));
+        // A control plane older than the field, and one that could not read
+        // the plan: today's behaviour.
+        assert!(judge(serde_json::json!({"workspaceId": "ws_old"})));
+        assert!(judge(serde_json::json!({"llmJudgeEnabled": null})));
+        assert!(judge(serde_json::json!({"llmJudgeEnabled": "false"})));
     }
 
     #[tokio::test]

@@ -61,7 +61,7 @@ list is a trial or a degraded preview of a paid feature:
 | Ticket board integration (Jira/Linear) | — | cost attribution to a ticket key |
 | Corporate SOP distribution | local files only | centralized, tamper-proof, pushed to every developer |
 | Guardrails from policy documents | hand-written SOP files and rules | Notion, Confluence, GitHub, Google Docs and uploads become cited, shadow-first guardrails a person promotes |
-| LLM-as-judge (L2/L3 semantic checks) | — | requires server compute |
+| LLM-as-judge (L2/L3 semantic checks) | — | on a paid plan or a trial, not Free: Free stays deterministic |
 | MCP server governance | the proxy's local checks: DLP, injection scanning, anomaly detectors, WASM rules, TOFU pinning | plus the [server registry](/guide/mcp-governance#the-registry) with approvals and default-deny, [approval holds](/guide/mcp-governance#approval-holds), allowlists, the calling member on every event, [call budgets](/guide/mcp-governance#call-budgets) and [tool-change risk scoring](/guide/mcp-governance#tool-change-risk), on every plan; the [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) on plans with single sign-on |
 
 Arm state carries over rather than resetting when you connect: a workspace
@@ -84,7 +84,7 @@ list. In short:
 | | Self-serve | Biz Org | Enterprise | Self-host |
 |---|:---:|:---:|:---:|:---:|
 | [Policy Guardrails](/guide/policy-guardrails) (extraction and the review page) | ✓ | ✓ | ✓ | ✓ |
-| [Trajectory Monitor](/guide/trajectory-monitor#what-runs-on-which-plan) LLM review of ambiguous windows (the monitor itself runs on every plan) | ✓ | ✓ | ✓ | ✓ |
+| LLM-as-judge: the [response judge](/guide/slash-commands) (`/intutic judge`), the [trajectory monitor's](/guide/trajectory-monitor#what-runs-on-which-plan) review of ambiguous windows, [agent posture](/guide/agents) judging, loop diff verification and semantic skill analysis. Free runs the deterministic checks only; the monitor itself runs on every plan | ✓ | ✓ | ✓ | ✓ |
 | [Single sign-on](/guide/security#single-sign-on-sso) (SAML 2.0, OIDC) | | ✓ | ✓ | ✓ |
 | [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) for high-risk tools | | ✓ | ✓ | ✓ |
 | [Custom Filters](/guide/wasm-rules) (WASM rules) | | ✓ | ✓ | ✓ |
@@ -98,7 +98,7 @@ list. In short:
 | [Self-hosted gateway](/external/self-hosted-gateway) | | | ✓ | ✓ |
 | Runs in your VPC or an air-gapped network | | | | ✓ |
 
-The 14-day Free trial includes Policy Guardrails, the trajectory monitor's LLM review, single sign-on, SCIM,
+The 14-day Free trial includes Policy Guardrails, LLM-as-judge, single sign-on, SCIM,
 Custom Filters, the SOP Optimizer, fleet analytics, member spend budgets, SIEM export and data
 residency; the 14-day Enterprise
 trial adds the Evaluator Sandbox and SOP write-back. Plan changes take effect

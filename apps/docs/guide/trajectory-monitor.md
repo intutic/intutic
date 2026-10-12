@@ -30,7 +30,8 @@ on any plan.
 A window where only an error storm or a tool-call burst fired is ambiguous.
 On Self-serve, Biz Org, Enterprise and Self-host, and in the 14-day Free and
 Enterprise trials, a self-hosted model reviews that window and decides its
-verdict. Free has no LLM review: the window is recorded as a warning that
+verdict, like every other LLM judge ([Tier Matrix](/guide/tier-matrix)).
+Free has no LLM review: the window is recorded as a warning that
 raises an alert and never escalates, the same verdict the monitor reaches
 when the review model cannot be reached. Each alert says which happened in
 `trajectoryWindow.judge`: `ran`, `failed`, `not_in_plan`, or
