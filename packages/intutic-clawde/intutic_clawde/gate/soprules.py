@@ -56,6 +56,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
+from .opaque import is_opaque_mode
+
 FETCH_TIMEOUT = 3.0
 
 # Actions the control plane can return. Anything else is ignored rather than
@@ -138,6 +140,22 @@ def parse_rules(payload: object) -> list[SopRule]:
     return out
 
 
+@dataclass
+class SopRegister:
+    """The register as GET /api/v1/sop/rules answers it: the rules, and whether
+    the workspace's intervention mode is OPAQUE (``interventionMode``; absent
+    from a control plane that predates it, which reads as not OPAQUE). The
+    gate uses the mode when there is no policy snapshot to read it from."""
+    rules: list
+    opaque: bool
+
+
+def parse_register(payload: object) -> SopRegister:
+    """parse_rules, and the interventionMode beside them."""
+    mode = payload.get("interventionMode") if isinstance(payload, dict) else None
+    return SopRegister(rules=parse_rules(payload), opaque=is_opaque_mode(mode))
+
+
 def fetch_rules(base_url: str, api_key: str, workspace_id: str,
                 timeout: float = FETCH_TIMEOUT) -> list[SopRule] | None:
     """Return active VALIDATED rules, or None if they could not be fetched.
@@ -146,6 +164,13 @@ def fetch_rules(base_url: str, api_key: str, workspace_id: str,
     None is "the register did not answer", [] is "the register answered and
     this workspace has no rules". Only the second is a statement about policy.
     """
+    register = fetch_register(base_url, api_key, workspace_id, timeout)
+    return None if register is None else register.rules
+
+
+def fetch_register(base_url: str, api_key: str, workspace_id: str,
+                   timeout: float = FETCH_TIMEOUT) -> SopRegister | None:
+    """fetch_rules with the workspace's mode; None if the register did not answer."""
     qs = urllib.parse.urlencode({"workspaceId": workspace_id, "active": "true"})
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/api/v1/sop/rules?{qs}",
@@ -159,7 +184,7 @@ def fetch_rules(base_url: str, api_key: str, workspace_id: str,
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError):
         return None
     try:
-        return parse_rules(json.loads(raw) if raw else {})
+        return parse_register(json.loads(raw) if raw else {})
     except json.JSONDecodeError:
         return None
 

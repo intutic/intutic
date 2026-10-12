@@ -159,6 +159,8 @@ export class Gate {
   /** `null` = not fetched yet. A failed fetch caches `[]` so one unreachable
    *  control plane does not add a timeout to every subsequent tool call. */
   private _sopRules: soprules.SopRule[] | null = null
+  /** The SOP register said the workspace is OPAQUE (read with its rules). */
+  private _registerOpaque = false
   private _chaos: ChaosState | null = null
 
   constructor(cfg: GateConfig = {}, client: GateClient | null = null) {
@@ -223,7 +225,11 @@ export class Gate {
     if (this._sopRules === null) {
       let fetched: soprules.SopRule[] | null = null
       if (this.client !== null) {
-        fetched = await soprules.fetchRules(this.client.baseUrl, this.client.apiKey, this.cfg.workspaceId)
+        const register = await soprules.fetchRegister(this.client.baseUrl, this.client.apiKey, this.cfg.workspaceId)
+        if (register !== null) {
+          fetched = register.rules
+          this._registerOpaque = register.opaque
+        }
       }
       if (fetched === null) {
         // Could not read the register. Say so once, then stay quiet — Tier
@@ -248,7 +254,19 @@ export class Gate {
    * code is unchanged, and the event is always emitted with the full reason.
    */
   private shown(reason: string): string {
-    return this.getSnapshot().opaque ? OPAQUE_REFUSAL_MESSAGE : reason
+    return this.opaque() ? OPAQUE_REFUSAL_MESSAGE : reason
+  }
+
+  /**
+   * Whether the workspace is OPAQUE: the policy snapshot's record when there
+   * is a snapshot, and the SOP register's `interventionMode` when there is
+   * none. Without a snapshot the only tiers that refuse on workspace policy
+   * are the register's (A3, which reads the mode with its rules) and the hook
+   * gate, which applies the mode itself.
+   */
+  private opaque(): boolean {
+    const snap = this.getSnapshot()
+    return snap.opaque || (snap.state === 'absent' && this._registerOpaque)
   }
 
   // ------------------------------------------------------------ emitting
@@ -566,7 +584,7 @@ export class Gate {
     }
     await this.emit('tool_held', toolName, `${rule.reason} [${rule.id}]`, toolInput)
     // An OPAQUE workspace's hold names the hold, not the rule.
-    const opaque = this.getSnapshot().opaque
+    const opaque = this.opaque()
     throw new IntuticGateHold(
       holdMessage(opaque ? OPAQUE_REFUSAL_MESSAGE : rule.reason, opaque ? '' : rule.id, outcome),
       outcome.recorded ? outcome.holdId : undefined,

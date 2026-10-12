@@ -19,7 +19,12 @@ OPAQUE_REFUSAL_MESSAGE = "Blocked by workspace policy. Ask a workspace admin if 
 INTERVENTION_MODE_RECORD_TAG = "@intervention_mode"
 
 
+def is_opaque_mode(mode: object) -> bool:
+    """Whether an intervention mode is OPAQUE, in any case."""
+    return isinstance(mode, str) and mode.strip().upper() == "OPAQUE"
+
+
 def is_opaque_record(line: str) -> bool:
     """Whether a ``.rules`` line is the record of an OPAQUE workspace."""
     parts = line.split("\t")
-    return len(parts) == 2 and parts[0] == INTERVENTION_MODE_RECORD_TAG and parts[1].strip().upper() == "OPAQUE"
+    return len(parts) == 2 and parts[0] == INTERVENTION_MODE_RECORD_TAG and is_opaque_mode(parts[1])

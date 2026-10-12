@@ -222,14 +222,29 @@ its text, the SOP, the pattern that matched or how to get around it, so it
 cannot learn the policy to route around it. A held call still names its hold
 id and how to approve it. What an operator reads keeps the full reason: hook
 events, the enforcement log, incidents, detector findings, traces and the SIEM
-export. It is applied by the local hook gates and the gate SDKs (`@intutic/gate`,
-`intutic-clawde`), which read it from the policy snapshot, by the hosted hook
-gate, the LLM proxy and the MCP proxy. Refusals that say nothing about the
-policy are unchanged: a call too large to evaluate, a gate past its deadline,
-an unreadable call, an unverified policy snapshot, a budget or rate limit, a
-chaos run's injected fault. The local gates pick up a change of mode with the
-next policy snapshot (every 30 seconds by default) and the LLM proxy within 30
-seconds.
+export. It is applied by the local hook gates, by the gate SDKs
+(`@intutic/gate`, `intutic-clawde`), which read it from the policy snapshot or,
+with no snapshot, from the SOP register, and by the hosted hook gate, the LLM
+proxy and the MCP proxy. Refusals that say nothing about the policy are
+unchanged: a call too large to evaluate, a gate past its deadline, an
+unreadable call, an unverified policy snapshot, a budget or rate limit, a
+chaos run's injected fault.
+
+What Opaque does not hide. It hides which rule refused a call, and nothing
+else:
+
+- SOP guidance the agent is meant to read is still readable. The MCP proxy's
+  `intutic_list_sops` tool still lists the workspace's SOPs.
+- The MCP proxy's `intutic_mcp_registry_status` tool still reports which
+  servers are approved, blocked or held, and which tools are disabled.
+- When the control plane cannot be reached and the LLM proxy is set to fail
+  open, the proxy cannot read the mode, and its refusals name the rule again
+  until the control plane answers.
+
+A change of mode reaches the hosted hook gate at once, the LLM proxy on its
+next request, the local gates with the next policy snapshot (pushed at once to
+a connected sync daemon, and polled every 30 seconds otherwise), and running
+MCP proxies on their next poll, within a minute.
 
 **Silent Log** applies to the local hook gates only. A would-block from a
 policy guardrail becomes a shadowed finding and counts toward the guardrail's

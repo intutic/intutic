@@ -13,6 +13,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import io
+
 from intutic_clawde.gate import soprules
 from intutic_clawde.gate.client import GateClient, GateResponse
 from intutic_clawde.gate.gate import Gate, GateConfig, IntuticGateHold, IntuticGateRefusal
@@ -124,3 +126,46 @@ def test_a_refusal_that_says_nothing_about_the_policy_is_unchanged(tmp_path, mon
     r = guard(monkeypatch, path, "mcp__github__create_issue")
     assert r.code == "POLICY_SNAPSHOT_UNVERIFIED"
     assert r.reason != OPAQUE_REFUSAL_MESSAGE
+
+
+RULES = [{"id": "r1", "toolPattern": "^Bash$", "action": "block", "reason": "no shell on prod"}]
+
+
+def guard_register(tmp_path, monkeypatch, body):
+    """A gate with no snapshot whose SOP register answers ``body`` over HTTP."""
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(soprules.urllib.request, "urlopen", lambda req, timeout=None: Resp(json.dumps(body).encode()))
+    monkeypatch.setenv("INTUTIC_SNAPSHOT_RULES", str(tmp_path / "no-such-snapshot.rules"))
+    client = RecordingClient()
+    gate = Gate(GateConfig(workspace_id="ws_test", use_hook_gate=False), client)
+    try:
+        gate.guard("Bash", {})
+    except IntuticGateRefusal as refusal:
+        return refusal, client.events
+    return None, client.events
+
+
+def test_with_no_snapshot_the_register_mode_hides_a_register_rule(tmp_path, monkeypatch):
+    r, events = guard_register(tmp_path, monkeypatch, {"rules": RULES, "interventionMode": "OPAQUE"})
+    assert r.code == "SOP_RULE"
+    assert r.reason == OPAQUE_REFUSAL_MESSAGE
+    assert ("tool_blocked", "Bash", "[sop:r1] no shell on prod") in events
+
+
+def test_with_no_snapshot_a_transparent_or_older_register_names_the_rule(tmp_path, monkeypatch):
+    for body in ({"rules": RULES, "interventionMode": "TRANSPARENT"}, {"rules": RULES}):
+        r, _ = guard_register(tmp_path, monkeypatch, body)
+        assert r.reason == "[sop:r1] no shell on prod"
+
+
+def test_the_register_parses_the_mode_beside_the_rules():
+    assert soprules.parse_register({"rules": RULES, "interventionMode": "opaque"}).opaque is True
+    assert soprules.parse_register({"rules": RULES, "interventionMode": "SILENT_LOG"}).opaque is False
+    assert soprules.parse_register(RULES).opaque is False
+    assert len(soprules.parse_register({"rules": RULES}).rules) == 1

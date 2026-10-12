@@ -12,14 +12,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { GateClient, type GateResponse } from '../client.js'
 import { IntuticGateHold, IntuticGateRefusal } from '../errors.js'
 import { Gate } from '../gate.js'
 import { _internal } from '../harness.js'
 import { encodeMcpRegistryRecord } from '../mcpRegistryRecord.js'
 import { encodeInterventionModeRecord, OPAQUE_REFUSAL_MESSAGE } from '../opaqueRefusal.js'
-import type { SopRule } from '../soprules.js'
+import { parseRegister, type SopRule } from '../soprules.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const dir = mkdtempSync(join(tmpdir(), 'intutic-gate-opaque-'))
@@ -174,4 +174,48 @@ describe('the sandbox hook script in an OPAQUE workspace', () => {
     const t = await run(transparent(WRITE_RULE), 'Write')
     expect(t.stderr).toContain('no writes to the ledger [sop.s_write]')
   }, 30_000)
+})
+
+describe('Gate.guard with no policy snapshot', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  /** A gate whose SOP register answers `body` over HTTP, as `/api/v1/sop/rules` does. */
+  async function guardRegister(body: unknown, tool: string): Promise<{ refusal: IntuticGateRefusal | null; events: RecordingClient['events'] }> {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(body), { status: 200 }))
+    const previous = process.env.INTUTIC_SNAPSHOT_RULES
+    process.env.INTUTIC_SNAPSHOT_RULES = join(dir, 'no-such-snapshot.rules')
+    const client = new RecordingClient()
+    try {
+      await new Gate({ workspaceId: 'ws_test', useHookGate: false }, client).guard(tool, {})
+      return { refusal: null, events: client.events }
+    } catch (err) {
+      if (err instanceof IntuticGateRefusal) return { refusal: err, events: client.events }
+      throw err
+    } finally {
+      if (previous === undefined) delete process.env.INTUTIC_SNAPSHOT_RULES
+      else process.env.INTUTIC_SNAPSHOT_RULES = previous
+    }
+  }
+
+  const RULES = [{ id: 'r1', toolPattern: '^Bash$', action: 'block', reason: 'no shell on prod' }]
+
+  it('reads the mode from the SOP register: an OPAQUE register rule is refused without naming it', async () => {
+    const { refusal, events } = await guardRegister({ rules: RULES, interventionMode: 'OPAQUE' }, 'Bash')
+    expect(refusal?.code).toBe('SOP_RULE')
+    expect(refusal?.reason).toBe(OPAQUE_REFUSAL_MESSAGE)
+    expect(events.find((e) => e.event === 'tool_blocked')?.reason).toBe('[sop:r1] no shell on prod')
+  })
+
+  it('names the rule when the register is TRANSPARENT, or predates the field', async () => {
+    for (const body of [{ rules: RULES, interventionMode: 'TRANSPARENT' }, { rules: RULES }]) {
+      expect((await guardRegister(body, 'Bash')).refusal?.reason).toBe('[sop:r1] no shell on prod')
+    }
+  })
+
+  it('parses the mode beside the rules', () => {
+    expect(parseRegister({ rules: RULES, interventionMode: 'opaque' }).opaque).toBe(true)
+    expect(parseRegister({ rules: RULES, interventionMode: 'SILENT_LOG' }).opaque).toBe(false)
+    expect(parseRegister(RULES).opaque).toBe(false)
+    expect(parseRegister({ rules: RULES }).rules).toHaveLength(1)
+  })
 })

@@ -176,6 +176,8 @@ class Gate:
         # None = not fetched yet. A failed fetch caches [] so one unreachable
         # control plane does not add a 3s timeout to every subsequent tool call.
         self._sop_rules: Optional[list] = None
+        # The SOP register said the workspace is OPAQUE (read with its rules).
+        self._register_opaque = False
         # A chaos run's plan, events path and why the plan cannot be used: read
         # from the environment on the first call.
         self._chaos: Optional[tuple] = None
@@ -223,8 +225,11 @@ class Gate:
         if self._sop_rules is None:
             fetched = None
             if self.client is not None:
-                fetched = soprules.fetch_rules(
+                register = soprules.fetch_register(
                     self.client.base_url, self.client.api_key, self.cfg.workspace_id)
+                if register is not None:
+                    fetched = register.rules
+                    self._register_opaque = register.opaque
             if fetched is None:
                 # Could not read the register. Say so once, then stay quiet —
                 # Tier A2 still fails closed on the same condition.
@@ -279,7 +284,16 @@ class Gate:
         or in an OPAQUE workspace (the snapshot's @intervention_mode record)
         the generic sentence, so it cannot learn the rule to route around it.
         The code is unchanged, and the event always carries the full reason."""
-        return OPAQUE_REFUSAL_MESSAGE if self.snapshot().opaque else reason
+        return OPAQUE_REFUSAL_MESSAGE if self._opaque() else reason
+
+    def _opaque(self) -> bool:
+        """Whether the workspace is OPAQUE: the policy snapshot's record when
+        there is a snapshot, the SOP register's interventionMode when there is
+        none. Without a snapshot the only tiers that refuse on workspace policy
+        are the register's (A3, which reads the mode with its rules) and the
+        hook gate, which applies the mode itself."""
+        snap = self.snapshot()
+        return snap.opaque or (snap.state == "absent" and self._register_opaque)
 
     def guard(self, tool_name: str, tool_input: dict) -> None:
         """Raise IntuticGateRefusal if this call must not run. Return to allow.
@@ -520,7 +534,7 @@ class Gate:
             return
         self._emit("tool_held", tool_name, f"{rule_reason} [{rule_id}]", tool_input)
         # An OPAQUE workspace's hold names the hold, not the rule.
-        opaque = self.snapshot().opaque
+        opaque = self._opaque()
         raise IntuticGateHold(hold_message(OPAQUE_REFUSAL_MESSAGE if opaque else rule_reason,
                                            "" if opaque else rule_id, outcome),
                               outcome.hold_id if outcome.recorded else None)
