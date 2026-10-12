@@ -55,7 +55,7 @@ Intutic is designed **AI-first**: AI coding agents (such as Claude Code, Antigra
 When interacting with model providers through the Intutic proxy, agents can issue commands directly inside prompt payloads by prepending `@intutic` or `/intutic`. The proxy intercepts these commands **pre-flight**, before the request reaches the provider, executes the governance action, and returns formatted response blocks:
 
 #### 1. Cost & Task Attribution
-* **`@intutic initialize`**: Queries linked task providers (Linear, Jira, GitHub Issues) and recommends open ticket candidates for the current session.
+* **`@intutic initialize`**: Queries linked task providers (Jira, Linear, PagerDuty) and recommends open ticket candidates for the current session.
 * **`@intutic start [<ticket_id>] [--sops=<names>] [--auto-judge]`**: Locks cost attribution to a ticket and scopes active local SOP directories.
   * *Example:* `@intutic start 12 --sops=security-rules --auto-judge`
 

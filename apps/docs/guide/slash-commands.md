@@ -58,7 +58,7 @@ Suggests prompt adjustments or corrective prompt cards based on recent anomalies
 * **Output (Healthy)**: General optimization recommendations (e.g. conciseness, model budgeting, guidelines collapsing).
 
 ### 3. `/intutic initialize`
-Begins manual session cost attribution by listing the top open or in-progress tasks from the connected integrations (Jira, Linear, GitHub).
+Begins manual session cost attribution by listing the top open or in-progress tasks from the connected integrations (Jira, Linear, PagerDuty).
 * **Mechanism**: Queries external task managers registered for the workspace, runs a lightweight LLM-as-a-judge check matching current repository context (active branch name or files) to recommend the most relevant task, caches options in Valkey, and displays a numbered list of tasks.
 * **Output**:
   ```markdown

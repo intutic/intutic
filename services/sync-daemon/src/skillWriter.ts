@@ -159,7 +159,7 @@ When interacting with LLM providers through the local proxy, prepend requests wi
 
 ### 1. Cost & Task Attribution
 - **Initialize Picker:** \`@intutic initialize\`
-  - *Description:* Pulls open tickets from linked task providers (Jira, Linear, GitHub Issues) and recommends ticket candidates for the session.
+  - *Description:* Pulls open tickets from linked task providers (Jira, Linear, PagerDuty) and recommends ticket candidates for the session.
 - **Lock Session & Scope Rules:** \`@intutic start [<ticket_id>] [--sops=<names_or_indices>] [--auto-judge]\`
   - *Description:* Attributes token costs to a ticket (optional) and scopes active local SOP directories for governance.
   - *Examples:*
