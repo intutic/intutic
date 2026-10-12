@@ -1,13 +1,15 @@
 /**
- * Trajectory Monitor — Daemon-side session watcher (Worker Thread).
+ * Trajectory Monitor — Daemon-side session watcher.
  *
- * Runs inside the sync-daemon as a Node.js Worker thread. Subscribes to
- * Valkey pub/sub `trace:live:{sessionId}` channels, buffers events in a
- * sliding window, and submits trajectory summaries to the control plane
- * for analysis.
+ * Runs in the `intutic connect` process, not a Worker thread:
+ * `tools/cli/src/commands/connect.ts` subscribes to the Valkey pub/sub
+ * `trace:live:*` channels and passes each event to `handleTraceEvent`. Events
+ * are buffered per session in a sliding window, and trajectory summaries are
+ * submitted to the control plane for analysis.
  *
  * Key guarantees:
- * - Non-blocking: Worker thread isolation, fire-and-forget analysis
+ * - Non-blocking: summaries go out asynchronously on a timer, with a 10s
+ *   HTTP timeout, and the monitor is separate from the proxy process
  * - No LLM calls on developer machine (all judgment is server-side)
  * - Cooldown rate limiter: 1 analysis request per minute per session
  *
@@ -260,8 +262,8 @@ export class TrajectoryMonitor {
       void this.submitAllSummaries()
     }, submitIntervalMs)
 
-    // Note: Valkey subscription is handled by the sync-daemon's existing
-    // Redis subscriber. Events are forwarded to this worker via postMessage.
+    // Note: the Valkey subscription lives in the caller (`connect.ts`), which
+    // passes each trace:live event to handleTraceEvent.
   }
 
   /**
