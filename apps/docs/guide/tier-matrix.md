@@ -84,6 +84,7 @@ list. In short:
 | | Self-serve | Biz Org | Enterprise | Self-host |
 |---|:---:|:---:|:---:|:---:|
 | [Policy Guardrails](/guide/policy-guardrails) (extraction and the review page) | ✓ | ✓ | ✓ | ✓ |
+| [Trajectory Monitor](/guide/trajectory-monitor#what-runs-on-which-plan) LLM review of ambiguous windows (the monitor itself runs on every plan) | ✓ | ✓ | ✓ | ✓ |
 | [Single sign-on](/guide/security#single-sign-on-sso) (SAML 2.0, OIDC) | | ✓ | ✓ | ✓ |
 | [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) for high-risk tools | | ✓ | ✓ | ✓ |
 | [Custom Filters](/guide/wasm-rules) (WASM rules) | | ✓ | ✓ | ✓ |
@@ -97,7 +98,7 @@ list. In short:
 | [Self-hosted gateway](/external/self-hosted-gateway) | | | ✓ | ✓ |
 | Runs in your VPC or an air-gapped network | | | | ✓ |
 
-The 14-day Free trial includes Policy Guardrails, single sign-on, SCIM,
+The 14-day Free trial includes Policy Guardrails, the trajectory monitor's LLM review, single sign-on, SCIM,
 Custom Filters, the SOP Optimizer, fleet analytics, member spend budgets, SIEM export and data
 residency; the 14-day Enterprise
 trial adds the Evaluator Sandbox and SOP write-back. Plan changes take effect

@@ -19,6 +19,23 @@ the platform has shipped with `PASSIVE` as the effective default since the
 monitor landed, and defaulting an unset value to `OFF` now would switch the
 monitor off platform-wide, so the code and this page say `PASSIVE`.
 
+## What runs on which plan
+
+`PASSIVE` and `ACTIVE` run on every plan, Free included, and so do the
+monitor's deterministic checks: budget spent past 95%, runaway token
+velocity, repeated identical tool calls, error storms and tool-call bursts.
+A budget past 95% is a critical verdict, which `ACTIVE` turns into a `KILL`
+on any plan.
+
+A window where only an error storm or a tool-call burst fired is ambiguous.
+On Self-serve, Biz Org, Enterprise and Self-host, and in the 14-day Free and
+Enterprise trials, a self-hosted model reviews that window and decides its
+verdict. Free has no LLM review: the window is recorded as a warning that
+raises an alert and never escalates, the same verdict the monitor reaches
+when the review model cannot be reached. Each alert says which happened in
+`trajectoryWindow.judge`: `ran`, `failed`, `not_in_plan`, or
+`plan_unreadable` (the plan could not be read, so the review was skipped).
+
 ## Changing the mode
 
 **Settings › Security › Trajectory Monitoring** (the **Monitor mode** control), or the API:
