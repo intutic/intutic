@@ -9,7 +9,7 @@ The **circuit breaker** is the decision engine that evaluates every AI agent too
 
 **Design goals:**
 - Evaluation is in-process with no model call. Cost is measured per payload size in `packages/proxy/benches` — there is no single figure, because it is dominated by request size.
-- **Fail-closed** by default for the proxy's connectivity to the control plane — if the model-request policy check can't complete, block the request (see [Proxy-side fail mode](#proxy-side-fail-mode)). This is a different guarantee from what happens *inside* a completed check: the hook gate's own per-check evaluation (DLP, SSO group policy, image provenance, and so on) fails **open** on an internal error — each check is independently wrapped so one broken detector degrades to "allowed," not "denied." Do not conflate the two.
+- **Fail-closed** by default for the proxy's connectivity to the control plane — if the model-request policy check can't complete, block the request (see [Proxy-side fail mode](#proxy-side-fail-mode)). The hook gate fails closed too, check by check: when one of its checks (the SOP rules, SSO group policy, the MCP server registry, image provenance, and so on) errors, the call is refused with `GOVERNANCE_UNAVAILABLE`, unless another check refuses it first with its own reason or the workspace is in shadow mode (see [How a verdict is decided](/concepts/enforcement-actions#how-a-verdict-is-decided)).
 - **Graceful degradation** — if a backend is unavailable, fall back to the next tier
 - **Zero single points of failure** — Valkey cache and Postgres each provide a degradation layer
 
@@ -176,7 +176,7 @@ held to the same set of test cases:
 
 | Decision point | Where the member's groups come from | When the decision can fail |
 |---|---|---|
-| The [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided) (`POST /api/v1/hook-gate`) | Resolved on every call | An internal error allows the call, like every check on that endpoint |
+| The [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided) (`POST /api/v1/hook-gate`) | Resolved on every call | An internal error refuses the call with `GOVERNANCE_UNAVAILABLE`, like every check on that endpoint, unless the workspace is in shadow mode |
 | The [MCP governance proxy](/guide/mcp-governance) | The member the proxy's API key resolves to, from its policy refresh | With a policy but no resolved member, or a key the control plane refuses, high-risk tools are refused |
 | The proxy's [response gate](#the-proxy-s-response-gate) | The member the request's virtual key belongs to, from the control plane, cached per key | With a policy but no resolved member, or a key the control plane refuses, high-risk tools are refused. When the policy cannot be fetched, the proxy's [fail mode](#proxy-side-fail-mode) decides |
 | The harness hook gates and the `@intutic/gate` and `intutic-clawde` SDK gates | The policy snapshot the sync daemon writes to `~/.intutic/hooks/` | See below |

@@ -9,9 +9,18 @@ synthesized locally for old servers that omit `verdict`.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from intutic_clawde.gate.client import GateClient, VALID_EVENTS
+
+# Shared with @intutic/gate's GateClient, which runs the same vectors.
+RESPONSE_VECTORS = json.loads(
+    (Path(__file__).resolve().parents[2] / "shared-types" / "fixtures"
+     / "hook-gate-response-vectors.json").read_text(encoding="utf-8")
+)["vectors"]
 
 
 class QueueTransport:
@@ -58,9 +67,8 @@ class TestHookGate:
         assert "failing closed" in r.reason
 
     def test_non_2xx_is_a_block_when_fail_closed(self):
-        # The SERVER fails open on its own error paths (it answers
-        # {allowed:true}); a non-2xx means we got no verdict at all, which is
-        # not the same thing, and fail_closed treats it as BLOCK.
+        # A non-2xx means we got no verdict at all, and fail_closed treats it
+        # as BLOCK.
         c, _ = make_client((500, {}))
         r = c.hook_gate("shell", {"command": "ls"})
         assert not r.allowed and not r.reached
@@ -70,6 +78,18 @@ class TestHookGate:
         r = c.hook_gate("shell", {"command": "ls"})
         assert r.allowed and not r.reached
         assert "failing open" in r.reason
+
+    @pytest.mark.parametrize("v", RESPONSE_VECTORS, ids=[v["name"] for v in RESPONSE_VECTORS])
+    def test_reads_the_answer_as_the_shared_vectors_say(self, v):
+        step = ConnectionError("down") if v["response"] is None else (
+            v["response"]["status"], v["response"]["body"])
+        c, _ = make_client(step, fail_closed=v["failClosed"])
+        r = c.hook_gate("shell", {"command": "make test"})
+        want = v["expect"]
+        assert (r.allowed, r.reached) == (want["allowed"], want["reached"])
+        assert r.code == want.get("code")
+        if "reasonContains" in want:
+            assert want["reasonContains"] in r.reason
 
     def test_harness_defaults_to_langgraph(self):
         c, t = make_client((200, {"allowed": True}))

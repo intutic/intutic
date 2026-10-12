@@ -34,9 +34,10 @@ server reaches the control plane as a tool_blocked event whose reason ends
 gate's refusal does.
 
 A1 and A2 are load-bearing and local. Tier B contributes the DLP regexes and
-workspace policy from the control plane; whether an unreachable control plane
-blocks is the client's `fail_closed` setting (default True — see client.py;
-the demo that fathered this code ran it advisory/fail-open).
+workspace policy from the control plane; whether an unreachable control plane,
+or one whose checks could not run (GOVERNANCE_UNAVAILABLE), blocks is the
+client's `fail_closed` setting (default True — see client.py; the demo that
+fathered this code ran it advisory/fail-open).
 
 Tier A3 applies rules written in the SOP register rather than in code —
 possible since intutic-enterprise#14 taught SOP titles a ` WHERE ` clause, so
@@ -471,7 +472,8 @@ class Gate:
         # Tier A still runs for reads: a snapshot rule legitimately blocks
         # reading a credential path, and that check is local and free.
         #
-        # Whether an unreachable control plane blocks here is the client's
+        # Whether an unreachable control plane, or one whose checks could not
+        # run (GOVERNANCE_UNAVAILABLE), blocks here is the client's
         # fail_closed setting (default True); see client.hook_gate.
         if self.cfg.use_hook_gate and self.client is not None and tool_name not in READ_ONLY_TOOLS:
             resp = self.client.hook_gate(tool_name, tool_input)

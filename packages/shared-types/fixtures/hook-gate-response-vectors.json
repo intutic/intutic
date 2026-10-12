@@ -1,0 +1,93 @@
+{
+  "_comment": "How a gate SDK client reads an answer from the control plane's hook gate (POST /api/v1/hook-gate). Run by @intutic/gate's GateClient (packages/gate-js/src/__tests__/client.test.ts) intutic-clawde's (packages/intutic-clawde/tests/test_gate_client.py) and the AgentCore interceptor (tools/agentcore-interceptor/src/handler.test.ts, which reads only `allowed`, mapping failClosed to INTUTIC_FAIL_OPEN); `governanceUnavailable` is the control plane's answer when a check could not run, which its own tests hold it to. A `response` of null is a control plane that cannot be reached. `expect.reasonContains` is matched case-sensitively against the client's reason. GOVERNANCE_UNAVAILABLE is decided as an unreachable control plane is, by the client's failClosed; INVALID_REQUEST is a refusal whatever failClosed says.",
+  "governanceUnavailable": {
+    "status": 403,
+    "body": { "allowed": false, "code": "GOVERNANCE_UNAVAILABLE", "reason": "Governance check unavailable; the call was refused. Retry, or ask an admin." }
+  },
+  "vectors": [
+    {
+      "name": "an allow is an allow",
+      "response": { "status": 200, "body": { "allowed": true } },
+      "failClosed": true,
+      "expect": { "allowed": true, "reached": true }
+    },
+    {
+      "name": "a refusal is a refusal, with its code",
+      "response": { "status": 200, "body": { "allowed": false, "reason": "MCP server pastebin is blocked [mcp_registry.blocked.pastebin]", "code": "SERVER_BLOCKED" } },
+      "failClosed": false,
+      "expect": { "allowed": false, "reached": true, "code": "SERVER_BLOCKED", "reasonContains": "pastebin is blocked" }
+    },
+    {
+      "name": "GOVERNANCE_UNAVAILABLE refuses when failing closed",
+      "response": { "status": 403, "body": { "allowed": false, "code": "GOVERNANCE_UNAVAILABLE", "reason": "Governance check unavailable; the call was refused. Retry, or ask an admin." } },
+      "failClosed": true,
+      "expect": { "allowed": false, "reached": false, "code": "GOVERNANCE_UNAVAILABLE", "reasonContains": "governance check unavailable (GOVERNANCE_UNAVAILABLE) — failing closed" }
+    },
+    {
+      "name": "GOVERNANCE_UNAVAILABLE allows when failing open, as an unreachable control plane does",
+      "response": { "status": 403, "body": { "allowed": false, "code": "GOVERNANCE_UNAVAILABLE", "reason": "Governance check unavailable; the call was refused. Retry, or ask an admin." } },
+      "failClosed": false,
+      "expect": { "allowed": true, "reached": false, "code": "GOVERNANCE_UNAVAILABLE", "reasonContains": "governance check unavailable (GOVERNANCE_UNAVAILABLE) — failing open" }
+    },
+    {
+      "name": "GOVERNANCE_UNAVAILABLE with a 200 is decided the same way",
+      "response": { "status": 200, "body": { "allowed": false, "code": "GOVERNANCE_UNAVAILABLE", "reason": "Governance check unavailable; the call was refused. Retry, or ask an admin." } },
+      "failClosed": false,
+      "expect": { "allowed": true, "reached": false, "code": "GOVERNANCE_UNAVAILABLE", "reasonContains": "failing open" }
+    },
+    {
+      "name": "a shadow workspace's degraded allow is an allow",
+      "response": { "status": 200, "body": { "allowed": true, "degraded": true, "code": "GOVERNANCE_UNAVAILABLE", "reason": "Governance check unavailable; allowed because the workspace is in shadow mode." } },
+      "failClosed": true,
+      "expect": { "allowed": true, "reached": true, "code": "GOVERNANCE_UNAVAILABLE" }
+    },
+    {
+      "name": "INVALID_REQUEST refuses when failing open",
+      "response": { "status": 400, "body": { "allowed": false, "code": "INVALID_REQUEST", "reason": "The request body is not a hook-gate call: toolName missing or invalid." } },
+      "failClosed": false,
+      "expect": { "allowed": false, "reached": true, "code": "INVALID_REQUEST", "reasonContains": "rejected the request (INVALID_REQUEST): The request body is not a hook-gate call" }
+    },
+    {
+      "name": "INVALID_REQUEST refuses when failing closed",
+      "response": { "status": 400, "body": { "allowed": false, "code": "INVALID_REQUEST", "reason": "The request body is not valid JSON." } },
+      "failClosed": true,
+      "expect": { "allowed": false, "reached": true, "code": "INVALID_REQUEST", "reasonContains": "INVALID_REQUEST" }
+    },
+    {
+      "name": "a 400 with no body still refuses",
+      "response": { "status": 400, "body": null },
+      "failClosed": false,
+      "expect": { "allowed": false, "reached": true, "code": "INVALID_REQUEST", "reasonContains": "HTTP 400" }
+    },
+    {
+      "name": "a server error is no verdict: failing closed refuses",
+      "response": { "status": 500, "body": { "error": "Internal error" } },
+      "failClosed": true,
+      "expect": { "allowed": false, "reached": false, "reasonContains": "failing closed" }
+    },
+    {
+      "name": "a server error is no verdict: failing open allows",
+      "response": { "status": 500, "body": { "error": "Internal error" } },
+      "failClosed": false,
+      "expect": { "allowed": true, "reached": false, "reasonContains": "failing open" }
+    },
+    {
+      "name": "an answer with no boolean allowed is no verdict",
+      "response": { "status": 200, "body": { "reason": "something in the way answered" } },
+      "failClosed": true,
+      "expect": { "allowed": false, "reached": false, "reasonContains": "answered without a verdict — failing closed" }
+    },
+    {
+      "name": "an unreachable control plane refuses when failing closed",
+      "response": null,
+      "failClosed": true,
+      "expect": { "allowed": false, "reached": false, "reasonContains": "unreachable" }
+    },
+    {
+      "name": "an unreachable control plane allows when failing open",
+      "response": null,
+      "failClosed": false,
+      "expect": { "allowed": true, "reached": false, "reasonContains": "failing open" }
+    }
+  ]
+}

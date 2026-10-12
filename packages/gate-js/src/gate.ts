@@ -48,7 +48,8 @@
  *
  * A1 and A2 are load-bearing and local. Tier B contributes the DLP regexes
  * and workspace policy from the control plane; whether an unreachable control
- * plane blocks is the client's `failClosed` setting (default true).
+ * plane, or one whose checks could not run (`GOVERNANCE_UNAVAILABLE`), blocks
+ * is the client's `failClosed` setting (default true).
  *
  * Tier A3 applies rules written in the SOP register rather than in code. It
  * runs BEFORE A2 so that a block, when both would fire, is attributed to the

@@ -68,7 +68,7 @@ except IntuticGateRefusal as e:
 | MCP servers | On an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance) and `mcpAllowedServers` list, from the same snapshot, with the codes, rule ids and reasons the hook gates and the MCP proxy use | No | A snapshot that fails its digest or workspace check admits no MCP server: every MCP call is refused with `POLICY_SNAPSHOT_UNVERIFIED` |
 | SOP rules | Rules authored in the SOP register, including their `WHERE` argument clauses, fetched once per process | Yes | Fails open; the image check below covers the same case |
 | Image integrity | On a deploy command, every container image it names (inline or in a referenced manifest) must be pinned to a digest approved in `.intutic/image-allowlist.json` | No | Fails closed, including when the allowlist is missing or unreadable |
-| Hook gate | `POST /api/v1/hook-gate` on the control plane: DLP patterns over the arguments, plus workspace policy, the MCP server registry and `mcpAllowedServers` | Yes | Set by the client's `failClosed` (default: block) |
+| Hook gate | `POST /api/v1/hook-gate` on the control plane: DLP patterns over the arguments, plus workspace policy, the MCP server registry and `mcpAllowedServers` | Yes | Set by the client's `failClosed` (default: block), for an unreachable control plane and for a `GOVERNANCE_UNAVAILABLE` answer alike; a request it cannot read always blocks |
 
 Read-only tools (`read_file`, `list_files`, `read`, `cat`, `view`, exported as `READ_ONLY_TOOLS`) get the snapshot check only. Every decision is reported to `POST /api/v1/hook-events` (`tool_blocked`, `tool_held`, `hold_approved_bypass_used`, `tool_flagged`, `tool_would_block`, `tool_allowed`, plus one snapshot-health event per process). Setting `INTUTIC_GUARD_DISABLE=1` skips the snapshot's destructive-command rules and reports `guards_disabled`.
 
@@ -106,7 +106,8 @@ Without the plan nothing changes, and `enforce: false` (`enforce=False`) skips t
 
 ### Fail-closed defaults
 
-- A `GateClient` that cannot reach the hook gate, or gets a non-2xx answer, reports a block. Pass `failClosed: false` (`fail_closed=False`) to treat that tier as advisory.
+- A `GateClient` that gets no verdict from the hook gate reports a block: the control plane cannot be reached, answers non-2xx or without a verdict, or answers `GOVERNANCE_UNAVAILABLE` because a check it runs (the SOP register, the SSO group policy, the MCP server registry, image provenance, promoted findings) could not complete. `failClosed` (`fail_closed`) is `true` by default in both SDKs; pass `failClosed: false` (`fail_closed=False`) to treat that tier as advisory during an outage, and the call goes ahead. A workspace in shadow mode gets an allow from the hook gate itself, marked `degraded`.
+- A request the hook gate cannot read (HTTP 400, `INVALID_REQUEST`) is a block whatever `failClosed` says: the request is wrong, not the control plane down. The response's `code` is `INVALID_REQUEST`, and the refusal's is `HOOK_GATE`.
 - A deploy command with no readable image allowlist is refused rather than approved against an empty policy.
 - A wrapped tool called with no gate installed and none passed throws (`RuntimeError` in Python) instead of running unguarded.
 - `GateClient.fromEnv()` (`from_env()`) throws when no session id is set, because the proxy would record every run under the session `unknown`.
@@ -156,7 +157,7 @@ A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Go
 | `SERVER_NOT_ALLOWED` | The MCP server is not on the workspace's `mcpAllowedServers` list |
 | `POLICY_SNAPSHOT_UNVERIFIED` | The policy snapshot on this machine failed its integrity check, so it admits no MCP server; the sync daemon restores the last verified snapshot |
 | `SOP_RULE` | A block rule in the SOP register matched |
-| `HOOK_GATE` | The control plane's hook gate refused the call, or could not be reached while `failClosed` is on |
+| `HOOK_GATE` | The control plane's hook gate refused the call or could not read it (`INVALID_REQUEST`), or, while `failClosed` is on, could not be reached or could not complete a check (`GOVERNANCE_UNAVAILABLE`) |
 | `COMMAND_TOO_LARGE` | The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls |
 | `CHAOS_FAULT` | A chaos experiment (`intutic chaos run`) injected this failure into a call governance allowed, and the reason carries the run's `E-INTUTIC-` canary; or the experiment set a plan the gate cannot read. Not a governance decision ([Chaos runs](#chaos-runs)) |
 | `E_UNPINNED_LATEST` | A deploy uses an image tagged `latest` |

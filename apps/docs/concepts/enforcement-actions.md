@@ -46,15 +46,31 @@ Tool call arrives
 **The first match wins, and the order is deliberate** — this is a short-circuit, not a
 strictest-wins merge. Deterministic policy (DLP, an operator-authored `BLOCK:` SOP, an SSO
 group decision, a registry decision) is evaluated before the heuristic, so a promoted detector can never override a
-decision an operator stated explicitly. Every stage after DLP fails **open**: if the check
-itself errors, the call is allowed and the error logged, rather than blocking work on an
-infrastructure fault.
+decision an operator stated explicitly.
 
-::: warning Not every harness consults the gate
-`POST /api/v1/hook-gate` is called synchronously by the goose and OpenHands hook writers. The
-Claude Code, Cursor, Cline, Claude Desktop, Windsurf, pi and openclaw integrations decide
-locally and report to the control plane asynchronously, which keeps their tool path free of a
-network round-trip. Everything on this page describes the gate. The local path enforces the
+Every stage after DLP fails **closed**. If a check errors or cannot run (a database or Valkey
+outage, say), the remaining checks still run, and one that blocks answers with its own
+reason. If none does, the call is refused with HTTP 403 and `code: GOVERNANCE_UNAVAILABLE`.
+A check the workspace has not set up (no SSO group policy, an empty registry, promotion off)
+is not an error and blocks nothing. In a workspace in shadow mode (`ff_shadow_enforcement`,
+the observe posture) the call is allowed instead, and the response carries `degraded: true`
+and the same code; a workspace whose shadow setting cannot be read counts as enforcing. A
+request body the gate cannot read is refused with HTTP 400 and `code: INVALID_REQUEST`.
+The [gate SDKs](/reference/gate-sdk#fail-closed-defaults) decide on `GOVERNANCE_UNAVAILABLE`
+as they do when the control plane is unreachable, by their `failClosed` setting, which
+refuses by default. Each check that could not run is logged and counted in the
+`governance_check_unavailable` metric, by surface, check and outcome (`refused` or
+`allowed_shadow`). The [AgentCore gateway check](/integrations/agentcore) and the
+[QM security screen](/integrations/qm) follow the same rules in their own response shapes.
+
+::: warning The harness hook gates do not consult the gate
+`POST /api/v1/hook-gate` is called synchronously by the [gate SDKs](/reference/gate-sdk)
+(`@intutic/gate` and `intutic_clawde.gate`, and the framework adapters built on them) when they
+have a control-plane client, by the TrueForge bridge, and by any integration of your own. No
+harness hook gate calls it: Claude Code, Cursor, Cline, goose, OpenHands and every other
+hook-gated harness decide locally and report to the control plane asynchronously
+(`POST /api/v1/hook-events`), which keeps their tool path free of a network round-trip.
+Everything on this page describes the gate. The local path enforces the
 protected-path and shell-bypass guards written into the generated hook script, plus the policy
 snapshot the sync daemon refreshes: the workspace's `BLOCK:` and `REQUIRE_APPROVAL:` rules, its
 SSO group policy, decided for the member the snapshot was issued to, and its MCP server registry

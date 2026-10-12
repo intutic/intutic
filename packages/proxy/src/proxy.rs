@@ -915,6 +915,40 @@ async fn intervention_mode(
     }
 }
 
+/// Whether the workspace's plan includes server-side LLM judging
+/// (`llmJudgeEnabled` on `/auth/key-context`, the same cached answer the
+/// intervention mode reads). On `false` this request is not judged: no
+/// `/judge/chunk` or `/judge/finalize` call, and the response passes through
+/// as it does when judging was never asked for.
+///
+/// `true`, today's behaviour, whenever the answer says nothing: no control
+/// plane or virtual key to ask, a control plane that could not answer or
+/// refused the key (the request is refused for that elsewhere), or one older
+/// than the field. Read only when this request would be judged.
+async fn llm_judge_allowed(
+    state: &AppState,
+    virtual_key: Option<&crate::credential::VirtualKey>,
+    workspace_id: &str,
+) -> bool {
+    let policy = &state.config.intutic_settings.policy;
+    let Some((cp_url, virtual_key)) = policy.control_plane_url.as_deref().zip(virtual_key) else {
+        return true;
+    };
+    let version = state.control_plane.policy_version(workspace_id).await;
+    match crate::key_context::fetch(
+        &state.http_client,
+        cp_url,
+        virtual_key,
+        std::time::Duration::from_millis(policy.timeout_ms),
+        version,
+    )
+    .await
+    {
+        Ok(crate::key_context::Answer::Body(body)) => crate::key_context::llm_judge_enabled(&body),
+        _ => true,
+    }
+}
+
 // ─── Error response helpers ──────────────────────────────────────────
 
 fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
@@ -3174,6 +3208,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .map(axum::body::Bytes::from)
             .unwrap_or(body_bytes);
         body_str = String::from_utf8_lossy(&body_bytes).into_owned();
+    }
+
+    // LLM judging is a plan capability. On a plan without it the request is
+    // not judged at all (an `/intutic judge` prefix is still stripped above):
+    // no judge call, no note, the stream exactly as an unjudged one.
+    if judge_active && !llm_judge_allowed(&state, credential.virtual_key(), &workspace_id).await {
+        tracing::info!(workspace_id = %workspace_id, "LLM judging is not in this workspace's plan; the response is not judged");
+        judge_active = false;
     }
 
     let personal_sops = if judge_active {

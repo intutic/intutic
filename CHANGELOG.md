@@ -38,6 +38,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Behaviour change: the control plane's hook gate (`POST /api/v1/hook-gate`)
+  fails closed.** It used to answer `allowed: true` whenever a check errored.
+  Now a check that could have refused the call and could not run (the SOP
+  rules, the SSO group policy, the MCP server registry and allowlist, image
+  provenance, promoted repeat findings) refuses it with HTTP 403 and
+  `code: GOVERNANCE_UNAVAILABLE`, unless another check refuses it first with
+  its own reason. A check the workspace has not configured refuses nothing. A
+  workspace in shadow mode (`ff_shadow_enforcement`) is allowed through with
+  `degraded: true`; one whose flag cannot be read counts as enforcing. A body
+  the gate cannot read is refused with HTTP 400 and `code: INVALID_REQUEST`,
+  where it used to be allowed.
+- **The gate SDK clients decide `GOVERNANCE_UNAVAILABLE` as an unreachable
+  control plane.** `@intutic/gate`'s and `intutic_clawde.gate`'s `GateClient`
+  refuse it under `failClosed` / `fail_closed`, whose default stays `true`
+  (fail closed) in both, and allow it only with that setting off. A 400
+  `INVALID_REQUEST` is refused whatever the setting (with the setting off it
+  used to be allowed), and an answer with no boolean `allowed` counts as no
+  verdict (it used to be read as an allow). Both clients are held to the
+  shared `hook-gate-response-vectors.json`.
+- **The AgentCore interceptor decides `GOVERNANCE_UNAVAILABLE` the same
+  way.** The control plane's AgentCore gateway check now refuses with a 403
+  `GOVERNANCE_UNAVAILABLE` when its DLP scan or SOP rules cannot run (a
+  degraded allow in shadow mode), and the interceptor Lambda decides that by
+  `INTUTIC_FAIL_OPEN`, closed by default; a 400 `INVALID_REQUEST` is denied
+  whatever that setting says. The QM security screen answers the same outage
+  with a strict score, since QM's client lets any non-2xx through as
+  unscreened.
 - **Gate bodies are v20** (`GATE_VERSION` 20). The sync daemon regenerates
   every hook gate on its next cycle; outside a chaos run the gates decide
   exactly as before.

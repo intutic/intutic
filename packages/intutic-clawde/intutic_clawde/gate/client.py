@@ -2,7 +2,7 @@
 
 Endpoints used:
 
-  POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?}
+  POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?, degraded?}
   POST /api/v1/hook-events     batched telemetry       -> creates governance_incidents rows
   POST /api/v1/judge/finalize  LLM judge verdict       -> {verdict, triggered, ...}
   POST /api/v1/decisions       record a hold           -> joins the review queue (hold.py)
@@ -14,14 +14,16 @@ wire without a server.
 
 Two behaviours that must not be "improved":
 
-  * The hook-gate SERVER fails OPEN on its own error paths — it returns
-    {allowed:true} on malformed input, schema mismatch, or DB error, because
-    blocking a developer over a bad payload teaches people to disable the
-    hook. This CLIENT, by contrast, defaults to FAIL-CLOSED (`fail_closed=True`)
-    for blocking decisions: a transport error or non-2xx response means we have
-    no verdict at all to defer to, so `hook_gate` reports `allowed=False`. Set
-    `fail_closed=False` to treat the tier as advisory, mirroring the server's
-    own posture.
+  * The hook gate fails CLOSED, on both sides. The server refuses a call
+    whose checks could not run (403 GOVERNANCE_UNAVAILABLE; a shadow-mode
+    workspace gets a degraded allow instead) and a body it cannot read (400
+    INVALID_REQUEST). This client treats GOVERNANCE_UNAVAILABLE exactly as it
+    treats a control plane it cannot reach, a non-2xx answer, or an answer
+    with no boolean `allowed`: there is no verdict to defer to, and
+    `fail_closed` (default True) decides, reporting `allowed=False`. Set
+    `fail_closed=False` to treat the tier as advisory during an outage. A 400
+    is refused whatever `fail_closed` says: it is this client's request that
+    is wrong, not the control plane that is down, and allowing would hide it.
   * `emit` NEVER raises. Telemetry that can break a run is worse than no
     telemetry.
 """
@@ -51,6 +53,9 @@ VALID_EVENTS = {
 
 REASON_MAX = 512   # control plane truncates at 512; do it here so logs match
 
+# The hook gate's code for a call whose checks could not run.
+GOVERNANCE_UNAVAILABLE = "GOVERNANCE_UNAVAILABLE"
+
 # transport(url, body, headers, timeout) -> (status_code, parsed_json_or_{})
 Transport = Callable[[str, Dict[str, Any], Dict[str, str], float], Tuple[int, Dict[str, Any]]]
 # get_transport(url, headers, timeout) -> (status_code, parsed_json_or_{})
@@ -76,13 +81,24 @@ def _requests_get_transport(url: str, headers: Dict[str, str],
     return res.status_code, _parsed(res)
 
 
+class HttpStatusError(requests.HTTPError):
+    """A non-2xx answer, with its status and whatever JSON body it carried."""
+
+    def __init__(self, path: str, status: int, body: Dict[str, Any]):
+        super().__init__(f"HTTP {status} from {path}")
+        self.status = status
+        self.body = body
+
+
 @dataclass
 class GateResponse:
     allowed: bool
     reason: str = ""
     incident_id: Optional[str] = None
-    reached: bool = True   # False when the call failed and fail_closed decided
-    # The refusal code the hook gate names, when it names one (the MCP registry's).
+    reached: bool = True   # False when the hook gate gave no verdict and fail_closed decided
+    # The code the hook gate names, when it names one: the MCP registry's on its
+    # refusals, GOVERNANCE_UNAVAILABLE when its checks could not run, and
+    # INVALID_REQUEST when it could not read the request.
     code: Optional[str] = None
 
 
@@ -119,7 +135,7 @@ class GateClient:
         }
         status, parsed = self.transport(self.base_url + path, body, headers, timeout)
         if not 200 <= status < 300:
-            raise requests.HTTPError(f"HTTP {status} from {path}")
+            raise HttpStatusError(path, status, parsed if isinstance(parsed, dict) else {})
         return parsed
 
     def _get(self, path: str, timeout: float) -> Dict[str, Any]:
@@ -141,10 +157,14 @@ class GateClient:
         against the serialised toolInput, plus SOP rules. It is defence in
         depth on top of the local tiers, not a replacement for them.
 
-        When the call itself fails (transport error, non-2xx), the verdict is
-        decided by `fail_closed`: True (the default) reports BLOCK, because a
-        client with no verdict has nothing to defer to; False reports allow,
-        mirroring the server's own fail-open error paths.
+        When there is no verdict (the control plane cannot be reached, answers
+        non-2xx or without a boolean `allowed`, or answers
+        GOVERNANCE_UNAVAILABLE because its own checks could not run), the
+        verdict is decided by `fail_closed`: True (the default) reports BLOCK,
+        because a client with no verdict has nothing to defer to; False
+        reports allow. A 400 INVALID_REQUEST is a BLOCK whatever `fail_closed`
+        says. A shadow-mode workspace's {allowed: true, degraded: true} is an
+        allow.
         """
         try:
             d = self._post("/api/v1/hook-gate", {
@@ -154,26 +174,40 @@ class GateClient:
                 "sessionId": self.session_id,
                 "harnessType": self.harness,
             }, self.timeout)
-            return GateResponse(
-                allowed=bool(d.get("allowed", True)),
-                reason=str(d.get("reason", "")),
-                incident_id=d.get("incidentId"),
-                code=d.get("code") if isinstance(d.get("code"), str) else None,
-            )
-        except Exception as exc:
-            if self.fail_closed:
+        except HttpStatusError as exc:
+            if exc.status == 400:
+                why = exc.body.get("reason")
                 return GateResponse(
                     allowed=False,
-                    reason=f"hook-gate unreachable ({type(exc).__name__}) — "
-                           f"failing closed (fail_closed=True)",
-                    reached=False,
+                    reason=f"hook-gate rejected the request (INVALID_REQUEST): "
+                           f"{why if isinstance(why, str) else exc}",
+                    code="INVALID_REQUEST",
                 )
-            return GateResponse(
-                allowed=True,
-                reason=f"hook-gate unreachable ({type(exc).__name__}) — "
-                       f"failing open (fail_closed=False)",
-                reached=False,
-            )
+            if exc.body.get("code") == GOVERNANCE_UNAVAILABLE:
+                return self._no_verdict(f"governance check unavailable ({GOVERNANCE_UNAVAILABLE})",
+                                        GOVERNANCE_UNAVAILABLE)
+            return self._no_verdict(f"unreachable ({type(exc).__name__})")
+        except Exception as exc:
+            return self._no_verdict(f"unreachable ({type(exc).__name__})")
+        if d.get("allowed") is False and d.get("code") == GOVERNANCE_UNAVAILABLE:
+            return self._no_verdict(f"governance check unavailable ({GOVERNANCE_UNAVAILABLE})",
+                                    GOVERNANCE_UNAVAILABLE)
+        if not isinstance(d.get("allowed"), bool):
+            return self._no_verdict("answered without a verdict")
+        return GateResponse(
+            allowed=d["allowed"],
+            reason=str(d.get("reason", "")),
+            incident_id=d.get("incidentId"),
+            code=d.get("code") if isinstance(d.get("code"), str) else None,
+        )
+
+    def _no_verdict(self, what: str, code: Optional[str] = None) -> GateResponse:
+        """The answer when the hook gate gave no verdict: `fail_closed` decides."""
+        if self.fail_closed:
+            return GateResponse(allowed=False, reached=False, code=code,
+                                reason=f"hook-gate {what} — failing closed (fail_closed=True)")
+        return GateResponse(allowed=True, reached=False, code=code,
+                            reason=f"hook-gate {what} — failing open (fail_closed=False)")
 
     # -------------------------------------------------------------- events
 

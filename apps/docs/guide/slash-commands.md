@@ -111,6 +111,7 @@ Runs a quick heuristic check on a prompt and returns a letter grade with suggest
 ### 7. `/intutic judge <prompt>`
 Runs the user prompt upstream to the LLM and evaluates the output response stream in parallel using LLM-as-a-judge compliance checks.
 * **Mechanism**: Intercepted pre-flight by the local Rust proxy if arguments are provided, stripping the command prefix and forwarding the prompt upstream while parallel chunk-evaluations run on the response stream. If no arguments are provided, it is handled as a slash command showing usage instructions.
+* **Plans**: the judge runs on Self-serve, Biz Org, Enterprise and Self-host, and in the 14-day trials (see the [Tier Matrix](/guide/tier-matrix)). On Free the prefix is still stripped and the response comes back unjudged, with no judge note.
 
 ### 8. `/intutic status`
 Displays the active session stats, trace count, average compliance score, and total spent budget.
