@@ -220,8 +220,10 @@ pub struct CommandsConfig {
 /// for pre-request SOP policy checks.
 ///
 /// If `fail_closed` is true (the default), a policy check failure or timeout
-/// causes the request to be rejected with 503. If false, the request is
-/// allowed through (fail-open, useful in dev mode only).
+/// causes the request to be refused with 403 `policy_denied` (403
+/// `GOVERNANCE_UNAVAILABLE` when the workspace's PII detector actions cannot be
+/// read). If false, the request is allowed through (fail-open, useful in dev
+/// mode only).
 #[derive(Debug, Deserialize, Clone)]
 pub struct PolicyConfig {
     /// Base URL of the Intutic control plane (e.g., `https://api.intutic.ai`).
