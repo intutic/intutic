@@ -69,7 +69,6 @@ export { DEFAULT_DAILY_BUDGET_USD, DEFAULT_MONTHLY_BUDGET_USD } from './finops.j
 export type {
   TraceEntry,
   CostBreakdown,
-  Attribution4D,
   TraceSummary,
   TraceListResult,
   TraceDetail,
@@ -99,8 +98,6 @@ export type {
   GovernanceIncidentStatus,
   CapabilityMissEvent,
   CapabilityMissInput,
-  DriftDirection,
-  DriftEvent,
 } from './anomaly.js'
 
 export type {
@@ -428,16 +425,7 @@ export type {
 export { normalizeGitRemote } from './gitRemote.js'
 
 // WS2: Advanced Observability
-export {
-  PromptEstimateInputSchema,
-} from './observability.js'
-
 export type {
-  PromptEstimateInput,
-  PromptEstimateResult,
-  CostHistoryEntry,
-  CostHistoryResult,
-  DriftReportResult,
   TraceDagNode,
   TraceDagResult,
 } from './observability.js'
@@ -580,10 +568,6 @@ export type {
   SslOutOfOrderEntry,
   ConstraintViolation,
   ConstraintEvalResult,
-  SslStepReport,
-  // Governance Output Injection
-  GovernanceNotification,
-  NotificationConfig,
   // Token Intelligence
   ToolCallTokenBreakdown,
   CostPrediction,
@@ -594,25 +578,15 @@ export type {
   OptimizationRecommendation,
   LlmProbeResult,
   ProbeViolation,
-  // Prompt Quality & Slash Commands
-  PromptQualityScore,
-  PromptQualityContext,
-  ContextGap,
-  DedupHint,
+  // Slash Commands
   SlashCommandRequest,
   SlashCommandResponse,
   // Harness Config & SkillOpt
-  HarnessConfigSnapshot,
   ConfigEdit,
-  ConfigEditWithTarget,
   SkillOptSuggestion,
-  ConfigCapturePayload,
 } from './intelligence.js'
 
 export {
-  // Governance Output Injection
-  type NotificationPriority,
-  type NotificationCategory,
   // Token Intelligence
   type InputTokenBucket,
   getInputBucket,

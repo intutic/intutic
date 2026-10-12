@@ -129,7 +129,7 @@ Since Claude Code's CLI natively intercepts prompts starting with `/` at the she
 :::
 
 1. **Attribution Initialization**:
-   Type `@intutic initialize` to fetch open tasks/incidents matching your local git branch context.
+   Type `@intutic initialize` to list open Jira and Linear tickets; the one your git branch names is marked Recommended.
 2. **Attribution Lock & Auto-Judging**:
    Type `@intutic start <option> --auto-judge` (or `-j`) to bind all session costs to the chosen ticket and activate automatic compliance evaluations for all subsequent prompts.
 3. **Interactive Validation**:

@@ -257,13 +257,13 @@ should anyone want to redo it properly, with a genuine isolate and a fail-closed
 
 ## SOP Pointer References
 
-When the sync daemon writes markdown rules into harness configuration files, it automatically appends invisible traceability comments:
+When the sync daemon writes markdown rules into harness configuration files, it appends a traceability comment after each one:
 
 ```markdown
 <!-- sop://intutic/sop_clt456 | Block unauthorized tools -->
 ```
 
-These metadata comments permit the control plane to map active config lines directly to the registered SOP IDs in the database, enabling precise governance coverage tracking.
+The comment is for people reading the file: it names the SOP a rule came from, so you can find it in the dashboard. Nothing reads these comments back. Coverage is not computed from them, and editing or deleting one changes nothing on the control plane.
 
 ## Personal Local-Only SOPs & Session Scoping
 

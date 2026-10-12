@@ -13,7 +13,7 @@
 | Module | Key Types |
 |--------|-----------|
 | `enums` | `EnforcementAction`, `HarnessType`, `RiskLevel`, `SopLifecycleStage` |
-| `finops` | `TraceEntry`, `Attribution4D`, `BudgetEnvelope`, `CostBreakdown` |
+| `finops` | `TraceEntry`, `BudgetEnvelope`, `CostBreakdown` |
 | `sop` | SOP lifecycle types, rule schemas, hook definitions |
 | `auth` | Session, token, credential types |
 | `identity` | SSO/OIDC provider config, cross-workspace user identity |

@@ -1,17 +1,17 @@
 /**
- * Task Management Adapter — Generic interface for external task/issue trackers.
+ * Task Management Adapter — read-only interface over external task trackers
+ * and incident tools.
  *
- * Provides a unified abstraction over external task management tools
- * (Jira, Linear, GitHub Issues, etc.) so the control plane can
- * create/update tasks based on governance events.
+ * The control plane reads tickets (Jira, Linear) and incidents (PagerDuty) to
+ * attach task context to agent sessions. It does not create or update them.
  *
  * @module
  */
 
 // ─── Core Types ──────────────────────────────────────────────────────
 
-/** Supported task management providers. */
-export type TaskProvider = 'jira' | 'linear' | 'github' | 'asana' | 'pagerduty'
+/** Providers with a registered adapter. */
+export type TaskProvider = 'jira' | 'pagerduty' | 'linear'
 
 /** Priority levels mapped across providers. */
 export type TaskPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
@@ -26,65 +26,16 @@ export interface TaskProviderCredentials {
   baseUrl: string
   /** Authentication token or API key. */
   authToken: string
-  /** Project or board identifier within the provider. */
+  /** Project, team or routing key within the provider. */
   projectKey: string
+  /**
+   * Jira Cloud only: the email of the Atlassian account the API token belongs
+   * to. Jira Cloud authenticates an API token as Basic `email:token`. A
+   * connection stores it as `metadata.accountEmail`.
+   */
+  accountEmail?: string
   /** Additional provider-specific config. */
   metadata?: Record<string, unknown>
-}
-
-/** Payload for creating a new task. */
-export interface CreateTaskPayload {
-  /** Human-readable task title. */
-  title: string
-  /** Markdown description of the task. */
-  description: string
-  /** Normalized priority. */
-  priority: TaskPriority
-  /** Intutic-specific labels for categorization. */
-  labels?: string[]
-  /** Assignee identifier (provider-specific). */
-  assigneeId?: string
-  /** Link back to the Intutic governance event. */
-  intuticLink?: {
-    /** Type of governance event that created this task. */
-    eventType: 'INCIDENT' | 'ANOMALY' | 'SOP_REVIEW' | 'COMPLIANCE'
-    /** ID of the governance event. */
-    eventId: string
-    /** Workspace this event belongs to. */
-    workspaceId: string
-  }
-}
-
-/** Result of creating a task in the external system. */
-export interface CreateTaskResult {
-  /** Whether the task was successfully created. */
-  success: boolean
-  /** External task ID (e.g., Jira issue key like "PROJ-123"). */
-  externalTaskId?: string
-  /** URL to the task in the external system. */
-  externalUrl?: string
-  /** Error message if creation failed. */
-  error?: string
-}
-
-/** Payload for updating an existing task. */
-export interface UpdateTaskPayload {
-  /** External task ID to update. */
-  externalTaskId: string
-  /** New status (optional). */
-  status?: TaskStatus
-  /** Comment to add (optional). */
-  comment?: string
-  /** Updated priority (optional). */
-  priority?: TaskPriority
-  /** Additional fields (provider-specific). */
-  fields?: Record<string, unknown>
-}
-
-/** Result of updating a task. */
-export interface UpdateTaskResult {
-  success: boolean
-  error?: string
 }
 
 /** A task as retrieved from the external system. */
@@ -102,15 +53,25 @@ export interface ExternalTask {
   epic?: string
 }
 
+/** Filters for `TaskManagementAdapter.searchTasks`. */
+export interface TaskSearchFilters {
+  status?: TaskStatus
+  priority?: TaskPriority
+  labels?: string[]
+  /**
+   * The provider's own id for the assignee. An adapter must apply it: a search
+   * for one person's work that comes back with everyone's is worse than none.
+   */
+  assigneeId?: string
+}
+
 // ─── Adapter Interface ───────────────────────────────────────────────
 
 /**
  * Generic task management adapter interface.
  *
- * Implementations of this interface connect Intutic's governance engine
- * to external task management tools. The control plane calls these methods
- * when governance events (incidents, anomalies, SOP reviews) require
- * external task creation or updates.
+ * Implementations read from an external tracker so the control plane can
+ * resolve which ticket or incident an agent session is working on.
  */
 export interface TaskManagementAdapter {
   /** Provider name for this adapter. */
@@ -123,20 +84,6 @@ export interface TaskManagementAdapter {
   testConnection(): Promise<boolean>
 
   /**
-   * Create a new task in the external system.
-   * @param payload - Task creation payload
-   * @returns Result with external task ID and URL
-   */
-  createTask(payload: CreateTaskPayload): Promise<CreateTaskResult>
-
-  /**
-   * Update an existing task in the external system.
-   * @param payload - Task update payload
-   * @returns Result indicating success/failure
-   */
-  updateTask(payload: UpdateTaskPayload): Promise<UpdateTaskResult>
-
-  /**
    * Retrieve a task by its external ID.
    * @param externalTaskId - The external system's task identifier
    * @returns The task details, or null if not found
@@ -144,13 +91,14 @@ export interface TaskManagementAdapter {
   getTask(externalTaskId: string): Promise<ExternalTask | null>
 
   /**
-   * Search for tasks matching Intutic criteria.
-   * @param workspaceId - Intutic workspace ID to filter by
-   * @param filters - Optional filters (status, priority, labels)
+   * Search for open tasks.
+   *
+   * Rejects when the provider cannot be asked (unreachable, refused, timed
+   * out), so a caller can tell "nothing open" from "could not ask".
+   *
+   * @param workspaceId - Intutic workspace ID, for logging
+   * @param filters - Optional filters (status, priority, labels, assignee)
    * @returns List of matching external tasks
    */
-  searchTasks(
-    workspaceId: string,
-    filters?: { status?: TaskStatus; priority?: TaskPriority; labels?: string[] },
-  ): Promise<ExternalTask[]>
+  searchTasks(workspaceId: string, filters?: TaskSearchFilters): Promise<ExternalTask[]>
 }

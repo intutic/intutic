@@ -1,8 +1,9 @@
 /**
- * Attenuation & GDPR types (Enterprise Identity & Compliance)
+ * Attenuation types (Enterprise Identity & Compliance)
  *
- * DCT Token Attenuation (Patent Family A), OBO Ephemeral Tokens,
- * PointerMemory GDPR erasure, and SSO Group Privilege Scoping.
+ * DCT Token Attenuation (Patent Family A), OBO Ephemeral Tokens and SSO
+ * Group Privilege Scoping. Per-user GDPR erasure has no types here: it is an
+ * operator script over the control plane's data erasure service.
  *
  * HLD §5.1, §5.6 — Zero-Trust Identity Broker
  *

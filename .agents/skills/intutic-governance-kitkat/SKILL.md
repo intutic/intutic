@@ -40,7 +40,7 @@ When interacting with LLM providers through the local proxy, prepend requests wi
 
 ### 1. Cost & Task Attribution
 - **Initialize Picker:** `@intutic initialize`
-  - *Description:* Pulls open tickets from linked task providers (Jira, Linear, GitHub Issues) and recommends ticket candidates for the session.
+  - *Description:* Lists the open tickets on the workspace's Jira and Linear connections, numbered, and marks the one the current git branch names as Recommended.
 - **Lock Session & Scope Rules:** `@intutic start [<ticket_id>] [--sops=<names_or_indices>] [--auto-judge]`
   - *Description:* Attributes token costs to a ticket (optional) and scopes active local SOP directories for governance.
   - *Examples:*
@@ -57,7 +57,7 @@ When interacting with LLM providers through the local proxy, prepend requests wi
 - **Verify Prompt:** `@intutic verify <prompt>` (or `@intutic check <prompt>`)
   - *Description:* Audits the prompt pre-flight against active SOPs and guidelines, returning pass/fail verdicts and listing any violations before submitting requests to the LLM.
 - **Review Prompt:** `@intutic review <prompt>`
-  - *Description:* Runs a deep heuristic prompt quality evaluation to grade clarity, specificity, and actionability.
+  - *Description:* Quick heuristic check that grades the prompt on its length, its use of action verbs, and whether it names an SOP or policy, with suggestions. No model is involved.
 - **Judge Response:** `@intutic judge <prompt>`
   - *Description:* Submits the prompt to the upstream LLM and evaluates the response stream in parallel using LLM-as-a-judge compliance checkers.
   - *Note:* If no prompt is provided (e.g. `@intutic judge`), returns usage instructions.

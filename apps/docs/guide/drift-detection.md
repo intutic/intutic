@@ -56,6 +56,14 @@ average and a stored baseline:
 
 Improvement and degradation are both recorded; only degradation is acted on.
 
+### Drift notifications
+
+Each drift event is also sent as `anomaly.drift.detected` to any notification
+rule on **Guideline Compliance Drifted** (Settings › Notifications). The alert
+names the guideline and both numbers. Degradation is sent as HIGH and
+improvement as INFO; tick HIGH on the rule to hear only about degradation. See
+[Notifications](/guide/settings#notifications).
+
 ---
 
 ## SOP Staleness

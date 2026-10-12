@@ -17,17 +17,18 @@ intutic-proxy is a high-performance AI agent proxy written in Rust (edition 2021
 - **No verdict refuses**: a rule stopped by either limit, or one that traps or returns something that is not a verdict, refuses the request with `GOVERNANCE_UNAVAILABLE`, whatever the fail setting
 - **Isolation**: Each plugin runs in a dedicated WASM store
 
-### Plugin Chain
+### Governance Steps
 
-The proxy processes every request through an ordered plugin chain:
+There is no plugin chain. Each step is called directly where it applies on the
+request or response path:
 
-| Plugin | Purpose |
-|--------|---------|
-| Budget Gate | Enforce per-ticket and per-team token budgets |
-| DLP Gate | Block or redact sensitive data (secrets, PII, credentials) |
-| PCAS Gate | Prior Consent and Autonomy Scope enforcement |
-| Response Cache | Replay the answer to an identical request (exact match, Valkey), or to a reworded plain-text question in the same context (semantic match, TurboVec) |
-| SOP Prompt Injector | Inject workspace governance SOPs into system prompts |
+| Step | Where | Purpose |
+|------|-------|---------|
+| Budget Gate | `plugins/budget_gate.rs`, called from `proxy.rs` | Enforce per-ticket and per-team token budgets |
+| DLP | `dlp::scan`, inline on the request path | Block or redact sensitive data (secrets, PII, credentials); findings reach `DlpEscalationDetector` |
+| Tool authorisation | `UnauthorizedToolDetector` and `plugins/response_gate.rs` | Refuse tools an SOP's `deny_tools` names, on the request and before a response's tool call reaches the client |
+| Response Cache | `plugins/semantic_cache.rs` | Replay the answer to an identical request (exact match, Valkey), or to a reworded plain-text question in the same context (semantic match, TurboVec) |
+| SOP injection | `sops.rs` | Resolve SOPs by role and inject their content into system prompts |
 
 ### Model Selection
 

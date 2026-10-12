@@ -86,7 +86,7 @@ pub(crate) mod test_support {
 // Phase 7: Intelligence Engine
 /// Response post-processor — appends governance notifications after LLM responses
 pub mod postprocessor;
-/// Request pre-processor — slash commands and prompt quality gate
+/// Request pre-processor — `/intutic` slash command interception
 pub mod quality;
 /// Token intelligence — tiktoken counting, reasoning extraction, cost prediction
 pub mod token;

@@ -287,27 +287,3 @@ export interface CapabilityMissInput {
   similarityScore?: number
   recommendedAction?: 'AUTHOR_NEW_SOP' | 'EXTEND_EXISTING_SOP'
 }
-
-// ─── Drift Detection ─────────────────────────────────────────────────
-
-/**
- * Drift direction classification.
- *
- * HLD §7.7 — Behavioral Drift Detector
- */
-export type DriftDirection = 'POSITIVE_DRIFT' | 'NEGATIVE_DRIFT' | 'NEUTRAL_DRIFT'
-
-/**
- * Drift detection event payload.
- *
- * anomaly.drift.detected event
- */
-export interface DriftEvent {
-  workspaceId: string
-  sopId: string
-  driftScore: number
-  driftDirection: DriftDirection
-  baselineScore: number
-  currentScore: number
-}
-

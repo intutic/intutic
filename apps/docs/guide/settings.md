@@ -444,6 +444,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `anomaly.detected` | Anomaly Detected |
 | `anomaly.finding` | Detector Finding (incl. advisory): every detector finding, allowed or blocked; pair it with a severity filter |
 | `trajectory.alert` | Trajectory Drift Alert |
+| `anomaly.drift.detected` | Guideline Compliance Drifted: an enforced guideline's compliance moved 0.15 or more from its baseline in the hourly check; once per drift. HIGH when compliance fell (the guideline is also queued for a rewrite), INFO when it rose. See [Behavioral Drift](/guide/drift-detection#behavioral-drift) |
 | `anomaly.capability_miss` | Capability Miss (ungoverned task) |
 | `sop.integrity.drift` | Guideline Integrity Drift |
 | `sop.stale.detected` | Guideline Went Stale |
@@ -484,7 +485,7 @@ Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leav
 
 Prevent alert noise by setting a cooldown period (in minutes) for each rule. Consecutive identical alerts inside the cooldown window are suppressed.
 
-The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule; the same goes for the other events that can be INFO (registry approvals, SCIM changes, rejections, evidence downloads). **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
+The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Reporting** fires once when a gate goes silent, however long it stays silent, and **Gate Reporting Again** fires once when it comes back; a PagerDuty rule on **Gate Reporting Again** resolves the incident the silent alert opened instead of opening a new one. **Gate Reporting Again** is INFO severity, which none of the severity boxes select, so leave them unticked on its rule; the same goes for the other events that can be INFO (registry approvals, SCIM changes, rejections, evidence downloads, rising guideline compliance). **Trace Integrity Check Failed** fires once for each kind of failure while it keeps failing, and again if it clears and recurs.
 
 **Show Delivery Log** lists each time a rule sent, failed or was filtered, with the event and channel.
 
@@ -494,7 +495,7 @@ The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Report
 
 Task trackers, memory providers, file scanning, the GitHub pull-request webhook and SIEM export.
 
-- **Task Management & Alerting** — connect Jira Cloud, PagerDuty, Linear, GitHub Issues or Asana to sync tickets and route governance alerts. **Add Connection** takes the provider, its base URL, an API token or auth secret, and a project key or routing key.
+- **Task Management** — connect Jira Cloud, Linear or PagerDuty. Intutic reads tickets and incidents to attach task context to sessions; it doesn't create or update them. A branch or commit that names a ticket (`PROJ-123`, or a Linear key such as `eng-123`) is matched to the connection with that project or team key, and the session picks up the ticket's story points, sprint and epic. With PagerDuty connected, a session that names no ticket picks up the newest triggered or acknowledged incident assigned to you, found by your email. **Add Connection** takes the provider, its base URL, an API token (a Linear API key, a PagerDuty REST API token), and a project key, team key or routing key. For Jira it also takes the **Account email**: the Atlassian account the API token belongs to, since Jira Cloud signs a token in as that account. A connection is saved only once the provider accepts its credentials. A Jira connection added before the email was asked for stops working; remove it and add it again with the email. To page on governance events, add a PagerDuty rule under [Notifications](#notifications) instead.
 - **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. Owners and admins add, test and remove providers; every member sees the list. See [Prompt Commands](/guide/agent-commands).
 - **VirusTotal Skill Scanning** — opt in to checking the sha256 hash of skill-bundled scripts against VirusTotal; file content is never uploaded. See [VirusTotal Integration](/guide/virustotal-scanning).
 - **GitHub Pull Request Webhook** — the payload URL and signing secret for GitHub's pull request events, which map branches to pull requests for cost per pull request without a GitHub token. **Create webhook** makes it; **Replace secret** makes a new secret and keeps the URL. The secret is shown once. Owners and admins, Biz Org and above. See [Cost per pull request](/guide/budgets#cost-per-pull-request).
