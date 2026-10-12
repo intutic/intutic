@@ -121,7 +121,7 @@ def shell(command: str) -> str:
 2. the workspace's **MCP server registry** and `mcpAllowedServers` list, from the same snapshot, on an `mcp__<server>__<tool>` call,
 3. **SOP rules** authored in the product, including the argument-level `WHERE` clause (`argPattern`) — the gate sees the tool's full rendered arguments, with positionals bound to their parameter names so an argPattern cannot be dodged by calling convention,
 4. container **image provenance** on deploy commands,
-5. the control plane's **hook-gate** (`POST /api/v1/hook-gate`) — fail-closed by default: if the control plane cannot be reached, the call is refused rather than waved through.
+5. the control plane's **hook-gate** (`POST /api/v1/hook-gate`) — fail-closed by default: if the control plane cannot be reached, or answers `GOVERNANCE_UNAVAILABLE` because one of its checks could not run, the call is refused rather than waved through.
 
 Every decision is reported via `/api/v1/hook-events`, so gated LangGraph runs appear in the same audit feed as hook-based harnesses.
 

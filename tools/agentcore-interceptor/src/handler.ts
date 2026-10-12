@@ -23,14 +23,12 @@
  * # Fail-open vs fail-closed on a control-plane failure
  *
  * Defaults to FAIL CLOSED (deny) when the control-plane call itself fails —
- * times out, network-errors, or returns a non-2xx/unparseable body. This is
- * a deliberate difference from `/api/v1/hook-gate`'s own fail-open default:
- * hook-gate protects a developer's local edit-test loop, where failing
- * closed would block their work for an infra blip. A Gateway an operator
- * explicitly wired an interceptor onto is a production governance boundary,
- * not a laptop — see apps/docs/integrations/agentcore.md for the reasoning
- * and the `INTUTIC_FAIL_OPEN=true` escape hatch for operators who have
- * judged their own uptime requirements differently.
+ * times out, network-errors, or returns a non-2xx/unparseable body, as
+ * `/api/v1/hook-gate` and the gate SDKs do. A Gateway an operator explicitly
+ * wired an interceptor onto is a production governance boundary — see
+ * apps/docs/integrations/agentcore.md for the reasoning and the
+ * `INTUTIC_FAIL_OPEN=true` escape hatch for operators who have judged their
+ * own uptime requirements differently.
  *
  * # Both interception points share this file, matching AWS's own reference
  * pass-through example (gateway-interceptors-examples.html): a REQUEST

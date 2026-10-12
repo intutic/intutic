@@ -42,6 +42,18 @@ implementation runs — this package's throw-based refusal contract, the same on
 `packages/mcp-proxy/src/policy.ts` use elsewhere in this repo's gate
 vocabulary.
 
+## Fail mode
+
+`GateClient` fails closed by default (`failClosed: true`). When the control
+plane's hook gate cannot be reached, answers non-2xx, or answers
+`GOVERNANCE_UNAVAILABLE` because a check it runs (the SOP register, the SSO
+group policy, the MCP server registry, image provenance, promoted findings)
+could not complete, there is no verdict, and the call is refused with
+`HOOK_GATE`. Pass `failClosed: false` to let calls through during such an
+outage. A request the hook gate cannot read (HTTP 400, `INVALID_REQUEST`) is
+refused whatever `failClosed` says. intutic-clawde's `GateClient` behaves the
+same way, held to it by `packages/shared-types/fixtures/hook-gate-response-vectors.json`.
+
 ## Public API surface
 
 | Export | From | What it is |

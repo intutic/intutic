@@ -5,21 +5,23 @@
  *
  * Endpoints used:
  *
- *   POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?}
+ *   POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?, degraded?}
  *   POST /api/v1/hook-events     batched telemetry       -> creates governance_incidents rows
  *   POST /api/v1/decisions       record a hold           -> joins the review queue (hold.ts)
  *   GET  /api/v1/decisions/approved-bypasses             -> approvals that let a held call through
  *
  * Two behaviours that must not be "improved":
  *
- *   * The hook-gate SERVER fails OPEN on its own error paths — it returns
- *     `{allowed:true}` on malformed input, schema mismatch, or DB error,
- *     because blocking a developer over a bad payload teaches people to
- *     disable the hook. This CLIENT, by contrast, defaults to FAIL-CLOSED
- *     (`failClosed=true`) for blocking decisions: a transport error or
- *     non-2xx response means we have no verdict at all to defer to, so
- *     `hookGate` reports `allowed=false`. Set `failClosed=false` to treat the
- *     tier as advisory, mirroring the server's own posture.
+ *   * The hook gate fails CLOSED, on both sides. The server refuses a call
+ *     whose checks could not run (403 `GOVERNANCE_UNAVAILABLE`; a shadow-mode
+ *     workspace gets a degraded allow instead) and a body it cannot read
+ *     (400 `INVALID_REQUEST`). This client treats `GOVERNANCE_UNAVAILABLE`
+ *     exactly as it treats a control plane it cannot reach, a non-2xx answer,
+ *     or an answer with no boolean `allowed`: there is no verdict to defer to,
+ *     and `failClosed` (default true) decides, reporting `allowed=false`. Set
+ *     `failClosed=false` to treat the tier as advisory during an outage. A 400
+ *     is refused whatever `failClosed` says: it is this client's request that
+ *     is wrong, not the control plane that is down, and allowing would hide it.
  *   * `emit` NEVER throws. Telemetry that can break a run is worse than no
  *     telemetry.
  */
@@ -54,10 +56,29 @@ export interface GateResponse {
   allowed: boolean
   reason: string
   incidentId?: string | undefined
-  /** The refusal code the hook gate names, when it names one (the MCP registry's). */
+  /**
+   * The code the hook gate names, when it names one: the MCP registry's on its
+   * refusals, `GOVERNANCE_UNAVAILABLE` when its checks could not run, and
+   * `INVALID_REQUEST` when it could not read the request.
+   */
   code?: string | undefined
-  /** False when the call failed and `failClosed` decided the verdict. */
+  /** False when the hook gate gave no verdict and `failClosed` decided it. */
   reached: boolean
+}
+
+/** The hook gate's code for a call whose checks could not run. */
+const GOVERNANCE_UNAVAILABLE = 'GOVERNANCE_UNAVAILABLE'
+
+/** A non-2xx answer, with its status and whatever JSON body it carried. */
+class HttpStatusError extends Error {
+  constructor(
+    path: string,
+    readonly status: number,
+    readonly body: Record<string, unknown>,
+  ) {
+    super(`HTTP ${status} from ${path}`)
+    this.name = 'HttpStatusError'
+  }
 }
 
 export interface GateClientOptions {
@@ -127,8 +148,16 @@ export class GateClient {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: controller.signal,
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status} from ${path}`)
       const text = await res.text()
+      if (!res.ok) {
+        let body: unknown = null
+        try {
+          body = text ? JSON.parse(text) : null
+        } catch {
+          // Not JSON: the status alone is the answer.
+        }
+        throw new HttpStatusError(path, res.status, body !== null && typeof body === 'object' ? (body as Record<string, unknown>) : {})
+      }
       return text ? (JSON.parse(text) as Record<string, unknown>) : {}
     } finally {
       clearTimeout(timer)
@@ -142,14 +171,18 @@ export class GateClient {
    * plus SOP rules. It is defence in depth on top of the local tiers, not a
    * replacement for them.
    *
-   * When the call itself fails (transport error, non-2xx), the verdict is
-   * decided by `failClosed`: true (the default) reports BLOCK, because a
-   * client with no verdict has nothing to defer to; false reports allow,
-   * mirroring the server's own fail-open error paths.
+   * When there is no verdict (the control plane cannot be reached, answers
+   * non-2xx or without a boolean `allowed`, or answers
+   * `GOVERNANCE_UNAVAILABLE` because its own checks could not run), the
+   * verdict is decided by `failClosed`: true (the default) reports BLOCK,
+   * because a client with no verdict has nothing to defer to; false reports
+   * allow. A 400 `INVALID_REQUEST` is a BLOCK whatever `failClosed` says. A
+   * shadow-mode workspace's `{allowed: true, degraded: true}` is an allow.
    */
   async hookGate(toolName: string, toolInput: unknown): Promise<GateResponse> {
+    let d: Record<string, unknown>
     try {
-      const d = await this.post(
+      d = await this.post(
         '/api/v1/hook-gate',
         {
           toolName,
@@ -160,28 +193,40 @@ export class GateClient {
         },
         this.timeoutMs,
       )
-      return {
-        allowed: Boolean(d.allowed ?? true),
-        reason: String(d.reason ?? ''),
-        incidentId: typeof d.incidentId === 'string' ? d.incidentId : undefined,
-        code: typeof d.code === 'string' ? d.code : undefined,
-        reached: true,
-      }
     } catch (exc) {
-      const name = exc instanceof Error ? exc.constructor.name : 'Error'
-      if (this.failClosed) {
+      if (exc instanceof HttpStatusError && exc.status === 400) {
+        const why = typeof exc.body.reason === 'string' ? exc.body.reason : exc.message
         return {
           allowed: false,
-          reason: `hook-gate unreachable (${name}) — failing closed (failClosed=true)`,
-          reached: false,
+          reason: `hook-gate rejected the request (INVALID_REQUEST): ${why}`,
+          code: 'INVALID_REQUEST',
+          reached: true,
         }
       }
-      return {
-        allowed: true,
-        reason: `hook-gate unreachable (${name}) — failing open (failClosed=false)`,
-        reached: false,
+      if (exc instanceof HttpStatusError && exc.body.code === GOVERNANCE_UNAVAILABLE) {
+        return this.noVerdict(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`, GOVERNANCE_UNAVAILABLE)
       }
+      const name = exc instanceof Error ? exc.constructor.name : 'Error'
+      return this.noVerdict(`unreachable (${name})`)
     }
+    if (d.allowed === false && d.code === GOVERNANCE_UNAVAILABLE) {
+      return this.noVerdict(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`, GOVERNANCE_UNAVAILABLE)
+    }
+    if (typeof d.allowed !== 'boolean') return this.noVerdict('answered without a verdict')
+    return {
+      allowed: d.allowed,
+      reason: String(d.reason ?? ''),
+      incidentId: typeof d.incidentId === 'string' ? d.incidentId : undefined,
+      code: typeof d.code === 'string' ? d.code : undefined,
+      reached: true,
+    }
+  }
+
+  /** The answer when the hook gate gave no verdict: `failClosed` decides. */
+  private noVerdict(what: string, code?: string): GateResponse {
+    return this.failClosed
+      ? { allowed: false, reason: `hook-gate ${what} — failing closed (failClosed=true)`, code, reached: false }
+      : { allowed: true, reason: `hook-gate ${what} — failing open (failClosed=false)`, code, reached: false }
   }
 
   /**

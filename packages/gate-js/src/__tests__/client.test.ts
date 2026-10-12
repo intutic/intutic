@@ -1,9 +1,29 @@
 import { createServer, type Server } from 'node:http'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { GateClient } from '../client.js'
 
 // Port of the relevant slice of packages/intutic-clawde/tests/test_gate_client.py:
 // hook-gate fail-closed/fail-open behaviour, and that emit() never throws.
+
+interface ResponseVector {
+  name: string
+  response: { status: number; body: unknown } | null
+  failClosed: boolean
+  expect: { allowed: boolean; reached: boolean; code?: string; reasonContains?: string }
+}
+
+// Shared with intutic-clawde's GateClient, which runs the same vectors.
+const VECTORS = (
+  JSON.parse(
+    readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../../shared-types/fixtures/hook-gate-response-vectors.json'),
+      'utf8',
+    ),
+  ) as { vectors: ResponseVector[] }
+).vectors
 
 describe('GateClient.hookGate', () => {
   let server: Server
@@ -62,6 +82,29 @@ describe('GateClient.hookGate', () => {
     const resp = await client.hookGate('shell', {})
     expect(resp.allowed).toBe(true)
     expect(resp.reached).toBe(false)
+  })
+
+  it('defaults to failing closed', () => {
+    expect(new GateClient().failClosed).toBe(true)
+  })
+
+  describe('reads the hook gate\'s answer as the shared vectors say', () => {
+    it.each(VECTORS.map((v) => [v.name, v] as const))('%s', async (_name, v) => {
+      if (v.response) {
+        const { status, body } = v.response
+        respond = () => ({ status, body })
+      }
+      const client = new GateClient({
+        baseUrl: v.response ? baseUrl : 'http://127.0.0.1:1',
+        workspaceId: 'ws_1',
+        failClosed: v.failClosed,
+        timeoutMs: 500,
+      })
+      const resp = await client.hookGate('shell', { command: 'make test' })
+      expect({ allowed: resp.allowed, reached: resp.reached }).toEqual({ allowed: v.expect.allowed, reached: v.expect.reached })
+      expect(resp.code).toBe(v.expect.code)
+      if (v.expect.reasonContains) expect(resp.reason).toContain(v.expect.reasonContains)
+    })
   })
 
   it('emit never throws, even against an unreachable endpoint', async () => {
