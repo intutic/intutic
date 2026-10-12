@@ -194,8 +194,9 @@ export interface WorkspaceSettings {
      *
      * Declaring it here is not enough on its own — the PUT schema in
      * `routes/workspace.ts` must list it too, because that `z.object` strips
-     * unknown keys. `ff_metaclaw_evolution` above was declared here and omitted
-     * there, so it has never been settable either.
+     * unknown keys. This flag and `ff_metaclaw_evolution` above were both once
+     * declared here and omitted there, so neither could be stored until both
+     * were added to it.
      */
     ff_shadow_enforcement?: boolean
     /**
