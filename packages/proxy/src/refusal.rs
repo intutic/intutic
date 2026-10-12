@@ -30,6 +30,53 @@ pub const RULE_HEADER: &str = "x-intutic-refusal-rule";
 /// The prefix of the SSE comment line that names a refusal on a stream.
 pub const STREAM_MARKER: &str = ": intutic-refusal ";
 
+/// What the agent is told in place of a rule's reason when its workspace is
+/// OPAQUE. Listed as `opaqueMessage` in the shared fixture; every surface
+/// that refuses an agent sends this same sentence.
+#[rustfmt::skip]
+pub const OPAQUE_MESSAGE: &str = "Blocked by workspace policy. Ask a workspace admin if you need this action.";
+
+/// The workspace's intervention mode: the `interventionMode` of its active
+/// PCAS policy with the lowest priority, carried on `/auth/key-context`
+/// (`crate::key_context::intervention_mode`).
+///
+/// Only [`InterventionMode::Opaque`] changes anything here: an agent refused
+/// by a rule is not told which rule, so it cannot learn the policy and route
+/// around it. The refusal's status, error type and code are unchanged, and
+/// logs, traces, findings and metrics keep the full reason; only what the
+/// agent sees changes. TRANSPARENT and SILENT_LOG refuse exactly as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InterventionMode {
+    /// The schema default, and the answer for a control plane that predates
+    /// the field, a standalone proxy, or a value this proxy does not know.
+    #[default]
+    Transparent,
+    Opaque,
+    SilentLog,
+}
+
+impl InterventionMode {
+    /// The mode a key-context value names; anything but `OPAQUE` or
+    /// `SILENT_LOG` (absent, null, unknown) is TRANSPARENT.
+    pub fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("OPAQUE") => Self::Opaque,
+            Some("SILENT_LOG") => Self::SilentLog,
+            _ => Self::Transparent,
+        }
+    }
+
+    /// What the agent is shown for a rule-identifying refusal whose full
+    /// reason is `full`: [`OPAQUE_MESSAGE`] under OPAQUE, `full` otherwise.
+    /// The one place that decides it, so every refusal site redacts alike.
+    pub fn agent_text(self, full: &str) -> &str {
+        match self {
+            Self::Opaque => OPAQUE_MESSAGE,
+            Self::Transparent | Self::SilentLog => full,
+        }
+    }
+}
+
 /// Every refusal the proxy can answer in band.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Code {
@@ -84,11 +131,26 @@ impl Refusal {
         }
     }
 
-    /// Names the refusal on a non-streaming response. A rule id that is not a
-    /// valid header value is left off rather than failing the response; the
-    /// code alone still tells the SDK it was refused.
+    /// The refusal as the agent may see it under `mode`. Under OPAQUE the rule
+    /// id is emptied, which leaves the rule header off ([`Refusal::apply`])
+    /// and the stream marker's `rule` an empty string; the code is kept, so
+    /// an SDK still knows what kind of refusal it was.
+    pub fn for_mode(mut self, mode: InterventionMode) -> Self {
+        if mode == InterventionMode::Opaque {
+            self.rule.clear();
+        }
+        self
+    }
+
+    /// Names the refusal on a non-streaming response. A rule id that is empty
+    /// (an OPAQUE workspace's, [`Refusal::for_mode`]) or not a valid header
+    /// value is left off rather than failing the response; the code alone
+    /// still tells the SDK it was refused.
     pub fn apply(&self, headers: &mut HeaderMap) {
         headers.insert(HEADER, HeaderValue::from_static(self.code.as_str()));
+        if self.rule.is_empty() {
+            return;
+        }
         if let Ok(v) = HeaderValue::from_str(&self.rule) {
             headers.insert(RULE_HEADER, v);
         }
@@ -128,14 +190,73 @@ pub fn tool_rule_id(kind: &str, tool: &str) -> String {
 mod tests {
     use super::*;
 
-    fn fixture() -> serde_json::Value {
+    fn whole_fixture() -> serde_json::Value {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../shared-types/fixtures/refusal-codes.json");
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("{} must exist: {e}", path.display()));
         serde_json::from_str::<serde_json::Value>(&text).expect("refusal-codes.json parses")
-            ["proxy"]
+    }
+
+    fn fixture() -> serde_json::Value {
+        whole_fixture()["proxy"].clone()
+    }
+
+    #[test]
+    fn the_opaque_message_matches_the_shared_list() {
+        assert_eq!(whole_fixture()["opaqueMessage"], OPAQUE_MESSAGE);
+    }
+
+    #[test]
+    fn only_opaque_replaces_the_reason() {
+        let full = "Request blocked by custom WASM governance rule: no deploys on Friday";
+        assert_eq!(InterventionMode::Opaque.agent_text(full), OPAQUE_MESSAGE);
+        assert_eq!(InterventionMode::Transparent.agent_text(full), full);
+        assert_eq!(InterventionMode::SilentLog.agent_text(full), full);
+    }
+
+    #[test]
+    fn an_absent_or_unknown_mode_is_transparent() {
+        assert_eq!(InterventionMode::parse(None), InterventionMode::Transparent);
+        assert_eq!(
+            InterventionMode::parse(Some("TRANSPARENT")),
+            InterventionMode::Transparent
+        );
+        assert_eq!(
+            InterventionMode::parse(Some("opaque")),
+            InterventionMode::Transparent
+        );
+        assert_eq!(
+            InterventionMode::parse(Some("OPAQUE")),
+            InterventionMode::Opaque
+        );
+        assert_eq!(
+            InterventionMode::parse(Some("SILENT_LOG")),
+            InterventionMode::SilentLog
+        );
+    }
+
+    #[test]
+    fn opaque_keeps_the_code_and_drops_the_rule() {
+        let r = Refusal::new(Code::ToolDenied, "deny_tools.Bash");
+        let mut h = HeaderMap::new();
+        r.clone().for_mode(InterventionMode::Opaque).apply(&mut h);
+        assert_eq!(h[HEADER], "TOOL_DENIED");
+        assert!(h.get(RULE_HEADER).is_none());
+        let m = r
             .clone()
+            .for_mode(InterventionMode::Opaque)
+            .stream_marker(OPAQUE_MESSAGE);
+        let payload: serde_json::Value =
+            serde_json::from_str(m.trim_end().strip_prefix(STREAM_MARKER).unwrap()).unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({"code": "TOOL_DENIED", "rule": "", "message": OPAQUE_MESSAGE})
+        );
+        // TRANSPARENT and SILENT_LOG leave it as it was.
+        for mode in [InterventionMode::Transparent, InterventionMode::SilentLog] {
+            assert_eq!(r.clone().for_mode(mode), r);
+        }
     }
 
     #[test]

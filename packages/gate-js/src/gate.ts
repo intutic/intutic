@@ -85,6 +85,7 @@ import { holdKey, holdMessage, requestHold } from './hold.js'
 import { tooLargeReason } from './limits.js'
 import { GateClient } from './client.js'
 import { evaluateMcpAllowlist, evaluateMcpRegistry, mcpSnapshotUnverifiedRefusal } from './mcpRegistryRecord.js'
+import { OPAQUE_REFUSAL_MESSAGE } from './opaqueRefusal.js'
 import * as imagecheck from './imagecheck.js'
 import * as snapshot from './snapshot.js'
 import * as soprules from './soprules.js'
@@ -240,6 +241,16 @@ export class Gate {
     return this._sopRules
   }
 
+  /**
+   * What the agent is told of a refusal on workspace policy: the reason, or in
+   * an OPAQUE workspace (the snapshot's `@intervention_mode` record) the
+   * generic sentence, so it cannot learn the rule to route around it. The
+   * code is unchanged, and the event is always emitted with the full reason.
+   */
+  private shown(reason: string): string {
+    return this.getSnapshot().opaque ? OPAQUE_REFUSAL_MESSAGE : reason
+  }
+
   // ------------------------------------------------------------ emitting
 
   private async emit(
@@ -377,7 +388,7 @@ export class Gate {
         if (note) note.ruleId = d.ruleId
         const reason = `${d.reason} [${d.ruleId}]`
         await this.emit('tool_blocked', toolName, reason, toolInput)
-        throw new IntuticGateRefusal(reason, 'SSO_GROUP')
+        throw new IntuticGateRefusal(this.shown(reason), 'SSO_GROUP')
       }
     }
 
@@ -409,7 +420,7 @@ export class Gate {
       if (note) note.policyHit = true
     } else if (d.severity === snapshot.SEV_BLOCK) {
       await this.emit('tool_blocked', toolName, d.reason, toolInput)
-      throw new IntuticGateRefusal(d.reason, 'SNAPSHOT')
+      throw new IntuticGateRefusal(this.shown(d.reason), 'SNAPSHOT')
     }
     if (d.severity === snapshot.SEV_WARN) {
       await this.emit('tool_flagged', toolName, d.reason, toolInput)
@@ -433,7 +444,7 @@ export class Gate {
         const reason = `[sop:${rule.id}] ${rule.reason}`
         if (rule.action === soprules.ACTION_BLOCK) {
           await this.emit('tool_blocked', toolName, reason, toolInput)
-          throw new IntuticGateRefusal(reason, 'SOP_RULE')
+          throw new IntuticGateRefusal(this.shown(reason), 'SOP_RULE')
         }
         if (rule.action === soprules.ACTION_APPROVAL) {
           // Held for a person, under the id the snapshot gives the same rule
@@ -486,7 +497,7 @@ export class Gate {
         // The hook gate names the MCP registry's own code when the registry
         // refused; anything else it refuses is HOOK_GATE.
         const code = MCP_CODES.has(resp.code ?? '') ? (resp.code as GateRefusalCode) : 'HOOK_GATE'
-        throw new IntuticGateRefusal(resp.reason, code, resp.incidentId)
+        throw new IntuticGateRefusal(this.shown(resp.reason), code, resp.incidentId)
       }
     }
 
@@ -520,7 +531,7 @@ export class Gate {
       if (note) note.ruleId = registry.ruleId
       const reason = `${registry.reason} [${registry.ruleId}]`
       await this.emit('tool_blocked', toolName, reason, toolInput)
-      throw new IntuticGateRefusal(reason, registry.code)
+      throw new IntuticGateRefusal(this.shown(reason), registry.code)
     }
     const allowlist = snap.mcpAllowlist ? evaluateMcpAllowlist(snap.mcpAllowlist, server) : null
     if (allowlist) {
@@ -531,7 +542,7 @@ export class Gate {
         return
       }
       await this.emit('tool_blocked', toolName, reason, toolInput)
-      throw new IntuticGateRefusal(reason, allowlist.code)
+      throw new IntuticGateRefusal(this.shown(reason), allowlist.code)
     }
   }
 
@@ -554,7 +565,12 @@ export class Gate {
       return
     }
     await this.emit('tool_held', toolName, `${rule.reason} [${rule.id}]`, toolInput)
-    throw new IntuticGateHold(holdMessage(rule.reason, rule.id, outcome), outcome.recorded ? outcome.holdId : undefined)
+    // An OPAQUE workspace's hold names the hold, not the rule.
+    const opaque = this.getSnapshot().opaque
+    throw new IntuticGateHold(
+      holdMessage(opaque ? OPAQUE_REFUSAL_MESSAGE : rule.reason, opaque ? '' : rule.id, outcome),
+      outcome.recorded ? outcome.holdId : undefined,
+    )
   }
 }
 

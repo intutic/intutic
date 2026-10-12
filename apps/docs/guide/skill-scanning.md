@@ -288,9 +288,9 @@ tier.
 separate tier below. It does not catch a skill file reached
 through a shell redirect, a symlink, or a relative path walk (`subject:
 'target'`, matching the tool's own path argument, not a bare mention in a
-command string). And SHADOW-mode workspaces see the promotion downgraded to
-`shadow` (observe, don't act) on the snapshot side, same as every other
-snapshot-delivered rule — the floor's own `warn` copy is unaffected by
+command string). And workspaces in the `SILENT_LOG` intervention mode see the promotion
+downgraded to `shadow` (observe, don't act) on the snapshot side, same as every
+other snapshot-delivered rule — the floor's own `warn` copy is unaffected by
 `interventionMode` either way.
 
 ## Block-tier skill-content protection
@@ -322,7 +322,7 @@ path and cannot tell "never read `.env`" from "read `.env`".
 
 **How it ships.** Through the policy snapshot only, never the compiled-in
 floor. Flipping `SKILL_CONTENT_TIER_SEVERITY` to `'warn'` retracts it in one
-sync cycle. SHADOW-mode workspaces get `shadow`, as with every snapshot rule.
+sync cycle. `SILENT_LOG` workspaces get `shadow`, as with every snapshot rule.
 Each rule matches the write's target path against the skill roots, then
 matches the pattern inside the text being written: the `content`,
 `new_string`/`newString`, `new_str` or `file_text` value of the tool input.

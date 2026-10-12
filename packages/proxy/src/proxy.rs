@@ -881,6 +881,40 @@ async fn daily_cap(
     }
 }
 
+/// The workspace's intervention mode from `/auth/key-context`, which decides
+/// whether a refused agent is told which rule refused it
+/// (`crate::refusal::InterventionMode`). The same cached answer the PII and
+/// SSO group reads use, so this adds no request: fresh within
+/// `key_context::CACHE_TTL`, refetched sooner when the config version moves.
+///
+/// TRANSPARENT when there is no control plane or virtual key to ask, or the
+/// control plane could not answer. A failed read already refused the request
+/// at Step 4 under fail-closed; under fail-open the request proceeds with the
+/// rule named, the same as before the mode existed.
+async fn intervention_mode(
+    state: &AppState,
+    virtual_key: Option<&crate::credential::VirtualKey>,
+    workspace_id: &str,
+) -> crate::refusal::InterventionMode {
+    let policy = &state.config.intutic_settings.policy;
+    let Some((cp_url, virtual_key)) = policy.control_plane_url.as_deref().zip(virtual_key) else {
+        return crate::refusal::InterventionMode::Transparent;
+    };
+    let version = state.control_plane.policy_version(workspace_id).await;
+    match crate::key_context::fetch(
+        &state.http_client,
+        cp_url,
+        virtual_key,
+        std::time::Duration::from_millis(policy.timeout_ms),
+        version,
+    )
+    .await
+    {
+        Ok(crate::key_context::Answer::Body(body)) => crate::key_context::intervention_mode(&body),
+        _ => crate::refusal::InterventionMode::Transparent,
+    }
+}
+
 // ─── Error response helpers ──────────────────────────────────────────
 
 fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
@@ -4174,6 +4208,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             None => None,
         }
     };
+    // Whether a refused agent is told which rule refused it. Read after the
+    // PII fetch above, from the same cached key-context answer; every
+    // rule-identifying refusal below sends `intervention_mode.agent_text` of
+    // its reason while its logs, trace and findings keep the reason whole.
+    let intervention_mode =
+        intervention_mode(&state, credential.virtual_key(), &workspace_id).await;
     let dlp_cfg = &state.config.intutic_settings.dlp;
     let input_dlp = dlp::direction_scan(dlp_cfg.enabled && dlp_cfg.scan_input, pii_policy.as_ref());
     let output_dlp =
@@ -4981,11 +5021,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     return json_error(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
-                        &format!(
+                        intervention_mode.agent_text(&format!(
                             "Request blocked by anomaly policy [{}]: {}",
                             k.kind.as_str(),
                             k.reason
-                        ),
+                        )),
                     );
                 }
             }
@@ -5022,11 +5062,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     return json_error(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
-                        &format!(
+                        intervention_mode.agent_text(&format!(
                             "Request blocked by anomaly policy [{}]: {}",
                             c.kind.as_str(),
                             c.reason
-                        ),
+                        )),
                     );
                 }
             }
@@ -5108,12 +5148,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     return json_error(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
-                        &format!(
+                        intervention_mode.agent_text(&format!(
                             "Request blocked by anomaly policy [{}] after {} attempts: {}",
                             r.kind.as_str(),
                             attempts,
                             r.reason
-                        ),
+                        )),
                     );
                 }
 
@@ -5135,12 +5175,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 return json_error(
                     StatusCode::CONFLICT,
                     "policy_reask",
-                    &format!(
+                    intervention_mode.agent_text(&format!(
                         "{} — revise your approach and try again ({} attempt{} left before this is blocked)",
                         r.reason,
                         remaining,
                         if remaining == 1 { "" } else { "s" },
-                    ),
+                    )),
                 );
             }
 
@@ -5194,18 +5234,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 return json_error(
                     StatusCode::FORBIDDEN,
                     "policy_denied",
-                    &format!("Request blocked by custom WASM governance rule: {}", reason),
+                    intervention_mode.agent_text(&format!(
+                        "Request blocked by custom WASM governance rule: {}",
+                        reason
+                    )),
                 );
             }
             // A rule reached no verdict. Refused whatever the fail mode: the
             // registry explains why. Its own code rather than `policy_denied`:
             // no rule decided against the call, and an agent or SDK should
             // tell "not allowed" from "could not be checked". The reason names
-            // the rule and the cause.
+            // the rule and the cause, so an OPAQUE workspace's agent gets the
+            // generic sentence under the same code.
             crate::wasm::context::Verdict::Unavailable { reason, .. } => {
                 tracing::warn!(workspace_id = %workspace_id, reason = %reason, "WASM custom rule reached no verdict — blocking");
                 crate::metrics::record_policy_refusal("wasm", "unavailable");
-                return json_error(StatusCode::FORBIDDEN, "GOVERNANCE_UNAVAILABLE", &reason);
+                return json_error(
+                    StatusCode::FORBIDDEN,
+                    "GOVERNANCE_UNAVAILABLE",
+                    intervention_mode.agent_text(&reason),
+                );
             }
             // A WASM rule reaching the reask rung takes the same ladder the
             // anomaly detectors take, rather than a second one beside it: same
@@ -5244,9 +5292,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     return json_error(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
-                        &format!(
+                        intervention_mode.agent_text(&format!(
                             "Request blocked by custom WASM governance rule [{rule_id}] after {attempts} attempts: {reason}"
-                        ),
+                        )),
                     );
                 }
 
@@ -5266,10 +5314,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 return json_error(
                     StatusCode::CONFLICT,
                     "policy_reask",
-                    &format!(
+                    intervention_mode.agent_text(&format!(
                         "{reason} ({remaining} attempt{} left before this is blocked)",
                         if remaining == 1 { "" } else { "s" },
-                    ),
+                    )),
                 );
             }
             // A Rego rule's hold: the call waits for a person, through the
@@ -5332,7 +5380,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         return json_error(
                             StatusCode::FORBIDDEN,
                             "policy_held",
-                            &crate::wasm::hold::refusal(&outcome, &rule_id, &reason),
+                            // An OPAQUE workspace's agent is told the hold,
+                            // not the rule: the hold id and how to approve it
+                            // stay, as the hook gates and SDKs word it.
+                            &if intervention_mode == crate::refusal::InterventionMode::Opaque {
+                                crate::wasm::hold::refusal(
+                                    &outcome,
+                                    "",
+                                    crate::refusal::OPAQUE_MESSAGE,
+                                )
+                            } else {
+                                crate::wasm::hold::refusal(&outcome, &rule_id, &reason)
+                            },
                         );
                     }
                 }
@@ -7386,8 +7445,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         }
                                     }
                                 }
-                                let tail =
-                                    crate::plugins::response_gate::refusal_tail(wire, &denial);
+                                let tail = crate::plugins::response_gate::refusal_tail(
+                                    wire,
+                                    &denial,
+                                    intervention_mode,
+                                );
                                 let _ = tx.send(Ok(axum::body::Bytes::from(tail))).await;
                                 // The client did get a terminal event, so this
                                 // is a closed stream and not a truncated one.
@@ -9106,6 +9168,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 wire,
                 &actual_model,
                 denial,
+                intervention_mode,
             ))
             // A refusal that cannot be serialised must not fall back to the
             // body it was refusing. An empty body is a broken response; the
@@ -9641,10 +9704,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // still a 200 assistant turn; these headers are how an SDK tells it
         // from the model's answer. The gate also runs over the DLP refusal and
         // finds no tool call in it, so at most one of the two is set.
+        // Under OPAQUE neither names its rule (`crate::refusal::Refusal::for_mode`).
         if let Some(refusal) = response_denial
             .as_ref()
-            .map(|d| d.refusal())
-            .or(output_dlp_withheld)
+            .map(|d| d.refusal_for(intervention_mode))
+            .or(output_dlp_withheld.map(|r| r.for_mode(intervention_mode)))
         {
             refusal.apply(headers_mut);
         }

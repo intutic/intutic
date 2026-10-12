@@ -75,6 +75,7 @@ from .actions import is_deploy, touches_infra
 from .client import GateClient
 from .hold import hold_key, hold_message, request_hold
 from .limits import too_large_reason
+from .opaque import OPAQUE_REFUSAL_MESSAGE
 
 
 # Tools that cannot change anything. They still get the local snapshot check
@@ -273,6 +274,13 @@ class Gate:
 
     # --------------------------------------------------------------- guard
 
+    def _shown(self, reason: str) -> str:
+        """What the agent is told of a refusal on workspace policy: the reason,
+        or in an OPAQUE workspace (the snapshot's @intervention_mode record)
+        the generic sentence, so it cannot learn the rule to route around it.
+        The code is unchanged, and the event always carries the full reason."""
+        return OPAQUE_REFUSAL_MESSAGE if self.snapshot().opaque else reason
+
     def guard(self, tool_name: str, tool_input: dict) -> None:
         """Raise IntuticGateRefusal if this call must not run. Return to allow.
 
@@ -352,7 +360,7 @@ class Gate:
                     note["ruleId"] = d.rule_id
                 reason = f"{d.reason} [{d.rule_id}]"
                 self._emit("tool_blocked", tool_name, reason, tool_input)
-                raise IntuticGateRefusal(reason, "SSO_GROUP")
+                raise IntuticGateRefusal(self._shown(reason), "SSO_GROUP")
 
         # ---- Tier A1: policy snapshot -------------------------------------
         disabled = snapshot.guard_disabled_from_env()
@@ -380,7 +388,7 @@ class Gate:
                 note["policyHit"] = True
         elif d.severity == snapshot.SEV_BLOCK:
             self._emit("tool_blocked", tool_name, d.reason, tool_input)
-            raise IntuticGateRefusal(d.reason, "SNAPSHOT")
+            raise IntuticGateRefusal(self._shown(d.reason), "SNAPSHOT")
         if d.severity == snapshot.SEV_WARN:
             self._emit("tool_flagged", tool_name, d.reason, tool_input)
         elif d.severity == snapshot.SEV_SHADOW:
@@ -403,7 +411,7 @@ class Gate:
                 reason = f"[sop:{rule.id}] {rule.reason}"
                 if rule.action == soprules.ACTION_BLOCK:
                     self._emit("tool_blocked", tool_name, reason, tool_input)
-                    raise IntuticGateRefusal(reason, "SOP_RULE")
+                    raise IntuticGateRefusal(self._shown(reason), "SOP_RULE")
                 if rule.action == soprules.ACTION_APPROVAL:
                     # Held for a person, under the id the snapshot gives the
                     # same rule (sop.<id>), so one approval covers the call in
@@ -458,7 +466,7 @@ class Gate:
                 # The hook gate names the MCP registry's own code when the
                 # registry refused; anything else it refuses is HOOK_GATE.
                 code = resp.code if resp.code in MCP_CODES else "HOOK_GATE"
-                raise IntuticGateRefusal(resp.reason, code, resp.incident_id)
+                raise IntuticGateRefusal(self._shown(resp.reason), code, resp.incident_id)
 
         if tool_name not in READ_ONLY_TOOLS:
             self._emit("tool_allowed", tool_name, "", tool_input)
@@ -485,7 +493,7 @@ class Gate:
                 if note is not None:
                     note["ruleId"] = rule_id
                 self._emit("tool_blocked", tool_name, f"{reason} [{rule_id}]", tool_input)
-                raise IntuticGateRefusal(f"{reason} [{rule_id}]", code)
+                raise IntuticGateRefusal(self._shown(f"{reason} [{rule_id}]"), code)
         if snap.mcp_allowlist is not None:
             refusal = mcp_registry.evaluate_allowlist(snap.mcp_allowlist, call[0])
             if refusal is not None:
@@ -496,7 +504,7 @@ class Gate:
                     self._emit("tool_would_block", tool_name, f"{reason} [{rule_id}]", tool_input)
                     return
                 self._emit("tool_blocked", tool_name, f"{reason} [{rule_id}]", tool_input)
-                raise IntuticGateRefusal(f"{reason} [{rule_id}]", code)
+                raise IntuticGateRefusal(self._shown(f"{reason} [{rule_id}]"), code)
 
     def _hold(self, rule_id: str, rule_reason: str, tool_name: str, tool_input: dict) -> None:
         """A hold rule matched: returns when an approved bypass lets this exact
@@ -511,7 +519,10 @@ class Gate:
                        f"{outcome.decided_by or 'an approver'} on hold {outcome.hold_id}", tool_input)
             return
         self._emit("tool_held", tool_name, f"{rule_reason} [{rule_id}]", tool_input)
-        raise IntuticGateHold(hold_message(rule_reason, rule_id, outcome),
+        # An OPAQUE workspace's hold names the hold, not the rule.
+        opaque = self.snapshot().opaque
+        raise IntuticGateHold(hold_message(OPAQUE_REFUSAL_MESSAGE if opaque else rule_reason,
+                                           "" if opaque else rule_id, outcome),
                               outcome.hold_id if outcome.recorded else None)
 
 

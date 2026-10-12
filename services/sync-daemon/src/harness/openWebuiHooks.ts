@@ -165,7 +165,10 @@ class Filter:
         if blocks:
             rid, reason = blocks[0]
             emit("tool_blocked", f"{reason} [{rid}]")
-            raise Exception(f"[Intutic Governance] BLOCKED: {reason} [{rid}]")
+            # An OPAQUE workspace's user reads the generic sentence, not the
+            # rule; the event above keeps the rule.
+            shown = _INTUTIC_OPAQUE_MESSAGE if _state["opaque"] else f"{reason} [{rid}]"
+            raise Exception(f"[Intutic Governance] BLOCKED: {shown}")
 
         emit("tool_allowed", "")
         return body

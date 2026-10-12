@@ -207,13 +207,34 @@ Each tool execution is classified by risk level:
 
 ### Intervention Modes
 
-How the enforcement action is communicated:
+What the agent is told when a call is refused. The workspace's mode is the
+mode of its active policy with the lowest priority number, whatever that
+policy's tool pattern; with no active policy it is Transparent.
 
 | Mode | Behavior |
 |------|----------|
-| **Transparent** | Developer sees a clear explanation of the policy breach |
-| **Opaque** | Agent receives a generic error and tries an alternative approach |
-| **Silent Log** | Request proceeds but is flagged in the dashboard for review |
+| **Transparent** (default) | The refusal names the rule that refused the call and its reason. |
+| **Opaque** | The same calls are refused, with the same refusal codes, HTTP statuses and exit codes, but the agent is told only *"Blocked by workspace policy. Ask a workspace admin if you need this action."* |
+| **Silent Log** | The local hook gates let a call a workspace rule would block run, and report it as `tool_would_block`. Built-in protections, SSO group refusals and the MCP server registry still refuse, and the hosted hook gate and the proxies enforce as in Transparent. |
+
+**Opaque** keeps the policy from the agent: it is not told the rule's name,
+its text, the SOP, the pattern that matched or how to get around it, so it
+cannot learn the policy to route around it. A held call still names its hold
+id and how to approve it. What an operator reads keeps the full reason: hook
+events, the enforcement log, incidents, detector findings, traces and the SIEM
+export. It is applied by the local hook gates and the gate SDKs (`@intutic/gate`,
+`intutic-clawde`), which read it from the policy snapshot, by the hosted hook
+gate, the LLM proxy and the MCP proxy. Refusals that say nothing about the
+policy are unchanged: a call too large to evaluate, a gate past its deadline,
+an unreadable call, an unverified policy snapshot, a budget or rate limit, a
+chaos run's injected fault. The local gates pick up a change of mode with the
+next policy snapshot (every 30 seconds by default) and the LLM proxy within 30
+seconds.
+
+**Silent Log** applies to the local hook gates only. A would-block from a
+policy guardrail becomes a shadowed finding and counts toward the guardrail's
+would-act rate; every other would-block is kept as rule evidence and exported
+to SIEM as `WOULD_BLOCK`.
 
 ---
 

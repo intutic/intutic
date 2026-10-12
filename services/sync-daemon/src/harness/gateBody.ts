@@ -48,7 +48,12 @@
  *
  * @module
  */
-import { HOLD_APPROVAL_HINT_TEMPLATE, HOLD_ID_PLACEHOLDER } from '@intutic/shared-types'
+import {
+  HOLD_APPROVAL_HINT_TEMPLATE,
+  HOLD_ID_PLACEHOLDER,
+  INTERVENTION_MODE_RECORD_TAG,
+  OPAQUE_REFUSAL_MESSAGE,
+} from '@intutic/shared-types'
 import {
   DESTRUCTIVE_COMMAND_PATTERNS,
   NORMALISE_CONTRACT,
@@ -260,8 +265,19 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * then the retry is allowed, or denied with the plan's canary. The hold's
  * state is a file beside the run's other counters (chaosGate.ts). Without a
  * chaos plan nothing changes; the `.rules` format is unchanged.
+ *
+ * v21: the OPAQUE intervention mode. The snapshot of an OPAQUE workspace
+ * carries an `@intervention_mode` data line (tag and `OPAQUE`, two columns,
+ * inside the digest; `encodeInterventionModeRecord` in `@intutic/shared-types`),
+ * and a gate reading one refuses on workspace policy with
+ * `OPAQUE_REFUSAL_MESSAGE` in place of the rule's reason and id: what the agent
+ * reads on stderr, in a JSON decision's reason (whose `ruleId` is null) and in
+ * a thrown error. The code, exit status and contract are unchanged, and the
+ * audit line keeps the full reason. A TRANSPARENT or SILENT_LOG snapshot has no
+ * such line and is unchanged. A v20 gate skips the line, as it skips any
+ * two-column one, and names the rule.
  */
-export const GATE_VERSION = 20
+export const GATE_VERSION = 21
 
 /**
  * The refusal codes a hook gate's JSON decision carries, as `code` beside the
@@ -737,6 +753,17 @@ function intuticPhraseRule(source, words) {
 }
 
 /**
+ * What an OPAQUE workspace's agent reads of a refusal on workspace policy,
+ * emitted once into every JS-family gate: `intuticShown(snap, reason)` is the
+ * reason, or the generic sentence when the snapshot carries the
+ * `@intervention_mode` record. The audit line always gets the full reason.
+ */
+const JS_OPAQUE_HELPERS = `const INTUTIC_OPAQUE_MESSAGE = ${JSON.stringify(OPAQUE_REFUSAL_MESSAGE)};
+function intuticShown(snap, reason) {
+  return snap && snap.opaque ? INTUTIC_OPAQUE_MESSAGE : reason;
+}`
+
+/**
  * The hold tier's JS helpers, emitted once into every JS-family gate.
  *
  * `intuticHold` is the one place a hold happens: bypass lookup, hold record,
@@ -747,6 +774,7 @@ function intuticPhraseRule(source, words) {
 function jsHoldHelpers(reviewRequestFile: string | undefined): string {
   return `${emitJsActionClassifier()}
 const INTUTIC_REVIEW_REQUEST_FILE = ${JSON.stringify(reviewRequestFile ?? null)};
+${JS_OPAQUE_HELPERS}
 
 // Who may approve a hold, and when the retry passes: the sentence every gate
 // and the MCP proxy print (holdMessages.ts in shared-types).
@@ -803,7 +831,7 @@ function intuticApprovedBypass(workspaceId, sopRuleId, toolNameNormalized, targe
   return null;
 }
 
-function intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId) {
+function intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId, opaque) {
   var crypto = require('crypto'), fs = require('fs'), path = require('path');
   // Key material, computed the same way at both ends: the normalised tool
   // name, and sha256 of the normalised command/target pair joined by a NUL so
@@ -849,7 +877,9 @@ function intuticHold(rule, toolName, command, target, toolInput, record, workspa
     try { console.error('[Intutic Guardrail] could not record the hold: ' + (e && e.message ? e.message : e)); } catch (e2) {}
   }
   var reason = rule.reason + ' [' + rule.id + ']';
-  try { console.error('[Intutic Guardrail] HELD: ' + reason + ' ' + intuticHoldHint(holdId)); } catch (e) {}
+  // An OPAQUE workspace's agent reads the generic sentence, not the rule; the
+  // hint stays, since it names the hold, not the policy.
+  try { console.error('[Intutic Guardrail] HELD: ' + (opaque ? INTUTIC_OPAQUE_MESSAGE : reason) + ' ' + intuticHoldHint(holdId)); } catch (e) {}
   try { record('tool_held', toolName, reason); } catch (e) {}
   return { holdId: holdId };
 }`
@@ -991,6 +1021,12 @@ INTUTIC_MCP_SEVERITY=""
 INTUTIC_MCP_SERVERS=""
 # The MCP server registry record (base64 JSON, inside the digest).
 INTUTIC_MCP_REGISTRY=""
+# An OPAQUE workspace (the @intervention_mode record): a refusal on workspace
+# policy tells the agent this sentence instead of the rule, and the audit line
+# keeps the rule. Kept on a snapshot that fails its digest: it only ever hides
+# text, never allows a call.
+INTUTIC_OPAQUE=0
+INTUTIC_OPAQUE_MESSAGE=${shq(OPAQUE_REFUSAL_MESSAGE)}
 if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   INTUTIC_SNAPSHOT_STATE="ok"
   while IFS= read -r _line || [ -n "$_line" ]; do
@@ -1008,6 +1044,7 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
         INTUTIC_MCP_SERVERS="\${_intutic_mcp_rest#*$'\\t'}"
         ;;
       '${MCP_REGISTRY_RECORD_TAG}'$'\\t'*) INTUTIC_MCP_REGISTRY="\${_line#*$'\\t'}" ;;
+      '${INTERVENTION_MODE_RECORD_TAG}'$'\\t''OPAQUE') INTUTIC_OPAQUE=1 ;;
       '#'*|'') : ;;
       *) INTUTIC_DYNAMIC+=("$_line") ;;
     esac
@@ -1111,6 +1148,12 @@ intutic_sha256() {
 intutic_json_escape() {
   printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g' | tr -d '\\n\\r\\t'
 }
+# What the agent reads of a refusal on workspace policy, in _intutic_shown: the
+# reason ($1), or in an OPAQUE workspace the generic sentence. The audit line
+# is always written with the full reason.
+intutic_shown() {
+  if [ "$INTUTIC_OPAQUE" = "1" ]; then _intutic_shown="$INTUTIC_OPAQUE_MESSAGE"; else _intutic_shown="$1"; fi
+}
 # Looks for a valid, unexpired, EXACT-match approved bypass. Prints nothing
 # and returns 1 on ANY reason not to bypass: missing file, failed digest or
 # workspace check, no matching line, or an entry whose expiresAt has passed —
@@ -1173,7 +1216,8 @@ intutic_hold() {
   # Who may approve, and when the retry passes (holdMessages.ts in shared-types).
   hint=${shq(HOLD_APPROVAL_HINT_TEMPLATE)}
   hint="\${hint//\\{holdId\\}/$hold_id}"
-  echo "[Intutic Guardrail] HELD: \${rreason} [\${rid}] \${hint}" >&2
+  intutic_shown "\${rreason} [\${rid}]"
+  echo "[Intutic Guardrail] HELD: \${_intutic_shown} \${hint}" >&2
   ${log} "tool_held" "\${TOOL:-}" "\${rreason} [\${rid}]" || true
   return 2
 }
@@ -1333,7 +1377,8 @@ intutic_apply() {
   # this text for "governance-protected" to file the incident CRITICAL.
   local reason="\${rreason} [\${rid}]"
   _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
-  echo "[Intutic Governance] BLOCKED: \${reason}" >&2
+  intutic_shown "$reason"
+  echo "[Intutic Governance] BLOCKED: \${_intutic_shown}" >&2
   ${log} "tool_blocked" "\${TOOL:-}" "\${reason}"
   exit 2
 }
@@ -1452,7 +1497,8 @@ sys.stdout.write(lib["intutic_mcp_registry"](sys.argv[1], sys.argv[2]))' "$INTUT
       if [ -n "$_intutic_reg" ]; then
         IFS=$'\\t' read -r _ _intutic_reg_rid _intutic_reg_reason <<< "$_intutic_reg"
         _intutic_chaos_rule="$_intutic_reg_rid"; _intutic_chaos_hit=1
-        echo "[Intutic Governance] BLOCKED: \${_intutic_reg_reason} [\${_intutic_reg_rid}]" >&2
+        intutic_shown "\${_intutic_reg_reason} [\${_intutic_reg_rid}]"
+        echo "[Intutic Governance] BLOCKED: \${_intutic_shown}" >&2
         ${log} "tool_blocked" "\${TOOL:-}" "\${_intutic_reg_reason} [\${_intutic_reg_rid}]"
         exit 2
       fi
@@ -1483,7 +1529,8 @@ case "\${TOOL:-}" in
             ${log} "tool_would_block" "\${TOOL:-}" "$_intutic_mcp_reason" || true
           else
             _intutic_chaos_rule=mcp_allowlist; _intutic_chaos_hit=1
-            echo "[Intutic Governance] BLOCKED: $_intutic_mcp_reason" >&2
+            intutic_shown "$_intutic_mcp_reason"
+            echo "[Intutic Governance] BLOCKED: \${_intutic_shown}" >&2
             ${log} "tool_blocked" "\${TOOL:-}" "$_intutic_mcp_reason"
             exit 2
           fi
@@ -1549,8 +1596,10 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     path.join(os.homedir(), '.intutic', 'hooks', 'policy-snapshot.rules');
   // mcpAllowlist and mcpRegistry stay null without their records: the
   // workspace set no allowlist and made no registry decision.
+  // opaque: an OPAQUE workspace (the @intervention_mode record). Kept on a
+  // snapshot that fails its digest: it only ever hides text, never allows.
   const out = { rules: [], digest: 'none', state: 'absent', workspaceId: '', generatedAt: '', ageDays: 0,
-    mcpAllowlist: null, mcpRegistry: null };
+    mcpAllowlist: null, mcpRegistry: null, opaque: false };
   let text;
   try { text = fs.readFileSync(p, 'utf8'); } catch (e) { return out; }
   out.state = 'ok';
@@ -1558,6 +1607,7 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     if (line.startsWith('#digest ')) { out.digest = line.slice(8).trim(); continue; }
     if (line.startsWith('#workspace ')) { out.workspaceId = line.slice(11).trim(); continue; }
     if (line.startsWith('#generated ')) { out.generatedAt = line.slice(11).trim(); continue; }
+    if (line === '${INTERVENTION_MODE_RECORD_TAG}\\tOPAQUE') { out.opaque = true; continue; }
     if (line.startsWith('${MCP_ALLOWLIST_RECORD_TAG}\\t')) {
       // The MCP server allowlist: tag, severity and comma-joined servers, a
       // data line inside the digest. Any severity but shadow refuses.
@@ -1758,8 +1808,10 @@ export function emitJsGate(opts: JsGateOptions): string {
    * `code` and `ruleId` are JavaScript expressions: a JSON decision carries
    * them ({@link HOOK_REFUSAL_CODES}), and `extra` adds fields such as `holdId`.
    */
-  const refuseWith = (code: string, ruleId: string, extra = '', tool = 'toolName') => {
-    const fields = `code: ${code}, ruleId: ${ruleId}${extra ? `, ${extra}` : ''}`
+  const refuseWith = (code: string, ruleId: string, extra = '', tool = 'toolName', shownRuleId = ruleId) => {
+    // The decision names shownRuleId: the deciding rule, or null where an
+    // OPAQUE workspace hides it. A chaos run's record keeps the rule.
+    const fields = `code: ${code}, ruleId: ${shownRuleId}${extra ? `, ${extra}` : ''}`
     // A chaos run's record of the refusal, first: every contract below ends
     // the call. A refusal a rule decided is a policy hit.
     const chaos = `      intuticChaosDecide(${tool}, '${code === "'HELD'" ? 'hold' : 'deny'}', ${ruleId}, ${ruleId} != null);\n`
@@ -2094,10 +2146,10 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
         // Not a permanent denial: the action is legitimate, someone asked to
         // see it first. An approved bypass lets this exact call through once;
         // otherwise the hold is recorded for review and the call refused.
-        const held = intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId);
+        const held = intuticHold(rule, toolName, command, target, toolInput, record, workspaceId, sessionId, snap.opaque);
         if (held.bypassed) { intuticChaosNote(rule.id, true); continue; }
-        const reason = '[Intutic Governance] HELD: ' + rule.reason + ' [' + rule.id + '] ' + intuticHoldHint(held.holdId);
-${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId')}
+        const reason = '[Intutic Governance] HELD: ' + intuticShown(snap, rule.reason + ' [' + rule.id + ']') + ' ' + intuticHoldHint(held.holdId);
+${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId', 'toolName', '(snap.opaque ? null : rule.id)')}
       }
       if (rule.severity === 'warn') {
         // Advisory tier — allowed, recorded with the rule id and the command's
@@ -2117,10 +2169,11 @@ ${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId')}
       }
       // The rule's own reason, not a generic one: hookEvents.resolveSeverity
       // reads this text for "governance-protected" to file it CRITICAL.
-      const reason = rule.reason + ' [' + rule.id + ']';
+      const _full = rule.reason + ' [' + rule.id + ']';
+      const reason = intuticShown(snap, _full);
       try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
-      try { record('tool_blocked', toolName, reason); } catch (e) {}
-${refuseWith('intuticRuleCode(rule)', 'rule.id')}
+      try { record('tool_blocked', toolName, _full); } catch (e) {}
+${refuseWith('intuticRuleCode(rule)', 'rule.id', '', 'toolName', '(snap.opaque ? null : rule.id)')}
     }
   }
 
@@ -2148,10 +2201,11 @@ ${refuseWith('_unv.code', '_unv.ruleId')}
     var _regSep = _regRest.indexOf('__');
     var _reg = _regSep > 0 ? evaluateMcpRegistry(snap.mcpRegistry, _regRest.slice(0, _regSep), _regRest.slice(_regSep + 2)) : null;
     if (_reg) {
-      var reason = _reg.reason + ' [' + _reg.ruleId + ']';
+      var _regFull = _reg.reason + ' [' + _reg.ruleId + ']';
+      var reason = intuticShown(snap, _regFull);
       try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
-      try { record('tool_blocked', toolName, reason); } catch (e) {}
-${refuseWith('_reg.code', '_reg.ruleId')}
+      try { record('tool_blocked', toolName, _regFull); } catch (e) {}
+${refuseWith('_reg.code', '_reg.ruleId', '', 'toolName', '(snap.opaque ? null : _reg.ruleId)')}
     }
   }
 
@@ -2172,9 +2226,10 @@ ${refuseWith('_reg.code', '_reg.ruleId')}
         intuticChaosNote(_mcp.ruleId, false);
         try { record('tool_would_block', toolName, reason); } catch (e) {}
       } else {
-        try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
         try { record('tool_blocked', toolName, reason); } catch (e) {}
-${refuseWith('_mcp.code', '_mcp.ruleId')}
+        reason = intuticShown(snap, reason);
+        try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+${refuseWith('_mcp.code', '_mcp.ruleId', '', 'toolName', '(snap.opaque ? null : _mcp.ruleId)')}
       }
     }
   }
@@ -2604,7 +2659,11 @@ def _intutic_rule_search(src, subject, flags_re, seq):
     return re.search(src, subject, flags_re) is not None
 
 
-_state = {"digest": "", "workspace": ""}
+# The sentence an OPAQUE workspace's refusal shows in place of the rule
+# (OPAQUE_REFUSAL_MESSAGE in @intutic/shared-types).
+_INTUTIC_OPAQUE_MESSAGE = ${JSON.stringify(OPAQUE_REFUSAL_MESSAGE)}
+
+_state = {"digest": "", "workspace": "", "opaque": False}
 
 
 def _intutic_snapshot_rules():
@@ -2619,6 +2678,8 @@ def _intutic_snapshot_rules():
         os.path.expanduser("~"), ".intutic", "hooks", "policy-snapshot.rules"
     )
     out = []
+    # Read afresh each time: the filter outlives a change of mode.
+    _state["opaque"] = False
     try:
         with open(p, "r", encoding="utf-8") as fh:
             for line in fh:
@@ -2631,6 +2692,11 @@ def _intutic_snapshot_rules():
                     continue
                 if line.startswith("#workspace "):
                     _state["workspace"] = line[11:].strip()
+                    continue
+                # An OPAQUE workspace: a refusal shows _INTUTIC_OPAQUE_MESSAGE.
+                # Kept on a snapshot that fails its digest; it only hides text.
+                if line == "${INTERVENTION_MODE_RECORD_TAG}\\tOPAQUE":
+                    _state["opaque"] = True
                     continue
                 if not line or line.startswith("#"):
                     continue
@@ -2775,6 +2841,8 @@ ${NORMALISE_CONTRACT.jsSource}
 ${PHRASES_JS_SOURCE}
 
 ${JS_SNAPSHOT_LOADER}
+
+${JS_OPAQUE_HELPERS}
 
 // The refusal of an MCP call on an unverified snapshot (mcpRegistryRecord.ts).
 ${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}
@@ -2923,9 +2991,11 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
         // The rule's own reason, not a generic one: hookEvents.resolveSeverity
         // reads this text for "governance-protected" to file it CRITICAL.
         const reason = rule.reason + ' [' + rule.id + '] (node "' + nodeName + '", type ' + nodeType + ')';
-        try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+        // An OPAQUE workspace is told which node, not which rule.
+        const shown = snap.opaque ? INTUTIC_OPAQUE_MESSAGE + ' (node "' + nodeName + '")' : reason;
+        try { console.error('[Intutic Governance] BLOCKED: ' + shown); } catch (e) {}
         try { record('tool_blocked', 'n8n:' + nodeName, reason); } catch (e) {}
-        throw new Error('[Intutic Governance] BLOCKED: ' + reason);
+        throw new Error('[Intutic Governance] BLOCKED: ' + shown);
       }
     }
   }
