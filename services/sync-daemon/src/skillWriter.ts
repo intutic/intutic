@@ -176,7 +176,7 @@ When interacting with LLM providers through the local proxy, prepend requests wi
 - **Verify Prompt:** \`@intutic verify <prompt>\` (or \`@intutic check <prompt>\`)
   - *Description:* Audits the prompt pre-flight against active SOPs and guidelines, returning pass/fail verdicts and listing any violations before submitting requests to the LLM.
 - **Review Prompt:** \`@intutic review <prompt>\`
-  - *Description:* Runs a deep heuristic prompt quality evaluation to grade clarity, specificity, and actionability.
+  - *Description:* Quick heuristic check that grades the prompt on its length, its use of action verbs, and whether it names an SOP or policy, with suggestions. No model is involved.
 - **Judge Response:** \`@intutic judge <prompt>\`
   - *Description:* Submits the prompt to the upstream LLM and evaluates the response stream in parallel using LLM-as-a-judge compliance checkers.
   - *Note:* If no prompt is provided (e.g. \`@intutic judge\`), returns usage instructions.

@@ -105,8 +105,8 @@ Runs manual pre-flight compliance checks on a prompt against active workspace SO
   ```
 
 ### 6. `/intutic review <prompt>`
-Runs a deep heuristic prompt quality evaluation to grade its clarity, specificity, and actionability.
-* **Mechanism**: Scores the prompt's quality using a heuristic model and suggests optimizations for improvement.
+Runs a quick heuristic check on a prompt and returns a letter grade with suggestions.
+* **Mechanism**: Scores four fixed rules: prompt length, whether it uses action verbs (check, enforce, verify…), and whether it names an SOP, policy or rule. No model is involved, so treat the grade as a nudge, not an assessment of the prompt's quality.
 
 ### 7. `/intutic judge <prompt>`
 Runs the user prompt upstream to the LLM and evaluates the output response stream in parallel using LLM-as-a-judge compliance checks.

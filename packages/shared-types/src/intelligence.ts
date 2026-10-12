@@ -1,9 +1,9 @@
 /**
  * Phase 7 Intelligence Types
  *
- * Types for LLDs #45, #47, #48, #49, #50, #51
- * SSL Runtime Enforcement, Governance Output Injection,
- * Token Intelligence, Auto-Classification, Prompt Quality,
+ * Types for LLDs #47, #48, #49, #50, #51
+ * SSL Runtime Enforcement, Token Intelligence,
+ * Auto-Classification, Slash Commands,
  * Harness Config & SkillOpt
  *
  * @module @intutic/shared-types/intelligence
@@ -129,58 +129,6 @@ export interface ConstraintEvalResult {
   pass: boolean
   failedKey?: string
   message?: string
-}
-
-export interface SslStepReport {
-  stepIndex: number
-  stepName: string
-  expectedTools: string[]
-}
-
-// ============================================
-// Governance Output Injection
-// ============================================
-
-export type NotificationPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO'
-
-export type NotificationCategory =
-  | 'anomaly'
-  | 'budget'
-  | 'ssl_violation'
-  | 'decision'
-  | 'incident'
-  | 'corrective'
-  | 'system'
-
-export interface GovernanceNotification {
-  notificationId: string
-  sessionId: string
-  workspaceId: string
-  priority: NotificationPriority
-  category: NotificationCategory
-  title: string
-  body: string
-  correctiveCard?: CorrectivePromptCard
-  actionUrl?: string
-  dedupHash: string
-  createdAt: string
-}
-
-export interface CorrectivePromptCard {
-  cardId: string
-  promptText: string
-  anomalyType: string
-  severity: string
-}
-
-export interface NotificationConfig {
-  workspaceId: string
-  inlineEnabled: boolean
-  inlinePriority: NotificationPriority
-  secondaryChannels: {
-    slack?: { webhookUrl: string; minPriority: NotificationPriority }
-    email?: { addresses: string[]; minPriority: NotificationPriority }
-  }
 }
 
 // ============================================
@@ -324,41 +272,8 @@ export interface ProbeViolation {
 }
 
 // ============================================
-// Prompt Quality & Slash Commands
+// Slash Commands
 // ============================================
-
-export interface PromptQualityScore {
-  score: number
-  grade: 'A' | 'B' | 'C' | 'D' | 'F'
-  dimensions: {
-    clarity: number
-    specificity: number
-    actionability: number
-    contextCompleteness: number
-  }
-  suggestions: string[]
-}
-
-export interface PromptQualityContext {
-  model: string
-  inputTokens: number
-  activeSOPs: string[]
-  harnessType: string
-}
-
-export interface ContextGap {
-  gapType: 'SOP_UNLINKED' | 'SOP_TRIGGER_MATCH' | 'CONFIG_RULE_RELEVANT'
-  description: string
-  sopId?: string
-  sopTitle?: string
-  actionUrl?: string
-}
-
-export interface DedupHint {
-  priorTraceId: string
-  priorDate: string
-  similarity: number
-}
 
 export interface SlashCommandRequest {
   sessionId: string
@@ -377,30 +292,12 @@ export interface SlashCommandResponse {
 // Harness Config & SkillOpt
 // ============================================
 
-export interface HarnessConfigSnapshot {
-  snapshotId: string
-  workspaceId: string
-  harnessType: string
-  filePath: string
-  content: string
-  contentHash: string
-  previousHash?: string
-  changeSource: 'daemon' | 'manual' | 'skillopt'
-  diffSummary?: { added: number; removed: number; changed: number }
-  capturedAt: string
-}
-
 export interface ConfigEdit {
   operation: 'ADD' | 'DELETE' | 'REPLACE'
   section: string
   target?: string
   content?: string
   reason: string
-}
-
-export interface ConfigEditWithTarget extends ConfigEdit {
-  harnessType: string
-  filePath: string
 }
 
 export interface SkillOptSuggestion {
@@ -423,12 +320,4 @@ export interface SkillOptSuggestion {
   dismissedAt?: string
   dismissReason?: string
   createdAt: string
-}
-
-export interface ConfigCapturePayload {
-  workspaceId: string
-  harnessType: string
-  filePath: string
-  content: string
-  capturedAt: string
 }

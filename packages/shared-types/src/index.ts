@@ -568,10 +568,6 @@ export type {
   SslOutOfOrderEntry,
   ConstraintViolation,
   ConstraintEvalResult,
-  SslStepReport,
-  // Governance Output Injection
-  GovernanceNotification,
-  NotificationConfig,
   // Token Intelligence
   ToolCallTokenBreakdown,
   CostPrediction,
@@ -582,25 +578,15 @@ export type {
   OptimizationRecommendation,
   LlmProbeResult,
   ProbeViolation,
-  // Prompt Quality & Slash Commands
-  PromptQualityScore,
-  PromptQualityContext,
-  ContextGap,
-  DedupHint,
+  // Slash Commands
   SlashCommandRequest,
   SlashCommandResponse,
   // Harness Config & SkillOpt
-  HarnessConfigSnapshot,
   ConfigEdit,
-  ConfigEditWithTarget,
   SkillOptSuggestion,
-  ConfigCapturePayload,
 } from './intelligence.js'
 
 export {
-  // Governance Output Injection
-  type NotificationPriority,
-  type NotificationCategory,
   // Token Intelligence
   type InputTokenBucket,
   getInputBucket,
