@@ -13,6 +13,7 @@
  */
 
 import { loadCredentials } from '../config/store.js'
+import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from './api.js'
 import { refreshDecisionsDigest, retireClaudeMdDigest } from '@intutic/sync-daemon'
 import type { HarnessType } from '@intutic/shared-types'
@@ -37,7 +38,10 @@ export async function refreshDecisionsLog(workspaceRoot: string): Promise<Decisi
     const creds = await loadCredentials()
     if (!creds) return { refreshed: false, reason: 'not authenticated' }
 
-    const client = createApiClient(creds.controlPlaneUrl, creds.apiKey)
+    // The shared resolver, as every command uses: the saved login URL alone
+    // ignored INTUTIC_CONTROL_PLANE_URL and a workspace set up with --dev.
+    const controlPlaneUrl = resolveControlPlaneUrl()
+    const client = createApiClient(controlPlaneUrl, creds.apiKey)
     const { settings } = await client.get<{ settings?: { decisionsLogEnabled?: boolean } }>(
       '/api/v1/workspace/settings',
     )
@@ -49,7 +53,7 @@ export async function refreshDecisionsLog(workspaceRoot: string): Promise<Decisi
     // its instructions, as on the daemon's own cycle.
     await retireClaudeMdDigest(workspaceRoot)
     const result = await refreshDecisionsDigest({
-      controlPlaneUrl: creds.controlPlaneUrl,
+      controlPlaneUrl,
       apiKey: creds.apiKey,
       workspaceId: creds.workspaceId,
       workspaceRoot,

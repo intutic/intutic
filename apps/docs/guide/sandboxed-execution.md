@@ -131,7 +131,10 @@ run — it will not fall back to the container backend for you.
 
 **Requires KVM** (so a bare-metal host or a VM host with nested
 virtualization enabled — not every cloud VM size supports this) plus the
-`firecracker` binary and your own kernel/rootfs images.
+`firecracker` binary and your own kernel/rootfs images. The agent runs in
+the guest over ssh, so the rootfs needs an sshd, and `INTUTIC_FC_GUEST_KEY`
+must name the private key it accepts for `root`. Without that key the run
+fails with exit `2` before the microVM is set up.
 
 The guest reaches the proxy at the host's address on the tap link, which
 exists only once the microVM starts, so the proxy has to listen on every

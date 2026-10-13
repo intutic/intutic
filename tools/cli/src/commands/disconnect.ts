@@ -4,7 +4,7 @@
  * Every harness config connect wrote is put back (see
  * `@intutic/sync-daemon`'s `planDisconnect` for the files), and on a full
  * disconnect the machine-level pieces go too: the background services, the
- * Intutic CA connect trusted in the login keychain, the Valkey container it
+ * Intutic CA connect trusted (login keychain; Linux system store), the Valkey container it
  * started, the gate caches and, unless `--keep-login`, the stored
  * credentials.
  *
@@ -30,6 +30,7 @@ import { HarnessType } from '@intutic/shared-types'
 import type { IntuticConfig } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { reportDisconnect } from '../lib/deviceReport.js'
+import { linuxConnectCaRemoval, removeLinuxConnectCaTrust } from '../lib/caTrust.js'
 import { clearCredentials, loadConfig, saveConfig } from '../config/store.js'
 import { getCredentialsPath, getIntuticDir } from '../config/paths.js'
 import { getServicePaths, uninstallDaemon, uninstallMcpDaemon, uninstallProxyService, type ServiceTarget } from './install-daemon.js'
@@ -85,9 +86,23 @@ async function planServices(plan: DisconnectPlan): Promise<void> {
  * The Intutic CA connect trusts in the macOS login keychain when the proxy's
  * certificate is not trusted yet. The administrator's machine-wide install
  * trusts it in the System keychain instead, so a copy in the login keychain
- * is connect's.
+ * is connect's. On Linux connect's copy has its own file name in the system
+ * store (`linuxConnectCaRemoval`); removing it needs root, as installing it
+ * did, so without root the commands are printed instead.
  */
-async function planCaTrust(plan: DisconnectPlan): Promise<void> {
+export async function planCaTrust(plan: DisconnectPlan): Promise<void> {
+  if (process.platform === 'linux') {
+    const removal = await linuxConnectCaRemoval()
+    if (!removal) return
+    if (process.getuid?.() === 0) {
+      plan.change(removal.dest, 'remove the Intutic CA certificate connect trusted, and rebuild the system CA bundle', () =>
+        removeLinuxConnectCaTrust(removal),
+      )
+    } else {
+      plan.note(removal.dest, `the Intutic CA certificate connect trusted; removing it needs root: ${removal.commands.join(' && ')}`)
+    }
+    return
+  }
   const certPath = node_path.join(getIntuticDir(), 'ca.crt')
   let sha1: string
   try {

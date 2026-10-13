@@ -52,7 +52,7 @@ import { trueforgeAdapter } from './trueforge.js'
 import { aiSdkHarnessAdapter } from './aiSdkHarness.js'
 import { aiSdkWorkflowAdapter } from './aiSdkWorkflow.js'
 import { agentcoreAdapter } from './agentcore.js'
-import { join } from 'node:path'
+import { resolve } from 'node:path'
 
 /** All registered harness adapters. */
 export const ALL_ADAPTERS: IHarnessAdapter[] = [
@@ -113,8 +113,11 @@ export async function detectHarnesses(workspaceRoot: string): Promise<DetectedHa
     const detected = await adapter.detect(workspaceRoot)
     results.push({
       type: adapter.type,
+      // Relative to the workspace for most harnesses; absolute for the few
+      // that keep their config in the home directory (Claude Desktop), which
+      // `join` used to append to the workspace root.
       configPath: adapter.configFileName
-        ? join(workspaceRoot, adapter.configFileName)
+        ? resolve(workspaceRoot, adapter.configFileName)
         : '',
       detected,
       lastWriteAt: null,

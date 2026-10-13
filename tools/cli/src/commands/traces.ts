@@ -186,9 +186,12 @@ export async function runTracesList(opts: TraceListCliOpts): Promise<void> {
   const client = createApiClient(controlPlaneUrl, creds.apiKey)
 
   // Build query params
+  // The window defaults to 24h, as in local mode and the footer below. With no
+  // `since` the route returns all time.
+  const sinceLabel = opts.since ?? '24h'
   const params = new URLSearchParams()
   if (opts.limit) params.set('limit', opts.limit)
-  if (opts.since) params.set('since', parseSince(opts.since))
+  params.set('since', parseSince(sinceLabel))
   if (opts.action) params.set('enforcement', opts.action)
   if (opts.model) params.set('model', opts.model)
 
@@ -227,7 +230,6 @@ export async function runTracesList(opts: TraceListCliOpts): Promise<void> {
 
     renderTable(headers, widths, rows)
 
-    const sinceLabel = opts.since ?? '24h'
     console.log(
       pc.dim(
         `Showing ${data.traces.length} of ${data.total} traces (last ${friendlyDuration(sinceLabel)})`,

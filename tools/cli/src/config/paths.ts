@@ -97,6 +97,19 @@ export function storedControlPlaneUrl(): string | undefined {
   }
 }
 
+/**
+ * Whether the workspace was initialised with `intutic init --dev`, read
+ * straight from the config file for the same reasons as
+ * {@link storedControlPlaneUrl}.
+ */
+export function workspaceDevMode(): boolean {
+  try {
+    return (JSON.parse(readFileSync(getConfigPath(), 'utf-8')) as { devMode?: unknown }).devMode === true
+  } catch {
+    return false
+  }
+}
+
 /** Trims trailing `/` without a regex (see `commands/exec.ts` for why). */
 function trimTrailingSlashes(s: string): string {
   let end = s.length
@@ -107,27 +120,28 @@ function trimTrailingSlashes(s: string): string {
 /**
  * Resolve the control plane URL, first match wins:
  *
- * 1. a flag: `--control-plane-url` (`flagUrl`), or `--dev` (`devMode`, which
- *    some callers also set from a workspace initialised with `--dev`)
+ * 1. a flag: `--control-plane-url` (`flagUrl`), or `--dev` (`devFlag`)
  * 2. the environment: `INTUTIC_CONTROL_PLANE_URL`, or `INTUTIC_DEV=1`
- * 3. the URL `intutic login` saved with the credentials (`useStored: false`
+ * 3. a workspace initialised with `intutic init --dev`
+ * 4. the URL `intutic login` saved with the credentials (`useStored: false`
  *    skips it, for credentials supplied on the command line instead)
- * 4. the hosted control plane
+ * 5. the hosted control plane
  *
- * Every command resolves through here, so a self-hosted control plane named
- * once — at login, or in the environment — is the one every later command
- * talks to. Before, only localhost or the hosted URL were reachable, and the
- * saved URL was ignored.
+ * Every command resolves through here and passes only its own `--dev` flag,
+ * never the workspace setting, so the precedence is the same everywhere. A
+ * caller that folded `config.devMode` into the flag put the workspace ahead
+ * of the environment; one that left it out ignored the workspace entirely.
  */
 export function resolveControlPlaneUrl(
-  devMode?: boolean,
+  devFlag?: boolean,
   opts: { flagUrl?: string; useStored?: boolean } = {},
 ): string {
   const url =
     opts.flagUrl ||
-    (devMode ? LOCAL_CONTROL_PLANE_URL : undefined) ||
+    (devFlag ? LOCAL_CONTROL_PLANE_URL : undefined) ||
     process.env.INTUTIC_CONTROL_PLANE_URL ||
     (process.env.INTUTIC_DEV === '1' ? LOCAL_CONTROL_PLANE_URL : undefined) ||
+    (workspaceDevMode() ? LOCAL_CONTROL_PLANE_URL : undefined) ||
     (opts.useStored === false ? undefined : storedControlPlaneUrl()) ||
     HOSTED_CONTROL_PLANE_URL
   return trimTrailingSlashes(url)

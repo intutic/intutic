@@ -40,7 +40,12 @@ export const GATE_SURFACES: Readonly<Record<string, GateSurface>> = {
     gate: ['.intutic/hooks/cursor-check.js'],
     loaders: ['.cursor/hooks.json', '~/.cursor/hooks.json'],
     // Machine-wide, root-owned. The guard watches this platform's copy.
-    refusedOnly: ['/etc/cursor/hooks.json', '/Library/Application Support/Cursor/hooks.json'],
+    refusedOnly: [
+      '/etc/cursor/hooks.json',
+      '/Library/Application Support/Cursor/hooks.json',
+      'C:\\ProgramData\\Cursor\\hooks.json',
+      'C:/ProgramData/Cursor/hooks.json',
+    ],
   },
   'windsurf': {
     gate: ['.intutic/hooks/windsurf-check.js'],

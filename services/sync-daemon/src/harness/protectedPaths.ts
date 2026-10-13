@@ -100,6 +100,12 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   // `intutic enterprise install`.
   '/etc/cursor/hooks.json',
   'Application Support/Cursor/hooks.json',
+  // Windows: `%ProgramData%\Cursor\hooks.json`, without the drive, as the
+  // macOS entry leaves out `/Library/`. Nothing turns a backslash into a
+  // slash before matching, and Windows takes either separator, so both
+  // spellings are listed.
+  'ProgramData\\Cursor\\hooks.json',
+  'ProgramData/Cursor/hooks.json',
   // Cline runs the executable `PreToolUse` in this directory; the gate is
   // that file. Cline runs the hooks it finds in its other hook directories as
   // well and refuses a call when any of them does, so a hook added there
@@ -1486,7 +1492,9 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly GuardPattern[] = assertGuard
 const PROTECTED_PATH_SHELL_PATTERNS: readonly GuardPattern[] = (() =>
   assertGuardTableSane(
     UNIVERSAL_PROTECTED_PATHS.map((p) => ({
-      id: `path.${p.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
+      // A backslash is spelled out, so the two Windows spellings of one path
+      // get two ids; no other path has one, so no other id changes.
+      id: `path.${p.replace(/\\/g, '_backslash_').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
       source: ereLiteral(p),
       severity: 'block' as const,
       reason: `Shell command references the governance-protected path ${p}`,

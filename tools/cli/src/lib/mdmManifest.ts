@@ -19,6 +19,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import * as path from 'node:path'
 import { buildHooksConfig, systemHooksDirFor } from '@intutic/sync-daemon/harness/cursorHooks'
 import { ANTIGRAVITY_HOOK_NAME, buildAntigravityHookEntry, buildGeminiBeforeToolEntry } from '@intutic/sync-daemon'
 
@@ -124,7 +125,8 @@ export interface HooksManifestParams {
 
 function resolveTargetPath(params: HooksManifestParams): string {
   if (params.targetPath) return params.targetPath
-  return `${systemHooksDirFor(params.platform ?? process.platform)}/hooks.json`
+  const platform = params.platform ?? process.platform
+  return (platform === 'win32' ? path.win32 : path.posix).join(systemHooksDirFor(platform), 'hooks.json')
 }
 
 /**

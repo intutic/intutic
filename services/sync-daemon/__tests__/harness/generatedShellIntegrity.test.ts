@@ -359,10 +359,10 @@ describe('generated hook scripts', () => {
         )
         const emitted = readFileSync(join(home, w.name, gate!), 'utf8')
 
-        // Emitted as ERE literals (dots escaped) inside the shared floor table, not
+        // Emitted as ERE literals (dots and backslashes escaped) inside the shared floor table, not
         // as a bare double-quoted bash array.
         const missing = UNIVERSAL_PROTECTED_PATHS.filter(
-          (p) => !emitted.includes(p.replace(/\./g, String.raw`\.`)),
+          (p) => !emitted.includes(p.replace(/[.\\]/g, (c) => '\\' + c)),
         )
         expect(
           missing,
@@ -460,7 +460,7 @@ describe('generated Claude Code hook', () => {
     // so the dots are escaped. Checking for the bare path would pass only by
     // accident and fail here for the right reason.
     const missing = UNIVERSAL_PROTECTED_PATHS.filter(
-      (p) => !body.includes(JSON.stringify(p.replace(/\./g, String.raw`\.`))),
+      (p) => !body.includes(JSON.stringify(p.replace(/[.\\]/g, (c) => '\\' + c))),
     )
     expect(missing, `generated hook omits ${missing.length} shared protected path(s)`).toEqual([])
   })

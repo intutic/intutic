@@ -7,6 +7,9 @@
  * file is written or touched. Never throws either way.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 vi.mock('../config/store.js', () => ({
   loadCredentials: vi.fn(async () => ({
@@ -31,16 +34,40 @@ import { loadCredentials } from '../config/store.js'
 
 describe('refreshDecisionsLog', () => {
   let fetchMock: ReturnType<typeof vi.fn>
+  const saved = { HOME: process.env.HOME, url: process.env.INTUTIC_CONTROL_PLANE_URL, dev: process.env.INTUTIC_DEV }
+  let home: string
 
   beforeEach(() => {
     fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     refreshDecisionsDigestMock.mockReset()
     vi.mocked(loadCredentials).mockClear()
+    // The control plane resolves from the environment and ~/.intutic, so
+    // neither the developer's own may leak in.
+    home = mkdtempSync(join(tmpdir(), 'intutic-decisions-'))
+    process.env.HOME = home
+    process.env.INTUTIC_CONTROL_PLANE_URL = 'https://api.test.invalid'
+    delete process.env.INTUTIC_DEV
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    rmSync(home, { recursive: true, force: true })
+    for (const [key, value] of [['HOME', saved.HOME], ['INTUTIC_CONTROL_PLANE_URL', saved.url], ['INTUTIC_DEV', saved.dev]] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  it('uses INTUTIC_CONTROL_PLANE_URL over the URL saved with the login', async () => {
+    process.env.INTUTIC_CONTROL_PLANE_URL = 'https://cp.env.example'
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ settings: { decisionsLogEnabled: true } }) })
+    refreshDecisionsDigestMock.mockResolvedValueOnce({ entriesWritten: 1 })
+
+    await refreshDecisionsLog('/tmp/some-workspace')
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://cp.env.example/api/v1/workspace/settings')
+    expect(refreshDecisionsDigestMock.mock.calls[0][0].controlPlaneUrl).toBe('https://cp.env.example')
   })
 
   it('not authenticated → no-op, no network call, no write attempt', async () => {

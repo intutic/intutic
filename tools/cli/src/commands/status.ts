@@ -12,6 +12,7 @@ import * as node_path from 'node:path'
 import { log } from '../lib/logger.js'
 import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
+import { resolveControlPlaneUrl } from '../config/paths.js'
 import { getActiveAgentProcesses, isSyncDaemonRunning } from '../lib/process.js'
 import { resolveDshHome, listDshProfileDirs, detectDshCoverageGap } from '@intutic/sync-daemon/harness/dshHooks'
 import pc from 'picocolors'
@@ -42,7 +43,7 @@ export async function runStatus(): Promise<void> {
   if (creds) {
     log.field('Email', creds.email)
     log.field('Workspace', creds.workspaceId)
-    log.field('Control Plane', creds.controlPlaneUrl)
+    log.field('Control Plane', resolveControlPlaneUrl())
   } else {
     log.warn(NOT_AUTHENTICATED)
   }

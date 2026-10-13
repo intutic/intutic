@@ -36,7 +36,7 @@ The agent sessions running on this host now, from the daemon's process scan.
 The sync daemon monitors and auto-heals essential local dependencies on the workstation:
 - **Proxy gateway**: The Intutic Rust proxy gateway (port 4000) redirecting LLM API requests and normalising protocols. If it exits or crashes, the daemon immediately re-spawns it.
 - **Valkey cache**: Caches local requests and telemetry (port 6379). The daemon auto-provisions and recovers Valkey using Docker, native binaries, or static fallback binaries.
-- **SSL certificate trust**: Verifies whether the local CA certificate (`ca.crt`) is trusted by the macOS keychain; on Linux and Windows it only checks that the certificate exists.
+- **SSL certificate trust**: Verifies whether the local CA certificate (`ca.crt`) is trusted by the macOS keychain, or, on Linux, is the certificate in the system trust store; on Windows it only checks that the certificate exists.
 
 ---
 

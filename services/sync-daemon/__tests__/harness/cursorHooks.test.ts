@@ -6,9 +6,21 @@ describe('systemHooksDirFor', () => {
     expect(systemHooksDirFor('darwin')).toBe('/Library/Application Support/Cursor')
   })
 
-  it('targets /etc/cursor on non-macOS platforms', () => {
+  it('targets /etc/cursor on Linux', () => {
     expect(systemHooksDirFor('linux')).toBe('/etc/cursor')
-    expect(systemHooksDirFor('win32')).toBe('/etc/cursor')
+  })
+
+  it('targets %ProgramData%\\Cursor on Windows, as Cursor documents', () => {
+    const saved = process.env.ProgramData
+    try {
+      process.env.ProgramData = 'D:\\ProgramData'
+      expect(systemHooksDirFor('win32')).toBe('D:\\ProgramData\\Cursor')
+      delete process.env.ProgramData
+      expect(systemHooksDirFor('win32')).toBe('C:\\ProgramData\\Cursor')
+    } finally {
+      if (saved === undefined) delete process.env.ProgramData
+      else process.env.ProgramData = saved
+    }
   })
 })
 
