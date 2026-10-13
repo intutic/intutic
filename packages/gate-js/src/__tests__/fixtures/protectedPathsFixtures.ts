@@ -312,6 +312,8 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.cursor/hooks.json',
   '/etc/cursor/hooks.json',
   'Application Support/Cursor/hooks.json',
+  'ProgramData\\Cursor\\hooks.json',
+  'ProgramData/Cursor/hooks.json',
   '.clinerules/hooks',
   '.codeium/windsurf/hooks.json',
   '.codeium/hooks.json',
@@ -357,7 +359,7 @@ function ereLiteral(s: string): string {
  */
 export function protectedPathShellPatterns(): readonly FixturePattern[] {
   return UNIVERSAL_PROTECTED_PATHS.map((p) => ({
-    id: `path.${p.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
+    id: `path.${p.replace(/\\/g, '_backslash_').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
     source: ereLiteral(p),
     severity: 'block' as const,
     reason: `Shell command references the governance-protected path ${p}`,
