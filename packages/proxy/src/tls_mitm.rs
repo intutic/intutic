@@ -157,7 +157,7 @@ async fn admit(
 /// Upgrades the connection to a raw TCP tunnel. If the target hostname
 /// is an AI provider, performs TLS MITM to inspect the request.
 /// Otherwise, acts as a transparent passthrough.
-pub async fn handle_connect(req: Request<Body>) -> Response<Body> {
+pub async fn handle_connect(mut req: Request<Body>) -> Response<Body> {
     let (host, port) = match req.uri().authority() {
         Some(a) => {
             let host = a.host().to_string();
@@ -216,21 +216,29 @@ pub async fn handle_connect(req: Request<Body>) -> Response<Body> {
         }
     }
 
-    let has_upgrade = req
-        .extensions()
-        .get::<hyper::upgrade::OnUpgrade>()
-        .is_some();
-    info!(host = %host, has_upgrade = %has_upgrade, "CONNECT upgrade extension check");
+    // Take the upgrade before answering: hyper hands the connection over once
+    // the 200 below is written, to whoever holds this.
+    let on_upgrade = hyper::upgrade::on(&mut req);
+    drop(req);
 
-    // Send 200 Connection Established to the client
+    // Send 200 Connection Established to the client.
+    //
+    // Not `Body::empty()`. axum's router adds `content-length` to every
+    // response whose body has an exact size, `0` for an empty one, and hyper
+    // refuses a 2xx answer to CONNECT that carries one (RFC 9110 §9.3.6): it
+    // drops the connection without writing anything, and the upgrade above is
+    // cancelled. A body of unknown size gets no `content-length`; it ends at
+    // once, so nothing follows the status line.
     let response = Response::builder()
         .status(StatusCode::OK)
-        .body(Body::empty())
+        .body(Body::from_stream(futures_util::stream::empty::<
+            Result<axum::body::Bytes, std::io::Error>,
+        >()))
         .unwrap();
 
     // Spawn the tunnel in the background using hyper's upgrade mechanism
     tokio::spawn(async move {
-        match hyper::upgrade::on(req).await {
+        match on_upgrade.await {
             Ok(upgraded) => {
                 let client_io = TokioIo::new(upgraded);
                 if should_mitm {
