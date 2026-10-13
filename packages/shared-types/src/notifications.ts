@@ -194,7 +194,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   /**
    * The hourly audit-log integrity check found a failure of one kind
    * (`kind`: `chain_break`, `mirror_copy_mismatch`, `signature_invalid`,
-   * `root_mismatch` or `guard_tampered`). Fired once per kind while it keeps
+   * `root_mismatch`, `guard_tampered` or `foreign_key_unenforced`). Fired once per kind while it keeps
    * failing; a recurrence after it clears fires again.
    */
   'governance.integrity.failed',
