@@ -16,7 +16,8 @@ describe('copies of UNIVERSAL_PROTECTED_PATHS', () => {
     const src = readFileSync(GATE_JS_COPY, 'utf8')
     const block = /export const UNIVERSAL_PROTECTED_PATHS: readonly string\[\] = \[\n([\s\S]*?)\n\]/.exec(src)
     expect(block, 'UNIVERSAL_PROTECTED_PATHS not found in the gate SDK fixture').not.toBeNull()
-    const copy = [...block![1]!.matchAll(/^\s*'([^']+)',$/gm)].map((m) => m[1])
+    // Source text: a `\\` in the literal is one backslash in the value.
+    const copy = [...block![1]!.matchAll(/^\s*'([^']+)',$/gm)].map((m) => m[1]!.replace(/\\\\/g, '\\'))
     expect(copy).toEqual([...UNIVERSAL_PROTECTED_PATHS])
   })
 })
