@@ -616,6 +616,29 @@ impl LocalStore for ValkeyStore {
         Ok(())
     }
 
+    async fn record_session_cache_unreported(
+        &self,
+        scope: &str,
+        model: &str,
+    ) -> anyhow::Result<()> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
+        let mut conn = self.conn();
+        let key = session_key(scope);
+        // HSETNX: an existing observation, measured or not, is kept.
+        let written: bool = conn.hset_nx(&key, "cacheWarmModel", model).await?;
+        if written {
+            let _: () = conn
+                .hset(
+                    &key,
+                    "cacheObservedAt",
+                    chrono::Utc::now().timestamp().to_string(),
+                )
+                .await?;
+        }
+        let _: Result<(), _> = conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
+        Ok(())
+    }
+
     async fn record_tool_sequence(
         &self,
         session_id: &str,

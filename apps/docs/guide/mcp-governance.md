@@ -480,13 +480,28 @@ pinning, extended to one fingerprint per `{workspace, server}` pair (each
 governance proxy process fronts exactly one real server). On the first
 `tools/list` response a proxy on this machine sees from a server for a
 workspace, the proxy computes a SHA-256 fingerprint over the canonical JSON of
-the `name`, `description`, and `inputSchema` of every tool it forwards — after
-allowlist filtering, disabled tools and description overrides — sorted so a server reordering its own
-list never reads as a change — and stores it under
+the `name`, `description`, and `inputSchema` of every tool the server declares,
+as the server sent them — before allowlist filtering, disabled tools and
+description overrides — sorted so a server reordering its own list never reads
+as a change, and stores it under
 `~/.intutic/mcp-pins/<workspace>__<server>.json`. Every later `tools/list`
-response is compared against that stored fingerprint.
+response is compared against that stored fingerprint. Changing the allowlist,
+disabling a tool or overriding a description is the owner's edit, not the
+server's, so it does not read as a change.
 
-On a mismatch, the proxy emits an `mcp_server_definition_changed` event and
+A pin written by an earlier version, which covered the curated list instead,
+is replaced by one over the server's own definitions the next time the server
+answers `tools/list`, without an alarm. The proxy logs `tofu_repinned`: as
+information when the old pin still matched the curated list, and as a warning
+when it did not, since that old pin cannot tell an owner's edit from a change
+by the server. In that second case it also sends an
+`mcp_server_definition_changed` event naming both fingerprints, which the
+control plane files as a LOW detector finding (`mcp:tofu_rebaseline`), so a
+real change at upgrade time shows on the Findings page. The server is not
+blocked.
+
+On a mismatch, the proxy emits an `mcp_server_definition_changed` event, which
+the control plane files as a MEDIUM detector finding (`mcp:tofu`), and
 honors the workspace's `mcpProxyFailBehavior` setting exactly the way every
 other governance check in this proxy does (see
 [When the registry has not loaded](#when-the-registry-has-not-loaded) for how
@@ -895,6 +910,10 @@ server: `intutic_governance_status`, `intutic_list_sops` and
 `intutic_mcp_budget_remaining` (what is left of each call budget, read from
 the Valkey the proxies count in). See [the MCP proxy
 reference](/integrations/mcp-proxy#execution-modes-standalone-vs-governed-proxy).
+`intutic_governance_status` checks the API key against the control plane
+(`GET /api/v1/auth/key-context`) and says whether it was accepted, rejected or
+the control plane could not be reached. `intutic_list_sops` lists the
+workspace's VALIDATED SOPs, the ones in force.
 The control plane lists incidents only for the OWNER, ADMIN or EM role, and
 the tool says so to anyone else. It needs `INTUTIC_API_KEY`,
 the control plane's address and a workspace id; with no address configured it

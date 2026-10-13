@@ -464,20 +464,20 @@ Shrinks long tool output in non-streamed JSON responses after the DLP scan, and 
 
 ### Model Routing (`intutic_settings.routing`)
 
-Contextual bandit routing picks a model per request via Thompson sampling over a candidate pool. It is experimental and opt-in: nothing is routed until `enabled` (standalone) or the workspace's `ff_bandit_routing` flag turns it on. See [Intelligent Model Routing](/guide/intelligent-routing#which-models-a-request-can-be-routed-to) for which candidates a request can reach.
+Contextual bandit routing picks a model per request via Thompson sampling over a candidate pool. It is experimental and opt-in: nothing is routed until `enabled` or `mode: shadow` (standalone) or the workspace's `ff_bandit_routing` flag turns it on. See [Intelligent Model Routing](/guide/intelligent-routing#which-models-a-request-can-be-routed-to) for which candidates a request can reach.
 
 | Setting | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `enabled` | boolean | — | Enables bandit routing in standalone mode. Unset defers entirely to the control plane |
+| `enabled` | boolean | — | Enables bandit routing in standalone mode. Unset defers to the control plane; standalone, unset routes only under `mode: shadow` |
 | `candidate_models` | string[] | `claude-sonnet-5-5`, `gpt-4.1`, `gemini-3.8-flash` | Candidate model pool for Thompson sampling. A request is routed only when its model is a candidate or a dated snapshot or `-latest` alias of one; others bypass the bandit entirely. A workspace's `routingCandidates` setting replaces this list for that workspace. Each request only chooses among the candidates it can reach: one its format can be translated to, that the allowlists admit, within budget, with a credential, and listed by the workspace's key when that key's models are known. With a non-empty `model_list`, names it does not list are dropped at startup |
-| `mode` | string | `enforce` | `enforce` serves the routed model; `shadow` records what it would have picked and serves the requested one; `off` does not route |
+| `mode` | string | `enforce` | `enforce` serves the routed model; `shadow` records what it would have picked and serves the requested one, and standalone turns routing on by itself unless `enabled` is `false` (which logs a warning at startup); `off` does not route |
 | `mirror_sample_rate` | number | `0` | Fraction of eligible non-streamed requests (at most `0.05`) also sent to the routed or mirror candidate, scored off the critical path. The copy goes to the candidate's own provider with that provider's credential; a candidate the request cannot reach as written, or has no credential for, is skipped and counted in `routing_targets_skipped`. Each mirrored request is paid for twice |
 | `mirror_candidate_model` | string | — | A model to mirror-test against live traffic, whether or not it is a candidate |
 | `anthropic_model_override` | string | — | When set, any Anthropic-bound model is rewritten to this ID after routing. Unset leaves the routed model untouched |
 | `sop_pin_max_age_secs` | number | `600` | How long a session's injected SOP text stays fixed, so the prompt prefix stays cacheable. `0` re-renders it on every request |
 | `cache_guard_max_age_secs` | number | `300` | How recent a prompt-cache observation must be for routing to keep a warm session on its model. `0` turns the guard off |
 | `cache_guard_min_read_bp` | number | `5000` | The cache-read share (basis points) that counts as warm |
-| `cache_guard_cold_start_prompt_bytes` | number | `20000` | On a session's first turn, a prompt larger than this stays on the requested model. `0` turns this off |
+| `cache_guard_cold_start_prompt_bytes` | number | `20000` | On a session's first turn, a prompt larger than this stays on the requested model. A provider that reports no cache fields still ends the first turn, so later turns route. `0` turns this off |
 
 **Precedence:** when a control plane manages the workspace, the Valkey `ff_bandit_routing` feature flag is authoritative, and `ff_shadow_routing` decides shadow mode in place of `mode: shadow`. `routing.enabled` applies only to standalone deployments where no control plane manages the workspace.
 

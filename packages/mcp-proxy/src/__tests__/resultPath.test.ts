@@ -143,6 +143,21 @@ describe('processServerLine', () => {
     expect(curated.toolsListMsgId).toBe(4)
   })
 
+  it('exposes the upstream definitions for TOFU, untouched by allowlist filtering or description overrides', () => {
+    const schema = { type: 'object', properties: { q: { type: 'string' } } }
+    const line = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 5,
+      result: { tools: [{ name: 'a', description: 'A', inputSchema: schema }, { name: 'b', description: 'B' }] },
+    })
+    const out = processServerLine(line, pendingWith(5, { method: 'tools/list' }), ['a'], { a: 'Owner text.' })
+    expect(out.toolsListTools).toEqual([{ name: 'a', description: 'Owner text.', inputSchema: schema }])
+    expect(out.toolsListPinned).toEqual([
+      { name: 'a', description: 'A', inputSchema: schema },
+      { name: 'b', description: 'B', inputSchema: undefined },
+    ])
+  })
+
   it('passes notifications and unknown ids through untouched', () => {
     const notification = JSON.stringify({ jsonrpc: '2.0', method: 'notifications/progress' })
     expect(processServerLine(notification, new Map(), [], {}).line).toBe(notification)

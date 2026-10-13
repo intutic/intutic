@@ -483,7 +483,11 @@ class Gate:
         if self.cfg.use_hook_gate and self.client is not None and tool_name not in READ_ONLY_TOOLS:
             resp = self.client.hook_gate(tool_name, tool_input)
             if not resp.allowed:
-                self._emit("tool_blocked", tool_name, resp.reason, tool_input, resp.incident_id)
+                # A refusal that names an incident was filed by the hook gate
+                # itself (its DLP check); reporting it again filed a second
+                # incident. Every other refusal is filed only by this event.
+                if not resp.incident_id:
+                    self._emit("tool_blocked", tool_name, resp.reason, tool_input)
                 # The hook gate names the MCP registry's own code when the
                 # registry refused; anything else it refuses is HOOK_GATE.
                 code = resp.code if resp.code in MCP_CODES else "HOOK_GATE"

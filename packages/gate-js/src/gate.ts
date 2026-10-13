@@ -519,7 +519,11 @@ export class Gate {
     if (this.cfg.useHookGate && this.client !== null && !READ_ONLY_TOOLS.has(toolName)) {
       const resp = await this.client.hookGate(toolName, toolInput)
       if (!resp.allowed) {
-        await this.emit('tool_blocked', toolName, resp.reason, toolInput, resp.incidentId)
+        // A refusal that names an incident was filed by the hook gate itself
+        // (its DLP check); reporting it again filed a second incident. Every
+        // other refusal — a rule, the registry, a check that could not run, a
+        // control plane that gave no verdict — is filed only by this event.
+        if (!resp.incidentId) await this.emit('tool_blocked', toolName, resp.reason, toolInput)
         // The hook gate names the MCP registry's own code when the registry
         // refused; anything else it refuses is HOOK_GATE.
         const code = MCP_CODES.has(resp.code ?? '') ? (resp.code as GateRefusalCode) : 'HOOK_GATE'

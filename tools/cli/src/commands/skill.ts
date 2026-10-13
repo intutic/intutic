@@ -69,6 +69,11 @@ export interface SkillReportEntry {
    */
   scanned?: boolean
   /**
+   * Why a `scanned: false` row was not scanned, for the audit's own report
+   * and SARIF. Not part of the control plane's report schema, which drops it.
+   */
+  unscannedReason?: UnscannedReason
+  /**
    * Which surface this row describes. `'skill_md'` for a skill's
    * `SKILL.md`, `'script'` for a bundled file discovered by
    * `discoverSkillBundledFiles` and audited by `auditScriptFile`. Absent for
@@ -96,6 +101,45 @@ export interface SkillReportEntry {
    * explains.
    */
   content?: string
+}
+
+/**
+ * Why a file was not scanned. `not_applicable` is a data file (see
+ * {@link isDataFile}): there is no script to scan, so it does not fail the
+ * audit. The other three are a script, or a file that may be one, the audit
+ * could not look at, and they do.
+ */
+export type UnscannedReason = 'unreadable' | 'over_cap' | 'unknown_language' | 'not_applicable'
+
+/** The words the audit uses for each {@link UnscannedReason}. */
+export function describeUnscanned(reason: UnscannedReason | undefined): string {
+  if (reason === 'not_applicable') return 'a data file, not a script'
+  if (reason === 'over_cap') return `larger than the ${MAX_SCRIPT_SCAN_BYTES}-byte scan cap`
+  if (reason === 'unknown_language') return 'not a script language the scanner reads'
+  return 'could not be read'
+}
+
+/**
+ * Extensions of the non-executable data files a skill bundles — documents,
+ * structured data and images. Such a file is not run, so the script scanner
+ * has nothing to look for; it is listed as not applicable rather than
+ * unscanned. Lowercase, without the dot.
+ */
+export const DATA_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
+  'md', 'markdown', 'txt', 'rst',
+  'json', 'jsonl', 'yaml', 'yml', 'csv', 'tsv',
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp',
+])
+
+/** Whether `filePath` names a data file by its extension ({@link DATA_FILE_EXTENSIONS}). */
+export function isDataFile(filePath: string): boolean {
+  const ext = /\.([A-Za-z0-9]+)$/.exec(filePath)?.[1]?.toLowerCase()
+  return ext !== undefined && DATA_FILE_EXTENSIONS.has(ext)
+}
+
+/** Whether an unscanned row fails the audit: anything but a data file. */
+export function failsAudit(entry: SkillReportEntry): boolean {
+  return entry.scanned === false && entry.unscannedReason !== 'not_applicable'
 }
 
 /**
@@ -173,7 +217,7 @@ export async function auditSkillFile(
         `[${filePath}] Could not be read (${err instanceof Error ? err.message : String(err)}) — reported as unscanned, not clean.`,
       )
     }
-    return { filePath, linesCount: 0, issuesDetected: 0, scanned: false, kind: 'skill_md' }
+    return { filePath, linesCount: 0, issuesDetected: 0, scanned: false, unscannedReason: 'unreadable', kind: 'skill_md' }
   }
 
   const contentLines = content.split('\n')
@@ -333,21 +377,31 @@ export async function auditScriptFile(
   fullPath: string,
   quiet = false,
 ): Promise<SkillReportEntry> {
+  const data = isDataFile(filePath)
   let buffer: Buffer
   try {
     buffer = await fs.readFile(fullPath)
   } catch (err) {
+    if (data) {
+      return { filePath, linesCount: 0, issuesDetected: 0, scanned: false, unscannedReason: 'not_applicable', kind: 'script' }
+    }
     if (!quiet) {
       log.warn(
         `[${filePath}] Could not be read (${err instanceof Error ? err.message : String(err)}) — reported as unscanned, not clean.`,
       )
     }
-    return { filePath, linesCount: 0, issuesDetected: 0, scanned: false, kind: 'script' }
+    return { filePath, linesCount: 0, issuesDetected: 0, scanned: false, unscannedReason: 'unreadable', kind: 'script' }
   }
 
   const sha256 = createHash('sha256').update(buffer).digest('hex')
   const firstLine = buffer.toString('utf8', 0, Math.min(buffer.length, 200)).split('\n')[0]
   const language: ScriptLanguage = detectScriptLanguage(filePath, firstLine)
+
+  // A data file is not applicable whatever its size, unless a shebang says
+  // it is a script after all.
+  if (data && language === 'unknown') {
+    return { filePath, linesCount: 0, issuesDetected: 0, sha256, scanned: false, unscannedReason: 'not_applicable', kind: 'script', language }
+  }
 
   if (buffer.length > MAX_SCRIPT_SCAN_BYTES) {
     if (!quiet) {
@@ -355,14 +409,14 @@ export async function auditScriptFile(
         `[${filePath}] Exceeds the ${MAX_SCRIPT_SCAN_BYTES}-byte script scan cap — refusing to scan (hash recorded).`,
       )
     }
-    return { filePath, linesCount: 0, issuesDetected: 0, sha256, scanned: false, kind: 'script', language }
+    return { filePath, linesCount: 0, issuesDetected: 0, sha256, scanned: false, unscannedReason: 'over_cap', kind: 'script', language }
   }
 
   if (language === 'unknown') {
     // Not a script language this scanner understands (binary, data file,
     // unrecognized extension with no useful shebang) — hash-only, same
     // refusal-not-pass status as an over-cap file.
-    return { filePath, linesCount: 0, issuesDetected: 0, sha256, scanned: false, kind: 'script', language }
+    return { filePath, linesCount: 0, issuesDetected: 0, sha256, scanned: false, unscannedReason: 'unknown_language', kind: 'script', language }
   }
 
   const content = buffer.toString('utf8')
@@ -484,6 +538,13 @@ export async function runSkillList(): Promise<void> {
   }
 }
 
+/** A scan engine that failed on one path, for the audit's report and SARIF. */
+export interface EngineFailure {
+  engine: string
+  path: string
+  error: string
+}
+
 /**
  * A minimal, valid SARIF 2.1.0 document for CI/code-scanning interop.
  *
@@ -516,7 +577,12 @@ export async function runSkillList(): Promise<void> {
  * `SkillScanFinding` representation (`mergeCiscoFindings`), never for this
  * output mode.
  */
-export function buildSarifLog(entries: readonly SkillReportEntry[], additionalRuns: readonly unknown[] = []): object {
+export function buildSarifLog(
+  entries: readonly SkillReportEntry[],
+  additionalRuns: readonly unknown[] = [],
+  /** Engine runs that failed (the Cisco engine on a skill directory). */
+  engineFailures: readonly EngineFailure[] = [],
+): object {
   const results = entries.flatMap((entry) =>
     (entry.findings ?? []).map((finding) => ({
       ruleId: finding.patternId,
@@ -565,6 +631,34 @@ export function buildSarifLog(entries: readonly SkillReportEntry[], additionalRu
         // missing `results` key reads to some SARIF consumers as "the tool
         // did not run" rather than "the tool ran and found nothing".
         results,
+        // What was NOT looked at. Unscanned files and failed engine runs used
+        // to be absent from the document, so an empty `results` read as clean
+        // for files nobody scanned.
+        invocations: [
+          {
+            executionSuccessful: engineFailures.length === 0,
+            toolExecutionNotifications: [
+              ...entries
+                .filter((entry) => entry.scanned === false)
+                .map((entry) => ({
+                  // A data file is a note: listed, nothing missed.
+                  level: entry.unscannedReason === 'not_applicable' ? 'note' : 'warning',
+                  message: {
+                    text:
+                      entry.unscannedReason === 'not_applicable'
+                        ? `Not applicable: ${describeUnscanned(entry.unscannedReason)}.`
+                        : `Not scanned: ${describeUnscanned(entry.unscannedReason)}.`,
+                  },
+                  locations: [{ physicalLocation: { artifactLocation: { uri: entry.filePath } } }],
+                })),
+              ...engineFailures.map((failure) => ({
+                level: 'error',
+                message: { text: `${failure.engine} failed: ${failure.error}` },
+                locations: [{ physicalLocation: { artifactLocation: { uri: failure.path } } }],
+              })),
+            ],
+          },
+        ],
       },
       ...additionalRuns,
     ],
@@ -744,6 +838,7 @@ export async function runSkillAudit(
     }
   }
   const ciscoRawSarifRuns: unknown[] = []
+  const engineFailures: EngineFailure[] = []
 
   const filesToScan = [
     '.cursorrules',
@@ -852,22 +947,49 @@ export async function runSkillAudit(
       if (ciscoResult.ok) {
         issues += mergeCiscoFindings([entry, ...bundledEntries], entry, ciscoResult, workspaceRoot)
         ciscoRawSarifRuns.push(...ciscoResult.sarifRuns)
-      } else if (!sarif) {
-        log.warn(`[cisco] ${skillDirPath}: ${ciscoResult.error}`)
+      } else {
+        engineFailures.push({ engine: 'cisco-skill-scanner', path: skillDirPath, error: ciscoResult.error ?? 'failed' })
+        if (!sarif) log.warn(`[cisco] ${skillDirPath}: ${ciscoResult.error}`)
       }
     }
   }
+
+  // A file nobody scanned, or an engine that failed, is not a clean result.
+  // A data file (not applicable) is listed but does not count.
+  const unscanned = skillsReport.filter(failsAudit)
+  const notApplicable = skillsReport.filter((entry) => entry.unscannedReason === 'not_applicable')
+  const incomplete = unscanned.length + engineFailures.length
 
   if (sarif) {
     // The whole point: one JSON document, nothing else, on stdout. Cisco's
     // combined run (if the engine ran) appends as a second `runs[]` entry,
     // verbatim — see `buildSarifLog`'s doc comment.
     const combinedCiscoRun = combineCiscoSarifRuns(ciscoRawSarifRuns)
-    console.log(JSON.stringify(buildSarifLog(skillsReport, combinedCiscoRun ? [combinedCiscoRun] : []), null, 2))
-  } else if (issues === 0) {
-    log.success('Skill security audit passed. No credentials or critical safety risks detected.')
+    console.log(
+      JSON.stringify(buildSarifLog(skillsReport, combinedCiscoRun ? [combinedCiscoRun] : [], engineFailures), null, 2),
+    )
   } else {
-    log.warn(`Security audit completed with ${issues} findings. Review warnings above.`)
+    // Unreadable and over-cap files were already named as they were met.
+    for (const entry of unscanned.filter((e) => e.unscannedReason === 'unknown_language')) {
+      log.warn(`[${entry.filePath}] Not scanned: ${describeUnscanned(entry.unscannedReason)}.`)
+    }
+    for (const entry of notApplicable) {
+      log.dim(`[${entry.filePath}] Not applicable: ${describeUnscanned(entry.unscannedReason)}.`)
+    }
+    if (issues === 0 && incomplete === 0) {
+      log.success('Skill security audit passed. No credentials or critical safety risks detected.')
+    } else if (issues === 0) {
+      log.warn(
+        `Security audit incomplete: ${unscanned.length} file(s) not scanned, ${engineFailures.length} engine run(s) failed. ` +
+          'No findings in what was scanned; it is not a pass.',
+      )
+    } else {
+      log.warn(
+        `Security audit completed with ${issues} findings` +
+          (incomplete > 0 ? `, ${unscanned.length} file(s) not scanned and ${engineFailures.length} engine run(s) failed` : '') +
+          '. Review warnings above.',
+      )
+    }
   }
 
   // Report findings to Control Plane
@@ -880,10 +1002,12 @@ export async function runSkillAudit(
     }
   }
 
-  // Findings fail the command, so a CI step can gate on it; exitCode rather
-  // than exit() so the SARIF document and the report above finish first.
-  // --exit-zero is for pipelines that upload the SARIF and gate elsewhere.
-  if (issues > 0 && !opts.exitZero) process.exitCode = 1
+  // Findings fail the command, so a CI step can gate on it, and so does an
+  // incomplete audit (a file not scanned, an engine run that failed): a pass
+  // over files nobody looked at is not a pass. exitCode rather than exit() so
+  // the SARIF document and the report above finish first. --exit-zero is for
+  // pipelines that upload the SARIF and gate elsewhere.
+  if ((issues > 0 || incomplete > 0) && !opts.exitZero) process.exitCode = 1
 }
 
 /**

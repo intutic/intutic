@@ -421,7 +421,8 @@ const CASES: Case[] = [
     connected: async () => {
       const text = await fs.readFile(join(home, '.config', 'goose', 'config.yaml'), 'utf-8')
       expect(text).toContain('    host: https://search.example\n    pre_tool_use: mine.sh\n')
-      expect(text).toContain(`  host: ${PROXY}\n`)
+      expect(text).toContain(`OPENAI_HOST: ${PROXY}\n`)
+      expect(text).toContain(`ANTHROPIC_HOST: ${PROXY}\n`)
     },
   },
   {

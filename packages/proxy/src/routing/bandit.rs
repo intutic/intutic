@@ -249,9 +249,13 @@ fn pick_with_family_preference(
 ///     cold-start heuristic: a large first-turn prompt is worth pinning
 ///     even with zero evidence yet, since it's the shape most likely to be
 ///     worth a stable prefix. Fires AT MOST ONCE per scope, ever — the
-///     moment any real observation exists (even stale or cold), evidence
-///     permanently supersedes the heuristic; this branch does not run once
-///     `cache_warm_model` is populated at all.
+///     moment any observation exists (even stale, cold, or one from a
+///     provider that reports no cache fields at all, which the response
+///     path records without a ratio — `record_session_cache_unreported`),
+///     evidence permanently supersedes the heuristic; this branch does not
+///     run once `cache_warm_model` is populated at all. Before that
+///     unreported observation existed, such a provider never wrote one, and
+///     this branch declined every large-prompt turn: routing was off.
 ///   - an observation exists but is STALE (older than `max_age_secs`) — sample.
 ///   - an observation exists and is fresh, but COLD (`cache_read_bp` below
 ///     the threshold) — sample.
@@ -1292,6 +1296,62 @@ mod tests {
                 decision, None,
                 "cache_guard_max_age_secs: 0 must disable the guard entirely"
             );
+        }
+
+        /// A provider whose usage never carries cache fields wrote no
+        /// observation, so the cold-start heuristic declined every
+        /// large-prompt turn and routing was off for the scope. The
+        /// "unreported" observation lets it fire once, then sample.
+        #[tokio::test]
+        async fn a_provider_that_never_reports_cache_fields_routes_after_one_guarded_turn() {
+            use crate::store::MemoryStore;
+            let store = MemoryStore::new();
+            let scope = "ws_1:agent_1";
+            let cfg = RoutingConfig::default();
+            let large = cfg.cache_guard_cold_start_prompt_bytes;
+
+            let first = store.session_routing(scope).await.unwrap();
+            assert_eq!(
+                cache_guard_decision(&first, "gpt-4o", large, NOW, &cfg).as_deref(),
+                Some("gpt-4o"),
+                "the first large-prompt turn still gets the cold-start heuristic"
+            );
+
+            store
+                .record_session_cache_unreported(scope, "gpt-4o")
+                .await
+                .unwrap();
+            let later = store.session_routing(scope).await.unwrap();
+            assert_eq!(
+                later.cache_read_bp, None,
+                "unreported must never read as a measured cold cache"
+            );
+            assert_eq!(
+                cache_guard_decision(&later, "gpt-4o", large, NOW, &cfg),
+                None,
+                "every later large-prompt turn must sample"
+            );
+        }
+
+        #[tokio::test]
+        async fn an_unreported_observation_never_replaces_a_measured_one() {
+            use crate::store::MemoryStore;
+            let store = MemoryStore::new();
+            let scope = "ws_1:agent_1";
+            store
+                .record_session_cache(scope, "claude-sonnet-4-5", 9_000)
+                .await
+                .unwrap();
+            store
+                .record_session_cache_unreported(scope, "gpt-4o")
+                .await
+                .unwrap();
+            let session = store.session_routing(scope).await.unwrap();
+            assert_eq!(
+                session.cache_warm_model.as_deref(),
+                Some("claude-sonnet-4-5")
+            );
+            assert_eq!(session.cache_read_bp, Some(9_000));
         }
     }
 }

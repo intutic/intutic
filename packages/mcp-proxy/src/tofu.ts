@@ -18,6 +18,12 @@
  * the "rug pull". The first tool list a workspace sees from a given server is
  * pinned locally; every later `tools/list` response is compared against it.
  *
+ * The pin is taken over the upstream server's own definitions, before
+ * Intutic's allowlist filtering, tool toggles and description overrides. A pin
+ * over the edited list read an owner's own curation change as the server's,
+ * and raised a false "definition changed" alarm on every machine — which,
+ * fail-closed, blocked the server until the pin file was deleted.
+ *
  * Straight from `tool_pin.rs`'s own doc comment, because it is still exactly
  * true here: **TOFU is change-detection, not content-detection.** A server
  * that is malicious from the very first `tools/list` response has its payload
@@ -31,6 +37,7 @@ import * as node_crypto from 'node:crypto'
 import * as node_fs from 'node:fs/promises'
 import * as node_os from 'node:os'
 import * as node_path from 'node:path'
+import type { DetectionFinding } from './emitter.js'
 
 /** The subset of a `tools/list` tool entry this module hashes. */
 export interface ToolDefinition {
@@ -102,6 +109,12 @@ export function computeToolsFingerprint(tools: readonly ToolDefinition[]): strin
 interface PinRecord {
   fingerprint: string
   pinnedAt: string
+  /**
+   * `'upstream'` for a pin over the server's own definitions. Absent on a
+   * pin written before that, which was taken over the curated list and is
+   * re-pinned on its next check (see `checkTofu`).
+   */
+  basis?: 'upstream'
 }
 
 function pinsDir(): string {
@@ -150,7 +163,7 @@ export async function loadPin(workspaceId: string, serverName: string): Promise<
 export async function savePin(workspaceId: string, serverName: string, fingerprint: string): Promise<void> {
   const dir = pinsDir()
   await node_fs.mkdir(dir, { recursive: true })
-  const record: PinRecord = { fingerprint, pinnedAt: new Date().toISOString() }
+  const record: PinRecord = { fingerprint, pinnedAt: new Date().toISOString(), basis: 'upstream' }
   await node_fs.writeFile(pinFilePath(workspaceId, serverName), JSON.stringify(record, null, 2) + '\n', 'utf-8')
 }
 
@@ -161,6 +174,14 @@ export type TofuOutcome =
   | { status: 'first_contact'; fingerprint: string }
   | { status: 'match'; fingerprint: string }
   | { status: 'mismatch'; fingerprint: string; previousFingerprint: string }
+  /**
+   * An old-style pin (taken over the curated list) replaced by one over the
+   * upstream definitions. `verified` says the old pin still matched the
+   * curated list, so nothing changed across the migration; when it did not,
+   * the old pin cannot tell an owner's curation change from the server's, and
+   * the caller logs it rather than raising an alarm.
+   */
+  | { status: 'repinned'; fingerprint: string; previousFingerprint: string; verified: boolean }
 
 /**
  * Runs the full TOFU check for one server's `tools/list` response: compute
@@ -173,7 +194,10 @@ export type TofuOutcome =
 export async function checkTofu(
   workspaceId: string,
   serverName: string,
+  /** The server's own definitions, before curation and overrides. */
   tools: readonly ToolDefinition[],
+  /** The list as curated for the agent — read only to migrate an old-style pin. */
+  curatedTools: readonly ToolDefinition[] = tools,
 ): Promise<TofuOutcome> {
   const fingerprint = computeToolsFingerprint(tools)
   if (fingerprint === '') return { status: 'skipped' }
@@ -184,11 +208,61 @@ export async function checkTofu(
     return { status: 'first_contact', fingerprint }
   }
 
+  if (existing.basis !== 'upstream') {
+    // Re-pinned silently, once: comparing the old pin with the upstream
+    // fingerprint would raise the false alarm this basis exists to end.
+    await savePin(workspaceId, serverName, fingerprint)
+    return {
+      status: 'repinned',
+      fingerprint,
+      previousFingerprint: existing.fingerprint,
+      verified: computeToolsFingerprint(curatedTools) === existing.fingerprint,
+    }
+  }
+
   if (existing.fingerprint === fingerprint) {
     return { status: 'match', fingerprint }
   }
 
   return { status: 'mismatch', fingerprint, previousFingerprint: existing.fingerprint }
+}
+
+/**
+ * What a TOFU outcome reports to the control plane, as the
+ * `mcp_server_definition_changed` event's reason and finding (filed as a
+ * detector finding, `mcp:<detectorId>`), or `null` when there is nothing to
+ * report.
+ *
+ * - `mismatch`: the server's definitions changed since they were pinned. A
+ *   MEDIUM finding, `kill` when fail-closed refused the listing.
+ * - `repinned`, unverified: an old-style pin no longer matched the curated
+ *   list, so a change by the server at upgrade time cannot be ruled out. The
+ *   server is not blocked; a LOW finding with both fingerprints makes the
+ *   re-baseline visible.
+ * - `repinned`, verified, and every other outcome: nothing changed. `null`.
+ */
+export function tofuReport(
+  outcome: TofuOutcome,
+  serverName: string,
+  blocked: boolean,
+  mismatchReason = '',
+): { reason: string; finding: DetectionFinding } | null {
+  if (outcome.status === 'mismatch') {
+    return {
+      reason: mismatchReason || `MCP server "${serverName}"'s tool definitions changed since they were first pinned.`,
+      finding: { detectorId: 'tofu', kind: 'prompt_injection', disposition: blocked ? 'kill' : 'steer', severity: 'medium', confidence: 1 },
+    }
+  }
+  if (outcome.status === 'repinned' && !outcome.verified) {
+    return {
+      reason:
+        `MCP server "${serverName}"'s TOFU pin was re-baselined on upgrade: the old pin, taken over the curated ` +
+        `tool list, no longer matched it, so a change by the server since it was pinned cannot be ruled out. ` +
+        `The server was not blocked. Old fingerprint ${outcome.previousFingerprint}, new ${outcome.fingerprint}.`,
+      finding: { detectorId: 'tofu_rebaseline', kind: 'prompt_injection', disposition: 'steer', severity: 'low', confidence: 0.5 },
+    }
+  }
+  return null
 }
 
 /**

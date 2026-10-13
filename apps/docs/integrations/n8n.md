@@ -61,4 +61,6 @@ If n8n was detected, `intutic connect` writes the gate, `INSTALL.md` and the imp
 3. Activate the imported workflow.
 
 ### 3. Add API Key
-Add your `INTUTIC_API_KEY` to the n8n environment, or replace the `Authorization` header on the workflow's **Forward to Intutic** node with an n8n credential. The workflow receives events on its webhook (`/webhook/intutic-governance`) and forwards each `tool_blocked` event to `/api/v1/hook-events` at the proxy URL it was generated with; other events end at a no-op node.
+Set `INTUTIC_API_KEY` in the environment of the n8n process and restart n8n, or replace the `Authorization` header on the workflow's **Forward to Intutic** node with an n8n credential. The header reads the key with an n8n expression (`$env.INTUTIC_API_KEY`), so n8n must allow expressions to read the environment: leave `N8N_BLOCK_ENV_ACCESS_IN_NODE` unset or `false`.
+
+The workflow receives events on its webhook (`/webhook/intutic-governance`) and forwards each `tool_blocked` event to the control plane's `/api/v1/hook-events`; other events end at a no-op node. The control plane's address is written into the workflow when it is generated: `INTUTIC_HOST` from `~/.intutic/env/runtime.env`, which the sync daemon writes. If that address changes, import the regenerated file again.
