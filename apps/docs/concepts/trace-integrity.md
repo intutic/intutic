@@ -26,6 +26,13 @@ off, used, and put back exactly as it was between two runs, or a session that
 skipped triggers with `session_replication_role = replica` — neither leaves
 anything in the catalogue. That window is what the roots below are for.
 
+The same run checks every foreign key in the schema. Postgres enforces a foreign
+key with internal triggers, and `ALTER TABLE ... DISABLE TRIGGER ALL` (left
+behind by an interrupted restore, for example) switches those off with the rest:
+the key is still listed and nothing is checked. Any foreign key with an internal
+trigger that is disabled or replica-only fails the probe, and the details report
+how many keys were checked.
+
 So a control that ends there reduces to *trust the operator*, which is the one
 claim an external auditor exists in order not to have to accept.
 
@@ -438,6 +445,10 @@ the operator of rewriting history over their own key management.
   names the guard and what changed; the error log carries every finding. Re-apply
   it from the migrations, then read the root checks — they say whether anything a
   root covers changed in the meantime.
+- **A foreign key's triggers are disabled.** The probe fails and names the
+  constraints and the table carrying the disabled triggers. Re-enabling them does
+  not re-check rows written in the meantime, so look for orphaned rows first,
+  then have a superuser run `ALTER TABLE <table> ENABLE TRIGGER ALL`.
 - **The database disagrees with your mirrored copy.** The probe fails and names
   the root and the fields. Your bucket's copy is the one written at seal time.
 - **A covered trace is deleted.** The leaf survives its trace on purpose — there
@@ -451,7 +462,7 @@ The `audit_log_integrity` probe runs every hour. When it fails, the control plan
 raises `governance.integrity.failed` (CRITICAL) through the notification hub, so a
 Slack, PagerDuty, email or webhook rule on **Trace Integrity Check Failed** hears
 about it without anyone opening the Compliance page. The alert names the kind of
-failure in `kind`, lists up to ten affected roots or guard findings in `affected`,
+failure in `kind`, lists up to ten affected roots, guard findings or foreign keys in `affected`,
 and carries the probe's remediation text:
 
 | `kind` | What the probe found |
@@ -461,6 +472,7 @@ and carries the probe's remediation text:
 | `mirror_copy_mismatch` | A sealed root differs from its copy in your bucket. |
 | `signature_invalid` | A root's signature is rejected by the key recorded on it. |
 | `guard_tampered` | An append-only guard is missing, disabled, or its trigger function no longer hashes to the shipped one. |
+| `foreign_key_unenforced` | A foreign key's internal triggers are disabled or replica-only, so the key is not enforced. |
 
 Each kind alerts once while it keeps failing, not once an hour. There is no
 "resolved" notice: the probe checks the most recent roots, so a mismatched root
