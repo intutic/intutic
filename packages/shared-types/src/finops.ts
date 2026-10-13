@@ -293,8 +293,10 @@ export interface TraceDetail {
   savingsUsd: number
   /** Who re-classified this trace, if anyone. Null when it holds its insert-time value. */
   tokenUtilityClassifiedBy?: string | null
-  tokenUtility: TokenUtility | string
-  tokenUtilityScore: number
+  /** Null when nobody classified the trace and ingest did not mark it WASTED. */
+  tokenUtility: TokenUtility | string | null
+  /** A person's label's score (1 USEFUL, 0 WASTED); null without one. */
+  tokenUtilityScore: number | null
   complianceScore: number
   enforcementAction: EnforcementAction | string
   anomalyDetected: AnomalyType | string | null

@@ -16,6 +16,7 @@ import { getIntuticDir, resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
 import {
   scanSkillContent,
+  skillContentForTransport,
   SKILL_SCAN_PATTERNS,
   scanScriptContent,
   SCRIPT_SCAN_PATTERNS,
@@ -108,12 +109,10 @@ export interface SkillReportEntry {
  * artifact, so silent truncation here is the same tradeoff
  * `mirrorAdoptionService.ts`'s own `capBytes` makes for judge prompt fields.
  */
-const MAX_SKILL_CONTENT_TRANSPORT_CHARS = 65536
-
 export function capContentForTransport(content: string): string {
-  return content.length > MAX_SKILL_CONTENT_TRANSPORT_CHARS
-    ? content.slice(0, MAX_SKILL_CONTENT_TRANSPORT_CHARS)
-    : content
+  // Shared with the sync daemon, which hashes this same text to find the
+  // verdict the control plane stores under the hash of what it received.
+  return skillContentForTransport(content)
 }
 
 /** Where bundled skill directories live, mirroring the conventions

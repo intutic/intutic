@@ -15,7 +15,7 @@ import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { MAX_SCRIPT_HASH_BYTES } from '@intutic/shared-types'
+import { MAX_SCRIPT_HASH_BYTES, SKILL_CONTENT_TRANSPORT_CHARS } from '@intutic/shared-types'
 import { collectAgentReport } from '../src/agentReporter.js'
 
 const sha256Of = (content: string | Buffer) => createHash('sha256').update(content).digest('hex')
@@ -74,6 +74,21 @@ describe('collectAgentReport — skills facet content scanning', () => {
     const r = await report()
     const entry = r.facets.skills.find((s: any) => s.name === 'hashed')
     expect(entry.sha256).toBe(createHash('sha256').update(content, 'utf8').digest('hex'))
+  })
+
+  // The CLI sends the judge at most SKILL_CONTENT_TRANSPORT_CHARS, and the
+  // control plane keys the verdict by the hash of what it received. Hashing the
+  // whole file here meant a SKILL.md over the cap never found its verdict.
+  it('hashes a SKILL.md over the transport cap as the judge receives it: the first 65536 characters', async () => {
+    const dir = join(workspaceRoot, '.agents', 'skills', 'long')
+    await fs.mkdir(dir, { recursive: true })
+    const content = '# Long\n' + 'x'.repeat(SKILL_CONTENT_TRANSPORT_CHARS) + '\ntail the judge never sees'
+    await fs.writeFile(join(dir, 'SKILL.md'), content, 'utf8')
+
+    const r = await report()
+    const entry = r.facets.skills.find((s: any) => s.name === 'long')
+    expect(entry.sha256).toBe(sha256Of(content.slice(0, SKILL_CONTENT_TRANSPORT_CHARS)))
+    expect(entry.sha256).not.toBe(sha256Of(content))
   })
 
   it('omits sha256 for a SKILL.md that could not be read', async () => {

@@ -1641,6 +1641,7 @@ fn request_costs(
             cache_read_input: Some(cache_read),
             cache_write_input: None,
             output: Some(output),
+            reasoning_output: None,
         };
         pricing::estimate_cost_cached(requested_model, &counterfactual_usage)
     } else {
@@ -4971,6 +4972,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // Blocked before any upstream call — no provider usage exists.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms: start.elapsed().as_millis() as u32,
                 verdict: match worst.disposition {
                     // `Ask` reports as "killed" rather than gaining a sixth
@@ -5737,6 +5739,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // call happened, so there is no provider cache to report.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms,
                 verdict: "allowed".to_string(),
                 harness_type: harness_type.clone(),
@@ -6704,6 +6707,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // No response was ever received — no provider usage to report.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms,
                 verdict: "upstream_error".to_string(),
                 harness_type: harness_type.clone(),
@@ -6989,6 +6993,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // Error or short-circuit — no complete response, no provider usage.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms,
                 verdict: verdict.to_string(),
                 harness_type: harness_type.clone(),
@@ -7998,6 +8003,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             // off this same accumulator rather than zeroing.
                             cache_read_input_tokens: usage_acc.cache_read_input,
                             cache_creation_input_tokens: usage_acc.cache_write_input,
+                            reasoning_tokens: usage_acc.reasoning_output,
                             latency_ms: start.elapsed().as_millis() as u32,
                             verdict: "upstream_error".to_string(),
                             harness_type: harness_type_clone.clone(),
@@ -8550,6 +8556,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 cache_hit: false,
                 cache_read_input_tokens: usage_acc.cache_read_input,
                 cache_creation_input_tokens: usage_acc.cache_write_input,
+                reasoning_tokens: usage_acc.reasoning_output,
                 latency_ms: start.elapsed().as_millis() as u32,
                 // Same string the request-side kill uses, so an audit of
                 // blocked tool calls does not have to know which half of the
@@ -8707,6 +8714,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // usage block to report.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms,
                 verdict: "upstream_error".to_string(),
                 harness_type: harness_type.clone(),
@@ -9572,6 +9580,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         cache_hit: false,
         cache_read_input_tokens: usage_final.cache_read_input,
         cache_creation_input_tokens: usage_final.cache_write_input,
+        reasoning_tokens: usage_final.reasoning_output,
         latency_ms,
         // Same string the request-side kill uses, so an audit of blocked tool
         // calls does not have to know which half of the turn caught it.
@@ -10751,6 +10760,7 @@ mod tests {
                 cache_read_input: Some(800),
                 cache_write_input: None,
                 output: Some(100),
+                reasoning_output: None,
             }
         }
 

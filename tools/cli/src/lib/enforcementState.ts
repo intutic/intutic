@@ -155,3 +155,13 @@ export async function writeEnforcementState(
 
   return next
 }
+
+/**
+ * Whether this machine is expected to be contained, and so whether a direct
+ * connection to an AI provider is a bypass worth reporting: the workspace
+ * enforces egress, or this machine applied `intutic enforce` (the firewall leg).
+ * Anywhere else a direct connection is the normal state.
+ */
+export function containmentExpected(egressMode: string | undefined, state: EnforcementState | null): boolean {
+  return egressMode === 'enforce' || state?.firewall?.active === true
+}

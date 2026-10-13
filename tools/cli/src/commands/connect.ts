@@ -32,7 +32,7 @@ import { createApiClient } from '../lib/api.js'
 import { getActiveAgentProcesses } from '../lib/process.js'
 import { getAdapter } from '../harness/detector.js'
 import { printOnboardingGuide } from '../lib/onboarding.js'
-import { writeEnforcementState } from '../lib/enforcementState.js'
+import { writeEnforcementState, readEnforcementState, computeFingerprint, containmentExpected } from '../lib/enforcementState.js'
 import { reportDeviceState } from '../lib/deviceReport.js'
 import { reportMachineInventory, shouldReportInventoryThisIteration } from '../lib/inventory.js'
 import { parseChecksums, verifyChecksum } from '../lib/binaryChecksum.js'
@@ -1025,12 +1025,26 @@ export async function runConnect(opts: {
   }
 
   // Helper to run compliance probes (Phase 6)
+  //
+  // Only where containment is expected: the workspace enforces egress, or this
+  // machine applied `intutic enforce`. Anywhere else a direct connection to a
+  // provider is the normal state, and reporting it filed a CRITICAL
+  // DATA_EXFILTRATION incident on every sync of every such machine.
   const runProbes = async () => {
     try {
+      const enforcement = await readEnforcementState()
+      if (!containmentExpected(safeConfig.settings?.egressMode, enforcement)) {
+        log.dim('[sync] Network containment probe skipped: egress is not enforced for this workspace or machine.')
+        return
+      }
+
       const hookEventsLog = node_path.join(safeConfig.workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
       await node_fs.mkdir(node_path.dirname(hookEventsLog), { recursive: true })
 
-      const probeResults = await runComplianceProbes(safeCreds.workspaceId)
+      // The CA this machine's proxy signs with; a certificate it did not issue is a bypass.
+      const caCertPem = await node_fs.readFile(node_path.join(getIntuticDir(), 'ca.crt'), 'utf-8').catch(() => undefined)
+      const machineId = enforcement?.fingerprint ?? (await computeFingerprint())
+      const probeResults = await runComplianceProbes(safeCreds.workspaceId, 443, { caCertPem, machineId })
       let hasBypass = false
       for (const res of probeResults) {
         if (!res.contained && res.incident) {

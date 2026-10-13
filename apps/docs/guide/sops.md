@@ -288,7 +288,7 @@ When you update a validated SOP, Intutic classifies the change for the audit tra
 | **NARROW** | Reducing the scope of what the rule covers |
 | **WEAKEN** | Making the rule more permissive |
 
-Every edit needs the OWNER or ADMIN role. A `WEAKEN` classification is returned with the edit; it does not need a further approval.
+Every edit needs the OWNER or ADMIN role, and an edit classified `WEAKEN` needs an OWNER: an Admin's is refused with 403 `WEAKEN_REQUIRES_OWNER` and nothing is saved. Approving a Dream Cycle amendment that weakens a guideline needs an OWNER too; a MetaClaw amendment applied by auto-approval is not gated. The classification is returned with every edit, as `antiGaming`.
 
 ## Best practices
 

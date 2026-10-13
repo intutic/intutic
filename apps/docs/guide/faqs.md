@@ -162,7 +162,7 @@ While pair-programming inside the agent chat window (like Cursor or Claude Code)
 ```markdown
 @intutic budget
 ```
-This returns a markdown card with the number of traces the workspace recorded today and the session id. For spend against your caps and budgets, use `intutic budget` or **Settings › Billing**.
+This returns a markdown card with today's and this month's spend against the workspace's caps and, on plans with member budgets, your own member budgets: spent, limit, share used, and whether the budget refuses requests or only alerts. The spend is read from the same counters the proxy's budget gate reads. Per-key budgets are on **Settings › Billing** and `intutic budget keys`.
 
 ---
 
@@ -341,7 +341,7 @@ Although both protect the same compliance boundaries, their engines and executio
 - **`/intutic verify <prompt>` (or `/intutic check`)**:
   - **Type**: Pre-flight prompt linter.
   - **Latency**: Very low — it runs in the control plane with no model call and no upstream network hop.
-  - **Mechanism**: Runs a fixed set of regex pattern matchers in the control plane on the prompt input (hardcoded color values, direct `Date` and UUID calls, database references outside `packages/db`); it does not read the workspace's SOPs. It checks for these violations *before* any request is forwarded to the LLM; the command itself is never sent upstream.
+  - **Mechanism**: Reads the `deny_tools` rules of the workspace's VALIDATED SOPs and enforcing guardrails in the control plane and reports each denied tool the prompt names, *before* any request is forwarded to the LLM; the command itself is never sent upstream. Rules about the order, count or data of calls are enforced by the proxy at call time, not by this check.
 - **`/intutic judge <prompt>`**:
   - **Type**: Parallel E2E response evaluator (LLM-as-a-judge).
   - **Latency**: Sub-second (hidden behind stream chunking).

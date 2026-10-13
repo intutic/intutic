@@ -545,3 +545,21 @@ export function scanSkillContent(content: string): SkillScanResult {
   }
   return { clean: findings.length === 0, findings, scannedAt: new Date().toISOString() }
 }
+
+/**
+ * The most of a `SKILL.md` the semantic judge is sent: the control plane's
+ * `SkillFileReportSchema` refuses a longer `content` (`z.string().max(65536)`).
+ */
+export const SKILL_CONTENT_TRANSPORT_CHARS = 65536
+
+/**
+ * A skill's content as the semantic judge receives it — truncated to
+ * {@link SKILL_CONTENT_TRANSPORT_CHARS} — and therefore the text its verdict is
+ * keyed by. The control plane hashes what it received; the sync daemon hashes
+ * this to look the verdict up. Hashing the whole file on one side and the
+ * truncated copy on the other meant a `SKILL.md` over the cap was judged but
+ * its verdict never found.
+ */
+export function skillContentForTransport(content: string): string {
+  return content.length > SKILL_CONTENT_TRANSPORT_CHARS ? content.slice(0, SKILL_CONTENT_TRANSPORT_CHARS) : content
+}

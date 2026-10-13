@@ -182,6 +182,13 @@ pub struct ExecutionTrace {
     /// `skip_serializing_if` reasoning as `cache_read_input_tokens` above.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u32>,
+    /// Output tokens the provider reported as reasoning
+    /// ([`crate::usage::TokenUsage::reasoning_output`]); part of
+    /// `output_tokens`, not in addition to it. `None` when the provider
+    /// reports no breakdown. Skipped when `None` for the reason
+    /// `cache_read_input_tokens` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u32>,
     pub latency_ms: u32,
     pub verdict: String,
     pub harness_type: String,
@@ -518,6 +525,7 @@ mod tests {
             cache_hit: false,
             cache_read_input_tokens: None,
             cache_creation_input_tokens: None,
+            reasoning_tokens: None,
             latency_ms: 0,
             verdict: String::new(),
             harness_type: String::new(),
@@ -1143,5 +1151,17 @@ mod tests {
             v.as_object().unwrap().get("findings").is_none(),
             "a clean request must not gain a field",
         );
+    }
+
+    // `reasoning_tokens` rides the trace to the control plane only when the
+    // provider reported one; an explicit null would be refused at ingest.
+    #[test]
+    fn reasoning_tokens_serialize_only_when_reported() {
+        let mut trace = base_trace();
+        let absent = serde_json::to_value(&trace).unwrap();
+        assert!(absent.get("reasoning_tokens").is_none());
+        trace.reasoning_tokens = Some(640);
+        let present = serde_json::to_value(&trace).unwrap();
+        assert_eq!(present["reasoning_tokens"], 640);
     }
 }
