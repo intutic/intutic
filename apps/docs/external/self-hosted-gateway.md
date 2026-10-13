@@ -89,7 +89,8 @@ Service. The install's notes print the address.
 | `controlPlaneUrl` | Intutic Cloud | The control plane the gateway reports to: Intutic Cloud, or your Self-host address |
 | `gatewaySecretName` | `intutic-gateway-token` | The Secret with `INTUTIC_GATEWAY_ID` and `INTUTIC_GATEWAY_TOKEN` |
 | `imagePullSecrets` | none | Pull Secrets for `ghcr.io/intutic` |
-| `proxy.image.repository`, `proxy.image.tag` | `ghcr.io/intutic/proxy`, the chart's version | Where the proxy image comes from |
+| `nameOverride`, `fullnameOverride` | none | Resource names are `<release>-intutic-gateway`, or the release name alone when it contains `intutic-gateway`. `nameOverride` replaces the `intutic-gateway` part, `fullnameOverride` the whole name |
+| `proxy.image.repository`, `proxy.image.tag`, `proxy.image.pullPolicy` | `ghcr.io/intutic/proxy`, the chart's version, `IfNotPresent` | Where the proxy image comes from |
 | `proxy.service.type`, `proxy.service.port` | `ClusterIP`, `8080` | How agents reach the gateway |
 | `proxy.replicaCount`, `proxy.resources` | 1, see `helm show values` | |
 | `proxy.heartbeatIntervalSeconds` | 30 | How often the gateway reports in |
@@ -99,13 +100,23 @@ Service. The install's notes print the address.
 | `proxy.requireProvisionedKey` | `false` | Also refuse a virtual key with no provider key provisioned for it |
 | `proxy.judgeFinalizeDeadlineMs` | 5000 | How long judging may hold up the end of a response, in milliseconds |
 | `proxy.localJudge` | `false` | Judge with this chart's LiteLLM (§4) |
-| `valkey.image.repository`, `valkey.image.tag` | `valkey/valkey`, `7-alpine` | |
+| `proxy.localJudgeTypedLo`, `proxy.localJudgeTypedHi` | none | The local judge's optional typed stage: log-odds bounds (`Lo` < `Hi`), on only when both are set. Quote them (`"-4"`). Measure your own model's band; the values validated for one model do not carry over |
+| `proxy.podAnnotations` | none | Annotations on the proxy's pods |
+| `proxy.podSecurityContext` | `runAsNonRoot: true`, `runAsUser: 1001` | The proxy pod's security context |
+| `proxy.securityContext` | no privilege escalation, every capability dropped | The proxy container's security context |
+| `proxy.nodeSelector`, `proxy.tolerations`, `proxy.affinity` | none | Where the proxy runs |
+| `valkey.image.repository`, `valkey.image.tag`, `valkey.image.pullPolicy` | `valkey/valkey`, `7-alpine`, `IfNotPresent` | |
+| `valkey.resources` | see `helm show values` | Valkey's requests and limits |
 | `valkey.persistence.enabled`, `valkey.persistence.size`, `valkey.persistence.storageClassName` | `false`, `1Gi`, the cluster default | Keep Valkey's data across restarts |
 | `litellm.enabled` | `false` | Run LiteLLM for the local judge |
 | `litellm.config` | none | LiteLLM's config: `--set-file litellm.config=./litellm_config.yaml` |
 | `litellm.configMapName` | none | Or a ConfigMap of yours with the key `config.yaml` |
 | `litellm.secretName` | none | A Secret passed to LiteLLM as environment: `LITELLM_MASTER_KEY` and the variables your config reads |
 | `litellm.judgeModel` | none | The `model_name` the local judge calls |
+| `litellm.typedJudgeModel` | `litellm.judgeModel` | The `model_name` for the local judge's typed stage |
+| `litellm.image.repository`, `litellm.image.digest`, `litellm.image.tag`, `litellm.image.pullPolicy` | `ghcr.io/berriai/litellm`, pinned by digest, `main-latest`, `IfNotPresent` | The digest wins over the tag; clear it only to track upstream on purpose |
+| `litellm.resources` | see `helm show values` | LiteLLM's requests and limits; it is killed at start with under 512Mi of memory |
+| `serviceAccount.create`, `serviceAccount.name`, `serviceAccount.annotations` | `true`, named after the release, none | The pods' ServiceAccount. With `create: false`, name one that exists |
 
 `helm show values oci://ghcr.io/intutic/charts/intutic-gateway --version <version>` prints
 them all with their comments.

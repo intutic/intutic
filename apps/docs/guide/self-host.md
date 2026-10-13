@@ -41,7 +41,9 @@ their deterministic versions.
   Stripe, the cloud marketplaces, the Notion and Google Drive connectors, the mem0
   and Supermemory memory providers, VirusTotal lookups and product telemetry.
   Confluence and GitHub connectors work against your own Confluence Data Center
-  or GitHub Enterprise Server.
+  or GitHub Enterprise Server: set `CONFLUENCE_BASE_URL` and `GITHUB_BASE_URL`
+  ([Compose](./self-host-compose#github-enterprise-server-and-confluence-data-center),
+  [Kubernetes](./self-host-kubernetes#values)).
 - **Email goes through your relay** (`SMTP_URL`). Without one, no email is sent
   and owners share sign-in details themselves.
 - **Alerts reach your channels with no flag to set.** The notification hub sends
@@ -61,8 +63,8 @@ their deterministic versions.
   TLS certificate for it. The installer can issue a self-signed one to start.
 - **Docker Compose:** one Linux host, x86-64 or arm64, with 4 vCPUs, 16 GB of memory and
   100 GB of disk, Docker Engine 24+ and Docker Compose v2, and `openssl`.
-- **Kubernetes:** a cluster running 1.27 or later, Helm 3, PostgreSQL 15 or later,
-  and an Ingress controller.
+- **Kubernetes:** a cluster running 1.27 or later, Helm 3.14 or later, PostgreSQL 15
+  or later, and an Ingress controller.
 - **Images:** linux/amd64 and linux/arm64. Each tag at `ghcr.io/intutic` holds
   both; the air-gap bundle comes in one per architecture.
 
