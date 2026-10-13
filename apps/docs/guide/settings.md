@@ -481,7 +481,7 @@ The **Event Type** list offers only the events the control plane sends:
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
 
-Through the API (`filters.severity` on `POST` and `PUT /api/v1/notifications/rules`), the CLI or the [Terraform provider](/reference/terraform/resources/notification_rule), the values are `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` and `INFO`, in any case. They are stored uppercase, and any other value is refused with `400` naming the valid ones. A rule saved before this with lowercase values matched no event; those rules were uppercased when the control plane upgraded.
+Through the API (`filters.severity` on `POST` and `PUT /api/v1/notifications/rules`), the CLI or the [Terraform provider](/reference/terraform/resources/notification_rule), the values are `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` and `INFO`, in any case. They are stored uppercase, and any other value is refused with `400` naming the valid ones. A rule saved before this with lowercase values matched no event; those rules were uppercased when the control plane upgraded, and values that are not severities were dropped. A rule whose filter held no severity at all was switched off rather than left to match every severity, and its id was printed in the upgrade's migration log: choose its severities before turning it back on.
 
 ### Cooldown Throttling
 

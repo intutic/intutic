@@ -204,8 +204,10 @@ Adjust a member's role at any time. Changes take effect immediately.
 The reliable path is **SCIM 2.0 provisioning** — see the
 [SCIM guide](/guide/scim). With it configured, removing a user in your identity
 provider sends `active: false`, which runs the deprovisioning cascade here: their API
-keys are revoked, the cached auth contexts the proxy reads are purged, and their
-sessions are killed. Nothing waits on a human.
+keys are revoked, the cached auth contexts the proxy reads are purged, their
+sessions are killed, and their OBO grants and emergency overrides are revoked. Their
+access tokens that have not expired yet are refused. Nothing waits on a human. A person
+who belongs to other workspaces keeps those memberships.
 
 ::: warning Without SCIM, IdP removal does not stop agents on its own
 API keys authenticate independently of SSO — Intutic checks the key hash and whether
@@ -225,7 +227,8 @@ DELETE /api/v1/members/:memberId
 
 or **Settings › Team Members › Deactivate**. This takes effect
 immediately — every key the member holds stops authenticating at the control plane
-and at the proxy on the next request, not after a cache expiry. The member also
+and at the proxy on the next request, not after a cache expiry, and so does a dashboard
+or API session they already have. The member also
 cannot sign in again by any method: password, magic link, GitHub, Google, OIDC or
 SAML. Each refused attempt is recorded as a failed sign-in.
 

@@ -372,9 +372,13 @@ When a user is deprovisioned (via `DELETE /scim/v2/Users/:id`, or `PATCH` or `PU
 | 1 | `revoke_api_keys` | Revokes every virtual API key (`vk_` prefix) the member holds and purges each from the key cache, so none authenticates again. Each is recorded as a credential change by `system:offboarding` |
 | 2 | `kill_sessions` | Revokes the member's refresh tokens, so no new access token can be issued |
 | 3 | `revoke_obo_grants` | Revokes the member's live [OBO](/guide/security#on-behalf-of-obo-tokens) grants, so their tokens stop verifying |
-| 4 | `notify` | Emits `identity.offboarding.completed` to the workspace event bus |
+| 4 | `revoke_break_glass` | Revokes the user's [emergency overrides](/guide/break-glass#revocation) in this workspace: pending requests can no longer be approved, and an approved token stops working at once instead of when it expires |
+| 5 | `release_held_loops` | Kills the member's loop runs held for review (`PENDING_REVIEW`), recording `system:offboarding` as the reviewer, so nobody resumes a run as someone who has left. The proxy refuses a killed run. Runs that are still active need the member's keys, which step 1 revoked |
+| 6 | `notify` | Emits `identity.offboarding.completed` to the workspace event bus |
 
-Then the user and the member are deactivated. That refuses the member's access tokens that have not expired yet, at the control plane and the proxy.
+Then the member is deactivated. That refuses the member's access tokens that have not expired yet, at the control plane and the proxy, for as long as an access token can live (`JWT_EXPIRY_SECONDS`, 15 minutes by default).
+
+Everything above is scoped to the membership in this workspace. A person who also belongs to another workspace keeps that membership, its keys and its sessions; their user record is marked inactive only when no active membership is left.
 
 The member's traces are kept: they are append-only audit records. Guidelines (SOPs) have no owner to reassign, and plans keep the member as their author.
 
@@ -387,7 +391,7 @@ The offboarding cascade is **idempotent** but uses a distributed lock (Valkey) t
 Each cascade execution is recorded in the `offboarding_events` table with:
 - Event ID, user ID, member ID, workspace ID
 - Trigger source: `scim_delete` for `DELETE /scim/v2/Users/:id`, `scim_deactivate` for a `PATCH` or `PUT` setting `active: false`
-- Status (`in_progress` → `completed`)
+- Status (`in_progress` → `completed`). An event whose steps did not all succeed stays `in_progress`, with the failed step recorded, and the retry below runs that step again
 - Individual step results with timing
 
 ---
