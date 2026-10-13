@@ -126,6 +126,12 @@ jobs:
       - name: Build workspace packages
         run: pnpm turbo run build
 
+      - name: Check published package entry points are packed
+        # Every main/types/bin/exports/typesVersions path of a published
+        # package must be in its npm tarball (@intutic/gate once pointed
+        # typesVersions at src/, which `files` does not ship).
+        run: node tools/scripts/check-package-entrypoints.js
+
       - name: Pack all 10 packages
         run: |
           set -euo pipefail

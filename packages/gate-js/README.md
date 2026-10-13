@@ -54,6 +54,14 @@ outage. A request the hook gate cannot read (HTTP 400, `INVALID_REQUEST`) is
 refused whatever `failClosed` says. intutic-clawde's `GateClient` behaves the
 same way, held to it by `packages/shared-types/fixtures/hook-gate-response-vectors.json`.
 
+A `GateClient` with no API key (what `fromEnv()` builds when neither
+`INTUTIC_API_KEY` nor `~/.intutic/credentials.json` has one) is local-only
+(`client.localOnly`): it sends nothing, the gate skips the SOP register and
+the hook gate, whose answer is an allow with code `LOCAL_ONLY`, and the
+snapshot, SSO-group, MCP-registry and image tiers still decide. A key the
+control plane refuses (401) is not local-only and fails closed as above. Both
+SDKs run `packages/shared-types/fixtures/gate-client-credentials-vectors.json`.
+
 ## Public API surface
 
 | Export | From | What it is |
@@ -62,11 +70,11 @@ same way, held to it by `packages/shared-types/fixtures/hook-gate-response-vecto
 | `install(gate)`, `active()` | `gate.ts` | Process-wide default gate, so wrapped tools don't need the instance threaded through every call site. |
 | `IntuticGateRefusal`, `GateError`, `GateConnectionError` | `errors.ts` | Thrown on refusal. `.reason`, `.code` (a `GateRefusalCode`, listed in `GATE_REFUSAL_CODES`), `.incidentId` carry the structured verdict; `.message` carries the `[Intutic Governance] BLOCKED: ...` text. |
 | `IntuticGateHold` | `errors.ts` | The `IntuticGateRefusal` a hold rule throws (`code` `HELD`) after recording the hold for approval; `.holdId` names it. See `hold.ts`. |
-| `GateClient` | `client.ts` | Control-plane client (`hookGate`, `emit`, `GateClient.fromEnv(...)`). |
+| `GateClient` | `client.ts` | Control-plane client (`hookGate`, `emit`, `localOnly`, `GateClient.fromEnv(...)`). |
 | `wrapTool(fn \| tool, opts?)`, `wrapTools(list \| record, gate?)` | `wrapTools.ts` | Generic wrapping for a plain async function or an `{ execute, ... }`-shaped tool object. **This is the integration point for any JS framework without a dedicated adapter — LangChain.js included.** |
 | `intuticHeaders(opts?)` | `headers.ts` | Headers for a proxy-pointed HTTP/OpenAI-compatible client (`x-session-id`, `x-workspace-id`, `x-intutic-harness`). |
 | `loadSnapshot`, `evaluate`, `Snapshot`, `guardDisabledFromEnv` | `snapshot.ts` | Tier A1: reads `~/.intutic/hooks/policy-snapshot.rules`. |
-| `parseRules`, `firstMatch`, `fetchRules`, `SopRule` | `soprules.ts` | Tier A3: SOP-authored `WHERE`-clause rules. |
+| `parseRules`, `firstMatch`, `fetchRules`, `fetchRegister`, `parseRegister`, `SopRule`, `SopRegister` | `soprules.ts` | Tier A3: SOP-authored `WHERE`-clause rules, and the register they come in (rules plus the workspace's intervention mode). |
 | `checkCommand`, `checkImages`, `checkWrittenManifest`, `ImageVerdict` | `imagecheck.ts` | Tier A2: container-image provenance on deploy commands. |
 | `McpRegistryRecord`, `McpAllowlistRecord` | `mcpRegistryRecord.ts` | Tier M: the snapshot's MCP server registry and allowlist (`Snapshot.mcpRegistry`, `Snapshot.mcpAllowlist`), decided as the hook gates and the MCP proxy decide them; a byte-identical copy of `@intutic/shared-types`' module. |
 | `classify`, `isDeploy`, `isTest`, `touchesInfra` | `actions.ts` | Command classifier shared by A2's deploy trigger. |
@@ -270,10 +278,12 @@ above). Later adapter phases follow the SAME convention (also
    ```json
    "./vercel": { "import": "./dist/vercel.js", "types": "./dist/vercel.d.ts" }
    ```
-3. A matching `typesVersions` entry so editors resolve types from source
-   pre-build:
+3. A matching `typesVersions` entry pointing at the built declarations, so a
+   consumer resolving with `moduleResolution: node` finds the subpath's types
+   (only `dist/` is published, so a `src/` path here resolves to nothing;
+   `tools/scripts/check-package-entrypoints.js` fails the build on one):
    ```json
-   "typesVersions": { "*": { "vercel": ["src/vercel.ts"] } }
+   "typesVersions": { "*": { "vercel": ["dist/vercel.d.ts"] } }
    ```
 4. Each adapter file imports from `./gate.js`, `./errors.js`, etc. (this
    package's core, already built) rather than re-implementing any tier —

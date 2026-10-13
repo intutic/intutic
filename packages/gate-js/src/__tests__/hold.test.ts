@@ -184,7 +184,7 @@ describe('Gate.guard: hold rules', () => {
   })
 
   it('stays held whatever failClosed says when the control plane is unreachable', async () => {
-    const unreachable = new GateClient({ baseUrl: 'http://127.0.0.1:1', workspaceId: 'ws_1', failClosed: false, timeoutMs: 200 })
+    const unreachable = new GateClient({ baseUrl: 'http://127.0.0.1:1', apiKey: 'k', workspaceId: 'ws_1', failClosed: false, timeoutMs: 200 })
     const err = await holdingGate(unreachable).guard('deploy', DEPLOY).catch((e) => e)
     expect(err).toBeInstanceOf(IntuticGateHold)
     expect(err.holdId).toBeUndefined()

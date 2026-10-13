@@ -254,3 +254,16 @@ class TestGateIntegration:
 # A real, healthy, rule-less snapshot: the snapshot tier must be a no-op in
 # these tests so that whatever raises is unambiguously SOP or image integrity.
 _EMPTY_SNAPSHOT = snapshot_mod.Snapshot(rules=[], state="ok", workspace_id="ws_1")
+
+
+def test_the_gate_package_exports_the_register_helpers_and_read_only_tools():
+    # @intutic/gate's index exports fetchRegister, parseRegister and
+    # READ_ONLY_TOOLS; the docs name READ_ONLY_TOOLS as exported here too.
+    import intutic_clawde.gate as gate_pkg
+
+    for name in ("fetch_register", "parse_register", "SopRegister", "READ_ONLY_TOOLS"):
+        assert name in gate_pkg.__all__
+    assert gate_pkg.fetch_register is soprules.fetch_register
+    assert gate_pkg.parse_register is soprules.parse_register
+    assert gate_pkg.READ_ONLY_TOOLS is gate_mod.READ_ONLY_TOOLS
+    assert all(hasattr(gate_pkg, name) for name in gate_pkg.__all__)

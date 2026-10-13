@@ -26,10 +26,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { generateText, tool } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 import { createOpenAI } from '@ai-sdk/openai'
+import { createAnthropic } from '@ai-sdk/anthropic'
 import { z } from 'zod'
 import { IntuticGateRefusal } from '../errors.js'
 import { Gate, install } from '../gate.js'
-import { intuticProxyUrl, intuticToolApproval, withIntuticProxy } from '../vercel.js'
+import { intuticProxyBaseUrl, intuticProxyUrl, intuticToolApproval, withIntuticProxy } from '../vercel.js'
 
 class FakeGate extends Gate {
   calls: Array<{ toolName: string; toolInput: Record<string, unknown> }> = []
@@ -123,15 +124,34 @@ describe('intuticProxyUrl', () => {
   })
 })
 
+describe('intuticProxyBaseUrl', () => {
+  it('appends /v1 to a bare proxy URL', () => {
+    expect(intuticProxyBaseUrl('http://127.0.0.1:4000')).toBe('http://127.0.0.1:4000/v1')
+    expect(intuticProxyBaseUrl('http://127.0.0.1:4000/')).toBe('http://127.0.0.1:4000/v1')
+    expect(intuticProxyBaseUrl('https://proxy.example.com/intutic')).toBe('https://proxy.example.com/intutic/v1')
+  })
+
+  it('never doubles a version segment the caller already supplied', () => {
+    expect(intuticProxyBaseUrl('http://127.0.0.1:4000/v1')).toBe('http://127.0.0.1:4000/v1')
+    expect(intuticProxyBaseUrl('http://127.0.0.1:4000/v1/')).toBe('http://127.0.0.1:4000/v1')
+    expect(intuticProxyBaseUrl('http://127.0.0.1:4000/v1beta')).toBe('http://127.0.0.1:4000/v1beta')
+  })
+
+  it('defaults to the resolved proxy URL', () => {
+    delete process.env.INTUTIC_PROXY_URL
+    expect(intuticProxyBaseUrl()).toBe('http://localhost:4000/v1')
+  })
+})
+
 describe('withIntuticProxy', () => {
-  it('injects the resolved proxy URL as baseURL, preserving other options', () => {
+  it('injects the proxy /v1 base URL as baseURL, preserving other options', () => {
     let seen: { apiKey?: string; baseURL?: string } | undefined
     const factory = (options: { apiKey?: string; baseURL?: string }) => {
       seen = options
       return { model: 'stub' }
     }
     withIntuticProxy(factory, 'http://127.0.0.1:4000')({ apiKey: 'sk-test' })
-    expect(seen).toEqual({ apiKey: 'sk-test', baseURL: 'http://127.0.0.1:4000' })
+    expect(seen).toEqual({ apiKey: 'sk-test', baseURL: 'http://127.0.0.1:4000/v1' })
   })
 
   it('resolves the proxy URL from the environment when no override is given', () => {
@@ -141,12 +161,58 @@ describe('withIntuticProxy', () => {
       seen = options
       return {}
     })({})
-    expect(seen?.baseURL).toBe('http://127.0.0.1:9999')
+    expect(seen?.baseURL).toBe('http://127.0.0.1:9999/v1')
   })
 
   it('a real @ai-sdk/openai provider factory accepts the wrapped call (structural, not a network call)', () => {
     const openai = withIntuticProxy(createOpenAI, 'http://127.0.0.1:4000')({ apiKey: 'sk-test' })
     expect(typeof openai).toBe('function')
+  })
+})
+
+// The proxy serves /v1/chat/completions, /v1/responses and /v1/messages
+// (packages/proxy/src/router.rs). These drive the REAL provider SDKs with a
+// recording `fetch` and assert the URL each one actually requests — the path
+// the SDK appends to `baseURL`, not just the `baseURL` handed to it.
+describe('withIntuticProxy: request paths the real provider SDKs send', () => {
+  function recordingFetch(urls: string[]): typeof fetch {
+    return async (input) => {
+      urls.push(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+      return new Response(JSON.stringify({ error: { message: 'stub', type: 'stub' } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+  }
+
+  const prompt = { prompt: 'hi', maxRetries: 0 } as const
+
+  it.each([
+    ['http://127.0.0.1:4000'],
+    ['http://127.0.0.1:4000/'],
+    ['http://127.0.0.1:4000/v1'],
+  ])('@ai-sdk/openai chat model posts to /v1/chat/completions (proxy URL %s)', async (proxy) => {
+    const urls: string[] = []
+    const openai = withIntuticProxy(createOpenAI, proxy)({ apiKey: 'sk-test', fetch: recordingFetch(urls) })
+    await expect(generateText({ model: openai.chat('gpt-5-mini'), ...prompt })).rejects.toThrow()
+    expect(urls).toEqual(['http://127.0.0.1:4000/v1/chat/completions'])
+  })
+
+  it('@ai-sdk/openai default (Responses) model posts to /v1/responses', async () => {
+    const urls: string[] = []
+    const openai = withIntuticProxy(createOpenAI, 'http://127.0.0.1:4000')({ apiKey: 'sk-test', fetch: recordingFetch(urls) })
+    await expect(generateText({ model: openai('gpt-5-mini'), ...prompt })).rejects.toThrow()
+    expect(urls).toEqual(['http://127.0.0.1:4000/v1/responses'])
+  })
+
+  it('@ai-sdk/anthropic posts to /v1/messages', async () => {
+    const urls: string[] = []
+    const anthropic = withIntuticProxy(createAnthropic, 'http://127.0.0.1:4000')({
+      apiKey: 'sk-test',
+      fetch: recordingFetch(urls),
+    })
+    await expect(generateText({ model: anthropic('claude-sonnet-4-5'), ...prompt })).rejects.toThrow()
+    expect(urls).toEqual(['http://127.0.0.1:4000/v1/messages'])
   })
 })
 

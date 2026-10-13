@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import requests
 from intutic_clawde import ClawdeBlockedError, ClawdeClient, ClawdeConnectionError, ClawdeVerdictError
 from intutic_clawde.client import SDK_HARNESS
+from intutic_clawde.context_resolver import resolve_context
 
 def test_client_init():
     # API key is required
@@ -31,6 +32,45 @@ def test_resolve_context(mock_exists):
         assert context["sessionId"] == "ses_456"
         assert context["gitBranch"] == "main"
         assert context["workingDirectory"] == os.getcwd()
+
+
+_CONTEXT_ENV = {
+    "INTUTIC_WORKSPACE_ID": "ws_env", "INTUTIC_SESSION_ID": "ses_env", "GIT_BRANCH": "main",
+    "GITHUB_RUN_ID": "run_env", "PD_INCIDENT_ID": "pd_env",
+}
+
+
+def _write_config(home, config):
+    (home / ".intutic").mkdir(parents=True, exist_ok=True)
+    (home / ".intutic" / "config.json").write_text(json.dumps(config), encoding="utf-8")
+
+
+def test_resolve_context_reads_the_environment_once_intutic_init_wrote_its_config(tmp_path, monkeypatch):
+    # The shape `intutic init` writes: none of the context fields.
+    monkeypatch.setattr("intutic_clawde.context_resolver.Path.home", lambda: tmp_path)
+    _write_config(tmp_path, {"workspaceRoot": "/repo", "harnesses": ["claude_code"],
+                             "configVersion": 3, "devMode": False})
+    with patch.dict(os.environ, _CONTEXT_ENV):
+        context = resolve_context()
+    assert context["workspaceId"] == "ws_env"
+    assert context["sessionId"] == "ses_env"
+    assert context["gitBranch"] == "main"
+    assert context["ciPipeline"] == "run_env"
+    assert context["pagerdutyIncident"] == "pd_env"
+    assert context["workingDirectory"] == os.getcwd()
+
+
+def test_resolve_context_merges_config_and_environment_field_by_field(tmp_path, monkeypatch):
+    monkeypatch.setattr("intutic_clawde.context_resolver.Path.home", lambda: tmp_path)
+    _write_config(tmp_path, {"workspaceId": "ws_config", "gitBranch": "", "jiraTicket": "INT-1",
+                             "workingDirectory": "/some/dir"})
+    with patch.dict(os.environ, _CONTEXT_ENV):
+        context = resolve_context()
+    assert context["workspaceId"] == "ws_config"
+    assert context["sessionId"] == "ses_env"
+    assert context["gitBranch"] == "main"  # an empty string is not a value
+    assert context["jiraTicket"] == "INT-1"
+    assert context["workingDirectory"] == "/some/dir"
 
 @patch("requests.get")
 def test_budget_checker_cache(mock_get, monkeypatch):

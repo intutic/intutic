@@ -53,8 +53,8 @@ import { IntuticGateRefusal } from '../errors.js'
 import { Gate, install } from '../gate.js'
 import { evaluate, loadSnapshot, SEV_BLOCK, SEV_SHADOW, SEV_WARN } from '../snapshot.js'
 import { allFloorFixtures, type FixturePattern } from './fixtures/protectedPathsFixtures.js'
+import { sandboxGateScript } from './fixtures/sandboxGateScript.js'
 import {
-  _internal,
   intuticApprovalResponder,
   intuticSandboxBootstrap,
   intuticStaticApprovals,
@@ -883,10 +883,10 @@ describe('intuticSandboxBootstrap: generated hook script matches snapshot.evalua
 
   /** Async spawn, not spawnSync: a synchronous spawn per fixture blocks the
    *  worker, which on a loaded machine starves its RPC with Vitest. */
-  function runGeneratedScript(p: FixturePattern, fixture: string): Promise<number | null> {
+  async function runGeneratedScript(p: FixturePattern, fixture: string): Promise<number | null> {
     writeFileSync(join(dir, 'policy-snapshot.rules'), rulesText([rulesLine(p)]), 'utf-8')
     const scriptPath = join(dir, 'claude-code-check.js')
-    writeFileSync(scriptPath, _internal.renderSandboxGateScript('policy-snapshot.rules'), 'utf-8')
+    writeFileSync(scriptPath, await sandboxGateScript(), 'utf-8')
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [scriptPath], { stdio: ['pipe', 'ignore', 'ignore'] })
       child.on('error', reject)
@@ -940,7 +940,7 @@ describe('intuticSandboxBootstrap: generated hook script and hold rules', () => 
   // The sandbox has no route to the control plane, so a hold cannot be
   // recorded or approved there. It used to fall through to an exit 0, letting
   // the call a workspace asked to review run unreviewed.
-  it('refuses a call a hold rule matches, and lets others through', () => {
+  it('refuses a call a hold rule matches, and lets others through', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'intutic-sandbox-gate-hold-'))
     try {
       writeFileSync(
@@ -949,7 +949,7 @@ describe('intuticSandboxBootstrap: generated hook script and hold rules', () => 
         'utf-8',
       )
       const scriptPath = join(dir, 'claude-code-check.js')
-      writeFileSync(scriptPath, _internal.renderSandboxGateScript('policy-snapshot.rules'), 'utf-8')
+      writeFileSync(scriptPath, await sandboxGateScript(), 'utf-8')
       const run = (toolName: string) =>
         spawnSync(process.execPath, [scriptPath], {
           input: JSON.stringify({ tool_name: toolName, tool_input: {} }),

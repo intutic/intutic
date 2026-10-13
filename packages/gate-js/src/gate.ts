@@ -49,7 +49,9 @@
  * A1 and A2 are load-bearing and local. Tier B contributes the DLP regexes
  * and workspace policy from the control plane; whether an unreachable control
  * plane, or one whose checks could not run (`GOVERNANCE_UNAVAILABLE`), blocks
- * is the client's `failClosed` setting (default true).
+ * is the client's `failClosed` setting (default true). A client with no API
+ * key is local-only (`GateClient.localOnly`): A3 and B are skipped and the
+ * hook-gate answer says so (code `LOCAL_ONLY`), while A0, A1, M and A2 run.
  *
  * Tier A3 applies rules written in the SOP register rather than in code. It
  * runs BEFORE A2 so that a block, when both would fire, is attributed to the
@@ -225,6 +227,11 @@ export class Gate {
   async getSopRules(): Promise<soprules.SopRule[]> {
     if (this._sopRules === null) {
       let fetched: soprules.SopRule[] | null = null
+      if (this.client !== null && this.client.localOnly) {
+        // No key: the register cannot be read, and saying so is not news.
+        this._sopRules = []
+        return this._sopRules
+      }
       if (this.client !== null) {
         const register = await soprules.fetchRegister(this.client.baseUrl, this.client.apiKey, this.cfg.workspaceId)
         if (register !== null) {

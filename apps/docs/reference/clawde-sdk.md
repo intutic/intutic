@@ -39,7 +39,7 @@ The proxy address is `baseUrl` (`base_url` in Python), then `INTUTIC_BASE_URL`, 
 For pre-execution checks on the tools an agent runs, rather than on its model calls, use the [Tool Gate SDK](/reference/gate-sdk).
 
 ### 1. Context Resolution
-`resolveContext()` (`resolve_context()`) reads `~/.intutic/config.json`, which the sync daemon keeps current: git branch, Jira ticket, PagerDuty incident, CI pipeline, working directory, workspace and session. Without that file it falls back to `INTUTIC_WORKSPACE_ID`, `INTUTIC_SESSION_ID`, `GIT_BRANCH`, `GITHUB_RUN_ID` / `BUILDKITE_BUILD_ID` / `CIRCLE_BUILD_NUM` and `PD_INCIDENT_ID`. Pass `autoContext: false` (`auto_context=False`) to make it return an empty object.
+`resolveContext()` (`resolve_context()`) builds the context field by field: git branch, Jira ticket, PagerDuty incident, CI pipeline, working directory, workspace and session each come from `~/.intutic/config.json` when that file carries them, and otherwise from `GIT_BRANCH`, `GITHUB_RUN_ID` / `BUILDKITE_BUILD_ID` / `CIRCLE_BUILD_NUM`, `PD_INCIDENT_ID`, the current directory, `INTUTIC_WORKSPACE_ID` and `INTUTIC_SESSION_ID`. The file `intutic init` writes carries none of these fields, so on a machine where it has run the environment variables still apply. The Jira ticket has no environment variable. Pass `autoContext: false` (`auto_context=False`) to make it return an empty object.
 
 `chat()` sends no context headers: the proxy does not read them. What it sends is a session, and the control plane attaches git context to the session.
 

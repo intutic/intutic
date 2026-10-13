@@ -96,6 +96,9 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
     devDependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^4.0.44
+        version: 4.0.44(zod@4.4.3)
       '@ai-sdk/harness':
         specifier: ^1.0.138
         version: 1.0.138(ws@8.21.3)(zod@4.4.3)

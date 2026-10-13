@@ -25,7 +25,8 @@
     "lint:detector-coverage": "node tools/scripts/check-detector-coverage-claims.js",
     "lint:wasm-context-docs": "node tools/scripts/check-wasm-context-docs.js",
     "lint:wasm-verdicts": "node tools/scripts/check-wasm-verdict-codes.js",
-    "lint:rule-dsl": "node tools/scripts/check-rule-dsl-fields.js"
+    "lint:rule-dsl": "node tools/scripts/check-rule-dsl-fields.js",
+    "lint:package-entrypoints": "node tools/scripts/check-package-entrypoints.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

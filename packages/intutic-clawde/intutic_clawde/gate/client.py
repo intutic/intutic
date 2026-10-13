@@ -26,6 +26,14 @@ Two behaviours that must not be "improved":
     is wrong, not the control plane that is down, and allowing would hide it.
   * `emit` NEVER raises. Telemetry that can break a run is worse than no
     telemetry.
+
+A client with no API key is LOCAL-ONLY (`GateClient.local_only`): it cannot
+authenticate, so it makes no request at all. Its hook gate answers allow with
+code LOCAL_ONLY and says why, its events and holds are not sent, and the Gate
+skips the SOP register. The local tiers (policy snapshot, SSO groups from the
+snapshot, MCP registry, image integrity) are unaffected. A client WITH a key
+that the control plane refuses (401) is not local-only: that is an
+authentication fault, and fails closed as above.
 """
 
 from __future__ import annotations
@@ -56,6 +64,9 @@ REASON_MAX = 512   # control plane truncates at 512; do it here so logs match
 # The hook gate's code for a call whose checks could not run.
 GOVERNANCE_UNAVAILABLE = "GOVERNANCE_UNAVAILABLE"
 
+# The code on a local-only client's hook-gate answer: no key, so no call was made.
+LOCAL_ONLY = "LOCAL_ONLY"
+
 # transport(url, body, headers, timeout) -> (status_code, parsed_json_or_{})
 Transport = Callable[[str, Dict[str, Any], Dict[str, str], float], Tuple[int, Dict[str, Any]]]
 # get_transport(url, headers, timeout) -> (status_code, parsed_json_or_{})
@@ -79,6 +90,13 @@ def _requests_get_transport(url: str, headers: Dict[str, str],
                             timeout: float) -> Tuple[int, Dict[str, Any]]:
     res = requests.get(url, headers=headers, timeout=timeout)
     return res.status_code, _parsed(res)
+
+
+class LocalOnlyError(RuntimeError):
+    """Raised before any request a local-only client would otherwise send."""
+
+    def __init__(self, path: str):
+        super().__init__(f"no API key: {path} not called (local-only client)")
 
 
 class HttpStatusError(requests.HTTPError):
@@ -127,7 +145,16 @@ class GateClient:
         self.transport = transport or _requests_transport
         self.get_transport = get_transport or _requests_get_transport
 
+    @property
+    def local_only(self) -> bool:
+        """True when there is no API key. Such a client cannot authenticate, so
+        it sends nothing: the control-plane tiers (SOP register, hook gate) are
+        skipped, events and holds are not reported, and the local tiers decide."""
+        return not self.api_key
+
     def _post(self, path: str, body: Dict[str, Any], timeout: float) -> Dict[str, Any]:
+        if self.local_only:
+            raise LocalOnlyError(path)
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -139,6 +166,8 @@ class GateClient:
         return parsed
 
     def _get(self, path: str, timeout: float) -> Dict[str, Any]:
+        if self.local_only:
+            raise LocalOnlyError(path)
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "X-Workspace-Id": self.workspace_id,
@@ -165,7 +194,17 @@ class GateClient:
         reports allow. A 400 INVALID_REQUEST is a BLOCK whatever `fail_closed`
         says. A shadow-mode workspace's {allowed: true, degraded: true} is an
         allow.
+
+        A `local_only` client makes no call and answers allow with code
+        LOCAL_ONLY, whatever `fail_closed` says: with no key there is no
+        control-plane tier to fail, only local ones, which have already run.
         """
+        if self.local_only:
+            return GateResponse(
+                allowed=True, reached=False, code=LOCAL_ONLY,
+                reason="hook-gate skipped — no API key, so this client is local-only: the "
+                       "control-plane tiers (SOP register, hook gate) did not run; the policy "
+                       "snapshot, SSO-group and image tiers did")
         try:
             d = self._post("/api/v1/hook-gate", {
                 "toolName": tool_name,
@@ -357,6 +396,7 @@ class GateClient:
 
         Reading ~/.intutic/credentials.json means the gate works with whatever
         workspace `intutic login` already bound, instead of duplicating the key.
+        With no key in either place the client is `local_only`.
         """
         base = os.environ.get("INTUTIC_CONTROL_PLANE_URL", "https://api.intutic.ai")
         key = os.environ.get("INTUTIC_API_KEY", "")
