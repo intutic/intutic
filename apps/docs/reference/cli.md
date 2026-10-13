@@ -384,9 +384,10 @@ that login.
    the Root store on Windows. On Linux the system trust store needs root, so connect installs the
    certificate there only when it runs as root; otherwise it prints the two commands to run, for
    example
-   `sudo cp ~/.intutic/ca.crt /usr/local/share/ca-certificates/intutic-ca.crt` and
+   `sudo cp ~/.intutic/ca.crt /usr/local/share/ca-certificates/intutic-connect-ca.crt` and
    `sudo update-ca-certificates` (Debian/Ubuntu), or the `update-ca-trust extract` equivalent
-   on RHEL/Fedora.
+   on RHEL/Fedora. The file is named `intutic-connect-ca.crt`, beside the `intutic-ca.crt` that
+   `intutic enterprise install` writes, so `intutic disconnect` removes only connect's copy.
 2. Seeds the policy snapshot (`~/.intutic/hooks/policy-snapshot.rules`) so the harness gates
    enforce workspace policy from the first tool call, and writes the
    [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) agent skills into
@@ -522,7 +523,7 @@ intutic disconnect [options]
 - **What connect replaced or removed** comes back: the Claude Code `permissions.deny` rules connect replaced, and Aider's `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint`.
 - **Agent skills** (without `--harness`): the [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) skills connect wrote into `.agents/skills/`, unless you have edited them. A copy that was there before connect, or that an earlier version of connect wrote, stays.
 
-Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted in the macOS login keychain, the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
+Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted (in the macOS login keychain, or connect's `intutic-connect-ca.crt` in the Linux system trust store, which needs root: run as a user, disconnect prints the `sudo rm` and bundle-rebuild commands instead), the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
 
 **How it knows what you had:** before connect first writes a file, it keeps a copy of it, in `.intutic/originals/` for files in the workspace and `~/.intutic/originals/` for the rest (owner-only, and ignored by git). A file you have not changed since is restored byte for byte. In one you have changed, only Intutic's entries are taken out and your edits stay. A file connect writes whole that you edited is left as it is, and listed.
 

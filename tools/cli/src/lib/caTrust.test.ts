@@ -76,6 +76,8 @@ describe('installCaTrust', () => {
       },
     }))
     vi.doMock('node:fs/promises', () => ({
+      access: vi.fn().mockRejectedValue(new Error('ENOENT')),
+      unlink: vi.fn(),
       copyFile: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn(),
     }))
@@ -102,6 +104,8 @@ describe('installCaTrust', () => {
       },
     }))
     vi.doMock('node:fs/promises', () => ({
+      access: vi.fn().mockRejectedValue(new Error('ENOENT')),
+      unlink: vi.fn(),
       copyFile: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn(),
     }))
@@ -118,6 +122,8 @@ describe('installCaTrust', () => {
       execFile: (_cmd: string, _args: string[], cb: (err: Error | null) => void) => cb(new Error('not found')),
     }))
     vi.doMock('node:fs/promises', () => ({
+      access: vi.fn().mockRejectedValue(new Error('ENOENT')),
+      unlink: vi.fn(),
       copyFile: vi.fn(),
       readFile: vi.fn(),
     }))
@@ -138,6 +144,8 @@ describe('installCaTrust', () => {
       },
     }))
     vi.doMock('node:fs/promises', () => ({
+      access: vi.fn().mockRejectedValue(new Error('ENOENT')),
+      unlink: vi.fn(),
       copyFile: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn(),
     }))
@@ -153,6 +161,7 @@ describe('installCaTrust', () => {
 describe('ensureLinuxCaTrust', () => {
   const execFileMock = vi.fn()
   const copyFileMock = vi.fn()
+  const unlinkMock = vi.fn()
   const originalPlatform = process.platform
   const CA = '-----BEGIN CERTIFICATE-----\nintutic\n-----END CERTIFICATE-----\n'
 
@@ -165,6 +174,10 @@ describe('ensureLinuxCaTrust', () => {
       },
     }))
     vi.doMock('node:fs/promises', () => ({
+      access: vi.fn(async (p: string) => {
+        if (opts.installed?.[p] === undefined) throw new Error('ENOENT')
+      }),
+      unlink: unlinkMock.mockResolvedValue(undefined),
       copyFile: copyFileMock.mockResolvedValue(undefined),
       readFile: vi.fn(async (p: string) => {
         if (p === '/home/dev/.intutic/ca.crt') return CA
@@ -178,6 +191,7 @@ describe('ensureLinuxCaTrust', () => {
   beforeEach(() => {
     execFileMock.mockReset()
     copyFileMock.mockReset()
+    unlinkMock.mockReset()
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
     vi.resetModules()
   })
@@ -195,7 +209,7 @@ describe('ensureLinuxCaTrust', () => {
     const out = await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', false)
     expect(out.state).toBe('needs-root')
     expect(out.commands).toEqual([
-      'sudo cp /home/dev/.intutic/ca.crt /usr/local/share/ca-certificates/intutic-ca.crt',
+      'sudo cp /home/dev/.intutic/ca.crt /usr/local/share/ca-certificates/intutic-connect-ca.crt',
       'sudo update-ca-certificates',
     ])
     expect(copyFileMock).not.toHaveBeenCalled()
@@ -207,17 +221,17 @@ describe('ensureLinuxCaTrust', () => {
     const { ensureLinuxCaTrust } = await import('./caTrust.js')
     const out = await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', false)
     expect(out.commands).toEqual([
-      'sudo cp /home/dev/.intutic/ca.crt /etc/pki/ca-trust/source/anchors/intutic-ca.crt',
+      'sudo cp /home/dev/.intutic/ca.crt /etc/pki/ca-trust/source/anchors/intutic-connect-ca.crt',
       'sudo update-ca-trust extract',
     ])
   })
 
-  it('root: installs into the system store', async () => {
+  it('root: installs into the system store under connect\'s own name, beside the machine-wide copy', async () => {
     mockSystem({ tools: ['update-ca-certificates'] })
     const { ensureLinuxCaTrust } = await import('./caTrust.js')
     const out = await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', true)
     expect(out.state).toBe('installed')
-    expect(copyFileMock).toHaveBeenCalledWith('/home/dev/.intutic/ca.crt', '/usr/local/share/ca-certificates/intutic-ca.crt')
+    expect(copyFileMock).toHaveBeenCalledWith('/home/dev/.intutic/ca.crt', '/usr/local/share/ca-certificates/intutic-connect-ca.crt')
     expect(execFileMock.mock.calls.map((c) => c[0])).toContain('update-ca-certificates')
   })
 
@@ -235,11 +249,24 @@ describe('ensureLinuxCaTrust', () => {
     expect((await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', false)).state).toBe('needs-root')
   })
 
+  it('enterprise install still writes the machine-wide name, which disconnect leaves alone', async () => {
+    mockSystem({ tools: ['update-ca-certificates'] })
+    const { installCaTrust } = await import('./caTrust.js')
+    await installCaTrust('/home/dev/.intutic/ca.crt', 'system')
+    expect(copyFileMock).toHaveBeenCalledWith('/home/dev/.intutic/ca.crt', '/usr/local/share/ca-certificates/intutic-ca.crt')
+  })
+
+  it('a copy connect installed counts as trusted', async () => {
+    mockSystem({ tools: ['update-ca-certificates'], installed: { '/usr/local/share/ca-certificates/intutic-connect-ca.crt': CA } })
+    const { ensureLinuxCaTrust } = await import('./caTrust.js')
+    expect((await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', false)).state).toBe('trusted')
+  })
+
   it('quotes a path that needs it', async () => {
     mockSystem({ tools: ['update-ca-certificates'] })
     const { linuxSystemTrustShellCommands } = await import('./caTrust.js')
     expect(linuxSystemTrustShellCommands('update-ca-certificates', "/home/o'neil dev/ca.crt")[0]).toBe(
-      "sudo cp '/home/o'\\''neil dev/ca.crt' /usr/local/share/ca-certificates/intutic-ca.crt",
+      "sudo cp '/home/o'\\''neil dev/ca.crt' /usr/local/share/ca-certificates/intutic-connect-ca.crt",
     )
   })
 })
@@ -251,5 +278,74 @@ describe('intutic connect trusts the CA on Linux', () => {
     const src = readFileSync(fileURLToPath(new URL('../commands/connect.ts', import.meta.url)), 'utf8')
     expect(src).toMatch(/process\.platform === 'linux'\) \{[\s\S]{0,400}ensureLinuxCaTrust\(caCertPath\)/)
     expect(src).toMatch(/process\.platform === 'linux'\) \{\s*sslTrustStatus = \(await verifyCaTrust\(caCertPath\)\)/)
+  })
+})
+
+// `intutic disconnect` takes out the copy connect installed, and only that one.
+describe('linuxConnectCaRemoval / removeLinuxConnectCaTrust', () => {
+  const execFileMock = vi.fn()
+  const unlinkMock = vi.fn()
+
+  function mockFiles(present: string[]) {
+    vi.doMock('node:child_process', () => ({
+      execFile: (cmd: string, args: string[], cb: (err: Error | null, res?: unknown) => void) => {
+        execFileMock(cmd, args)
+        cb(null, { stdout: '' })
+      },
+    }))
+    vi.doMock('node:fs/promises', () => ({
+      access: vi.fn(async (p: string) => {
+        if (!present.includes(p)) throw new Error('ENOENT')
+      }),
+      unlink: unlinkMock.mockResolvedValue(undefined),
+      copyFile: vi.fn(),
+      readFile: vi.fn(),
+    }))
+  }
+
+  beforeEach(() => {
+    execFileMock.mockReset()
+    unlinkMock.mockReset()
+    vi.resetModules()
+  })
+
+  afterEach(() => {
+    vi.doUnmock('node:child_process')
+    vi.doUnmock('node:fs/promises')
+    vi.resetModules()
+  })
+
+  it('finds nothing when only the machine-wide copy is there', async () => {
+    mockFiles(['/usr/local/share/ca-certificates/intutic-ca.crt'])
+    const { linuxConnectCaRemoval } = await import('./caTrust.js')
+    expect(await linuxConnectCaRemoval()).toBeNull()
+  })
+
+  it('Debian/Ubuntu: names connect\'s copy and the exact sudo commands', async () => {
+    mockFiles(['/usr/local/share/ca-certificates/intutic-connect-ca.crt'])
+    const { linuxConnectCaRemoval } = await import('./caTrust.js')
+    const removal = await linuxConnectCaRemoval()
+    expect(removal?.dest).toBe('/usr/local/share/ca-certificates/intutic-connect-ca.crt')
+    expect(removal?.commands).toEqual([
+      'sudo rm /usr/local/share/ca-certificates/intutic-connect-ca.crt',
+      'sudo update-ca-certificates --fresh',
+    ])
+  })
+
+  it('RHEL/Fedora: names connect\'s copy and update-ca-trust extract', async () => {
+    mockFiles(['/etc/pki/ca-trust/source/anchors/intutic-connect-ca.crt'])
+    const { linuxConnectCaRemoval } = await import('./caTrust.js')
+    expect((await linuxConnectCaRemoval())?.commands).toEqual([
+      'sudo rm /etc/pki/ca-trust/source/anchors/intutic-connect-ca.crt',
+      'sudo update-ca-trust extract',
+    ])
+  })
+
+  it('removes the file, then rebuilds the bundle', async () => {
+    mockFiles(['/usr/local/share/ca-certificates/intutic-connect-ca.crt'])
+    const { linuxConnectCaRemoval, removeLinuxConnectCaTrust } = await import('./caTrust.js')
+    await removeLinuxConnectCaTrust((await linuxConnectCaRemoval())!)
+    expect(unlinkMock).toHaveBeenCalledWith('/usr/local/share/ca-certificates/intutic-connect-ca.crt')
+    expect(execFileMock).toHaveBeenCalledWith('update-ca-certificates', ['--fresh'])
   })
 })
