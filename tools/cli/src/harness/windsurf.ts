@@ -24,6 +24,7 @@ import { HarnessType, rulesFrontMatterOf } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
 import type { IHarnessAdapter } from './types.js'
 import { loadCredentials } from '../config/store.js'
+import { localProxyPort } from '../lib/localProxy.js'
 import { writeWindsurfHooks } from '@intutic/sync-daemon/harness/windsurfHooks'
 import { ownRulesFileHash, retireLegacyRulesFile, writeOwnRulesFile } from './rulesFiles.js'
 
@@ -44,9 +45,10 @@ export const windsurfAdapter: IHarnessAdapter = {
 
   /** Cascade hooks.json at user + workspace level, and the TLS MITM proxy.
    *  The proxy serves HTTP CONNECT on the same listener as its API, so the
-   *  port is the one `intutic connect` runs it on (PORT, 4000 by default). */
+   *  port is the one `intutic connect` and `start` run it on: the port of
+   *  INTUTIC_PROXY_URL, 4000 by default. `PORT` is not read. */
   async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
-    const proxyPort = parseInt(process.env.PORT || '4000', 10)
+    const proxyPort = localProxyPort()
     const creds = await loadCredentials()
     await writeWindsurfHooks(workspaceRoot, proxyUrl, proxyPort, creds?.workspaceId || 'local')
   },

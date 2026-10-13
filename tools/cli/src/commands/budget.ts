@@ -107,10 +107,9 @@ export async function runBudget(opts: { dev?: boolean }): Promise<void> {
 
   const creds = await loadCredentials()
   const config = loadConfig()
-  const devMode = opts.dev || config?.devMode || process.env.INTUTIC_DEV === '1'
 
   if (creds) {
-    const controlPlaneUrl = resolveControlPlaneUrl(devMode)
+    const controlPlaneUrl = resolveControlPlaneUrl(opts.dev)
     const client = createApiClient(controlPlaneUrl, creds.apiKey)
 
     // 1. Fetch Cloud Budget Status
@@ -152,7 +151,7 @@ export async function runBudget(opts: { dev?: boolean }): Promise<void> {
 
   // 3. Fetch Active Loops (requires connection)
   if (creds) {
-    const controlPlaneUrl = resolveControlPlaneUrl(devMode)
+    const controlPlaneUrl = resolveControlPlaneUrl(opts.dev)
     const client = createApiClient(controlPlaneUrl, creds.apiKey)
     try {
       const loopsRes = await client.get<LoopListResponse>('/api/v1/loops')
@@ -227,9 +226,7 @@ export async function runBudgetWatch(opts: { dev?: boolean; interval?: string })
   console.log('')
 
   const creds = await loadCredentials()
-  const config = loadConfig()
-  const devMode = opts.dev || config?.devMode || process.env.INTUTIC_DEV === '1'
-  const client = creds ? createApiClient(resolveControlPlaneUrl(devMode), creds.apiKey) : null
+  const client = creds ? createApiClient(resolveControlPlaneUrl(opts.dev), creds.apiKey) : null
 
   const intervalSeconds = (() => {
     const parsed = Number(opts.interval)

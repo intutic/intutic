@@ -43,11 +43,13 @@ plan or higher. Every command ships in the open-core CLI; the badge says what it
 Every command that talks to a control plane picks it the same way; the first that is set wins:
 
 1. A flag: `--control-plane-url <url>` (on `login`, `connect` and `daemon install`), or `--dev`
-   for the local one at `http://localhost:3001`. A workspace initialized with `intutic init --dev`
-   counts as `--dev`.
+   for the local one at `http://localhost:3001`.
 2. The environment: `INTUTIC_CONTROL_PLANE_URL`, or `INTUTIC_DEV=1` for the local one.
-3. The control plane `intutic login` saved with your credentials.
-4. Intutic's hosted control plane.
+3. A workspace initialized with `intutic init --dev`, which uses the local one.
+4. The control plane `intutic login` saved with your credentials.
+5. Intutic's hosted control plane.
+
+`intutic status` shows the control plane this order picks.
 
 For a self-hosted control plane, log in once with its URL and every later command uses it:
 
@@ -304,7 +306,7 @@ intutic status
 ```
 
 No options. Displays:
-- Current authentication state: email, workspace and control plane
+- Current authentication state: email, workspace, and the control plane commands use (see [Choosing a control plane](#control-plane-url))
 - The workspace root, dev mode and config version recorded by `intutic init`
 - The harnesses recorded by `intutic init`, by name
 - Sync state: last sync timestamp and the number of tracked files, and whether the sync daemon is running
@@ -377,7 +379,14 @@ that login.
 
 **What it does:**
 1. Starts Valkey if none is running (connected mode needs it), and spawns a managed proxy if
-   nothing is listening on the proxy port (the port of `INTUTIC_PROXY_URL`, else `4000`).
+   nothing is listening on the proxy port (the port of `INTUTIC_PROXY_URL`, else `4000`). It then
+   trusts the proxy's CA certificate (`~/.intutic/ca.crt`): in the login keychain on macOS and
+   the Root store on Windows. On Linux the system trust store needs root, so connect installs the
+   certificate there only when it runs as root; otherwise it prints the two commands to run, for
+   example
+   `sudo cp ~/.intutic/ca.crt /usr/local/share/ca-certificates/intutic-ca.crt` and
+   `sudo update-ca-certificates` (Debian/Ubuntu), or the `update-ca-trust extract` equivalent
+   on RHEL/Fedora.
 2. Seeds the policy snapshot (`~/.intutic/hooks/policy-snapshot.rules`) so the harness gates
    enforce workspace policy from the first tool call, and writes the
    [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) agent skills into
@@ -4353,7 +4362,7 @@ intutic enterprise install [options]
 
    With `--generate-mdm-only` the command stops here.
 3. Checks for admin/root privilege. If the shell is not elevated it prints a warning and still attempts the remaining steps.
-4. Unless `--skip-hooks`: writes the Cursor hook script to `<workspace>/.intutic/hooks/cursor-check.js` and a `hooks.json` pointing at it in `<workspace>/.cursor/`, `~/.cursor/`, and the system location (`/Library/Application Support/Cursor/` on macOS, `/etc/cursor/` elsewhere). The workspace is the one recorded by `intutic init`, or the current directory. If you are logged in, your workspace ID is embedded in the hook's event payloads; without a login it is left empty.
+4. Unless `--skip-hooks`: writes the Cursor hook script to `<workspace>/.intutic/hooks/cursor-check.js` and a `hooks.json` pointing at it in `<workspace>/.cursor/`, `~/.cursor/`, and the system location (`/Library/Application Support/Cursor/` on macOS, `/etc/cursor/` on Linux, `%ProgramData%\Cursor\` on Windows). The workspace is the one recorded by `intutic init`, or the current directory. If you are logged in, your workspace ID is embedded in the hook's event payloads; without a login it is left empty.
 5. Unless `--skip-ca`: trusts `~/.intutic/ca.crt` system-wide — the System keychain via `security add-trusted-cert` on macOS; `update-ca-certificates` (Debian/Ubuntu) or `update-ca-trust` (RHEL/Fedora) on Linux; the Root store via `certutil` on Windows.
 6. Records the outcome in a machine-wide state file (`/Library/Application Support/Intutic/enforcement-state.json` on macOS, `/var/lib/intutic/enforcement-state.json` on Linux, `%ProgramData%\Intutic\enforcement-state.json` on Windows). If you are logged in, it also reports that state to the control plane; this is best-effort and never fails the command.
 7. Prints the next step. This command never changes the host firewall — use [`intutic enforce apply`](#intutic-enforce) for that.
@@ -4394,7 +4403,7 @@ Also available as the top-level shortcut `intutic install-daemon`, with the same
 |--------|-------------|---------|
 | `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required unless `--proxy`) | — |
 | `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required unless `--proxy`) | — |
-| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL`, then the URL saved by `intutic login`, then Intutic's hosted control plane |
+| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL` (or `INTUTIC_DEV=1`), then a workspace initialized with `intutic init --dev`, then the URL saved by `intutic login`, then Intutic's hosted control plane |
 | `--binary-path <path>` | Path to the `intutic` CLI binary; with `--proxy`, an absolute path to `intutic-proxy` | _(current process; with `--proxy`, the launcher's pinned binary, then `intutic-proxy` on PATH)_ |
 | `--dry-run` | Print what would be done without writing files | — |
 | `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |
@@ -4552,7 +4561,7 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 
 | Variable | Read by | Effect |
 |----------|---------|--------|
-| `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of the one saved by `intutic login` and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
+| `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of a workspace initialized with `intutic init --dev` and the one saved by `intutic login`, and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
 | `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`, unless `INTUTIC_CONTROL_PLANE_URL` is set. Any other value is ignored. |
 | `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read. |
 | `VALKEY_URL` | `intutic start`, `intutic connect` | Valkey/Redis the proxy uses. `start` passes it through only when a Valkey is reachable on `--valkey-port`; otherwise it uses `redis://127.0.0.1:<valkey-port>`. `connect` defaults to `redis://127.0.0.1:6379`. |
@@ -4563,7 +4572,7 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 | `INTUTIC_WASM_DIR` | `intutic policy install`, `intutic policy list-local`, the proxy | Directory for local WASM rules. Default `~/.intutic/wasm`; a leading `~/` is expanded. Set it the same way for the CLI and the proxy. |
 | `INTUTIC_FC_KERNEL` | `intutic exec --sandbox firecracker` | Path to the guest kernel image. Required; no default. |
 | `INTUTIC_FC_ROOTFS` | `intutic exec --sandbox firecracker` | Path to the guest root filesystem image containing your agent. Required; no default. |
-| `INTUTIC_FC_GUEST_KEY` | `intutic exec --sandbox firecracker` | Path to the SSH private key for the guest, which needs an sshd-enabled root filesystem. The agent runs in the guest over SSH; without this key the microVM boots but the agent is not run. No default. |
+| `INTUTIC_FC_GUEST_KEY` | `intutic exec --sandbox firecracker` | Path to the private ssh key the rootfs's sshd accepts for `root`; the agent runs in the guest over ssh. Required: without it, or if the file cannot be read, the run fails with exit `2` before the microVM is set up. |
 | `INTUTIC_FC_TAP` | `intutic exec --sandbox firecracker` | Host tap device name. Default `tap-intutic`. |
 | `INTUTIC_FC_GUEST_IP` | `intutic exec --sandbox firecracker` | Guest IP on the tap link. Default `172.16.0.2`. |
 | `INTUTIC_FC_HOST_IP` | `intutic exec --sandbox firecracker` | Host IP on the tap link; the guest reaches the proxy here. Default `172.16.0.1`. |

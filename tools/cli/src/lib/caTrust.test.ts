@@ -146,3 +146,110 @@ describe('installCaTrust', () => {
     await expect(install('/tmp/ca.crt', 'system')).resolves.toMatchObject({ installed: false })
   })
 })
+
+// `intutic connect` trusted the CA on macOS and Windows only. On Linux the
+// system store is the shared one and needs root: install as root, otherwise
+// print the exact commands.
+describe('ensureLinuxCaTrust', () => {
+  const execFileMock = vi.fn()
+  const copyFileMock = vi.fn()
+  const originalPlatform = process.platform
+  const CA = '-----BEGIN CERTIFICATE-----\nintutic\n-----END CERTIFICATE-----\n'
+
+  function mockSystem(opts: { tools: string[]; installed?: Record<string, string> }) {
+    vi.doMock('node:child_process', () => ({
+      execFile: (cmd: string, args: string[], cb: (err: Error | null, res?: unknown) => void) => {
+        execFileMock(cmd, args)
+        if (cmd === 'which') return opts.tools.includes(args[0]) ? cb(null, { stdout: `/usr/sbin/${args[0]}` }) : cb(new Error('not found'))
+        cb(null, { stdout: '' })
+      },
+    }))
+    vi.doMock('node:fs/promises', () => ({
+      copyFile: copyFileMock.mockResolvedValue(undefined),
+      readFile: vi.fn(async (p: string) => {
+        if (p === '/home/dev/.intutic/ca.crt') return CA
+        const installed = opts.installed?.[p]
+        if (installed === undefined) throw new Error('ENOENT')
+        return installed
+      }),
+    }))
+  }
+
+  beforeEach(() => {
+    execFileMock.mockReset()
+    copyFileMock.mockReset()
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+    vi.resetModules()
+  })
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    vi.doUnmock('node:child_process')
+    vi.doUnmock('node:fs/promises')
+    vi.resetModules()
+  })
+
+  it('not root: installs nothing and gives the exact Debian/Ubuntu commands', async () => {
+    mockSystem({ tools: ['update-ca-certificates'] })
+    const { ensureLinuxCaTrust } = await import('./caTrust.js')
+    const out = await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', false)
+    expect(out.state).toBe('needs-root')
+    expect(out.commands).toEqual([
+      'sudo cp /home/dev/.intutic/ca.crt /usr/local/share/ca-certificates/intutic-ca.crt',
+      'sudo update-ca-certificates',
+    ])
+    expect(copyFileMock).not.toHaveBeenCalled()
+    expect(execFileMock.mock.calls.map((c) => c[0])).not.toContain('update-ca-certificates')
+  })
+
+  it('not root: gives the RHEL/Fedora commands where only update-ca-trust exists', async () => {
+    mockSystem({ tools: ['update-ca-trust'] })
+    const { ensureLinuxCaTrust } = await import('./caTrust.js')
+    const out = await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', false)
+    expect(out.commands).toEqual([
+      'sudo cp /home/dev/.intutic/ca.crt /etc/pki/ca-trust/source/anchors/intutic-ca.crt',
+      'sudo update-ca-trust extract',
+    ])
+  })
+
+  it('root: installs into the system store', async () => {
+    mockSystem({ tools: ['update-ca-certificates'] })
+    const { ensureLinuxCaTrust } = await import('./caTrust.js')
+    const out = await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', true)
+    expect(out.state).toBe('installed')
+    expect(copyFileMock).toHaveBeenCalledWith('/home/dev/.intutic/ca.crt', '/usr/local/share/ca-certificates/intutic-ca.crt')
+    expect(execFileMock.mock.calls.map((c) => c[0])).toContain('update-ca-certificates')
+  })
+
+  it('already trusted: does nothing', async () => {
+    mockSystem({ tools: ['update-ca-certificates'], installed: { '/usr/local/share/ca-certificates/intutic-ca.crt': CA } })
+    const { ensureLinuxCaTrust } = await import('./caTrust.js')
+    const out = await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', false)
+    expect(out.state).toBe('trusted')
+    expect(execFileMock).not.toHaveBeenCalled()
+  })
+
+  it('an installed copy of a different CA does not count as trusted', async () => {
+    mockSystem({ tools: ['update-ca-certificates'], installed: { '/usr/local/share/ca-certificates/intutic-ca.crt': 'an older CA' } })
+    const { ensureLinuxCaTrust } = await import('./caTrust.js')
+    expect((await ensureLinuxCaTrust('/home/dev/.intutic/ca.crt', false)).state).toBe('needs-root')
+  })
+
+  it('quotes a path that needs it', async () => {
+    mockSystem({ tools: ['update-ca-certificates'] })
+    const { linuxSystemTrustShellCommands } = await import('./caTrust.js')
+    expect(linuxSystemTrustShellCommands('update-ca-certificates', "/home/o'neil dev/ca.crt")[0]).toBe(
+      "sudo cp '/home/o'\\''neil dev/ca.crt' /usr/local/share/ca-certificates/intutic-ca.crt",
+    )
+  })
+})
+
+describe('intutic connect trusts the CA on Linux', () => {
+  it('connect calls ensureLinuxCaTrust on Linux and reports real Linux trust state', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const src = readFileSync(fileURLToPath(new URL('../commands/connect.ts', import.meta.url)), 'utf8')
+    expect(src).toMatch(/process\.platform === 'linux'\) \{[\s\S]{0,400}ensureLinuxCaTrust\(caCertPath\)/)
+    expect(src).toMatch(/process\.platform === 'linux'\) \{\s*sslTrustStatus = \(await verifyCaTrust\(caCertPath\)\)/)
+  })
+})

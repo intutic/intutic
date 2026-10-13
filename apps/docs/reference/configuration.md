@@ -121,10 +121,10 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `CONTROL_PLANE_URL` | unset | Set when `intutic start` runs, the proxy it starts is managed (see above) |
-| `INTUTIC_CONTROL_PLANE_URL` | the URL `intutic login` saved, else the hosted control plane | The control plane every command talks to. A `--control-plane-url` or `--dev` flag takes precedence |
+| `INTUTIC_CONTROL_PLANE_URL` | a workspace's `init --dev` setting, else the URL `intutic login` saved, else the hosted control plane | The control plane every command talks to. A `--control-plane-url` or `--dev` flag takes precedence |
 | `INTUTIC_DEV` | unset | `1`: talk to a local control plane at `http://localhost:3001` instead of the saved or hosted one. `INTUTIC_CONTROL_PLANE_URL` takes precedence |
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Passed to the proxy the CLI starts |
-| `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at. Its port is the one `intutic connect` and `intutic start` (without `--port`) run the proxy on, and the one `intutic budget` and `intutic doctor` probe. `PORT` is not read for this |
+| `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at. Its port is the one `intutic connect` and `intutic start` (without `--port`) run the proxy on, the one `intutic budget` and `intutic doctor` probe, and the one Windsurf's proxy setting points at. `PORT` is not read for this |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | Where the CLI writes the policy snapshot the hook gate reads |
 | `INTUTIC_APPROVED_BYPASSES` | `~/.intutic/hooks/approved-bypasses.jsonl` | The approved-bypass list the hook gates read, which `intutic chaos run` copies into each repetition with the snapshot |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | Where `intutic policy install` puts WASM rules |

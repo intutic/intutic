@@ -91,6 +91,17 @@ describe('hooks manifests (Jamf / Intune)', () => {
         expect(parsed.target_path).toBe('/Library/Application Support/Cursor/hooks.json')
       })
 
+      it('defaults target_path to C:\\ProgramData\\Cursor\\hooks.json for Windows', () => {
+        const saved = process.env.ProgramData
+        delete process.env.ProgramData
+        try {
+          const json = generate({ hookScriptPath: 'C:\\intutic\\cursor-check.js', platform: 'win32' })
+          expect(JSON.parse(json).target_path).toBe('C:\\ProgramData\\Cursor\\hooks.json')
+        } finally {
+          if (saved !== undefined) process.env.ProgramData = saved
+        }
+      })
+
       it('is valid JSON', () => {
         const json = generate({ hookScriptPath: '/opt/intutic/hooks/cursor-check.js' })
         expect(() => JSON.parse(json)).not.toThrow()

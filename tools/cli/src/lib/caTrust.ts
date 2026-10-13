@@ -4,7 +4,9 @@
  * Two trust scopes:
  * - `'user'` — per-user, non-elevated. Already shipping today via
  *   `commands/connect.ts` (macOS login keychain, Windows `certutil`), run
- *   silently on every `intutic connect`.
+ *   silently on every `intutic connect`. Linux has no per-user store its TLS
+ *   clients share, so connect uses `ensureLinuxCaTrust` instead: the system
+ *   store when it runs as root, otherwise the exact commands to run.
  * - `'system'` — machine-wide, requires root/admin. New here — this is the
  *   half `enterprise install` (`commands/enterprise.ts`) needs and the
  *   deleted `enterprise-install.ts` (commit `8481b5d9`) used to provide.
@@ -125,6 +127,71 @@ async function installLinuxSystemCaTrust(caCertPath: string): Promise<CaTrustRes
   }
 }
 
+/** Quotes `s` for a POSIX shell only when it needs it. */
+function shellQuote(s: string): string {
+  return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * The shell lines that trust `caCertPath` machine-wide on Linux with `tool`,
+ * for a user to run. Pure. Each needs root, so each is prefixed with `sudo`.
+ */
+export function linuxSystemTrustShellCommands(
+  tool: 'update-ca-certificates' | 'update-ca-trust',
+  caCertPath: string,
+): string[] {
+  return tool === 'update-ca-certificates'
+    ? [`sudo cp ${shellQuote(caCertPath)} ${LINUX_DEBIAN_DEST}`, 'sudo update-ca-certificates']
+    : [`sudo cp ${shellQuote(caCertPath)} ${LINUX_RHEL_DEST}`, 'sudo update-ca-trust extract']
+}
+
+export interface LinuxCaTrustOutcome {
+  /**
+   * `trusted`: already in the system store. `installed`: put there now (as
+   * root). `needs-root`: the user must run `commands`. `unsupported`: no
+   * trust tool on this machine. `failed`: installing as root failed.
+   */
+  state: 'trusted' | 'installed' | 'needs-root' | 'unsupported' | 'failed'
+  detail: string
+  commands?: string[]
+}
+
+/**
+ * `intutic connect`'s Linux CA trust. Linux has no per-user trust store that
+ * the system's TLS clients read, and the system store needs root, so: as root
+ * the CA is installed; otherwise connect prints the exact commands to run.
+ */
+export async function ensureLinuxCaTrust(
+  caCertPath: string,
+  isRoot: boolean = process.getuid?.() === 0,
+): Promise<LinuxCaTrustOutcome> {
+  if (await verifyCaTrust(caCertPath)) return { state: 'trusted', detail: 'The CA is in the system trust store.' }
+  if (isRoot) {
+    try {
+      const result = await installLinuxSystemCaTrust(caCertPath)
+      return result.installed
+        ? { state: 'installed', detail: result.detail }
+        : { state: 'unsupported', detail: result.detail }
+    } catch (err) {
+      return { state: 'failed', detail: err instanceof Error ? err.message : String(err) }
+    }
+  }
+  const tool = (await commandExists('update-ca-certificates'))
+    ? 'update-ca-certificates'
+    : (await commandExists('update-ca-trust')) ? 'update-ca-trust' : null
+  if (!tool) {
+    return {
+      state: 'unsupported',
+      detail: 'Neither update-ca-certificates (Debian/Ubuntu) nor update-ca-trust (RHEL/Fedora) is available on this system.',
+    }
+  }
+  return {
+    state: 'needs-root',
+    detail: 'Trusting the CA on Linux means adding it to the system trust store, which needs root.',
+    commands: linuxSystemTrustShellCommands(tool, caCertPath),
+  }
+}
+
 /**
  * Installs `caCertPath` into the OS trust store at `scope`.
  *
@@ -186,9 +253,15 @@ export async function verifyCaTrust(caCertPath: string): Promise<boolean> {
     }
   }
   if (process.platform === 'linux') {
+    // The installed copy must be this CA, not one an earlier proxy generated.
     try {
-      const installed = await readFile(LINUX_DEBIAN_DEST, 'utf-8').catch(() => readFile(LINUX_RHEL_DEST, 'utf-8'))
-      return installed.length > 0
+      const ours = (await readFile(caCertPath, 'utf-8')).trim()
+      if (!ours) return false
+      for (const dest of [LINUX_DEBIAN_DEST, LINUX_RHEL_DEST]) {
+        const installed = await readFile(dest, 'utf-8').catch(() => '')
+        if (installed.trim() === ours) return true
+      }
+      return false
     } catch {
       return false
     }

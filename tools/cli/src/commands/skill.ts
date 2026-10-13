@@ -474,7 +474,7 @@ export async function runSkillList(): Promise<void> {
   const creds = await loadCredentials().catch(() => null)
   if (creds && skillsReport.length > 0) {
     try {
-      const client = await getClient(config?.devMode)
+      const client = await getClient()
       await client.post(`/api/v1/workspaces/${creds.workspaceId}/skills/report`, { skills: skillsReport })
       log.dim('Reported local skills to Intutic control plane.')
     } catch {
@@ -700,7 +700,7 @@ export async function runSkillAudit(
   // semantic analysis are enabled
   if (creds) {
     try {
-      const client = await getClient(config?.devMode)
+      const client = await getClient()
       const syncConfig = await client.fetchConfig(creds.workspaceId)
       enableLocalSkillAuditDelete = syncConfig.settings?.enableLocalSkillAuditDelete ?? false
       ciscoSkillScannerEnabled = syncConfig.settings?.ciscoSkillScannerEnabled ?? false
@@ -873,7 +873,7 @@ export async function runSkillAudit(
   // Report findings to Control Plane
   if (creds && skillsReport.length > 0) {
     try {
-      const client = await getClient(config?.devMode)
+      const client = await getClient()
       await client.post(`/api/v1/workspaces/${creds.workspaceId}/skills/report`, { skills: skillsReport })
     } catch {
       // Non-blocking
@@ -988,21 +988,9 @@ export async function getClient(dev?: boolean) {
     log.error(NOT_AUTHENTICATED)
     process.exit(1)
   }
-  // `config?.devMode` is load-bearing and was missing here.
-  //
-  // Every other command that talks to the control plane resolves dev mode as
-  // `flag || config.devMode || INTUTIC_DEV` (sops, policy, budget, connect, exec).
-  // This one read only the flag and the env var, so a workspace configured with
-  // `devMode: true` still had `intutic loop start` resolve to https://api.intutic.ai
-  // — the loop commands, which are the governance feature, were the one family that
-  // ignored the workspace's own setting and silently addressed production.
-  //
-  // It went unnoticed because tools/cli/dist was stale: the built CLI predated this
-  // code and still read the config, so the bug only appeared once a workspace build
-  // regenerated dist from source.
-  const config = loadConfig()
-  const devMode = dev || config?.devMode || process.env.INTUTIC_DEV === '1'
-  const controlPlaneUrl = resolveControlPlaneUrl(devMode)
+  // Only the flag: the resolver reads the workspace's `init --dev` setting
+  // itself, behind INTUTIC_CONTROL_PLANE_URL.
+  const controlPlaneUrl = resolveControlPlaneUrl(dev)
   return createApiClient(controlPlaneUrl, creds.apiKey)
 }
 

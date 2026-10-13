@@ -79,7 +79,7 @@ The gate is merged into `.cursor/hooks.json` (project) and `~/.cursor/hooks.json
 }
 ```
 
-A machine-wide copy (`/Library/Application Support/Cursor/hooks.json` on macOS, `/etc/cursor/hooks.json` on Linux) is written only by `intutic enterprise install`, which needs administrator rights.
+A machine-wide copy (`/Library/Application Support/Cursor/hooks.json` on macOS, `/etc/cursor/hooks.json` on Linux, `%ProgramData%\Cursor\hooks.json` on Windows) is written only by `intutic enterprise install`, which needs administrator rights.
 
 ### Proxy routing
 

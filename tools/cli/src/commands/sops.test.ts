@@ -26,6 +26,21 @@ import { createHash } from 'node:crypto'
 import { renderSopFile } from '../lib/sopFrontMatter.js'
 import { runSopsPush, runSopsPull, runSopsStatus, runSopsOrgList, runSopsOrgRm } from './sops.js'
 
+/**
+ * A `GET /api/v1/sops` that pages like the route: `page`/`limit` (at most
+ * 100) with `total`. `count` SOPs, titled `SOP <n>`.
+ */
+function pagedSopList(count: number) {
+  return (url: string) => {
+    const q = new URL(url, 'https://x.invalid').searchParams
+    const page = Number(q.get('page') ?? '1')
+    const limit = Math.min(Number(q.get('limit') ?? '50'), 100)
+    const items = Array.from({ length: count }, (_, i) => ({ sopId: `sop_${i}`, title: `SOP ${i}` }))
+      .slice((page - 1) * limit, page * limit)
+    return { items, total: count, page, limit }
+  }
+}
+
 // Every shared mock, before every test in every describe: the module mocks
 // are file-wide, and `vi.restoreAllMocks()` in the afterEach hooks only
 // restores `vi.spyOn` spies on Vitest 4 — it no longer wipes a `vi.fn()`'s
@@ -311,6 +326,20 @@ describe('runSopsPull', () => {
     expect(entries.filter((e) => e.startsWith('onboarding'))).toHaveLength(2)
   })
 
+  it('pulls every SOP across pages, not just the first 100', async () => {
+    const list = pagedSopList(250)
+    // Each SOP's content fetch fails, so pull skips it without writing: the
+    // fetches alone show which SOPs the listing produced.
+    getMock.mockImplementation((url: string) =>
+      url.startsWith('/api/v1/sops?') ? Promise.resolve(list(url)) : Promise.reject(new Error('offline')))
+
+    await pull()
+
+    const fetched = new Set(getMock.mock.calls.map((c) => String(c[0])).filter((u) => !u.startsWith('/api/v1/sops?')))
+    expect(fetched.size).toBe(250)
+    expect(fetched.has('/api/v1/sops/sop_249')).toBe(true)
+  })
+
   it('reports no SOPs found without writing anything, rather than an error', async () => {
     getMock.mockResolvedValue({ items: [] })
     await pull()
@@ -415,6 +444,16 @@ describe('runSopsStatus', () => {
     await status()
 
     expect(output()).toContain('push-only')
+  })
+
+  it('matches a local file against a SOP past the first 100', async () => {
+    await fs.writeFile(path.join(sopsDir, 'late.md'), renderSopFile({ title: 'SOP 180', riskTier: 'LOW', version: '1.0.0', body: 'Body.' }))
+    getMock.mockImplementation((url: string) => Promise.resolve(pagedSopList(250)(url)))
+
+    await status()
+
+    expect(output()).toContain('late.md: remote-ahead')
+    expect(output()).toContain('0 push-only')
   })
 
   it('reports a directory-not-found message rather than throwing when .intutic/sops is absent', async () => {

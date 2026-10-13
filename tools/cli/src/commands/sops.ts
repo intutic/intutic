@@ -14,9 +14,7 @@ async function getClient(dev?: boolean) {
     log.error(NOT_AUTHENTICATED)
     process.exit(1)
   }
-  const config = loadConfig()
-  const devMode = dev || config?.devMode || process.env.INTUTIC_DEV === '1'
-  const controlPlaneUrl = resolveControlPlaneUrl(devMode)
+  const controlPlaneUrl = resolveControlPlaneUrl(dev)
   return createApiClient(controlPlaneUrl, creds.apiKey)
 }
 
@@ -145,10 +143,33 @@ export async function runSopsPush(name: string, opts: { dev?: boolean; org?: boo
   if (failures > 0) process.exit(1)
 }
 
-/** The subset of a control-plane SOP row `pull` needs. */
+/** The subset of a control-plane SOP row `pull` and `status` need. */
 interface SopListItem {
   sopId: string
   title: string
+  contentHash?: string
+}
+
+/** The route's own cap on `limit`. */
+const SOP_PAGE_SIZE = 100
+
+/**
+ * Every SOP in the workspace. `GET /api/v1/sops` pages by `page` and `limit`
+ * (at most 100) and reports `total`, so one request stopped at the first 100.
+ */
+async function listAllSops(client: Awaited<ReturnType<typeof getClient>>): Promise<SopListItem[]> {
+  const all: SopListItem[] = []
+  for (let page = 1; ; page++) {
+    const res = await client.get<{ items?: SopListItem[]; total?: number }>(
+      `/api/v1/sops?page=${page}&limit=${SOP_PAGE_SIZE}`,
+    )
+    const items = res.items ?? []
+    // A control plane that ignores `page` would hand back page 1 forever.
+    if (items.length > 0 && all.some((s) => s.sopId === items[0].sopId)) return all
+    all.push(...items)
+    if (items.length < SOP_PAGE_SIZE) return all
+    if (typeof res.total === 'number' && all.length >= res.total) return all
+  }
 }
 interface SopDetail {
   sopId: string
@@ -188,8 +209,7 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
 
   let items: SopListItem[]
   try {
-    const res = await client.get<{ items: SopListItem[] }>('/api/v1/sops?limit=100')
-    items = res.items ?? []
+    items = await listAllSops(client)
   } catch (err) {
     log.error(`Failed to list SOPs: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)
@@ -307,10 +327,8 @@ export async function runSopsStatus(opts: { dev?: boolean }): Promise<void> {
   const client = await getClient(opts.dev)
   let remoteByTitle: Map<string, { sopId: string; contentHash?: string }>
   try {
-    const res = await client.get<{ items: Array<{ sopId: string; title: string; contentHash?: string }> }>(
-      '/api/v1/sops?limit=100',
-    )
-    remoteByTitle = new Map((res.items ?? []).map((r) => [r.title, { sopId: r.sopId, contentHash: r.contentHash }]))
+    const items = await listAllSops(client)
+    remoteByTitle = new Map(items.map((r) => [r.title, { sopId: r.sopId, contentHash: r.contentHash }]))
   } catch (err) {
     log.error(`Failed to fetch workspace SOPs: ${err instanceof Error ? err.message : String(err)}`)
     process.exit(1)

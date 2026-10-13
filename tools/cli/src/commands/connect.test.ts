@@ -11,7 +11,10 @@
  * at all despite every real release having shipped one since v1.6.0).
  */
 import { describe, it, expect } from 'vitest'
-import { resolveProxyAssetName } from './connect.js'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { resolveProxyAssetName, findWorkspaceProxyBuild } from './connect.js'
 
 describe('resolveProxyAssetName', () => {
   const supported: Array<[NodeJS.Platform, string, string]> = [
@@ -136,5 +139,54 @@ describe('connect runs the per-cycle sync work the docs promise', () => {
     expect(pollBody.indexOf('const syncConfig = await client.fetchConfig(')).toBeLessThan(pollBody.indexOf('await captureAndUpload({'))
     expect(pollBody).toMatch(/if \(shouldCaptureThisIteration\(pollIteration\)\)/)
     expect(pollBody).toMatch(/pollIteration\+\+/)
+  })
+})
+
+// The root Cargo.toml is a workspace with packages/proxy as a member, so the
+// proxy builds into <root>/target. connect looked in packages/proxy/target.
+describe('findWorkspaceProxyBuild', () => {
+  function workspace(builds: string[]): string {
+    const root = mkdtempSync(join(tmpdir(), 'intutic-proxy-build-'))
+    for (const rel of builds) {
+      mkdirSync(join(root, rel, '..'), { recursive: true })
+      writeFileSync(join(root, rel), '')
+    }
+    return root
+  }
+
+  it('finds a release build in the root target/, ahead of a debug one', async () => {
+    const root = workspace(['target/release/intutic-proxy', 'target/debug/intutic-proxy'])
+    try {
+      expect(await findWorkspaceProxyBuild(root, 'linux')).toBe(join(root, 'target', 'release', 'intutic-proxy'))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to the debug build', async () => {
+    const root = workspace(['target/debug/intutic-proxy'])
+    try {
+      expect(await findWorkspaceProxyBuild(root, 'linux')).toBe(join(root, 'target', 'debug', 'intutic-proxy'))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores a stale packages/proxy/target build, which cargo no longer writes', async () => {
+    const root = workspace(['packages/proxy/target/release/intutic-proxy'])
+    try {
+      expect(await findWorkspaceProxyBuild(root, 'linux')).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('looks for intutic-proxy.exe on Windows', async () => {
+    const root = workspace(['target/release/intutic-proxy.exe'])
+    try {
+      expect(await findWorkspaceProxyBuild(root, 'win32')).toBe(join(root, 'target', 'release', 'intutic-proxy.exe'))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
