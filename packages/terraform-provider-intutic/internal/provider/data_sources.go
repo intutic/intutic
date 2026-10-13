@@ -116,16 +116,17 @@ func (d *membersDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{Computed: true, Description: "The workspace id."},
 			"members": schema.ListNestedAttribute{
-				Computed: true,
+				Computed:    true,
+				Description: "The workspace's members.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
-						"member_id":     schema.StringAttribute{Computed: true},
-						"email":         schema.StringAttribute{Computed: true},
-						"display_name":  schema.StringAttribute{Computed: true},
-						"role":          schema.StringAttribute{Computed: true},
-						"is_active":     schema.BoolAttribute{Computed: true},
+						"member_id":     schema.StringAttribute{Computed: true, Description: "The member id."},
+						"email":         schema.StringAttribute{Computed: true, Description: "The member's email address."},
+						"display_name":  schema.StringAttribute{Computed: true, Description: "The member's display name."},
+						"role":          schema.StringAttribute{Computed: true, Description: "One of `OWNER`, `ADMIN`, `EM`, `DEVELOPER`, `VIEWER`."},
+						"is_active":     schema.BoolAttribute{Computed: true, Description: "False once the member is deactivated."},
 						"last_login_at": schema.StringAttribute{Computed: true, Description: "RFC 3339, or null."},
-						"created_at":    schema.StringAttribute{Computed: true},
+						"created_at":    schema.StringAttribute{Computed: true, Description: "When the member joined (RFC 3339)."},
 					},
 				},
 			},

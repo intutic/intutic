@@ -140,8 +140,9 @@ func (r *siemDestinationResource) Schema(_ context.Context, _ resource.SchemaReq
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"name": schema.StringAttribute{
-				Required:   true,
-				Validators: []validator.String{stringvalidator.LengthBetween(1, 128)},
+				Required:    true,
+				Description: "The destination's name (1–128 characters).",
+				Validators:  []validator.String{stringvalidator.LengthBetween(1, 128)},
 			},
 			"adapter_type": schema.StringAttribute{
 				Required: true,
@@ -193,9 +194,10 @@ func (r *siemDestinationResource) Schema(_ context.Context, _ resource.SchemaReq
 				Validators:  []validator.Int64{int64validator.AtLeast(1)},
 			},
 			"enabled": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  booldefault.StaticBool(true),
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(true),
+				Description: "Whether events stream to the destination. Defaults to true.",
 			},
 			"paused_reason": schema.StringAttribute{
 				Computed: true,

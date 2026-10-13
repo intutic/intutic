@@ -91,6 +91,7 @@ func (r *virtualKeyResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			},
 			"label": schema.StringAttribute{
 				Required:      true,
+				Description:   "The key's label (1–128 characters). Changing it replaces the key.",
 				Validators:    []validator.String{stringvalidator.LengthBetween(1, 128)},
 				PlanModifiers: replaceString,
 			},
@@ -150,6 +151,7 @@ func (r *virtualKeyResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			},
 			"created_at": schema.StringAttribute{
 				Computed:      true,
+				Description:   "When the key was created (RFC 3339).",
 				PlanModifiers: keep,
 			},
 			"rate_limit_rpm": schema.Int64Attribute{

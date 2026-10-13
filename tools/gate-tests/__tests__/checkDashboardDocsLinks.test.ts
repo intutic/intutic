@@ -16,6 +16,7 @@ const gate = (await import(SCRIPT)) as {
   slugify(text: string): string
   headingAnchors(markdown: string): Set<string>
   check(root: string): { skipped: boolean; links: number; problems: string[] }
+  helpLinkProblems(root: string, exempt?: Map<string, string>): string[]
 }
 
 describe('heading anchors', () => {
@@ -80,5 +81,77 @@ describe('check', () => {
   it('skips a checkout without the dashboard (the public repo)', async () => {
     await put('apps/docs/index.md', '# Docs\n')
     expect(gate.check(root)).toEqual({ skipped: true, links: 0, problems: [] })
+  })
+})
+
+describe('help links on navigation pages', () => {
+  let root: string
+  const put = async (file: string, text: string) => {
+    await mkdir(join(root, file, '..'), { recursive: true })
+    await writeFile(join(root, file), text)
+  }
+  const LINKED = "export function A() { return <a href={docs('https://docs.intutic.ai/guide/a')}>A guide</a> }"
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'help-links-'))
+    await put(
+      'apps/dashboard/src/components/layout/areas.tsx',
+      [
+        'export const AREAS: Area[] = [',
+        "  { id: 'a', label: 'A', root: '/a', pages: [{ path: '/a', label: 'A' }, { path: '/a/b', label: 'B', roles: LEADS }] },",
+        ']',
+        '',
+        "export function areaForPath(p: string) { return p === '/elsewhere' }",
+      ].join('\n'),
+    )
+    await put(
+      'apps/dashboard/src/main.tsx',
+      [
+        "const a = createRoute({ path: '/a', component: lazyRouteComponent(() => import('./routes/APage'), 'APage') })",
+        "const b = createRoute({",
+        "  path: '/a/b',",
+        "  component: lazyRouteComponent(() => import('./routes/BPage'), 'BPage'),",
+        '})',
+        "const login = createRoute({ path: '/login', component: LoginPage })",
+      ].join('\n'),
+    )
+    await put('apps/dashboard/src/routes/APage.tsx', LINKED)
+  })
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('passes when every page in AREAS has a docs link in its route module', async () => {
+    await put('apps/dashboard/src/routes/BPage.tsx', LINKED)
+    expect(gate.helpLinkProblems(root)).toEqual([])
+  })
+
+  it('fails a page whose route module has no docs link', async () => {
+    await put('apps/dashboard/src/routes/BPage.tsx', 'export function BPage() { return <h1>B</h1> }')
+    const problems = gate.helpLinkProblems(root)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('/a/b (apps/dashboard/src/routes/BPage.tsx): no https://docs.intutic.ai/ help link')
+  })
+
+  it('accepts an exemption with a reason, and fails one that is stale', async () => {
+    await put('apps/dashboard/src/routes/BPage.tsx', 'export function BPage() { return <h1>B</h1> }')
+    expect(gate.helpLinkProblems(root, new Map([['/a/b', 'a redirect with no content of its own']]))).toEqual([])
+    const stale = gate.helpLinkProblems(
+      root,
+      new Map([
+        ['/a', 'linked already'],
+        ['/a/b', 'reason'],
+        ['/gone', 'removed page'],
+      ]),
+    )
+    expect(stale).toEqual([
+      '/a: has a help link now; remove its NO_HELP_LINK entry',
+      'NO_HELP_LINK lists /gone, which AREAS does not; remove the entry',
+    ])
+  })
+
+  it('fails a page main.tsx renders from no route module', async () => {
+    await put('apps/dashboard/src/main.tsx', "const a = createRoute({ path: '/a', component: lazyRouteComponent(() => import('./routes/APage'), 'APage') })")
+    expect(gate.helpLinkProblems(root)).toEqual(['/a/b: apps/dashboard/src/main.tsx registers no ./routes/ module for it'])
   })
 })

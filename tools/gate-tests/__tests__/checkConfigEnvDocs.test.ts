@@ -4,7 +4,7 @@
  * undocumented knob, a phantom read hides a documented variable nothing uses.
  */
 import { describe, it, expect } from 'vitest'
-import { readsIn, documentedIn } from '../../scripts/check-config-env-docs.js'
+import { readsIn, documentedIn, envConstantsIn } from '../../scripts/check-config-env-docs.js'
 
 describe('readsIn', () => {
   it('finds Rust reads by literal, by const and through an array of names', () => {
@@ -49,6 +49,51 @@ describe('readsIn', () => {
     ].join('\n')
     expect([...readsIn(src, 'ts')].sort()).toEqual(['INTUTIC_DEV', 'INTUTIC_FC_KERNEL', 'INTUTIC_PROXY_URL', 'MCP_DAEMON_SOCKET'])
   })
+
+  it('resolves TypeScript reads through a name constant, local or imported', () => {
+    // The MCP proxy reads INTUTIC_WASM_MANIFEST_ROOT and the chaos variables
+    // this way, and the gate missed all three.
+    const src = [
+      "export const MANIFEST_ROOT_ENV = 'INTUTIC_WASM_MANIFEST_ROOT'",
+      'const raw = env[MANIFEST_ROOT_ENV]',
+      'const plan = process.env[CHAOS_PLAN_ENV]',
+      'process.env[WRITTEN_ENV] = "x"',
+      'const unknown = env[NOT_A_KNOWN_CONSTANT]',
+    ].join('\n')
+    const imported = new Map([
+      ['CHAOS_PLAN_ENV', 'INTUTIC_CHAOS_PLAN'],
+      ['WRITTEN_ENV', 'ONLY_ASSIGNED'],
+    ])
+    expect([...readsIn(src, 'ts', imported)].sort()).toEqual(['INTUTIC_CHAOS_PLAN', 'INTUTIC_WASM_MANIFEST_ROOT'])
+    expect(envConstantsIn("export const SESSION_SCOPE_ENV: string = 'INTUTIC_MCP_SESSION_SCOPE'").get('SESSION_SCOPE_ENV')).toBe(
+      'INTUTIC_MCP_SESSION_SCOPE',
+    )
+  })
+
+  it('finds a name handed to a helper together with the environment', () => {
+    const src = "const base = required(env, 'TRUEFORGE_BASE_URL')\nconst key = required(process.env, \"INTUTIC_API_KEY\")"
+    expect([...readsIn(src, 'ts')].sort()).toEqual(['INTUTIC_API_KEY', 'TRUEFORGE_BASE_URL'])
+  })
+
+  it('finds Python reads, not assignments or comments', () => {
+    const src = [
+      'debug = os.environ.get("INTUTIC_DEBUG") == "true"',
+      'path = os.environ.get(',
+      '    "INTUTIC_SNAPSHOT_RULES",',
+      '    default,',
+      ')',
+      "key = os.environ['INTUTIC_API_KEY']",
+      'ws = os.getenv("INTUTIC_WORKSPACE_ID")',
+      'os.environ["ONLY_ASSIGNED"] = "1"',
+      '# os.environ.get("IN_A_COMMENT")',
+    ].join('\n')
+    expect([...readsIn(src, 'python')].sort()).toEqual([
+      'INTUTIC_API_KEY',
+      'INTUTIC_DEBUG',
+      'INTUTIC_SNAPSHOT_RULES',
+      'INTUTIC_WORKSPACE_ID',
+    ])
+  })
 })
 
 describe('documentedIn', () => {
@@ -66,5 +111,11 @@ describe('documentedIn', () => {
     expect([...tabled.keys()]).toEqual(['PORT', 'INTUTIC_EGRESS_MODE'])
     expect(mentioned.has('OTHER_VAR')).toBe(true)
     expect(mentioned.has('DATABASE_URL')).toBe(true)
+  })
+
+  it('leaves out the sections of a component this tree does not carry', () => {
+    const doc = ['### Sync daemon', '| `CONFIG_CAPTURE_INTERVAL` | `5` | x |', '### TrueForge bridge', '| `TRUEFORGE_BASE_URL` | — | x |'].join('\n')
+    expect([...documentedIn(doc, [/^### Sync daemon\b/]).tabled.keys()]).toEqual(['CONFIG_CAPTURE_INTERVAL'])
+    expect([...documentedIn(doc).tabled.keys()]).toEqual(['CONFIG_CAPTURE_INTERVAL', 'TRUEFORGE_BASE_URL'])
   })
 })

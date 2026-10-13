@@ -73,7 +73,8 @@ jobs:
 
       # The budgets guide documented two variables nothing reads while the
       # proxy's real ones appeared on no page. Every variable the proxy, the
-      # CLI or the gate SDK reads must be in the configuration reference, and
+      # CLI, the gate SDK, the sync daemon, the MCP proxy, the clawde SDKs and
+      # the interceptors read must be in the configuration reference, and
       # every one it documents for them must be read.
       - name: Verify the configuration reference names every environment variable
         run: pnpm lint:config-env
@@ -84,6 +85,15 @@ jobs:
       # scanned.
       - name: Verify no internal tracker ids or internal docs links
         run: pnpm lint:internal-ids
+
+      # The steps above are a subset of `lint:claims`, which also holds a dozen
+      # gates no workflow ran (harness counts, plan names, feature surfaces,
+      # guard reachability, ...), so the docs drifted while each gate passed
+      # locally. Running the whole chain here means a gate added to it is
+      # enforced without a workflow edit. Gates whose inputs this tree does not
+      # carry report a skip rather than a pass.
+      - name: Run every claim and docs-drift gate (lint:claims)
+        run: pnpm lint:claims
 
   typecheck:
     name: Typecheck (TS Workspaces) - Run TypeScript typecheck
@@ -264,6 +274,17 @@ jobs:
         run: |
           go generate ./...
           git diff --exit-code -- . ../../apps/docs/reference/terraform
+          # A file go generate creates (a new resource's page) is untracked, so
+          # git diff never sees it: the page would ship missing from the repo.
+          untracked="$(git status --porcelain -- . ../../apps/docs/reference/terraform)"
+          if [ -n "$untracked" ]; then
+            echo "::error::go generate left files out of step with the commit; run it and commit them:"
+            echo "$untracked"
+            exit 1
+          fi
+          # The registry's own checks on docs/ (front matter, file names, one
+          # page per resource and data source).
+          go tool tfplugindocs validate --provider-name intutic
 
   rust:
     name: Rust Proxy (Build & Test)
@@ -331,12 +352,14 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            packages/proxy/target
-          # The proxy's own lockfile, not the workspace root's. This job builds
-          # `packages/proxy`, and that crate is now pinned by
-          # `packages/proxy/Cargo.lock` — keying the cache on the root lockfile
-          # meant a proxy dependency change did not invalidate it.
-          key: ${{ runner.os }}-cargo-${{ hashFiles('packages/proxy/Cargo.lock') }}
+            target
+          # The workspace's, not the crate's: packages/proxy is a member of the
+          # root Cargo.toml workspace, so `cd packages/proxy && cargo build`
+          # resolves the root Cargo.lock and writes the root target/. Caching
+          # packages/proxy/target (which nothing writes) and keying on
+          # packages/proxy/Cargo.lock (which only the Docker build reads)
+          # restored nothing and missed dependency changes.
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 

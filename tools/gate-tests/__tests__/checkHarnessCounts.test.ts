@@ -26,8 +26,11 @@ function runGate(...args: string[]): Promise<{ status: number; out: string }> {
   })
 }
 
-// 40 harnesses: 30 hook-gated, 6 SDK-gated, 4 neither.
+// 40 harnesses: 30 hook-gated, 6 SDK-gated, 4 neither. The last is a value
+// whose page has another slug (agent-framework → microsoft-agent-framework).
 const MEMBERS = Array.from({ length: 40 }, (_, i) => `H${i}`)
+const value = (m: string) => (m === 'H39' ? 'agent-framework' : m.toLowerCase())
+const slug = (m: string) => (m === 'H39' ? 'microsoft-agent-framework' : m.toLowerCase())
 const set = (name: string, members: string[]) =>
   `export const ${name}: ReadonlySet<HarnessTypeT> = new Set([\n${members.map((m) => `  HarnessType.${m},`).join('\n')}\n])\n`
 
@@ -41,14 +44,15 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'harnesscounts-'))
   await put(
     'packages/shared-types/src/enums.ts',
-    `export const HarnessType = {\n${MEMBERS.map((m) => `  ${m}: '${m.toLowerCase()}',`).join('\n')}\n} as const\n\n` +
+    `export const HarnessType = {\n${MEMBERS.map((m) => `  ${m}: '${value(m)}',`).join('\n')}\n} as const\n\n` +
       'export const HARNESS_COUNT = Object.keys(HarnessType).length\n' +
       'export const HARNESS_HEADLINE_COUNT = HARNESS_COUNT - [].length\n',
   )
   await put(
     'apps/docs/reference/harness-security-matrix.md',
-    MEMBERS.map((m, i) => `| ${i + 1} | ${m} |`).join('\n') + '\n',
+    MEMBERS.map((m, i) => `| ${i + 1} | **${m} Agent** |`).join('\n') + '\n',
   )
+  for (const m of MEMBERS) await put(`apps/docs/integrations/${slug(m)}.md`, `# ${m} Agent <Badge type="tip" text="Preview" />\n`)
   await put(
     'packages/shared-types/src/gateKind.ts',
     set('SDK_GATED_HARNESSES', MEMBERS.slice(30, 36)) +
@@ -100,5 +104,36 @@ describe('gate-kind counts', () => {
     expect(r.status, r.out).toBe(1)
     expect(r.out).toContain('says 5 harnesses are SDK-gated')
     expect(r.out).not.toContain('says 30 harnesses')
+  })
+})
+
+describe('one page and one named row per harness', () => {
+  it('passes when every harness has its page, under an aliased slug too, and its row', async () => {
+    const r = await runGate(root)
+    expect(r.status, r.out).toBe(0)
+    expect(r.out).toContain('every harness has a page and a named row')
+  })
+
+  it('fails a harness with no integration page', async () => {
+    await rm(join(root, 'apps/docs/integrations/h7.md'))
+    const r = await runGate(root)
+    expect(r.status, r.out).toBe(1)
+    expect(r.out).toContain("HarnessType 'h7' has no apps/docs/integrations/h7.md")
+  })
+
+  it('fails a harness whose matrix row names another harness, though the count is right', async () => {
+    await put(
+      'apps/docs/reference/harness-security-matrix.md',
+      MEMBERS.map((m, i) => `| ${i + 1} | **${m === 'H5' ? 'Something Else' : `${m} Agent`}** |`).join('\n') + '\n',
+    )
+    const r = await runGate(root)
+    expect(r.status, r.out).toBe(1)
+    expect(r.out).toContain(`HarnessType 'h5' has no "**H5 Agent**" row`)
+  })
+
+  it('takes the title from the front matter when the page has one', async () => {
+    await put('apps/docs/integrations/h3.md', '---\ntitle: H3 Agent\n---\n\nNo heading here.\n\n```sh\n# a comment\n```\n')
+    const r = await runGate(root)
+    expect(r.status, r.out).toBe(0)
   })
 })

@@ -33,7 +33,7 @@ resource "intutic_virtual_key" "ci" {
 
 ### Required
 
-- `label` (String)
+- `label` (String) The key's label (1–128 characters). Changing it replaces the key.
 
 ### Optional
 
@@ -50,7 +50,7 @@ resource "intutic_virtual_key" "ci" {
 
 ### Read-Only
 
-- `created_at` (String)
+- `created_at` (String) When the key was created (RFC 3339).
 - `expires_at` (String) Expiry time (RFC 3339), or null.
 - `id` (String) The key id (`key_…`).
 - `key` (String, Sensitive) The plaintext key. Only known for a key Terraform created; null after an import.

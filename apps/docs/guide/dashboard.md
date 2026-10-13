@@ -131,6 +131,21 @@ The dashboard has no global shortcuts. Two lists take single-key shortcuts while
 | | `f` | Rule the selected finding a false positive |
 | **Policies › Policy Guardrails › Review** | `j` / `k` (or ↓ / ↑) | Move to the next / previous guardrail |
 
+## Signing in {#signing-in}
+
+The sign-in page offers a password or an emailed sign-in link:
+
+- **Password**: enter your email and password and click **Sign In**. More than 10 attempts for one address within 15 minutes are refused until the window passes.
+- **Sign-in link**: click **Use a sign-in link instead**, enter your email and click **Send sign-in link**. The link is valid for 15 minutes and works once; opening it again shows **Verification Failed**, and you request a new one. The page says the email was sent whether or not the address has an account.
+- **GitHub and Google**: **Continue with GitHub** and **Continue with Google** appear only when the deployment has them configured.
+- **SSO**: enter the **SSO provider ID** your admin gave you and click **Continue with SSO**. See [Single Sign-On](/guide/security#single-sign-on-sso).
+
+**Sign-up.** **Create one** opens **Create your account**: your name, email, a password of at least 8 characters and a workspace name. **Create Account** creates the account and its first workspace, on a free trial, and signs you in. Sign-up works only on a deployment that has self-serve sign-up turned on; otherwise it is refused. A self-hosted deployment has no sign-up: an owner invites you.
+
+**Email verification.** Signing up also sends a verification email. Its link is valid for 24 hours and works once. An expired link offers **Resend verification email**; a link that was already used says so.
+
+**Forgotten password.** **Forgot password?** opens **Reset Password**, which emails the same one-time sign-in link. Once signed in, set a new password under **Settings › General › Change Password**.
+
 ## Accessing the Dashboard
 
 ### Local Development

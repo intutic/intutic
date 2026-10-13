@@ -62,13 +62,13 @@ variable "splunk_hec_token" {
 ### Required
 
 - `adapter_type` (String) One of `syslog_cef`, `webhook_https`, `gcs`, `s3`, `splunk_hec`, `datadog_logs`. Changing it replaces the destination.
-- `name` (String)
+- `name` (String) The destination's name (1–128 characters).
 
 ### Optional
 
 - `batch_size` (Number) Events per bucket object (`gcs`, `s3`). Defaults to 100.
 - `config` (String) The adapter's settings as a JSON object, without its credentials. Required keys: `syslog_cef` `host` and `port`; `webhook_https` `webhookUrl`; `splunk_hec` `hecUrl`; `gcs` and `s3` `bucketName`. Optional ones include `useTls` (syslog), `prefix` and `projectId` (gcs), `region` and `accessKeyId` (s3), `source` and `sourcetype` (splunk), `intakeUrl` and `hostname` (datadog). URLs must be public https endpoints.
-- `enabled` (Boolean)
+- `enabled` (Boolean) Whether events stream to the destination. Defaults to true.
 - `flush_interval_ms` (Number) Longest wait, in milliseconds, before a bucket object is written with fewer events. Defaults to 60000.
 - `secret_config` (Map of String, Sensitive) The adapter's credentials, which the API only ever returns masked: `webhook_https` `authHeaderValue` (optional); `splunk_hec` `token`; `datadog_logs` `apiKey`; `gcs` `credentials` (a base64-encoded service-account key); `s3` `secretAccessKey`. A value changed outside Terraform shows as a difference. Removing an optional credential clears it.
 - `secret_rotation_triggers` (Map of String) Arbitrary values that rotate the signing secret when they change. Changing, adding or removing any value replaces a `webhook_https` destination's signing secret in place on the next apply and stores the new one in `signing_secret`; the old secret stops working at once. Creating the resource does not rotate, since the API issues a secret then. Only for a `webhook_https` destination.

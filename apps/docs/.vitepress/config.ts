@@ -71,6 +71,21 @@ function paidTierPages(): string[] {
 
 const PAID_TIER_PAGES = IS_OSS ? paidTierPages() : []
 
+/**
+ * The Terraform provider's resources (or data sources): the pages tfplugindocs
+ * renders into reference/terraform/<kind>/ from the provider's own schema. Read
+ * from disk rather than listed here, because a hand-kept list left
+ * intutic_provider_credential out of the sidebar.
+ */
+function terraformPages(kind: 'resources' | 'data-sources'): string[] {
+  const dir = path.resolve(__dirname, '..', 'reference', 'terraform', kind)
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => f.slice(0, -'.md'.length))
+    .sort()
+}
+
 const navItems = [
   { text: 'Guide', link: '/guide/getting-started' },
   { text: 'Integrations', link: '/integrations/' },
@@ -120,6 +135,7 @@ if (!IS_OSS) {
       { text: 'AI Inventory (Cloud)', link: '/guide/ai-inventory' },
       { text: 'Agent Guidelines (Cloud)', link: '/guide/sops' },
       { text: 'GitOps for SOPs (Cloud)', link: '/guide/gitops-sops' },
+      { text: 'Findings & Incidents (Cloud)', link: '/guide/findings' },
       { text: 'Review Queue (Cloud)', link: '/guide/decisions' },
       { text: 'Governed Decisions Log (Cloud)', link: '/guide/decisions-log' },
       { text: 'Budgets & FinOps (Cloud)', link: '/guide/budgets' },
@@ -232,9 +248,9 @@ const sidebarReference = [
           collapsed: true,
           items: [
             { text: 'Provider', link: '/reference/terraform/' },
-            ...['sop', 'policy', 'guardrail', 'workspace_settings', 'virtual_key', 'workspace_budget', 'member_budget', 'gateway', 'notification_rule', 'mcp_server_decision', 'siem_destination', 'wasm_rule']
+            ...terraformPages('resources')
               .map((r) => ({ text: `intutic_${r}`, link: `/reference/terraform/resources/${r}` })),
-            ...['workspace', 'members']
+            ...terraformPages('data-sources')
               .map((d) => ({ text: `intutic_${d} (data)`, link: `/reference/terraform/data-sources/${d}` })),
           ],
         },

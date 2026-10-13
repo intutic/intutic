@@ -1,5 +1,6 @@
 # ─── Stage 1: Builder ──────────────────────────────────────────────────────────
-FROM rust:1.89-slim-bookworm AS builder
+# The toolchain CI pins (the rust job in .github/workflows/ci.yml); bump both together.
+FROM rust:1.98.0-slim-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
