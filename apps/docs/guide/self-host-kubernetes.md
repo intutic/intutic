@@ -148,6 +148,7 @@ set `global.imagePullSecrets`.
 | Value | Default | |
 |---|---|---|
 | `hostname` | required | The name users reach Intutic at |
+| `nameOverride`, `fullnameOverride` | none | Resource names are `<release>-intutic`, or the release name alone when it contains `intutic` (so `intutic-control-plane` above). `nameOverride` replaces the `intutic` part, `fullnameOverride` the whole name |
 | `secretName` | `intutic-secrets` | The credentials above |
 | `license.secretName` | `intutic-license` | The license, under the key `license.json` |
 | `bootstrap.secretName` | none | Creates the first owner: keys `email`, `name`, `password` (12+ characters) |
@@ -163,10 +164,13 @@ set `global.imagePullSecrets`.
 | `valkey.image.repository`, `valkey.image.tag` | `valkey/valkey`, `7-alpine` | Your copy of Valkey |
 | `valkey.persistence.size`, `valkey.persistence.storageClass` | `5Gi`, the cluster default | Valkey's volume |
 | `proxy.env` | none | Where model requests go: `OPENAI_UPSTREAM_URL`, `ANTHROPIC_UPSTREAM_URL`, `GEMINI_UPSTREAM_URL`, `MISTRAL_UPSTREAM_URL`, `OPENROUTER_UPSTREAM_URL`, `DEEPSEEK_UPSTREAM_URL` |
-| `controlPlane.env` | LiteLLM model names, `LOG_LEVEL` | Extra settings, e.g. `INTUTIC_WEBHOOK_ALLOWED_HOSTS`, or `LITELLM_ADMIN_BASE_URL`: your LiteLLM's address, which turns on the LLM-backed checks |
+| `controlPlane.env` | LiteLLM model names, `LOG_LEVEL`, `FF_TRAJECTORY_MONITOR: "true"` | Extra settings, e.g. `INTUTIC_WEBHOOK_ALLOWED_HOSTS`; `LITELLM_ADMIN_BASE_URL`, your LiteLLM's address, which turns on the LLM-backed checks; `GITHUB_BASE_URL` (`https://HOST/api/v3`) and `CONFLUENCE_BASE_URL` for your GitHub Enterprise Server and Confluence Data Center; `FF_TRAJECTORY_MONITOR: "false"` to turn the trajectory monitor off |
+| `controlPlane.podAnnotations` | none | Annotations on the control plane's pods |
 | `controlPlane.replicaCount`, `proxy.replicaCount`, `dashboard.replicaCount` | 2 | |
 | `docs.replicaCount` | 1 | |
-| `controlPlane.autoscaling.enabled` | `false` | With `minReplicas`, `maxReplicas` and CPU and memory targets |
+| `controlPlane.autoscaling.enabled` | `false` | Scale the control plane with a HorizontalPodAutoscaler instead of `replicaCount` |
+| `controlPlane.autoscaling.minReplicas`, `controlPlane.autoscaling.maxReplicas` | 2, 10 | |
+| `controlPlane.autoscaling.targetCPUUtilizationPercentage`, `controlPlane.autoscaling.targetMemoryUtilizationPercentage` | 70, 80 | |
 | `controlPlane.resources`, `proxy.resources`, `dashboard.resources`, `docs.resources`, `valkey.resources` | see `helm show values` | Requests and limits |
 | `controlPlane.nodeSelector`, `controlPlane.tolerations`, `controlPlane.affinity` | spread across nodes | Where the control plane runs |
 | `serviceAccount.create`, `serviceAccount.name`, `serviceAccount.annotations` | `true`, named after the release, none | The pods' ServiceAccount. With `create: false`, name one that exists; the migration Job runs as it too |
@@ -183,8 +187,13 @@ the control plane, `/v1` to the proxy and `/docs` to the docs.
 
 ```bash
 helm upgrade intutic oci://ghcr.io/intutic/charts/intutic --version <new version> \
-  --namespace intutic --reuse-values
+  --namespace intutic --reset-then-reuse-values
 ```
+
+`--reset-then-reuse-values` (Helm 3.14 or later) keeps the values you set and
+takes every other value from the new chart. `--reuse-values` would keep the
+previous chart's defaults too, so a setting a release adds or changes, such as
+`FF_TRAJECTORY_MONITOR`, would not reach you.
 
 The migration Job runs first; a failed migration leaves the running release
 untouched.
@@ -201,5 +210,15 @@ first, wait for its rollout, then upgrade the rest:
 kubectl -n intutic set image deploy/intutic-proxy proxy=ghcr.io/intutic/proxy:<new version>
 kubectl -n intutic rollout status deploy/intutic-proxy
 helm upgrade intutic oci://ghcr.io/intutic/charts/intutic --version <new version> \
-  --namespace intutic --reuse-values
+  --namespace intutic --reset-then-reuse-values
+```
+
+Air-gapped, push the new bundle's images to your registry as in the install,
+then use your registry and the chart from the new bundle:
+
+```bash
+REG=registry.example.internal/intutic
+kubectl -n intutic set image deploy/intutic-proxy proxy=$REG/proxy:<new version>
+kubectl -n intutic rollout status deploy/intutic-proxy
+helm upgrade intutic helm/intutic-<new version>.tgz --namespace intutic --reset-then-reuse-values
 ```

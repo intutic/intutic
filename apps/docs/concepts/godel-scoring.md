@@ -16,7 +16,7 @@ An SOP is scored against 13 rubric categories, each worth **0–2 points**, when
 
 ## Threshold Gates
 
-The Gödel score gates the `PENDING_REVIEW → GENERATED` transition. With the thresholds the hosted deployment sets (12 and 15):
+The Gödel score gates the `PENDING_REVIEW → GENERATED` transition. With the default thresholds (12 and 15):
 
 | Score Range | Gate Result | Effect |
 |-------------|-------------|--------|
@@ -92,7 +92,7 @@ Tune the gate thresholds with environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GODEL_SCORE_THRESHOLD_GENERATED` | `22` (the hosted deployment sets `15`) | Minimum score for the `PENDING_REVIEW → GENERATED` transition |
+| `GODEL_SCORE_THRESHOLD_GENERATED` | `15` | Minimum score for the `PENDING_REVIEW → GENERATED` transition |
 | `GODEL_SCORE_THRESHOLD_BLOCKED` | `12` | Scores below this are `BLOCKED` |
 
 ::: warning
