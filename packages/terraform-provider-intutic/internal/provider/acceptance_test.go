@@ -476,7 +476,7 @@ resource "intutic_notification_rule" "hook" {
   event_type       = "incident.created"
   channel          = "webhook"
   webhook_url      = "https://hooks.example.com/intutic"
-  filter_severity  = ["critical", "high"]
+  filter_severity  = ["CRITICAL", "HIGH"]
   cooldown_minutes = 30
 }`
 	pagerduty := `
@@ -528,7 +528,19 @@ resource "intutic_notification_rule" "page" {
 		clean(rotated("1")+pagerduty),
 		rotation("2"),
 		clean(rotated("2")+pagerduty),
+		// Lowercase severities are the same filter: the API stores them
+		// uppercase, state keeps the configured spelling, and a re-plan is
+		// empty. Before, the API stored "critical" as sent and nothing matched.
+		resource.TestStep{
+			Config: lowercased(rotated("2")) + pagerduty,
+			Check:  resource.TestCheckResourceAttr(hook, "filter_severity.0", "critical"),
+		},
+		clean(lowercased(rotated("2"))+pagerduty),
 	)
+}
+
+func lowercased(config string) string {
+	return strings.Replace(config, `["CRITICAL", "HIGH"]`, `["critical", "high"]`, 1)
 }
 
 func TestAccSiemDestination(t *testing.T) {

@@ -10,7 +10,7 @@ Intutic implements the **SCIM 2.0** protocol per [RFC 7643](https://datatracker.
 
 - **Just-in-time provisioning** — New directory users are automatically created in Intutic
 - **Attribute synchronization** — Name, email, and role changes propagate automatically
-- **Automated offboarding** — Deprovisioned users trigger a 7-step security cascade
+- **Automated offboarding** — Deprovisioned users trigger an offboarding cascade that revokes their credentials
 - **Group-to-role mapping** — IdP groups map to Intutic RBAC roles
 - **Group-based tool clearance** — the same groups decide who may run the tools an SSO group policy marks high-risk
 
@@ -365,17 +365,22 @@ Every write your identity provider makes through SCIM that succeeds is announced
 
 ## Offboarding Cascade
 
-When a user is deprovisioned (via `DELETE /scim/v2/Users/:id` or `PATCH` with `active: false`), Intutic executes a **7-step offboarding cascade** to ensure complete security cleanup:
+When a user is deprovisioned (via `DELETE /scim/v2/Users/:id`, or `PATCH` or `PUT` with `active: false`), Intutic runs an **offboarding cascade**:
 
-| Step | Action | Description |
-|------|--------|-------------|
-| 1 | **Revoke API Keys** | All virtual API keys (`vk_` prefix) belonging to the member are immediately invalidated |
-| 2 | **Kill Sessions** | All active sessions and refresh tokens are terminated; Valkey session cache is purged |
-| 3 | **Prune Graph** | Recorded as `skipped`: there is no graph to prune |
-| 4 | **Reassign SOPs** | Picks a remaining owner or admin and records it; SOPs have no owner column, so nothing is moved |
-| 5 | **Archive Traces** | Nothing changes: execution traces are append-only and stay readable for audit |
-| 6 | **Prune State** | Residual Valkey cache entries and ephemeral state tied to the user are cleaned up |
-| 7 | **Notify** | An offboarding completion event is emitted to the workspace event bus |
+| Step | Name | What it does |
+|------|------|--------------|
+| 1 | `revoke_api_keys` | Revokes every virtual API key (`vk_` prefix) the member holds and purges each from the key cache, so none authenticates again. Each is recorded as a credential change by `system:offboarding` |
+| 2 | `kill_sessions` | Revokes the member's refresh tokens, so no new access token can be issued |
+| 3 | `revoke_obo_grants` | Revokes the member's live [OBO](/guide/security#on-behalf-of-obo-tokens) grants, so their tokens stop verifying |
+| 4 | `revoke_break_glass` | Revokes the user's [emergency overrides](/guide/break-glass#revocation) in this workspace: pending requests can no longer be approved, and an approved token stops working at once instead of when it expires |
+| 5 | `release_held_loops` | Kills the member's loop runs held for review (`PENDING_REVIEW`), recording `system:offboarding` as the reviewer, so nobody resumes a run as someone who has left. The proxy refuses a killed run. Runs that are still active need the member's keys, which step 1 revoked |
+| 6 | `notify` | Emits `identity.offboarding.completed` to the workspace event bus |
+
+Then the member is deactivated. That refuses the member's access tokens that have not expired yet, at the control plane and the proxy, for as long as an access token can live (`JWT_EXPIRY_SECONDS`, 15 minutes by default).
+
+Everything above is scoped to the membership in this workspace. A person who also belongs to another workspace keeps that membership, its keys and its sessions; their user record is marked inactive only when no active membership is left.
+
+The member's traces are kept: they are append-only audit records. Guidelines (SOPs) have no owner to reassign, and plans keep the member as their author.
 
 ::: warning
 The offboarding cascade is **idempotent** but uses a distributed lock (Valkey) to prevent concurrent executions for the same user. If the lock cannot be acquired, the request returns `409 Conflict`.
@@ -385,8 +390,8 @@ The offboarding cascade is **idempotent** but uses a distributed lock (Valkey) t
 
 Each cascade execution is recorded in the `offboarding_events` table with:
 - Event ID, user ID, member ID, workspace ID
-- Trigger source (`scim`)
-- Status (`in_progress` → `completed`)
+- Trigger source: `scim_delete` for `DELETE /scim/v2/Users/:id`, `scim_deactivate` for a `PATCH` or `PUT` setting `active: false`
+- Status (`in_progress` → `completed`). An event whose steps did not all succeed stays `in_progress`, with the failed step recorded, and the retry below runs that step again
 - Individual step results with timing
 
 ---
@@ -416,7 +421,7 @@ If an offboarding cascade partially fails (e.g., due to a transient database err
 
 | Status | Meaning |
 |--------|---------|
-| `retried` | The offboarding cascade was re-executed successfully |
+| `retried` | The steps the cascade had not finished were run again, and the user and member deactivated |
 | `lock_conflict` | Another retry is already in progress for this user |
 | `error` | The retry failed (check logs for details) |
 

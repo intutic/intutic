@@ -115,7 +115,7 @@ Intutic provides enterprise-grade identity and access management:
 
 - **Single Sign-On (SSO)** — SAML 2.0 and OIDC integration with Okta, Microsoft Entra ID, Google Workspace, Ping Identity, and custom providers. Available from the Biz Org plan upward.
 - **API Keys** — Virtual keys (`vk_` prefix) for programmatic access, with rotation and revocation
-- **OBO Tokens** — Short-lived, employee-scoped agent credentials that replace shared API keys
+- **OBO Tokens** — Short-lived, employee-scoped credentials that name the tools they cover; not a session, and checked with a verification call. See [On-Behalf-Of (OBO) Tokens](/guide/security#on-behalf-of-obo-tokens)
 - **RBAC Roles** — Five-tier role hierarchy (Owner → Admin → EM → Developer → Viewer) with feature-level gating
 
 ---

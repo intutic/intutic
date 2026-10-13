@@ -79,6 +79,43 @@ func TestNotificationRuleEventTypeMustBeOneTheAPIDispatches(t *testing.T) {
 	}
 }
 
+func TestNotificationRuleSeverityAcceptsAnyCaseOfAKnownSeverity(t *testing.T) {
+	var resp resource.SchemaResponse
+	(&notificationRuleResource{}).Schema(context.Background(), resource.SchemaRequest{}, &resp)
+	attribute := resp.Schema.Attributes["filter_severity"].(schema.ListAttribute)
+	accepts := func(v ...string) bool {
+		var out validator.ListResponse
+		for _, check := range attribute.Validators {
+			check.ValidateList(context.Background(), validator.ListRequest{Path: path.Root("filter_severity"), ConfigValue: stringList(v)}, &out)
+		}
+		return !out.Diagnostics.HasError()
+	}
+	if !accepts("CRITICAL", "high", "Medium", "low", "info") {
+		t.Fatal("every severity must be accepted in any case")
+	}
+	if accepts("critical", "urgent") || accepts("") {
+		t.Fatal("a value that is not a severity must fail at plan time")
+	}
+}
+
+func TestNotificationRuleKeepsAConfiguredSeverityThatDiffersOnlyInCase(t *testing.T) {
+	m := notificationRuleModel{Severity: stringList([]string{"critical", "high"}), SigningSecret: types.StringNull()}
+	(&apiRule{RuleID: "nr_1", Channel: "slack", Filters: apiFilters{Severity: []string{"CRITICAL", "HIGH"}}}).applyTo(&m)
+	if got := knownStrings(m.Severity); !reflect.DeepEqual(got, []string{"critical", "high"}) {
+		t.Fatalf("the API's uppercase copy of the configured list must keep the configured spelling, got %v", got)
+	}
+
+	(&apiRule{RuleID: "nr_1", Channel: "slack", Filters: apiFilters{Severity: []string{"CRITICAL"}}}).applyTo(&m)
+	if got := knownStrings(m.Severity); !reflect.DeepEqual(got, []string{"CRITICAL"}) {
+		t.Fatalf("a list changed outside Terraform must show as a difference, got %v", got)
+	}
+
+	(&apiRule{RuleID: "nr_1", Channel: "slack"}).applyTo(&m)
+	if !m.Severity.IsNull() {
+		t.Fatalf("a filter removed outside Terraform must read back null, got %v", m.Severity)
+	}
+}
+
 func TestNotificationRuleSigningSecretSurvivesAListRead(t *testing.T) {
 	// The list never returns the secret; the one from creation must stay.
 	m := notificationRuleModel{SigningSecret: types.StringValue("whsec_1")}
