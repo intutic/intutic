@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-13
+
+Everything that reached `main` since 2.4.0. Check these behaviour changes
+before upgrading: the control plane's hook gate (`POST /api/v1/hook-gate`) now
+fails closed, so an integration that counted on it answering `allowed: true`
+when a check errored, or when it could not read the body, is refused (403
+`GOVERNANCE_UNAVAILABLE`, 400 `INVALID_REQUEST`); the gate SDKs and the
+AgentCore interceptor refuse a `GOVERNANCE_UNAVAILABLE` unless set to fail open,
+and a 400 whatever that setting says. A workspace whose intervention mode is
+`OPAQUE` now gets what the mode promised: its refusals on workspace policy no
+longer name the rule. The sync daemon regenerates every hook gate as gate body
+v21 (`GATE_VERSION` 21) on its next cycle. No LLM judge runs on a plan that does
+not include it (Free). Code that imports the `@intutic/shared-types` exports
+listed under Removed, names `github` or `asana` as a `TaskProvider`, calls
+`TaskManagementAdapter.createTask` or `updateTask`, or implements
+`IntuticPlugin::priority` must change, as must any notification rule or
+Terraform `intutic_notification_rule` naming `ssl.enforcement.violation`,
+`context_gap.auto_injected` or `adapter.write_back.failed`: the API refuses
+those event types, and the control plane's migrations delete existing rules on
+them. A Jira connection added without the account email stops working; add it
+again with the email.
+
 ### Added
 
 - **Agent chaos engineering.** `intutic chaos run <experiment>` runs an agent
@@ -35,9 +57,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the base for agents that need Node; and `intutic chaos run` carries a
   project's generated gates, snapshot and hook settings into each repetition,
   rewritten for `/work`, so a real harness finds its gates in the sandbox.
+- **Behavioural drift alerts are routable.** `anomaly.drift.detected` is a
+  notification event (**Guideline Compliance Drifted**): sent once per drift
+  when an enforced guideline's compliance moves 0.15 or more from its baseline
+  in the hourly check, HIGH when it fell and INFO when it rose. The dashboard
+  offers it, and the Slack and email alerts name the guideline and both
+  numbers.
+- **The integrity probe checks that foreign keys are enforced.** The hourly
+  `audit_log_integrity` probe fails when any foreign key in the schema has an
+  internal trigger that is disabled or replica-only (left behind by
+  `DISABLE TRIGGER ALL`, for example after an interrupted restore), and
+  `governance.integrity.failed` gains the kind `foreign_key_unenforced`. See
+  Trace Integrity for the fix.
+- **`fetchRegister` / `parseRegister`** in `@intutic/gate` (with the
+  `SopRegister` type) and `fetch_register` / `parse_register` in
+  `intutic_clawde.gate` read the SOP register with the workspace's
+  intervention mode beside the rules (`GET /api/v1/sop/rules`).
+- **`TaskSearchFilters`** and `TaskProviderCredentials.accountEmail` in
+  `@intutic/shared-types`.
 
 ### Changed
 
+- **Behaviour change: the `OPAQUE` intervention mode is enforced.** In a
+  workspace whose mode is `OPAQUE`, every refusal on workspace policy tells
+  the agent only "Blocked by workspace policy. Ask a workspace admin if you
+  need this action." instead of the rule's name, text, matched pattern or
+  remediation. Refusal codes, HTTP statuses and exit codes are unchanged; a
+  held call still names its hold id. It applies in the hook gates, the gate
+  SDKs (from the policy snapshot, or from the SOP register when there is no
+  snapshot), the control plane's hook gate, the LLM proxy (which drops the
+  `x-intutic-refusal-rule` header) and the MCP proxy (whose `error.data.ruleId`
+  is empty); a gate's JSON decision carries a null `ruleId`. Hook events,
+  traces, findings, incidents and the SIEM export keep the full reason.
+  `OPAQUE` does not hide SOP guidance the agent is meant to read
+  (`intutic_list_sops`), the MCP registry status tool, or the LLM proxy's
+  refusals while it fails open during a control-plane outage. `TRANSPARENT`
+  and `SILENT_LOG` are unchanged; the policies guide and the Terraform
+  `intutic_policy` docs describe each mode as built, `SILENT_LOG` as local-gate
+  only.
+- **A policy change reaches every gate at once.** Creating, editing, enabling,
+  disabling, deleting or rolling back a policy moves the config version, so the
+  LLM proxy reads the new mode on its next request, running MCP proxies on
+  their next poll and connected sync daemons refresh the policy snapshot
+  immediately.
+- **Gate bodies are v21** (`GATE_VERSION` 21; 2.4.0 shipped v18). v19 and v20
+  added the chaos fault injection and v21 the `OPAQUE` record in the policy
+  snapshot, inside its digest. The sync daemon regenerates every hook gate on
+  its next cycle; outside a chaos run and an `OPAQUE` workspace the gates
+  decide exactly as before.
 - **Behaviour change: the control plane's hook gate (`POST /api/v1/hook-gate`)
   fails closed.** It used to answer `allowed: true` whenever a check errored.
   Now a check that could have refused the call and could not run (the SOP
@@ -65,9 +132,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whatever that setting says. The QM security screen answers the same outage
   with a strict score, since QM's client lets any non-2xx through as
   unscreened.
-- **Gate bodies are v20** (`GATE_VERSION` 20). The sync daemon regenerates
-  every hook gate on its next cycle; outside a chaos run the gates decide
-  exactly as before.
+- **Behaviour change: LLM judging runs only on plans that include it.** The
+  key-context answer carries `llmJudgeEnabled`; on `false` the LLM proxy makes
+  no `/judge/chunk` or `/judge/finalize` call and passes the response through
+  unjudged, with no note, still stripping an `/intutic judge` prefix. An absent
+  or null field, an unreachable control plane and a refused key keep judging as
+  before. On a plan without it (Free) `/judge/chunk` and `/judge/finalize`
+  answer 403 `FEATURE_NOT_AVAILABLE`, agent judge scores are refused, and the
+  trajectory monitor's review of an ambiguous window is skipped: the heuristics
+  decide, as when the review model is unreachable, and the alert's
+  `trajectoryWindow.judge` says `not_in_plan`. `PASSIVE` and `ACTIVE` and the
+  monitor's deterministic checks run on every plan, and any plan's owner or
+  admin can set the mode.
+- **Task Management reads Jira, Linear and PagerDuty only.**
+  `TaskManagementAdapter` is read-only and `TaskProvider` is
+  `'jira' | 'pagerduty' | 'linear'`. A ticket key in a branch or commit is
+  matched to the connection with that project or team key, case-insensitively,
+  so Linear's lower-case branch names resolve. With PagerDuty connected, a
+  session that names no ticket picks up the newest triggered or acknowledged
+  incident assigned to its member, found by email, instead of the newest
+  incident on the whole service. `searchTasks` takes `TaskSearchFilters`, must
+  apply `assigneeId`, and rejects when the provider cannot be asked, so a
+  caller can tell "nothing open" from "could not ask".
+- **Jira connections take the Atlassian account email.** Jira Cloud signs an
+  API token in as `email:token`; **Add Connection** asks for the account email
+  for Jira and saves a connection only once the provider accepts its
+  credentials.
+- **`/intutic initialize` lists open Jira and Linear tickets** (up to 10 per
+  connection, newest first, in parallel), names a tracker it could not reach
+  within 5 seconds, and marks the ticket the git branch names as Recommended,
+  with no model call. PagerDuty incidents are not listed.
+- **The trajectory spool drops a summary a retry cannot deliver.** A summary
+  the control plane refuses with a non-retryable 4xx (malformed, a VIEWER key,
+  another workspace's session) is dropped, on first submission or in the drain,
+  with one warning naming the session and status, never the payload. 401, 408,
+  429, 5xx and network errors keep retrying.
 
 ### Fixed
 
@@ -82,14 +181,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.claude/settings.json` deny list was replaced by Intutic's on every cycle;
   only rules an earlier sync wrote are swapped now.
 - **No false tamper reports from the daemon's own writes**: regenerating the
-  hardened goose plugin no longer files a SECURITY override incident, and the
-  policy snapshot self-heal no longer "restores" a refresh in progress.
+  hardened goose plugin no longer files a SECURITY override incident, also on
+  a machine where the plugin cannot be made immutable (Linux without root), and
+  the policy snapshot self-heal no longer "restores" a refresh in progress.
 - **`rm -rf ~` and `rm -rf $HOME` are in the destructive tier** (rule
   `destructive.rm_rf_home`); a subdirectory of home is not matched.
 - **Tool-description poisoning catches an order to run a destructive
   command** (recursive delete of `/` or home, `mkfs`, `dd` to a device,
   `DROP DATABASE`, a download piped into a shell, a fork bomb), with no new
   false positives on the 10,753-description benign corpus.
+- **A chaos run keeps the agent's own provider keys.** On a machine logged in
+  to Intutic the runner replaced `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` with
+  the workspace key, which a repetition's standalone proxy cannot resolve, so
+  every baseline failed and every run with a real agent was invalid. The MCP
+  proxy also records a blocked or held chaos call before answering it, so the
+  runner never reads the events file ahead of the event.
+- **The Terraform provider release pushes with the provider repository's
+  token.** The checkout's persisted token overrode it, and the push was
+  refused.
+
+### Removed
+
+- From `@intutic/shared-types`, exports nothing produced or read:
+  `Attribution4D`, `DriftEvent`, `DriftDirection`, `PromptEstimateInputSchema`,
+  `PromptEstimateInput`, `PromptEstimateResult`, `CostHistoryEntry`,
+  `CostHistoryResult`, `DriftReportResult`, `SslStepReport`,
+  `GovernanceNotification`, `NotificationConfig`, `NotificationPriority`,
+  `NotificationCategory`, `PromptQualityScore`, `PromptQualityContext`,
+  `ContextGap`, `DedupHint`, `HarnessConfigSnapshot`, `ConfigEditWithTarget`,
+  `ConfigCapturePayload`, `CreateTaskPayload`, `CreateTaskResult`,
+  `UpdateTaskPayload` and `UpdateTaskResult`. Drift is the
+  `anomaly.drift.detected` event; cost estimates are `POST
+  /api/v1/predict-cost`.
+- **`TaskManagementAdapter.createTask` and `updateTask`**, which nothing
+  called, and the `github` and `asana` `TaskProvider` values, which had no
+  adapter. The docs and skill files list Jira, Linear and PagerDuty.
+- **Three notification event types nothing emitted**:
+  `ssl.enforcement.violation`, `context_gap.auto_injected` and
+  `adapter.write_back.failed`, from `NOTIFICATION_EVENT_TYPES` and the
+  Terraform provider. A rule on one could never deliver; the API refuses new
+  ones and the control plane's migrations delete existing ones.
+- **`IntuticPlugin::priority`** from the proxy: nothing read it, since each
+  gate is called at its own site. The proxy README lists the governance steps
+  that run, and where, instead of a plugin chain that did not exist.
+- **`/intutic config quality-gate`**, which replied that a prompt quality gate
+  was on and stored nothing; no such gate exists.
+
+### Documentation
+
+- `/intutic review` is described as the quick heuristic check it is: four
+  fixed rules (prompt length, action verbs, naming an SOP or policy), no model.
+- `sop://` comments in generated config are for traceability only; nothing
+  parses them back.
+- The chaos engineering guide records the first run with a model-backed agent
+  and says to weight `failure_surfaced`, `no_policy_hits` and
+  `no_destructive_attempt`, not `task_success`, when the fault is a permission
+  denial.
+- Source comments: `ff_metaclaw_evolution` is settable, a fail-closed proxy
+  policy refusal is a 403 (not 503), and the trajectory monitor runs in the
+  `intutic connect` process.
 
 ## [2.4.0] - 2026-10-11
 
