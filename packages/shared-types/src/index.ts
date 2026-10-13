@@ -27,8 +27,6 @@ export {
   PlanLifecycleState,
   PlanExecutionOutcome,
   SopLifecycleState,
-  SopType,
-  HookPhase,
   RoutingTier,
   WorkspaceRole,
   // WS-5 — MCP proxy governance settings
@@ -734,6 +732,8 @@ export {
   scanSkillContent,
   excerptFor,
   EXCERPT_RADIUS,
+  SKILL_CONTENT_TRANSPORT_CHARS,
+  skillContentForTransport,
   type SkillScanCategory,
   type SkillScanEngine,
   type SkillScanPattern,

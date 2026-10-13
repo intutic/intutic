@@ -96,7 +96,7 @@ Traces are the foundation for cost tracking, anomaly detection, and compliance a
 ## Reasoning/Thinking Tokens
 
 **Reasoning tokens** (or thinking tokens) are special, non-content tokens generated internally by advanced reasoning models (e.g. Claude 3.7 Sonnet thinking mode, OpenAI o1/o3 series) during deep-thinking cycles.
-* Intutic's proxy automatically extracts these tokens (`token/reasoning_extractor.rs`) to report actual raw vs. reasoning cost proportions in the trace ledger.
+* The proxy records the provider's own count of them on the trace as `reasoningTokens`, where the provider reports one: OpenAI's `reasoning_tokens` (Chat Completions and Responses) and Gemini's `thoughtsTokenCount`. They are part of the output tokens and priced with them, never added on top. Anthropic counts thinking inside `output_tokens` and reports no breakdown, so its traces carry none.
 * Tracking reasoning tokens helps teams evaluate where agents spent computation time vs. where they output final code structure.
 
 ## Token Waste Classification
@@ -144,7 +144,7 @@ Before 2.4.0 both were filed as `SCOPE_VIOLATION`, and those incidents keep that
 
 ## Trust Scores
 
-Every member receives a **trust score** — a 0–100 reliability rating, starting at 80, that tracks how well their agents follow governance rules over time: it falls with each anomaly or block recorded in their sessions. It is shown with the session in the dashboard and returned by `GET /api/v1/trust-scores`; no enforcement decision reads it.
+Every member receives a **trust score** — a 0–100 reliability rating, starting at 80, that tracks how well their agents follow governance rules over time: it falls (×0.85) with each incident filed against one of their sessions, and rises (×1.02) when a session ends with none filed against it. It is shown with the session in the dashboard and returned by `GET /api/v1/trust-scores`; no enforcement decision reads it.
 
 ## Compliance Scores
 

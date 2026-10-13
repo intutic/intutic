@@ -77,14 +77,6 @@ A run held for review is approved or rejected (which kills it) with `intutic loo
 - **Circuit Breaker Controls**: **Mark Completed** or **Force Stop** a running session. A session held for review offers **Approve & Resume** or **Reject & Kill** instead; held runs are also listed under **Findings › Review Queue › Held Changes**.
 - **Start New Session** opens a loop run with a session name and a budget in USD.
 
-## Memory Guardrails & State Scanning
-
-To prevent agent loops from being hijacked by prompt injections hidden in memory or state files, the control plane scans state files submitted with their content to config capture (`POST /api/v1/config/capture`, which accepts content only when the workspace has turned on config content upload):
-- **Automatic Scans**: Files at `PROGRESS.md`, `STATE.md` or `task.md`, or whose path ends in `state.json`, are checked against unsafe patterns (e.g., `ignore previous instructions`, `bypass guardrails`, `disable safety checks`).
-- **Incident Logging**: If an injection attempt is detected, the capture is still accepted, but a HIGH-severity **PROMPT_INJECTION** incident is opened in the governance incident queue.
-
-The sync daemon's own config capture uploads only harness rules files, not these state files, so the scan runs only on a capture another client submits.
-
 ## Verification Gate (Loop Verifier API)
 
 Agent loops can actively check code diffs and progress against workspace SOPs before executing final operations:

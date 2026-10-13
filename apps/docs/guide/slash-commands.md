@@ -18,7 +18,7 @@ name with a CLI command and do something different:
 |---|---|
 | `/intutic start <task>` binds this session's costs to a ticket | [`intutic start`](/reference/cli#intutic-start) runs the proxy |
 | `/intutic status` shows this session's stats | [`intutic status`](/reference/cli#intutic-status) shows local auth, harness and sync state |
-| `/intutic budget` shows how many requests the workspace has traced today | [`intutic budget`](/reference/cli#intutic-budget) shows spend against the daily and monthly budgets |
+| `/intutic budget` shows today's and this month's spend against the caps and budgets covering this session | [`intutic budget`](/reference/cli#intutic-budget) shows the workspace's spend against its caps, the local cap, and running loops |
 :::
 
 ---
@@ -103,18 +103,17 @@ Binds all sequential LLM request costs and traces in the current session (identi
   ```
 
 ### 5. `/intutic verify <prompt>` (or `/intutic check <prompt>`)
-Runs manual pre-flight checks on a prompt and returns a verdict, a score and any violations.
-* **Mechanism**: Routes to the control plane, which checks the prompt text against four fixed patterns: hardcoded color values, direct `Date` calls, raw `uuidv4()` calls, and `drizzle-orm` named outside `packages/db`. It names the session's active SOP and local SOP folders in the output, but does not check the prompt against their content. No model is involved.
+Checks a prompt for tools your workspace's policy refuses, before you send it.
+* **Mechanism**: Routes to the control plane, which reads the `deny_tools` front matter of the workspace's VALIDATED, active SOPs (org SOPs included) and of the policy guardrails it runs as ENFORCING, the same set the proxy enforces, and reports each denied tool the prompt names, with the SOP that denies it and any role scope. A guardrail in SHADOW mode and `action:` tokens are not matched. Ordering, call-count and data rules (`requires_before`, `forbid_after`, `max_calls`, `forbid_with`) apply to the calls an agent makes, so the proxy enforces them at call time rather than this command. With no VALIDATED SOPs or enforcing guardrails, it says there is no policy to check against. No model is involved.
 * **Output**:
   ```markdown
-  ### ⚖️ E2E Compliance Verification
+  ### ⚖️ Policy Check
 
-  **Target Query**: *"Retrieve users using db helper"*
-  **Active SOP Context**: `Default Workspace Rules`
-  **Compliance Score**: `100%`
-  **Verdict**: ✅ **COMPLIANT**
+  **Prompt**: *"Use WebFetch to pull the vendor's pricing page"*
+  **Checked against**: 3 enforced SOP(s) and guardrail(s), 4 `deny_tools` rule(s)
+  **Verdict**: ⚠️ **Names a denied tool**
 
-  No active SOP violations or architectural boundary risks identified in your query. Safe to execute.
+  - `WebFetch` is denied by **Outbound data policy**; the proxy refuses a call to it.
   ```
 
 ### 6. `/intutic review <prompt>`
@@ -130,7 +129,7 @@ Runs the user prompt upstream to the LLM and evaluates the output response strea
 Displays the session's trace count, total cost, average compliance score and session ID.
 
 ### 9. `/intutic budget`
-Displays how many requests the workspace has traced today. Spend against budgets is on the dashboard's Billing tab.
+Displays today's and this month's spend against every budget covering the session: the workspace's daily and monthly caps and, on plans with member budgets, the session member's own (theirs, or the default member budget). Each row shows spent, limit, share used, and whether the budget refuses requests or only alerts. The spend comes from the counters the proxy's budget gate reads. Per-key budgets are on the dashboard's Billing tab.
 
 ### 10. `/intutic sops`
 Lists up to 20 of the workspace's SOPs with their lifecycle state and ID.

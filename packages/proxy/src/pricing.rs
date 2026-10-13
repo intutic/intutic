@@ -342,6 +342,7 @@ mod tests {
                 cache_read_input: Some(0),
                 cache_write_input: Some(0),
                 output: Some(output),
+                reasoning_output: None,
             };
             let cached = estimate_cost_cached(model, &usage);
             assert!(
@@ -372,6 +373,7 @@ mod tests {
                 cache_read_input: Some(1000),
                 cache_write_input: Some(0),
                 output: Some(0),
+                reasoning_output: None,
             },
         );
         let full_rate_equivalent = estimate_cost("claude-opus-not-a-real-version", 1000, 0);
@@ -395,6 +397,7 @@ mod tests {
                 cache_read_input: Some(500),
                 cache_write_input: Some(500),
                 output: Some(0),
+                reasoning_output: None,
             };
             let cached = estimate_cost_cached(model, &usage);
             let blind_equivalent = estimate_cost(model, 1000, 0);

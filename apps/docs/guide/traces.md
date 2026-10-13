@@ -134,7 +134,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ## Classifying token utility
 
-You can retroactively classify traces as USEFUL or WASTED (Owner, Admin or EM). The trace row itself is append-only, so the label is stored beside it and the trace's detail reports it as `tokenUtility` (with `tokenUtilityClassifiedBy`); ids that are not in your workspace are skipped. The response is `{ "classified": <count> }`.
+You can retroactively classify traces as USEFUL or WASTED (Owner, Admin or EM). The trace row itself is append-only, so the label is stored beside it and the trace's detail reports it as `tokenUtility` (with `tokenUtilityClassifiedBy`). The label is also the routing reward signal: the reward cron scores a labelled trace as `WASTED` 0 or `USEFUL` 100 in place of its measured response integrity. Ids that are not in your workspace are skipped. The response is `{ "classified": <count> }`.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" \

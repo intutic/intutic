@@ -8,6 +8,7 @@ import {
   computeFingerprint,
   writeEnforcementState,
   readEnforcementState,
+  containmentExpected,
 } from './enforcementState.js'
 
 describe('enforcementStatePath', () => {
@@ -107,5 +108,23 @@ describe('writeEnforcementState / readEnforcementState', () => {
     const state = await readEnforcementState(path)
     expect(state?.firewall?.active).toBe(false)
     expect(state?.firewall?.backend).toBeUndefined()
+  })
+})
+
+// The connect loop probed every machine on every sync and filed a CRITICAL
+// DATA_EXFILTRATION incident wherever a provider was reachable directly, which
+// is every machine without `intutic enforce`.
+describe('containmentExpected', () => {
+  const state = (active: boolean) => ({
+    fingerprint: 'f', hostname: 'h', platform: 'darwin', cliVersion: '1',
+    firewall: { active, reportedAt: '2026-10-13T00:00:00Z' },
+  })
+  it('is false for a machine with no firewall in a workspace that does not enforce egress', () => {
+    expect(containmentExpected(undefined, null)).toBe(false)
+    expect(containmentExpected('monitor', state(false))).toBe(false)
+  })
+  it('is true when the workspace enforces egress, or this machine applied enforce', () => {
+    expect(containmentExpected('enforce', null)).toBe(true)
+    expect(containmentExpected('off', state(true))).toBe(true)
   })
 })
