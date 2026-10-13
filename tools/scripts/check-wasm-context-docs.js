@@ -54,12 +54,34 @@ if (!struct) {
 // A field marked `#[serde(skip)]` is never serialised, so a rule never sees it
 // (`turn_tool_calls`, which only the Rego host reads). Its attributes sit
 // between the previous field and its own declaration.
-const fields = []
-let previousEnd = 0
-for (const m of struct[1].matchAll(/^\s*pub\s+(\w+)\s*:/gm)) {
-  if (!/#\[serde\(skip\)\]/.test(struct[1].slice(previousEnd, m.index))) fields.push(m[1])
-  previousEnd = m.index + m[0].length
+//
+// A field marked `#[serde(flatten)]` is not sent under its own name: its
+// struct's fields are inlined beside the others (`node: NodeIdentity` arrives as
+// `node_id`, `depth`, `graph_spend_usd`, …). Those inlined names are what a rule
+// reads, so they are what must be documented.
+function structFields(name, body) {
+  const out = []
+  let previousEnd = 0
+  for (const m of body.matchAll(/^\s*pub\s+(\w+)\s*:\s*([\w:<>]+)/gm)) {
+    const attrs = body.slice(previousEnd, m.index)
+    previousEnd = m.index + m[0].length
+    if (/#\[serde\(skip\)\]/.test(attrs)) continue
+    if (/#\[serde\(flatten\)\]/.test(attrs)) {
+      const inner = rs.match(new RegExp(`pub struct ${m[2]}\\s*\\{([\\s\\S]*?)\\n\\}`))
+      if (!inner) {
+        fail(
+          `${name}.${m[1]} is flattened from ${m[2]}, but "pub struct ${m[2]}" is not in ` +
+            `${CONTEXT_RS}.\nThe gate cannot see the fields it inlines; find the struct deliberately.`,
+        )
+      }
+      out.push(...structFields(m[2], inner[1]))
+      continue
+    }
+    out.push(m[1])
+  }
+  return out
 }
+const fields = structFields('RequestContext', struct[1])
 
 // A struct this small silently shrinking to nothing is the failure mode a
 // regex-based extractor has. Refuse to pass on a suspiciously short list.
@@ -79,8 +101,12 @@ const doc = readFileSync(PAGE, 'utf8')
 // `injection_findings` was deleted from the table, because the name also appears
 // in a prose warning two sections down. A field mentioned in a sentence about
 // something else is not documented; a reader scanning for it will not find it.
+// A row may name several fields that share one description
+// (`| \`node_id\`, \`agent_role\`, … | …`); each name in the first cell counts.
 const documented = new Set(
-  [...doc.matchAll(/^\|\s*`(\w+)`\s*\|/gm)].map((m) => m[1]),
+  [...doc.matchAll(/^\|\s*((?:`\w+`\s*,\s*)*`\w+`)\s*\|/gm)].flatMap((m) =>
+    [...m[1].matchAll(/`(\w+)`/g)].map((n) => n[1]),
+  ),
 )
 
 const missing = fields.filter((f) => !documented.has(f))

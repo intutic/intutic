@@ -64,7 +64,7 @@ Muse exposes a `META_API_KEY` env var and a `--base-url` CLI flag for routing mo
 - **Hook script:** `.intutic/hooks/muse-check.js` — the same shared gate evaluator (compiled protection floor + policy snapshot + ` WHERE `/argPattern rules) every other JavaScript-family harness in this product runs, registered for both `PreToolUse` and `PermissionRequest`.
 - **`~/.config/muse/settings.json`:** narrow merge-write — only `managed_hooks_path` is set/updated; `schema_version` (defaulted to `1` if the file is new) and everything else (`mcp_servers`, any user-set key) is preserved.
 - **MCP servers:** entries under `mcp_servers` in `settings.json` (both `stdio` and `streamable_http` transports) are proxy-wrapped the same way every other JSON-map harness's servers are — though the `streamable_http` entry shape itself is an assumption; see the callout below.
-- **Skills:** `~/.agents/skills` is already covered by this product's existing skill-scanning feature — nothing Muse-specific was needed there.
+- **Skills:** nothing Muse-specific. The product's skill inventory reads the workspace's `.agents/skills/`; a user-level `~/.agents/skills` is not scanned.
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness muse-code`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 

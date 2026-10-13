@@ -67,13 +67,19 @@ a real tool call. WASM rules are the supported answer.
 
 ## Lifecycle Transitions
 
-SOP lifecycle states are tracked sequentially in the database. Every state change creates an audit record:
+SOP lifecycle states are tracked in the database (`lifecycleState` above), and only these transitions are allowed (`POST /api/v1/sops/:sopId/transition`, Owners and Admins):
 
 ```
-[ DRAFT ] ──> [ UNDER_REVIEW ] ──> [ ACTIVE ] ──> [ ARCHIVED ]
+[ DRAFT ] ──> [ PENDING_REVIEW ] ──> [ GENERATED ] ──> [ HYPOTHESIZED ] ──> [ REFINED ] ──> [ VALIDATED ]
+
+PENDING_REVIEW ──> DRAFT
+HYPOTHESIZED, REFINED, VALIDATED ──> INVALIDATED
+VALIDATED ──> PENDING_REVIEW
 ```
 
-Each change projects metadata detailing the creator user, review tickets, and the migration hashes proving policy integrity.
+`PENDING_REVIEW → GENERATED` must pass a Gödel score threshold; `REFINED → VALIDATED` is refused while the SOP's compiled graph is missing or stale, unless the admin acknowledges it with a reason. `HYPOTHESIZED` and `REFINED` SOPs are evaluated in shadow; only `VALIDATED` enforces. Invalidating a SOP sends the SOPs that depend on it back to `PENDING_REVIEW`.
+
+Each change emits a `sop.lifecycle.transitioned` event carrying the acting user, the from and to states, and the reason.
 
 ---
 

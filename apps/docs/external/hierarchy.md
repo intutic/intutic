@@ -14,26 +14,29 @@ When a request hits the Rust proxy gateway, it resolves the `workspace_id` using
                   Incoming LLM Interception Request
                                 │
                                 ▼
-                 Check for "x-workspace-id" header?
+          Does the virtual key name a workspace?
+               (vk_{32 hex}_{workspace_id})
                               /     \
                             YES      NO
                             /         \
                            ▼           ▼
-             Set workspace_id from   Parse Authorization header
-                 HTTP Header         (vk_{workspace_id}_{token})
-                                               │
-                                               ▼
-                                     Extract workspace_id
+           workspace_id from key    "x-workspace-id" header,
+           (403 if the header       else INTUTIC_WORKSPACE_ID
+            names another)
+                            \         /
+                             ▼       ▼
+             Authenticate the key: its record's workspace wins
+             (403 workspace_mismatch if the request claimed another)
 ```
 
 ### A. HTTP Header Inspection
-The proxy checks for the presence of an explicit `x-workspace-id` HTTP header. This header is typically injected by internal CLI tools or agent portal extensions when establishing a session.
+The proxy reads an explicit `x-workspace-id` HTTP header, set by the harness on session start. It decides the workspace only when the key itself names none (an attenuated child key, or a provider key on a standalone proxy); when both name a workspace and they differ, the request is refused with `403 workspace_mismatch`. With neither, the proxy falls back to its `INTUTIC_WORKSPACE_ID` environment variable.
 
 ### B. Virtual Key Parsing
-If the header is missing, the proxy inspects the `Authorization` bearer token. Intutic virtual keys follow a structured format:
-`vk_{workspace_id}_{cryptographic_token}`
+Intutic virtual keys minted by the control plane follow a structured format:
+`vk_{32 hex characters}_{workspace_id}` (older keys: `vk_{ws_…}_{32 characters}`)
 
-The proxy splits the token string at the delimiter to extract the `workspace_id` prefix. Once resolved, the proxy queries the Valkey cache (requesting configuration from the control plane API if missing) to retrieve policy settings for that tenant.
+The proxy reads the `workspace_id` suffix, then authenticates the key (the Valkey cache first, the control plane on a miss). The authenticated key record is the authority: the proxy adopts its workspace and refuses a request that claimed a different one with `403 workspace_mismatch`, then retrieves that tenant's policy settings.
 
 ---
 
@@ -65,7 +68,7 @@ graph TD
 ### 🏛️ Org
 * **Purpose**: The billing and trial boundary. `kind: 'personal'` is the implicit org every individual signup gets — capped at exactly one team, which is the entire mechanism behind "a single user can never create more than their one default workspace." `kind: 'org'` is a real organization (`POST /api/v1/orgs`, from an already-authenticated caller, gated behind DNS domain-ownership verification since it auto-provisions a real managed gateway cell — see [Organizations, Teams & Billing](/guide/organizations)), on a paid tier with a 30-day trial from creation, capable of creating additional teams up to its plan's `maxTeamsPerOrg` limit.
 * **Table**: `orgs` — `orgId`, `kind`, `planTier`, `trialExpiresAt`, `dailySpendCapUsd`, `monthlyBudgetUsd`, `stripeCustomerId`, `stripeSubscriptionId`, `ownerUserId`, `gatewayId` (nullable — see [Self-Hosted Gateway](/external/self-hosted-gateway)).
-* **Authority**: `orgs.ownerUserId` is the one single-owner fact (billing/deletion authority). "Can manage this org's teams and workspaces" is derived, not a separate role: any user holding `OWNER`/`ADMIN` on *any* active workspace under the org counts (`hasOrgAdminAccess`) — there is no parallel Org-Owner/Org-Admin role split, since `WorkspaceRole`'s `OWNER`/`ADMIN` already converge everywhere a split would add.
+* **Authority**: `orgs.ownerUserId` is reserved for the one single-owner fact (billing/deletion authority), but neither org-creation path populates it yet (both write `null` pending the users backfill), so nothing reads it. "Can manage this org's teams and workspaces" is derived, not a separate role: any user holding `OWNER`/`ADMIN` on *any* active workspace under the org counts (`hasOrgAdminAccess`) — there is no parallel Org-Owner/Org-Admin role split, since `WorkspaceRole`'s `OWNER`/`ADMIN` already converge everywhere a split would add.
 
 ### 🗂️ Team
 * **Purpose**: Groups workspaces under an org. A personal org's one team is created automatically at signup and cannot be added to; a real org's default team is created at org creation, and admins can create more (`POST /api/v1/orgs/:orgId/teams`) up to the plan's team limit.
@@ -73,7 +76,7 @@ graph TD
 
 ### 🏢 Workspace
 * **Purpose**: The primary security and isolation boundary — unchanged by the org/team layer above it. All budgets, DLP configurations, WASM rules, provider credentials, and Postgres RLS policies are still keyed on `workspace_id` alone; org/team is an ancestor, not a re-scoping. Every workspace's `orgId`/`teamId` are non-nullable (denormalized onto `workspaces` so hot-path billing/auth checks need no extra join).
-* **Table**: `workspaces` — gains `teamId`, `orgId`, `gatewayId` (nullable per-workspace gateway override — schema-only today, see [Self-Hosted Gateway §3](/external/self-hosted-gateway#pointing-a-workspace-at-your-gateway)).
+* **Table**: `workspaces` — gains `teamId`, `orgId`, `gatewayId` (nullable per-workspace gateway override, set with `PATCH /api/v1/workspace/gateway`; it wins over the org's default — see [Self-Hosted Gateway §3](/external/self-hosted-gateway#pointing-a-workspace-at-your-gateway)).
 * **Creation**: `POST /api/v1/teams/:teamId/workspaces` — the calling admin is added as the new workspace's `OWNER` (a JWT is workspace-scoped, so being an org admin elsewhere grants no automatic session on a newly created workspace). A new workspace inherits its org's current `planTier`/`dailySpendCapUsd`/`monthlyBudgetUsd` at creation time; a later org-plan change write-through updates every workspace under the org to match.
 
 ### 👤 User & Workspace Member
@@ -97,12 +100,12 @@ graph TD
 
 In enterprise environments with multiple developers, Intutic maintains isolated live monitoring and centralized compliance audits through two distinct layers:
 
-### A. Heartbeat and Telemetry Isolation (Developer Sub-Workspaces)
-* The sync daemon heartbeat is cached in Valkey using the `workspace_id` (`v2:sync:heartbeat:${workspaceId}`).
-* To prevent concurrent developers from overwriting each other's live session states on the **Developer Sessions** (`/activity/sessions`) page, each developer is provisioned their own personal sandbox or developer-specific sub-workspace ID (e.g., `wk_dev_alice`, `wk_dev_bob`).
-* These sub-workspaces automatically inherit the master standard operating procedures (SOPs), DLP rules, and custom WASM filters published by SREs or platform engineers at the parent organization level (`wk_org_acme`).
+### A. Heartbeat and Telemetry Isolation
+* The sync daemon heartbeat is cached in Valkey per workspace (`v2:sync:heartbeat:${workspaceId}`, 120-second TTL). It holds the most recent daemon report for that workspace, not one entry per developer.
+* There are no developer sub-workspaces. The isolation unit is the workspace: an org admin can create more workspaces under the org (`POST /api/v1/teams/:teamId/workspaces`), and each keeps its own SOPs, DLP configuration and WASM rules.
+* What every workspace under an org shares is the org-level SOP floor: an org admin publishes SOPs with `POST /api/v1/workspace/org-sops`, and each workspace enforces them in addition to (never instead of) its own.
 
 ### B. Centralized Audit Aggregation
 * When developers run AI agent sessions (e.g., Cursor, Claude Code, Aider), the Rust proxy gateway intercepts the execution traces.
-* Every trace log and incident record is database-tagged with **both** the developer's unique identity (`user_id` / `developerId`) and the shared organization `workspace_id`.
-* This allows security teams, managers, and SREs to view and search consolidated logs, compliance scores, and compute budgets across the entire team in the **Activity Logs** (`/activity/traces`), **Review Queue** (`/findings/review`), and **Compliance Scope** (`/policies/scope`) views without any conflict.
+* Every trace belongs to an agent session, and the session records **both** the developer's identity (`user_id`) and the `workspace_id`; incident records carry the `workspace_id` and the session.
+* This allows security teams, managers, and SREs to view and search consolidated logs, compliance scores, and compute budgets across the entire team in the **Traces** (`/activity/traces`), **Review Queue** (`/findings/review`), and **Compliance Scope** (`/policies/scope`) views without any conflict.

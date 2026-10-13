@@ -26,7 +26,7 @@ region). A few things distinguish a managed cell from every other gateway type:
   provisioner reconciler actually deploys it and the first heartbeat arrives, flipping its status
   to `online`.
 - **Personal orgs never get one.** Only real orgs (created via `intutic org create` or the
-  dashboard's "Create Organization" flow) get a managed cell — freemium/personal workspaces stay
+  dashboard's "Create Organization" flow, or an org signup) get a managed cell — freemium/personal workspaces stay
   on the shared platform gateway.
 - **One org can hold more than one cell**, one per region, up to its plan's ceiling — see
   Capacity below.
@@ -45,7 +45,7 @@ more. When an org is at or over its limit, the panel surfaces an inline **"Manag
 reached"** banner with a direct upgrade call-to-action rather than a generic error.
 
 A second guard, `assertRegionAvailable`, prevents two *active* cells for the same org landing in
-the same region — you'd need to revoke the existing regional cell first, or pick a different
+the same region — it refuses with a 409 naming the occupied region; you'd need to revoke the existing regional cell first, or pick a different
 region.
 
 ## The deprovision policy engine

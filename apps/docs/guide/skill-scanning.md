@@ -6,7 +6,7 @@ description: Content-scanning agent skill files (SKILL.md) and their bundled scr
 # Skill Scanning <Badge type="tip" text="Open-Core" />
 
 An agent skill is a directory a harness loads on its own initiative —
-`.claude/skills/**/SKILL.md` for Claude Code, `.agents/skills/**/SKILL.md`
+`.claude/skills/<name>/SKILL.md` for Claude Code, `.agents/skills/<name>/SKILL.md`
 for Intutic's own bundled skills — containing a markdown file of
 instructions the agent treats as authoritative, the same way it treats the
 system prompt. Nothing in this codebase read that content before this
@@ -61,8 +61,8 @@ for every consumer, immediately.
 
 | Surface | What it does |
 |---|---|
-| `intutic skill audit` | Walks `.agents/skills/**/SKILL.md` and `.claude/skills/**/SKILL.md`, scans each, prints findings, and reports them to the control plane. Auto-pruning a flagged line is opt-in via the `enableLocalSkillAuditDelete` workspace setting — the same gate that already covers the legacy rule-file audit (`CLAUDE.md`, `.cursorrules`, etc). Also enumerates and scans each skill's **bundled scripts** — see below. |
-| Sync daemon | Scans `.agents/skills/**/SKILL.md` on every sync cycle and attaches the verdict to the agent's reported `skills` facet — no separate command needed. Also computes a `scripts: {total, scanned, flagged}` facet per skill from the same bounded bundled-file enumeration. |
+| `intutic skill audit` | Reads the `SKILL.md` of each skill directory directly under `.agents/skills/` and `.claude/skills/` (one level deep; a symlinked skill directory is skipped), scans each, prints findings, and reports them to the control plane. It exits 1 when there is any finding, unless `--exit-zero` is passed. Auto-pruning a flagged line is opt-in via the `enableLocalSkillAuditDelete` workspace setting — the same gate that already covers the legacy rule-file audit (`CLAUDE.md`, `.cursorrules`, etc). Also enumerates and scans each skill's **bundled scripts** — see below. |
+| Sync daemon | Scans `.agents/skills/<name>/SKILL.md` on every sync cycle and attaches the verdict to the agent's reported `skills` facet — no separate command needed. Also computes a `scripts: {total, scanned, flagged}` facet per skill from the same bounded bundled-file enumeration. |
 | Agent posture score | The `skills` scoring dimension is content-aware: a skill scanned clean scores full marks, a skill with a confirmed finding scores zero, and a skill this report cannot vouch for either way (never scanned, or reported by an older daemon build) scores in between — see [What this cannot catch](#what-this-cannot-catch) for why "in between" and not "clean." A flagged bundled script pulls the whole skill to zero regardless of how `SKILL.md` itself scored; an unscanned (refused, over-cap, or unrecognized-language) bundled script pulls the skill down to the same "in between" band an unscanned `SKILL.md` gets. |
 
 A file that cannot be read — permissions, vanished between discovery and the
@@ -103,10 +103,10 @@ taxonomy, and fixture discipline) plus two new functions in
   `detectScriptLanguage` (extension first, shebang as a fallback), and
   **always** computes its sha256 hash — even for a file this scanner cannot
   itself interpret, such as a compiled binary. That hash is deliberate, not
-  incidental: a later, separate, **opt-in** integration with Cisco's
-  `skill-scanner` project (and a VirusTotal-style hash lookup) depends on
-  every bundled file being hashed regardless of whether this phase's own
-  regex patterns can say anything about its content. Content scanning itself
+  incidental: the separate, **opt-in** [VirusTotal hash lookup](#virustotal-hash-lookup-opt-in-hash-only)
+  depends on every bundled file being hashed regardless of whether this phase's own
+  regex patterns can say anything about its content. (The Cisco integration
+  below scans the skill directory itself and does not use the hashes.) Content scanning itself
   (`scanScriptContent`) only runs when the language is recognized and the
   file is within the byte cap.
 
@@ -175,13 +175,13 @@ run as a second engine alongside — never instead of — native scanning.
 
 **Findings and provenance.** Every finding — native or Cisco — now carries
 an `engine: 'native' | 'cisco-skill-scanner'` field, so a consumer can tell
-which engine produced it. In `--sarif` output, Cisco's own SARIF run is
-appended VERBATIM as a second entry in the document's `runs[]` array — SARIF
-is explicitly designed to carry multiple tools' output in one document, so
-Cisco's results are never translated or re-shaped for that output mode. For
-every OTHER consumer (the human-readable CLI report, the control-plane
-`skills/report` payload, posture scoring), Cisco's findings ARE translated
-into this codebase's own `SkillScanFinding` shape — `patternId` prefixed
+which engine produced it. In `--sarif` output, the Cisco runs for every
+skill directory are combined into one second entry in the document's `runs[]`
+array, keeping Cisco's tool name, rules and results — SARIF is explicitly
+designed to carry multiple tools' output in one document. Cisco's findings
+are also translated, for the human-readable CLI report, the control-plane
+`skills/report` payload and the native `intutic-skill-scan` run (so in SARIF
+each appears in both runs), into this codebase's own `SkillScanFinding` shape — `patternId` prefixed
 `cisco.` followed by their ruleId, category mapped onto this page's
 `prompt_injection | data_exfiltration | malicious_code` taxonomy, excerpt bounded — the same
 `SkillScanFinding` shape native findings already use, just with `engine:
@@ -255,12 +255,13 @@ dynamic-tier promotion" pattern this product already uses for
   same two path patterns are re-shipped as `skill_surface.*.tier` entries
   through the policy-snapshot channel, at whatever severity
   `SKILL_SURFACE_TIER_SEVERITY` currently declares — `block` today. Because a
-  gate evaluates every matching rule and a `block` verdict wins outright, a
-  workspace with a valid, current snapshot sees the write refused even though
-  the floor's own copy only warned; a workspace whose snapshot is absent,
-  stale, or fails its digest/workspace check degrades cleanly back to the
+  gate evaluates the snapshot's rules before the compiled-in floor, a
+  workspace with a valid snapshot sees the write refused even though
+  the floor's own copy only warned; a workspace whose snapshot is absent
+  or fails its digest/workspace check degrades cleanly back to the
   floor's `warn`, because the dynamic tier is dropped and only the compiled-in
-  rules remain.
+  rules remain. A stale snapshot is still enforced: staleness raises an
+  alert, it does not drop the rules.
 
 **Why `block`, unlike the destructive-command tier it borrows the mechanism
 from.** `DESTRUCTIVE_COMMAND_PATTERNS` ships its `block`-eligible patterns at
@@ -338,7 +339,7 @@ skills developers write locally, and no recall is measured.
 `block`, the path tier already refuses every write into a skill directory,
 so today the content tier mostly changes the reason the developer sees. It
 becomes the only refusal if the path tier is retracted to `warn`. Each tier
-can be retracted without the other, with one exception: the `@intutic/gate-js`
+can be retracted without the other, with one exception: the `@intutic/gate`
 and `intutic-clawde` gates do not evaluate the snapshot's argument column, so
 there the content rules behave as path-only blocks.
 
@@ -357,7 +358,9 @@ was a deliberate, accepted gap: a rephrasing that avoids every
 pattern's literal wording passes clean, and closing that gap needs a
 semantic judgment call a regex table cannot make. Semantic analysis closes it — as an
 **opt-in**, workspace-level setting (`semanticSkillAnalysisEnabled`, default
-`false`), never a hot/live path.
+`false`, set through `PUT /api/v1/workspace/settings`), never a hot/live path.
+It needs a control plane on a plan with the LLM judge, so not Free: on Free
+the content is still stripped and nothing is judged.
 
 **What it catches that deterministic scanning cannot.** The judge is asked
 one question: does this skill's prose direct the agent to do something its
@@ -385,20 +388,20 @@ the exact wording.
 
 **Content transits the control plane, transiently, then is stripped.**
 Stated plainly rather than buried: when this setting is on, `intutic skill
-audit` attaches the FULL content of a `SKILL.md` file (capped at 64 KiB) to
+audit` attaches the content of a `SKILL.md` file (its first 65,536 characters) to
 its `/skills/report` entry — never bundled scripts, which stay S2/S3/S4's
 domain. The control plane hands that content to the judge and then strips it
 before anything is persisted — the stored report never contains `content`,
 regardless of whether judging ran, succeeded, or was skipped. Only the
-verdict (`'clean' | 'suspicious' | 'malicious' | 'unjudged'`) and a short,
-bounded `reason` string are stored, keyed by the content's own sha256, under
+verdict (`'clean' | 'suspicious' | 'malicious' | 'unjudged'`), a short,
+bounded `reason` string, the file path and when it was judged are stored, keyed by the content's own sha256, under
 `skills:semantic:{workspaceId}` in Valkey — never the judged text itself.
 
 **Caps.** Two independent bounds, both enforced server-side regardless of
 what a client sends:
 
-- **64 KiB per file** — the content-transport cap on `SkillFileReportSchema`'s
-  `content` field.
+- **65,536 characters per file** — the content-transport cap on `SkillFileReportSchema`'s
+  `content` field. The judge itself reads the first 16 KiB of it.
 - **A per-workspace daily judge-call cap** (`SEMANTIC_SKILL_JUDGE_DAILY_CAP`,
   env-overridable, default 200/day) — on top of a zero-cost, no-LLM-call
   skip for content that has not changed since it was last judged (a 30-day
@@ -408,8 +411,7 @@ what a client sends:
 
 **Fail-secure semantics.** `'unjudged'` is not `'clean'` — it means no
 determination was made: a timeout, a malformed judge response, or the daily
-cap being spent when this content was reported. It is scored no differently
-from a skill the deterministic scanner never got to look at, and it is never
+cap being spent when this content was reported. It leaves the posture score where the deterministic scan put it, and it is never
 treated as evidence of safety. Only a confirmed `'malicious'` or
 `'suspicious'` verdict changes anything — the posture score (a `'malicious'`
 verdict overrides the skill's score to 0 outright, the same severity tier as
@@ -421,9 +423,8 @@ severity for `'malicious'`, MEDIUM for `'suspicious'`).
 **Verdicts are advisory, not enforcement.** Nothing in this codebase blocks,
 refuses, or auto-prunes a skill on the strength of a semantic-judge finding
 — consistent with the report-only stance the
-deterministic scanner takes above. It carries the same corpus-measurement
-caveat: its false-positive rate stays unmeasured until a benign-skill corpus
-exists.
+deterministic scanner takes above. Its false-positive rate is unmeasured: the benign-skill corpus
+[above](#block-tier-skill-content-protection) measures the deterministic patterns, not the judge.
 
 ## What this cannot catch
 
@@ -469,9 +470,7 @@ Specifically:
   **separate, opt-in** integration with Cisco's open-source `skill-scanner`
   project described in
   [Cisco `skill-scanner` integration](#cisco-skill-scanner-integration-opt-in)
-  above — off by default, requires a separate `pipx install cisco-ai-skill-scanner`,
-  and consumes the sha256 hash `auditScriptFile` computes for every bundled
-  file.
+  above — off by default, and requires a separate `pipx install cisco-ai-skill-scanner`.
   A narrower, ALREADY-built piece sits between "no coverage" and full
   static analysis: the opt-in [VirusTotal hash lookup](#virustotal-hash-lookup-opt-in-hash-only)
   catches a script whose exact bytes match a hash already known-malicious
@@ -484,9 +483,8 @@ Specifically:
   (optional)](#semantic-analysis-optional) above, built through this
   codebase's `resolveMonitor` judge-call convention like every other LLM
   judge invocation. Its own real-world false-positive/negative rate is
-  unmeasured for the identical reason the deterministic patterns' rate is —
-  no benign-skill corpus exists yet — which is why it stays report-only,
-  opt-in, and never a gate.
+  unmeasured — the benign-skill corpus has not been run through the judge —
+  which is why it stays report-only, opt-in, and never a gate.
 - **Bundled-script coverage, specifically, is a first pass, not a general
   scanner.** `SCRIPT_SCAN_PATTERNS` seeds a handful of well-known shapes
   (remote-download-piped-to-shell, decode-then-execute, credential-path

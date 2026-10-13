@@ -130,7 +130,7 @@ A request the proxy receives as a TLS-intercepted `CONNECT` to a known provider 
 
 ## 🛠️ Framework Integration
 
-Connecting any standard LLM framework to the standalone proxy is simple. Just override the `base_url` parameter and pass your Intutic API key.
+Connecting any standard LLM framework to the standalone proxy is simple. Just override the `base_url` parameter; the proxy forwards the provider API key the client sends.
 
 ### 1. LangGraph (Python & TypeScript)
 
@@ -138,26 +138,15 @@ LangGraph now has a dedicated harness adapter — see the [LangGraph integration
 
 ### 2. Amazon Bedrock AgentCore & Anthropic Managed Agents
 
-Amazon Bedrock AgentCore and Anthropic Managed Agents connect to Intutic Proxy by configuring the provider gateway endpoint:
+The proxy serves Amazon Bedrock models itself: send an Anthropic- or OpenAI-format request to the proxy naming the model `bedrock/<model id>`, and the proxy signs the Bedrock call with the AWS credentials it is configured with — see [AWS Bedrock](/integrations/aws-bedrock). A Bedrock SDK client, which signs its own requests for the Bedrock runtime endpoint, cannot be pointed at the proxy. An agent deployed to Bedrock AgentCore is governed through the framework it is built with — see [AWS Bedrock AgentCore](/integrations/agentcore).
 
-```python
-import os
-from langchain_community.chat_models import BedrockChat
-
-# Route Amazon Bedrock traffic through Intutic Proxy (Option A: Intutic + LiteLLM)
-os.environ["AWS_BEDROCK_RUNTIME_ENDPOINT"] = "http://localhost:4000/v1"
-
-llm = BedrockChat(
-    model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
-    model_kwargs={"temperature": 0.1}
-)
-```
+Anthropic Managed Agents run their tool loop at Anthropic, so their model calls do not pass through the proxy; govern their tool calls by answering the session's confirmation events — see [Anthropic Managed Agents](/integrations/anthropic-managed-agents).
 
 ### 3. Custom & Proprietary Company Harnesses
 
 Any internal, microservice-based, or custom company agent framework can be governed by Intutic with zero refactoring:
 
-* **Standard HTTP Protocol Override**: Point `OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `HTTP_PROXY`, or `HTTPS_PROXY` to `https://proxy.your-company.com/v1`.
+* **Standard HTTP Protocol Override**: Point `OPENAI_BASE_URL` to `https://proxy.your-company.com/v1` and `ANTHROPIC_BASE_URL` to `https://proxy.your-company.com`.
 * **Native Package Suite**: Import `@intutic/clawde` (TypeScript SDK) or spawn `npx @intutic/proxy` directly inside microservice containers.
 * **Custom Harness Config Adapters**: Intutic supports Markdown (`.md`), YAML (`.yml`), JSON (`.json`), and Env (`.env`) harness config formats.
 
@@ -177,10 +166,12 @@ For strict security environments requiring zero data egress:
 
 Because the proxy intercepts prompt content *pre-flight*, developers can invoke interactive slash commands directly inside their chat prompts or agent sessions. 
 
-If a prompt begins with `/intutic` or `@intutic`, the proxy will process the command immediately and return the output without calling the upstream provider:
+If the last user message begins with `/fix` or `/draw` (also `@fix`, `/intutic-fix`, `@intutic fix`, and the same forms of `draw`), the proxy answers it locally without calling the upstream provider (unless `intutic_settings.commands.non_blocking` is on, which forwards `/fix`'s enhanced prompt); this works standalone. `/fix` returns the governance primitives that apply to the request with recommendations, and `/draw` the guardrail graph.
+
+A line beginning with `/intutic <command>` or `@intutic <command>` (for example `/intutic status`) is answered by the control plane, so the proxy intercepts it only when `CONTROL_PLANE_URL` is set; standalone, the message goes to the model as written. With a control plane, a request made with an Intutic virtual key gets the control plane's answer, and one made with a provider key gets an answer saying the command is unavailable; neither is forwarded to the model:
 
 ```python
-# Returns active session budget usage and audit compliance rating
+# Answered by the control plane: needs CONTROL_PLANE_URL and a virtual key
 response = llm.invoke("/intutic status")
 print(response.content)
 ```
@@ -189,4 +180,4 @@ print(response.content)
 To prevent client-side SDK parser failures, the proxy automatically formats the slash command response content to match the requested protocol schema:
 *   **OpenAI SDK:** Wraps the payload in a standard `chat.completion` Choice object.
 *   **Anthropic SDK:** Wraps the payload in a standard `message` JSON block.
-*   **Streaming Content:** Streams command outputs using Server-Sent Events (SSE) chunks if `stream: true` is configured.
+*   **Streaming Content:** `/fix` and `/draw` answer a `stream: true` request with Server-Sent Events (SSE) chunks. `/intutic` commands answer with a single JSON body.

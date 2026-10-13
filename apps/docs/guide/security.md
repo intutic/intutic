@@ -13,10 +13,12 @@ Intutic supports OpenID Connect (OIDC) Single Sign-On for seamless integration w
 2. On the **Single Sign-On (SSO)** card, click **Configure SSO**
 3. Enter your OIDC identity provider's configuration:
    - **Provider Type** &mdash; Select your provider (Okta, Microsoft Entra ID, Google, Ping Identity, or Custom OIDC)
+   - **Provider Name** &mdash; How the provider is labelled in Intutic
    - **Issuer URL** &mdash; Your identity provider's unique issuer OIDC endpoint URL
    - **Client ID** &mdash; The application client ID assigned by your provider
    - **Client Secret** &mdash; The secure OIDC client secret key
    - **Scopes** &mdash; Permissions scopes (defaults to `openid,profile,email`)
+   - **Default Role for Auto-Provisioned Users** and **Auto-provision users on first login**
 4. Save the provider, then register this redirect URI (also called the callback or reply URL) in your identity provider's application settings:
 
    | Deployment | Redirect URI |
@@ -85,23 +87,16 @@ All keys use the `vk_` prefix for easy identification.
 
 ---
 
-## On-Behalf-Of (OBO) Tokens
+## On-Behalf-Of (OBO) Tokens <Badge type="warning" text="Self-serve+" />
 
-OBO tokens solve the "shared API key" problem by issuing short-lived, employee-scoped credentials for agent authentication.
+`POST /api/v1/auth/obo-token` issues a short-lived token on behalf of the calling
+member (Developer and above). The request names the tools the token is for
+(`scopedTools`, at least one) and, optionally, the agent session (`sessionId`);
+the response carries the token, its `grantId` and `expiresAt`. Tokens expire after
+15 minutes, and each grant is recorded against the member.
 
-### How OBO Works
-
-1. A developer authenticates with Intutic (via SSO or password)
-2. Intutic issues an OBO token scoped to that developer's RBAC role
-3. The AI agent uses this token instead of a shared workspace key
-4. All actions are attributed to the specific developer
-5. The token enforces the developer's permission boundaries
-
-### Benefits
-
-- **Audit trail** — Every agent action is tied to a specific developer
-- **Least privilege** — Agents can only do what the developer is allowed to do
-- **Time-limited** — Tokens expire automatically, reducing risk from credential leaks
+Nothing in Intutic consumes OBO tokens yet: the proxy, the gates and the SDKs
+authenticate with virtual API keys, and the tool list is not enforced anywhere.
 
 ---
 
@@ -151,10 +146,12 @@ Some dashboard features are restricted to specific roles:
 | Feature | Required Role |
 |---------|--------------|
 | Overview › Spend tab | Owner, Admin, or EM |
+| Activity › AI Inventory | Owner, Admin, EM, or Developer |
 | Policies › Enforcement Policies | Owner, Admin, or EM |
 | Policies › Policy Guardrails | Owner, Admin, or EM |
 | Policies › Custom Filters (WASM) | Owner, Admin, or EM |
 | Policies › Emergency Overrides | Owner, Admin, or EM |
+| Policies › MCP Servers | Owner, Admin, or EM |
 | Policies › Compliance Scope | Owner, Admin, or EM |
 | Findings › Findings | Owner, Admin, or EM |
 | Findings › Incidents | Owner, Admin, or EM |

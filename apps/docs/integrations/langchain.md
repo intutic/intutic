@@ -11,7 +11,7 @@ LangChain is governed on two independent surfaces:
 
 The `langchain` adapter is detected when `pyproject.toml`, `requirements.txt`, or `uv.lock` declares a `langchain`/`langchain-core` dependency. Like LangGraph, it writes a `.env.intutic` file with proxy base-URL env vars plus a comment block pointing at the SDK gate.
 
-Detection also covers LangChain.js (the `langchain` npm package) for reporting purposes — but this adapter's env-writer is Python-only, matching the `intutic_clawde.gate.adapters.langchain` gate it points at. A JS/TS tool-call gate for LangChain.js is tracked separately.
+Detection is Python-only: a LangChain.js project (the `langchain` npm package in `package.json`) is not detected, matching the `intutic_clawde.gate.adapters.langchain` gate the env file points at. A JS/TS tool-call gate for LangChain.js is tracked separately.
 
 ## Setup
 
@@ -59,7 +59,7 @@ from intutic_clawde.gate import guard_tools
 tools = guard_tools([shell_tool, write_file_tool, deploy_tool])
 ```
 
-Both paths funnel into the same `Gate.guard(tool_name, tool_input)` decision — the same evaluation (policy snapshot, MCP server registry, SOP rules, image integrity, control-plane hook-gate) documented on the [LangGraph](/integrations/langgraph#3-gate-local-tool-execution-sdk) page.
+Both paths funnel into the same `Gate.guard(tool_name, tool_input)` decision — the same evaluation (SSO group policy, policy snapshot, MCP server registry, SOP rules, image integrity, control-plane hook-gate) documented on the [LangGraph](/integrations/langgraph#3-gate-local-tool-execution-sdk) page.
 
 ### 4. Trace attribution
 
@@ -88,7 +88,7 @@ Same structural gaps as every SDK-gated framework — see [LangGraph's "What the
 |----------|-------|
 | Harness type | `langchain` |
 | Config file | `.env.intutic` |
-| Detection | `langchain`/`langchain-core` in `pyproject.toml`, `requirements.txt`, or `uv.lock` (Python); `langchain` in `package.json` (JS/TS, detection-only) |
+| Detection | `langchain`/`langchain-core` in `pyproject.toml`, `requirements.txt`, or `uv.lock` |
 | Format | Shell environment variables |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
 | Tool gate | SDK-side (`intutic_clawde.gate.adapters.langchain.IntuticMiddleware`, LangChain v1.x `wrap_tool_call`) — no sync-daemon hook file |

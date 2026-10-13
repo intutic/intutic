@@ -57,7 +57,7 @@ An API error, a timeout, a malformed response, or an exhausted daily budget all 
 
 ## Effect on the posture score
 
-A hash that comes back flagged (any AV engine detection) scores that skill **zero** in the [agent posture](/guide/agents) ring's `skills` dimension — the identical severity treatment a confirmed finding from the native pattern scanner gets. It also raises a `skill.malware.detected` notification at **HIGH** severity, the same tier as a provider outage or a device dropping its firewall enforcement.
+A hash that comes back flagged (at least one engine rates it malicious; a `suspicious`-only rating does not flag) scores that skill **zero** in the [agent posture](/guide/agents) ring's `skills` dimension — the identical severity treatment a confirmed finding from the native pattern scanner gets. It also raises a `skill.malware.detected` notification at **HIGH** severity, the same tier as a provider outage or a device dropping its firewall enforcement.
 
 ## Related
 

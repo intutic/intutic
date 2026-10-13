@@ -27,19 +27,20 @@ It walks you through:
    provider (`anthropic/...`, `openai/...`, `openrouter/...`, an Ollama Cloud model…) is refused,
    even with your own key, and nothing is written.
 2. **`litellm_config.yaml`** is written to the path you gave — the same `model_list` shape as
-   the `litellm_config.yaml` in the release bundle's `gateway/` directory. Intutic's platform default
+   the `litellm_config.yaml` in the release bundle's `gateway/` directory, with one entry named
+   after the model (`ollama/llama3.1` becomes `llama3.1`); the env and Helm snippets it prints
+   use that name. Intutic's platform default
    is a cost-optimized open-weight judge behind the stable alias `intutic-openweight-judge`;
-   reusing that alias on-prem keeps every env and Helm snippet deployment-shape-independent —
-   only the `litellm_params` backing changes per deployment. Whatever name you use, it must be
-   backed by your own Ollama/vLLM server:
+   renaming the entry to that alias on-prem keeps every env and Helm snippet deployment-shape-independent —
+   only the `litellm_params` backing changes per deployment. The examples below use that alias.
+   Whatever name you use, it must be backed by your own Ollama/vLLM server:
 
    ```yaml
    model_list:
-     - model_name: intutic-openweight-judge
+     - model_name: intutic-openweight-judge     # the command writes llama3.1 here
        litellm_params:
-         model: openai/<your-local-judge-model>   # any model your server exposes
-         api_base: http://ollama:11434/v1         # or your vLLM server's OpenAI-compatible URL
-         api_key: "not-needed"                    # most local servers ignore this
+         model: ollama/llama3.1
+         api_base: os.environ/OLLAMA_API_BASE   # your Ollama server
 
    general_settings:
      master_key: os.environ/LITELLM_MASTER_KEY
@@ -49,8 +50,9 @@ It walks you through:
    judges run only on self-hosted models.
 
 3. **An env block** is printed for Docker Compose. Note that `LITELLM_LOCAL_JUDGE_MODEL`
-   deliberately has **no default** — an unset value fails loud at startup rather than silently
-   judging on a model you didn't choose. In the gateway's `.env` (next to
+   deliberately has **no default** — with it unset, every judge call reports the judge
+   unavailable (and the Helm chart refuses to install without `litellm.judgeModel`) rather than
+   silently judging on a model you didn't choose. In the gateway's `.env` (next to
    `docker-compose.gateway.yml`, where the generated `litellm_config.yaml` replaces the shipped
    one), the local judge needs:
 
@@ -137,10 +139,11 @@ judge configured via this page has no such obligation.
 ## Verifying it worked
 
 Once the gateway is running with `local_judge` on and pointed at a reachable LiteLLM instance
-serving the model you configured, a finalize-time judge call for that workspace should return a
-`COMPLIANT | VIOLATION | AMBIGUOUS` verdict instead of the judge-unavailable note. If your judge
+serving the model you configured, a judged response for that workspace no longer carries the
+judge-unavailable note: a `COMPLIANT` verdict adds nothing, and a `VIOLATION` or `AMBIGUOUS`
+one appends an `Intutic LLM-as-a-Judge (local)` note with the judge's reasoning. If your judge
 LLM is unreachable, the proxy reports that honestly — `Intutic LLM-as-a-Judge: verdict
-UNAVAILABLE — treat as unverified, not as clean` — rather than silently passing every check; see
+UNAVAILABLE`, with "Treat it as unverified, not as clean." — rather than silently passing every check; see
 [the self-hosted gateway's fail-loud section](/external/self-hosted-gateway#4-what-does-not-run-locally-read-this-before-you-deploy)
 for the full behavior.
 

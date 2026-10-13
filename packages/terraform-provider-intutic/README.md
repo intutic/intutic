@@ -38,7 +38,7 @@ The tests create and destroy their own resources, but leave the workspace settin
 
 Releases are cut from the open-core repository by pushing a tag `terraform-provider-vX.Y.Z`. `.github/workflows/release-terraform-provider.yml` pushes this directory to `intutic/terraform-provider-intutic`, tags it `vX.Y.Z` there, and builds a signed GoReleaser release in that repository, which is where the Terraform Registry reads providers from.
 
-One-time setup before the first release:
+One-time setup before the first release (done on 2026-10-13: the provider is on the Registry as `intutic/intutic`, with v0.1.0 and v0.2.0; kept here for a fresh namespace):
 
 1. Create the public repository `intutic/terraform-provider-intutic`, empty.
 2. Generate a GPG signing key. The Registry accepts RSA or DSA keys, not ECC: `gpg --full-generate-key`, choose RSA, 4096 bits.
@@ -50,4 +50,4 @@ One-time setup before the first release:
 5. Push the first tag, for example `git tag terraform-provider-v0.1.0 && git push origin terraform-provider-v0.1.0`, and wait for the release to appear on `intutic/terraform-provider-intutic`.
 6. In the Registry, choose **Publish › Provider**, select `intutic/terraform-provider-intutic`, and publish. The Registry installs a webhook on that repository, so later tags publish on their own.
 
-Once the provider is on the Registry, the guide's build-from-source steps can give way to `source = "intutic/intutic"` alone.
+After that, a release is only the tag: the Registry webhook publishes it, and `terraform init` verifies its signature against the key above.

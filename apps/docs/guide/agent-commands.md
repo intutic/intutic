@@ -21,7 +21,9 @@ model reply. The card:
 5. Lists **recommendations** for whatever guardrail is off — e.g. "enable output
    DLP", "write a role SOP under `.intutic/sops`".
 
-It never leaves your machine.
+The card is built on your machine. The one exception is the memory search
+below: with a control plane connected and a virtual key, the prompt text (not
+the request body) is sent to it to search your workspace's memory providers.
 
 ### Memory context
 

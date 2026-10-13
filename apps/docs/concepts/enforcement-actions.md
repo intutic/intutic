@@ -15,6 +15,8 @@ Every tool call that flows through the Intutic proxy receives exactly one **enfo
 | **REASK** | The attempt is refused and the reason is handed back to the agent, which may retry a bounded number of times before the finding escalates to a block | An error it can read and act on, then another turn |
 | **KILL** | Request is blocked entirely | Error response with the reason for blocking |
 
+A sixth value, **OBSERVED**, sits outside this ladder: it records a request the model provider failed to answer (a provider error or an unservable model), where nothing was enforced.
+
 ---
 
 ## How a verdict is decided
@@ -38,17 +40,19 @@ Tool call arrives
 ```
 
 1. **DLP Scanner** — credential patterns matched against the serialised tool arguments, and destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`) matched against each argument string as the tool receives it, with the SQL keywords split by any whitespace, a block or `--` comment, or an escaped `\n`. The SQL patterns are the ones the MCP governance proxy uses. A hit blocks the call and opens an incident.
-2. **BLOCK: SOP match** — `VALIDATED` SOPs whose title begins `BLOCK:` are compiled to a pattern and tested against the tool name. A title beginning `REQUIRE_APPROVAL:` is the same rule at the `hold` tier: the harness hook gates refuse the call and record it for **Findings › Review Queue › Held Changes** (approving it with `intutic decision approve <holdId>` or from Slack lets that exact call through once while the workspace's review-hold bypass is on, and otherwise records the decision); the MCP proxy and the [SDK gates](/reference/gate-sdk#holds) hold it the same way through the same decisions API (see [Approval holds](/guide/mcp-governance#approval-holds)); the proxy, which has no reviewer in the loop, treats it as a block.
+2. **BLOCK: SOP match** — `VALIDATED` SOPs whose title begins `BLOCK:` are compiled to a pattern and tested against the tool name, and, in the `BLOCK:<tool> WHERE <args>:<reason>` form, against the serialised arguments too. The gate evaluates only `BLOCK:` titles. A title beginning `REQUIRE_APPROVAL:` is the same rule at the `hold` tier: the harness hook gates refuse the call and record it for **Findings › Review Queue › Held Changes** (approving it with `intutic decision approve <holdId>` or from Slack lets that exact call through once while the workspace's review-hold bypass is on, and otherwise records the decision); the MCP proxy and the [SDK gates](/reference/gate-sdk#holds) hold it the same way through the same decisions API (see [Approval holds](/guide/mcp-governance#approval-holds)); the proxy, which has no reviewer in the loop, treats it as a block.
 3. **SSO group policy** — decides the caller's [group clearance](/concepts/circuit-breaker#_3-sso-group-clearance) for the tool, from their SCIM groups while SCIM provisioning is on and from their last SSO sign-in otherwise. `DENIED` or `REQUIRES_OBO` blocks, and the reason names the deciding rule (`[sso_group.high_risk.<tool>]`).
-4. **MCP server registry** — on an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance): a blocked or held server, a server not approved under `mcpDefaultPolicy: deny`, or a disabled tool blocks, with the MCP proxy's reason. The response names the refusal in `code` (`SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`) and `ruleId`, and a server refused as unapproved joins the approval queue on the MCP Servers page.
-5. **Promoted findings** — repeat anomaly findings that have been promoted to enforcement. Only a promoted `KILL` blocks; a promoted `HIJACK` is recorded and falls through.
+4. **MCP server registry** — on an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance): a blocked or held server, a server not approved under `mcpDefaultPolicy: deny`, or a disabled tool blocks, with the MCP proxy's reason; then a server missing from a non-empty [`mcpAllowedServers`](/guide/mcp-governance#the-allowlist-mcpallowedservers) list blocks. The response names the refusal in `code` (`SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`, `SERVER_NOT_ALLOWED`) and `ruleId`, and a server refused as unapproved joins the approval queue on the MCP Servers page.
+5. **Promoted findings** — repeat anomaly findings that have been promoted to enforcement. Only a promoted `KILL` blocks; a promoted `HIJACK` allows the call and queues a corrective card for the session.
+
+Between the registry and the promoted findings, two more checks run that the diagram leaves out: container-image provenance, which blocks only in a workspace that has turned it on, and SSL enforcement, which runs in shadow and never blocks (see [KILL](#kill)).
 
 **The first match wins, and the order is deliberate** — this is a short-circuit, not a
 strictest-wins merge. Deterministic policy (DLP, an operator-authored `BLOCK:` SOP, an SSO
 group decision, a registry decision) is evaluated before the heuristic, so a promoted detector can never override a
 decision an operator stated explicitly.
 
-Every stage after DLP fails **closed**. If a check errors or cannot run (a database or Valkey
+Every stage after DLP fails **closed**, except the shadowed SSL evaluation. If a check errors or cannot run (a database or Valkey
 outage, say), the remaining checks still run, and one that blocks answers with its own
 reason. If none does, the call is refused with HTTP 403 and `code: GOVERNANCE_UNAVAILABLE`.
 A check the workspace has not set up (no SSO group policy, an empty registry, promotion off)
@@ -98,8 +102,8 @@ SSO group policy, and budget limits are all authored by an operator or
 computed from a fixed rule. There is no learning curve and no false-positive
 rate to earn: the rule either matches or it doesn't, so it enforces
 (`KILL`/`HIJACK`) from the moment it's turned on. This rung is exactly the
-open-core pitch — every check on it ships in the public proxy, runs
-deterministically, and needs no control plane to decide.
+open-core pitch — every check on it runs deterministically, and the DLP and
+SOP checks ship in the public proxy and need no control plane to decide.
 
 **Rung 2 — learned, shadow-first.** SSL's structural and logical layers,
 anomaly-finding promotion, and loop detection are heuristic: they're right
@@ -272,13 +276,21 @@ tested against the tool name. No scripting is involved:
 BLOCK:^run_command$:Recursive delete at filesystem root is prohibited
 ```
 
-The reason is optional and the match is case-insensitive. Because the pattern is delimited by
-colons it cannot itself contain one, and a title whose pattern is not a valid regular
-expression is skipped rather than blocking every call.
+The reason is optional. The `BLOCK:` prefix is case-insensitive, but the pattern is matched
+case-sensitively. In this form the pattern ends at the first colon, so it cannot itself contain
+one, and a title whose pattern is not a valid regular expression is skipped rather than blocking
+every call.
 
-For argument-level conditions — matching `rm -rf /` inside the arguments rather than the tool
-name — write a [WASM rule](/guide/wasm-rules), which runs in the proxy with an explicit
-host-import allowlist.
+For an argument-level condition — matching `rm -rf /` inside the arguments rather than the tool
+name — add ` WHERE <argPattern>`, a regular expression tested against the JSON-serialised
+arguments; it may contain colons:
+
+```
+BLOCK:^run_command$ WHERE rm -rf /[\s"]:Recursive delete at filesystem root is prohibited
+```
+
+For anything a pair of patterns cannot express, write a [WASM rule](/guide/wasm-rules), which
+runs in the proxy with an explicit host-import allowlist.
 
 **What the agent sees:**
 
@@ -296,8 +308,8 @@ The enforcement action system is defined across these components:
 
 | Component / File | What it defines | Scope |
 |---|---|---|
-| [enums.ts](https://github.com/intutic/intutic/blob/main/packages/shared-types/src/enums.ts) | `EnforcementAction` enum — `BYPASS`, `ENHANCE`, `HIJACK`, `REASK`, `KILL` | Open-Core / Shared Types |
-| `routes/hookEvents.ts` | The gate itself — DLP, `BLOCK:` SOP, SSO group policy, promoted findings | Enterprise Control Plane |
+| [enums.ts](https://github.com/intutic/intutic/blob/main/packages/shared-types/src/enums.ts) | `EnforcementAction` enum — `BYPASS`, `ENHANCE`, `HIJACK`, `REASK`, `KILL`, plus `OBSERVED` | Open-Core / Shared Types |
+| `routes/hookEvents.ts` | The gate itself — DLP, `BLOCK:` SOP, SSO group policy, MCP registry, image provenance, promoted findings | Enterprise Control Plane |
 | `valkeySubscriber.ts` | Proxy verdict → `EnforcementAction` mapping | Enterprise Control Plane |
 | `pcasService.ts` | SSO group privilege resolution (Valkey → Postgres cascade) | Enterprise Control Plane |
 | `anomalyEnforcementService.ts` | Promotion of repeat findings to an enforceable verdict | Enterprise Control Plane |

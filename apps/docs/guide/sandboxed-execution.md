@@ -55,7 +55,7 @@ The isolation envelope:
 | `--security-opt=no-new-privileges` | No setuid-root escalation inside the container |
 | `--read-only` rootfs + `tmpfs` scratch | The container's filesystem can't be modified; `/tmp`, `/run`, and the sandbox home are writable scratch space only, emptied when the container exits |
 | `--pids-limit` / `--memory` / `--cpus` | Bounds on fork-bombs and resource exhaustion |
-| A default-deny egress firewall inside the container | Installed by the image's entrypoint before the agent starts; permits only the proxy (reached via `host.docker.internal`) and DNS |
+| A default-deny egress firewall inside the container | Installed by the image's entrypoint before the agent starts; permits only the proxy (reached via `host.docker.internal`), DNS, and any CIDRs passed with `--sandbox-allow` |
 
 **The image** must contain `nftables` and `capsh`, which the entrypoint uses
 to install the firewall and drop privilege, plus your agent. The default,

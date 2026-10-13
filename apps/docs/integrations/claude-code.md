@@ -83,7 +83,7 @@ Never commit secrets, API keys, or credentials to version control...
 }
 ```
 
-There is one PreToolUse entry each for `Bash`, `Edit`, `Write`, `MultiEdit` and `mcp__.*`. Your own PreToolUse hooks and every other setting are kept; only the Intutic entries are replaced on each sync. In the project file `permissions.deny` is the list derived from your SOPs' blocked tools and patterns; in the user file those entries are added to your own. A settings file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
+There is one PreToolUse entry each for `Bash`, `Edit`, `Write`, `MultiEdit` and `mcp__.*`. Your own PreToolUse hooks and every other setting are kept; only the Intutic entries are replaced on each sync. `permissions.deny` gets the entries derived from your SOPs' blocked tools and patterns, added to your own: in the project file the entries an earlier sync wrote give way to the current set, and in the user file they accumulate until `intutic disconnect` removes them. A settings file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
 
 The gate fails closed: if it cannot read the tool call or crashes, the call is refused. Every decision is appended to `.intutic/events/hook-events.jsonl` and forwarded to the control plane.
 

@@ -61,4 +61,4 @@ If n8n was detected, `intutic connect` writes the gate, `INSTALL.md` and the imp
 3. Activate the imported workflow.
 
 ### 3. Add API Key
-Add your `INTUTIC_API_KEY` to your environment or configure it in the n8n Credentials UI as a header token. The webhook router will intercept and forward workflow execution trace audits to the Intutic control plane.
+Add your `INTUTIC_API_KEY` to the n8n environment, or replace the `Authorization` header on the workflow's **Forward to Intutic** node with an n8n credential. The workflow receives events on its webhook (`/webhook/intutic-governance`) and forwards each `tool_blocked` event to `/api/v1/hook-events` at the proxy URL it was generated with; other events end at a no-op node.

@@ -26,7 +26,8 @@ intutic org create
 intutic org create --org-name "Acme Corp" --domain acme.com
 ```
 
-This starts domain verification, prints the TXT record to publish (`_intutic-verify.<domain>`),
+`--region` (for example `us` or `eu`) places the org's gateway cell; it defaults to the
+deployment's home region. This starts domain verification, prints the TXT record to publish (`_intutic-verify.<domain>`),
 polls DNS on your confirmation, then creates the org — one default team, one default workspace —
 and switches your CLI session into it once verified. Equivalent API calls:
 `POST /api/v1/domain-verification/start`, `GET /api/v1/domain-verification/:id`, and

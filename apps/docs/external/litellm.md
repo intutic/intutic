@@ -54,7 +54,7 @@ The commercial control plane deploys an internal Python `litellm` container. It 
 *   **LLM Probes (Layer 2 SOP Evaluation):** Captures tool-use events and executes asynchronous, deep LLM evaluations against your organization's SOP registry.
 *   **SOP Compliance Scoring:** Automatically evaluates newly added SOP rules across 13 compliance categories to generate structured quality metrics.
 *   **SOP Compilation:** Translates natural-language SOP markdown files into machine-readable JSON schemas using structured model outputs.
-*   **Pricing Synchronization (FinOps):** Automatically queries provider endpoints daily to sync token and context costs, storing them in the control plane's database for accurate cost attribution.
+*   **Not pricing (FinOps):** this container does not fetch rates. Token costs come from LiteLLM's published price list, re-pinned nightly into the proxy's offline pricing bundle and shipped with each release.
 
 ---
 

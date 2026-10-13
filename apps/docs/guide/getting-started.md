@@ -26,13 +26,13 @@ part of open core; see [Security](/security) for what changes if you connect one
 
 Every LLM request from your AI agent flows through Intutic's local proxy,
 where SOPs (Standard Operating Procedures) evaluate each tool call in
-real time and return one of four verdicts: **BYPASS**, **ENHANCE**, **HIJACK**, or **KILL**.
+real time and return one of five verdicts: **BYPASS**, **ENHANCE**, **HIJACK**, **REASK** or **KILL**.
 
 ## Prerequisites
 
 | Requirement | Version |
 |---|---|
-| **Node.js** | 18 or later |
+| **Node.js** | 20.19 or later |
 | **npm** | 10 or later |
 | **AI coding agent** | Any of the [43 supported harnesses](/integrations/) (Cursor, Claude Code, Aider, Windsurf, Antigravity, etc.) |
 | **Valkey** (or Redis) | *Optional.* 8.x — a shared, durable cache. `intutic start` provisions one if it can, and runs without it if it cannot |
@@ -76,10 +76,11 @@ yarn global add @intutic/cli @intutic/proxy
 ```
 
 For environments without Node.js, download single-file precompiled binaries directly from [GitHub Releases](https://github.com/intutic/intutic/releases/latest):
-* 🪟 Windows (x64): `cli-win-x64.exe`
-* 🐧 Linux (x64): `cli-linux-x64`
+* 🪟 Windows (x64): `cli-win-x64.exe` / `intutic-proxy-win32-x64.exe`
+* 🐧 Linux (x64): `cli-linux-x64` / `intutic-proxy-linux-x64`
+* 🐧 Linux (arm64): `intutic-proxy-linux-arm64` (proxy only)
 * 🍎 macOS (Apple Silicon): `cli-macos-arm64` / `intutic-proxy-darwin-arm64`
-* 💻 macOS (Intel): `cli-macos-x64`
+* 💻 macOS (Intel): `cli-macos-x64` / `intutic-proxy-darwin-x64`
 :::
 
 ## Step 2 — Log in <Badge type="tip" text="Connected mode only" />
@@ -98,12 +99,10 @@ intutic login
 You'll be prompted for your email and password. On success:
 
 ```
-╭─ Intutic — Authentication ─╮
+Intutic — Authentication
 Control plane: https://your-control-plane.example
-
 ✔ Authenticated as you@company.com
   Workspace: wk_k8x9m2p4
-  Role: admin
 ```
 
 Your credentials are stored at `~/.intutic/credentials.json` (mode `0600`),
@@ -148,7 +147,7 @@ This auto-detects every AI harness in your project and records them in
 files; `intutic connect` (Step 4) writes those.
 
 ```
-╭─ Intutic — Workspace Initialization ─╮
+Intutic — Workspace Initialization
 ✔ Workspace root: /home/dev/my-project
 
 Detecting AI harnesses...
@@ -255,10 +254,12 @@ intutic connect
 ```
 
 ```
-✓ Connected to workspace: my-team (wk_wR1ePE40kLNAneONnIumE)
-✓ Proxy running: http://localhost:4000
-✓ Sync daemon active: listening for harness changes
-✓ Governance policy: 14 active SOPs, WASM hot-reload ready
+Intutic — Sync Daemon
+ℹ Starting sync daemon... (Ctrl+C to stop)
+ℹ Port 4000 is free. Spawning managed proxy gateway...
+✔ Managed proxy gateway process spawned.
+ℹ Applying configuration v14...
+[sync] Config v14 — 14 SOPs synced
 ```
 
 ::: warning Connected mode requires Valkey
@@ -324,24 +325,24 @@ For a persistent system service that starts on login, see [`intutic daemon insta
 
 ## Step 5 — Trigger your first block
 
-Open your AI agent and ask it to do something a default SOP would catch:
+Open your AI agent and ask it to do something destructive:
 
 > _"Delete all files in /tmp"_
 
-The proxy intercepts the tool call, evaluates it against your SOPs,
-and returns a **KILL** verdict — the destructive action never executes.
+The proxy reads the tool call, and a shell or code-execution call carrying a
+destructive operation (`rm -rf /`, `mkfs`, `dd if=`, …) is a **KILL**: the
+request is refused with HTTP `403` and code `policy_denied`.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  KILL — SOP: filesystem-safety                      │
-│                                                     │
-│  Blocked: rm -rf /tmp/*                             │
-│  Reason: Recursive deletion outside project root    │
-│          is prohibited by filesystem-safety SOP.    │
-│                                                     │
-│  Session: ses_7x2k9m    Trace: tr_p4n8q1            │
-└─────────────────────────────────────────────────────┘
+Request blocked by anomaly policy [TOOL_ABUSE]: Code-execution call 'Bash'
+contains a destructive operation ('rm -rf /'). Per-call gates cannot see
+inside a code blob; this one was read.
 ```
+
+The proxy alone reads a call's arguments once the call comes back in the
+conversation history, on the next request. To refuse a tool before the harness
+runs it, name it in an SOP's `deny_tools`, which the proxy applies to the
+model's response, or use the pre-tool-use gate `intutic connect` installs.
 
 ## Step 6 — View your trace
 
@@ -351,10 +352,19 @@ Check the trace from the command line:
 intutic traces list --limit 5
 ```
 
+With no control plane connected, this reads the proxy's own trace log
+(`~/.intutic/logs/traces-*.jsonl`) and shows each trace's local verdict
+(`allowed`, `killed`, `reasked`, `hijacked` or `upstream_error`); connected,
+it shows the control plane's enforcement action and compliance score instead.
+
 ```
-ID           Harness       Timestamp             Tool Calls  Verdicts           Status
-tr_p4n8q1    cursor        2026-07-04 07:30:01   1           KILL: 1            blocked
-tr_m3k7n2    cursor        2026-07-04 07:28:44   3           BYPASS: 3          complete
+Intutic — Execution Traces (local)
+┌────────────────┬─────────────────────┬──────────────────┬────────────────┬───────────┐
+│ Trace ID       │ Timestamp           │ Model            │ Verdict        │ Cost      │
+├────────────────┼─────────────────────┼──────────────────┼────────────────┼───────────┤
+│ tr_p4n8q1      │ 2026-07-04 07:30:01 │ claude-sonnet-4… │ killed         │ $0.0000   │
+│ tr_m3k7n2      │ 2026-07-04 07:28:44 │ claude-sonnet-4… │ allowed        │ $0.0123   │
+└────────────────┴─────────────────────┴──────────────────┴────────────────┴───────────┘
 ```
 
 Drill into the blocked trace:
@@ -370,13 +380,24 @@ intutic status
 ```
 
 ```
-╭─ Intutic — Workspace Status ─╮
-  Auth: ✔ you@company.com (wk_k8x9m2p4)
-  Workspace root: /home/dev/my-project
-  Harnesses: cursor ✔, claude-code ✔
-  Daemon: running (PID 48291)
-  Last sync: 12s ago
-  SOPs: 5 active
+Intutic — Workspace Status
+  Email: you@company.com
+  Workspace: wk_k8x9m2p4
+  Control Plane: https://your-control-plane.example
+  Workspace Root: /home/dev/my-project
+  Dev Mode: no
+  Config Version: 14
+
+ℹ Detected harnesses:
+  ✔ cursor
+  ✔ claude-code
+  Last Sync: 2026-07-04T07:30:13.000Z
+  Tracked Files: 2
+
+ℹ Active Running Processes:
+  (none detected)
+
+  Sync Daemon State: Running
 ```
 
 ## Disconnecting
@@ -393,7 +414,7 @@ intutic disconnect
 | Topic | Description |
 |---|---|
 | [**How It Works**](/guide/how-it-works) | Understand the proxy → policy engine → verdict pipeline |
-| [**Enforcement Actions**](/concepts/enforcement-actions) | Deep dive into BYPASS, ENHANCE, HIJACK, and KILL |
+| [**Enforcement Actions**](/concepts/enforcement-actions) | Deep dive into BYPASS, ENHANCE, HIJACK, REASK and KILL |
 | [**Custom Filters (WASM)**](/external/wasm-rules) | Create WASM policy rules for custom tool-call filtering |
 | [**Integrations**](/integrations/) | Detailed setup guides for all 43 harnesses |
 | [**CLI Reference**](/reference/cli) | Complete command reference for `@intutic/cli` |

@@ -14,7 +14,7 @@ Steps 1–2 run entirely in the proxy gateway and work the same way whether or n
 2. **Scrub and publish** — the pair (request text + both responses) is DLP-scrubbed and published as a transient message. Nothing here is written to disk yet. A standalone open-core install without a control plane stops here: mirroring still runs and a local counter still tracks outcomes, but nothing judges the pair and there is no report to read.
 
 <!-- ENTERPRISE_ONLY_START -->
-3. **Judge at ingest** — a control-plane subscriber judges the pair the instant it arrives: an LLM judge compares the candidate's response against the response that actually served the request and returns a verdict (`candidate_better`, `original_better`, or `tie`), plus a 0–100 quality score for each side.
+3. **Judge at ingest** — a control-plane subscriber judges the pair the instant it arrives: an LLM judge compares the candidate's response against the response that actually served the request and returns a verdict (`candidate_better`, `original_better`, or `tie`), plus a 0–100 quality score for each side. Judging needs a paid plan or an active trial, and stops at 200 judge calls per workspace per UTC day (`MIRROR_ADOPTION_JUDGE_DAILY_CAP`); a pair dropped by either limit is not judged and leaves no verdict.
 4. **Store the verdict, not the text** — only the verdict and its metadata (scores, both sides' cost and latency, which judge model was used) are written durably. The request text and both response bodies are discarded the moment judging finishes.
 5. **Report** — once enough verdicts exist for a candidate model, the report aggregates them into win/loss/tie counts and the three deltas described below. You read it from the dashboard or the CLI.
 <!-- ENTERPRISE_ONLY_END -->
@@ -22,7 +22,7 @@ Steps 1–2 run entirely in the proxy gateway and work the same way whether or n
 ## Limits
 
 ::: warning Standalone: mirroring bills twice and reports nothing
-A standalone open-core proxy (no control plane) still makes the mirrored call — and pays for it — but has nowhere to publish the comparison pair. The proxy logs one warning the first time it discards a pair; after that the discards are silent at the default log level. If you run standalone, leave `mirror_sample_rate` at `0`, or run with a control plane.
+A standalone open-core proxy (no control plane) still makes the mirrored call — and pays for it — but has nowhere to publish the comparison pair. The proxy logs a warning at startup and another the first time it discards a pair; after that the discards are silent at the default log level. If you run standalone, leave `mirror_sample_rate` at `0`, or run with a control plane.
 :::
 
 This feature is useful, but it is not a substitute for real evaluation. Read this section before you make a decision off of it.
@@ -97,7 +97,7 @@ Intutic — Mirror-Test Adoption Report
   Unjudged: 2
 
   Fault-rate delta: -8.0 pts (candidate faults less)
-  Avg. cost delta: -$0.0021 per call
+  Avg. cost delta: -0.0021 USD/request
   Avg. latency delta: -310 ms
 
   This is a reported signal for human review, not an automatic gate — nothing here changes routing.

@@ -117,11 +117,12 @@ def shell(command: str) -> str:
 
 **The python-raise contract:** on deny the gate raises `IntuticGateRefusal` *before the tool body runs*, with a message beginning `[Intutic Governance] BLOCKED:` — the same prefix family as the Open WebUI filter, so anything that already recognises that contract recognises this one. The gate evaluates, in order:
 
-1. the compiled **policy snapshot** (`~/.intutic/hooks/policy-snapshot.rules`) — the same artifact the sync-daemon compiles for every shipped harness,
-2. the workspace's **MCP server registry** and `mcpAllowedServers` list, from the same snapshot, on an `mcp__<server>__<tool>` call,
-3. **SOP rules** authored in the product, including the argument-level `WHERE` clause (`argPattern`) — the gate sees the tool's full rendered arguments, with positionals bound to their parameter names so an argPattern cannot be dodged by calling convention,
-4. container **image provenance** on deploy commands,
-5. the control plane's **hook-gate** (`POST /api/v1/hook-gate`) — fail-closed by default: if the control plane cannot be reached, or answers `GOVERNANCE_UNAVAILABLE` because one of its checks could not run, the call is refused rather than waved through.
+1. the workspace's **SSO group policy** for the member the snapshot was issued to, carried in the policy snapshot,
+2. the compiled **policy snapshot** (`~/.intutic/hooks/policy-snapshot.rules`) — the same artifact the sync-daemon compiles for every shipped harness,
+3. the workspace's **MCP server registry** and `mcpAllowedServers` list, from the same snapshot, on an `mcp__<server>__<tool>` call,
+4. **SOP rules** authored in the product, including the argument-level `WHERE` clause (`argPattern`) — the gate sees the tool's full rendered arguments, with positionals bound to their parameter names so an argPattern cannot be dodged by calling convention,
+5. container **image provenance** on deploy commands,
+6. the control plane's **hook-gate** (`POST /api/v1/hook-gate`) — fail-closed by default: if the control plane cannot be reached, or answers `GOVERNANCE_UNAVAILABLE` because one of its checks could not run, the call is refused rather than waved through.
 
 Every decision is reported via `/api/v1/hook-events`, so gated LangGraph runs appear in the same audit feed as hook-based harnesses.
 
@@ -160,6 +161,8 @@ export INTUTIC_SOP_COUNT=5
 # blocking tool gate ships SDK-side:
 #   pip install intutic-clawde
 #   from intutic_clawde.gate import guard_tools
+# guard_tools(tools) refuses denied calls by raising, before the tool
+# body runs. See https://docs.intutic.ai/integrations/langgraph
 ```
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness langgraph`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

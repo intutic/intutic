@@ -1,10 +1,10 @@
 # Roo Code
 
-Integrate Intutic governance with [Roo Code](https://github.com/RooVetGit/Roo-Code) — the AI-powered VS Code extension (formerly Roo Clinic).
+Integrate Intutic governance with [Roo Code](https://github.com/RooVetGit/Roo-Code) — the AI-powered VS Code extension (formerly Roo Cline).
 
 ## How it works
 
-Intutic writes governance rules into a marked section of the workspace's `AGENTS.md`, which Roo Code reads as custom instructions unless the `roo-cline.useAgentRules` setting is off. Roo Code has no hook system, so there is no gate to install: the rules are advisory, and enforcement comes from the proxy (once Roo Code is routed through it, below) and from the MCP governance proxy wrapping its MCP servers.
+Intutic writes governance rules into a marked section of the workspace's `AGENTS.md`, which Roo Code reads as custom instructions unless the `roo-cline.useAgentRules` setting is off. Roo Code has no hook system, so there is no gate to install: the rules are advisory, and enforcement comes from the proxy, once Roo Code is routed through it (below). Intutic does not wrap Roo Code's MCP servers.
 
 ## Setup
 

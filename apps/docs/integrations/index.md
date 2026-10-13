@@ -29,7 +29,7 @@ Code editors with built-in AI that read project-level config files.
 | [**Cursor**](/integrations/cursor) | AI-powered code editor by Anysphere | `.cursor/rules/intutic-governance.mdc` |
 | [**Windsurf**](/integrations/windsurf) | AI-native code editor by Codeium | `.windsurf/rules/intutic-governance.md` |
 | [**Cline**](/integrations/cline) | VS Code extension for autonomous agentic coding | `.clinerules/intutic-governance.md` |
-| [**Roo Code**](/integrations/roo-code) | AI-powered VS Code extension (formerly Roo Clinic) | `AGENTS.md` (section) |
+| [**Roo Code**](/integrations/roo-code) | AI-powered VS Code extension (formerly Roo Cline) | `AGENTS.md` (section) |
 | [**Continue**](/integrations/continue) | Open-source autopilot for VS Code and JetBrains | `.continue/rules/intutic-governance.md` |
 
 ## CLI Tools

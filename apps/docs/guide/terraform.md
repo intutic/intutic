@@ -27,7 +27,19 @@ Two data sources read the [workspace](/reference/terraform/data-sources/workspac
 
 ## Install
 
-The provider's source is in the open-core repository, under `packages/terraform-provider-intutic`. Until it is published to the Terraform Registry, build it and point Terraform at the binary:
+The provider is on the Terraform Registry as `intutic/intutic`. Declare it, then run `terraform init`:
+
+```hcl
+terraform {
+  required_providers {
+    intutic = {
+      source = "intutic/intutic"
+    }
+  }
+}
+```
+
+Its source is in the open-core repository, under `packages/terraform-provider-intutic`. To run a build of your own instead, build it and point Terraform at the binary:
 
 ```sh
 git clone https://github.com/intutic/intutic.git
@@ -45,17 +57,7 @@ provider_installation {
 }
 ```
 
-With a development override in place, skip `terraform init` for this provider and run `terraform plan` directly. Once the provider is on the Registry, remove the override and declare it as usual:
-
-```hcl
-terraform {
-  required_providers {
-    intutic = {
-      source = "intutic/intutic"
-    }
-  }
-}
-```
+With a development override in place, skip `terraform init` for this provider and run `terraform plan` directly.
 
 ## Authenticate
 
@@ -119,7 +121,7 @@ resource "intutic_notification_rule" "incidents" {
   event_type         = "incident.created"
   channel            = "slack"
   slack_channel_name = "#agent-incidents"
-  filter_severity    = ["critical", "high"]
+  filter_severity    = ["CRITICAL", "HIGH"]
 }
 ```
 
@@ -186,5 +188,5 @@ The API cannot change an uploaded rule's bytes, so a rebuilt file replaces the r
 - `intutic_guardrail` manages guardrails you author. A guardrail extracted from a policy document cannot be managed or imported: it changes when its document does, and you move it through the [guardrail review](/guide/policy-guardrails).
 - Approving a guardrail for shadow and promoting it are review decisions, not Terraform actions.
 - Org-wide SOPs, members and roles, SSO and SCIM are managed in the dashboard.
-- Spend caps are not managed by the provider. A workspace that has not saved a daily cap is held to $100 a day; set caps on Settings › Billing › Budget Limits or with `PUT /api/v1/budget` (see [Budgets](/guide/budgets#workspace-caps)).
+- `intutic_workspace_budget` sets the workspace caps; destroying it leaves them as they are. A workspace that has not saved a daily cap is held to $100 a day (see [Budgets](/guide/budgets#workspace-caps)).
 - A virtual key belongs to the member whose key runs Terraform, and Terraform sees only that member's keys.

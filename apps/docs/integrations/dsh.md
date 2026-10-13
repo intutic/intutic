@@ -73,7 +73,7 @@ intutic-governance (@intutic/gate/dsh): failed to import
 dsh offers no way for a profile row to make startup fail instead, so this step is permanent and manual. `intutic status` shows which profiles are registered but not yet activated.
 :::
 
-The CLI's own onboarding text (shown when `intutic connect` starts with dsh recorded) prints this same command, per profile, so you don't have to come back to this page to find it.
+The CLI's own onboarding text (shown when `intutic connect` starts with dsh recorded) prints this same command, with a `<name>` placeholder, and points at `$DSH_HOME/INSTALL.md`, so you don't have to come back to this page to find it.
 
 Every sync also (re)writes `$DSH_HOME/INSTALL.md`, listing the exact `dsh plugin --profile <name> add @intutic/gate` command for every profile currently registered — a standing, always-current reference alongside the onboarding text (the same pattern the [n8n integration](/integrations/n8n)'s own auto-generated INSTALL.md follows).
 
@@ -112,7 +112,7 @@ dsh's veto contract is **confirmed**, not assumed — read from `@deepseek-ai/ds
 Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to the control plane, same as every other harness.
 
 ::: tip Enforcement tiers under dsh vs. under a shell/JS hook
-`@intutic/gate`'s Tier A1 (the local policy snapshot) reads **only** `~/.intutic/hooks/policy-snapshot.rules` — unlike the shell/JS gates this product generates for other harnesses, it does not separately compile in the "static floor" (bypass/secret-content/skill-surface pattern tables). A dsh workspace therefore gets Tier A1 (snapshot rules), Tier A2 (image integrity), Tier A3 (SOP rules), and Tier B (the control-plane `/hook-gate` call) — a strict subset of the compiled-in floor a generated shell/JS hook enforces, by design (this is a pre-existing, documented gap in the `@intutic/gate` package itself, not something dsh's integration introduced). See `@intutic/gate`'s own README for the full accounting.
+`@intutic/gate`'s Tier A1 (the local policy snapshot) reads **only** `~/.intutic/hooks/policy-snapshot.rules` — unlike the shell/JS gates this product generates for other harnesses, it does not separately compile in the "static floor" (bypass/secret-content/skill-surface pattern tables). A dsh workspace therefore gets Tier A0 (SSO group policy from the snapshot), Tier A1 (snapshot rules), the MCP server registry and allowlist checks, Tier A2 (image integrity), Tier A3 (SOP rules), and Tier B (the control-plane `/hook-gate` call) — a strict subset of the compiled-in floor a generated shell/JS hook enforces, by design (this is a pre-existing, documented gap in the `@intutic/gate` package itself, not something dsh's integration introduced). See `@intutic/gate`'s own README for the full accounting.
 :::
 
 ## Known gaps

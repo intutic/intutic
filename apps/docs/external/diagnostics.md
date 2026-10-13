@@ -53,27 +53,13 @@ kubectl get endpoints -n intutic-dev
 
 Because the `litellm` pod is private to the cluster network, you must run health check commands from inside another container in the same namespace.
 
-### Test LiteLLM via Curl
-Execute an internal HTTP request to the health endpoint from the `control-plane` deployment:
-```bash
-kubectl exec deployment/control-plane -n intutic-dev -- curl -s http://litellm:4000/health
-```
-
-*Expected response:*
-```json
-{
-  "healthy_endpoints": [{"model": "openai/gpt-4o-mini"}],
-  "unhealthy_endpoints": [],
-  "healthy_count": 1,
-  "unhealthy_count": 0
-}
-```
-
 ### Test LiteLLM via Wget
-If curl is absent in the target image, use wget:
+Execute an internal HTTP request from the `control-plane` deployment, the workload in this namespace that the `litellm-ingress` network policy admits on port 4000. Its image ships `wget`, not `curl`:
 ```bash
-kubectl exec deployment/control-plane -n intutic-dev -- wget -qO- http://litellm:4000/health
+kubectl exec deployment/control-plane -n intutic-dev -- wget -qO- http://litellm:4000/health/readiness
 ```
+
+`/health/readiness` is the unauthenticated endpoint the LiteLLM pod's own readiness probe uses. The per-model `/health` endpoint calls every configured model (`intutic-openweight-judge`, `intutic-openweight-fast`) and needs a LiteLLM key in the `Authorization` header; a healthy result lists both under `healthy_endpoints`.
 
 ---
 

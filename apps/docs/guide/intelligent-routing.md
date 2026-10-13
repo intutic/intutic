@@ -12,7 +12,7 @@ Intelligent Model Routing lets the proxy choose which model serves a request, fr
 1. **Proxy Interception**: Every outbound prompt from your developer tools is routed through the proxy gateway.
 2. **Gateway Classification**: The proxy performs deterministic keyword matching — in-process, no model call — to classify the prompt into one of five task types: `testing`, `deployment`, `review`, `debugging`, or `coding`.
 3. **Thompson Sampling Selection**: Intutic evaluates historical reward parameters ($\alpha, \beta$) for the `(Model × SOP Tier × Task Type)` Beta distribution to select the optimal model.
-4. **Reward Feedback**: Every routed request updates its arm's ($\alpha, \beta$) parameters in Valkey. Where the reward signal comes from depends on your deployment: [local deterministic rewards](#local-deterministic-reward-mode-open-core) in standalone open-core mode, or LLM-as-a-Judge audits in cloud-managed workspaces.
+4. **Reward Feedback**: Every routed request updates its arm's ($\alpha, \beta$) parameters in Valkey (standalone without one, `~/.intutic/bandit-state.json`). Where the reward signal comes from depends on your deployment: [local deterministic rewards](#local-deterministic-reward-mode-open-core) in standalone open-core mode, or LLM-as-a-Judge audits in cloud-managed workspaces.
 
 <!-- ENTERPRISE_ONLY_START -->
 ### Cloud Reward Feedback (LLM-as-a-Judge)
@@ -60,7 +60,7 @@ The model the request named is always kept: choosing it sends the request as wri
 
 ### Try it in shadow mode first
 
-Shadow mode runs the whole selection and records its pick on the trace (`routing_shadow_model`) and in the shadow savings report, while every request is served with the model it asked for. Turn on **Shadow Routing** in the dashboard, or set `ff_shadow_routing` (`intutic settings set featureFlags '{"ff_shadow_routing": true}'`); standalone, set `routing.mode: shadow`. Shadow says how often the router would switch and what that would cost; it cannot say whether the other model's answers would have been as good, because it never ran. [Mirroring](/guide/mirror-adoption-report) measures that.
+Shadow mode runs the whole selection and records its pick on the trace (`routing_shadow_model`) and in the shadow savings report, while every request is served with the model it asked for. Turn on **Shadow Routing** in the dashboard, or set `ff_shadow_routing` (`intutic settings set featureFlags '{"ff_shadow_routing": true}'`); standalone, set `routing.mode: shadow` together with `routing.enabled: true`. Shadow says how often the router would switch and what that would cost; it cannot say whether the other model's answers would have been as good, because it never ran. [Mirroring](/guide/mirror-adoption-report) measures that.
 
 ---
 
@@ -72,14 +72,17 @@ Where that arm state lives depends on whether a Valkey is present. With one, it 
 
 The two representations are numerically equivalent within `1e-12`. The difference is not the update rule — that is shared code — but serialization: Valkey round-trips each arm through `cjson`'s 14 significant digits, while the local file keeps full `f64` precision. The local store is, marginally, the more precise of the two.
 
+A response starts from a baseline of `0.8`, adjusted by:
+
 | Signal | Effect on reward |
 |---|---|
-| Upstream transport failure or 5xx | reward = `0` (failed pull) |
+| Upstream transport failure, 5xx, or a stream that did not complete | reward = `0` (failed pull) |
 | Latency over `latency_slo_ms` | `− latency_penalty × min(overrun ratio, 1)` |
 | Token-count anomaly detected | `− token_anomaly_penalty` |
-| Routed model costlier than requested | `− cost_penalty × min(cost ratio − 1, 1)` |
+| Response integrity score below 100 | `− 0.5 × (1 − score/100)` |
+| Routed model's cost vs the requested model's | `+ cost_penalty × clamp(1 − cost ratio, −1, 1)` — cheaper raises the reward, costlier lowers it |
 
-A clean on-SLO response at equal-or-lower cost earns the full reward of `1.0`. Upstream 4xx responses are the caller's fault and produce no update. Cached responses never produce updates.
+The result is clamped to $[0, 1]$: a clean on-SLO response at equal cost earns `0.8`, and a cheaper one more. Upstream 4xx responses are the caller's fault and produce no update, except a `400`/`404` saying the routed model does not exist, which scores `0`. Cached responses never produce updates.
 
 The arm update rule is identical to the cloud reward cron, so learning state carries over seamlessly if you later connect a control plane:
 
@@ -107,12 +110,12 @@ intutic_settings:
       cost_penalty: 0.2
 ```
 
-When `config.yaml` has a non-empty `model_list`, a candidate it does not name (as `model_name` or `litellm_params.model`) is dropped at startup with an error in the log, so a typo cannot become a model the bandit routes to. That check is all `model_list` does: the provider is chosen from the model name, its address from `ANTHROPIC_UPSTREAM_URL` and the other [upstream variables](/reference/configuration#provider-upstreams-and-keys), and cost from the bundled price list. Requests for models outside the pool bypass the bandit untouched.
+When `config.yaml` has a non-empty `model_list`, a candidate it does not name (as `model_name` or `litellm_params.model`) is dropped at startup with an error in the log, so a typo cannot become a model the bandit routes to. That check is all `model_list` does: the provider is chosen from the model name, its address from `ANTHROPIC_UPSTREAM_URL` and the other [upstream variables](/reference/configuration#provider-upstreams-and-keys), and cost from the bundled price list. A `model_list` entry can also alias a name to a `bedrock/`, `vertex/` or `azure/` cloud model. Requests for models outside the pool bypass the bandit untouched.
 
 The allowlists narrow the pool in every deployment, standalone included: a candidate the workspace's approved models, a standalone proxy's `allowedModels` file or the key's own list excludes is never selected, no matter how strong its arm. See [Which models a request can be routed to](#which-models-a-request-can-be-routed-to) for the other checks.
 
 > [!IMPORTANT]
-> **Precedence**: if a control plane publishes a feature-flag payload for the workspace, `ff_bandit_routing` is authoritative and `routing.enabled` is ignored — even if that payload is malformed, in which case every flag resolves to `false`. Presence is what confers authority. The config toggle applies only when no control plane manages the workspace.
+> **Precedence**: if a control plane publishes a feature-flag payload for the workspace, `ff_bandit_routing` and `ff_shadow_routing` are authoritative and `routing.enabled` is ignored (though `routing.mode: off` still turns routing off) — even if that payload is malformed, in which case every flag resolves to `false`. Presence is what confers authority. The config toggle applies only when no control plane manages the workspace.
 
 ---
 
@@ -133,7 +136,7 @@ fixed in the same change that made the honesty work below possible.
 
 The real key is the **scope**: `{workspace_id}:{agent}`, where `agent` resolves through a ladder —
 the `x-session-id` header if a harness ever sends one, else the active autonomous-loop run id, else
-the authenticated member id, else `anonymous`. Workspace is always the first component, so
+the authenticated member id (narrowed by a hash of the request's `metadata.user_id` or `user`, when it carries one), else `anonymous`. Workspace is always the first component, so
 cross-tenant contamination is structurally impossible regardless of what (if anything) identifies
 the caller beyond that. Anonymous traffic inside one workspace still shares a bucket — correct,
 since there is genuinely nothing to tell two anonymous callers in the same workspace apart — but
@@ -165,9 +168,9 @@ The switch costs about four times what staying costs on the turn it happens. Hai
 then save $0.004 a turn ($0.006 − $0.002), so the switch does not pay for itself until five more
 turns have gone by on Haiku without switching back — and a bandit that re-samples every turn
 switches back. The guard rule in the proxy is exactly this arithmetic: when the last observation
-for the scope shows a cache-read fraction of at least `cache_guard_min_read_bp` (5000 = 50%) and
-is younger than `cache_guard_max_age_secs` (300 s, the provider's cache TTL), the bandit is not
-consulted and the warm model is kept. Output tokens are the same either way and are left out.
+for the scope is of the requested model's family, shows a cache-read fraction of at least
+`cache_guard_min_read_bp` (5000 = 50%) and is younger than `cache_guard_max_age_secs` (300 s, the
+provider's cache TTL), the bandit is not consulted and the requested model is served. Output tokens are the same either way and are left out.
 
 The lock exists primarily to stop the bandit from flip-flopping arms mid-conversation — that was
 the original complaint it fixes. Keeping the provider-side KV-cache prefix warm across turns is a
@@ -199,8 +202,9 @@ load-bearing for cost and latency.
 ### The limit of what the lock protects
 
 The lock only protects the *model* choice — it says nothing about the rest of the request body.
-SOP content is still prepended to the system prompt on every request, which can itself shift the
-cached prefix even with the model held constant. The lock keeps you from paying the worst-case
+SOP content is still prepended to the system prompt on every request; that block is pinned per
+scope for `sop_pin_max_age_secs` (600 s by default), but an expired pin re-renders it, which can
+shift the cached prefix even with the model held constant. The lock keeps you from paying the worst-case
 cost (a full model switch) on every turn; it does not guarantee a byte-identical prefix across the
 whole scope's life.
 
@@ -227,7 +231,7 @@ Three knobs, all on `intutic_settings.routing`, following the same shape as `sop
 |---|---|---|
 | `cache_guard_max_age_secs` | `300` | How old an observation may be and still count as fresh — Anthropic's own prompt-cache TTL, not an arbitrary staleness budget. **`0` is the kill switch**: the guard never finds a fresh observation and always falls through to normal sampling. |
 | `cache_guard_min_read_bp` | `5000` | The minimum observed cache-read fraction, in basis points, to count as "warm enough" to protect. `5000` = 50% — a coin-flip cache-read rate isn't worth pinning a turn's routing decision over. |
-| `cache_guard_cold_start_prompt_bytes` | `20000` | On a scope's very first turn — no observation exists yet — a prompt at or above this size declines to sample once, on the theory that a large first prompt is the shape most likely worth a stable prefix. Fires **at most once per scope, ever**: the moment any real observation exists (even a stale or cold one), evidence permanently supersedes the heuristic. `0` disables just this heuristic, leaving the evidence-based guard itself untouched. |
+| `cache_guard_cold_start_prompt_bytes` | `20000` | On a scope's very first turn — no observation exists yet — a prompt at or above this size declines to sample once, on the theory that a large first prompt is the shape most likely worth a stable prefix. Fires on each such turn **only until the scope's first cache observation**: the moment any real observation exists (even a stale or cold one), evidence permanently supersedes the heuristic. `0` disables just this heuristic, leaving the evidence-based guard itself untouched. |
 
 The guard deliberately does **not** re-engage the session lock when it declines to sample — a
 scope is coarse (`{workspace}:{agent}`) with its own 24-hour TTL, and locking on a single guarded
@@ -235,8 +239,9 @@ turn would pin routing off for a full day. Leaving it unlocked means the guard r
 on every turn and resumes sampling the moment the prefix actually goes cold, rather than on a
 fixed schedule.
 
-If you need an instant, config-redeploy-free lever instead of the guard's own kill switch, `routing.mode: shadow`
-stops enforcement entirely while still recording what the router would have chosen.
+If you need an instant, config-redeploy-free lever instead of the guard's own kill switch, the
+**Shadow Routing** toggle (`ff_shadow_routing`; standalone, `routing.mode: shadow`) stops enforcement
+entirely while still recording what the router would have chosen.
 
 **Design principle**: the router is only trustworthy if it prices its own decisions honestly. As of
 this guard and the honest-counterfactual pricing fix it depends on, a request that keeps a warm
@@ -266,8 +271,7 @@ are on by default; fallbacks are off until you list a target.
   response head arrives, so a failure before it is retried and a `2xx` head commits the request.
   A stream that breaks after it started, or an `error` event inside a `200` stream, is never
   retried: your agent may already hold part of the answer.
-- **Only inference calls**: `POST` to `/v1/messages`, `/v1/chat/completions`, `/v1/responses` and
-  Gemini's `generateContent`. These create nothing you can address later, so sending one twice
+- **Only inference calls**: `POST` to `/v1/messages`, `/v1/chat/completions` and `/v1/responses`. These create nothing you can address later, so sending one twice
   costs tokens and changes no state. Anything else the proxy passes through (batches, files,
   cached contents) is sent once.
 - **Not a spent quota.** A `429` that reports an exhausted spend limit or quota
@@ -365,7 +369,7 @@ the fallback's response earns it nothing.
 
 ### Per-workspace settings
 
-The workspace setting `upstreamRetry` overrides any of the proxy's values, field by field:
+The workspace setting `upstreamRetry` overrides any of the proxy's values, field by field, for requests made with a virtual key through a proxy that has a control plane URL:
 
 ```bash
 intutic settings set upstreamRetry '{"maxAttempts": 4, "budgetMs": 45000}'
@@ -414,7 +418,7 @@ You can customize the words that trigger model redirection to fit your team's te
 To route agent traffic, you must ensure your AI agent harnesses are connected to the Intutic proxy gateway:
 
 #### Option A: Using the CLI (Recommended)
-The Intutic CLI sync daemon scans and automatically updates the configurations of all supported harnesses in your local repository:
+`intutic connect` starts the sync daemon, which writes each detected harness's gate and, where the harness has a config key for it, its base URL, and prints setup steps for the rest:
 ```bash
 npm install -g @intutic/cli
 intutic login

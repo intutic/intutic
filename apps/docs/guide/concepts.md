@@ -14,7 +14,7 @@ A **workspace** is the top-level organizational unit in Intutic. Everything — 
 
 - IDs use the `ws_` prefix (e.g., `ws_V1StGXR8_Z5jdHi6B-myT`)
 - A personal account has one workspace. An organization on **Biz Org**, **Enterprise** or **Self-host** can create more teams, each with its own workspace (5, 25 and unlimited)
-- Each workspace has its own virtual API key (`vk_*`) that the proxy uses for authentication
+- Virtual API keys (`vk_*`) belong to one workspace; each member creates their own, and the proxy uses them for authentication
 
 ::: tip One workspace per repo
 Most teams map one workspace to one code repository. This keeps governance rules scoped to the project they apply to.
@@ -66,13 +66,14 @@ Only SOPs in the `VALIDATED` state are actively enforced. Learn more in [Standar
 
 ## Enforcement Actions (PCAS)
 
-The **Policy Compliance and Action System** evaluates every LLM request against your active SOPs and applies one of four actions:
+The **Policy Compliance and Action System** evaluates every LLM request against your active SOPs and applies one of five actions:
 
 | Action | Effect | Example scenario |
 |--------|--------|-----------------|
 | **BYPASS** | Request passes through unmodified | Fully compliant with all policies |
 | **ENHANCE** | Request is enriched (prompt injection, context added) | SOP suggests adding security context to the prompt |
-| **HIJACK** | Request is rerouted to a different model | Downgrading `gpt-4o` to `gpt-4o-mini` for a simple task |
+| **HIJACK** | Request is modified or steered before it proceeds (a corrective notice for the agent, a redacted credential) | A detector finding steers the agent back toward its SOP |
+| **REASK** | The attempt is refused and the reason handed back to the agent, which may retry a bounded number of times before it escalates to a block | An agent repeating the same call in a loop |
 | **KILL** | Request is blocked entirely | Budget exceeded, unauthorized tool call, or policy violation |
 
 ::: info HIJACK decisions require review
@@ -81,12 +82,12 @@ When PCAS applies a HIJACK action, the decision is routed to the human review qu
 
 ## Traces
 
-A **trace** is the audit record of a single LLM request. Every request that flows through the Intutic proxy produces a trace (prefixed `tr_`).
+A **trace** is the audit record of a single LLM request. Every request that flows through the Intutic proxy produces a trace, identified by a UUID.
 
 Each trace captures:
 - **Model** used and **token counts** (input + output)
 - **Cost** in USD
-- **Enforcement action** applied (BYPASS / ENHANCE / HIJACK / KILL)
+- **Enforcement action** applied (BYPASS / ENHANCE / HIJACK / REASK / KILL, or OBSERVED when the provider itself failed)
 - **Compliance score** — how well the request matched active SOPs
 - **Token utility** — classified as `USEFUL` or `WASTED`
 
@@ -101,7 +102,7 @@ Traces are the foundation for cost tracking, anomaly detection, and compliance a
 ## Token Waste Classification
 
 The Intelligence Engine classifies trace data to identify inefficient token consumption. `wastePatternService.ts` computes **one waste pattern**, derived from columns that exist on `execution_traces`, and it carries a confidence reflecting how it was derived — so the UI never presents an inference as a measurement:
-- **Oversized prompt** (heuristic, confidence 0.6) — traces whose raw input exceeds 3× the workspace median, with the excess over the median attributed as waste. A legitimately large task looks the same, hence the reduced confidence.
+- **Oversized prompt** (heuristic, confidence 0.6) — traces whose raw input exceeds 3× the workspace median, with the excess over three times the median attributed as waste. A legitimately large task looks the same, hence the reduced confidence.
 
 A second pattern, **context bloat** (raw minus compressed input tokens), has been removed: the proxy writes those two figures equal on every trace path, so it could never fire. The compactor's real saving is reported separately, in bytes, and is not counted as waste.
 
@@ -143,7 +144,7 @@ Before 2.4.0 both were filed as `SCOPE_VIOLATION`, and those incidents keep that
 
 ## Trust Scores
 
-Every agent session receives a **trust score** — a numerical reliability rating that tracks how well the agent follows governance rules over time. Trust scores factor into enforcement decisions: a session with a declining trust score may trigger stricter PCAS actions.
+Every member receives a **trust score** — a 0–100 reliability rating, starting at 80, that tracks how well their agents follow governance rules over time: it falls with each anomaly or block recorded in their sessions. It is shown with the session in the dashboard and returned by `GET /api/v1/trust-scores`; no enforcement decision reads it.
 
 ## Compliance Scores
 

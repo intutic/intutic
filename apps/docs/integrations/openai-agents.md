@@ -100,8 +100,8 @@ setting the SDK's own kill-switch env, `OPENAI_AGENTS_DISABLE_TRACING=1`.
 
 If you want the traces, keep them governed: the control plane accepts the
 exporter's own wire shape at `POST /api/v1/integrations/openai-agents/traces/ingest`,
-DLP-scans every span's input and output, and records each `generation` span
-as a trace in the same ledger proxied calls use. Tool and agent spans are
+DLP-scans each `generation` span's input and output, redacting any match, and
+records the span as a trace in the same ledger proxied calls use. Tool and agent spans are
 counted, not stored — they carry no model, tokens or cost.
 
 ```ts

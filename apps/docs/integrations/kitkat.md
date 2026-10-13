@@ -55,13 +55,13 @@ Intutic is designed **AI-first**: AI coding agents (such as Claude Code, Antigra
 When interacting with model providers through the Intutic proxy, agents can issue commands directly inside prompt payloads by prepending `@intutic` or `/intutic`. The proxy intercepts these commands **pre-flight**, before the request reaches the provider, executes the governance action, and returns formatted response blocks:
 
 #### 1. Cost & Task Attribution
-* **`@intutic initialize`**: Lists the open tickets on the workspace's Jira and Linear connections and marks the one your git branch names as Recommended.
-* **`@intutic start [<ticket_id>] [--sops=<names>] [--auto-judge]`**: Locks cost attribution to a ticket and scopes active local SOP directories.
+* **`@intutic initialize`**: Lists the open tickets on the workspace's Jira and Linear connections, and the local SOP folders under `.intutic/sops/`, as numbered options, and marks the ticket your git branch names as Recommended.
+* **`@intutic start [<option_number_or_ticket_key>] [--sops=<names>] [--auto-judge]`**: Locks cost attribution to a ticket (an option number from `initialize`, or the ticket key) and scopes active local SOP directories; `--auto-judge` (or `-j`) judges every later prompt in the session.
   * *Example:* `@intutic start 12 --sops=security-rules --auto-judge`
 
 #### 2. FinOps & Token Projections
 * **`@intutic predict <prompt>`**: Calculates pre-flight input/output token projections and USD cost before submitting the request to upstream LLM providers.
-* **`@intutic recommend`**: Analyzes the active conversation state and suggests context-pruning strategies to eliminate wasted token loops.
+* **`@intutic recommend`**: Returns the corrective prompt for the most recent anomaly detected in the session, with its evidence; with no anomaly, general tips for keeping prompts and spend down.
 
 #### 3. Policy Verification & Automated E2E Judging
 * **`@intutic verify <prompt>`**: Audits the prompt pre-flight against active SOPs and guidelines, returning pass/fail verdicts before submitting requests to the LLM.

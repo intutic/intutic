@@ -15,7 +15,8 @@ This page is the map. The mechanics of each enforcer live on their own pages:
 ## From a page to a rule
 
 1. **Sources.** A connector (Notion, Confluence, GitHub, Google Docs) or a
-   one-off upload (Markdown, plain text or HTML) brings a document in. Every
+   one-off upload (Markdown, plain text or HTML; Word and PDF through the API)
+   brings a document in. Every
    document is split into **passages** — paragraphs, list items, table rows,
    code fences — each addressed by the hash of its text. A re-sync re-splits
    and keeps the hashes that did not change.
@@ -252,8 +253,11 @@ Four ways in, one API:
 
 ## Limits
 
-- **PDF and Word documents are not ingested.** Export them to Markdown, or put
-  them in a Google Drive folder and let Drive convert them. **Test connection** (an owner or admin) exchanges the stored credential and lists one document in the folder, so a wrong key or an unshared folder is found before the first sync.
+- **PDF and Word come in through the upload route only.** A PDF or Word file
+  in a Google Drive folder is skipped, and the dashboard's upload card takes
+  Markdown, plain text and HTML. `POST /api/v1/policy-guardrails/documents/upload`
+  also takes `.docx` and `.pdf` (up to 10 MB); or let Drive convert the file to
+  a Google Doc. A scanned PDF with no text layer is refused: there is no OCR. **Test connection** (an owner or admin) exchanges the stored credential and lists one document in the folder, so a wrong key or an unshared folder is found before the first sync.
 - **Shadow evidence for a front-matter guardrail comes from a proxy that
   reports traces to the control plane** — a gateway-mode proxy, or a
   standalone proxy attached to a workspace. A proxy with no control plane
@@ -263,7 +267,7 @@ Four ways in, one API:
   evaluation that did not fire, which biases the would-act rate down by at
   most one 30-second cycle per machine.
 - **Extraction fidelity is measured against a recorded golden corpus.** The
-  corpus (22 documents, two adversarial) has goldens recorded against a real
+  corpus (23 documents, two adversarial) has goldens recorded against a real
   model; a golden is a real extraction, never hand-written. The
   fidelity test's always-on half checks the corpus and prints how many goldens
   exist; its opt-in live half re-extracts every document and holds it to the

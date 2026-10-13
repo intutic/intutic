@@ -10,14 +10,14 @@ Each execution trace contains (field names as written to the local JSONL; connec
 
 | Field | Description |
 |-------|-------------|
-| `trace_id` | Unique identifier (`tr_` prefix) |
+| `trace_id` | Unique identifier (a UUID minted by the proxy) |
 | `session_id` | The agent session this trace belongs to |
 | `created_at` | ISO 8601 timestamp of the request |
 | `model` / `provider` | The LLM model and provider used |
 | `requested_model` / `actual_model_routed` | The model the caller asked for vs. the one that actually served the request |
 | `raw_input_tokens` / `output_tokens` | Token counts |
 | `raw_cost_usd` / `actual_cost_usd` | Cost had the requested model served it, vs. the actual cost of the routed model's response |
-| `cache_hit` / `cache_read_input_tokens` / `cache_creation_input_tokens` | Provider prompt-cache accounting |
+| `cache_hit` / `cache_read_input_tokens` / `cache_creation_input_tokens` | Whether the proxy's own response cache served the request, and the provider's prompt-cache token counts |
 | `latency_ms` | Request latency |
 | `verdict` | The proxy's own enforcement verdict — locally, exactly one of `allowed`, `killed`, `upstream_error`, `reasked`, `hijacked` |
 | `harness_type` | Which coding agent/IDE issued the request |
@@ -99,7 +99,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 |-------|------|-------------|
 | `limit` | number | 1–100, default 20 |
 | `offset` | number | Pagination offset, default 0 |
-| `since` | ISO 8601 datetime | Only traces after this time |
+| `since` | ISO 8601 datetime, or `24h` / `7d` | Only traces after this time |
 | `enforcement` | enum | `BYPASS`, `ENHANCE`, `HIJACK`, `KILL` |
 | `model` | string | Filter by model name |
 
@@ -134,7 +134,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ## Classifying token utility
 
-You can retroactively classify traces as USEFUL or WASTED. This feeds the FinOps ledger and the model routing optimizer.
+You can retroactively classify traces as USEFUL or WASTED (Owner, Admin or EM). The trace row itself is append-only, so the label is stored beside it and the trace's detail reports it as `tokenUtility` (with `tokenUtilityClassifiedBy`); ids that are not in your workspace are skipped. The response is `{ "classified": <count> }`.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" \

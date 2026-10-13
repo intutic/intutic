@@ -34,7 +34,7 @@ The proxy exports a small, deliberate instrument set (`packages/proxy/src/metric
 | `snip_input_bytes` / `snip_output_bytes` | histograms | `input_type`, `strategy` | Compaction sizes before/after |
 | `snip_compacted` | counter | `input_type`, `strategy` | Compaction event count |
 | `egress_denied` / `egress_would_deny` | observable counters | — | Egress policy denials (enforcing and shadow) |
-| `policy_refusals` | counter | `source` ∈ anomaly\|wasm, `action` ∈ kill\|ask\|reask\|reask_exhausted | Requests governance actually refused |
+| `policy_refusals` | counter | `source` ∈ anomaly\|wasm\|model_allowlist\|spend_budget\|key_rate_limit\|key_rate_limit_unchecked, `action` ∈ kill\|ask\|reask\|reask_exhausted\|hold\|unavailable\|allow | Requests governance actually refused (`allow` counts a request let through because the key's rate limit could not be checked) |
 | `upstream_retries` | counter | `provider`, `outcome` (`http_529`, `timeout`, …) | Upstream calls the proxy [retried](/guide/intelligent-routing#retries-and-fallbacks), by the failure that prompted each |
 | `upstream_fallbacks` | counter | `result` ∈ served\|exhausted, `provider` | Requests that ran their fallback chain, and whether a target answered |
 | `routing_targets_skipped` | counter | `stage` ∈ candidate\|mirror, `reason` (`wire_mismatch`, `model_not_allowed`, `budget`, `no_credential`, `not_listed`, …) | Models [smart routing](/guide/intelligent-routing#which-models-a-request-can-be-routed-to) left out of a request's choice, and mirror copies not sent, by the check that excluded them |

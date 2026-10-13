@@ -1,12 +1,12 @@
 # SIEM Export <Badge type="warning" text="Biz Org+" />
 
-Stream governance events — execution traces, incidents, detector findings, plan decisions, device firewall enforcement, machine disconnects, sign-ins, settings and policy changes, MCP registry decisions, SCIM changes, held-decision reviews, secret rotations, evidence downloads, gate and integrity alerts, ungoverned AI tools found on a machine, and optionally every gate decision — to your own SIEM or warehouse, each naming the person behind it.
+Stream governance events — execution traces, incidents, detector findings, plan decisions, device firewall enforcement, machine disconnects, sign-ins, settings and policy changes, MCP registry decisions, SCIM changes, held-decision reviews, secret rotations, evidence downloads, gate and integrity alerts, ungoverned AI tools found on a machine, credential changes, budget alerts, and optionally every gate decision — to your own SIEM or warehouse, naming the person behind each event that has one.
 
 ---
 
 ## Overview
 
-Every governance decision Intutic makes already lands in Postgres and the dashboard. SIEM Export streams the same events out to infrastructure you already run: Splunk, Datadog, a generic webhook, syslog/CEF, or an S3/GCS bucket for cold storage. This is delivery, not a second source of truth — the row in your SIEM is a copy of what the dashboard already shows.
+Every governance decision Intutic makes already lands in Postgres and the dashboard. SIEM Export streams the same events out to infrastructure you already run: Splunk, Datadog, a generic webhook, syslog/CEF, or an S3/GCS bucket for cold storage. This is delivery, not a second source of truth: for most sources the row in your SIEM is a copy of what the dashboard already shows. Gate allows, SCIM changes, secret rotations and governance alerts are not stored as rows of their own, so the SIEM copy is their only lasting record.
 
 Six destination types are supported:
 
@@ -22,6 +22,8 @@ Six destination types are supported:
 ## Configuring a destination
 
 From **Settings › Integrations › SIEM Export**, click **Add Destination**, choose a type, and provide its connection config as JSON. Each type's placeholder shows the fields it expects (a webhook URL, a Splunk HEC token, an S3 bucket + credentials, etc.).
+
+A webhook, Splunk or Datadog URL must be public `https`, and a syslog host publicly routable: the [outbound address guard](/guide/settings#webhook-destinations) that covers notification webhooks covers these too, `INTUTIC_WEBHOOK_ALLOWED_HOSTS` included. A bucket destination brings its own credentials: `accessKeyId` and `secretAccessKey` for S3, and for GCS `credentials`, a base64-encoded service-account key. The control plane's own cloud identity is not used unless the operator sets `INTUTIC_SIEM_ALLOW_AMBIENT_CREDENTIALS=true`.
 
 Credentials are encrypted at rest and are never returned unmasked after creation: a read shows `********` and, for a value longer than eight characters, its last four. When you edit a destination's `config`, a credential you leave out, or send back exactly as it was masked, keeps its stored value; any other value replaces it. The one exception is a webhook destination's `signingSecret`: the control plane generates it, an edit always keeps it whatever `config` says, and only **New signing secret** (`POST /api/v1/siem/destinations/:id/signing-secret`) replaces it. Only OWNER/ADMIN roles can create, edit, or deactivate a destination. Any workspace member can view the destination list and its health status.
 
@@ -39,7 +41,7 @@ A workspace that moves to a plan without SIEM export keeps its destinations, and
 - Events from that point are not delivered, and none are queued for later.
 - The dead-letter queue is kept and not retried. It is delivered once the workspace is on a plan with SIEM export again.
 - The control plane logs `SIEM export paused: the workspace plan does not include it`, at most once an hour per workspace.
-- Owners and admins can still view, deactivate (`PUT` with only `{"isActive": false}`) and delete a destination.
+- Owners and admins can still view and deactivate a destination (`PUT` with only `{"isActive": false}`, or `DELETE`, which deactivates it too: destinations are never removed).
 
 Moving back to a plan with SIEM export resumes streaming to every destination still active.
 
@@ -110,7 +112,7 @@ curl -X PUT https://<control-plane>/api/v1/siem/destinations/<id> \
   -d '{"sourceTables": ["governance_incidents", "detector_findings", "login_events", "workspace_settings_changes", "governance_alerts", "gate_decisions"]}'
 ```
 
-Hook gates report in batches, and each batch goes to a destination as one delivery: one webhook request, one Splunk or Datadog request, or one batch for a bucket. Decisions from SDK gates that ask the control plane per call (`POST /api/v1/hook-gate`) are delivered one at a time. Decisions made in the proxy, rather than in a hook gate, already stream as `detector_findings` and `governance_incidents`.
+Hook gates report in batches, and each batch goes to a destination as one delivery: one webhook request, one Splunk or Datadog request, or one batch for a bucket. Decisions from SDK gates that ask the control plane per call (`POST /api/v1/hook-gate`) are delivered one at a time. Decisions made in the proxy, rather than in a hook gate, already stream as `detector_findings` and `governance_incidents`, apart from the response gate's SSO group policy refusals, which are `gate_decisions` too.
 
 ### Syslog (CEF) classes
 
@@ -139,7 +141,7 @@ An incident's `msg` is its description.
 
 ### Bucket batching
 
-S3 and GCS destinations hold events until the destination's `batchSize` events are waiting or `flushIntervalMs` has passed since the first (defaults 100 and 60 seconds), then write them as one NDJSON object. A batch that cannot be written goes to the dead-letter queue whole. Held events are written when the control plane shuts down cleanly; a crash loses them, like any other in-flight event on the emitter path.
+S3 and GCS destinations hold events until the destination's `batchSize` events are waiting or `flushIntervalMs` has passed since the first (defaults 100 and 60 seconds), then write them as one NDJSON object. A batch that cannot be written goes to the dead-letter queue whole. Held events are written when the control plane shuts down cleanly; a crash loses them, from either delivery path.
 
 ## Verifying webhook signatures
 
@@ -182,11 +184,11 @@ def verify_intutic_webhook(raw_body: bytes, headers: dict, secret: str) -> bool:
 
 ## Delivery guarantees
 
-Every event, from either path, is retried up to 5 times per destination with exponential backoff. An event that still fails after retries is written to a dead-letter queue and retried automatically every 15 minutes. The DLQ count and a manual **Retry now** control are both visible on the SIEM Export panel; **Retry now** (`POST /api/v1/siem/dlq/retry`, owners and admins) retries your workspace's queue only. A destination that has been deactivated has its DLQ backlog dropped rather than retried forever — there's nowhere left to deliver it. Both paths share this exact retry + DLQ mechanism and the same dedup-key shape family for event ids.
+Every event, from either path, is sent up to 5 times per destination (the first try and four retries) with exponential backoff. A send the [outbound address guard](/guide/settings#webhook-destinations) refuses is not retried. An event that still fails is written to a dead-letter queue and retried automatically every 15 minutes, up to 100 events a pass and 20 per destination; one the address guard refused waits until the destination's config changes. The DLQ count and a manual **Retry now** control are both visible on the SIEM Export panel; **Retry now** (`POST /api/v1/siem/dlq/retry`, owners and admins) retries your workspace's queue only. A destination that has been deactivated has its DLQ backlog dropped rather than retried forever — there's nowhere left to deliver it. Both paths share this retry and DLQ mechanism. An event redelivered from the DLQ gets a new event id.
 
 ### Emitter path (default)
 
-- **At-most-once, per replica.** Each running control-plane replica processes its own copy of the in-process event emitter — if you run more than one replica, each one dispatches the same event independently, so you get **duplicate delivery** at your SIEM, not exactly-once. This is a real, plain limitation, not a hedge.
+- **At-most-once, per replica.** An event raised by an API request (a sign-in, a settings change, an MCP decision) is dispatched by the replica that served the request. Events every replica hears — the proxy's traces, findings and gate decisions, which arrive over Valkey, and per-replica sweeps such as the stale-device check — are dispatched by each replica independently, so with more than one replica you get **duplicate delivery** of those at your SIEM, not exactly-once. This is a real, plain limitation, not a hedge.
 - **No replay.** There is no offset or log to go back to — once an event is emitted, that's the only chance it has to be delivered (retries within that one attempt aside).
 - **In-flight events are lost on process restart.** An event mid-dispatch when the control plane restarts (deploy, crash, scale-down) is simply gone; nothing re-sends it afterward.
 
@@ -194,10 +196,10 @@ Every event, from either path, is retried up to 5 times per destination with exp
 
 - **WAL-sourced, at-least-once.** Events come from Postgres's write-ahead log via Debezium, not from application code remembering to emit — this closes the gap where an application code path writes a row but forgets (or fails) to emit an event. It is a genuine superset of what the emitter path can ever produce: some database writes never had a corresponding emitter call at all, and CDC sees them regardless.
 - **Replayable by consumer offset.** A consumer group can be rewound and replayed from any retained offset — recovering from a bad destination config or a downstream outage doesn't require the source events to still be "live" anywhere else.
-- **Survives control-plane restarts.** Nothing is held in process memory between the WAL and the consumer; a restart just resumes from the last committed offset.
-- **Safe with multiple replicas.** Kafka consumer-group semantics partition work across replicas without duplicate delivery — the multi-replica caveat above does not apply here.
+- **Survives control-plane restarts.** A restart resumes from the last committed offset. Two exceptions: an event for an S3 or GCS destination is held in memory for [batching](#bucket-batching) after its offset is committed, and an event whose workspace or destinations could not be looked up is dropped with its offset still committed.
+- **Safe with multiple replicas.** Kafka consumer-group semantics partition work across replicas, so the multi-replica caveat above does not apply here; a rebalance can still redeliver, as at-least-once allows.
 - **The original five sources only.** CDC carries `execution_traces`, `governance_incidents`, `detector_findings`, `stored_plans` and `enforcement_devices`. Every other source in the table above is delivered by the emitter path whether or not Kafka is on.
-- **Same dedup key family, same DLQ.** Event ids are deterministic from Kafka delivery coordinates (`siemev_cdc_<topic>_<partition>_<offset>`), so redelivery reproduces the same id; failures land in the identical DLQ the emitter path uses.
+- **Deterministic ids, same DLQ.** Event ids come from Kafka delivery coordinates (`siemev_cdc_<topic>_<partition>_<offset>`), so a Kafka redelivery reproduces the same id; failures land in the same DLQ the emitter path uses, and a DLQ retry sends a new id.
 
 **Setup:** the Kafka/CDC path is opt-in and requires an operator-run Kafka broker, Kafka Connect, and Debezium connector (this product does not deploy any of those three) — see `infra/kubernetes/cdc/README.md` in the enterprise repo for the full runbook, including the required `REPLICA IDENTITY FULL` change on two tables and every `KAFKA_*` environment variable the control plane reads.
 

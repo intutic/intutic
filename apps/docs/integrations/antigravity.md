@@ -130,7 +130,7 @@ intutic init
   ✔ antigravity → GEMINI.md
 ```
 
-The harness is detected from a `.gemini/` directory or an `.agents/hooks.json` file in the project, or from Antigravity's app-data directories (`~/.gemini/antigravity`, `~/.gemini/antigravity-cli`, `~/.gemini/antigravity-ide`). `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+The harness is detected from a `.gemini/` directory or an `.agents/hooks.json` file in the project, Antigravity's app-data directories (`~/.gemini/antigravity`, `~/.gemini/antigravity-cli`, `~/.gemini/antigravity-ide`), `antigravity` or `gemini` on `PATH`, or a `~/.gemini/settings.json` with a setting of its own. `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### 2. Start the proxy
 
@@ -168,5 +168,5 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness an
 | Rules file | `GEMINI.md` in the project (the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->`) |
 | Gates | `~/.gemini/config/hooks.json` (Antigravity), `~/.gemini/settings.json` (Gemini CLI) |
 | MCP servers | `~/.gemini/config/mcp_config.json` (Antigravity), `mcpServers` in `~/.gemini/settings.json` and the project's `.gemini/settings.json` (Gemini CLI), proxy-wrapped |
-| Detection | `.gemini/` or `.agents/hooks.json` in the project, or Antigravity's app-data directories |
+| Detection | `.gemini/` or `.agents/hooks.json` in the project, Antigravity's app-data directories, `antigravity` or `gemini` on `PATH`, or a `~/.gemini/settings.json` with a setting of its own |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

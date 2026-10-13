@@ -36,7 +36,8 @@ Every autonomous agent session can be registered as a **Loop Run** under a works
 ### 2. Circuit Breaker Enforcement {#circuit-breaker-enforcement}
 
 If a budget is breached, or if an administrator manually terminates a loop run from the dashboard, the loop state is set to `KILLED`.
-- Once `KILLED`, the reverse proxy intercepts any subsequent model requests matching the loop run header with an HTTP `403 Forbidden` response and error code `LOOP_RUN_TERMINATED`.
+- Once `KILLED` (or in any other status but `ACTIVE`), the reverse proxy refuses any subsequent model request for that loop run with an HTTP `403 Forbidden` response and error code `LOOP_RUN_TERMINATED`. The run is the one named in the `X-Loop-Run-Id` header or, when a request carries none, the member's active loop run.
+- A run held for review (`PENDING_REVIEW`) is refused with `LOOP_RUN_PENDING_REVIEW` until it is approved or rejected.
 - This immediately stops the running agent CLI or IDE extension, preventing any further waste.
 
 ## Using the CLI to Manage Loops
@@ -52,7 +53,7 @@ This registers a new Loop Run ID, configures the loop on the control plane (pers
 ### Execute a Wrapped Command
 You can automatically wrap any agent tool command under a safety loop boundary. Active local SOPs and auto-judging options are fully supported:
 ```bash
-intutic loop exec --name "refactor-auth" --budget 2.50 --sops=1 --auto-judge -- Aider --yes
+intutic loop exec --name "refactor-auth" --budget 2.50 --sops=1 --auto-judge -- aider --yes
 ```
 
 ### List Active Loop Runs
@@ -66,6 +67,8 @@ intutic loop complete lr_abc123
 intutic loop kill lr_abc123
 ```
 
+A run held for review is approved or rejected (which kills it) with `intutic loop review lr_abc123 --approve` or `--reject`, optionally with `--note`.
+
 ## Managing Loops in the Dashboard
 
 **Activity › Session Safety & Budgets** (`/activity/budgets`) in the Intutic dashboard provides an overview of all loop runs:
@@ -76,9 +79,11 @@ intutic loop kill lr_abc123
 
 ## Memory Guardrails & State Scanning
 
-To prevent agent loops from being hijacked by prompt injections hidden in memory or state files, Intutic actively scans uploaded state files during config capture:
-- **Automatic Scans**: Any files named `PROGRESS.md`, `STATE.md`, `task.md`, or matching `*.json` state schemas are parsed against unsafe patterns (e.g., `ignore previous instructions`, `bypass safety checks`).
-- **Incident Logging**: If an injection attempt is detected, the daemon accepts the capture without crashing, but flags it immediately as a **PROMPT_INJECTION** anomaly in the governance incident queue.
+To prevent agent loops from being hijacked by prompt injections hidden in memory or state files, the control plane scans state files submitted with their content to config capture (`POST /api/v1/config/capture`, which accepts content only when the workspace has turned on config content upload):
+- **Automatic Scans**: Files at `PROGRESS.md`, `STATE.md` or `task.md`, or whose path ends in `state.json`, are checked against unsafe patterns (e.g., `ignore previous instructions`, `bypass guardrails`, `disable safety checks`).
+- **Incident Logging**: If an injection attempt is detected, the capture is still accepted, but a HIGH-severity **PROMPT_INJECTION** incident is opened in the governance incident queue.
+
+The sync daemon's own config capture uploads only harness rules files, not these state files, so the scan runs only on a capture another client submits.
 
 ## Verification Gate (Loop Verifier API)
 
@@ -99,4 +104,4 @@ Agent loops can actively check code diffs and progress against workspace SOPs be
     "findings": ["SOP violation: Destructive command detected in diff."]
   }
   ```
-This endpoint triggers the compliance evaluation engine to analyze the diff against active SOP instructions, returning findings and safety status dynamically to the running harness.
+This endpoint triggers the compliance evaluation engine to analyze the diff against the workspace's `VALIDATED` SOPs, returning findings and safety status dynamically to the running harness. With no `VALIDATED` SOP, or on a plan without LLM judging, nothing is checked: the response is `ok: true`, `score: 0`, `unverified: true`, with a finding saying why.

@@ -25,8 +25,8 @@ The figure comes from `computeAvertedSpend` in the control plane
 1. **Measure the burn rate.** Sum `actual_cost_usd` over every execution trace on the killed
    session that precedes the kill timestamp, and divide by the elapsed time from the earliest of
    those traces up to the kill. This gives a `$/min` burn rate for the session's actual,
-   already-incurred activity — the killed trace itself is excluded (its cost is zeroed at the
-   source by the proxy's KILL handling anyway).
+   already-incurred activity — the killed trace itself adds nothing (its cost is zeroed at the
+   source by the proxy's KILL handling).
 2. **Extrapolate forward.** Multiply that measured `$/min` rate by a fixed extrapolation window —
    currently **60 minutes** — to produce the averted-spend dollar figure.
 
@@ -34,9 +34,12 @@ The figure comes from `computeAvertedSpend` in the control plane
 avertedUsd = usdPerMin × 60
 ```
 
+The figure is computed once, when the KILL incident is created, and stored on that incident.
+
 If a session has **zero traces preceding the kill**, there is nothing to measure a rate from, and
-the service returns no figure at all rather than a fabricated `$0`. A missing averted-spend
-callout on a killed session means "not enough data to estimate," not "nothing was averted."
+the service returns no figure at all rather than a fabricated `$0`; the same holds for an
+aggregate session bucket that is not a single run. Such a kill adds nothing to the dashboard
+total, which means "not enough data to estimate," not "nothing was averted."
 
 ## What it deliberately does not do
 
@@ -54,8 +57,10 @@ callout on a killed session means "not enough data to estimate," not "nothing wa
 
 ## Where it shows up
 
-The dashboard's **Cost Savings** card (`apps/dashboard/src/components/dashboard/CostSavingsCard.tsx`)
-renders the averted-spend figure as its own callout row, tagged **extrapolated**, and deliberately
+The dashboard's **Cost Savings** card (`apps/dashboard/src/components/dashboard/CostSavingsCard.tsx`,
+on the Overview's **Cost & Token Efficiency** tab) sums the figures of the KILL incidents created
+in the last 7 days, the same window as the savings above it, and renders the total as its own
+callout row, tagged **(extrapolated from blocked sessions)**, and deliberately
 never merges it into the measured routing-savings percentage shown above it. Those are two
 different populations of numbers:
 

@@ -42,7 +42,7 @@ intutic start
 - **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, written when at least one SOP targets Grok Build or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)).
 - **Hook registration:** `.grok/hooks/intutic-governance.json` (project) and `~/.grok/hooks/intutic-governance.json` (user) — a `PreToolUse` entry with no matcher, so every tool call is evaluated. Grok Build's hook directory is a glob of independent files, so this write never touches any other hook file you may already have there.
 - **Hook script:** `.intutic/hooks/grok-check.js` — the same shared gate evaluator (compiled protection floor + policy snapshot + ` WHERE `/argPattern rules) every other JavaScript-family harness in this product runs.
-- **LLM egress:** `base_url` merged into every existing `[model.*]` table in `config.toml`, at both `<repo>/.grok/config.toml` and `~/.grok/config.toml`. `XAI_API_KEY` remains the auth mechanism — only the endpoint moves.
+- **LLM egress:** `base_url` (the proxy's `/v1` URL) merged into every existing `[model.*]` table in `config.toml`, at both `<repo>/.grok/config.toml` and `~/.grok/config.toml`; a file with no `[model.*]` table gets one for Grok Build's default model, `[model."grok-4.6"]`. `XAI_API_KEY` remains the auth mechanism — only the endpoint moves.
 - **MCP servers:** any `[mcp_servers.*]` table in either `config.toml` is proxy-wrapped the same way every other harness's `mcpServers` map is (stdio entries wrapped with `--`, remote/`url`-keyed entries bridged with `--remote-url`/`--remote-transport`).
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness grok`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
@@ -85,9 +85,10 @@ gate says so.
 ::: tip Not live-verified
 Grok Build was not installable in the environment this integration was built
 and tested in. The blocking contract above is independently confirmed from
-Grok Build's own documentation; the exact per-file hook-registration schema
-(the `event`/`command`/`timeout` fields Intutic writes into
-`intutic-governance.json`) is this integration's own reasonable design
-against those confirmed facts, not a byte-for-byte match pinned against a
-real install.
+Grok Build's own documentation, and the per-file hook-registration schema
+Intutic writes into `intutic-governance.json` (a top-level `hooks` key, then
+`PreToolUse` groups of `{type, command, timeout}` entries, the shape of Claude
+Code's `settings.json` hooks) is confirmed against the hook-file parser in
+Grok Build's open-sourced code. Neither has been exercised against a real
+install.
 :::

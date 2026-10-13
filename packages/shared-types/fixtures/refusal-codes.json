@@ -77,7 +77,7 @@
       { "code": "COMMAND_TOO_LARGE", "meaning": "The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls" },
       { "code": "GATE_DEADLINE", "meaning": "The gate did not finish deciding within its deadline, a second under its harness's hook timeout and at most 9 seconds, and refuses rather than let the hook timeout allow the call" },
       { "code": "UNREADABLE_CALL", "meaning": "The hook received no tool call it could read, and refuses rather than allow a call it cannot evaluate" },
-      { "code": "GATE_CRASHED", "meaning": "The gate failed while deciding, and refuses rather than allow an unevaluated call" }
+      { "code": "GATE_CRASHED", "meaning": "The gate failed while deciding, and refuses rather than allow an unevaluated call; also a chaos run's `INTUTIC_CHAOS_PLAN` that is set but unreadable" }
     ]
   },
   "mcp": {

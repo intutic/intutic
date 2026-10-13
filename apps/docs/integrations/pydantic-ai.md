@@ -1,6 +1,6 @@
 # Pydantic AI
 
-Integrate Intutic governance with [Pydantic AI](https://ai.pydantic.dev/) (`pydantic-ai`/`pydantic-ai-slim`, 2.31+) — Pydantic's typed agent framework.
+Integrate Intutic governance with [Pydantic AI](https://ai.pydantic.dev/) (`pydantic-ai`/`pydantic-ai-slim`; the `[pydantic-ai]` extra installs `pydantic-ai-slim` 2.53 or later) — Pydantic's typed agent framework.
 
 Pydantic AI is governed on two independent surfaces:
 
