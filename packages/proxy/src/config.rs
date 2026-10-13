@@ -1127,9 +1127,15 @@ intutic_settings:
             mode: RoutingMode::Shadow,
             ..Default::default()
         };
-        assert!(shadow(None).standalone_active(), "shadow alone must run the selection");
+        assert!(
+            shadow(None).standalone_active(),
+            "shadow alone must run the selection"
+        );
         assert!(shadow(Some(true)).standalone_active());
-        assert!(!shadow(Some(false)).standalone_active(), "an explicit false still wins");
+        assert!(
+            !shadow(Some(false)).standalone_active(),
+            "an explicit false still wins"
+        );
         assert!(shadow_without_routing_warning(&shadow(Some(false))).is_some());
         assert!(shadow_without_routing_warning(&shadow(None)).is_none());
 

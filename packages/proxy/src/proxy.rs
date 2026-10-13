@@ -426,8 +426,10 @@ impl Provider {
 ///
 /// - a first-party Gemini model asked for on `/v1/messages`,
 ///   `/v1/chat/completions` or `/v1/responses` goes through the Gemini
-///   translation (`Cloud(GoogleAi)`); on its own `/v1beta` route it is
-///   passed through untouched;
+///   translation (`Cloud(GoogleAi)`). A request on the `/v1beta` route is
+///   not passed through: it is refused as an unsupported route, because its
+///   model is named in the URL, which the proxy does not read (see
+///   `delta_shape`'s `Unparsed` arm);
 /// - an Azure deployment takes Foundry's Messages API when the request is in
 ///   Anthropic's format or the deployment is a Claude one.
 fn route_for_inbound(target: Provider, inbound: &Provider, model: &str) -> Provider {
@@ -487,8 +489,8 @@ fn wire_route(inbound: &Provider, protocol: &Protocol, target: &Provider) -> Opt
         .then_some(WireRoute::OpenAIToAnthropic)
 }
 
-/// A first-party Gemini key for a request translated to the Gemini API: the
-/// same key, under the same rules, a request on the `/v1beta` route gets — a
+/// A first-party Gemini key for a request translated to the Gemini API, by
+/// the rules `fetch_provider_credential` applies to `Provider::Gemini` — a
 /// `vk_` request's workspace key (or, unless BYO-key is enforced, the
 /// operator's `GEMINI_API_KEY`); a raw caller's own `x-goog-api-key` first.
 async fn google_ai_config(
@@ -1683,7 +1685,12 @@ fn cache_fields_unreported(usage: &TokenUsage) -> bool {
 
 /// Post-response, fire-and-forget: what this response says about the scope's
 /// prompt cache — a measured ratio, or that the provider reports none.
-async fn record_cache_observation(store: &Arc<dyn LocalStore>, scope: &str, model: &str, usage: &TokenUsage) {
+async fn record_cache_observation(
+    store: &Arc<dyn LocalStore>,
+    scope: &str,
+    model: &str,
+    usage: &TokenUsage,
+) {
     if let Some(bp) = cache_read_bp(usage) {
         let _ = store.record_session_cache(scope, model, bp).await;
     } else if cache_fields_unreported(usage) {
@@ -5673,11 +5680,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let bandit_active = !routing_off
         && match feature_flags {
             Some(f) => f.bandit_routing || f.shadow_routing,
-            None => state
-                .config
-                .intutic_settings
-                .routing
-                .standalone_active(),
+            None => state.config.intutic_settings.routing.standalone_active(),
         };
 
     // Shadow is decided the same way routing is: the managed flag wins where one

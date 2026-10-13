@@ -604,7 +604,8 @@ pub trait LocalStore: Send + Sync + 'static {
     /// heuristic fires at most once, as documented, and later turns sample.
     /// `cache_read_bp` stays unset, so nothing reads the observation as a cold
     /// cache, and a real measurement replaces it.
-    async fn record_session_cache_unreported(&self, scope: &str, model: &str) -> anyhow::Result<()>;
+    async fn record_session_cache_unreported(&self, scope: &str, model: &str)
+        -> anyhow::Result<()>;
 
     // ── Tool-sequence anomaly detection ──────────────────────────────
 

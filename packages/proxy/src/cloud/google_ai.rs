@@ -8,8 +8,10 @@
 //! as an Anthropic message or Anthropic SSE.
 //! <https://ai.google.dev/api/generate-content>
 //!
-//! A request on `/v1beta/models/…:generateContent` itself is not routed here:
-//! the proxy passes it to the Gemini API untouched, as it always has.
+//! A request on `/v1beta/models/…:generateContent` itself is not routed here,
+//! nor passed through: the proxy refuses it as an unsupported route, because
+//! its model is named in the URL, which the proxy does not read
+//! (`proxy::delta_shape`'s `Unparsed` arm).
 
 use serde_json::Value;
 

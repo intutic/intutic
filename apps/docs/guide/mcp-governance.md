@@ -494,9 +494,14 @@ is replaced by one over the server's own definitions the next time the server
 answers `tools/list`, without an alarm. The proxy logs `tofu_repinned`: as
 information when the old pin still matched the curated list, and as a warning
 when it did not, since that old pin cannot tell an owner's edit from a change
-by the server.
+by the server. In that second case it also sends an
+`mcp_server_definition_changed` event naming both fingerprints, which the
+control plane files as a LOW detector finding (`mcp:tofu_rebaseline`), so a
+real change at upgrade time shows on the Findings page. The server is not
+blocked.
 
-On a mismatch, the proxy emits an `mcp_server_definition_changed` event and
+On a mismatch, the proxy emits an `mcp_server_definition_changed` event, which
+the control plane files as a MEDIUM detector finding (`mcp:tofu`), and
 honors the workspace's `mcpProxyFailBehavior` setting exactly the way every
 other governance check in this proxy does (see
 [When the registry has not loaded](#when-the-registry-has-not-loaded) for how

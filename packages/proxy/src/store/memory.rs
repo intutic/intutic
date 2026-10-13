@@ -687,7 +687,11 @@ impl LocalStore for MemoryStore {
         Ok(())
     }
 
-    async fn record_session_cache_unreported(&self, scope: &str, model: &str) -> anyhow::Result<()> {
+    async fn record_session_cache_unreported(
+        &self,
+        scope: &str,
+        model: &str,
+    ) -> anyhow::Result<()> {
         debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
         {
             let mut sessions = lock(&self.sessions, "session")?;

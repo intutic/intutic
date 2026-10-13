@@ -152,8 +152,10 @@ pub enum CloudConfig {
     GoogleAi(GoogleAiConfig),
 }
 
-/// First-party Gemini API: the workspace's or operator's Gemini key, resolved
-/// by the proxy exactly as it is for a request on the `/v1beta` route.
+/// First-party Gemini API: the workspace's or operator's Gemini key
+/// (`proxy::google_ai_config`). The proxy's `/v1beta` route refuses every
+/// request today, so this translation is the only way a Gemini model is
+/// served.
 #[derive(Debug, Clone)]
 pub struct GoogleAiConfig {
     /// `https://generativelanguage.googleapis.com`, or `GEMINI_UPSTREAM_URL`.

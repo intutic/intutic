@@ -220,6 +220,21 @@ describe('intutic skill audit exit status', () => {
     expect((await run(['skill', 'audit', '--exit-zero'], dir)).code).toBe(0)
   }, 60_000)
 
+  it('exits 0 when the only files it did not scan are data files, and lists them as not applicable', async () => {
+    const dir = join(home, 'audited-data-files')
+    await mkdir(join(dir, '.git'), { recursive: true })
+    await mkdir(join(dir, '.agents', 'skills', 'helper', 'references'), { recursive: true })
+    await writeFile(join(dir, '.agents', 'skills', 'helper', 'SKILL.md'), '# Helper\n\nSummarise the diff.\n')
+    await writeFile(join(dir, '.agents', 'skills', 'helper', 'references', 'style.md'), '# Style\n')
+    await writeFile(join(dir, '.agents', 'skills', 'helper', 'schema.json'), '{}')
+    expect((await run(['init', '--no-git-hooks'], dir)).code).toBe(0)
+
+    const res = await run(['skill', 'audit'], dir)
+    expect(`${res.stdout}${res.stderr}`).toContain('Not applicable')
+    expect(`${res.stdout}${res.stderr}`).toContain('audit passed')
+    expect(res.code).toBe(0)
+  }, 60_000)
+
   it('exits 0 when the audit is clean', async () => {
     const dir = join(home, 'audited-clean')
     await mkdir(join(dir, '.git'), { recursive: true })

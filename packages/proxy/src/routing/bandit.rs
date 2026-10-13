@@ -1317,9 +1317,15 @@ mod tests {
                 "the first large-prompt turn still gets the cold-start heuristic"
             );
 
-            store.record_session_cache_unreported(scope, "gpt-4o").await.unwrap();
+            store
+                .record_session_cache_unreported(scope, "gpt-4o")
+                .await
+                .unwrap();
             let later = store.session_routing(scope).await.unwrap();
-            assert_eq!(later.cache_read_bp, None, "unreported must never read as a measured cold cache");
+            assert_eq!(
+                later.cache_read_bp, None,
+                "unreported must never read as a measured cold cache"
+            );
             assert_eq!(
                 cache_guard_decision(&later, "gpt-4o", large, NOW, &cfg),
                 None,
@@ -1332,10 +1338,19 @@ mod tests {
             use crate::store::MemoryStore;
             let store = MemoryStore::new();
             let scope = "ws_1:agent_1";
-            store.record_session_cache(scope, "claude-sonnet-4-5", 9_000).await.unwrap();
-            store.record_session_cache_unreported(scope, "gpt-4o").await.unwrap();
+            store
+                .record_session_cache(scope, "claude-sonnet-4-5", 9_000)
+                .await
+                .unwrap();
+            store
+                .record_session_cache_unreported(scope, "gpt-4o")
+                .await
+                .unwrap();
             let session = store.session_routing(scope).await.unwrap();
-            assert_eq!(session.cache_warm_model.as_deref(), Some("claude-sonnet-4-5"));
+            assert_eq!(
+                session.cache_warm_model.as_deref(),
+                Some("claude-sonnet-4-5")
+            );
             assert_eq!(session.cache_read_bp, Some(9_000));
         }
     }

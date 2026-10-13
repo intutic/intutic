@@ -161,8 +161,9 @@ impl CloudProvider {
 ///   the deployment is a Claude one (named `claude-…`, Foundry's default
 ///   deployment names); otherwise the OpenAI v1 API.
 /// - A first-party Gemini model asked for in Anthropic's or OpenAI's format
-///   goes through the Gemini translation ([`CloudProvider::GoogleAi`]). On
-///   its own `/v1beta` route it is passed through untouched, as before.
+///   goes through the Gemini translation ([`CloudProvider::GoogleAi`]). A
+///   request on the `/v1beta` route never gets here: the proxy refuses it as
+///   an unsupported route (`proxy::delta_shape`'s `Unparsed` arm).
 pub fn for_inbound(
     provider: CloudProvider,
     inbound_anthropic: bool,

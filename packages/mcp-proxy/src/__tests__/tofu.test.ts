@@ -17,6 +17,7 @@ import {
   checkTofu,
   decideTofuAction,
   loadPin,
+  tofuReport,
   type ToolDefinition,
 } from '../tofu.js'
 
@@ -225,6 +226,41 @@ describe('checkTofu — the pin is over the upstream definitions', () => {
     const outcome = await checkTofu('ws-1', 'srv', upstream, [upstream[0]!])
     expect(outcome).toMatchObject({ status: 'repinned', verified: false })
     expect(decideTofuAction(outcome, 'srv', false).block).toBe(false)
+  })
+})
+
+describe('tofuReport — what reaches the control plane', () => {
+  const fp = (c: string) => c.repeat(64)
+
+  it('reports an unverified re-baseline as a LOW, non-blocking finding with both fingerprints', () => {
+    const report = tofuReport(
+      { status: 'repinned', fingerprint: fp('b'), previousFingerprint: fp('a'), verified: false },
+      'github',
+      false,
+    )
+    expect(report?.finding).toEqual({
+      detectorId: 'tofu_rebaseline',
+      kind: 'prompt_injection',
+      disposition: 'steer',
+      severity: 'low',
+      confidence: 0.5,
+    })
+    expect(report?.reason).toContain('re-baselined on upgrade')
+    expect(report?.reason).toContain(fp('a'))
+    expect(report?.reason).toContain(fp('b'))
+    expect(report?.reason).toContain('not blocked')
+  })
+
+  it('reports nothing for a verified re-baseline, a match or a first contact', () => {
+    expect(tofuReport({ status: 'repinned', fingerprint: fp('b'), previousFingerprint: fp('a'), verified: true }, 's', false)).toBeNull()
+    expect(tofuReport({ status: 'match', fingerprint: fp('a') }, 's', false)).toBeNull()
+    expect(tofuReport({ status: 'first_contact', fingerprint: fp('a') }, 's', false)).toBeNull()
+  })
+
+  it('reports a real mismatch as MEDIUM, kill when the listing was refused', () => {
+    const mismatch = { status: 'mismatch' as const, fingerprint: fp('b'), previousFingerprint: fp('a') }
+    expect(tofuReport(mismatch, 's', true, 'changed')?.finding).toMatchObject({ detectorId: 'tofu', severity: 'medium', disposition: 'kill' })
+    expect(tofuReport(mismatch, 's', false, 'changed')).toMatchObject({ reason: 'changed', finding: { disposition: 'steer' } })
   })
 })
 

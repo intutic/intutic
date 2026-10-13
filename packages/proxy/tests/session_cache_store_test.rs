@@ -40,8 +40,15 @@ async fn an_unreported_observation_is_a_first_observation_without_a_ratio() {
             .await
             .unwrap();
         let session = store.session_routing(&scope).await.unwrap();
-        assert_eq!(session.cache_warm_model.as_deref(), Some("gpt-4o"), "{name}");
-        assert_eq!(session.cache_read_bp, None, "{name}: unreported is not a measured cold cache");
+        assert_eq!(
+            session.cache_warm_model.as_deref(),
+            Some("gpt-4o"),
+            "{name}"
+        );
+        assert_eq!(
+            session.cache_read_bp, None,
+            "{name}: unreported is not a measured cold cache"
+        );
         assert!(session.cache_observed_at.is_some(), "{name}");
     }
 }
@@ -59,7 +66,11 @@ async fn an_unreported_observation_never_replaces_an_existing_one() {
             .await
             .unwrap();
         let session = store.session_routing(&scope).await.unwrap();
-        assert_eq!(session.cache_warm_model.as_deref(), Some("claude-sonnet-4-5"), "{name}");
+        assert_eq!(
+            session.cache_warm_model.as_deref(),
+            Some("claude-sonnet-4-5"),
+            "{name}"
+        );
         assert_eq!(session.cache_read_bp, Some(9_000), "{name}");
 
         // And a measurement replaces an unreported observation.

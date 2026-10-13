@@ -37,6 +37,7 @@ import * as node_crypto from 'node:crypto'
 import * as node_fs from 'node:fs/promises'
 import * as node_os from 'node:os'
 import * as node_path from 'node:path'
+import type { DetectionFinding } from './emitter.js'
 
 /** The subset of a `tools/list` tool entry this module hashes. */
 export interface ToolDefinition {
@@ -224,6 +225,44 @@ export async function checkTofu(
   }
 
   return { status: 'mismatch', fingerprint, previousFingerprint: existing.fingerprint }
+}
+
+/**
+ * What a TOFU outcome reports to the control plane, as the
+ * `mcp_server_definition_changed` event's reason and finding (filed as a
+ * detector finding, `mcp:<detectorId>`), or `null` when there is nothing to
+ * report.
+ *
+ * - `mismatch`: the server's definitions changed since they were pinned. A
+ *   MEDIUM finding, `kill` when fail-closed refused the listing.
+ * - `repinned`, unverified: an old-style pin no longer matched the curated
+ *   list, so a change by the server at upgrade time cannot be ruled out. The
+ *   server is not blocked; a LOW finding with both fingerprints makes the
+ *   re-baseline visible.
+ * - `repinned`, verified, and every other outcome: nothing changed. `null`.
+ */
+export function tofuReport(
+  outcome: TofuOutcome,
+  serverName: string,
+  blocked: boolean,
+  mismatchReason = '',
+): { reason: string; finding: DetectionFinding } | null {
+  if (outcome.status === 'mismatch') {
+    return {
+      reason: mismatchReason || `MCP server "${serverName}"'s tool definitions changed since they were first pinned.`,
+      finding: { detectorId: 'tofu', kind: 'prompt_injection', disposition: blocked ? 'kill' : 'steer', severity: 'medium', confidence: 1 },
+    }
+  }
+  if (outcome.status === 'repinned' && !outcome.verified) {
+    return {
+      reason:
+        `MCP server "${serverName}"'s TOFU pin was re-baselined on upgrade: the old pin, taken over the curated ` +
+        `tool list, no longer matched it, so a change by the server since it was pinned cannot be ruled out. ` +
+        `The server was not blocked. Old fingerprint ${outcome.previousFingerprint}, new ${outcome.fingerprint}.`,
+      finding: { detectorId: 'tofu_rebaseline', kind: 'prompt_injection', disposition: 'steer', severity: 'low', confidence: 0.5 },
+    }
+  }
+  return null
 }
 
 /**

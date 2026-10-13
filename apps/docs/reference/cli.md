@@ -1272,7 +1272,7 @@ It scans the workspace recorded by `intutic init`, or the current directory when
 
 1. **Rule files** at the workspace root (`.cursorrules`, `CLAUDE.md`, `.windsurfrules`, `.clauderules`) are checked for hardcoded Intutic virtual keys, hardcoded `sk-live-` secrets, recursive-delete wildcards such as `rm -rf *`, and `curl`/`wget` commands.
 2. **Skill files** (`.agents/skills/<name>/SKILL.md`, `.claude/skills/<name>/SKILL.md`) are content-scanned for prompt-injection, data-exfiltration, and malicious-code patterns. See [Skill Scanning](/guide/skill-scanning).
-3. **Bundled files** next to each `SKILL.md` (up to 3 directories deep and 40 files per skill; symlinks are skipped) are hashed (SHA-256). Shell, Python, JavaScript, TypeScript, Ruby, PowerShell, and Perl scripts up to 256 KiB are also content-scanned. Larger files, unreadable files, and unrecognised file types are reported as unscanned, never as clean: the report names each one, and the audit does not pass.
+3. **Bundled files** next to each `SKILL.md` (up to 3 directories deep and 40 files per skill; symlinks are skipped) are hashed (SHA-256). Shell, Python, JavaScript, TypeScript, Ruby, PowerShell, and Perl scripts up to 256 KiB are also content-scanned. Data files — `.md`, `.markdown`, `.txt`, `.rst`, `.json`, `.jsonl`, `.yaml`, `.yml`, `.csv`, `.tsv` and images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.bmp`) — are not scripts: they are listed as not applicable and do not affect the result, unless a shebang makes one a script, which is then scanned. Any other file that is larger than the cap, unreadable, or not a recognised script is reported as unscanned, never as clean: the report names each one, and the audit does not pass.
 
 When you are logged in, three workspace settings change the run:
 
@@ -1282,9 +1282,9 @@ When you are logged in, three workspace settings change the run:
 | `ciscoSkillScannerEnabled` | Runs the Cisco engine without `--engine cisco` if `skill-scanner` is on `PATH`; if it is not, the run continues with the built-in scanner only |
 | `semanticSkillAnalysisEnabled` | Includes each `SKILL.md`'s content in the report it uploads |
 
-When you are logged in, the results are also reported to the control plane; a failed report is ignored. With `--sarif`, nothing but the JSON document is printed. Cisco's results, when that engine ran, are added as a second run in the same document. The run's `invocations` entry lists each unscanned file as a warning notification and each failed Cisco run as an error notification, with `executionSuccessful: false` when an engine run failed.
+When you are logged in, the results are also reported to the control plane; a failed report is ignored. With `--sarif`, nothing but the JSON document is printed. Cisco's results, when that engine ran, are added as a second run in the same document. The run's `invocations` entry lists each unscanned file as a warning notification, each data file as a note, and each failed Cisco run as an error notification, with `executionSuccessful: false` when an engine run failed.
 
-**Exit status:** `1` when the audit has findings, when a file could not be scanned, or when a Cisco engine run failed, so a CI step fails on them; `0` when everything was scanned and nothing was found, or with `--exit-zero`. Also `1` for an unknown `--engine` value, or for `--engine cisco` when `skill-scanner` is not on `PATH`. The report, the SARIF document and the control-plane report are all complete before the command exits.
+**Exit status:** `1` when the audit has findings, when a file other than a data file could not be scanned, or when a Cisco engine run failed, so a CI step fails on them; `0` when everything was scanned and nothing was found, or with `--exit-zero`. Also `1` for an unknown `--engine` value, or for `--engine cisco` when `skill-scanner` is not on `PATH`. The report, the SARIF document and the control-plane report are all complete before the command exits.
 
 **Examples:**
 

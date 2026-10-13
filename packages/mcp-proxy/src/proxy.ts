@@ -56,7 +56,7 @@ import { GuardedValkey } from './guardedValkey.js'
 import { McpBudgetEnforcer, ValkeyBudgetStore } from './budget.js'
 import { WasmRunner } from './wasm/runner.js'
 import { CloudRuleSet, fetchRuleBinaryFrom, refusalDetail } from './wasm/cloudRules.js'
-import { checkTofu, decideTofuAction, type ToolDefinition } from './tofu.js'
+import { checkTofu, decideTofuAction, tofuReport, type ToolDefinition } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
 import { callerIdentity, type CallerIdentity } from './identity.js'
@@ -1170,6 +1170,10 @@ export class McpGovernanceProxy {
               'matched it, and cannot tell a curation change from a server change',
           )
         }
+        // Visible, never blocking: a LOW finding with both fingerprints when
+        // the old pin did not match; nothing when it did.
+        const report = tofuReport(tofu, serverName, false)
+        if (report) this.emitter.emit('mcp_server_definition_changed', serverName, undefined, report.reason, report.finding)
       } else if (tofu.status === 'mismatch') {
         const action = decideTofuAction(tofu, serverName, this.interceptor.failOpen)
         const reason = action.reason ?? 'MCP server tool definitions changed since first pinned.'
@@ -1183,7 +1187,8 @@ export class McpGovernanceProxy {
           },
           reason,
         )
-        this.emitter.emit('mcp_server_definition_changed', serverName, undefined, reason)
+        const report = tofuReport(tofu, serverName, action.block, reason)
+        this.emitter.emit('mcp_server_definition_changed', serverName, undefined, reason, report?.finding)
 
         if (action.block) {
           writeFrame(
