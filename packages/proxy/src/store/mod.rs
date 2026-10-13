@@ -593,6 +593,19 @@ pub trait LocalStore: Send + Sync + 'static {
         cache_read_bp: u32,
     ) -> anyhow::Result<()>;
 
+    /// Record that `model` answered for `scope` with real usage and no cache
+    /// fields at all — an observation with no `cache_read_bp`, written only
+    /// when the scope has no observation yet.
+    ///
+    /// Without it, a scope served only by a provider that never reports cache
+    /// activity never had an observation, so the cache guard's cold-start
+    /// heuristic (`routing::bandit::cache_guard_decision`) declined to route
+    /// every large-prompt turn: routing was off for that scope. With it, the
+    /// heuristic fires at most once, as documented, and later turns sample.
+    /// `cache_read_bp` stays unset, so nothing reads the observation as a cold
+    /// cache, and a real measurement replaces it.
+    async fn record_session_cache_unreported(&self, scope: &str, model: &str) -> anyhow::Result<()>;
+
     // ── Tool-sequence anomaly detection ──────────────────────────────
 
     /// Append `new_tools` to the session's tool sequence, trim to the newest

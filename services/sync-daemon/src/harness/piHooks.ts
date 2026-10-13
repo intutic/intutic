@@ -207,7 +207,9 @@ export default function intuticGovernance(pi) {
  * Merge Pi models.json — point the anthropic and openai providers at the
  * proxy, each with the base URL its SDK expects (the Anthropic SDK appends
  * `/v1/messages`, the OpenAI one `/chat/completions`). Google is left alone:
- * the proxy does not serve the Gemini API, so routing it there would break it.
+ * the proxy has a Gemini `/v1beta` route, but refuses every request on it as
+ * an unsupported route (the model is named in the URL, which it does not
+ * read), so routing Google there would break it.
  * Every other provider and key is kept. A provider entry may carry `baseUrl`
  * alone (`ProviderConfigSchema` in `packages/coding-agent/src/core/model-config.ts`).
  */

@@ -21,7 +21,6 @@ export interface WsClientOptions {
   apiKey: string
   workspaceId: string
   onConfigUpdate: (config: SyncConfigPayload) => Promise<void>
-  onContextSyncTrigger?: (adapterId: string) => Promise<void>
   onActiveLocalSopsUpdate?: (activeLocalSops: string[]) => Promise<void>
   signal?: AbortSignal
 }
@@ -79,11 +78,6 @@ export class SyncWsClient {
         } else if (payload.type === 'active_local_sops_update') {
           if (this.options.onActiveLocalSopsUpdate) {
             await this.options.onActiveLocalSopsUpdate(payload.activeLocalSops)
-          }
-        } else if (payload.type === 'context_sync_trigger') {
-          // Trigger a ContextGraph filesystem scan and sync push
-          if (this.options.onContextSyncTrigger) {
-            await this.options.onContextSyncTrigger(payload.adapterId)
           }
         } else if (payload.type === 'pong') {
           log.debug({ action: 'ws_pong' }, 'Received pong from server')

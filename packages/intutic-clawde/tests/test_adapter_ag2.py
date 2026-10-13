@@ -114,6 +114,31 @@ class TestIntuticMiddleware:
 
         assert "[Intutic Governance] BLOCKED:" in result.result.parts[0].content
 
+    def test_a_gate_error_reaches_the_model_as_a_blocked_message_not_the_raw_exception(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+
+        def broken_guard(tool_name, tool_input):
+            raise ValueError("snapshot parse failed")
+
+        monkeypatch.setattr(g, "guard", broken_guard)
+        mw = IntuticMiddleware(event=None, context=None, gate=g)
+        call_next_invoked = []
+
+        async def spy_call_next(event, context):
+            call_next_invoked.append(True)
+            return await _real_tool_call_next(event, context)
+
+        ev = _call("shell", {"command": "ls"})
+        result = asyncio.run(mw.on_tool_execution(spy_call_next, ev, None))
+
+        assert call_next_invoked == []
+        content = result.result.parts[0].content
+        assert "[Intutic Governance] BLOCKED: gate error, failing closed: snapshot parse failed" in content
+        assert "ValueError" not in content
+        assert "snapshot parse failed" in capsys.readouterr().err
+
     def test_no_gate_configured_fails_closed_rather_than_running_call_next(self, capsys):
         mw = IntuticMiddleware(event=None, context=None)  # no gate= and none installed
         call_next_invoked = []
@@ -126,6 +151,7 @@ class TestIntuticMiddleware:
         result = asyncio.run(mw.on_tool_execution(spy_call_next, ev, None))
 
         assert call_next_invoked == []
+        assert "[Intutic Governance] BLOCKED:" in result.result.parts[0].content
         assert "No gate configured" in result.result.parts[0].content
         assert "No gate configured" in capsys.readouterr().err
 

@@ -458,6 +458,9 @@ impl Default for DlpConfig {
 pub struct RoutingConfig {
     /// `None` — defer entirely to the Valkey feature flag (control-plane managed).
     /// `Some(true)` — enable bandit routing in standalone mode.
+    ///
+    /// Standalone, `mode: shadow` with `enabled` unset turns routing on for
+    /// shadow: see [`RoutingConfig::standalone_active`].
     #[serde(default)]
     pub enabled: Option<bool>,
 
@@ -498,6 +501,12 @@ pub struct RoutingConfig {
     /// That yields reach and exposure — "we would have downgraded 34% of
     /// requests, $X/mo" — and **nothing about quality**, because the other model
     /// never ran. Only mirroring can measure that.
+    ///
+    /// Standalone, `mode: shadow` is enough on its own: with `enabled` unset
+    /// it runs the selection for shadow ([`RoutingConfig::standalone_active`]).
+    /// It used to need `enabled: true` as well and, without it, silently did
+    /// nothing. An explicit `enabled: false` still wins, with a warning at
+    /// startup.
     #[serde(default)]
     pub mode: RoutingMode,
 
@@ -633,6 +642,17 @@ pub struct RoutingConfig {
     /// into per model, never implied.
     #[serde(default)]
     pub fallbacks: crate::routing::retry::FallbackMap,
+}
+
+impl RoutingConfig {
+    /// Whether routing runs when no control-plane feature flags govern the
+    /// workspace (standalone open core). `enabled` when it is set; otherwise
+    /// on exactly for `mode: shadow`, which only records what it would pick
+    /// and serves the requested model. `mode: off` is checked separately by
+    /// the caller, ahead of this and of the flags.
+    pub fn standalone_active(&self) -> bool {
+        self.enabled.unwrap_or(self.mode == RoutingMode::Shadow)
+    }
 }
 
 impl Default for RoutingConfig {
@@ -872,7 +892,19 @@ pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
         // (testing a model `model_list` does not know about yet).
     }
 
+    if let Some(warning) = shadow_without_routing_warning(&config.intutic_settings.routing) {
+        tracing::warn!("{warning}");
+    }
+
     Ok(config)
+}
+
+/// The startup warning for `mode: shadow` under an explicit `enabled: false`,
+/// which runs no selection standalone and so records nothing.
+fn shadow_without_routing_warning(routing: &RoutingConfig) -> Option<&'static str> {
+    (routing.mode == RoutingMode::Shadow && routing.enabled == Some(false)).then_some(
+        "routing.mode is shadow but routing.enabled is false: standalone, no selection runs,          so shadow routing records nothing. Remove `enabled: false` (shadow alone turns it on)          or set mode to off.",
+    )
 }
 
 #[cfg(test)]
@@ -1083,6 +1115,37 @@ intutic_settings:
             proxy.contains("let bandit_active = !routing_off"),
             "`off` must short-circuit `bandit_active`, or a remote flag overrides \
              the operator's stop",
+        );
+    }
+
+    /// Standalone `mode: shadow` used to do nothing without `enabled: true`,
+    /// although the field's comment says shadow runs the selection.
+    #[test]
+    fn standalone_shadow_turns_routing_on_unless_explicitly_disabled() {
+        let shadow = |enabled| RoutingConfig {
+            enabled,
+            mode: RoutingMode::Shadow,
+            ..Default::default()
+        };
+        assert!(shadow(None).standalone_active(), "shadow alone must run the selection");
+        assert!(shadow(Some(true)).standalone_active());
+        assert!(!shadow(Some(false)).standalone_active(), "an explicit false still wins");
+        assert!(shadow_without_routing_warning(&shadow(Some(false))).is_some());
+        assert!(shadow_without_routing_warning(&shadow(None)).is_none());
+
+        // Enforce keeps needing `enabled: true` standalone.
+        let enforce = |enabled| RoutingConfig {
+            enabled,
+            mode: RoutingMode::Enforce,
+            ..Default::default()
+        };
+        assert!(!enforce(None).standalone_active());
+        assert!(enforce(Some(true)).standalone_active());
+
+        let proxy = include_str!("proxy.rs");
+        assert!(
+            proxy.contains(".standalone_active()"),
+            "the proxy must decide standalone routing through standalone_active"
         );
     }
 

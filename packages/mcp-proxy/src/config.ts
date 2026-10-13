@@ -36,9 +36,10 @@ export interface ProxyConfig {
    * MCP proxy deployment model ('per-session' | 'daemon').
    * WS-5 Q2 — 'daemon' is active: when set, policy lookups are answered by the
    * long-lived daemon over its Unix socket (see policy.ts) instead of a
-   * per-process fetch from the control plane. What is NOT active is daemon
-   * health telemetry — the health-snapshot route was removed and the dashboard
-   * flag is hardcoded off, so daemon health is not reported anywhere.
+   * per-process fetch from the control plane. The daemon also reports its
+   * health: `daemon/statusReporter.ts` posts a snapshot to
+   * `POST /api/v1/mcp-daemon/report` every minute by default, which the dashboard
+   * reads back through `GET /api/v1/mcp-daemon/status`.
    */
   mcpProxyMode: string
   /**
@@ -117,8 +118,9 @@ export interface ProxyConfig {
    * (`anomaly/index.ts`'s `DETECTOR_BASE_DISPOSITION`); values are
    * `'steer' | 'reask' | 'kill' | 'off'`, clamped at each detector's own
    * Rust-declared ceiling by `resolveEffectiveDisposition` — never able to
-   * promote past it. Overridden wholesale by the control plane's
-   * `mcpAnomalyOverrides` policy field when present. Empty object when
+   * promote past it. Merged per detector with the control plane's
+   * `mcpAnomalyOverrides` policy field, whose entry wins for a detector both
+   * name (interceptor.ts). Empty object when
    * unset, malformed, or not a plain JSON object.
    */
   mcpAnomalyOverrides: Record<string, 'steer' | 'reask' | 'kill' | 'off'>

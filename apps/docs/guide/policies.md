@@ -234,7 +234,7 @@ What Opaque does not hide. It hides which rule refused a call, and nothing
 else:
 
 - SOP guidance the agent is meant to read is still readable. The MCP proxy's
-  `intutic_list_sops` tool still lists the workspace's SOPs.
+  `intutic_list_sops` tool still lists the workspace's SOPs in force.
 - The MCP proxy's `intutic_mcp_registry_status` tool still reports which
   servers are approved, blocked or held, and which tools are disabled.
 - When the control plane cannot be reached and the LLM proxy is set to fail

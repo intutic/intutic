@@ -453,33 +453,54 @@ describe('OpenHands base_url outside [llm]', () => {
 describe('Goose config.yaml', () => {
   const script = '/home/u/.agents/plugins/intutic-governance/scripts/intutic-check.sh'
 
-  it('sets provider.host and hooks.pre_tool_use, and no other host or hook key', () => {
+  it("sets goose's own host keys and hooks.pre_tool_use, and no other host or hook key", () => {
     // The old text edit replaced the first `host:` line and the first
     // `pre_tool_use:` line in the file, whichever key held them.
     const user =
-      '# mine\nextensions:\n  search:\n    host: https://search.example\n    pre_tool_use: keep-me\n' +
-      'provider:\n  name: openai\n  host: https://api.openai.com\n'
+      '# mine\nGOOSE_PROVIDER: openai\nextensions:\n  search:\n    host: https://search.example\n    pre_tool_use: keep-me\n'
     const merged = mergeGooseConfigYaml(user, 'http://127.0.0.1:4000', script)!
     const parsed = parseYaml(merged)
     expect(parsed.extensions.search).toEqual({ host: 'https://search.example', pre_tool_use: 'keep-me' })
-    expect(parsed.provider).toEqual({ name: 'openai', host: 'http://127.0.0.1:4000' })
+    // Top-level keys, read by goose's providers through Config::get_param.
+    expect(parsed.OPENAI_HOST).toBe('http://127.0.0.1:4000')
+    expect(parsed.ANTHROPIC_HOST).toBe('http://127.0.0.1:4000')
+    expect(parsed.GOOSE_PROVIDER).toBe('openai')
+    expect(parsed.provider).toBeUndefined()
     expect(parsed.hooks).toEqual({ pre_tool_use: script })
     expect(merged.startsWith('# mine\n')).toBe(true)
     expect(mergeGooseConfigYaml(merged, 'http://127.0.0.1:4000', script)).toBe(merged)
   })
 
-  it('writes both keys into an empty file, and keeps the host when no proxy URL is given', () => {
+  it('points an OPENAI_BASE_URL already in the file at the proxy, since it outranks OPENAI_HOST', () => {
+    const merged = parseYaml(mergeGooseConfigYaml('OPENAI_BASE_URL: https://api.openai.com/v1\n', 'http://h:4000/', script)!)
+    expect(merged.OPENAI_BASE_URL).toBe('http://h:4000/v1')
+    expect(merged.OPENAI_HOST).toBe('http://h:4000')
+    // Not added when absent: the host key is goose's persisted default.
+    expect(parseYaml(mergeGooseConfigYaml('', 'http://h:4000', script)!).OPENAI_BASE_URL).toBeUndefined()
+  })
+
+  it('removes the provider.host an earlier version wrote, and nothing else under provider', () => {
+    const stale = parseYaml(mergeGooseConfigYaml('provider:\n  host: http://h:4000\n', 'http://h:4000', script)!)
+    expect(stale.provider).toBeUndefined()
+    const kept = parseYaml(
+      mergeGooseConfigYaml('provider:\n  name: openai\n  host: https://own.example\n', 'http://h:4000', script)!,
+    )
+    expect(kept.provider).toEqual({ name: 'openai', host: 'https://own.example' })
+  })
+
+  it('writes the keys into an empty file, and keeps the hosts when no proxy URL is given', () => {
     expect(parseYaml(mergeGooseConfigYaml('', 'http://h:4000', script)!)).toEqual({
-      provider: { host: 'http://h:4000' },
+      ANTHROPIC_HOST: 'http://h:4000',
+      OPENAI_HOST: 'http://h:4000',
       hooks: { pre_tool_use: script },
     })
-    const kept = parseYaml(mergeGooseConfigYaml('provider:\n  host: http://h:4000\n', '', script)!)
-    expect(kept.provider.host).toBe('http://h:4000')
+    const kept = parseYaml(mergeGooseConfigYaml('OPENAI_HOST: http://h:4000\n', '', script)!)
+    expect(kept.OPENAI_HOST).toBe('http://h:4000')
   })
 
   it('leaves a file it cannot merge into alone', () => {
-    expect(mergeGooseConfigYaml('provider: [unclosed\n', 'http://h:4000', script)).toBeNull()
+    expect(mergeGooseConfigYaml('hooks: [unclosed\n', 'http://h:4000', script)).toBeNull()
     expect(mergeGooseConfigYaml('- a list\n', 'http://h:4000', script)).toBeNull()
-    expect(mergeGooseConfigYaml('provider: openai\n', 'http://h:4000', script)).toBeNull()
+    expect(mergeGooseConfigYaml('hooks: on\n', 'http://h:4000', script)).toBeNull()
   })
 })

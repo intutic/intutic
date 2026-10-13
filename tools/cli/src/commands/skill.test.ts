@@ -531,6 +531,34 @@ describe('buildSarifLog', () => {
     expect(sarif.runs[1]).toEqual(ciscoRun)
   })
 
+  it('names every unscanned file and failed engine run, instead of an empty, clean-looking document', () => {
+    const unscanned: SkillReportEntry = {
+      filePath: '.agents/skills/poisoned/big.sh',
+      linesCount: 0,
+      issuesDetected: 0,
+      scanned: false,
+      unscannedReason: 'over_cap',
+      kind: 'script',
+    }
+    const sarif = buildSarifLog([unscanned], [], [
+      { engine: 'cisco-skill-scanner', path: '.agents/skills/poisoned', error: 'exit 2' },
+    ]) as any
+    const [invocation] = sarif.runs[0].invocations
+    expect(invocation.executionSuccessful).toBe(false)
+    const notes = invocation.toolExecutionNotifications
+    expect(notes).toHaveLength(2)
+    expect(notes[0]).toMatchObject({ level: 'warning' })
+    expect(notes[0].message.text).toContain('scan cap')
+    expect(notes[0].locations[0].physicalLocation.artifactLocation.uri).toBe('.agents/skills/poisoned/big.sh')
+    expect(notes[1]).toMatchObject({ level: 'error' })
+    expect(notes[1].message.text).toContain('cisco-skill-scanner failed: exit 2')
+  })
+
+  it('reports a successful invocation with no notifications when everything was scanned', () => {
+    const sarif = buildSarifLog([entry()]) as any
+    expect(sarif.runs[0].invocations).toEqual([{ executionSuccessful: true, toolExecutionNotifications: [] }])
+  })
+
   it('omits additional runs when none are given, unchanged from before Phase S3', () => {
     const sarif = buildSarifLog([entry()]) as any
     expect(sarif.runs).toHaveLength(1)
