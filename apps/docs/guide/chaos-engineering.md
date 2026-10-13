@@ -20,9 +20,9 @@ intutic chaos run registry-down.yaml --sandbox-image my-agent-sandbox
 
 ## Safety rules
 
-- **Sandbox only.** `intutic chaos run` refuses to start unless a sandbox
-  backend is available, with the same selection and health check as
-  [`intutic exec --sandbox`](/guide/sandboxed-execution). It never falls back
+- **Sandbox only.** `intutic chaos run` refuses to start unless the container
+  sandbox backend (Docker or Podman) is available, with the same health check
+  as [`intutic exec --sandbox`](/guide/sandboxed-execution). It never falls back
   to running the agent on your machine. Mutating faults — the ones that
   change what the agent sees — never run outside a sandbox.
 - **A fault never loosens governance.** Faults are applied only to calls that

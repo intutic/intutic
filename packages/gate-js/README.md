@@ -15,9 +15,11 @@ eve's per-tool/per-connection `approval` policy surface — Vercel's
 filesystem-first durable-agent framework, a pre-1.0 **Preview** product),
 `@intutic/gate/harness` (Vercel's `@ai-sdk/harness` sandboxed coding-agent
 runtime), `@intutic/gate/workflow` (Vercel's `@ai-sdk/workflow` durable
-workflow agents), and `@intutic/gate/managed-agents` (Anthropic's Managed
+workflow agents), `@intutic/gate/managed-agents` (Anthropic's Managed
 Agents — a session-confirmation responder, not a hook, since Anthropic hosts
-the tool-call loop; see below). LangChain.js has no dedicated adapter planned
+the tool-call loop; see below), and `@intutic/gate/trueforge`
+(`intuticApprovalResponder()` answering TrueForge's `tool.approval_required`
+pauses, for a process that embeds `@truefoundry/trueforge-core`). LangChain.js has no dedicated adapter planned
 and instead uses the generic `wrapTool`/`wrapTools` helper directly.
 
 ## Quick start
@@ -66,7 +68,7 @@ same way, held to it by `packages/shared-types/fixtures/hook-gate-response-vecto
 | `wrapTool(fn \| tool, opts?)`, `wrapTools(list \| record, gate?)` | `wrapTools.ts` | Generic wrapping for a plain async function or an `{ execute, ... }`-shaped tool object. **This is the integration point for any JS framework without a dedicated adapter — LangChain.js included.** |
 | `intuticHeaders(opts?)` | `headers.ts` | Headers for a proxy-pointed HTTP/OpenAI-compatible client (`x-session-id`, `x-workspace-id`, `x-intutic-harness`). |
 | `loadSnapshot`, `evaluate`, `Snapshot`, `guardDisabledFromEnv` | `snapshot.ts` | Tier A1: reads `~/.intutic/hooks/policy-snapshot.rules`. |
-| `parseRules`, `firstMatch`, `fetchRules`, `SopRule` | `soprules.ts` | Tier A3: SOP-authored `WHERE`-clause rules. |
+| `parseRules`, `firstMatch`, `fetchRules`, `SopRule`, `fetchRegister`, `parseRegister`, `SopRegister` | `soprules.ts` | Tier A3: SOP-authored `WHERE`-clause rules; the register reads them with the workspace's intervention mode. |
 | `checkCommand`, `checkImages`, `checkWrittenManifest`, `ImageVerdict` | `imagecheck.ts` | Tier A2: container-image provenance on deploy commands. |
 | `McpRegistryRecord`, `McpAllowlistRecord` | `mcpRegistryRecord.ts` | Tier M: the snapshot's MCP server registry and allowlist (`Snapshot.mcpRegistry`, `Snapshot.mcpAllowlist`), decided as the hook gates and the MCP proxy decide them; a byte-identical copy of `@intutic/shared-types`' module. |
 | `classify`, `isDeploy`, `isTest`, `touchesInfra` | `actions.ts` | Command classifier shared by A2's deploy trigger. |
@@ -249,7 +251,7 @@ ordering gotcha.
 
 ## Subpath convention
 
-Eight adapters exist today, one source file each: `@intutic/gate/dsh`
+Nine adapters exist today, one source file each: `@intutic/gate/dsh`
 (`src/dsh.ts` — a Cordis plugin; see its module doc for the veto contract and
 `services/sync-daemon/src/harness/dshHooks.ts` for profile registration),
 `@intutic/gate/mastra` (`src/mastra.ts`), `@intutic/gate/vercel`
@@ -260,7 +262,8 @@ per-tool/per-connection `approval` surface, plus the observe-only
 pre-1.0 Preview product, see its module doc), `@intutic/gate/harness`
 (`src/harness.ts` — see above), `@intutic/gate/workflow` (`src/workflow.ts`
 — see above), and `@intutic/gate/managed-agents` (`src/managedAgents.ts` — see
-above). Later adapter phases follow the SAME convention (also
+above), and `@intutic/gate/trueforge` (`src/trueforge.ts` — embedded mode
+only; see its module doc). Later adapter phases follow the SAME convention (also
 `services/sync-daemon`'s existing subpath convention — see that package's
 `package.json`):
 

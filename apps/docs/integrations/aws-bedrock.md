@@ -34,7 +34,7 @@ Requests made with an Intutic key (`vk_…`) use it. On a gateway that requires 
 
 The credential is checked as soon as it is saved, and again from **Test** on the Provider Keys card: an access key pair with STS `GetCallerIdentity`, which proves the key but not its Bedrock permissions (the first model call checks those); a Bedrock API key with `ListFoundationModels`. A key AWS does not recognise is reported as rejected; a key that authenticates but may not list models is reported as not verified.
 
-**A self-hosted proxy's own credentials.** Set the region with `AWS_REGION` or `intutic_settings.providers.bedrock.region`. The proxy then authenticates with, in order:
+**A self-hosted proxy's own credentials.** Set the region with `AWS_REGION` (or `AWS_DEFAULT_REGION`) or `intutic_settings.providers.bedrock.region`. The proxy then authenticates with, in order:
 
 1. a Bedrock API key in `AWS_BEARER_TOKEN_BEDROCK` (or `providers.bedrock.api_key: os.environ/<NAME>`);
 2. `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, with `AWS_SESSION_TOKEN` for temporary credentials;

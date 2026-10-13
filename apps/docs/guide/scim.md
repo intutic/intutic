@@ -41,8 +41,8 @@ directory credentials. Revoke from the same panel or
 
 The token is workspace-scoped and separate from regular API keys.
 
-Issuing a token needs the Enterprise or Self-host plan, the same check every
-`/scim/v2` request makes. On another plan, Biz Org included, the panel says
+Issuing a token needs the Enterprise or Self-host plan (or a trial), the same
+check every `/scim/v2` request makes. On another plan, Biz Org included, the panel says
 which plans include SCIM and `POST /api/v1/scim/tokens` answers `403`
 (`Upgrade required — SCIM user provisioning requires an Enterprise plan`).
 Tokens issued before a downgrade stay listed so you can revoke them; `/scim/v2`
@@ -91,7 +91,7 @@ List all provisioned users in the workspace with optional filtering and paginati
 |-------|------|-------------|
 | `filter` | string | SCIM filter expression (e.g., `userName eq "jane@example.com"`) |
 | `startIndex` | number | 1-based pagination start index |
-| `count` | number | Maximum results per page |
+| `count` | number | Maximum results per page (default 100, at most 200) |
 
 **Response:** `200 OK`
 
@@ -250,7 +250,7 @@ other attributes in the payload are ignored rather than stored.
 
 ### DELETE /scim/v2/Users/:id — Deprovision User
 
-Fully remove a user from the workspace, triggering the offboarding cascade.
+Deactivate the user's membership in the workspace, triggering the offboarding cascade.
 
 **Response:** `204 No Content`
 
@@ -371,9 +371,9 @@ When a user is deprovisioned (via `DELETE /scim/v2/Users/:id` or `PATCH` with `a
 |------|--------|-------------|
 | 1 | **Revoke API Keys** | All virtual API keys (`vk_` prefix) belonging to the member are immediately invalidated |
 | 2 | **Kill Sessions** | All active sessions and refresh tokens are terminated; Valkey session cache is purged |
-| 3 | **Prune Context Graph** | The member's entries in the cross-harness context graph are removed |
-| 4 | **Reassign SOPs** | Any SOPs owned by the departing member are reassigned to the workspace owner |
-| 5 | **Archive Traces** | The member's execution traces are marked as archived (preserved for audit, but excluded from active queries) |
+| 3 | **Prune Graph** | Recorded as `skipped`: there is no graph to prune |
+| 4 | **Reassign SOPs** | Picks a remaining owner or admin and records it; SOPs have no owner column, so nothing is moved |
+| 5 | **Archive Traces** | Nothing changes: execution traces are append-only and stay readable for audit |
 | 6 | **Prune State** | Residual Valkey cache entries and ephemeral state tied to the user are cleaned up |
 | 7 | **Notify** | An offboarding completion event is emitted to the workspace event bus |
 
@@ -393,11 +393,11 @@ Each cascade execution is recorded in the `offboarding_events` table with:
 
 ## Admin: Retry Failed Offboardings
 
-If an offboarding cascade partially fails (e.g., due to a transient database error), an admin can retry stale events:
+If an offboarding cascade partially fails (e.g., due to a transient database error), the operator of the control plane can retry stale events:
 
 ### POST /api/v1/admin/offboarding/retry
 
-**Auth:** SCIM bearer token
+**Auth:** an `x-admin-token` header matching the control plane's `INTUTIC_ADMIN_TOKEN` environment variable. This is an operator credential, not a SCIM token.
 
 **Response:** `200 OK`
 

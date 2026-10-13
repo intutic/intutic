@@ -44,10 +44,11 @@ The catalog spans the registry's providers (Anthropic, OpenAI, Gemini, Mistral,
 OpenRouter, Azure OpenAI, AWS Bedrock, Google Vertex AI, Cohere, Ollama; not yet DeepSeek's own
 API, whose models appear only under OpenRouter and Ollama) — but "in the catalog"
 and "routable by Intutic's managed gateway today" are different questions. Only
-`routingLive: true` providers (Anthropic, OpenAI, Gemini, Mistral, OpenRouter, DeepSeek as of this
-writing — see [Provider Keys](/guide/settings#provider-keys)) can be reached through the
-gateway; the rest are real, browsable catalog entries for providers whose *routing* is
-separate, real engineering, not yet built.
+`routingLive: true` providers (Anthropic, OpenAI, Gemini, Azure OpenAI, AWS Bedrock, Google
+Vertex AI, Mistral, OpenRouter, DeepSeek as of this writing — see
+[Provider Keys](/guide/settings#provider-keys)) can be reached through the gateway; Cohere and
+Ollama are real, browsable catalog entries for providers whose *routing* is separate, real
+engineering, not yet built.
 
 Judges are a narrower question still: they run only on self-hosted models. Of the registry,
 only Ollama is self-hosted (`SELF_HOSTED_MODEL_PROVIDER_IDS`), and its Ollama Cloud models

@@ -48,6 +48,12 @@ Model request arrives at proxy (:4000)
      └────────┬───────┘
               │ pass
               ▼
+     ┌────────────────┐
+     │ 3. Plan daily  │ ◀── daily token and session limits
+     │  limits        │     of the workspace's plan
+     └────────┬───────┘
+              │ pass
+              ▼
           Final verdict
 ```
 
@@ -60,9 +66,9 @@ If **any gate** returns a deny/kill, evaluation short-circuits immediately — s
 The fastest check — a single Valkey key lookup.
 
 **How it works:**
-- The billing cron job sets `v2:budget:hard_block:{workspace_id}` = `"1"` when a workspace's daily spend exceeds `daily_spend_cap_usd`
-- The policy check reads this key — if present → `KILL` immediately
-- Also checks loop-level budget caps: if a loop run (`loop_run_id`) has status `KILLED` → deny
+- The billing cron job sets `v2:budget:hard_block:{workspace_id}` = `"1"`, expiring at midnight UTC, when a workspace's daily spend exceeds `daily_spend_cap_usd` and the workspace has the hard cap on (`enforcement_mode: "hard"` and `workspace_hard_cap_enabled: true` in its settings)
+- The policy check reads this key — if present → deny immediately
+- Also checks loop-level budget caps: if a loop run (`loop_run_id`) has any status other than `ACTIVE` → deny
 
 **Cost:** A single Valkey GET. No model call, no Postgres round trip.
 
@@ -74,9 +80,13 @@ if (budgetBlock) {
 }
 ```
 
-The proxy also does a **local budget check** before even calling the control plane — checking `v2:budget:hard_block:{workspace_id}` directly from its own Valkey connection. This means budget blocks take effect with zero network round-trips.
+The proxy also does a **local budget check** before even calling the control plane — checking `v2:budget:hard_block:{workspace_id}` directly from its own Valkey connection and refusing with `429 OVERAGE_HARD_CAP_EXCEEDED` while it is set. This means budget blocks take effect with zero network round-trips. When a control plane is configured but the key cannot be read, the proxy refuses with `503 BUDGET_UNVERIFIABLE`.
 
-→ Source: [metering.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/metering.rs) (proxy-side); `routes/evaluate.ts` in the control plane, which is not open source
+→ Source: [store/valkey.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/store/valkey.rs) (`hard_block`, proxy-side); `routes/evaluate.ts` in the control plane, which is not open source
+
+### Plan daily limits
+
+The policy check then compares the workspace's token count and session count for the UTC day with its plan's daily limits, and denies the request once either is exceeded. A request from a session already counted today is not refused by the session limit. If these counters cannot be read, the check allows the request.
 
 ---
 
@@ -267,7 +277,7 @@ The proxy has its own circuit breaker behavior, configured via `PolicyConfig`:
 ```rust
 // packages/proxy/src/config.rs
 pub struct PolicyConfig {
-    pub control_plane_url: String,
+    pub control_plane_url: Option<String>,
     pub fail_closed: bool,    // default: true
     pub timeout_ms: u64,      // default: 3,000ms
 }
@@ -320,7 +330,7 @@ All circuit breaker state lives in Valkey for fast access:
 
 | Key pattern | Purpose | TTL |
 |---|---|---|
-| `v2:budget:hard_block:{workspace_id}` | Budget cap exceeded flag | Set by billing cron |
+| `v2:budget:hard_block:{workspace_id}` | Budget cap exceeded flag, set by the billing cron | Until midnight UTC |
 | `v2:budget:{workspace_id}:monthly_limit` | Monthly spend limit | Persistent |
 | `v2:budget:{workspace_id}:daily_limit` | Daily spend limit | Persistent |
 | `v2:pcas:sso_group:{workspace_id}` | Cached SSO group policy, read by the gate | 60 s |
@@ -333,7 +343,7 @@ All circuit breaker state lives in Valkey for fast access:
 
 | Component / File | What it implements | Scope |
 |---|---|---|
-| [metering.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/metering.rs) | Proxy-side budget gate and virtual key validation | Open-Core / Proxy |
+| [store/valkey.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/store/valkey.rs) | Proxy-side budget gate (`hard_block`) and the other control-plane cache reads | Open-Core / Proxy |
 | [config.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/config.rs) | `PolicyConfig` — fail-closed, timeout settings | Open-Core / Proxy |
 | [detectors.rs](https://github.com/intutic/intutic/blob/main/packages/proxy/src/plugins/anomaly/detectors.rs) | `consecutive_repeat` loop detection and the rest of the detector registry | Open-Core / Proxy |
 | `POST /api/v1/hook-gate` (`hookEvents.ts`) | The hot-path policy check endpoint | Enterprise Control Plane |

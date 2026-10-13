@@ -48,7 +48,7 @@ sequenceDiagram
 
 ### 1. Submitting a Request
 Open **Policies › Emergency Overrides** (`/policies/overrides`; Owners, Admins and Engineering Managers) and use the **Request an override** card:
-1. Enter the **Scope (optional)** to bypass, or leave it empty for a global bypass. A scope is `wasm:<ruleId>` (one custom WASM rule) or `detector:<detectorId>` (one anomaly detector); nothing else can be named. SOPs and hook rules have no bypass, and DLP, budgets, `deny_tools` and the control plane's pre-check are never skipped by any token.
+1. Enter the **Scope (optional)** to bypass, or leave it empty for a global bypass. A scope is `wasm:<ruleId>` (one custom WASM rule) or `detector:<detectorId>` (one anomaly detector); nothing else can be named. SOPs and hook rules have no bypass, and DLP, the workspace hard-cap block and `deny_tools` are never skipped by any token. Only a global bypass skips the control plane's pre-check (key validity, the workspace budget cap, loop status and plan limits); a scoped token never does.
 2. Choose the **Duration**: 15 minutes, 30 minutes, 1 hour, 4 hours, 8 hours or 24 hours.
 3. Click **Request override**.
 4. Under **Copy your bypass token now**, click **Copy** next to the **Bypass token**. *It is shown only this once — the control plane does not display it again after this step, and it is not at rest anywhere: the request row and the cache key the approval writes hold only its SHA-256.* Treat it as a live credential for the whole bypass duration: anyone holding it can use it until it expires.

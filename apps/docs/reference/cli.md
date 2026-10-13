@@ -304,9 +304,11 @@ intutic status
 ```
 
 No options. Displays:
-- Current authentication state
-- Detected harnesses and their config paths
-- Sync state (last sync timestamp, any errors)
+- Current authentication state: email, workspace and control plane
+- The workspace root, dev mode and config version recorded by `intutic init`
+- The harnesses recorded by `intutic init`, by name
+- Sync state: last sync timestamp and the number of tracked files, and whether the sync daemon is running
+- Running agent processes, with a warning when a recorded harness is running but the sync daemon is not
 
 ---
 
@@ -426,6 +428,14 @@ The daemon runs in the foreground. Use `Ctrl+C` to stop.
 - An agent report per harness: the configured guardrails, role SOPs, skills found under
   `.agents/skills` (scan findings and file hashes, not file contents), declared MCP servers and the
   budget tier.
+- Every tenth poll (about every five minutes at the default interval), the machine's
+  [AI inventory](/guide/ai-inventory), under the machine's fingerprint and hostname: every harness
+  detected on it, connected or not, with its version and gate state; the MCP servers the harness
+  configs declare and whether each is wrapped; and the skill bundles under `.agents/skills`,
+  `.claude/skills` and `~/.claude/skills` (names, hashes and scan results). Names, home-relative
+  paths, hashes and timestamps only, never file contents.
+- At most once a minute per proxy session, a trajectory summary of the session's live traces: tool
+  call count and tool names, tokens, model switches, errors and repeated identical calls.
 - Session start and end, with the names of your local SOP folders, and the repository, Git branch
   and HEAD commit of the workspace root, reported again when they change. The repository is the
   `origin` remote reduced to host and path; any user name, password or token in it is removed
@@ -1622,7 +1632,7 @@ intutic doctor
 
 ---
 
-## `intutic policy replay <ruleId>` <Badge type="tip" text="Cloud" />
+## `intutic policy replay <ruleId>` <Badge type="warning" text="Biz Org+" />
 
 Run a WASM rule against this workspace's own recent traffic and report what it would have done, without touching enforcement. Needs the OWNER, ADMIN or EM role.
 
@@ -1757,7 +1767,7 @@ intutic rules build --rego <path> --entrypoint <package/rule> [options]
 | `--rego <path>` | Rego file or directory (required) | — |
 | `--entrypoint <package/rule>` | The rule to evaluate, e.g. `intutic/shell/deny` (required) | — |
 | `--risk-tier <tier>` | Default risk tier for the rule's decisions: `low`, `medium`, `high` or `critical` | _(none)_ |
-| `--out <path>` | Output `.wasm` path | `build/<entrypoint>.wasm` |
+| `--out <path>` | Output `.wasm` path | `build/<entrypoint>.wasm`, with each character other than a letter, digit, `_` or `-` as `_` (`build/intutic_shell_deny.wasm`) |
 
 **What it does:**
 1. Runs `opa build -t wasm -e <entrypoint>` — OPA must be on the `PATH`, or set `INTUTIC_OPA_BIN`; without it the command says how to install it
@@ -1787,13 +1797,13 @@ Prints each case's decision (`ALLOW`, `DENY`, `HOLD` or `REASK`), reason and ris
 
 ---
 
-## `intutic guardrails` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails` <Badge type="tip" text="Cloud" />
 
-The Policy Clause Ledger from the terminal: sources, documents, the review queue, the three decisions that move a cited guardrail, guardrails you author directly, and the file plane. A client of `/api/v1/policy-guardrails/*` and `/api/v1/connectors`; nothing here decides anything the server would not, and the acting identity is never a flag — the server records the authenticated member. Not `intutic policy` (the WASM rule loop) and not `intutic sops` (your own SOP files). See [Policy Guardrails](/guide/policy-guardrails).
+The Policy Clause Ledger from the terminal: sources, documents, the review queue, the three decisions that move a cited guardrail, guardrails you author directly, and the file plane. A client of `/api/v1/policy-guardrails/*` and `/api/v1/connectors`; nothing here decides anything the server would not, and the acting identity is never a flag — the server records the authenticated member. Only `docs extract` needs a paid plan, because it is the one step that spends model budget. Not `intutic policy` (the WASM rule loop) and not `intutic sops` (your own SOP files). See [Policy Guardrails](/guide/policy-guardrails).
 
 ---
 
-## `intutic guardrails sources list` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails sources list` <Badge type="tip" text="Cloud" />
 
 List configured policy sources and their last sync.
 
@@ -1813,7 +1823,7 @@ Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs
 
 ---
 
-## `intutic guardrails sources add <provider>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails sources add <provider>` <Badge type="tip" text="Cloud" />
 
 Connect a policy source; the credential is read from `--token` or `--token-file`, never echoed.
 
@@ -1843,7 +1853,7 @@ Creates the connector encrypted at rest. Exactly one of `--token` / `--token-fil
 
 ---
 
-## `intutic guardrails sources sync <connectorId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails sources sync <connectorId>` <Badge type="tip" text="Cloud" />
 
 Pull the source now instead of waiting for the next cron pass.
 
@@ -1869,7 +1879,7 @@ Runs one sync: changed documents are re-split into passages, citations that no l
 
 ---
 
-## `intutic guardrails docs list` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails docs list` <Badge type="tip" text="Cloud" />
 
 List ingested policy documents.
 
@@ -1889,7 +1899,7 @@ One line per document: provider, title, passage, clause and guardrail counts, an
 
 ---
 
-## `intutic guardrails docs show <docId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails docs show <docId>` <Badge type="tip" text="Cloud" />
 
 Show a document, its passages and the clauses extracted from them.
 
@@ -1942,7 +1952,7 @@ One model call per chunk of passages, under the workspace's daily cap (exit 1 wi
 
 ---
 
-## `intutic guardrails search <token>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails search <token>` <Badge type="tip" text="Cloud" />
 
 Which passages and guardrails mention a tool or action token; with `--text`, which passages use these words.
 
@@ -1979,7 +1989,7 @@ intutic guardrails search --text "production deploy"
 
 ---
 
-## `intutic guardrails list` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails list` <Badge type="tip" text="Cloud" />
 
 List guardrails with their status and shadow evidence.
 
@@ -2004,7 +2014,7 @@ One line per guardrail: id, status, target, what it stands on (the cited quote, 
 
 ---
 
-## `intutic guardrails show <guardrailId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails show <guardrailId>` <Badge type="tip" text="Cloud" />
 
 Show a guardrail: cited passage, rendered artifact, validation checks, readiness and history.
 
@@ -2248,7 +2258,7 @@ SHADOW or ENFORCING → RETIRED. The rule leaves both rule endpoints and the SOP
 
 ---
 
-## `intutic guardrails reconfirm <guardrailId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails reconfirm <guardrailId>` <Badge type="tip" text="Cloud" />
 
 Confirm a guardrail whose cited passage changed upstream still holds.
 
@@ -2274,7 +2284,7 @@ Clears the stale flag only when the quote is still verbatim in a live passage of
 
 ---
 
-## `intutic guardrails replay <guardrailId>` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails replay <guardrailId>` <Badge type="tip" text="Cloud" />
 
 Run a guardrail over captured calls and report how many it would have fired on.
 
@@ -2300,7 +2310,7 @@ A preview before anything ships: a hook rule over the enforcement log's captured
 
 ---
 
-## `intutic guardrails conflicts` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails conflicts` <Badge type="tip" text="Cloud" />
 
 List guardrails that contradict each other, with both quotes.
 
@@ -2320,7 +2330,7 @@ Pure arithmetic over the live rules: a denied tool with a call ceiling, an order
 
 ---
 
-## `intutic guardrails impact` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails impact` <Badge type="tip" text="Cloud" />
 
 Show what a change to a document or a passage reaches: related passages, the clauses citing them, and their guardrails.
 
@@ -2353,7 +2363,7 @@ intutic guardrails impact --doc psd_abc123
 
 ---
 
-## `intutic guardrails duplicates` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails duplicates` <Badge type="tip" text="Cloud" />
 
 List overlapping passages, with their Jaccard arithmetic, and the same rule cited from more than one passage.
 
@@ -2385,7 +2395,7 @@ intutic guardrails duplicates --min-jaccard 0.85
 
 ---
 
-## `intutic guardrails pull` <Badge type="warning" text="Self-serve+" />
+## `intutic guardrails pull` <Badge type="tip" text="Cloud" />
 
 Write the SHADOW and ENFORCING front-matter guardrails to `.intutic/sops/guardrail-<id>.md`, for a proxy that reads SOPs from disk.
 
@@ -2913,7 +2923,7 @@ This is routing discovery: it tells a client which gateway to use. It does not p
 
 ---
 
-## `intutic org create` <Badge type="warning" text="Biz Org+" />
+## `intutic org create` <Badge type="tip" text="Cloud" />
 
 Create an org, with a default team and workspace, after proving you own its domain.
 
@@ -4328,7 +4338,7 @@ intutic enterprise install [options]
 | `--mdm-output-dir <dir>` | Directory the MDM manifests are written to (created if missing) | `./intutic-mdm` |
 | `--skip-ca` | Skip system-wide CA trust installation | — |
 | `--skip-hooks` | Skip the Cursor hooks installation | — |
-| `--dev` | Send the device report to the local control plane (`http://localhost:3001`) instead of to Intutic's hosted control plane (the default) | — |
+| `--dev` | Send the device report to the local control plane (`http://localhost:3001`) instead of the one chosen as in [Choosing a control plane](#control-plane-url) | — |
 | `--cli-binary-path <path>` | Absolute path of the `intutic` binary on the *target* machines, written into the firewall manifests | `/usr/local/bin/intutic` |
 
 **What it does:**
@@ -4553,6 +4563,7 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 | `INTUTIC_WASM_DIR` | `intutic policy install`, `intutic policy list-local`, the proxy | Directory for local WASM rules. Default `~/.intutic/wasm`; a leading `~/` is expanded. Set it the same way for the CLI and the proxy. |
 | `INTUTIC_FC_KERNEL` | `intutic exec --sandbox firecracker` | Path to the guest kernel image. Required; no default. |
 | `INTUTIC_FC_ROOTFS` | `intutic exec --sandbox firecracker` | Path to the guest root filesystem image containing your agent. Required; no default. |
+| `INTUTIC_FC_GUEST_KEY` | `intutic exec --sandbox firecracker` | Path to the SSH private key for the guest, which needs an sshd-enabled root filesystem. The agent runs in the guest over SSH; without this key the microVM boots but the agent is not run. No default. |
 | `INTUTIC_FC_TAP` | `intutic exec --sandbox firecracker` | Host tap device name. Default `tap-intutic`. |
 | `INTUTIC_FC_GUEST_IP` | `intutic exec --sandbox firecracker` | Guest IP on the tap link. Default `172.16.0.2`. |
 | `INTUTIC_FC_HOST_IP` | `intutic exec --sandbox firecracker` | Host IP on the tap link; the guest reaches the proxy here. Default `172.16.0.1`. |

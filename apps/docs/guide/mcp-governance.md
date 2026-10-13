@@ -29,8 +29,8 @@ the controls built on top of the MCP proxy-wrapping mechanism described in
   to the approval queue.
 
 The proxy and the checks it makes on its own run in open core, with no
-account: TOFU pinning, prompt-injection scanning, the remote-server bridge and
-the gate backstop. The registry, the allowlists, approval holds, the calling
+account: TOFU pinning, prompt-injection scanning and the remote-server bridge.
+The registry, the allowlists, the gate backstop that enforces them, approval holds, the calling
 member, call budgets and tool-change risk scoring come from a connected
 workspace's control plane, on every plan; their sections are badged
 <Badge type="tip" text="Cloud" />.
@@ -160,15 +160,19 @@ this page apply to it.
 ## The registry <Badge type="tip" text="Cloud" /> {#the-registry}
 
 **Policies › MCP Servers** lists every MCP server the workspace's proxies
-have seen. A server gets there two ways:
+have seen. A server gets there four ways:
 
 - **The proxy reports it.** Each proxy reports the server it fronts (its
   `--server-name`) when it starts, and again with its tools — names,
   descriptions and input schemas, as the server declared them — whenever a
   `tools/list` response shows a different set
   (`POST /api/v1/mcp/servers/observe`).
-- **The MCP daemon reports it.** Its heartbeat carries every server it finds
-  in the harness configs on the machine (`POST /api/v1/mcp-daemon/report`).
+- **The MCP daemon reports it.** Its heartbeat carries the servers in Claude
+  Code's, Claude Desktop's and Cursor's global config on the machine
+  (`POST /api/v1/mcp-daemon/report`).
+- **A hook gate refuses it.** A server a gate refuses as unapproved is queued.
+- **The sync daemon cannot wrap it.** A server the sync daemon cannot put
+  behind the proxy is reported, with the reason.
 
 The first sighting creates the server as **awaiting decision** (a candidate)
 and sends the `mcp.server.candidate` notification, which a
@@ -228,7 +232,9 @@ before refetching.
 The registry and the [allowlist](#the-allowlist-mcpallowedservers) both
 apply: a call has to pass each. The registry knows a server by its
 `--server-name`; a proxy started without one fronts a server called
-`unknown`, which a `deny` workspace refuses.
+`unknown`, which a `deny` workspace refuses. Such a proxy — like one with no
+API key — does not report to the registry, so the server never appears in
+the approval queue.
 
 ### When the registry has not loaded {#when-the-registry-has-not-loaded}
 
@@ -236,7 +242,8 @@ A proxy keeps the last registry it loaded for as long as it runs, so a
 control plane that goes away later changes nothing. The open question is a proxy that has never loaded one: it started
 while the control plane was unreachable, or the MCP daemon has only its local
 snapshot so far, which carries no registry. The first tool call waits for the
-proxy's first policy fetch (at most five seconds); after that the proxy asks
+proxy's first policy fetch (at most five seconds; about seven in `daemon`
+mode, which asks the daemon first); after that the proxy asks
 again at most every five seconds while it still has no registry. Until then:
 
 - **Fail open**: the registry is not applied — the call goes on to the
@@ -250,7 +257,9 @@ and the local `INTUTIC_MCP_FAIL_OPEN` (`false` for fail closed) before that or
 for a workspace that never chose. The same setting governs every other check
 that cannot complete, such as a failed DLP scan or an unreadable TOFU pin, but
 not a [custom rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict),
-which always refuses the call.
+which always refuses the call, nor an approval hold, which stays held; an error
+in the injection scanner or an anomaly detector skips that check whatever the
+setting.
 
 ## The allowlist: `mcpAllowedServers` <Badge type="tip" text="Cloud" /> {#the-allowlist-mcpallowedservers}
 
@@ -395,10 +404,15 @@ route's role check and change history apply:
 }
 ```
 
-A budget's `id` (letters, digits, `-` and `_`, unique in the workspace) names
-it in refusals and alerts, and keeps its count when you change its limit.
-Budgets reach every proxy with the rest of its policy — `mcpBudgets` on
-`GET /api/v1/sop/rules` and `GET /api/v1/policy/resolve` — within a minute.
+For `--file`, the file holds only the inner object
+(`{ "warnAtPct": 80, "budgets": [...] }`).
+
+A budget's `id` (letters, digits, `-` and `_`, at most 40 characters, unique
+in the workspace) names it in refusals and alerts, and keeps its count when
+you change its limit. Budgets reach every proxy with the rest of its policy —
+`mcpBudgets` on `GET /api/v1/sop/rules` and `GET /api/v1/policy/resolve` —
+within a minute (up to `MCP_DAEMON_POLICY_TTL_MS` for proxies in `daemon`
+mode).
 
 **How a call is counted.** After every other check has passed — the registry,
 the allowlists, DLP, policy rules, injection, anomaly and WASM checks — the
@@ -425,7 +439,7 @@ MCP call budget "github-hour" is used up (calls to github: 600 per hour):
 ```
 
 Each refusal is a `tool_blocked` event, like any refused call: it is in the
-local event file and, when SIEM export of gate decisions is on, in
+local event file (in `daemon` mode, only when the daemon does not answer) and, when SIEM export of gate decisions is on, in
 `gate_decisions`. Incidents are the exception. A used-up budget files **one**
 incident per period (per member, for a per-member budget), from its first
 refusal; each later refusal in the period adds one to the incident's count of
@@ -464,9 +478,10 @@ So a budget needs a Valkey on every machine whose proxies it should limit:
 Ported from `packages/proxy/src/tool_pin.rs`'s per-request tool-array
 pinning, extended to one fingerprint per `{workspace, server}` pair (each
 governance proxy process fronts exactly one real server). On the first
-`tools/list` response a workspace sees from a server, the proxy computes a
-SHA-256 fingerprint over the canonical JSON of every tool's `name`,
-`description`, and `inputSchema` — sorted so a server reordering its own
+`tools/list` response a proxy on this machine sees from a server for a
+workspace, the proxy computes a SHA-256 fingerprint over the canonical JSON of
+the `name`, `description`, and `inputSchema` of every tool it forwards — after
+allowlist filtering, disabled tools and description overrides — sorted so a server reordering its own
 list never reads as a change — and stores it under
 `~/.intutic/mcp-pins/<workspace>__<server>.json`. Every later `tools/list`
 response is compared against that stored fingerprint.
@@ -540,7 +555,7 @@ with the reasons and the tools that changed. What else happens is the **High-ris
 | **Return the server to the approval queue** (`hold`) | The server goes back to awaiting decision, marked **Held: risky tool change**, and every proxy refuses calls to it — under either default policy — until an owner or admin approves, blocks or resets it. A blocked server stays blocked. |
 
 A held server reaches the proxies as `heldServers` in `mcpRegistry`, within a
-minute. Scoring happens in the control plane when a proxy reports, so it
+minute (up to `MCP_DAEMON_POLICY_TTL_MS` in `daemon` mode). Scoring happens in the control plane when a proxy reports, so it
 needs the control plane reachable; the local TOFU pin keeps detecting
 changes offline.
 
@@ -836,12 +851,13 @@ apply to that gate's unit of evaluation at all.
 | Claude Code | ✅ yes | Dedicated `mcp__.*` `PreToolUse` matcher (M3). Claude Code's own MCP tool-naming convention IS `mcp__<server>__<tool>`. |
 | Cursor | ✅ yes | M3 fix: `beforeMCPExecution`'s `tool_name` (bare tool name) and top-level `command`/`url` (server identifier) are now composed into `mcp__<server>__<tool>` — confirmed against Cursor's own hooks documentation and a live payload example. |
 | Windsurf | ✅ yes | Confirmed 2026-08-18 (M3's original composition fix targeted Cursor's shape by analogy and was wrong): Cascade's real hook system registers `pre_run_command`/`pre_write_code`/`pre_mcp_tool_use`, and `pre_mcp_tool_use`'s `tool_info.mcp_server_name`/`tool_info.mcp_tool_name` are now composed into `mcp__<server>__<tool>` — confirmed against docs.devin.ai/desktop/cascade/hooks (current authoritative source) and covered by `windsurfHooks.test.ts` against the real payload shape. |
-| Cline | ❌ no (unconfirmed dispatch) | `use_mcp_tool` envelope normalization added to the shared gate evaluator (fires if the payload arrives), but no `use_mcp_tool`/`access_mcp_resource` `PreToolUse` matcher was added — whether Cline's hook mechanism actually dispatches for these tool names could not be confirmed during M3. |
-| Codex CLI, Continue, GitHub Copilot | ⚠️ reachable | Already `.*` catch-all matchers; each harness's own MCP tool-naming convention was not independently verified during M3. |
+| Cline | ⚠️ reachable | The `.clinerules/hooks/PreToolUse` file hook has no matcher and runs for every tool call, `use_mcp_tool` included; the shared gate composes `use_mcp_tool` {server_name, tool_name} into `mcp__<server>__<tool>` for the allowlist. The SDK's MCP tool naming is not verified. |
+| Codex CLI, GitHub Copilot | ⚠️ reachable | Already `.*` catch-all matchers; each harness's own MCP tool-naming convention was not independently verified during M3. |
 | Muse Code | ⚠️ reachable | Already a `.*` catch-all matcher across both `PreToolUse` and `PermissionRequest`. The `muse` binary could not be installed to confirm its own MCP tool-naming convention, or that its `mcp_servers` `streamable_http` entry shape matches the `url`/`headers` convention this repo's wrapper assumes. |
-| Goose, OpenHands, Hermes, Gemini CLI (Antigravity), Pi | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified during M3. |
+| Goose, OpenHands, Hermes, Gemini CLI (Antigravity) | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified during M3. |
 | Google Antigravity | ⚠️ reachable | Its `PreToolUse` registration uses matcher `*`, so the gate runs for every tool call; Antigravity's own MCP tool-naming convention is not documented and was not verified. |
-| Openclaw | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention unconfirmed. |
+| Pi | ✅ yes | Pi registers each MCP tool as `mcp__<server>__<tool>` and runs its `tool_call` handlers for every tool. |
+| Openclaw | ✅ yes | OpenClaw names MCP tools `<server>__<tool>`; the plugin composes `mcp__<server>__<tool>` for the allowlist. |
 | Grok Build | ⚠️ reachable | No matcher on its `PreToolUse` registration — runs for every tool call; tool-naming convention not independently verified (not installable in the environment this integration was built in). |
 | OpenCode | ✅ yes | The plugin hook fires for every tool id, MCP tools included (confirmed from `session/tools.ts`). OpenCode 1.x names MCP tools `sanitize(server)_sanitize(tool)` (its `mcp/catalog.ts`, read from source); the plugin composes that into `mcp__<server>__<tool>` against the server names in the OpenCode config files, longest name first, so the allowlist applies. OpenCode 2.x MCP ids are not verified. |
 | dsh | ⚠️ reachable | `tools/pre-execute` fires unconditionally for every tool call (confirmed from `@deepseek-ai/dsh-tools`'s shipped types — it is the registry's own dispatch point, not an opt-in matcher). dsh's own MCP tool-naming convention was not independently verified — MCP composition itself was out of scope for this phase, see the note above. |
@@ -849,6 +865,7 @@ apply to that gate's unit of evaluation at all.
 | Open WebUI | ❌ n/a | This gate evaluates PROMPT TEXT, not a tool call — no tool name of any shape reaches it. |
 | LangGraph | ❌ n/a | No generated gate file — the SDK-side `intutic_clawde.gate` is out of scope for this phase's per-harness matcher work. |
 | Aider | ❌ n/a | No `PreToolUse` hook mechanism exists for this harness at all (see `NO_GATE` in `gateRegistry.ts`). |
+| Continue | ❌ n/a | No tool-call gate: its CLI loads `PreToolUse` hooks but never fires them, and the IDE extension has no hook system (see `NO_GATE` in `gateRegistry.ts`). |
 | Xirp | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a Xirp-managed session is whatever the WRAPPED harness (Claude Code, Codex, …) sends, and is covered by that harness's own row above when that harness's hook is registered at user level, which applies in every `git worktree`. Project-level gate files are written only into the checkout `intutic connect` ran in, so a hook registered only at project level is absent from the worktree a Xirp session runs in — see [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage). |
 | Agentic Orchestrator | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a session is whatever the WRAPPED backend (Claude Code, Codex, or OpenCode) sends. Claude Code/Codex calls are covered by that backend's own row above on the same terms as Xirp — through user-level hooks, which reach its per-feature worktrees, and not through project-level files, which do not; OpenCode calls are covered by the OpenCode row above (the plugin fires for MCP tools and composes their ids for the allowlist). |
 
@@ -900,7 +917,7 @@ Settings are read from the environment first, then from
 | `INTUTIC_MCP_SESSION_SCOPE` | derived | Sets the shared session scope explicitly (see [the MCP proxy reference](/integrations/mcp-proxy#anomaly-detection-session-scope)). Environment only. |
 | `INTUTIC_VALKEY_URL` / `VALKEY_URL` | none | The Valkey sibling proxies share their anomaly window and their [call budget](#call-budgets) counters through. Without it, a call a budget covers follows the fail setting. |
 | `INTUTIC_REMOTE_HEADERS` | none | A JSON object of headers for `--remote-url`, such as `Authorization`. Environment only, never a flag, so it stays out of `ps`. |
-| `INTUTIC_EVENTS_FILE` | `~/.intutic/events/hook-events.jsonl` | The local file every event is also appended to. |
+| `INTUTIC_EVENTS_FILE` | `~/.intutic/events/hook-events.jsonl` | The local file every event is also appended to (in `daemon` mode, only when the daemon does not answer). |
 | `INTUTIC_WASM_LOCAL_DIR` | `~/.intutic/wasm` | Where the proxy loads local custom WASM rules from. Read from runtime.env; `INTUTIC_WASM_DIR` in the environment takes precedence. |
 | `INTUTIC_DISABLE_REGO_RULES` | unset | `1` refuses [Rego rules](/guide/rego-policies) at load; native WASM rules still run. |
 

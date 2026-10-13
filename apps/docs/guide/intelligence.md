@@ -17,7 +17,7 @@ The Intelligence Engine automatically flags inefficient token spend. The pattern
 One detector ships today.
 
 - **Oversized Prompt** *(heuristic, confidence 0.6)* — Traces whose raw input exceeds
-  three times the workspace median. The excess over the median is attributed as waste.
+  three times the workspace median. The excess over that threshold is attributed as waste.
   A legitimately large task looks identical, which is why the confidence is moderate and
   why the panel labels this **heuristic** rather than **measured**.
 
@@ -50,10 +50,10 @@ SkillOpt parses agent trajectory failures and config files (like `.cursor/rules/
 
 ### How It Works
 
-1. **Analysis** — SkillOpt evaluates compliance logs and config drift. This runs on a nightly schedule for every workspace; a **Regenerate suggestions** button in **SkillOpt Suggestions**, on the Intelligence page's **Version History** tab, triggers the same pipeline on demand, for when you don't want to wait for the next scheduled sweep. The scheduled run remains the authoritative, unattended path — the button is a manual, on-demand trigger only.
+1. **Analysis** — SkillOpt evaluates compliance logs and config drift. This runs for every workspace on the control plane's scheduled lifecycle sweep (hourly by default); a **Regenerate suggestions** button in **SkillOpt Suggestions**, on the Intelligence page's **Version History** tab, triggers the same pipeline on demand, for when you don't want to wait for the next scheduled sweep. The scheduled run remains the authoritative, unattended path — the button is a manual, on-demand trigger only.
 2. **Generation** — An LLM call generates structural changes (e.g., adding rules to block specific commands or auto-inject system contexts). This step is generation, not evaluation — nothing here judges whether the result is safe.
 3. **Safety Gate** — Two deterministic checks run before a recommendation is displayed, not an LLM judge: bounds checking (operation count, edit size, no wildcard deletes, no sectionless full-file replaces, and per-file-type syntax validation for JSON/YAML/Markdown), and a scan of the edit against active workspace SOPs for conflicting security language (e.g. a SOP's "must not"/"forbidden" clauses).
-4. **Auto-Apply** — If enabled, recommendations with confidence scores above `0.85` are automatically queued for the sync daemon to apply (`status: 'apply_unconfirmed'`). The suggestion only reaches `applied` once the daemon acks back that the edit actually landed on disk; a queued edit the daemon fails to write (e.g. a fuzzy-match miss) ends up `apply_failed` instead.
+4. **Auto-Apply** — If enabled, recommendations with a confidence score of `0.85` or higher are automatically queued for the sync daemon to apply (`status: 'apply_unconfirmed'`). The suggestion reaches `applied` once the daemon acks back that the edit actually landed on disk; a queued edit the daemon fails to write (e.g. a fuzzy-match miss) ends up `apply_failed` instead. One left unacknowledged for 24 hours (a daemon too old to send the ack) is marked `applied` anyway, with its measurement recorded as unconfirmed.
 5. **Measurement** — Every applied suggestion carries the dollar estimate that
    justified it (`estimatedSavingsUsd`, snapshotted from the originating
    recommendation) alongside an actual measured outcome, so the estimate is
@@ -70,8 +70,8 @@ SkillOpt parses agent trajectory failures and config files (like `.cursor/rules/
    recomputed aggregate that gets overwritten on every cycle and would no
    longer hold the original numbers by the time 7 days had passed.
 
-   The after-window must carry at least as much oversized-prompt traffic as
-   originally justified the recommendation, or the suggestion is marked
+   The after-window must carry at least the five oversized-prompt traces a
+   recommendation needs in the first place, or the suggestion is marked
    **insufficient traffic to measure** rather than scored — a quiet workspace
    is not the same thing as a fixed one, and no delta is ever fabricated to
    fill the gap. Otherwise it is marked **measured**, with the actual

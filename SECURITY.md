@@ -10,8 +10,8 @@ We provide security updates and patches for the following versions of Intutic pa
 
 | Version | Supported | Description / Patch SLA |
 | :--- | :---: | :--- |
-| `1.6.x` (Latest) | :white_check_mark: | **Active Support** — Current stable production release line. Critical security patches within 24–48 hours. |
-| `< 1.6.0` | :x: | **Unsupported / Pre-release** — Legacy or pre-release iterations. Users should upgrade to `1.6.x`. |
+| `2.5.x` (Latest) | :white_check_mark: | **Active Support** — Current stable production release line. Critical security patches within 24–48 hours. |
+| `< 2.5.0` | :x: | **Unsupported / Pre-release** — Legacy or pre-release iterations. Users should upgrade to `2.5.x`. |
 
 ---
 
@@ -39,7 +39,7 @@ When you submit a vulnerability report:
 * **Initial Acknowledgment:** Within **24 hours** of receipt.
 * **Triage & Classification:** Within **48 hours**, confirming validity and severity level (CVSS v3).
 * **Patch Deployment:** 
-  * **Critical / High:** Patched within **72 hours** across NPM packages, GKE deployments, and release binaries.
+  * **Critical / High:** Patched within **72 hours** across NPM packages, hosted deployments, and release binaries.
   * **Medium / Low:** Addressed in the next planned minor/patch release cycle.
 * **Public Disclosure:** Once a fix is verified and deployed, we coordinate public advisory release and attribution with the reporter.
 

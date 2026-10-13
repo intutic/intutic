@@ -7,7 +7,7 @@ Integrate Intutic governance with [Aider](https://aider.chat) — the AI pair pr
 Intutic merges three things into your `.aider.conf.yml`, keeping every other setting:
 
 - **Proxy routing** — `openai-api-base` set to the proxy for OpenAI models, and an `ANTHROPIC_BASE_URL` entry in `set-env` for Anthropic models (Aider has no Anthropic base-URL option).
-- **Rules** — your SOPs written to `.intutic/aider-sops.md` and listed under `read` by absolute path, Aider's way of loading a conventions file into every session. Aider resolves `read` entries against the directory it runs in, so the absolute path lets it find the file from any subdirectory. Aider has no instructions option of its own; it loads only the files listed under `read`.
+- **Rules** — your SOPs written to `.intutic/aider-sops.md` (when the workspace has any) and listed under `read` by absolute path, Aider's way of loading a conventions file into every session. Aider resolves `read` entries against the directory it runs in, so the absolute path lets it find the file from any subdirectory. Aider has no instructions option of its own; it loads only the files listed under `read`.
 - **Hardening** — `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint` are removed, because Aider runs them without asking.
 
 Aider has no hook that runs before it edits a file or runs a command, so there is no blocking gate for Aider: its traffic is governed at the proxy.

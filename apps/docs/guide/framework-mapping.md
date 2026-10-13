@@ -38,7 +38,7 @@ For a workspace, each mapped control also has a **state**, read from the newest 
 | State | Meaning |
 |---|---|
 | Evidenced | Every probe behind the control passes |
-| Warning | A probe reports a warning, and none fails |
+| Warning | A probe reports a warning, and every other probe behind the control passes or warns |
 | Failing | A probe behind the control fails |
 | Not evidenced | A probe behind the control has not run, could not run, or reports `not_enforced` |
 | Records to review | No probe scores the control; its evidence is records and controls to review |

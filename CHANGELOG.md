@@ -71,7 +71,7 @@ again with the email.
   Trace Integrity for the fix.
 - **`fetchRegister` / `parseRegister`** in `@intutic/gate` (with the
   `SopRegister` type) and `fetch_register` / `parse_register` in
-  `intutic_clawde.gate` read the SOP register with the workspace's
+  `intutic_clawde.gate.soprules` read the SOP register with the workspace's
   intervention mode beside the rules (`GET /api/v1/sop/rules`).
 - **`TaskSearchFilters`** and `TaskProviderCredentials.accountEmail` in
   `@intutic/shared-types`.

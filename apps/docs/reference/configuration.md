@@ -121,10 +121,10 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `CONTROL_PLANE_URL` | unset | Set when `intutic start` runs, the proxy it starts is managed (see above) |
-| `INTUTIC_DEV` | unset | `1`: talk to a local control plane at `http://localhost:3001` instead of the hosted control plane |
-| `PORT` | `4000` | The port `intutic start` and `intutic connect` run the proxy on |
+| `INTUTIC_CONTROL_PLANE_URL` | the URL `intutic login` saved, else the hosted control plane | The control plane every command talks to. A `--control-plane-url` or `--dev` flag takes precedence |
+| `INTUTIC_DEV` | unset | `1`: talk to a local control plane at `http://localhost:3001` instead of the saved or hosted one. `INTUTIC_CONTROL_PLANE_URL` takes precedence |
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Passed to the proxy the CLI starts |
-| `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at |
+| `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at. Its port is the one `intutic connect` and `intutic start` (without `--port`) run the proxy on, and the one `intutic budget` and `intutic doctor` probe. `PORT` is not read for this |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | Where the CLI writes the policy snapshot the hook gate reads |
 | `INTUTIC_APPROVED_BYPASSES` | `~/.intutic/hooks/approved-bypasses.jsonl` | The approved-bypass list the hook gates read, which `intutic chaos run` copies into each repetition with the snapshot |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | Where `intutic policy install` puts WASM rules |
@@ -152,7 +152,7 @@ Read by `@intutic/gate`. The MCP daemon and the Python `intutic-clawde` gate rea
 | `INTUTIC_WORKSPACE_ID` | from `intutic login` | The workspace |
 | `INTUTIC_CONTROL_PLANE_URL` | the hosted control plane | The control plane |
 | `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy the Vercel AI SDK helper points models at |
-| `INTUTIC_SESSION_ID` | generated | The session id reported with each verdict |
+| `INTUTIC_SESSION_ID` | none | The session id reported with each verdict. `GateClient.fromEnv()` throws without it or a `sessionId`; the OpenAI Agents and dsh installers generate one |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | The local policy snapshot |
 | `INTUTIC_GUARD_DISABLE` | unset | `1` turns the local snapshot guard off |
 
@@ -260,25 +260,28 @@ Each session carries a budget tier label: `JUNIOR` (the default), `SENIOR`, `STA
 
 ## Execution Modes
 
+Each session also carries an execution-mode label, shown with the session. It records how the session was opened and changes no enforcement.
+
 | Mode | Description |
 |------|-------------|
-| `STANDARD` | Normal operation — enforcement actions applied |
-| `PLAN_ONLY` | Generate execution plan without running |
-| `SHADOW` | Run enforcement in shadow mode (log only, don't block) |
-| `AUTONOMOUS` | Fully autonomous — minimal human oversight |
+| `STANDARD` | The default |
+| `SANDBOX` | Opened by `intutic exec --sandbox` |
+| `HOOK_NATIVE` | A harness's own session, recorded from its hook events |
+| `PROXY` | A session the proxy recorded for requests that named none |
 
 ## ID Conventions
 
-IDs are a short prefix, an underscore and 21 random characters (`ws_V1StGXR8_Z5jdHi6B-myT`). The common prefixes:
+IDs the control plane mints are a short prefix, an underscore and 21 random characters (`ws_V1StGXR8_Z5jdHi6B-myT`). The common prefixes:
 
 | Prefix | Entity |
 |--------|--------|
 | `ws_` | Workspace |
 | `mbr_` | Member |
-| `tr_` | Trace |
 | `sp_` | SOP |
-| `vk_` | Virtual API key |
-| `ses_` | Session |
+| `key_` | API key record |
+| `ses_` | Session, when the control plane opens it; a harness's own session id is kept as sent |
+
+Trace ids are UUIDs the proxy assigns. An API key itself starts `vk_` and is not in this format.
 
 ---
 

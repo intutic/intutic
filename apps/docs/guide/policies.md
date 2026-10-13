@@ -264,7 +264,7 @@ hot-reload it within roughly 30 seconds, no restart needed.
 
 | Mode | Behavior |
 |---|---|
-| **Off** (default) | The proxy mediates AI traffic but denies nothing. No egress control — each proxy stays on its own local config. |
+| **Off** (default) | The proxy mediates AI traffic but denies nothing. Until the workspace picks a mode, each proxy stays on its own local config; once **Off** is chosen, it turns egress control off on every proxy, overriding a local `monitor` or `enforce`. |
 | **Monitor** | Nothing is blocked, but every connection that would be denied under Enforce is logged and counted. Use it to measure blast radius before committing. |
 | **Enforce** | Destinations not on the allow list are denied (403, no tunnel). AI providers are always intercepted, never blocked. |
 
@@ -325,7 +325,7 @@ this does and does not cover.
 When you run `intutic connect`, the sync daemon keeps your workspace aligned with the control plane:
 
 1. **Detects** all active coding harnesses in your workspace
-2. **Formats** SOPs into harness-native structures (Markdown for Claude Code, JSON for Antigravity, YAML for Aider, etc.)
+2. **Formats** SOPs into each harness's own rules file (`.claude/rules/intutic-governance.md` for Claude Code, a section of `GEMINI.md` for Antigravity, `.intutic/aider-sops.md` listed under `read:` in `.aider.conf.yml` for Aider, etc.)
 3. **Writes** governance rules atomically, preventing configuration drift or corruption
 4. **Monitors** for manual edits and rewrites configurations based on your bypass enforcement tier
 
@@ -335,7 +335,7 @@ See [How It Works](/guide/how-it-works) for the full sync daemon architecture.
 
 ## Compliance Scope
 
-**Policies › Compliance Scope** (`/policies/scope`; Owners, Admins and Engineering Managers) shows how much of each connected agent environment Intutic enforces, and the evidence behind it. It refreshes every 30 seconds.
+**Policies › Compliance Scope** (`/policies/scope`; Owners, Admins and Engineering Managers) shows how much of each connected agent environment Intutic enforces, and the evidence behind it. It refreshes every 60 seconds.
 
 Each environment (a harness the sync daemon reported) gets an **enforcement tier** from the governance layers found active in its config:
 

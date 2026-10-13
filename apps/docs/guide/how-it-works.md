@@ -28,7 +28,7 @@ Intutic is a **transparent governance layer** that sits between your AI agents a
 
 ## The Proxy Gateway
 
-Every LLM request from your agents flows through the Intutic proxy. The proxy is transparent — agents don't need to change their code. The CLI's `init` command configures each harness to route through the proxy by setting the appropriate base URL or config variable.
+Every LLM request from your agents flows through the Intutic proxy. The proxy is transparent — agents don't need to change their code. `intutic connect` configures each harness to route through the proxy by setting the appropriate base URL or config variable.
 
 **How routing works per harness:**
 
@@ -36,18 +36,18 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 |---------|-------------|-----------|
 | Cursor | `.cursor/hooks.json`, `~/.cursor/hooks.json` | Project and user hooks; see [Cursor](/integrations/cursor) |
 | Claude Code | `.claude/settings.json` | PreToolUse hook and deny rules |
-| Windsurf | Windsurf's user `settings.json` | Cascade hooks + HTTP proxy setting |
+| Windsurf | `~/.codeium/windsurf/hooks.json`, `.windsurf/hooks.json`, Windsurf's user `settings.json` | Cascade hooks + HTTP proxy setting |
 | Aider | `.aider.conf.yml` | `openai-api-base`, and `ANTHROPIC_BASE_URL` under `set-env` |
 | Antigravity | `~/.gemini/settings.json`, `~/.gemini/config/hooks.json` | BeforeTool / PreToolUse hooks |
-| Codex | `~/.codex/config.toml`, `.env.intutic` | `openai_base_url`, and `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` for shells that source the env file |
+| Codex | `~/.codex/config.toml`, `~/.codex/hooks.json`, `.env.intutic` | `openai_base_url`, a PreToolUse hook, and `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` for shells that source the env file |
 | OpenHands | `config.toml` | `[llm] base_url` merged in, plus a PreToolUse hook in `.openhands/hooks.json` |
 | n8n | `~/.intutic/hooks/n8n-governance-hook.js` | External hook the n8n server loads through `EXTERNAL_HOOK_FILES` |
 | Cline | `.clinerules/hooks/PreToolUse` | PreToolUse hook; the base URL is set by hand in Cline's settings panel |
 | Roo Code | none | Base URL set by hand in Roo Code's settings panel; no hook system |
 | Continue | `~/.continue/config.yaml` | `apiBase` on each OpenAI and Anthropic model (no gate: `cn` never fires its PreToolUse hooks) |
-| Claude Desktop | `claude_desktop_config.json` | Dev override + MCP wrapping |
-| Goose | `.agents/plugins/intutic-governance/hooks/hooks.json` | JSON plugin hook structure |
-| Open WebUI | `.open-webui/intutic-governance-filter.py` | Python inlet() filter hook |
+| Claude Desktop | `claude_desktop_config.json` | MCP server wrapping; no proxy override (the file is drift-watched) |
+| Goose | `~/.agents/plugins/intutic-governance/hooks/hooks.json`, `~/.config/goose/config.yaml` | JSON plugin hook structure, plus the proxy URL |
+| Open WebUI | `~/.open-webui/intutic-governance-filter.py` | Python inlet() filter hook |
 | OpenClaw | `~/.openclaw/openclaw.json`, `~/.intutic/hooks/openclaw/intutic-governance.cjs` | `before_tool_call` plugin, listed in `plugins.load.paths` |
 | Hermes | `~/.hermes/config.yaml` | YAML configuration file |
 | Pi | `~/.pi/agent/extensions/intutic-governance.js`, `~/.pi/agent/models.json` | `tool_call` extension; `baseUrl` for the Anthropic and OpenAI providers |
@@ -56,23 +56,24 @@ Where the rule sets themselves go is a separate question; see [Where rule sets g
 
 ### Proxy Response Post-Processor
 
-The proxy gateway contains a dedicated Rust post-processing engine (`packages/proxy/src/postprocessor/` — `mod.rs`, `formatter.rs`, `notification_client.rs`). It acts as a consumer for workspace-level Valkey notification queues (`gov:notify:workspace:{workspaceId}`) and session-specific queues (`gov:notify:{sessionId}`).
+The proxy gateway contains a dedicated Rust post-processing engine (`packages/proxy/src/postprocessor/` — `mod.rs`, `formatter.rs`, `notification_client.rs`). It acts as a consumer for workspace-level Valkey notification queues (`gov:notify:workspace:{workspaceId}`), session-specific queues (`gov:notify:{sessionId}`) and, for a node in a multi-agent graph, its graph queue (`gov:notify:graph:{workspaceId}:{graphId}:{nodeId}`).
 
-When the proxy intercepts a streaming or block response from an LLM provider:
+When a streaming response from an LLM provider finishes (not on the OpenAI Responses API, where notifications stay queued):
 1. It queries Valkey to drain any pending policy or budget notifications queued for that session.
-2. It formats notifications using markdown or plaintext formatters.
-3. It appends the compiled notifications block directly into the response stream inside a `<!-- intutic-governance -->` tag.
+2. It formats up to five notifications, most severe first, using markdown or plaintext formatters.
+3. It appends the compiled notifications block directly into the response stream, between `<!-- intutic:governance -->` markers (markdown) or `--- Intutic Governance ---` lines (plaintext).
 4. The agent harness displays the injected feedback inline, warning developers immediately of budget overruns, compliance score drops, or recommended fixes.
 
 ## Enforcement Actions (PCAS)
 
-The **Policy Compliance and Action System** evaluates every request against your SOPs and applies one of four enforcement actions:
+The **Policy Compliance and Action System** evaluates every request against your SOPs and applies one of five enforcement actions:
 
 | Action | What happens | When it's used |
 |--------|--------------|----------------|
 | **BYPASS** | Request passes through unmodified | Compliant with all SOPs |
 | **ENHANCE** | Request is modified (prompt enrichment, model upgrade) | SOP suggests improvements |
 | **HIJACK** | Request is rerouted to a different model or modified substantially | Cost optimization, capability routing |
+| **REASK** | Request is refused with the reason, so the agent can correct course and retry; repeated trips escalate to KILL | Structural thresholds (repeats, cycles, depth, fan-out) |
 | **KILL** | Request is blocked entirely | Policy violation, budget breach, deterministic anomaly (loop, forbidden succession, credential sweep) |
 
 ## The Circuit Breaker
@@ -80,9 +81,10 @@ The **Policy Compliance and Action System** evaluates every request against your
 The circuit breaker is the runtime enforcement mechanism. It evaluates each request against:
 
 1. **SOP rules** — Does this request comply with active SOPs?
-2. **Budget limits** — Is the workspace within its daily spend cap?
-3. **Anomaly scores** — Has the ARE flagged this session?
-4. **Trust scores** — What's the trust level of this agent session?
+2. **Budget limits** — Is the workspace within its daily and monthly caps, and the key and its owner within their budgets?
+3. **Anomaly detectors** — Do the proxy's detectors (including findings promoted from the ARE) flag this request?
+
+Trust scores are kept per user and shown to administrators; they do not gate a request.
 
 If any check fails, the circuit breaker applies the appropriate enforcement action.
 
@@ -100,7 +102,7 @@ DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATE
 |-------|---------|
 | `DRAFT` | Initial authoring, not yet active |
 | `PENDING_REVIEW` | Submitted for team review |
-| `GENERATED` | Auto-generated from observed patterns |
+| `GENERATED` | Passed the Gödel score threshold on promotion from `PENDING_REVIEW` (auto-generated SOPs start as `DRAFT`) |
 | `HYPOTHESIZED` | Proposed rule being tested |
 | `REFINED` | Iteratively improved based on feedback |
 | `VALIDATED` | Active and enforced |
@@ -239,7 +241,7 @@ not route through it is not governed, and the [Active Network Probes](#active-ne
 below exist to *detect* exactly that. Two opt-in layers turn mediation into
 enforcement, so bypass is not possible rather than merely detected:
 
-- **`intutic enforce`** installs a host-level default-deny egress firewall
+- **`intutic enforce apply`** installs a host-level default-deny egress firewall
   (nftables/iptables/pf) that permits outbound only to the proxy, DNS, and
   operator-declared infrastructure. Every other connection is dropped, so the
   only path to the network is the governing proxy. The proxy itself can then run
@@ -263,6 +265,6 @@ Both are off by default, so an existing install is unchanged.
 
 To detect if a developer has bypassed the proxy gateway (when host enforcement
 is not enabled):
-1. The `sync-daemon` periodically fires background HTTP requests directly to standard provider endpoints (e.g. `https://api.anthropic.com/v1/messages`) bypassing localhost routing.
-2. If this direct connection succeeds, it indicates that the network is uncontained.
-3. The daemon instantly raises a `network_bypass` incident of `CRITICAL` severity, shown to administrators under **Findings › Incidents**.
+1. On every sync, the `sync-daemon` sends an HTTPS `HEAD` request directly to `https://api.anthropic.com/` and `https://api2.cursor.sh/`, bypassing localhost routing.
+2. If this direct connection succeeds with a certificate not issued by the Intutic CA, it indicates that the network is uncontained.
+3. The daemon records a `network_bypass` event, which the control plane files as a `CRITICAL` `DATA_EXFILTRATION` incident, shown to administrators under **Findings › Incidents**.

@@ -33,8 +33,9 @@ its ring:
 ## Connections between agents
 
 Directed edges show how agents relate — **spawns**, **handoff**, **verifies**,
-or **shares-graph** — derived from session parentage and shared graph IDs, or
-declared explicitly. This is what lets a rule reason about the whole graph
+or **shares_graph**. **spawns** edges are derived from session parentage; any
+relation can be declared explicitly in an agent report (`links` on
+`POST /api/v1/agents/report`). This is what lets a rule reason about the whole graph
 rather than one node's turn.
 
 ## The trust ring

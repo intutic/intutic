@@ -135,7 +135,7 @@ Package `dist/` (plus `node_modules` if you add runtime dependencies beyond Node
 | Variable | Required | Meaning |
 |---|---|---|
 | `INTUTIC_CONTROL_PLANE_URL` | Yes | Your Intutic control-plane base URL, e.g. `https://your-intutic-control-plane.example.com` |
-| `INTUTIC_API_KEY` | Yes | A workspace virtual key (`vk_...`) from Settings › Security › Virtual API Keys in your Intutic dashboard (or `POST /api/v1/keys`) |
+| `INTUTIC_API_KEY` | Yes | A workspace virtual key (`vk_...`) from Settings › Security › Virtual API Keys in your Intutic dashboard (or `POST /api/v1/keys`). The endpoint refuses a key whose member is a Viewer (403), which the Lambda treats as a control-plane failure |
 | `INTUTIC_FAIL_OPEN` | No (default `false`) | Set `"true"` to allow tool calls through when the control-plane check itself fails or answers `GOVERNANCE_UNAVAILABLE`, instead of denying. A 400 is denied either way |
 | `INTUTIC_TIMEOUT_MS` | No (default `3000`) | Control-plane call timeout |
 | `AGENTCORE_GATEWAY_ID` | No | Attached to requests for control-plane log correlation only — never affects the verdict |
@@ -174,5 +174,5 @@ Send a `tools/call` request through the gateway for a tool your workspace has a 
 | Gateway endpoint | `POST /api/v1/integrations/agentcore/gateway-check` |
 | Gateway auth | `Authorization: Bearer vk_...` (standard workspace virtual key — no special header scheme) |
 | Gateway request | `{ toolName: string, toolInput?: unknown, sessionId?: string, gatewayId?: string }` |
-| Gateway response | `{ allowed: boolean, reason?: string }` |
+| Gateway response | `{ allowed: boolean, reason?: string, code?: string, degraded?: boolean }` |
 | Interceptor Lambda source | `tools/agentcore-interceptor/src/handler.ts` |

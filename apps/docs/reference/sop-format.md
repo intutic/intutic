@@ -110,7 +110,7 @@ DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATE
 | `GENERATED` | Auto-generated from observed patterns. |
 | `HYPOTHESIZED` | Proposed rule being tested in shadow mode. |
 | `REFINED` | Iteratively improved based on feedback. |
-| `VALIDATED` | **Active and enforced.** Only validated SOPs are synced to harnesses. |
+| `VALIDATED` | **Active and enforced.** `HYPOTHESIZED` and `REFINED` SOPs are synced to harnesses too, as guidance no gate enforces. |
 | `INVALIDATED` | Retired or superseded. No longer enforced. |
 
 ### Transitioning states
@@ -139,7 +139,7 @@ This classification is recorded for audit trail and helps track policy drift ove
 
 ## Dependencies
 
-SOPs can declare dependencies on other SOPs. When a parent SOP is invalidated, **cascade invalidation** automatically invalidates all dependent SOPs.
+SOPs can declare dependencies on other SOPs. When a parent SOP is invalidated, **cascade invalidation** automatically sends every SOP that depends on it, up to five hops away, back to `PENDING_REVIEW` for re-review.
 
 ```json
 {
@@ -165,4 +165,4 @@ curl -H "Authorization: Bearer $TOKEN" \
   "https://your-control-plane.example/api/v1/sops/sop_abc123/health"
 ```
 
-Health metrics include enforcement hit rate, false positive rate, and compliance improvement over time.
+Health metrics include the last match and last edit, matches and activation rate over 30 days, average compliance, drift events, attributed cost, whether the SOP is stale, and its latest Gödel score.

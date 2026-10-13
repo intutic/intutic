@@ -66,7 +66,7 @@ app.post('/webhooks/anthropic', (req, res) => {
 })
 ```
 
-Or a live stream. `watch()` follows the session's event stream and reconnects when it drops — backoff from 500 ms doubling to 10 s, reset on any event — re-polling after every reconnect so a pause raised while the stream was down is still answered, and each `tool_use_id` is confirmed exactly once. A fatal 4xx (anything but 408 and 429) is rethrown rather than retried; the loop ends on a terminal event, on `signal` abort, or when `maxReconnects` (unbounded by default) is exhausted. `idleTimeoutMs` drops a silent stream and reopens it:
+Or a live stream. `watch()` follows the session's event stream and reconnects when it drops — backoff from 500 ms doubling to 10 s, reset on any event — re-polling after every reconnect so a pause raised while the stream was down is still answered, and each `tool_use_id` is confirmed exactly once. A fatal 4xx (anything but 408 and 429) is rethrown rather than retried; the loop ends on a terminal event or on `signal` abort, and throws once `maxReconnects` (unbounded by default) is exhausted. `idleTimeoutMs` drops a silent stream and reopens it:
 
 ```ts
 const ac = new AbortController()

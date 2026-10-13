@@ -45,9 +45,9 @@ docker compose -f docker-compose.gateway.yml up -d
 ```
 
 The images at `ghcr.io/intutic` are private, hence the login. A host that cannot reach
-`ghcr.io` loads them from the bundle instead (`docker load -i ../images.tar`); one that also
-cannot reach Docker Hub copies the `VALKEY_IMAGE` and `LITELLM_IMAGE` lines from
-`../images.env` into `.env`.
+`ghcr.io` loads them from the bundle instead (`docker load -i ../images.tar`) and copies the
+`LITELLM_IMAGE` line from `../images.env` into `.env` (LiteLLM's image is on `ghcr.io` too); one
+that also cannot reach Docker Hub copies the `VALKEY_IMAGE` line as well.
 
 Agents reach the gateway on the host's port `GATEWAY_PORT` (default `8080`), at `/v1`: for
 example `http://gateway.example.internal:8080/v1`. Put your own TLS-terminating proxy or load
@@ -234,12 +234,13 @@ Assign a gateway per-workspace (overriding the org default) or per-org (every wo
 it that hasn't set its own override):
 
 ```bash
-intutic gateway assign <gateway_id> --workspace <workspace_id>   # this workspace only
-intutic gateway assign <gateway_id> --org <org_id>                # org-wide default
-intutic gateway resolve --workspace <workspace_id>                 # which gateway actually applies, and why
+intutic gateway assign --gateway <gateway_id>                 # the workspace you're logged in to only
+intutic gateway assign --gateway <gateway_id> --org <org_id>  # org-wide default
+intutic gateway assign --clear [--org <org_id>]               # remove the override / org default
+intutic gateway resolve                                       # which gateway actually applies, and why
 ```
 
-`gateway resolve` reports `source: workspace | org | default` so you can tell whether a
+`gateway resolve` (`--json` gives `source: workspace | org | default`) tells you whether a
 workspace is riding its own override, its org's default, or the shared `gateway.intutic.ai`
 (no assignment at any level). This is *routing resolution* — it tells a client which gateway to
 point at — not traffic proxying: the client still connects directly to the resolved gateway's
@@ -267,7 +268,7 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
   - Judging happens once, at finalize time — **no mid-stream chunk grading** (the SaaS judge's
     `judge_chunk_scan!` path is skipped entirely when local judge is on).
   - **No personal-SOPs merge** — only the workspace's shared SOPs are graded against.
-  - **No incident persistence** — a `VIOLATION` verdict is annotated in the response; it is not
+  - **No incident persistence** — a `VIOLATION` or `AMBIGUOUS` verdict is annotated in the response; it is not
     written to `governance_incidents`, since that table lives in the control plane's Postgres,
     which a self-hosted gateway deliberately doesn't have a connection to.
   - SOP *text* is still fetched from the control plane (`sops::all_sops_for_workspace`) — only
@@ -283,8 +284,8 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
     [On-Prem Judge Setup](/external/on-prem-judge#typed-stage-optional).
 - **If your judge LLM is unreachable** — local or SaaS — the proxy reports
   this honestly rather than silently passing every check: a response is annotated `Intutic
-  LLM-as-a-Judge: verdict UNAVAILABLE — treat as unverified, not as clean`, instead of
-  defaulting to a clean verdict. A local judge never falls back to calling the SaaS judge on
+  LLM-as-a-Judge: verdict UNAVAILABLE`, with the reason and "Treat it as unverified, not as
+  clean.", instead of defaulting to a clean verdict. A local judge never falls back to calling the SaaS judge on
   its own failure.
 
 ## Related

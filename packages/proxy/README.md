@@ -24,7 +24,7 @@ request or response path:
 
 | Step | Where | Purpose |
 |------|-------|---------|
-| Budget Gate | `plugins/budget_gate.rs`, called from `proxy.rs` | Enforce per-ticket and per-team token budgets |
+| Budget Gate | `plugins/budget_gate.rs`, called from `proxy.rs` | Refuse a request that would pass this machine's daily spend cap (standalone); workspace, key and member budgets are checked beside it in `proxy.rs` |
 | DLP | `dlp::scan`, inline on the request path | Block or redact sensitive data (secrets, PII, credentials); findings reach `DlpEscalationDetector` |
 | Tool authorisation | `UnauthorizedToolDetector` and `plugins/response_gate.rs` | Refuse tools an SOP's `deny_tools` names, on the request and before a response's tool call reaches the client |
 | Response Cache | `plugins/semantic_cache.rs` | Replay the answer to an identical request (exact match, Valkey), or to a reworded plain-text question in the same context (semantic match, TurboVec) |
@@ -33,32 +33,33 @@ request or response path:
 ### Model Selection
 
 - **Thompson Sampling bandit**: selects a model per task cell from observed
-  **availability and latency**.
+  **availability, latency, cost and response integrity**.
 
-  Two corrections to what this said before. It claimed selection was based on
-  "historical cost, latency, and quality signals". `RewardSignals`
-  (`src/routing/reward.rs:32`) carries `upstream_ok`, `latency_ms`,
-  `token_anomaly`, `raw_cost_usd` and `actual_cost_usd` — and the cost pair does
-  not move the reward: `cheaper_routed_model_earns_no_bonus` asserts a cheaper
-  route earns nothing, deliberately. There is **no quality signal at all**: a
-  cheap model returning a confidently wrong answer, quickly, scores a perfect
-  1.0.
+  `RewardSignals` (`src/routing/reward.rs:32`) carries `upstream_ok`,
+  `latency_ms`, `token_anomaly`, `raw_cost_usd`, `actual_cost_usd` and
+  `response_integrity`. The cost term is two-sided: a cheaper route earns more
+  than an equal-cost one (`cheaper_routed_model_earns_a_bonus`), and a costlier
+  one less. `response_integrity` is the only signal about the answer itself: it
+  catches malformed, truncated and unusable responses, and a faulted response
+  loses more than any price advantage can return
+  (`quality_fault_outweighs_any_price_advantage`). It does **not** catch a
+  wrong but well-formed answer.
 
-  So the router today optimises for *responding*, not for responding *well* or
-  *cheaply*. Do not describe it as saving money or preserving quality until
-  there is a measurement behind either word.
+  So the router optimises for responding *usably* and *cheaply*, not for
+  responding *well*. Do not describe it as preserving quality until there is a
+  measurement behind the word.
 
 ### Network Enforcement
 
 - **TLS MITM**: Transparent interception for Windsurf and other harnesses
-- **OS-level firewall rules**: Generates platform-native rules to redirect agent traffic through the proxy
-  - macOS: `pf` (Packet Filter)
-  - Linux: `iptables` / `nftables`
-  - Windows: `netsh`
+- **OS-level firewall rules**: Generates platform-native default-deny egress rules, so traffic leaves the machine only through the proxy (`intutic-proxy enforce`, `intutic enforce`)
+  - macOS: `pf` (Packet Filter) anchor
+  - Linux: `nftables`, or `iptables` when `nft` is absent
+  - Windows: not implemented (`generate` says so, `apply` refuses)
 
 ### Security & Observability
 
-- **DLP scanner**: Pattern-based and entropy-based secret detection, plus validated PII detectors for payment cards (Luhn), IBANs (mod 97) and US Social Security numbers (issued ranges), on by default, and email addresses and phone numbers, off by default. `dlp.detectors` in the proxy config sets each detector's action, and a connected workspace's `piiDetectors` setting sets a baseline the local config may only make stricter. See [PII detectors](https://docs.intutic.ai/guide/policies#pii-detectors)
+- **DLP scanner**: Prefix-anchored secret patterns (no entropy-based matching), plus validated PII detectors for payment cards (Luhn), IBANs (mod 97) and US Social Security numbers (issued ranges), on by default, and email addresses and phone numbers, off by default. `intutic_settings.dlp.detectors` in this machine's config sets each detector's action, and a connected workspace's `piiDetectors` setting sets a baseline the local config may only make stricter. See [PII detectors](https://docs.intutic.ai/guide/policies#pii-detectors)
 - **Code skeleton extraction**: Uses `tree-sitter` and `syn` for AST-level code analysis
 - **Token counting**: Accurate pre-flight token estimation via `tiktoken-rs`
 - **Telemetry**: OpenTelemetry OTLP export for traces and metrics — a `SpanExporter` and `SdkMeterProvider` ship in `src/main.rs`, with the exported instrument set declared in `src/metrics.rs` (snip compaction histograms, egress counters, policy refusals). No logs pipeline

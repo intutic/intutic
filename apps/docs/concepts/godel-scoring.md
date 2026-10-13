@@ -10,19 +10,19 @@ Automated quality scoring for Standard Operating Procedures (SOPs) using a 13-ca
 
 The **Gödel score** is a quality metric on a **0–26 scale** that evaluates whether an SOP is comprehensive, consistent, and safe enough to be enforced by the governance engine. Named after Kurt Gödel's work on formal system completeness, it ensures that SOPs meet a minimum quality bar before they can influence agent behavior.
 
-Every SOP submitted to the control plane is scored against 13 rubric categories, each worth **0–2 points**. The total score determines which lifecycle gate the SOP passes through.
+An SOP is scored against 13 rubric categories, each worth **0–2 points**, when it is promoted from `PENDING_REVIEW` to `GENERATED`, when the SOP refinement cycle rewrites it, and whenever a lead runs the probe by hand. The total score determines the gate result.
 
 ---
 
 ## Threshold Gates
 
-The Gödel score controls automatic SOP lifecycle transitions:
+The Gödel score gates the `PENDING_REVIEW → GENERATED` transition. With the thresholds the hosted deployment sets (12 and 15):
 
 | Score Range | Gate Result | Effect |
 |-------------|-------------|--------|
-| **< 12** | `BLOCKED` | SOP cannot proceed — it is rejected and must be revised |
-| **12–14** | `PENDING_REVIEW` | SOP requires manual review by an Admin or EM before advancing |
-| **≥ 15** | `GENERATED` | SOP auto-advances to the next lifecycle state |
+| **< 12** | `BLOCKED` | The transition is refused; the SOP must be revised |
+| **12–14** | `PENDING_REVIEW` | The transition is refused; the SOP stays in review |
+| **≥ 15** | `GENERATED` | The transition goes through |
 
 ::: tip
 These thresholds can be tuned via environment variables to match your organization's risk tolerance. See [Configuration](#configuration) below.
@@ -30,15 +30,15 @@ These thresholds can be tuned via environment variables to match your organizati
 
 ### Lifecycle Integration
 
-The Gödel score integrates into the SOP lifecycle at the **DRAFT → PENDING_REVIEW / GENERATED** transition:
+The Gödel score integrates into the SOP lifecycle at the **PENDING_REVIEW → GENERATED** transition (`POST /api/v1/sops/:sopId/transition`, owners and admins):
 
 ```
-DRAFT → [Gödel Scoring] → BLOCKED (score < 12)
-                         → PENDING_REVIEW (12 ≤ score < 15)
-                         → GENERATED (score ≥ 15)
+PENDING_REVIEW → [Gödel Scoring] → refused, BLOCKED (score < 12)
+                                 → refused, PENDING_REVIEW (12 ≤ score < 15)
+                                 → GENERATED (score ≥ 15)
 ```
 
-SOPs that score `BLOCKED` remain in `DRAFT` state and surface a quality report showing which rubric categories scored low.
+A refused transition leaves the SOP in `PENDING_REVIEW` and names the score, the threshold and the gate result. Every score, passing or not, is recorded, and the latest one is shown with its per-category scores and rationales under **Gödel probe** on the SOP's Governance tab, where an owner, admin or EM can also re-run it (`POST /api/v1/sops/:sopId/godel-probe`).
 
 ---
 
@@ -92,24 +92,22 @@ Tune the gate thresholds with environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GODEL_SCORE_THRESHOLD_GENERATED` | `22` | Minimum score for automatic advancement to `GENERATED` |
+| `GODEL_SCORE_THRESHOLD_GENERATED` | `22` (the hosted deployment sets `15`) | Minimum score for the `PENDING_REVIEW → GENERATED` transition |
 | `GODEL_SCORE_THRESHOLD_BLOCKED` | `12` | Scores below this are `BLOCKED` |
 
 ::: warning
 Lowering `GODEL_SCORE_THRESHOLD_GENERATED` reduces the quality bar for auto-approved SOPs. Only adjust this if you have a robust manual review process for `PENDING_REVIEW` SOPs.
 :::
 
-Scores between `GODEL_SCORE_THRESHOLD_BLOCKED` and `GODEL_SCORE_THRESHOLD_GENERATED` land in `PENDING_REVIEW`, requiring manual approval from an Admin or EM.
+Scores between `GODEL_SCORE_THRESHOLD_BLOCKED` and `GODEL_SCORE_THRESHOLD_GENERATED` get the gate result `PENDING_REVIEW`. Any score below `GODEL_SCORE_THRESHOLD_GENERATED` refuses the transition; there is no manual override.
 
 ---
 
 ## Current Implementation
 
-::: info Phase 1 — Static Scoring
-The current implementation (Phase 1) returns a **static score of 22** for all SOPs, placing them directly in the `GENERATED` gate. This ensures forward compatibility while the full LLM-based scoring engine is developed in Phase 2.
+Each SOP's markdown is scored against the rubric by the platform's self-hosted judge model, which returns a score and a rationale per category. When the judge is the same model as the platform's default routing model (no separate `INTUTIC_TRUSTED_MONITOR_MODEL` is set), every rationale is prefixed `[self-graded]`.
 
-Phase 2 will integrate real 13-category LLM-based scoring via the Gödel Guardrails evaluator service, where each SOP's markdown content is evaluated against the rubric by an LLM judge.
-:::
+When the judge cannot be reached (for example an air-gapped install with no model service), scoring falls back to an offline rubric that scores the same 13 categories on the document's observable structure: section headings, numbered steps, and language about verification, side effects, failures, credentials, scope, versions, cost, logging and prohibitions. Its rationales are prefixed `[offline]`, and the same thresholds apply.
 
 ---
 

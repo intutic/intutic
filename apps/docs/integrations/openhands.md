@@ -10,7 +10,7 @@ Intutic writes your SOP text to `.openhands/microagents/intutic-governance.md`, 
 
 ### 1. Have an OpenHands project
 
-`intutic init` detects OpenHands when the project has OpenHands' `.openhands/` directory, or a `config.toml` with one of the tables only OpenHands' configuration uses: `[core]`, `[agent]`, `[sandbox]` or `[condenser]`. A `config.toml` without them, such as a Hugo site's, is not taken for OpenHands.
+`intutic init` detects OpenHands when the project has OpenHands' `.openhands/` directory, or a `config.toml` with one of the tables only OpenHands' configuration uses: `[core]`, `[agent]`, `[sandbox]` or `[condenser]` (or the `[intutic]` table earlier versions of connect wrote). A `config.toml` without them, such as a Hugo site's, is not taken for OpenHands.
 
 ### 2. Initialize Intutic
 
@@ -70,6 +70,6 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness op
 | Harness type | `openhands` |
 | Rules file | `.openhands/microagents/intutic-governance.md` |
 | Config file | `config.toml` |
-| Detection | `.openhands/` in the workspace root, or a `config.toml` with a `[core]`, `[agent]`, `[sandbox]` or `[condenser]` table |
+| Detection | `.openhands/` in the workspace root, or a `config.toml` with a `[core]`, `[agent]`, `[sandbox]`, `[condenser]` or `[intutic]` table |
 | Format | Markdown microagent with no triggers; TOML, merged: `[llm] base_url` |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

@@ -50,7 +50,7 @@ Vague rules like "be careful with data" don't give agents clear boundaries. Writ
 
 ## The SOP lifecycle
 
-SOPs follow a 7-state lifecycle. Only `VALIDATED` SOPs are actively enforced.
+SOPs follow a 7-state lifecycle. Only `VALIDATED` SOPs are actively enforced; `HYPOTHESIZED` and `REFINED` SOPs run in shadow.
 
 ```
 DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATED
@@ -58,15 +58,17 @@ DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATE
                                                               INVALIDATED
 ```
 
-| State | When to use | Who can transition |
-|-------|-------------|-------------------|
-| **DRAFT** | You're still writing the SOP | Any role |
-| **PENDING_REVIEW** | Ready for team review before activation | DEVELOPER+ |
-| **GENERATED** | Auto-created by the system from observed patterns | System |
-| **HYPOTHESIZED** | Proposed rule being tested against live traffic | ADMIN+ |
-| **REFINED** | Updated based on testing feedback and data | ADMIN+ |
-| **VALIDATED** | Approved and actively enforced | ADMIN, OWNER |
-| **INVALIDATED** | Retired, superseded, or found to be incorrect | ADMIN, OWNER |
+| State | When to use |
+|-------|-------------|
+| **DRAFT** | You're still writing the SOP |
+| **PENDING_REVIEW** | Ready for team review before activation |
+| **GENERATED** | Passed the Gödel score check on the way out of review |
+| **HYPOTHESIZED** | Proposed rule being tested against live traffic |
+| **REFINED** | Updated based on testing feedback and data |
+| **VALIDATED** | Approved and actively enforced |
+| **INVALIDATED** | Retired, superseded, or found to be incorrect |
+
+Every transition needs the OWNER or ADMIN role, as creating and editing a SOP do. Moving from `PENDING_REVIEW` to `GENERATED` also needs the SOP's Gödel score to pass its threshold.
 
 ### The compiled graph gate
 
@@ -86,7 +88,7 @@ but is deprecated: it logs a warning on every use and will be removed in a
 later release.
 
 ::: info Auto-generated SOPs
-Intutic can auto-generate SOPs from agent behavior patterns. These start in `GENERATED` state and move to `HYPOTHESIZED` for testing before you validate them.
+Intutic can propose SOPs from agent behavior patterns. A proposed SOP starts as a `DRAFT` and goes through the same lifecycle as one you wrote.
 :::
 
 ## Risk tiers
@@ -100,17 +102,17 @@ Every SOP has a risk tier that indicates the severity of violating it:
 | **HIGH** | Security or reliability concern | "Never commit API keys to source control" |
 | **CRITICAL** | Could cause data loss or security breach | "Never execute DELETE queries on production" |
 
-Risk tiers affect enforcement behavior:
-- `LOW` violations may only generate warnings
-- `CRITICAL` violations trigger an immediate `KILL` action and open a governance incident
+The tier does not block anything by itself. It affects enforcement in two places:
+- Custom filters receive it as `risk_tier`, so a [WASM rule](/guide/wasm-rules) can act on it
+- A `HIGH` or `CRITICAL` SOP that declares no tool rule of its own gives the tool-call gates a warning on every tool call ("High-risk SOP active in workspace")
 
 ## Dependencies and cascade invalidation
 
 SOPs can depend on other SOPs. For example, a "No production writes" SOP might depend on a "Database access policy" SOP.
 
 When a parent SOP is invalidated:
-1. All dependent SOPs are **cascade-invalidated** automatically
-2. Affected team members are notified
+1. Its dependent SOPs, up to five hops away, are moved back to `PENDING_REVIEW` automatically
+2. A **Guideline Cascade Invalidated** notification is sent to any rule that subscribes to it
 3. The dependency graph on the dashboard updates to show broken chains
 
 ::: warning Cascade effects
@@ -136,7 +138,7 @@ A low activation rate may indicate an SOP that's too narrow or no longer relevan
 You don't need to manually copy SOP rules into each agent's config. The **sync daemon** (`intutic connect`) handles this automatically:
 
 1. The daemon polls the control plane every 30 seconds (configurable)
-2. It pulls the latest `VALIDATED` SOPs for your workspace
+2. It pulls the workspace's `VALIDATED` SOPs, and the `HYPOTHESIZED` and `REFINED` ones, which agents read but no gate enforces
 3. It writes governance rules into each detected harness's native config file
 4. It uses atomic writes (write to temp file, then rename) to prevent corruption
 
@@ -154,7 +156,7 @@ machine, beside the workspace whose rules it is enforcing, so the SOPs it should
 ones sitting in the repository you are working in.
 
 ::: warning A proxy that does not run beside a workspace finds no SOPs at all
-Run the same binary in a container, or as a shared gateway, and the walk starts somewhere like
+Run the same binary in a container and the walk starts somewhere like
 `/home/intutic` and finds nothing. There is no error, because "this workspace has no SOPs" is
 a legitimate state. Every SOP-derived control then resolves to nothing:
 
@@ -176,6 +178,9 @@ SOP prompt injection is a no-op as well, so the agent is never told the rules ei
 **Set `INTUTIC_SOPS_DIR`** to an absolute path holding your `.md` SOP files. It takes
 precedence over the walk. In Kubernetes that means mounting the SOPs as a volume and pointing
 the variable at the mount path.
+
+A gateway that accepts only virtual keys (`INTUTIC_GATEWAY_REQUIRE_VK`) is the exception: it
+fetches each caller's workspace SOPs from the control plane instead of reading a directory.
 :::
 
 The proxy does not leave you to discover this from behaviour. When it starts and resolves an
@@ -215,13 +220,9 @@ the running proxy on the old policy. Add your own SOPs by listing each `.md` fil
 `base/proxy/kustomization.yaml`; `files:` takes paths, not directories, so a file dropped
 into `sops/` is not picked up until you name it.
 
-**That pod still has no callers.** The proxy is a `ClusterIP` service with no ingress, and no
-workload in the cluster sets `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `GEMINI_API_ENDPOINT`
-to its address — so it enforces the mounted policy for nobody. Delivering SOPs and giving
-the service a caller are separate pieces of work, and only the first is done. Giving it a
-caller means either deploying a workload configured to route through it, or deciding what a
-hosted multi-tenant gateway would look like — who may call it, and whose SOPs it enforces.
-Neither question is answered by this repository today.
+The same base also gives the proxy an Ingress of its own (`gateway-ingress.yaml`), for callers
+outside the cluster. A deployment that turns on `INTUTIC_GATEWAY_REQUIRE_VK` serves each caller
+its own workspace's SOPs, fetched from the control plane, rather than the mounted ones.
 :::
 
 <!-- ENTERPRISE_ONLY_START -->
@@ -287,7 +288,7 @@ When you update a validated SOP, Intutic classifies the change for the audit tra
 | **NARROW** | Reducing the scope of what the rule covers |
 | **WEAKEN** | Making the rule more permissive |
 
-`WEAKEN` changes require OWNER or ADMIN approval and are flagged in the audit log.
+Every edit needs the OWNER or ADMIN role. A `WEAKEN` classification is returned with the edit; it does not need a further approval.
 
 ## Best practices
 
@@ -305,8 +306,8 @@ Instead of manually entering and updating SOPs on the dashboard, you can connect
 - **Notion** — Sync Notion databases or specific page block trees.
 - **Confluence** — Sync Space wikis and page hierarchies.
 - **GitHub** — Sync markdown files from code repositories, with a personal access token (`GITHUB_BASE_URL` points it at GitHub Enterprise Server). Reading needs Contents: Read on a fine-grained token, or the `repo` scope on a classic one for a private repository; writing an approved SOP back needs Contents: Read and write. The same token also maps branches to pull requests for [cost per pull request](/guide/budgets#cost-per-pull-request), which needs Pull requests: Read on a fine-grained token (a classic `repo` token already has it).
-- **Google Docs** — Sync the Google Docs in one Drive folder, read-only, with a service-account key file (share the folder with the service account's email) or a short-lived access token. Google Drive is cloud-only and is unavailable in offline mode.
-- **Upload** — A one-off Markdown, plain-text or HTML document (up to 1 MB) with no connector behind it, from Policy Guardrails → Sources. The same file twice is one document; an edited copy re-binds the citations that still hold.
+- **Google Docs** — Sync the Google Docs in one Drive folder, read-only, with a service-account key file (share the folder with the service account's email) or a short-lived access token. Google Drive is cloud-only and is unavailable in a self-hosted deployment.
+- **Upload** — A one-off Markdown, plain-text or HTML document (up to 1 MB), or a Word or PDF document (up to 10 MB), with no connector behind it, from Policy Guardrails → Sources. The same file twice is one document; an edited copy re-binds the citations that still hold.
 
 ### Configuring Connectors
 

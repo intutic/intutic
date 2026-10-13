@@ -1,6 +1,6 @@
 # Evaluator Sandbox <Badge type="warning" text="Biz Org+" />
 
-**Labs › Evaluator Sandbox** (`/labs/evaluator`) replays a candidate evaluator config against a golden dataset, and blocks a deploy that would weaken enforcement. Owners and Admins only, on a plan that includes it (Biz Org and the Enterprise plans).
+**Labs › Evaluator Sandbox** (`/labs/evaluator`) replays a candidate evaluator config against a golden dataset, and blocks a deploy that would weaken enforcement. Owners and Admins only, on a plan that includes it (Biz Org, Enterprise and Self-host, and the Enterprise trial).
 
 The page has two tabs: **Golden Datasets** and **Run & Results**.
 
@@ -24,7 +24,7 @@ Then **Create Dataset**.
 |-------|--------------|
 | **Golden Dataset** | The dataset to replay |
 | **Evaluator Prompt Override (optional)** | Leave blank to score with the evaluator prompt deployed now |
-| **Model Override (optional)** | A different model for the run |
+| **Model Override (optional)** | A different model for the run; only a self-hosted judge model is accepted |
 | **HIJACK at or above**, **KILL at or above**, **BYPASS at or below** | Score thresholds, 0 to 1 (defaults 0.7, 0.9 and 0.3) |
 | **LLM scoring layer enabled** | Whether the LLM layer scores the samples |
 | **Compare with the config deployed now** | Score every sample under the deployed config as well. Needed to deploy: without it the weakening check cannot pass |

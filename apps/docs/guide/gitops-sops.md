@@ -94,8 +94,9 @@ the *current* local body's hash:
 intutic sops status
 ```
 
-Does not modify any local file. For every local `.intutic/sops/*.md` file,
-matched by title against the workspace's control-plane SOPs, reports one of:
+Does not modify any local file. For every local `.intutic/sops/*.md` file
+(except the `guardrail-*.md` files `intutic guardrails pull` writes, which
+have no control-plane SOP to compare against), matched by title against the workspace's control-plane SOPs, reports one of:
 
 | Status | Meaning |
 |---|---|
@@ -122,8 +123,8 @@ on a schedule, is today's substitute — and unlike earlier, it now leaves a
 compliance signal behind each time it runs (see `sop_git_drift` below),
 instead of only printing to a terminal no one is later asked to read.
 
-**The compliance probe reports on staleness, not just the last run's
-result.** `sop_git_drift` reads whatever `git_drift_status` was last
+**The compliance probe reports the last run's result, not staleness.**
+`sop_git_drift` reads whatever `git_drift_status` was last
 recorded per SOP — it does not know how long ago that was beyond the
 `git_drift_checked_at` timestamp it carries, and it cannot detect a file
 that changed after the last `status` run and before the next one. Run

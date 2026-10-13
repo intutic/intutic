@@ -83,9 +83,10 @@ Every request passes through these stages before reaching the LLM:
 1. **Virtual key validation** — verifies the `vk_*` workspace key
 2. **Budget gate** — checks session and workspace spend limits against Valkey (`v2:budget:hard_block:{workspace_id}`)
 3. **DLP scanner** — regex-based detection of secrets across ~20 high-precision patterns (AWS keys incl. temporary creds, GitHub classic + fine-grained tokens, Anthropic/OpenAI/GitLab/Slack/Google/Stripe/SendGrid/npm/PyPI/Hugging Face keys, Slack webhooks, DB connection credentials, JWTs, bearer tokens, private keys) plus validated PII detectors (payment cards, IBANs, SSNs; email and phone when enabled), with `redact` or `block` actions — applied to request bodies and forwarded header values; responses are scanned on the way back too, with streaming output scrubbed per SSE line
-4. **SnipCompactor** — token compression: text repetition collapse, JSON array truncation, code skeleton extraction via tree-sitter
-5. **WASM plugin evaluation** — custom governance plugins compiled to WebAssembly
-6. **Policy check** — pre-request evaluation against the control plane (3s timeout, configurable fail-open or fail-closed)
+4. **WASM plugin evaluation** — custom governance plugins compiled to WebAssembly
+5. **Policy check** — pre-request evaluation against the control plane (3s timeout, configurable fail-open or fail-closed)
+
+**SnipCompactor** — token compression: text repetition collapse, JSON array truncation, code skeleton extraction via tree-sitter — runs on the way back instead: on the tool-result text of a non-streaming response, after the response DLP scan.
 
 ### Key constants
 
@@ -116,8 +117,8 @@ The sync daemon keeps harness config files in sync with SOPs from the control pl
 5. **Apply SkillOpt edits** — config edits the control plane queued for the workspace are written into the rules files and each outcome is acknowledged; when step 3 rewrote the files, every edit is applied again
 6. **Refresh the decisions log** — only when the workspace turned it on, into each harness's instructions file (see [Governed Decisions Log](/guide/decisions-log)); a decisions section an earlier version put in `CLAUDE.md` is taken out on every sync
 7. **Compute SHA-256 hashes** — hash each harness's config file
-8. **Report hashes** — `POST /api/v1/sync/sop-hash` for drift detection
-9. **Update integrity store** — `.intutic/integrity.json` in the workspace
+8. **Update integrity store** — `.intutic/integrity.json` in the workspace
+9. **Report hashes** — `POST /api/v1/sync/sop-hash` for drift detection
 10. **Health checks** — the local proxy and Valkey are checked and restarted if they stopped
 
 Each poll also registers every recorded harness as an agent with its facets and records a `skill_flagged` event for each skill whose scan found something, and every fifth poll records the rules files that changed in the config history (their text only with [content upload](/reference/cli#config-content-upload) on). On startup `connect` writes the bundled `intutic-rule-author` skill if the workspace does not have it.
@@ -151,8 +152,8 @@ SOPs are written in each harness's native format. [Where rule sets go](/guide/ho
 | Markdown section in your own file | Codex, Muse Code, Grok Build, OpenCode, Pi, Hermes, Roo Code, dsh, OpenClaw (`AGENTS.md`); Antigravity and Gemini CLI (`GEMINI.md`); GitHub Copilot (`.github/copilot-instructions.md`); Goose (`.goosehints`) | `AGENTS.md` |
 | YAML | Aider (the `read:` entry that loads its rules file) | `.aider.conf.yml` |
 | Env | Codex and the SDK frameworks (proxy URLs) | `.env.intutic` |
-| No instructions file | n8n, Claude Desktop, Open WebUI, Xirp, Agentic Orchestrator, AgentCore, the SDK frameworks | — |
-| Native hooks | Claude Code, Cursor, Windsurf, Cline, Codex, GitHub Copilot (agent mode), Antigravity, Goose, OpenHands, OpenClaw (plugin), Hermes, Pi (extension), Muse Code, Grok Build, OpenCode (plugin), dsh (plugin), n8n (workflow hook) | Harness-specific — see the [coverage matrix](/reference/harness-security-matrix#coverage-matrix) |
+| No instructions file | n8n, Claude Desktop, Open WebUI, Xirp, Agentic Orchestrator, AgentCore, TrueForge server, the SDK frameworks | — |
+| Native hooks | Claude Code, Cursor, Windsurf, Cline, Codex, GitHub Copilot (agent mode), Antigravity, Goose, OpenHands, OpenClaw (plugin), Hermes, Pi (extension), Muse Code, Grok Build, OpenCode (plugin), dsh (plugin), n8n (workflow hook), Open WebUI (prompt filter) | Harness-specific — see the [coverage matrix](/reference/harness-security-matrix#coverage-matrix) |
 
 → Source: [services/sync-daemon/](https://github.com/intutic/intutic/tree/main/services/sync-daemon)
 
@@ -179,15 +180,17 @@ interface IHarnessAdapter {
 |---|---|
 | `detect()` | Check if the harness is present (usually `fs.access` on the config file) |
 | `installGate()` | Install the harness's tool-call gate and its proxy routing. `intutic connect` runs it for every configured harness, whether or not a rule set targets it |
-| `writeConfig()` | Write the rule sets into the one file the harness reads as standing instructions, and no other; called only when a rule set targets the harness |
+| `writeConfig()` | Write the rule sets into the one file the harness reads as standing instructions, and no other; called only when a rule set targets the harness, or on a forced sync |
 | `readCurrentHash()` | SHA-256 of the rules file (for drift detection) |
 
-Which file that is comes from `HARNESS_RULES_FILES` in `@intutic/shared-types`, and the adapters write it through [rulesFiles.ts](https://github.com/intutic/intutic/blob/main/tools/cli/src/harness/rulesFiles.ts): a file of Intutic's own in a directory the harness reads every file of, or a marked section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` of a file you also write (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Either one starts with the same generated header, and carries no sync time, so a sync with nothing new leaves the file as it is:
+Which file that is comes from `HARNESS_RULES_FILES` in `@intutic/shared-types`, and the adapters write it through [rulesFiles.ts](https://github.com/intutic/intutic/blob/main/tools/cli/src/harness/rulesFiles.ts): a file of Intutic's own in a directory the harness reads every file of, or a marked section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` of a file you also write (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Either one starts with the same generated title (a file of Intutic's own after the harness's front matter, if it needs any), and carries no sync time, so a sync with nothing new leaves the file as it is:
 
 ```markdown
 # Intutic Governance Rules (auto-generated)
 # DO NOT EDIT — managed by intutic sync daemon; put rules of your own in another file
 ```
+
+In a marked section the second line reads `# DO NOT EDIT this section — managed by intutic sync daemon; edit outside the INTUTIC:RULES markers`.
 
 → Source: [tools/cli/src/harness/](https://github.com/intutic/intutic/tree/main/tools/cli/src/harness)
 

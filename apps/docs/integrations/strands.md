@@ -25,13 +25,13 @@ Strands supports multiple model providers, and whether the Intutic proxy can see
 
 | Provider | Proxy-routable? | How |
 |---|---|---|
-| **Bedrock** (`BedrockModel` — the DEFAULT when you pass no `model`) | ❌ **No** | Bedrock traffic is SigV4-signed boto3 calls to `bedrock-runtime.<region>.amazonaws.com`. The Intutic proxy does not speak Bedrock's wire protocol and cannot re-sign SigV4 requests — there is no base-URL env var that makes this traffic governable by the proxy. Vector B and the [response gate](/reference/harness-security-matrix#vector-d--response-gate) do **not** apply; the SDK tool gate below is the enforcement point. |
+| **Bedrock** (`BedrockModel` — the DEFAULT when you pass no `model`) | ❌ **No** | Bedrock traffic is SigV4-signed boto3 calls to `bedrock-runtime.<region>.amazonaws.com`. The Intutic proxy does not accept Bedrock's wire protocol from a client and cannot re-sign your SigV4 requests — there is no base-URL env var that makes this traffic governable by the proxy. To have the proxy govern a Bedrock-hosted model, use `AnthropicModel` or `OpenAIModel` pointed at the proxy and name the model `bedrock/<model id>`: the proxy signs the Bedrock call with the AWS credentials it is configured with (see [AWS Bedrock](/integrations/aws-bedrock)). Vector B and the [response gate](/reference/harness-security-matrix#vector-d--response-gate) do **not** apply; the SDK tool gate below is the enforcement point. |
 | `AnthropicModel` | ✅ Yes | The Anthropic Python SDK honors `ANTHROPIC_BASE_URL` (written by `.env.intutic`) when no explicit `base_url` is passed, or pass `client_args={"base_url": ...}`. |
 | `OpenAIModel` | ✅ Yes | The OpenAI Python SDK honors `OPENAI_BASE_URL` (written by `.env.intutic`), or pass `client_args={"base_url": ...}`. |
 | `LiteLLMModel` | ⚠️ Per-model | Set `client_args={"api_base": "<proxy>"}`; whether env-var routing applies depends on the underlying provider LiteLLM dispatches to. |
 | Gemini / Mistral / Ollama / Writer / LlamaAPI / SageMaker | ❌ Not via `.env.intutic` | No Intutic-written env var routes these today. Ollama is local egress by definition; SageMaker is SigV4 like Bedrock. |
 
-If you deploy on **Bedrock AgentCore Runtime**, the same per-provider reality applies inside the runtime; a dedicated AgentCore deployment guide is a separate, later documentation phase — this page is scoped to the framework.
+If you deploy on **Bedrock AgentCore Runtime**, the same per-provider reality applies inside the runtime; see [AWS Bedrock AgentCore](/integrations/agentcore) — this page is scoped to the framework.
 
 ### 3. Gate local tool execution (SDK)
 

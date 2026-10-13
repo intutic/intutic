@@ -9,7 +9,7 @@ Custom Filters let you write policy rules in AssemblyScript (a TypeScript subset
 Rules can also be written in Rego and compiled with OPA: see [Rego policies](/guide/rego-policies). They install, upload and run the same way, with a budget of their own.
 
 ::: info Availability
-Local filters installed into `~/.intutic/wasm/` need no capability and no role — the open-core proxy loads them on the request path in any build. Dashboard-managed filters (Cloud) require the `feature.wasm_rules` capability and are accessible to **Owner**, **Admin**, and **EM** roles.
+Local filters installed into `~/.intutic/wasm/` need no capability and no role — the open-core proxy loads them on the request path in any build. Dashboard-managed filters (Cloud) require the `feature.wasm_rules` capability. **Owner**, **Admin** and **EM** roles can see them; only **Owner** and **Admin** can add, enable, disable or delete one.
 :::
 
 ---
@@ -115,7 +115,7 @@ refusal, never a trap:
 The SDK wraps the import as `readReferencedFile(path)`, in
 `assembly/referencedFiles.ts` (import it only in a rule that reads files, so
 no other rule carries the import). It sizes the buffer, copies the bytes, and
-returns them with the code; its `unread` is true for every code except `-3`,
+returns them with the code; its `unread` is true for every negative code except `-3`,
 which is the cue for a rule governing that path to refuse:
 
 ```typescript
@@ -277,8 +277,8 @@ across three shapes, because they answer three different questions:
   this run". No notion of time; a workspace that made 3 deploys over a week
   and one that made 3 in a minute are indistinguishable to it.
 - **Spend ceilings** — `budget_remaining_usd`, `workflow_spend_usd` /
-  `workflow_budget_usd` above, and `graph_spend_usd` / `graph_budget_usd` on
-  [`node`](#budget-and-graph) — the same "at most N, ever" shape as
+  `workflow_budget_usd` above, and `graph_spend_usd` / `graph_budget_usd`
+  ([graph position](#budget-and-graph)) — the same "at most N, ever" shape as
   `max_calls`, just in dollars instead of calls.
 
 What none of those can express is a **rate** — "at most N in the last M
@@ -301,7 +301,10 @@ ceiling a rule picks here is an unmeasured threshold, the same reasoning
 | `budget_remaining_usd` | `f64` | Workspace budget left. |
 | `workflow_spend_usd` | `f64?` | Spend on this workflow. Absent outside a workflow. |
 | `workflow_budget_usd` | `f64?` | Its ceiling. Absent outside a workflow. |
-| `node` | `NodeIdentity` | Position in the agent graph — id, parent, depth, liveness, node count. |
+| `node_id`, `agent_role`, `graph_id`, `parent_session_id`, `depth` | `string` / `i32` | Position in the agent graph, as top-level fields. `node_id` defaults to `session_id`; `depth` is 0 at the root. |
+| `graph_spend_usd`, `graph_budget_usd` | `f64` | Spend across every node in this graph, and the per-node budget it is measured against. `-1` when unknown. |
+| `parent_alive` | `i32` | `1` the parent is live, `0` it is not, `-1` unknown. |
+| `graph_node_count` | `i32` | Nodes in this graph. `-1` when unknown. |
 
 ::: warning Unknown is not zero
 The optional numerics arrive as `-1` when the host has nothing to send, not `0`.
@@ -317,7 +320,10 @@ The same shape bites on empty lists: an empty `allowed_harnesses` means
 
 The template ships six working rules in `runRules()`, each with a should-block
 and should-allow mock in `assembly/mocks/` and a test asserting both. Keep the
-ones you want, delete the rest.
+ones you want, delete the rest. Before them, `runRules()` also blocks on
+three inline checks: a DLP finding whose action is `block`, a `bash`,
+`execute_bash` or `run_command` call whose arguments contain `rm `, `drop ` or
+`delete `, and `budget_remaining_usd <= 0`.
 
 | Rule | Reads | Verdict |
 | :--- | :--- | :--- |
@@ -428,7 +434,7 @@ The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority n
 
 ### 1. Upload via the Dashboard
 
-1. Open **Policies › Custom Filters** (Owners, Admins and Engineering Managers, on a plan that includes custom filters)
+1. Open **Policies › Custom Filters** (Owners and Admins, on a plan that includes custom filters; Engineering Managers can view the page)
 2. Click **Add filter**
 3. In the **Add a custom filter** dialog, enter a **Name** and, optionally, a **Description**
 4. Choose the **Compiled bundle (.wasm, up to 1 MB)**
@@ -472,7 +478,7 @@ The dashboard does not show per-filter execution metrics such as hit counts or l
 
 ## Rules from policy documents
 
-A rule can also start as a sentence in a policy document. The Policy Guardrails page extracts cited clauses from Notion, Confluence, GitHub and uploaded documents; a clause whose control is a *context condition* — which harness, role or environment may act — becomes a guardrail of target `wasm_rule`: the same closed predicate vocabulary as a mined candidate, always verdict 3 (reask), never a block.
+A rule can also start as a sentence in a policy document. The Policy Guardrails page extracts cited clauses from Notion, Confluence, GitHub, Google Drive and uploaded documents; a clause whose control is a *context condition* — which harness, role or environment may act — becomes a guardrail of target `wasm_rule`: the same closed predicate vocabulary as a mined candidate, always verdict 3 (reask), never a block.
 
 Approving that guardrail for shadow hands it to this pipeline as a rule candidate that carries:
 

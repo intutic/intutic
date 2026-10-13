@@ -1,6 +1,6 @@
 # Starter rule library
 
-Eight drop-in WASM rules. Each directory is self-contained: `rule.ts`, a
+Nine drop-in WASM rules. Each directory is self-contained: `rule.ts`, a
 `block.json` mock the rule must refuse, and an `allow.json` (plus sometimes
 `allow-*.json`) mock it must permit. `dropInRules.test.ts` compiles every
 directory standalone — the exact `intutic policy compile` invocation each
@@ -27,7 +27,7 @@ with):**
 
 **Field-coverage — one rule per `RequestContext` field with no other
 consumer, so the rule doubles as the field's coverage test** (this is the
-actual criterion the other six were picked by):
+actual criterion the other seven were picked by):
 
 | Rule | Field it exercises | The inversion its allow mock catches |
 |---|---|---|

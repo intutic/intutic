@@ -10,7 +10,7 @@ The SOP Optimizer is a self-optimizing prompt compiler that analyzes historical 
 - Feature gating and role requirements
 
 ::: info
-The SOP Optimizer requires the `feature.metaclaw` flag to be enabled for your workspace. This feature is available on Biz Org, Enterprise and Self-host, and during a trial.
+The SOP Optimizer needs a plan that includes it (Biz Org, Enterprise and Self-host, and during a trial) and the `ff_metaclaw_evolution` [workspace setting](/reference/workspace-settings) turned on. Without both, cycles are skipped and **Run optimizer** returns 403.
 :::
 
 ---
@@ -22,7 +22,7 @@ The optimizer continuously monitors your SOP enforcement data and identifies rul
 - **Compliance scores** — The rate at which developer agent sessions violate or bypass specific rules.
 - **Trace logs** — The underlying token prompts and tool calls.
 
-An hourly background sweep runs an evaluation cycle for every eligible workspace automatically. This scheduled path is **proposal-only** — it always generates candidate proposals for human review, regardless of your workspace's auto-apply setting. Only a manually triggered cycle (below) can auto-apply a proposal, and only when your workspace has auto-apply enabled.
+An hourly background sweep runs an evaluation cycle for every eligible workspace automatically. This scheduled path is **proposal-only** — it always generates candidate proposals for human review, regardless of your workspace's auto-apply setting. Only a manually triggered cycle (below) can auto-apply a proposal, and only when your workspace has the `ff_metaclaw_auto_apply` setting on and the proposal's score reaches the auto-approve threshold.
 
 ---
 
@@ -31,9 +31,9 @@ An hourly background sweep runs an evaluation cycle for every eligible workspace
 Unlike general SOP listings, the optimizer has a dedicated home: **Labs › SOP Optimizer** (`/labs/sop-optimizer`; Owners, Admins and Engineering Managers, on a plan that includes it).
 
 ### 1. Manual Trigger
-While the optimizer runs hourly compiles in the background, you can trigger an immediate evaluation cycle by clicking **Run optimizer**. Owners and Admins also have **Mine incidents**, which drafts amendments from recent incidents.
+While the optimizer runs hourly compiles in the background, Owners and Admins can trigger an immediate evaluation cycle by clicking **Run optimizer**. They also have **Mine incidents**, which drafts amendments from recent incidents.
 - *Rate limits:* Trigger is restricted to once per hour per workspace, independently of the background sweep's own hourly cadence.
-- *Report:* On complete, displays candidates evaluated, proposals created, and runs skipped.
+- *Report:* On complete, displays candidates evaluated, proposals created, proposals auto-approved, and runs skipped.
 
 ---
 
@@ -47,7 +47,7 @@ Lists all completed optimization runs:
 - **Simulated Compliance** — Before/after comparison showing the change in compliance score if the proposal is adopted (e.g. `70% → 95%`).
 - **Delta** — The net compliance improvement (runs with a delta < 5% are skipped).
 - **Sample Size** — Number of traces evaluated in the simulation.
-- **Score** — Semantic alignment rating of the mutated rule.
+- **Score** — Composite score: 70% the compliance gain, 30% sample-size confidence. Rejected runs score 0.
 - **Status** — Displays whether the outcome was `Accepted` or `Rejected`.
 
 ### Pending Proposals

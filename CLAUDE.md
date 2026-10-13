@@ -22,7 +22,7 @@ This file contains standard operating rules and governance constraints for AI co
 
 ## 3. Security & Credentials Boundary
 
-- **Credential Isolation**: All API keys and tokens must be loaded via environment variables (e.g. `INTUTIC_PROXY_KEY`). Never hardcode or echo raw secrets in logs or source files.
+- **Credential Isolation**: All API keys and tokens must be loaded via environment variables (e.g. `INTUTIC_API_KEY`). Never hardcode or echo raw secrets in logs or source files.
 - **DLP Enforcement**: Ensure DLP scanner patterns in `packages/proxy/src/dlp.rs` continue to detect AWS keys, Anthropic tokens, and sensitive headers.
 
 ---

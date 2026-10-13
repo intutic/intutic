@@ -282,7 +282,7 @@ GitLab merge requests are not mapped yet; calls on GitLab branches are in cost b
 ### Resolving Budget Breaches
 Budget breach anomalies (see [Budget Breach Anomalies](#budget-breach-anomalies)) are incidents: security and FinOps administrators review them on **Findings › Incidents**. When resolving a breach, administrators can record:
 - **Resolution Status:** `RESOLVED` status marking once action has been taken (e.g., plan tier upgraded, limits adjusted).
-- **Audit Trails:** Record `resolvedBy` and `resolutionNote` to maintain SOC 2 compliance logs for financial audit records.
+- **Audit Trails:** Record `resolution_notes` to maintain SOC 2 compliance logs for financial audit records; `resolved_by` is taken from the signed-in account, not from the request.
 
 ---
 

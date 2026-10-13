@@ -5,7 +5,7 @@
 ## Why Developer Sessions?
 
 AI coding agents are highly active but often hard to observe locally. Developer Sessions brings process activity and configuration sync audits together into a single screen:
-- **Process Activity (`abtop`)**: Which agent tools (Cursor, Claude Code, Aider, Windsurf) are running on the workstation.
+- **Process Activity**: Which agent tools (Cursor, Claude Code, Aider, Windsurf) are running on the workstation.
 - **Config Sync Status**: Whether local rules files (such as `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`) are synced or have drifted from the central SOP policies.
 - **Rules Safety Auditing**: Findings from local skill audits (secrets, credentials, dangerous wildcards).
 
@@ -19,9 +19,9 @@ A strip at the top summarizes the sync daemon: **Sync daemon** (with when it con
 The files found by local runs of `intutic skill list` and `intutic skill audit`:
 - **Instruction file** — the file path (e.g. `.cursorrules`, `CLAUDE.md`)
 - **Lines** — the instruction line count
-- **Security check** — unsafe segments detected (secrets, credentials, dangerous wildcards)
+- **Security check** — unsafe segments detected (Intutic virtual keys and `sk-live-` secrets, `rm -rf *` / `rm -rf /`, `curl` / `wget` network commands)
 
-If the workspace setting `enableLocalSkillAuditDelete` is active, the local CLI/daemon automatically prunes any rule lines containing leaked keys, passwords, or unsafe shell wildcards during security scans.
+If the workspace setting `enableLocalSkillAuditDelete` is active, `intutic skill audit` removes every flagged line (leaked keys, unsafe recursive deletes, `curl` / `wget` commands) from the instruction file it scans.
 
 ### Guideline Sync
 Sync status by agent platform: each platform the daemon found, its guidelines, and when they last synced.
@@ -36,7 +36,7 @@ The agent sessions running on this host now, from the daemon's process scan.
 The sync daemon monitors and auto-heals essential local dependencies on the workstation:
 - **Proxy gateway**: The Intutic Rust proxy gateway (port 4000) redirecting LLM API requests and normalising protocols. If it exits or crashes, the daemon immediately re-spawns it.
 - **Valkey cache**: Caches local requests and telemetry (port 6379). The daemon auto-provisions and recovers Valkey using Docker, native binaries, or static fallback binaries.
-- **SSL certificate trust**: Verifies whether the local CA certificate (`ca.crt`) is trusted by the host OS keychain.
+- **SSL certificate trust**: Verifies whether the local CA certificate (`ca.crt`) is trusted by the macOS keychain; on Linux and Windows it only checks that the certificate exists.
 
 ---
 

@@ -15,7 +15,7 @@ Open **Settings** in the sidebar. The Settings area has three pages: **Settings*
 
 Your workspace, its plan, and your own profile and password.
 
-- **Workspace** — the **Workspace ID** (used in API calls and CLI configuration) and the **Plan**, marked Trial or Active, with the days left in a trial. Below them, the plan limits: tokens per day, sessions per day and active guidelines.
+- **Workspace** — the **Workspace ID** (used in API calls and CLI configuration) and the **Plan**, marked Trial or Active, with the days left in a trial. Below them, the plan limits: tokens per day and sessions per day.
 - **Workspace Policies** — **Governance card labeling**: ask for adoption labels on corrective cards, to tune the judge. Turning it off stops label collection only; cards are still created and delivered.
 - **Trace Storage** — whether traces mirror to, or live only in, a bucket you own, and a check that the bucket is still reachable. The bucket is set with `PUT /api/v1/workspace/settings` (a `byocStorage` object); its credentials are encrypted at rest and never returned.
 - **Profile** — your email (read-only), display name and avatar URL.
@@ -68,6 +68,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Provider Keys** | This workspace's own provider credentials. See [below](#provider-keys). |
 | **Gateways** | Register a [self-hosted gateway](/external/self-hosted-gateway) to run the proxy in your own infrastructure. |
 | **Data Residency** | Pin the workspace's data to a region, and block requests that violate the pin. Needs the Enterprise or Self-host plan; on another plan the card says so, and a pin set before a downgrade can still be turned off. |
+| **Harness Config History** | Whether harness rules files are uploaded with their text or as hashes only. See [below](#harness-config-history). |
 | **Network Egress Control** | The egress mode and allow list every proxy in the workspace hot-reloads. |
 | **Sandboxed Execution** | Require agents to run in a sandbox; enforced by the CLI on `intutic exec`. See [Sandboxed Execution](/guide/sandboxed-execution). |
 | **PII Detectors** | The action the LLM proxy and the MCP proxy take on card numbers, IBANs, Social Security numbers, email addresses and phone numbers in this workspace's model traffic and MCP tool calls. A developer's own proxy config can only make a detector stricter. See [PII detectors](/guide/policies#setting-detector-actions-for-a-workspace). |
@@ -157,7 +158,9 @@ The same list from the CLI or the API:
 ```bash
 intutic credentials models anthropic
 # GET /api/v1/workspace/provider-credentials/anthropic/models
-``` AWS Bedrock and Google Vertex AI are checked by a
+```
+
+AWS Bedrock and Google Vertex AI are checked by a
 signed AWS call or a Google token request, which prove the credential but not the model permissions
 the first request uses.
 
@@ -261,7 +264,7 @@ What the MCP governance proxy does when it cannot reach Intutic, and how firmly 
 | Setting | Behavior |
 |---------|----------|
 | **Fail open** *(recommended)* | The tool call runs, and a warning event reaches the dashboard. Custom rule failures are excluded: a [rule that reaches no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict) always refuses the call |
-| **Fail closed** | The tool call is blocked with "Governance check failed: Intutic control plane unreachable." The dashboard asks you to confirm before switching to it |
+| **Fail closed** | The tool call is blocked with "Governance check failed — Intutic control plane unreachable." The dashboard asks you to confirm before switching to it |
 
 The choice reaches each proxy with its policy. A proxy that has not been able to load policy since it started uses its local `INTUTIC_MCP_FAIL_OPEN` instead — see [When the registry has not loaded](/guide/mcp-governance#when-the-registry-has-not-loaded). It also decides what happens to a call an [MCP call budget](/guide/mcp-governance#call-budgets) covers when the proxy cannot reach Valkey to count it: fail open lets the call through uncounted, fail closed refuses it.
 
@@ -336,7 +339,7 @@ Enter a **Candidate model** and **Load Report** to see how a model mirror-tested
 <!-- ENTERPRISE_ONLY_START -->
 ## Billing {#billing}
 
-Usage against your plan, invoices, and the spend caps that stop a runaway agent.
+Usage against your plan, invoices, and the spend caps that stop a runaway agent. In a self-hosted deployment the tab shows the **Self-host license** card in place of the trial, usage and invoice cards; the budget cards are the same.
 
 - **Enterprise trial** — for an Owner on an eligible workspace, a banner offers **Start 14-day enterprise trial**; during a trial it shows the days remaining and **Talk to Sales**.
 - **Governed Request Usage** — Governed Requests this month against the requests your plan includes (for an organization's plan, counted across all its workspaces), any overage and its charge, the rate per 1,000 Governed Requests your workspace is billed at, and a daily trend.
@@ -469,7 +472,7 @@ The **Event Type** list offers only the events the control plane sends:
 | `governance.gate.recovered` | Gate Reporting Again |
 | `inventory.ungoverned.detected` | Ungoverned AI Tool Found: a machine's [AI inventory](/guide/ai-inventory) listed an ungoverned harness or MCP server for the first time; once per machine and item |
 | `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature, an altered append-only guard or a foreign key that is not enforced. See [Trace Integrity](/concepts/trace-integrity#alerts) |
-| `decision.pending` | Held Decision Waiting for Review: a call was held for approval and the hold was recorded; MEDIUM. On Slack the message carries **Approve** and **Reject** buttons (see [Slack interactive reviews](/guide/decisions#slack-interactive-reviews)) |
+| `decision.pending` | Decision Held for Review: a call was held for approval and the hold was recorded; MEDIUM. On Slack the message carries **Approve** and **Reject** buttons (see [Slack interactive reviews](/guide/decisions#slack-interactive-reviews)) |
 | `decision.approved` | Held Decision Approved: an owner, admin or engineering manager approved a [held decision](/guide/decisions#slack-interactive-reviews), in Slack or with `intutic decision approve`; MEDIUM, because the held call can now run |
 | `decision.rejected` | Held Decision Rejected: the same, for a rejection; INFO |
 | `auth.login.failed` | Sign-in Refused: a sign-in to the workspace was refused (wrong password, deactivated member, an SSO identity the workspace does not admit, a response that failed verification). Names the member, or the email presented, the method, the reason and the address; repeats for the same identity and address within the cooldown send once |

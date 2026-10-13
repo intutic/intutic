@@ -15,7 +15,7 @@ fetch config → write harness files → compute hashes → report drift
 On each sync cycle the daemon:
 
 1. **Fetches** the latest SOP configuration from the control plane
-2. **Writes** harness-specific config files using 19 format-aware config writers
+2. **Writes** harness-specific config files using its format-aware config writers
 3. **Computes** content hashes for drift detection
 4. **Reports** any detected drift back to the control plane
 
@@ -39,11 +39,7 @@ Content-hash-based drift detection identifies when harness config files have bee
 
 ### Trajectory Monitoring
 
-Monitors active agent sessions and streams trajectory data (tool calls, file edits, terminal commands) to the control plane for real-time governance evaluation.
-
-### Brain Indexing
-
-Indexes harness-specific context directories (BRAIN folders, memory files, skill definitions) and uploads structured metadata to the context graph.
+Watches the proxy's live trace events, buffers them per session in a sliding window, and submits trajectory summaries to the control plane for governance evaluation. No LLM runs on the developer machine.
 
 ### Config Capture
 
@@ -51,18 +47,14 @@ Captures point-in-time snapshots of all harness configurations for audit, compli
 
 ## Usage
 
-The daemon is typically started via the CLI:
+The daemon is started via the CLI:
 
 ```bash
-intutic connect              # Start with default 30s interval
-intutic connect --interval 10  # Custom sync interval (seconds)
+intutic connect                   # Start with default 30s interval
+intutic connect --interval 10000  # Custom sync interval (milliseconds)
 ```
 
-Or directly:
-
-```bash
-npx @intutic/sync-daemon --api-url https://api.intutic.ai --interval 30
-```
+The package has no executable of its own; `intutic connect` is how it runs.
 
 ## Part of Intutic
 

@@ -25,12 +25,12 @@ curl -X PUT "$INTUTIC_CONTROL_PLANE_URL/api/v1/workspace/settings" \
 ```
 
 - **Who:** the OWNER or ADMIN role. Any other role gets `403`.
-- **Strict:** a top-level key not listed on this page is refused with `400` naming it, and nothing is stored. So is a value outside the bounds below. Inside every object (`featureFlags`, `imageProvenance`, `anomaly_enforcement`, `banditKeywords`, `byocStorage`, `loop_review`, `mcpBudgets`, `sso_group_policy`) an unknown field is refused the same way, named. `managedJudgeModel`, `typedJudgeBackend` and `typedJudgeBackendAck` are no longer settings; a body carrying one is refused with a `400` that says why.
+- **Strict:** a top-level key not listed on this page is refused with `400` naming it, and nothing is stored. So is a value outside the bounds below. Inside every object (`featureFlags`, `imageProvenance`, `anomaly_enforcement`, `banditKeywords`, `byocStorage`, `loop_review`, `mcpBudgets`, `sso_group_policy`, `upstreamRetry`) an unknown field is refused the same way, named. `managedJudgeModel`, `typedJudgeBackend` and `typedJudgeBackendAck` are no longer settings; a body carrying one is refused with a `400` that says why.
 - **At least one key.** An empty body is refused.
 - **Only the keys you send change.** Each top-level key you send replaces its stored value whole: send all of an object's fields, or the ones you leave out are gone. The exceptions:
   - `featureFlags` merges flag by flag, so `{"featureFlags": {"ff_shadow_enforcement": true}}` leaves every other flag as it was.
   - `byocStorage` keeps the stored `secretAccessKey` and `credentials` when the update leaves them out or sends `__redacted__`, so a bucket or prefix change does not need the secrets again.
-  - `sso_group_policy` and `piiDetectors` take `null`, which removes the stored value.
+  - `sso_group_policy`, `piiDetectors` and `upstreamRetry` take `null`, which removes the stored value.
 - **Plan:** a non-null `sso_group_policy` needs a plan with single sign-on, <Badge type="warning" text="Biz Org+" />; on other plans it is refused with `403`. Clearing it with `null` works on every plan.
 
 The response is `{ "updated": true, "workspaceId": ..., "settings": { ... } }`, the full settings after the change, in the same form as `GET`. Every change is recorded in the settings history on the [Audit Timeline](/guide/audit-timeline).

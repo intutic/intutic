@@ -11,8 +11,8 @@ request is answered whether or not the monitor has finished.
 | Mode | What happens on a bad verdict | Default |
 |---|---|---|
 | `PASSIVE` | The verdict is recorded and an alert is raised for review. Nothing changes for the agent. | **Yes** — every workspace, unless changed |
-| `ACTIVE` | The verdict suggests a `KILL` for that session, which the loop governor then applies. This is one of the two opt-in paths by which a judged finding can escalate to enforcement — see [Enforcement Actions](/concepts/enforcement-actions). | No |
-| `OFF` | The monitor does not run for the workspace. | No |
+| `ACTIVE` | The alert records a suggested `KILL` (critical verdict) or `HIJACK` (the LLM review's intervene verdict), and each intervene verdict counts as a `WORKFLOW_GOAL_DRIFT` finding toward [repeat-finding enforcement](/reference/workspace-settings) (`anomaly_enforcement`), which steers or blocks the session only if that is enabled. This is one of the two opt-in paths by which a judged finding can escalate to enforcement — see [Enforcement Actions](/concepts/enforcement-actions). | No |
+| `OFF` | The monitor does not run for the workspace. Capability-miss detection is separate and still runs. | No |
 
 The default is `PASSIVE`. An earlier design document specified `OFF`;
 the platform has shipped with `PASSIVE` as the effective default since the
@@ -24,8 +24,8 @@ monitor off platform-wide, so the code and this page say `PASSIVE`.
 `PASSIVE` and `ACTIVE` run on every plan, Free included, and so do the
 monitor's deterministic checks: budget spent past 95%, runaway token
 velocity, repeated identical tool calls, error storms and tool-call bursts.
-A budget past 95% is a critical verdict, which `ACTIVE` turns into a `KILL`
-on any plan.
+A budget past 95% is a critical verdict, which `ACTIVE` escalates on any
+plan.
 
 A window where only an error storm or a tool-call burst fired is ambiguous.
 On Self-serve, Biz Org, Enterprise and Self-host, and in the 14-day Free and
@@ -48,15 +48,22 @@ curl -X PUT "$INTUTIC_CONTROL_PLANE_URL/api/v1/workspace/settings" \
   -d '{"trajectory_monitor_mode": "ACTIVE"}'
 ```
 
-A workspace owner or admin can set any of the three modes, on any plan.
+A workspace owner or admin can set any of the three modes, on any plan. A
+self-hosted control plane runs the monitor only with
+`FF_TRAJECTORY_MONITOR=true` in its environment; without it, every window
+is answered `PASS` with `monitoringEnabled: false`.
 Turning `ACTIVE` on does not change any verdict already recorded; it changes
 what the next bad verdict does.
 
 ## What `ACTIVE` escalates, and what it does not
 
-`ACTIVE` only ever turns a verdict the monitor has already reached into a
-`KILL` for that session. It does not add checks, lower thresholds, or touch
-any other session. A [break-glass](/guide/break-glass) grant scoped to a rule
+`ACTIVE` only ever escalates a verdict the monitor has already reached, and
+only through repeat-finding enforcement: with `anomaly_enforcement` off (the
+default), `ACTIVE` changes the action recorded on the alert and nothing else.
+With it on, the session is steered or blocked once it has `minRepeats`
+intervene verdicts at or above `minConfidence` in one session (the count lapses after an hour without one), using that
+setting's `action` (`HIJACK` by default; set `KILL` to block). It does not add
+checks, lower thresholds, or touch any other session. A [break-glass](/guide/break-glass) grant scoped to a rule
 or detector does not exempt a session from the monitor, because the monitor
 is not a rule the grant can name.
 

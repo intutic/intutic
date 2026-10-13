@@ -90,7 +90,7 @@ A `.env.intutic` file with proxy URLs and metadata:
 export ANTHROPIC_BASE_URL="http://localhost:4000"
 export OPENAI_BASE_URL="http://localhost:4000/v1"
 export INTUTIC_PROXY_URL="http://localhost:4000"
-INTUTIC_SOP_COUNT=5
+export INTUTIC_SOP_COUNT=5
 ```
 
 ::: tip Shell integration

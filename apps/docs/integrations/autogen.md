@@ -1,6 +1,6 @@
 # AutoGen
 
-Integrate Intutic governance with [Microsoft AutoGen](https://microsoft.github.io/autogen/) (`autogen-core`/`autogen-agentchat`/`autogen-ext`, 0.4+) — Microsoft's multi-agent conversation framework.
+Integrate Intutic governance with [Microsoft AutoGen](https://microsoft.github.io/autogen/) (`autogen-core`/`autogen-agentchat`/`autogen-ext`; the `[autogen]` extra requires 0.7.5+) — Microsoft's multi-agent conversation framework.
 
 ::: warning Read this before wiring the SDK gate in — it does not see the tool calls most AutoGen code makes
 `IntuticInterventionHandler` hooks `autogen_core.InterventionHandler.on_send` — the only confirmed veto point AutoGen publishes for a `FunctionCall` message. It is real, and it was driven end to end against a real `SingleThreadedAgentRuntime` (registering the handler, sending a `FunctionCall` through `runtime.send_message`, and observing the runtime's own `MessageDroppedException` on a block). But `on_send` only fires for messages explicitly routed through `runtime.send_message`/`publish_message` — and **`AssistantAgent`, the class essentially every AutoGen application and tutorial is built on, never calls that.** Its `_execute_tool_call` dispatches directly to `workbench.call_tool_stream(...)`/`handoff_tool.run_json(...)`, entirely in-process, bypassing the `AgentRuntime` message-passing this handler intercepts.
@@ -73,7 +73,7 @@ runtime = SingleThreadedAgentRuntime(intervention_handlers=[IntuticInterventionH
 
 On a deny, `on_send` returns AutoGen's own `DropMessage` sentinel; the runtime turns that into a `MessageDroppedException` raised back to the sender's `await runtime.send_message(...)` call — the message never reaches its recipient, and the tool body never runs. Non-`FunctionCall` messages pass through unchanged.
 
-Most real applications need **both**: `guard_tools` for the `AssistantAgent` tools you construct, and `IntuticInterventionHandler` only if some part of your system also dispatches runtime-routed `FunctionCall` messages by hand.
+Most real applications need **both**: `IntuticWorkbench` (or `guard_tools`) for the `AssistantAgent` tools you construct, and `IntuticInterventionHandler` only if some part of your system also dispatches runtime-routed `FunctionCall` messages by hand.
 
 ### 4. Trace attribution
 

@@ -73,17 +73,17 @@ npm install -g @intutic/cli @intutic/proxy
 npx @intutic/proxy
 ```
 
-### 2. Connect Your Workspace
-Run `intutic connect` inside your project folder. This boots the local high-speed Rust proxy on port `4000` and auto-detects installed coding assistants:
+### 2. Start the Proxy
+Run `intutic start` inside your project folder. This boots the local high-speed Rust proxy on port `4000` — no account, configuration file or control plane needed:
 ```bash
-intutic connect
+intutic start
 ```
 
 ### 3. Route Any Agent to Intutic
 Point your favorite LLM client or agent framework to the local proxy:
 ```bash
-export ANTHROPIC_BASE_URL="http://localhost:4000/v1"
-export OPENAI_BASE_URL="http://localhost:4000/v1"
+export ANTHROPIC_BASE_URL="http://localhost:4000"     # Anthropic SDKs append /v1/messages
+export OPENAI_BASE_URL="http://localhost:4000/v1"      # OpenAI SDKs append /chat/completions
 ```
 
 That's it! Your agent is now governed by real-time safety guardrails.
@@ -99,7 +99,7 @@ That's it! Your agent is now governed by real-time safety guardrails.
 | 🔐 **Secret DLP & Masking** | Automatically redacts API keys (`[REDACTED_SECRET]`), AWS credentials, and tokens in prompts & tool payloads. |
 | 💰 **Session Spend Ceilings** | Prevents "loop burn" by enforcing token spending ceilings per session (e.g. $5.00 limit). |
 | 🔄 **43 Harness Adapters** | Pre-configured support for Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, OpenCode, DeepSeek dsh, Spotify Xirp, DoorDash Agentic Orchestrator, AWS Bedrock AgentCore Runtime, and more. |
-| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools as well as multi-agent graph/swarm workflows — LangGraph, LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, AWS Strands Agents, and Microsoft Agent Framework each have a dedicated SDK-side gate (Python); Mastra, the Vercel AI SDK, and TrueForge (embedded) have the same on the TypeScript side (`@intutic/gate`). |
+| 🤖 **Single & Multi-Agent Swarms** | Governs single developer tools as well as multi-agent graph/swarm workflows — LangGraph, LangChain, CrewAI, AutoGen, AG2, Google ADK, OpenAI Agents SDK, Pydantic AI, smolagents, AWS Strands Agents, and Microsoft Agent Framework each have a dedicated SDK-side gate (Python); Mastra, the Vercel AI SDK, eve, AI SDK Harness, AI SDK Workflow, and TrueForge (embedded) have the same on the TypeScript side (`@intutic/gate`). |
 
 ---
 
@@ -132,10 +132,10 @@ Intutic ships **43 harness adapters**: 18 install as native hook gates in the ha
 | Category | Supported Tools & Frameworks |
 | :--- | :--- |
 | **Single-Agent Assistants** (native adapters) | **Claude Code CLI**, **Cursor**, **Windsurf**, **Aider**, **Antigravity**, **Cline**, **Roo Code**, **Codex**, **Continue**, **Claude Desktop**, **Goose**, **Pi**, **GitHub Copilot**, **OpenWebUI**, **Muse Code**, **Grok Build**, **OpenCode**, **dsh** (preview) |
-| **Multi-Agent Swarms** (native adapters) | **LangGraph**, **OpenHands**, **OpenClaw**, **Hermes**, **n8n** |
+| **Multi-Agent Swarms** (native adapters) | **OpenHands**, **OpenClaw**, **Hermes**, **n8n** |
 | **Orchestrators** (delegate to already-gated harnesses, no gate of their own) | **Spotify Xirp**, **DoorDash Agentic Orchestrator**, **AWS Bedrock AgentCore Runtime** (hosts your own framework-SDK code unchanged; delegates to whichever already-supported framework adapter that code uses) |
-| **SDK-gated frameworks** (dedicated in-process gate, `@intutic/gate`/`intutic-clawde`) | **LangChain**, **CrewAI**, **AutoGen**, **AG2**, **Google ADK**, **OpenAI Agents SDK**, **Pydantic AI**, **smolagents**, **AWS Strands Agents**, **Microsoft Agent Framework**, **Mastra**, **Vercel AI SDK**, **eve**, **TrueForge** (embedded), **AI SDK Harness**, **AI SDK Workflow** |
-| **Bridge-gated** (out-of-process Intutic-operated service, no gate in the harness's own process) | **TrueForge** (standalone/hosted server — `services/trueforge-bridge`) |
+| **SDK-gated frameworks** (dedicated in-process gate, `@intutic/gate`/`intutic-clawde`) | **LangGraph**, **LangChain**, **CrewAI**, **AutoGen**, **AG2**, **Google ADK**, **OpenAI Agents SDK**, **Pydantic AI**, **smolagents**, **AWS Strands Agents**, **Microsoft Agent Framework**, **Mastra**, **Vercel AI SDK**, **eve**, **TrueForge** (embedded), **AI SDK Harness**, **AI SDK Workflow** |
+| **Bridge-gated** (out-of-process Intutic-operated service, no gate in the harness's own process) | **TrueForge** (standalone/hosted server) |
 | **Any OpenAI-compatible framework** (no adapter needed) | Anything else honoring `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` — launch it with `intutic exec` or export the base-URL env vars |
 | **Server-side platform integrations** (call Intutic directly over HTTP; no `HarnessType`, not auto-detected by `intutic init`) | **QM** (`securityScreen` HTTP contract), **Anthropic Managed Agents** (session-confirmation responder), **AWS Bedrock AgentCore Gateway** (interceptor Lambda) |
 
@@ -163,11 +163,11 @@ Intutic governance rules are written as standard Markdown files under `.intutic/
 
 ## 💬 Interactive Slash Commands
 
-Because Intutic evaluates prompts pre-flight, you can run interactive governance commands directly inside your agent chat:
+Because Intutic evaluates prompts pre-flight, you can run interactive governance commands directly inside your agent chat. The proxy intercepts them before they reach the model, and a connected control plane answers them (open core alone has none, so standalone they reply that the command is unavailable):
 
 ```bash
-/intutic status   # View active session spend and compliance score
-/intutic rules    # List active WASM & Markdown SOP rules
+/intutic status   # View this session's spend and compliance score
+/intutic sops     # List the workspace's active SOPs
 ```
 
 ---
