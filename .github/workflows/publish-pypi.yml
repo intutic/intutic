@@ -1,0 +1,146 @@
+# ─────────────────────────────────────────────────────────────
+# publish-pypi.yml — Publish the intutic-clawde package to PyPI
+# ─────────────────────────────────────────────────────────────
+#
+# Triggered by:
+#   1. Push of a version tag (e.g. v2.5.0): the same tag publish.yml releases
+#      the npm packages and binaries from, so every release reaches PyPI too.
+#   2. Manual workflow_dispatch (dry_run skips the upload). Run from main it
+#      builds main's version; skip-existing makes a re-run of a published
+#      version a no-op rather than a failure.
+#
+# Authenticates by PyPI Trusted Publishing (OIDC): no token secret. GitHub mints
+# a short-lived OIDC token per run and PyPI checks it came from this repository,
+# this workflow file and the `pypi` environment.
+#
+# PyPI side (project intutic-clawde → Publishing), registered 2026-10-13:
+#     Owner:       intutic
+#     Repository:  intutic
+#     Workflow:    publish-pypi.yml
+#     Environment: pypi
+# GitHub side: the `pypi` environment deploys only from `v*` tags and `main`.
+# ─────────────────────────────────────────────────────────────
+
+name: Publish Python SDK to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (skip actual publish)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Builds and tests the package but holds no PyPI credential and no
+  # id-token permission at all. Split out of what is now the `publish`
+  # job specifically so that `poetry install` + `poetry run pytest` — which
+  # run arbitrary dependency- and test-time code (fixtures, pytest plugins,
+  # transitive install scripts) — never execute in the same job as the
+  # permission that lets GitHub mint a PyPI-trusted OIDC token. A
+  # compromised dependency's code can still run here, but there is no
+  # token-minting capability here for it to reach; that lives only in the
+  # job below, which runs no dependency or test code at all.
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # This workflow publishes whatever version pyproject.toml declares, on any
+      # v* tag. Nothing checked that the two agreed, and they drifted: the
+      # monorepo reached 1.8.0 while pyproject sat at 1.6.3, so a v1.8.0 tag here
+      # would have published intutic-clawde 1.8.0's code under version 1.6.3 —
+      # and PyPI versions cannot be reused once claimed.
+      - name: Verify tag matches pyproject version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PYVER="$(grep -m1 '^version' packages/intutic-clawde/pyproject.toml | cut -d'"' -f2)"
+          if [ "$PYVER" != "$TAG" ]; then
+            echo "::error file=packages/intutic-clawde/pyproject.toml::version $PYVER != tag $TAG"
+            echo "Refusing to publish: tag and pyproject disagree."
+            exit 1
+          fi
+          echo "✅ pyproject version $PYVER matches tag $TAG"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pip install poetry==2.4.2
+
+      - name: Verify poetry.lock is present and matches pyproject.toml
+        working-directory: packages/intutic-clawde
+        run: poetry check --lock
+
+      - name: Install dependencies
+        working-directory: packages/intutic-clawde
+        run: poetry install
+
+      - name: Run Tests
+        working-directory: packages/intutic-clawde
+        run: poetry run pytest
+
+      - name: Build Package
+        working-directory: packages/intutic-clawde
+        run: poetry build
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: python-dist
+          path: packages/intutic-clawde/dist/*
+
+  # This job's only input is the already-built dist/ artifact from `build` —
+  # no poetry install, no tests, no dependency code of any kind runs where
+  # the OIDC token-minting permission is in scope.
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    needs: build
+    environment: pypi
+    permissions:
+      contents: read
+      # Required for Trusted Publishing — this is what lets GitHub mint the OIDC
+      # token PyPI checks. Without it the upload fails with an auth error rather
+      # than falling back to anything.
+      id-token: write
+    steps:
+      - name: Download built package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: python-dist
+          path: dist/
+
+      # `poetry publish ... || echo` used to sit here. That swallowed *every*
+      # failure — a bad credential, a network error, a rejected file — and let the
+      # job report success. A publish that silently did not happen is the worst
+      # outcome available, because the tag exists and nothing says otherwise.
+      #
+      # gh-action-pypi-publish fails the job on any real error. `skip-existing`
+      # covers the one benign case (this version is already on PyPI) without
+      # hiding the rest.
+      - name: Publish to PyPI (Trusted Publishing)
+        if: ${{ !inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+          print-hash: true
+
+      - name: Dry run — skip upload
+        if: ${{ inputs.dry_run }}
+        run: echo "🏜️ DRY RUN — package built and tested, upload skipped"
