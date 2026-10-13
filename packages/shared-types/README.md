@@ -8,12 +8,12 @@
 
 ## Scope
 
-27 source modules exporting ~200+ types covering:
+One source module per domain under `src/`. Among them:
 
 | Module | Key Types |
 |--------|-----------|
-| `enums` | `EnforcementAction`, `HarnessType`, `RiskLevel`, `SopLifecycleStage` |
-| `finops` | `TraceEntry`, `BudgetEnvelope`, `CostBreakdown` |
+| `enums` | `EnforcementAction`, `HarnessType`, `RiskLevel`, `SopLifecycleState` |
+| `finops` | `TraceEntry`, `CostBreakdown`, `TraceFilters` |
 | `sop` | SOP lifecycle types, rule schemas, hook definitions |
 | `auth` | Session, token, credential types |
 | `identity` | SSO/OIDC provider config, cross-workspace user identity |
@@ -27,19 +27,18 @@
 ## Usage
 
 ```typescript
-import { EnforcementAction, HarnessType } from '@intutic/shared-types';
-import { traceEntrySchema } from '@intutic/shared-types/finops';
+import { EnforcementAction, HarnessType, CreateTraceSchema } from '@intutic/shared-types';
 
 // Zod validation
-const parsed = traceEntrySchema.parse(rawData);
+const parsed = CreateTraceSchema.parse(rawData);
 ```
 
 ## Design Principles
 
 - **Single source of truth**: All cross-package types live here. No type duplication.
-- **Zod-first**: Schemas define the shape; TypeScript types are inferred via `z.infer<>`.
-- **Barrel exports**: Each module re-exports from `index.ts` for clean import paths.
-- **No runtime dependencies**: This package has zero runtime dependencies beyond Zod.
+- **Zod at the boundaries**: API payloads have Zod schemas, with their TypeScript types inferred via `z.infer<>`; other shapes are plain interfaces.
+- **Barrel exports**: `index.ts` is the single entry point; import from the package root (there are no subpath exports).
+- **Minimal runtime dependencies**: Zod and `@intutic/anomaly-taxonomy`, nothing else.
 
 ## Installation
 

@@ -16,9 +16,10 @@ This file is the **machine-readable** entry point for AI coding agents working i
 | [`packages/logger/`](packages/logger/) | Structured logging with trace context |
 | [`packages/id/`](packages/id/) | `newId(prefix)`, `newIso()` — never use raw UUIDs or Date.now() |
 | [`packages/theme/`](packages/theme/) | Central design system tokens, fonts, and assets |
-| [`packages/proxy/`](packages/proxy/) | LiteLLM-Rust proxy wrapper, WASM filters, and protocol normalization |
+| [`packages/proxy/`](packages/proxy/) | Rust governance proxy, WASM filters, and protocol normalization |
 | [`packages/clawde-sdk/`](packages/clawde-sdk/) | TypeScript SDK for Claude agent integration |
 | [`packages/intutic-clawde/`](packages/intutic-clawde/) | Python SDK for Claude agent integration |
+| [`packages/gate-js/`](packages/gate-js/) | In-process TypeScript tool-call gates (`@intutic/gate`) for SDK-gated frameworks |
 | [`packages/mcp-proxy/`](packages/mcp-proxy/) | Model Context Protocol governance proxy |
 | [`packages/wasm-sdk/`](packages/wasm-sdk/) | AssemblyScript WASM rules SDK (built with `asc`) for custom proxy policy filters |
 | [`services/sync-daemon/`](services/sync-daemon/) | Bidirectional config sync daemon (SOPs → harness) |
@@ -47,8 +48,8 @@ cargo test --package intutic-proxy
 pnpm run lint
 pnpm run typecheck
 
-# Generate docs site locally
-pnpm run docs
+# Serve the docs site locally
+pnpm --filter @intutic/docs dev
 ```
 
 ## House rules (don't relearn the hard way)
@@ -69,10 +70,10 @@ pnpm run docs
 rg "\.command\(" tools/cli/src -n
 
 # Find proxy plugin implementations
-rg "impl Plugin for" packages/proxy/src -n
+rg "impl IntuticPlugin for" packages/proxy/src -n
 
 # Find WASM filter exports
-rg "pub fn evaluate" packages/proxy/src -n
+rg "export function evaluate" packages/wasm-sdk -n
 
 # Find ID generation
 rg "newId\(|newIso\(\)" -n
