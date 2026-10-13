@@ -65,7 +65,7 @@ output "incident_webhook_signing_secret" {
 
 - `cooldown_minutes` (Number) Minimum minutes between notifications from this rule (1–1440). Defaults to 15.
 - `email_recipients` (List of String) For `email`: 1–20 addresses, one message each.
-- `enabled` (Boolean)
+- `enabled` (Boolean) Whether the rule sends notifications. Defaults to true.
 - `filter_harness_type` (List of String) Only notify for events whose harness type is one of these.
 - `filter_severity` (List of String) Only notify for events whose severity is one of these: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`. Any case is accepted; the API stores them uppercase.
 - `filter_user_id` (List of String) Only notify for events whose user id is one of these.

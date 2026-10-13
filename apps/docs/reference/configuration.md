@@ -140,6 +140,9 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | `INTUTIC_FC_PREFIX` | `30` | The network's prefix length |
 | `INTUTIC_FC_VCPUS` | `1` | Guest vCPUs |
 | `INTUTIC_FC_MEM` | `512` | Guest memory, in MiB |
+| `INTUTIC_GRAPH_ID` | unset (a new graph) | Set by `intutic exec` on the agent it starts, and read by a nested `intutic exec`: the [agent graph](/guide/graph-guardrails) the agent belongs to |
+| `INTUTIC_NODE_ID` | unset | Likewise: the agent that ran the nested `intutic exec`, which becomes its parent |
+| `INTUTIC_DEPTH` | `0` | Likewise: how deep in the graph that agent is |
 
 `intutic connect` also passes `ANTHROPIC_API_KEY` from its own environment to the proxy it starts.
 
@@ -157,13 +160,79 @@ Read by `@intutic/gate`. The MCP daemon and the Python `intutic-clawde` gate rea
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | The local policy snapshot |
 | `INTUTIC_GUARD_DISABLE` | unset | `1` turns the local snapshot guard off |
 
-### MCP daemon
+### Sync daemon
+
+Read by the sync daemon `intutic connect` runs.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `MCP_DAEMON_SOCKET` | `~/.intutic/mcp-proxy.sock` | The MCP daemon's Unix socket |
+| `CONFIG_CAPTURE_INTERVAL` | `5` | Capture the harness rules files for the config history every this many polls (a poll is 30 seconds by default) |
+| `INTUTIC_SKIP_GLOBAL_HOOKS` | unset | Any value: do not write Intutic's hooks and deny rules into `~/.claude/settings.json`; the project's `.claude/settings.json` is still written |
 
-The MCP proxy's other settings are on [MCP Proxy](/integrations/mcp-proxy).
+The hook gates it writes read `INTUTIC_SNAPSHOT_RULES`, `INTUTIC_APPROVED_BYPASSES`, `INTUTIC_GUARD_DISABLE` and, under `intutic chaos run`, `INTUTIC_CHAOS_PLAN` and `INTUTIC_CHAOS_EVENTS`, as the CLI and the gate SDK do.
+
+### MCP proxy / MCP daemon
+
+Read by the MCP proxy (`intutic-mcp-proxy`) and the MCP daemon (`intutic-mcp-daemon`). The proxy reads most of its settings from the environment first, then from `~/.intutic/env/runtime.env`; [MCP governance](/guide/mcp-governance#configuration-reference) has the full rules.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `INTUTIC_EVENTS_FILE` | `~/.intutic/events/hook-events.jsonl` | The local file every MCP event is also appended to |
+| `INTUTIC_MCP_FAIL_OPEN` | `true` | `false`: a check that cannot complete refuses the call. The workspace's `mcpProxyFailBehavior` wins once the proxy has loaded it |
+| `INTUTIC_MCP_INJECTION_ACTION` | `warn` | `block`: refuse a call, or withhold a result, that matches a prompt-injection pattern |
+| `INTUTIC_MCP_ANOMALY_MODE` | `enforce` | `warn` reports anomaly findings without blocking; `off` skips detection |
+| `INTUTIC_MCP_ANOMALY_OVERRIDES` | none | A JSON object of anomaly detector id → `steer`, `reask`, `kill` or `off`, capped at each detector's ceiling |
+| `INTUTIC_MCP_DLP_DETECTORS` | none | A JSON object of PII detector id → `off`, `redact` or `block`; it may only make the workspace's setting stricter |
+| `INTUTIC_MCP_SESSION_SCOPE` | derived | The session scope sibling proxies share their anomaly window under |
+| `INTUTIC_VALKEY_URL` | none (`VALKEY_URL` is also read) | The Valkey sibling proxies share their anomaly window and call-budget counters through |
+| `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | The local WASM rule directory, ahead of runtime.env's `INTUTIC_WASM_LOCAL_DIR` |
+| `INTUTIC_WASM_MANIFEST_ROOT` | unset (off) | The directory WASM rules may read files from, as for the proxy |
+| `INTUTIC_DISABLE_REGO_RULES` | unset | `1`: refuse Rego rules at load |
+| `INTUTIC_CHAOS_PLAN` | unset | Set by `intutic chaos run`: the fault plan the proxy injects |
+| `INTUTIC_CHAOS_EVENTS` | unset | Set with it: the file each injected fault is recorded in |
+| `MCP_DAEMON_SOCKET` | `~/.intutic/mcp-proxy.sock` | The MCP daemon's Unix socket, for the daemon and the proxies that call it |
+| `MCP_DAEMON_POLICY_TTL_MS` | `300000` | How long the daemon serves a cached policy before refetching it |
+| `MCP_DAEMON_MAX_CACHE_ENTRIES` | `500` | Workspaces kept in the daemon's policy cache |
+| `MCP_DAEMON_STATUS_REPORT_MS` | `60000` | How often the daemon reports its status and the MCP servers it found |
+| `MCP_DAEMON_TELEMETRY_FLUSH_MS` | `1000` | How often the daemon flushes the events it batched to the control plane |
+| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/verified/policy-snapshot.json` | The verified policy snapshot the daemon seeds its cache from at start |
+| `REDIS_URL` | `redis://localhost:6379` | The daemon's Valkey when `VALKEY_URL` is unset |
+
+Both also read `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_CONTROL_PLANE_URL` (the daemon: `CONTROL_PLANE_URL`), and the daemon exports traces to `OTEL_EXPORTER_OTLP_ENDPOINT`. The remote-bridge headers (`INTUTIC_REMOTE_HEADERS`) are on [MCP governance](/guide/mcp-governance#configuration-reference).
+
+### Clawde SDK
+
+Read by the TypeScript `@intutic/clawde-sdk` and the Python `intutic-clawde` client.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `INTUTIC_BASE_URL` | `http://localhost:4000` | The proxy the client sends model calls to, when `baseUrl` (`base_url`) is not passed |
+| `INTUTIC_DEBUG` | unset | `true`: log retries and circuit-breaker trips to the console |
+| `GIT_BRANCH` | unset | The branch reported with each call when the sync daemon is not running |
+| `PD_INCIDENT_ID` | unset | A PagerDuty incident reported with each call, likewise |
+
+They also read `INTUTIC_CONTROL_PLANE_URL`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_SESSION_ID`; the Python gate reads the Gate SDK's variables above, and the TypeScript client the agent-graph variables `intutic exec` sets (`INTUTIC_GRAPH_ID`, `INTUTIC_NODE_ID`, `INTUTIC_DEPTH`). Without the sync daemon, the CI run id comes from the variable GitHub Actions, Buildkite or CircleCI sets. See [Clawde SDK](/reference/clawde-sdk).
+
+### AgentCore interceptor
+
+Read by the [AgentCore Gateway interceptor Lambda](/integrations/agentcore), besides `INTUTIC_CONTROL_PLANE_URL` and `INTUTIC_API_KEY`, which it requires.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `INTUTIC_TIMEOUT_MS` | `3000` | The control-plane call timeout |
+| `INTUTIC_FAIL_OPEN` | `false` | `true`: allow tool calls when the control-plane check itself fails |
+| `AGENTCORE_GATEWAY_ID` | unset | Attached to requests for log correlation; never affects the verdict |
+
+### TrueForge bridge
+
+Read by the [TrueForge server bridge](/integrations/trueforge#server-mode-standalone-hosted), besides `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_CONTROL_PLANE_URL`.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `TRUEFORGE_BASE_URL` | none (required) | The TrueForge server |
+| `TRUEFORGE_API_KEY` | unset | Its bearer token, when the server has OIDC configured |
+| `TRUEFORGE_SESSION_IDS` | unset (discover) | Comma-separated session ids to watch |
+| `TRUEFORGE_RECONNECT_DELAY_MS` | `2000` | The wait before re-subscribing to a dropped turn stream |
 
 <!-- ENTERPRISE_ONLY_START -->
 ### Control plane

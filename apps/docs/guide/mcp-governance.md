@@ -932,6 +932,7 @@ Unix socket, caches policy and batches events for proxies in `daemon` mode:
 | `MCP_DAEMON_POLICY_TTL_MS` | `300000` | How long a cached policy is served before it is refetched. |
 | `MCP_DAEMON_MAX_CACHE_ENTRIES` | `500` | Workspaces kept in the policy cache. |
 | `MCP_DAEMON_STATUS_REPORT_MS` | `60000` | How often it reports its status and the servers it found. |
+| `MCP_DAEMON_TELEMETRY_FLUSH_MS` | `1000` | How often it flushes the events it batched to the control plane. |
 | `CONTROL_PLANE_URL` | `http://localhost:3001` | The control plane, for the daemon itself. |
 | `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/verified/policy-snapshot.json` | The sync daemon's verified copy of its snapshot, which the daemon seeds its cache from at start. It reads the verified copy rather than the live file beside it, so an edit to the live file never seeds the cache. The daemon seeds the SOP rules and the server allowlist from it, not the registry, so the registry follows the fail setting until the first fetch. A proxy that already loaded a policy keeps its allowlists and other settings through a daemon restart and takes only the snapshot's rules. |
 

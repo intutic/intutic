@@ -27,7 +27,7 @@ resource "intutic_sop" "deploys" {
 - `complexity_tier` (String) One of `TIER_0`, `TIER_1`, `TIER_2`.
 - `markdown_content` (String) The SOP body in Markdown (at most 100,000 characters).
 - `risk_tier` (String) One of `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
-- `title` (String)
+- `title` (String) The SOP's title (1–256 characters).
 
 ### Optional
 

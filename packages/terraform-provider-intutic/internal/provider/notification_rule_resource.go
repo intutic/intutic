@@ -177,9 +177,10 @@ func (r *notificationRuleResource) Schema(_ context.Context, _ resource.SchemaRe
 				Validators:  []validator.Int64{int64validator.Between(1, 1440)},
 			},
 			"enabled": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  booldefault.StaticBool(true),
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(true),
+				Description: "Whether the rule sends notifications. Defaults to true.",
 			},
 			"signing_secret": schema.StringAttribute{
 				Computed:  true,

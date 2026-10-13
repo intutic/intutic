@@ -35,7 +35,7 @@ resource "kubernetes_secret" "gateway_token" {
 ### Required
 
 - `deployment_target` (String) One of `docker`, `kubernetes`, `bare_metal`.
-- `name` (String)
+- `name` (String) The gateway's name (1–128 characters). Changing it replaces the gateway.
 
 ### Optional
 
@@ -44,9 +44,9 @@ resource "kubernetes_secret" "gateway_token" {
 
 ### Read-Only
 
-- `created_at` (String)
+- `created_at` (String) When the gateway was registered (RFC 3339).
 - `id` (String) The gateway id (`gw_…`).
-- `key_prefix` (String)
+- `key_prefix` (String) The token's first 12 characters, as the dashboard shows them.
 - `status` (String) Registration status (`pending` until the gateway first reports in).
 - `token` (String, Sensitive) The gateway's `gwk_…` token. Only known for a gateway Terraform registered.
 

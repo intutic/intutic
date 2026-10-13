@@ -30,13 +30,13 @@ resource "intutic_policy" "no_force_push" {
 ### Required
 
 - `enforcement_action` (String) One of `BYPASS`, `ENHANCE`, `HIJACK`, `REASK`, `KILL`.
-- `name` (String)
+- `name` (String) The policy's name (1–256 characters).
 - `target_tool_pattern` (String) Tool name or glob the policy applies to; `*` matches all. Letters, digits and `_ - . : / *` only, for example `Bash` or `mcp__github__*`.
 
 ### Optional
 
 - `conditions` (String) Extra match conditions as a JSON object, for example `jsonencode({ ... })`.
-- `description` (String)
+- `description` (String) What the policy is for (at most 4,000 characters).
 - `intervention_mode` (String) What the agent is told when a call is refused; the active policy with the lowest `priority` sets it for the whole workspace. `TRANSPARENT` (default): the refusal names the rule and its reason. `OPAQUE`: the same calls are refused with the same refusal codes, but the agent is told only "Blocked by workspace policy. Ask a workspace admin if you need this action."; audit records keep the rule. `SILENT_LOG`: the local hook gates let a call a workspace rule would block run and report it as `tool_would_block`; built-in protections, SSO group rules and the MCP server registry still refuse, and the hosted hook gate and the proxies enforce as usual.
 - `is_active` (Boolean) Whether the policy is enforced. Defaults to true.
 - `priority` (Number) 0–10000; the lowest number wins. Defaults to 100.

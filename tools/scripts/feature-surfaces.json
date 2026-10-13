@@ -969,6 +969,7 @@
         "docs": [
           { "ref": "guide/concepts.md#incident-types", "badge": false },
           { "ref": "guide/settings.md#rule-filters", "badge": false },
+          { "ref": "guide/findings.md#incidents", "badge": false },
           { "ref": "reference/cli.md#intutic-incidents-list", "badge": false }
         ],
         "website": { "none": "an operational detail of the incident queue" },

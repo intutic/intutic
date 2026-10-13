@@ -46,44 +46,13 @@ jobs:
       - name: Run Style Lint (Design System Check)
         run: pnpm lint:styles
 
-      # This repo had no claim gates at all, which is why the Phase 0 latency
-      # retraction never held here: five comparison pages, the homepage and the
-      # security page were still advertising figures like "kills the session in
-      # under 1ms" long after the first benchmark run disproved the last such
-      # number published. A retraction nothing enforces is a retraction that
-      # comes back.
-      - name: Verify no unsupported latency claim in published docs
-        run: pnpm lint:latency-claims
-
-      # The four ordering keys ship enforcing, with kills, and were documented
-      # nowhere a reader of this repo could open. And the CLI's install-time
-      # validation offered a host import the proxy never registered, so a rule
-      # using randomness installed clean and then failed open on every request.
-      - name: Verify every SOP front-matter key is documented and accounted for
-        run: pnpm lint:sop-keys
-
-      - name: Verify WASM host imports agree across the proxy and the CLI
-        run: pnpm lint:wasm-host-imports
-
-      # The docs build ignores dead links (an open-source build leaves the
-      # paid-tier pages out) and VitePress never checks #anchors, so 17 links to
-      # renamed headings went unnoticed. This checks every link between pages.
-      - name: Verify links between docs pages open a page and heading that exist
-        run: pnpm lint:docs-links
-
-      # The budgets guide documented two variables nothing reads while the
-      # proxy's real ones appeared on no page. Every variable the proxy, the
-      # CLI or the gate SDK reads must be in the configuration reference, and
-      # every one it documents for them must be read.
-      - name: Verify the configuration reference names every environment variable
-        run: pnpm lint:config-env
-
-      # 925 source lines here once cited tracker ids and design-doc numbers
-      # this repo has no record of: "see <id>" where the comment should have
-      # said why. The docs site carried 64 more. Every file in the tree is
-      # scanned.
-      - name: Verify no internal tracker ids or internal docs links
-        run: pnpm lint:internal-ids
+      # Every claim and docs-drift gate, once: the chain in package.json's
+      # `lint:claims`. Each script's header says what it guards and the defect
+      # that made it. A gate added to the chain is enforced here without a
+      # workflow edit. Gates whose inputs this tree does not carry report a
+      # skip rather than a pass.
+      - name: Run every claim and docs-drift gate (lint:claims)
+        run: pnpm lint:claims
 
   typecheck:
     name: Typecheck (TS Workspaces) - Run TypeScript typecheck
@@ -264,6 +233,17 @@ jobs:
         run: |
           go generate ./...
           git diff --exit-code -- . ../../apps/docs/reference/terraform
+          # A file go generate creates (a new resource's page) is untracked, so
+          # git diff never sees it: the page would ship missing from the repo.
+          untracked="$(git status --porcelain -- . ../../apps/docs/reference/terraform)"
+          if [ -n "$untracked" ]; then
+            echo "::error::go generate left files out of step with the commit; run it and commit them:"
+            echo "$untracked"
+            exit 1
+          fi
+          # The registry's own checks on docs/ (front matter, file names, one
+          # page per resource and data source).
+          go tool tfplugindocs validate --provider-name intutic
 
   rust:
     name: Rust Proxy (Build & Test)
@@ -312,6 +292,7 @@ jobs:
           df -h / | tail -1 | awk '{print "free after:  " $4 " of " $2}'
 
       - name: Install Rust toolchain
+        id: toolchain
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           # Pinned: a floating `stable` brings new clippy lints that fail the
@@ -325,20 +306,24 @@ jobs:
       - name: cargo fmt --check
         run: cd packages/proxy && cargo fmt -- --check
 
-      - name: Cache cargo registry
+      - name: Cache cargo registry and release build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
+          # The workspace's target/, not the crate's: packages/proxy is a member
+          # of the root Cargo.toml workspace, so `cd packages/proxy && cargo
+          # build` resolves the root Cargo.lock and writes the root target/.
+          # The old paths (packages/proxy/target, keyed on
+          # packages/proxy/Cargo.lock, which only the Docker build reads)
+          # restored nothing. Only target/release: the debug half that clippy
+          # and the test suites leave would carry the entry toward the 10 GB
+          # cache limit, and is the cheaper half to rebuild.
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            packages/proxy/target
-          # The proxy's own lockfile, not the workspace root's. This job builds
-          # `packages/proxy`, and that crate is now pinned by
-          # `packages/proxy/Cargo.lock` — keying the cache on the root lockfile
-          # meant a proxy dependency change did not invalidate it.
-          key: ${{ runner.os }}-cargo-${{ hashFiles('packages/proxy/Cargo.lock') }}
+            target/release
+          key: ${{ runner.os }}-cargo-release-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-release-${{ steps.toolchain.outputs.cachekey }}-
 
       # ── Grammar .wasm files ──────────────────────────────────────────────────
       # Strategy: LFS pull is the fast path (files already built and stored).
