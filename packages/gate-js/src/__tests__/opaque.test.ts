@@ -12,11 +12,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { GateClient, type GateResponse } from '../client.js'
 import { IntuticGateHold, IntuticGateRefusal } from '../errors.js'
 import { Gate } from '../gate.js'
-import { _internal } from '../harness.js'
+import { sandboxGateScript } from './fixtures/sandboxGateScript.js'
 import { encodeMcpRegistryRecord } from '../mcpRegistryRecord.js'
 import { encodeInterventionModeRecord, OPAQUE_REFUSAL_MESSAGE } from '../opaqueRefusal.js'
 import { parseRegister, type SopRule } from '../soprules.js'
@@ -44,7 +44,7 @@ const transparent = (...lines: string[]) => snapshotFile(lines)
 class RecordingClient extends GateClient {
   events: Array<{ event: string; toolName: string; reason: string }> = []
   constructor(private readonly verdict: GateResponse = { allowed: true, reason: '', reached: true }) {
-    super({ baseUrl: 'http://127.0.0.1:9', workspaceId: 'ws_test', sessionId: 'sess_opaque' })
+    super({ baseUrl: 'http://127.0.0.1:9', apiKey: 'k', workspaceId: 'ws_test', sessionId: 'sess_opaque' })
   }
   override async emit(event: string, toolName: string, reason = ''): Promise<boolean> {
     this.events.push({ event, toolName, reason })
@@ -147,7 +147,7 @@ describe('Gate.guard in an OPAQUE workspace', () => {
 describe('the sandbox hook script in an OPAQUE workspace', () => {
   const script = join(dir, 'sandbox-check.js')
   const rules = join(dir, 'policy-snapshot.rules')
-  writeFileSync(script, _internal.renderSandboxGateScript('policy-snapshot.rules', 'ws_test'))
+  beforeAll(async () => writeFileSync(script, await sandboxGateScript('ws_test')))
 
   function run(snapshot: string, tool: string): Promise<{ status: number | null; stderr: string }> {
     writeFileSync(rules, readFileSync(snapshot))

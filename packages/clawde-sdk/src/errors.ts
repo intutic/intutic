@@ -15,13 +15,6 @@ export class ClawdeConnectionError extends ClawdeError {
   }
 }
 
-export class ClawdeBudgetExceededError extends ClawdeError {
-  constructor(message: string) {
-    super(message)
-    this.name = 'ClawdeBudgetExceededError'
-  }
-}
-
 /** A governance verdict stopped the call: a proxy refusal (`ClawdeBlockedError`) or the circuit breaker's budget check. */
 export class ClawdeVerdictError extends ClawdeError {
   public verdict: string

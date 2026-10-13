@@ -58,15 +58,15 @@
   },
   "typesVersions": {
     "*": {
-      "mastra": ["src/mastra.ts"],
-      "vercel": ["src/vercel.ts"],
-      "dsh": ["src/dsh.ts"],
-      "openai": ["src/openai.ts"],
-      "eve": ["src/eve.ts"],
-      "harness": ["src/harness.ts"],
-      "workflow": ["src/workflow.ts"],
-      "managed-agents": ["src/managedAgents.ts"],
-      "trueforge": ["src/trueforge.ts"]
+      "mastra": ["dist/mastra.d.ts"],
+      "vercel": ["dist/vercel.d.ts"],
+      "dsh": ["dist/dsh.d.ts"],
+      "openai": ["dist/openai.d.ts"],
+      "eve": ["dist/eve.d.ts"],
+      "harness": ["dist/harness.d.ts"],
+      "workflow": ["dist/workflow.d.ts"],
+      "managed-agents": ["dist/managedAgents.d.ts"],
+      "trueforge": ["dist/trueforge.d.ts"]
     }
   },
   "files": [
@@ -83,6 +83,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@ai-sdk/anthropic": "^4.0.44",
     "@ai-sdk/harness": "^1.0.138",
     "@anthropic-ai/sdk": "^0.131.0",
     "@ai-sdk/openai": "^4.0.83",

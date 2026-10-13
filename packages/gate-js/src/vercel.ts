@@ -171,14 +171,34 @@ export function intuticProxyUrl(): string {
 }
 
 /**
+ * The `baseURL` an `@ai-sdk/*` provider needs to reach the proxy.
+ *
+ * `@ai-sdk/openai` and `@ai-sdk/anthropic` append the endpoint path
+ * (`/chat/completions`, `/responses`, `/messages`) to `baseURL` — their own
+ * defaults end in `/v1` — while the proxy serves those routes under `/v1/*`.
+ * So the bare proxy URL gets `/v1` appended. A URL that already ends in a
+ * version segment (`/v1` or `/v1beta`) is kept as given, so `/v1` is never
+ * doubled.
+ */
+export function intuticProxyBaseUrl(proxyUrl: string = intuticProxyUrl()): string {
+  // A loop, not `/\/+$/`: CodeQL flags that regex as polynomial on a long run
+  // of slashes (see openai.ts's intuticTracingExporterOptions).
+  let base = proxyUrl
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  return base.endsWith('/v1') || base.endsWith('/v1beta') ? base : `${base}/v1`
+}
+
+/**
  * Wraps a provider-constructing function so it points at the Intutic proxy.
  *
  * The Vercel AI SDK has no env-var base-URL override (see module doc), so
  * routing LLM traffic through the proxy is IN-CODE: pass the provider
- * factory you would otherwise call directly (`createOpenAI`, `createGateway`,
- * any `@ai-sdk/*` `create*` export or compatible custom factory that accepts
- * a `{ baseURL }`-shaped options object) and get back one pre-configured to
- * call the proxy instead of the provider's real endpoint:
+ * factory you would otherwise call directly (`createOpenAI`,
+ * `createAnthropic`, or a compatible factory that accepts a
+ * `{ baseURL }`-shaped options object and appends the provider's endpoint
+ * path to it) and get back one pre-configured to call the proxy instead of
+ * the provider's real endpoint. The Vercel AI Gateway (`createGateway`)
+ * speaks a protocol the proxy does not parse, so it is not a target:
  *
  * ```ts
  * import { createOpenAI } from '@ai-sdk/openai'
@@ -190,7 +210,8 @@ export function intuticProxyUrl(): string {
  *
  * `baseUrl` overrides the resolved proxy URL (see {@link intuticProxyUrl});
  * omit it to use `INTUTIC_PROXY_URL`/the local default, same as every other
- * harness in this codebase.
+ * harness in this codebase. Either way the provider receives
+ * {@link intuticProxyBaseUrl} of it — the proxy URL plus `/v1`.
  *
  * This does NOT make Vercel AI SDK integration "zero-code": every provider
  * construction call site in the caller's application must go through this
@@ -206,6 +227,6 @@ export function withIntuticProxy<
   TOptions extends { baseURL?: string } | undefined,
   TProvider,
 >(providerFactory: (options: TOptions) => TProvider, baseUrl?: string): (options: TOptions) => TProvider {
-  const url = baseUrl ?? intuticProxyUrl()
+  const url = intuticProxyBaseUrl(baseUrl ?? intuticProxyUrl())
   return (options: TOptions): TProvider => providerFactory({ ...options, baseURL: url })
 }

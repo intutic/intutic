@@ -166,7 +166,7 @@ import { IntuticGateRefusal } from './errors.js'
 // One routing story, one implementation: eve's direct-provider path is the
 // Vercel AI SDK's (eve is built on `ai` v7), so the helper is re-exported
 // rather than duplicated. See vercel.ts for the full module doc.
-export { intuticProxyUrl, withIntuticProxy } from './vercel.js'
+export { intuticProxyBaseUrl, intuticProxyUrl, withIntuticProxy } from './vercel.js'
 
 /** Synthetic tool name used by {@link intuticAuditHooks} — eve's
  *  `approval.candidate`/`approval.settled` events do not carry the real tool
