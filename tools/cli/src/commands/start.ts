@@ -26,7 +26,7 @@
 import { spawn } from 'node:child_process'
 import { log } from '../lib/logger.js'
 import { ensureValkey, valkeyRemediation } from '../lib/ensureValkey.js'
-import { localProxyBinary } from '../lib/proxyBinary.js'
+import { localProxyBinary, sandboxBindEnv } from '../lib/proxyBinary.js'
 import { localProxyPort } from '../lib/localProxy.js'
 
 export async function runStart(opts: {
@@ -66,6 +66,7 @@ export async function runStart(opts: {
     stdio: 'inherit',
     env: {
       ...process.env,
+      ...sandboxBindEnv(),
       PORT: proxyPort,
       // Tell the proxy which mode it is in rather than pointing it at an
       // address we already know is dead — it skips a redundant connect and

@@ -1431,20 +1431,20 @@ The `OWNER` role cannot be assigned via invite. Only existing Owners can transfe
 
 ## Proxy endpoints <Badge type="tip" text="Open-Core" />
 
-The Intutic proxy (default port `4000`, set by `PORT`) serves these besides the provider APIs it governs. It listens on every interface, so the routes marked loopback answer `403` (`{"error": "loopback only"}`) to any caller not on the same machine.
+The Intutic proxy (default port `4000`, set by `PORT`) serves these besides the provider APIs it governs. It listens on loopback unless [`INTUTIC_PROXY_BIND`](/reference/configuration#core) opens it (the container image and a gateway listen on every interface), and the routes marked loopback answer `403` (`{"error": "loopback only"}`) to any caller not on the same machine.
 
 | Method | Path | Access | Returns |
 |---|---|---|---|
 | POST | `/v1/messages` | Your provider credential or a `vk_` key | Anthropic Messages API, governed |
 | POST | `/v1/chat/completions` | Your provider credential or a `vk_` key | OpenAI Chat Completions, governed |
 | POST | `/v1/responses` | Your provider credential or a `vk_` key | OpenAI Responses API, governed |
-| CONNECT | any host | — | HTTPS tunnel for clients that use the proxy as `HTTPS_PROXY`. AI provider hosts are decrypted and governed; other hosts follow the [egress policy](/reference/configuration#egress-control) |
+| CONNECT | any host | This machine; from elsewhere, an Intutic key in `Proxy-Authorization` on a listener opened with `INTUTIC_PROXY_BIND` | HTTPS tunnel for clients that use the proxy as `HTTPS_PROXY`. AI provider hosts are decrypted and governed; other hosts follow the [egress policy](/reference/configuration#egress-control). From another machine: `403` when the listener is loopback-only, `407` without a key or with one the control plane rejects |
 | GET | `/health` | Open | `{ status, service, version }` |
 | GET | `/` | Open | Service name, version and the protocols that work end to end |
 | GET | `/intutic/egress` | Open | Egress posture: `{ mode, denied, would_deny }`, where `mode` is `off`, `monitor` or `enforce` and the counts run since the proxy started |
 | GET | `/intutic/spend` | Loopback | Today's spend on this machine: `{ local_spend_usd_today, local_cap_usd, enforced }` |
 | GET | `/intutic/instance` | Loopback | `{ proxy_instance_id, shared_gateway }`, the id every trace from this process carries |
 | GET | `/intutic/probes` | Loopback | The last scheduled guard self-test: `{ probes, total, failed, ran_at }`; `503` before the first run finishes |
-| POST | `/intutic/attest-sandbox` | The request's `Authorization` bearer, an Intutic key (`vk_…`) | Called from inside an `intutic exec --sandbox` container, whose firewall lets it reach only the proxy. Forwards `{ "sessionId": "…" }` to the control plane's `PATCH /api/v1/sessions/:sessionId/attest-sandbox` and answers `{ attested }`. `400` without `sessionId`, `401` without a bearer or with one that is not an Intutic key, `503` when no control plane is configured, `502` when it cannot be reached |
+| POST | `/intutic/attest-sandbox` | The request's `Authorization` bearer, an Intutic key (`vk_…`) the control plane accepts, from this machine or a network the listener was opened to | Called from inside an `intutic exec --sandbox` container, whose firewall lets it reach only the proxy. Forwards `{ "sessionId": "…" }` to the control plane's `PATCH /api/v1/sessions/:sessionId/attest-sandbox` and answers `{ attested }`. `400` without `sessionId`, `401` without a bearer, with one that is not an Intutic key or with a key the control plane rejects, `403` from another machine when the listener is loopback-only, `503` when no control plane is configured or the key cannot be checked, `502` when it cannot be reached |
 
 `/v1beta/models/:model` (Gemini's own route) is refused with `400 unsupported_route`: the proxy reads a request's model from its body, and this route names it in the URL. Gemini models are served on `/v1/messages`, `/v1/chat/completions` and `/v1/responses`, translated to the Gemini API.

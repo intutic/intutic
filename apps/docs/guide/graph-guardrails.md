@@ -764,11 +764,17 @@ proxy as its only egress path — and a rule can gate on that proof directly via
 
 The container's own entrypoint calls the proxy's attest endpoint from inside
 its egress-locked network namespace, after capability drop and firewall
-install are already in effect. Only that call can set the flag; nothing the
-agent sends in a request can. The proxy checks a control-plane-backed cache on
-every request, so once a session attests, every subsequent request in that
-session reads `sandbox_attested: true` — no per-call attestation, and no way
-for one node to attest on another's behalf across sessions.
+install are already in effect, with the workspace's Intutic key. The proxy
+accepts the call only from its own machine or a network it was opened to
+(`INTUTIC_PROXY_BIND`), and only with a key the control plane accepts; the
+control plane records it only for a session in that key's workspace. Only that
+call can set the flag; nothing the agent sends in a request can. The proxy
+checks a control-plane-backed cache on every request, keyed by the request's
+authenticated workspace and its session, so once a session attests, every
+subsequent request in that session reads `sandbox_attested: true` — no
+per-call attestation, no way for one node to attest on another's behalf across
+sessions, and no way for another workspace to read the attestation by naming
+the same session id.
 
 ```javascript
 // AssemblyScript — see Custom Filters for the full rule harness.

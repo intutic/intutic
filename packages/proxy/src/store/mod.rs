@@ -1208,5 +1208,10 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// miss, standalone) must collapse to the same fail-closed answer as
     /// "confirmed unattested", not be left for every rule author to handle
     /// separately.
-    async fn is_sandbox_attested(&self, session_id: &str) -> bool;
+    ///
+    /// Keyed by workspace as well as session: the session id on a request is
+    /// the caller's claim, so a read keyed by it alone let one workspace name
+    /// another's attested session and read `true`. `workspace_id` is the
+    /// request's authenticated workspace.
+    async fn is_sandbox_attested(&self, workspace_id: &str, session_id: &str) -> bool;
 }

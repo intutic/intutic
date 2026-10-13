@@ -23,7 +23,7 @@ import pc from 'picocolors'
 import { FAULT_CATALOG, FAULT_IDS, type RunVerdict } from '@intutic/shared-types'
 import { deriveIdentity, type GraphIdentity } from '../lib/graphIdentity.js'
 import { log } from '../lib/logger.js'
-import { resolveProxyBinary } from '../lib/proxyBinary.js'
+import { resolveProxyBinary, sandboxBindEnv } from '../lib/proxyBinary.js'
 import { resolveSnapshotRulesPath } from '../lib/policySnapshot.js'
 import { selectBackend } from '../lib/sandbox/index.js'
 import { loadExperiment } from '../lib/chaos/experiment.js'
@@ -224,7 +224,8 @@ function startProxy(port: number, env: Record<string, string>, logPath: string):
   delete inherited.CONTROL_PLANE_URL
   const child = spawn(resolveProxyBinary(), [], {
     stdio: ['ignore', out, out],
-    env: { ...inherited, INTUTIC_STANDALONE: '1', ...env },
+    // The repetition's sandbox has to reach this proxy (sandboxBindEnv).
+    env: { ...inherited, ...sandboxBindEnv(inherited), INTUTIC_STANDALONE: '1', ...env },
   })
   fs.closeSync(out)
   const exited = new Promise<string>((resolve) => {
