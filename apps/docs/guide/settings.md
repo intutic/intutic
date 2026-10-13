@@ -64,7 +64,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. Needs a plan with SSO. See [below](#group-policy-for-high-risk-tools). |
 | **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy. See [below](#virtual-api-keys). |
 | **Attenuated API Keys** | Child keys minted from a parent key with fewer capabilities by `intutic attenuate`; open a chain to see each step. |
-| **On-Behalf-Of Tokens** | A short-lived token that lets an agent act for you with only the tools you pick. See [below](#on-behalf-of-obo-tokens). |
+| **On-Behalf-Of Tokens** | A short-lived token that names you and only the tools you pick, for a service to check. See [below](#on-behalf-of-obo-tokens). |
 | **Provider Keys** | This workspace's own provider credentials. See [below](#provider-keys). |
 | **Gateways** | Register a [self-hosted gateway](/external/self-hosted-gateway) to run the proxy in your own infrastructure. |
 | **Data Residency** | Pin the workspace's data to a region, and block requests that violate the pin. Needs the Enterprise or Self-host plan; on another plan the card says so, and a pin set before a downgrade can still be turned off. |
@@ -181,7 +181,7 @@ and `PUT /api/v1/workspace/settings` rejects `managedJudgeModel` with `400`.
 
 ### On-Behalf-Of (OBO) Tokens
 
-OBO tokens are short-lived, employee-scoped credentials. They let an agent act for you with only the tools you pick (for example, running commands or reading files during a debugging session). A token expires after 15 minutes.
+OBO tokens are short-lived, employee-scoped credentials naming only the tools you pick (for example, running commands or reading files during a debugging session). A token expires after 15 minutes. It is not a session: no other API call accepts it. A service holding one checks it, and that it covers a tool, with `POST /api/v1/auth/obo-token/verify`. See [On-Behalf-Of (OBO) Tokens](/guide/security#on-behalf-of-obo-tokens).
 <!-- ENTERPRISE_ONLY_END -->
 
 ### Approved Models
@@ -480,6 +480,8 @@ The **Event Type** list offers only the events the control plane sends:
 | `credential.changed` | API Key or Provider Key Changed: a virtual key, gateway token or SCIM token was created, rotated or revoked, or a provider key was added, replaced or removed. Says which credential, what happened and who did it, never the value; INFO for a new virtual key, gateway token or SCIM token, MEDIUM otherwise. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
+
+Through the API (`filters.severity` on `POST` and `PUT /api/v1/notifications/rules`), the CLI or the [Terraform provider](/reference/terraform/resources/notification_rule), the values are `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` and `INFO`, in any case. They are stored uppercase, and any other value is refused with `400` naming the valid ones. A rule saved before this with lowercase values matched no event; those rules were uppercased when the control plane upgraded.
 
 ### Cooldown Throttling
 

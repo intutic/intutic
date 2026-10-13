@@ -87,21 +87,19 @@ All keys use the `vk_` prefix for easy identification.
 
 ## On-Behalf-Of (OBO) Tokens
 
-OBO tokens solve the "shared API key" problem by issuing short-lived, employee-scoped credentials for agent authentication.
+An OBO token is a short-lived credential that names one member and the tools they allow, for handing to something that acts for them.
 
 ### How OBO Works
 
-1. A developer authenticates with Intutic (via SSO or password)
-2. Intutic issues an OBO token scoped to that developer's RBAC role
-3. The AI agent uses this token instead of a shared workspace key
-4. All actions are attributed to the specific developer
-5. The token enforces the developer's permission boundaries
+1. A member signed in to Intutic (Developer or above) asks for a token with `POST /api/v1/auth/obo-token`, listing the tools it may cover (`scopedTools`). The plan needs OBO tokens enabled.
+2. Intutic records a grant and returns the token. It expires after 15 minutes.
+3. A service holding the token checks it with `POST /api/v1/auth/obo-token/verify`, authenticating as itself (a member's session or `vk_` key in the same workspace) and sending `{ "token": "...", "tool": "..." }`. The answer is `200` with the member and the scoped tools when the token is live and covers the tool, `403` when the tool is outside its scope, and `401` for anything else: forged, expired, revoked, another workspace's, or a member who has been deactivated.
 
-### Benefits
+An OBO token is not a session. It is signed with its own key and type, and every other API call refuses it with `401`, so it cannot be used to act as the member in the dashboard or the API. The tool-call gates do not accept one yet, which is why a tool on an SSO group policy's [on-behalf-of list](/concepts/circuit-breaker#_3-sso-group-clearance) is always refused.
 
-- **Audit trail** — Every agent action is tied to a specific developer
-- **Least privilege** — Agents can only do what the developer is allowed to do
-- **Time-limited** — Tokens expire automatically, reducing risk from credential leaks
+### Revocation
+
+Offboarding a member through [SCIM](/guide/scim#offboarding-cascade) revokes their outstanding OBO grants, so their tokens stop verifying at once rather than when they expire.
 
 ---
 

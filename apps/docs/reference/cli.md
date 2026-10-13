@@ -3349,7 +3349,7 @@ intutic notifications create --event <type> --channel <channel> <target option> 
 | `--email <addresses>` | Comma-separated recipients, up to 20, for the `email` channel |
 | `--webhook-url <url>` | HTTPS URL, for the `webhook` channel |
 | `--pagerduty-key <key>` | Routing key, for the `pagerduty` channel |
-| `--severity <list>` | Only events of these comma-separated severities |
+| `--severity <list>` | Only events of these comma-separated severities: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`, in any case. Another value is refused |
 | `--harness <list>` | Only events from these comma-separated harnesses |
 | `--user <ids>` | Only events from these comma-separated user ids |
 | `--cooldown <minutes>` | Minimum minutes between two notifications from this rule, 1 to 1440 (default 15) |
@@ -3393,7 +3393,7 @@ intutic notifications update <rule_id> [options]
 | `--email <addresses>` | Comma-separated recipients, up to 20 |
 | `--webhook-url <url>` | HTTPS URL |
 | `--pagerduty-key <key>` | Routing key |
-| `--severity <list>` | Only events of these comma-separated severities |
+| `--severity <list>` | Only events of these comma-separated severities: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`, in any case. Another value is refused |
 | `--harness <list>` | Only events from these comma-separated harnesses |
 | `--user <ids>` | Only events from these comma-separated user ids |
 | `--cooldown <minutes>` | Minimum minutes between two notifications, 1 to 1440 |

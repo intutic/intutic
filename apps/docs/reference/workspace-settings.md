@@ -33,7 +33,7 @@ curl -X PUT "$INTUTIC_CONTROL_PLANE_URL/api/v1/workspace/settings" \
   - `sso_group_policy` and `piiDetectors` take `null`, which removes the stored value.
 - **Plan:** a non-null `sso_group_policy` needs a plan with single sign-on, <Badge type="warning" text="Biz Org+" />; on other plans it is refused with `403`. Clearing it with `null` works on every plan.
 
-The response is `{ "updated": true, "workspaceId": ..., "settings": { ... } }`, the full settings after the change, in the same form as `GET`. Every change is recorded in the settings history on the [Audit Timeline](/guide/audit-timeline).
+The response is `{ "updated": true, "workspaceId": ..., "settings": { ... } }`, the full settings after the change, in the same form as `GET`: storage credentials in `byocStorage` come back as `__redacted__` here too, as they do from `POST /api/v1/workspace/posture`. Every change is recorded in the settings history on the [Audit Timeline](/guide/audit-timeline).
 
 ### From the CLI
 

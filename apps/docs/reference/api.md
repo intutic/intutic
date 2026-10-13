@@ -564,7 +564,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 411 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 412 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -606,7 +606,8 @@ Every route the control plane serves: 411 routes, grouped by the source file tha
 | POST | `/api/v1/attenuate` | OWNER/ADMIN/EM/DEVELOPER | <Badge type="warning" text="Biz Org+" /> Attenuate a parent key into a narrower child key |
 | GET | `/api/v1/attenuate/chain/:chainId` | OWNER/ADMIN | Resolve a delegation chain's lineage |
 | GET | `/api/v1/attenuate/chains` | OWNER/ADMIN | List recent delegation chains for the workspace |
-| POST | `/api/v1/auth/obo-token` | OWNER/ADMIN/EM/DEVELOPER | <Badge type="warning" text="Self-serve+" /> Issue an on-behalf-of (OBO) ephemeral session token |
+| POST | `/api/v1/auth/obo-token` | OWNER/ADMIN/EM/DEVELOPER | <Badge type="warning" text="Self-serve+" /> Issue an on-behalf-of (OBO) ephemeral token |
+| POST | `/api/v1/auth/obo-token/verify` | OWNER/ADMIN/EM/DEVELOPER | Verify an OBO token, and that its scope covers a tool |
 
 ### `audit.ts` <Badge type="tip" text="Cloud" />
 

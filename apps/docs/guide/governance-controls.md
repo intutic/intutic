@@ -26,10 +26,11 @@ gloss. Where coverage is partial, it says so, and says why.
 
 <!-- ENTERPRISE_ONLY_START -->
 ::: tip Cloud / Enterprise — agent-scoped credentials
-On-behalf-of ephemeral tokens are a distinct credential type an agent
-receives for a bounded task and time window — not the developer's own
-shared key. See [Policies & Enforcement](/guide/policies) for the full
-mechanism. Enterprise device visibility also reports whether host-level
+On-behalf-of ephemeral tokens are a distinct credential type for a bounded
+task and time window — not the developer's own shared key, and not a
+session: they name the tools they cover, and a service checks one against a
+tool with `POST /api/v1/auth/obo-token/verify`. The tool-call gates do not
+accept them yet. See [On-Behalf-Of (OBO) Tokens](/guide/security#on-behalf-of-obo-tokens). Enterprise device visibility also reports whether host-level
 enforcement (`intutic enforce`) is actually active on a given machine, not
 just configured to be — strengthening the "sweeps for unauthorized agents"
 row above.

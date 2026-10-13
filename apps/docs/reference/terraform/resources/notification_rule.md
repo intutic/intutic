@@ -15,14 +15,14 @@ resource "intutic_notification_rule" "incidents_to_slack" {
   event_type         = "incident.created"
   channel            = "slack"
   slack_channel_name = "#agent-incidents"
-  filter_severity    = ["critical", "high"]
+  filter_severity    = ["CRITICAL", "HIGH"]
 }
 
 resource "intutic_notification_rule" "incidents_to_pagerduty" {
   event_type            = "incident.created"
   channel               = "pagerduty"
   pagerduty_routing_key = var.pagerduty_routing_key
-  filter_severity       = ["critical"]
+  filter_severity       = ["CRITICAL"]
   cooldown_minutes      = 60
 }
 
@@ -67,7 +67,7 @@ output "incident_webhook_signing_secret" {
 - `email_recipients` (List of String) For `email`: 1–20 addresses, one message each.
 - `enabled` (Boolean)
 - `filter_harness_type` (List of String) Only notify for events whose harness type is one of these.
-- `filter_severity` (List of String) Only notify for events whose severity is one of these.
+- `filter_severity` (List of String) Only notify for events whose severity is one of these: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`. Any case is accepted; the API stores them uppercase.
 - `filter_user_id` (List of String) Only notify for events whose user id is one of these.
 - `pagerduty_routing_key` (String, Sensitive) For `pagerduty`: the integration's routing key. The API only ever returns it masked.
 - `secret_rotation_triggers` (Map of String) Arbitrary values that rotate the signing secret when they change. Changing, adding or removing any value replaces a `webhook` rule's signing secret in place on the next apply and stores the new one in `signing_secret`; the old secret stops working at once. Creating the resource does not rotate, since the API issues a secret then. Only for a `webhook` rule.
