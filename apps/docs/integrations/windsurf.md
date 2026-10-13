@@ -82,7 +82,9 @@ A settings file with comments or trailing commas is not plain JSON; it is left u
 }
 ```
 
-The port is the one the proxy listens on (`PORT`, 4000 by default) — the proxy accepts `CONNECT` tunnels on the same port as its API. On macOS and Windows, `intutic connect` also adds the proxy's certificate authority (`~/.intutic/ca.crt`) to the trusted roots (the login keychain on macOS) so the decrypted connection is trusted.
+The port is the one the proxy listens on (`PORT`, 4000 by default) — the proxy accepts `CONNECT` tunnels on the same port as its API, from this machine only unless [`INTUTIC_PROXY_BIND`](/reference/configuration#core) opens it. On macOS and Windows, `intutic connect` also adds the proxy's certificate authority (`~/.intutic/ca.crt`) to the trusted roots (the login keychain on macOS) so the decrypted connection is trusted.
+
+The proxy creates that certificate authority on first run, valid for ten years from that day. Each intercepted connection gets a certificate of its own for the host, issued then and valid for 90 days, so certificates never run out while the proxy runs. When the certificate authority is within 30 days of expiring, the proxy replaces it at startup and logs a warning; run `intutic connect` again to trust the new one.
 
 ### JetBrains IDEs
 

@@ -20,6 +20,7 @@ import * as node_fs from 'node:fs/promises'
 import { log } from '../lib/logger.js'
 import { ensureValkey, valkeyRemediation, isValkeyRunning } from '../lib/ensureValkey.js'
 import { createShutdownHandler, terminateChild } from '../lib/gracefulShutdown.js'
+import { sandboxBindEnv } from '../lib/proxyBinary.js'
 import {
   loadCredentials,
   loadConfig,
@@ -489,6 +490,7 @@ export async function runConnect(opts: {
       
       proxyEnv = {
         ...process.env,
+        ...sandboxBindEnv(),
         // Explicit, so a PORT in the operator's shell cannot move the proxy
         // away from the port everything else probes.
         PORT: String(proxyPort),

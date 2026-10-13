@@ -57,6 +57,14 @@ The isolation envelope:
 | `--pids-limit` / `--memory` / `--cpus` | Bounds on fork-bombs and resource exhaustion |
 | A default-deny egress firewall inside the container | Installed by the image's entrypoint before the agent starts; permits only the proxy (reached via `host.docker.internal`) and DNS |
 
+The proxy listens on loopback by default. Docker Desktop (macOS, Windows)
+delivers the container's `host.docker.internal` connections to the host's
+loopback, so nothing more is needed there. With Docker or Podman on Linux,
+`host.docker.internal` is the bridge's address on the host, so start the proxy
+listening there too, for example
+`INTUTIC_PROXY_BIND=127.0.0.1,172.17.0.1` (see
+[`INTUTIC_PROXY_BIND`](/reference/configuration#core)).
+
 **The image** must contain `nftables` and `capsh`, which the entrypoint uses
 to install the firewall and drop privilege, plus your agent. The default,
 `intutic/sandbox:<CLI version>`, is built on your machine from the
@@ -124,6 +132,10 @@ run — it will not fall back to the container backend for you.
 **Requires KVM** (so a bare-metal host or a VM host with nested
 virtualization enabled — not every cloud VM size supports this) plus the
 `firecracker` binary and your own kernel/rootfs images.
+
+The guest reaches the proxy at the host's address on the tap link, which
+exists only once the microVM starts, so the proxy has to listen on every
+interface: `INTUTIC_PROXY_BIND=0.0.0.0`.
 
 ## Enforcement levels
 

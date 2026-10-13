@@ -647,6 +647,47 @@ async fn validate_key_via_control_plane(
     parse_key_context(resp, key.as_str()).await
 }
 
+/// What authenticating a virtual key outside the LLM request path found.
+pub(crate) enum KeyCheck {
+    /// The control plane (or its cache) recognises the key.
+    Valid,
+    /// It does not, or there is nothing that could vouch for it.
+    Invalid,
+    /// The cache or the control plane could not be reached. Callers refuse
+    /// with a retryable status rather than admit an unchecked key.
+    Unverifiable,
+}
+
+/// Authenticate `key` as `handle_proxy` does a gateway request (Step 2.5): the
+/// control plane's auth cache, then the control plane itself on a miss. Used
+/// where the proxy acts for a key without serving an LLM call: a `CONNECT`
+/// from another machine, and a sandbox attestation.
+///
+/// Standalone (no auth cache) still asks a configured control plane. With no
+/// control plane at all nothing can vouch for a key, so it is `Invalid`.
+pub(crate) async fn authenticate_virtual_key(state: &AppState, key: &VirtualKey) -> KeyCheck {
+    match state.control_plane.auth_context(key.as_str()).await {
+        ControlPlaneAuth::Known(_) => KeyCheck::Valid,
+        ControlPlaneAuth::Unavailable => KeyCheck::Unverifiable,
+        ControlPlaneAuth::Rejected | ControlPlaneAuth::Unmanaged => {
+            let Some(url) = state
+                .config
+                .intutic_settings
+                .policy
+                .control_plane_url
+                .as_deref()
+            else {
+                return KeyCheck::Invalid;
+            };
+            match validate_key_via_control_plane(&state.http_client, url, key).await {
+                Ok(Some(_)) => KeyCheck::Valid,
+                Ok(None) => KeyCheck::Invalid,
+                Err(()) => KeyCheck::Unverifiable,
+            }
+        }
+    }
+}
+
 /// Turn a 200 from `/auth/key-context` into an identity-only key record.
 async fn parse_key_context(
     resp: reqwest::Response,
@@ -4613,7 +4654,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // doc comment. Resolved here, once, like the other control-plane reads
     // above, so every detector and WASM rule reading it stays a pure function
     // of this struct.
-    let sandbox_attested = state.control_plane.is_sandbox_attested(&session_id).await;
+    let sandbox_attested = state
+        .control_plane
+        .is_sandbox_attested(&workspace_id, &session_id)
+        .await;
 
     // (pattern names, contributing sources) — see injection.rs::scan_body's
     // doc comment for why these stay two separately-deduplicated lists
@@ -7669,7 +7713,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     skip_forward = true;
                                 } else if is_done {
                                     {
-                                        let harness = session_id_clone.as_str();
+                                        // The resolved harness, which picks
+                                        // the Markdown or plain-text block.
+                                        let harness = harness_type_clone.as_str();
                                         // Keyed on the protocol, not the
                                         // provider: the block has to be
                                         // written in the shape the CLIENT
@@ -7793,7 +7839,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         }
                                         // Phase 7: Inject governance notifications before [DONE]
                                         {
-                                            let harness = session_id.as_str();
+                                            let harness = harness_type_clone.as_str();
                                             // Cross-provider: the client is
                                             // reading translated OpenAI chunks
                                             // whatever the upstream was, so the
@@ -13665,7 +13711,7 @@ mod tests {
             ) -> Vec<String> {
                 Vec::new()
             }
-            async fn is_sandbox_attested(&self, _sid: &str) -> bool {
+            async fn is_sandbox_attested(&self, _w: &str, _sid: &str) -> bool {
                 false
             }
         }

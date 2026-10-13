@@ -14,6 +14,8 @@ pub mod injection;
 /// The per-key `/auth/key-context` answer the workspace policy rides on
 pub mod key_context;
 pub mod key_limits;
+/// The listen addresses, and whether peers off this machine may connect
+pub mod listen;
 pub mod manifest;
 pub mod memory;
 pub mod metering;

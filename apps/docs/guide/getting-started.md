@@ -192,7 +192,7 @@ intutic start
 ℹ Docker detected — starting a Valkey container (intutic-valkey)…
 ✔ Valkey running in Docker (intutic-valkey) on port 6379.
 ℹ Starting proxy on port 4000…
-INFO intutic_proxy: Listening on 0.0.0.0:4000
+INFO intutic_proxy: Listening on 127.0.0.1:4000
 ```
 
 If no Valkey can be started — no Docker, no `valkey-server` on your PATH — the
@@ -203,7 +203,7 @@ proxy runs anyway:
 ℹ Routing, policies, DLP and local spend caps all work.
 ℹ Bandit learning persists to ~/.intutic; the response cache is per-process.
 ℹ Starting proxy on port 4000 (standalone)…
-INFO intutic_proxy: Listening on 0.0.0.0:4000
+INFO intutic_proxy: Listening on 127.0.0.1:4000
 ```
 
 DLP scanning, WASM rule enforcement, policy evaluation and intelligent routing

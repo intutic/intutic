@@ -49,6 +49,10 @@ COPY --from=builder /build/target/release/intutic-proxy /usr/local/bin/intutic-p
 # Default config (overridden by ConfigMap mount at /etc/intutic/proxy-config.yaml)
 ENV CONFIG_PATH=/etc/intutic/proxy-config.yaml
 ENV PORT=4000
+# A container is reached through its own network interface, never its
+# loopback, so the image listens on every interface. Run outside a container,
+# the proxy listens on loopback unless INTUTIC_PROXY_BIND says otherwise.
+ENV INTUTIC_PROXY_BIND=0.0.0.0
 ENV RUST_LOG=intutic_proxy=info,tower_http=info
 
 EXPOSE 4000

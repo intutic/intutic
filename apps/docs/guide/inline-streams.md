@@ -22,16 +22,16 @@ The Rust proxy gateway captures and buffers streaming responses from models in a
    * **OpenAI / Gemini**: `data: [DONE]`
    * **Anthropic**: `event: message_stop`
 2. **Notification Draining**: Before forwarding the terminal delimiter, the proxy performs an atomic pipeline fetch (`LRANGE` + `DEL`) against the workspace and session notification lists in Valkey.
-3. **Chunk Injection**: If any governance events were flagged during the trace execution, they are formatted as a protocol-compliant markdown block chunk and written into the stream.
+3. **Chunk Injection**: If any governance events were flagged during the trace execution, they are formatted as a block chunk in the stream's own protocol and written into the stream: Markdown for harnesses whose chat renders it (Claude Code, Cursor, Windsurf, Antigravity, OpenHands, Cline, Roo Code), plain text for any other.
 4. **Clean Exit**: The proxy then forwards the original stream end marker, allowing client-side parsers (such as in Cursor or VS Code) to terminate correctly without crashes.
 
 ---
 
 ## 📋 Markdown Alert Structure
 
-Drained alerts are formatted into standard Markdown blocks containing GitHub-style warning callouts. An alert names the governance event and the guidance to follow; when the rule was derived from a policy document, that guidance carries the cited sentence and the page it came from, the same text the gate printed at the moment of the block:
+For a harness that renders Markdown, drained alerts are formatted as a Markdown block: a heading, then each alert with a priority marker and its category. Any other harness gets the same alerts as plain text, as below. An alert names the governance event and the guidance to follow; when the rule was derived from a policy document, that guidance carries the cited sentence and the page it came from, the same text the gate printed at the moment of the block:
 
-```markdown
+```text
 --- Intutic Governance ---
 
 [CRITICAL] Anomaly: Data Exfiltration Detected

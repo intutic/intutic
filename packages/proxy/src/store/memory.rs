@@ -1268,7 +1268,7 @@ impl ControlPlaneCache for NullControlPlaneCache {
     /// Always `false`. No control plane means nothing ever attests a
     /// sandbox — returning anything else would make every open-core session
     /// look sandboxed regardless of reality.
-    async fn is_sandbox_attested(&self, _session_id: &str) -> bool {
+    async fn is_sandbox_attested(&self, _workspace_id: &str, _session_id: &str) -> bool {
         false
     }
 }
@@ -1285,7 +1285,7 @@ mod null_control_plane_cache_tests {
     #[tokio::test]
     async fn standalone_never_attests_a_sandbox() {
         let cp = NullControlPlaneCache;
-        assert!(!cp.is_sandbox_attested("ses_1").await);
+        assert!(!cp.is_sandbox_attested("ws_1", "ses_1").await);
     }
 
     /// Standalone proxies have no control plane to have configured a

@@ -36,6 +36,17 @@ pub enum Protocol {
     OpenAIResponses,
 }
 
+/// Whether `harness_type` renders Markdown in its chat, so the governance block
+/// is written as Markdown rather than plain text. Takes the resolved harness id
+/// (`resolve_harness_type` in `proxy.rs`), spelled as `HarnessType` in
+/// `packages/shared-types` spells it: hyphenated.
+fn renders_markdown(harness_type: &str) -> bool {
+    matches!(
+        harness_type,
+        "cursor" | "claude-code" | "windsurf" | "antigravity" | "openhands" | "cline" | "roo-code"
+    )
+}
+
 impl ResponsePostProcessor {
     /// Create a new post-processor for the given harness type.
     ///
@@ -47,11 +58,12 @@ impl ResponsePostProcessor {
         protocol: Protocol,
     ) -> anyhow::Result<Self> {
         let notification_client = NotificationClient::new(control_plane);
-        let formatter: Box<dyn GovernanceFormatter + Send + Sync> = match harness_type {
-            "cursor" | "claude_code" | "windsurf" | "antigravity" | "openhands" | "cline"
-            | "roo_code" => Box::new(formatters::markdown::MarkdownFormatter),
-            _ => Box::new(formatters::plaintext::PlaintextFormatter),
-        };
+        let formatter: Box<dyn GovernanceFormatter + Send + Sync> =
+            if renders_markdown(harness_type) {
+                Box::new(formatters::markdown::MarkdownFormatter)
+            } else {
+                Box::new(formatters::plaintext::PlaintextFormatter)
+            };
         Ok(Self {
             notification_client,
             formatter,
@@ -343,7 +355,7 @@ mod tests {
         ) -> Option<crate::store::TokenBaseline> {
             None
         }
-        async fn is_sandbox_attested(&self, _sid: &str) -> bool {
+        async fn is_sandbox_attested(&self, _w: &str, _sid: &str) -> bool {
             false
         }
     }
@@ -367,7 +379,7 @@ mod tests {
     }
 
     fn processor(cache: Arc<QueuedCards>, protocol: Protocol) -> ResponsePostProcessor {
-        ResponsePostProcessor::new(cache, "claude_code", protocol).expect("processor")
+        ResponsePostProcessor::new(cache, "claude-code", protocol).expect("processor")
     }
 
     #[tokio::test]
@@ -446,6 +458,57 @@ mod tests {
             recorded[0].1.len(),
             5,
             "only the five appended cards count as delivered"
+        );
+    }
+
+    /// The harness ids the proxy resolves are hyphenated (`HarnessType` in
+    /// `packages/shared-types`); matching underscored spellings sent every
+    /// Claude Code and Roo Code session to the plain-text formatter.
+    #[test]
+    fn markdown_harnesses_are_matched_by_their_real_ids() {
+        for id in [
+            "claude-code",
+            "roo-code",
+            "cursor",
+            "windsurf",
+            "antigravity",
+            "openhands",
+            "cline",
+        ] {
+            assert!(renders_markdown(id), "{id}");
+        }
+        for id in ["aider", "codex", "ses_9f2c1a", "unknown"] {
+            assert!(!renders_markdown(id), "{id}");
+        }
+    }
+
+    async fn block_for(harness: &str) -> String {
+        let cache = Arc::new(QueuedCards {
+            session: vec![payload(Some("crd_a"), "HIGH")],
+            workspace: Vec::new(),
+            recorded: Mutex::new(Vec::new()),
+        });
+        let pp = ResponsePostProcessor::new(cache, harness, Protocol::Anthropic).unwrap();
+        String::from_utf8(pp.process("ses_test", "wk_test", None).await.unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn claude_code_gets_the_markdown_block_and_aider_plain_text() {
+        let md = block_for("claude-code").await;
+        assert!(md.contains("<!-- intutic:governance -->"), "{md}");
+        let plain = block_for("aider").await;
+        assert!(plain.contains("--- Intutic Governance ---"), "{plain}");
+    }
+
+    /// Both stream call sites pass the resolved harness, not the session id.
+    #[test]
+    fn the_stream_call_sites_pass_the_harness_not_the_session_id() {
+        let src = include_str!("../proxy.rs");
+        assert!(!src.contains("let harness = session_id"));
+        assert_eq!(
+            src.matches("let harness = harness_type_clone.as_str();")
+                .count(),
+            2
         );
     }
 }
