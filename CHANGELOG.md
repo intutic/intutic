@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking for SIEM rules: traces, detector findings and device events get
+  their own CEF classes.** All of them went out over syslog as
+  `AGENT_TOOL_CALL` (device events as `AGENT_TOOL_CALL_UPDATE`) at severity 5,
+  though none is a tool call. Now `execution_traces` is
+  `AGENT_MODEL_REQUEST` (severity 1), `detector_findings` is
+  `DETECTOR_FINDING` (severity from the finding: 10, 7, 4 or 1), a disabled
+  firewall is `DEVICE_ENFORCEMENT_DISABLED_UPDATE` (7) and a device that
+  stopped reporting is `DEVICE_ENFORCEMENT_STALE` (4). The CEF header's
+  device version goes from `1.0` to `2.0`, so a rule can tell the two apart.
+  The stopped-reporting alert changes no record, so it is no longer labelled
+  "(Updated)": its `mutationType` is `INSERT` at every destination, and one
+  already in the dead-letter queue is retried as an `INSERT`. A source with
+  no class is refused instead of sent under a default, and a test fails when
+  an exported source has none. Update Sentinel, Splunk or ArcSight rules that
+  match the old classes; the SIEM export guide's "Changed in 2.5.1" lists
+  old and new.
 - **Behaviour change: `withIntuticProxy()` points providers at the proxy's
   `/v1` routes.** `@intutic/gate/vercel` (and its `@intutic/gate/eve`
   re-export) passed the bare proxy URL as `baseURL`, and `@ai-sdk/openai` and
