@@ -77,9 +77,9 @@ export const API_KEY_SCOPES: readonly ApiKeyScopeEntry[] = [
 ]
 
 /** Every valid scope string. */
-export const API_KEY_SCOPE_NAMES: readonly ApiKeyScope[] = API_KEY_SCOPES.map((s) => s.scope)
+export const API_SCOPE_NAMES: readonly ApiKeyScope[] = API_KEY_SCOPES.map((s) => s.scope)
 
-const SCOPE_SET: ReadonlySet<string> = new Set(API_KEY_SCOPE_NAMES)
+const SCOPE_SET: ReadonlySet<string> = new Set(API_SCOPE_NAMES)
 
 /** The least-privilege preset for a key that only runs agents, CI jobs or a proxy. */
 export const AUTOMATION_KEY_SCOPES: readonly ApiKeyScope[] = [GATEWAY_USE_SCOPE]
@@ -136,7 +136,7 @@ export function effectiveApiKeyScopes(stored: unknown): { scopes: ApiKeyScope[];
  */
 export function compactScopes(scopes: readonly string[]): ApiKeyScope[] {
   if (scopes.includes(ALL_SCOPES)) return [ALL_SCOPES]
-  return API_KEY_SCOPE_NAMES.filter(
+  return API_SCOPE_NAMES.filter(
     (s) => s !== ALL_SCOPES && scopes.includes(s) && !(s.endsWith(':read') && scopes.includes(`${s.slice(0, -':read'.length)}:write`)),
   )
 }
@@ -144,10 +144,10 @@ export function compactScopes(scopes: readonly string[]): ApiKeyScope[] {
 /** What both `a` and `b` grant, compacted — a child key's reach under its parent. */
 export function intersectScopes(a: readonly string[], b: readonly string[]): ApiKeyScope[] {
   if (a.includes(ALL_SCOPES) && b.includes(ALL_SCOPES)) return [ALL_SCOPES]
-  return compactScopes(API_KEY_SCOPE_NAMES.filter((s) => s !== ALL_SCOPES && scopeGrants(a, s) && scopeGrants(b, s)))
+  return compactScopes(API_SCOPE_NAMES.filter((s) => s !== ALL_SCOPES && scopeGrants(a, s) && scopeGrants(b, s)))
 }
 
 /** The message naming the valid scopes, for a request that sent an unknown one. */
 export function unknownScopesMessage(unknown: readonly string[]): string {
-  return `Unknown scope${unknown.length === 1 ? '' : 's'} ${unknown.map((s) => `"${s}"`).join(', ')}. Valid scopes: ${API_KEY_SCOPE_NAMES.join(', ')}`
+  return `Unknown scope${unknown.length === 1 ? '' : 's'} ${unknown.map((s) => `"${s}"`).join(', ')}. Valid scopes: ${API_SCOPE_NAMES.join(', ')}`
 }

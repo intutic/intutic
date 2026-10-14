@@ -15,7 +15,7 @@
  * @module
  */
 
-import { API_KEY_SCOPE_NAMES, unknownApiKeyScopes } from '@intutic/shared-types'
+import { API_SCOPE_NAMES, unknownApiKeyScopes } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { getClient } from './skill.js'
 
@@ -73,7 +73,7 @@ export async function runAttenuate(opts: {
   }
   const unknown = unknownApiKeyScopes(requestedCaps)
   if (unknown.length > 0) {
-    log.error(`Unknown scope${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}. Valid scopes: ${API_KEY_SCOPE_NAMES.join(', ')}`)
+    log.error(`Unknown scope${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}. Valid scopes: ${API_SCOPE_NAMES.join(', ')}`)
     process.exit(1)
   }
 

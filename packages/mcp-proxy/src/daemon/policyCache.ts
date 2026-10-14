@@ -8,7 +8,7 @@
  */
 import https from 'node:https'
 import http from 'node:http'
-import { createHash } from 'node:crypto'
+import { scryptSync } from 'node:crypto'
 import { Redis } from 'ioredis'
 import { describeConnectionError } from '../valkeyErrors.js'
 import { createLogger } from '@intutic/logger'
@@ -163,13 +163,18 @@ async function readConfigVersion(workspaceId: string): Promise<number | undefine
 }
 
 /**
- * Who this daemon resolves policy as: the first 32 hex characters of the
- * SHA-256 of its API key, never the key. The control plane answers
+ * Who this daemon resolves policy as: a scrypt derivation of its API key,
+ * never the key, computed once per key. The control plane answers
  * `policy/resolve` for the key's member — their role's hook rules, their
  * principal — so the shared entry is that caller's, not the workspace's.
  */
+let callerTagMemo: { key: string; tag: string } | undefined
 function callerTag(): string {
-  return createHash('sha256').update(getDaemonApiKey()).digest('hex').slice(0, 32)
+  const key = getDaemonApiKey()
+  if (callerTagMemo?.key !== key) {
+    callerTagMemo = { key, tag: scryptSync(key, 'intutic-mcp-daemon-policy-cache', 16).toString('hex') }
+  }
+  return callerTagMemo.tag
 }
 
 /**

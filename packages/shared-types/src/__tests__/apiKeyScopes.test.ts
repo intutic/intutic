@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
 import {
-  API_KEY_SCOPE_NAMES,
+  API_SCOPE_NAMES,
   compactScopes,
   effectiveApiKeyScopes,
   intersectScopes,
@@ -22,9 +22,9 @@ const TERRAFORM_COPY = fileURLToPath(
 
 describe('API key scopes', () => {
   it('is a small fixed vocabulary: *, gateway:use and <area>:<read|write>', () => {
-    expect(new Set(API_KEY_SCOPE_NAMES).size).toBe(API_KEY_SCOPE_NAMES.length)
-    expect(API_KEY_SCOPE_NAMES.slice(0, 2)).toEqual(['*', 'gateway:use'])
-    for (const s of API_KEY_SCOPE_NAMES.slice(2)) expect(s).toMatch(/^[a-z]+:(read|write)$/)
+    expect(new Set(API_SCOPE_NAMES).size).toBe(API_SCOPE_NAMES.length)
+    expect(API_SCOPE_NAMES.slice(0, 2)).toEqual(['*', 'gateway:use'])
+    for (const s of API_SCOPE_NAMES.slice(2)) expect(s).toMatch(/^[a-z]+:(read|write)$/)
   })
 
   it('grants: * covers all, write covers read, nothing else', () => {
@@ -67,7 +67,7 @@ describe('API key scopes', () => {
 
   it("matches the Terraform provider's copy", () => {
     const copy = JSON.parse(readFileSync(TERRAFORM_COPY, 'utf8')) as { scopes: string[] }
-    // On a mismatch, write `{ "scopes": API_KEY_SCOPE_NAMES }` to the file, two-space indented.
-    expect(copy.scopes).toEqual([...API_KEY_SCOPE_NAMES])
+    // On a mismatch, write `{ "scopes": API_SCOPE_NAMES }` to the file, two-space indented.
+    expect(copy.scopes).toEqual([...API_SCOPE_NAMES])
   })
 })

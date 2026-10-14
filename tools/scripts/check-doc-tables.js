@@ -351,7 +351,7 @@ run('SOP lifecycle', () => {
       diagrams += 1
       diagramPages.add(p.rel)
       const drawn = diagramEdges(b.lines, states)
-      const arrow = (e) => e.replace('>', ' → ')
+      const arrow = (e) => e.replaceAll('>', ' → ')
       const missing = transitions.filter((e) => !drawn.has(e))
       const extra = [...drawn].filter((e) => !transitions.includes(e))
       if (missing.length) findings.push(`${p.rel}:${b.line}: the lifecycle diagram does not draw ${missing.map(arrow).join(', ')} (VALID_SOP_TRANSITIONS, ${SOP_TS}).`)

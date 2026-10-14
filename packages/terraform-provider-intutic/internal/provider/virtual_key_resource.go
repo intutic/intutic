@@ -27,7 +27,7 @@ import (
 // and UpdateApiKeyInputSchema. The key's spend budgets and rate limit change
 // in place through PATCH /api/v1/keys/:id; every other input replaces the key.
 
-// The scopes a key can hold: shared-types' API_KEY_SCOPE_NAMES, which the API
+// The scopes a key can hold: shared-types' API_SCOPE_NAMES, which the API
 // validates against. Checked here so an unknown scope fails at plan time rather
 // than as a 400 mid-apply; shared-types' test suite asserts this file matches.
 //
