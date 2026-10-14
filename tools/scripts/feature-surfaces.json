@@ -18,6 +18,7 @@
     },
     "docsPages": {
       "reference/workspace-settings.md": "the reference for every workspace settings key, which many features share; services/control-plane/__tests__/unit/settingsKeyParity.test.ts holds it to the settings schema",
+      "reference/openapi.md": "renders public/openapi.json, every control plane route as OpenAPI, which every feature with an API surface shares; generated with the route catalog in reference/api.md and held to the route source the same way",
       "compare/noma.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",
       "compare/palo-alto-networks.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",
       "compare/pillar-security.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",

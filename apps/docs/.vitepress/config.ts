@@ -241,6 +241,7 @@ const sidebarReference = [
       { text: 'SOP Front Matter (Open-Core)', link: '/reference/sop-front-matter' },
       ...(!IS_OSS ? [
         { text: 'REST API (Cloud)', link: '/reference/api' },
+        { text: 'OpenAPI Reference (Cloud)', link: '/reference/openapi' },
         { text: 'Workspace Settings (Cloud)', link: '/reference/workspace-settings' },
         { text: 'SOP Format (Cloud)', link: '/reference/sop-format' },
         {
@@ -296,6 +297,14 @@ export default defineConfig({
   // each other, so excluding the set removes both the pages and their linkers;
   // `ignoreDeadLinks` above absorbs any stragglers.
   srcExclude: PAID_TIER_PAGES,
+
+  // public/openapi.json describes the control plane's routes, the content of
+  // the Cloud-badged REST API pages above, and names hosted terms the
+  // open-source build refuses (see BANNED below). VitePress copies public/
+  // whole, so the open-source build drops it with the pages that render it.
+  buildEnd(siteConfig) {
+    if (IS_OSS) fs.rmSync(path.join(siteConfig.outDir, 'openapi.json'), { force: true })
+  },
 
   // Strip ENTERPRISE_ONLY blocks in the markdown pipeline, not only in the Vite
   // transform below.

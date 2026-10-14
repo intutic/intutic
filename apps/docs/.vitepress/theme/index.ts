@@ -2,6 +2,7 @@
 import DefaultTheme from 'vitepress/theme-without-fonts'
 import './custom.css'
 import { inBrowser } from 'vitepress'
+import { defineAsyncComponent } from 'vue'
 
 declare global {
   interface Window {
@@ -11,7 +12,26 @@ declare global {
 
 export default {
   extends: DefaultTheme,
-  enhanceApp({ router }) {
+  enhanceApp({ app, router }) {
+    // The OpenAPI renderer (vitepress-openapi, about 2 MB) is loaded only by
+    // the page that shows it, reference/openapi.md. Its stylesheet carries
+    // unlayered utility classes (.container, .hidden, .table) that would reach
+    // every page through VitePress's single bundled stylesheet, so it is
+    // inlined and added to the document only when the renderer loads.
+    app.component(
+      'ApiReference',
+      defineAsyncComponent(async () => {
+        const [{ theme, OASpec }, { default: css }] = await Promise.all([
+          import('vitepress-openapi/client'),
+          import('vitepress-openapi/dist/style.css?inline'),
+        ])
+        if (inBrowser && !document.getElementById('vitepress-openapi-css')) {
+          document.head.append(Object.assign(document.createElement('style'), { id: 'vitepress-openapi-css', textContent: css }))
+        }
+        theme.enhanceApp({ app } as Parameters<typeof theme.enhanceApp>[0])
+        return OASpec
+      }),
+    )
     if (inBrowser) {
       // Safely load tracking configurations
       const posthogKey = (import.meta.env.VITE_POSTHOG_KEY as string) || ''
