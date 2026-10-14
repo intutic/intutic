@@ -95,6 +95,9 @@ importers:
 
   packages/clawde-sdk:
     devDependencies:
+      '@intutic/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       typescript:
         specifier: ^5.5
         version: 5.9.3

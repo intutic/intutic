@@ -19,10 +19,11 @@
     "lint": "eslint src",
     "build": "tsc",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {},
   "devDependencies": {
+    "@intutic/shared-types": "workspace:*",
     "typescript": "^5.5",
     "vitest": "^4"
   },

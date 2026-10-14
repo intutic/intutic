@@ -6,7 +6,7 @@ The REST API endpoints documented below are exposed by the **Intutic Control Pla
 
 The Intutic control plane exposes a RESTful API under `/api/v1/`. Request and response bodies are JSON.
 
-The same routes are published as an OpenAPI 3.1 document, [`openapi.json`](/openapi.json), with the request schemas the handlers validate against: browse it in the [OpenAPI Reference](/reference/openapi).
+The same routes are published as an OpenAPI 3.1 document, [`openapi.json`](/openapi.json), with the request schemas the handlers validate against and the response schemas they answer with: browse it in the [OpenAPI Reference](/reference/openapi).
 
 ## Base URL
 

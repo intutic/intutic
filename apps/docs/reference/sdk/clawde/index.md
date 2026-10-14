@@ -94,7 +94,7 @@ Any of the three. A changed IR creates the next version; `description: null` cle
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-forked"></a> `forked` | `boolean` | The IR changed: a new version, PROPOSED with no evidence, replaced the old one, which is now RETIRED. |
-| <a id="property-guardrail"></a> `guardrail` | [`GuardrailDetail`](#guardraildetail) | - |
+| <a id="property-guardrail"></a> `guardrail` | [`GuardrailDetail`](#guardraildetail) \| `null` | The guardrail read back after the write; null only if it is gone by then. |
 | <a id="property-ok"></a> `ok` | `true` | - |
 | <a id="property-supersedes"></a> `supersedes` | `string` \| `null` | - |
 
@@ -162,8 +162,6 @@ Any of the three. A changed IR creates the next version; `description: null` cle
 | Property | Type |
 | ------ | ------ |
 | <a id="property-accepted"></a> `accepted?` | `boolean` |
-| <a id="property-detail"></a> `detail?` | `string` |
-| <a id="property-error"></a> `error?` | `string` |
 | <a id="property-gates"></a> `gates?` | `object`[] |
 | <a id="property-mode"></a> `mode?` | `string` |
 | <a id="property-ruleid"></a> `ruleId?` | `string` |
@@ -553,7 +551,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | <a id="property-cap"></a> `cap` | \| \{ `cap`: `number`; `count`: `number`; \} \| `null` |
 | <a id="property-chunks"></a> `chunks` | `number` |
 | <a id="property-docid"></a> `docId` | `string` |
-| <a id="property-error-1"></a> `error` | `string` \| `null` |
+| <a id="property-error"></a> `error` | `string` \| `null` |
 | <a id="property-extractor"></a> `extractor` | `string` |
 | <a id="property-guardrails"></a> `guardrails` | `object` |
 | `guardrails.existing` | `number` |
@@ -777,15 +775,15 @@ An evidence archive: the parts verification reads. Everything else is covered by
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
-| <a id="property-activeworkspaces"></a> `activeWorkspaces` | `number` \| `null` | - |
+| <a id="property-activeworkspaces"></a> `activeWorkspaces?` | `number` \| `null` | - |
 | <a id="property-appliedconfigversion"></a> `appliedConfigVersion` | `number` \| `null` | The config version the gateway reported running in its last heartbeat; null when unreachable or not reported. |
 | <a id="property-desiredconfigversion"></a> `desiredConfigVersion` | `number` | The version the latest config change produced; 0 before any. The gateway pulls it on its next heartbeat. |
-| <a id="property-lasterror"></a> `lastError` | `string` \| `null` | - |
-| <a id="property-litellmreachable"></a> `litellmReachable` | `boolean` \| `null` | - |
-| <a id="property-proxyversion-1"></a> `proxyVersion` | `string` \| `null` | - |
+| <a id="property-lasterror"></a> `lastError?` | `string` \| `null` | - |
+| <a id="property-litellmreachable"></a> `litellmReachable?` | `boolean` \| `null` | - |
+| <a id="property-proxyversion-1"></a> `proxyVersion?` | `string` \| `null` | The fields below are null when the gateway is unreachable, and absent when its last heartbeat did not report them. |
 | <a id="property-reportedat"></a> `reportedAt` | `string` \| `null` | - |
 | <a id="property-status-4"></a> `status` | `"pending"` \| `"online"` \| `"degraded"` \| `"unreachable"` | - |
-| <a id="property-uptimeseconds"></a> `uptimeSeconds` | `number` \| `null` | - |
+| <a id="property-uptimeseconds"></a> `uptimeSeconds?` | `number` \| `null` | - |
 
 ***
 
@@ -826,7 +824,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | <a id="property-b"></a> `b` | `object` |
 | `b.id` | `string` |
 | `b.quote` | `string` |
-| <a id="property-detail-1"></a> `detail` | `string` |
+| <a id="property-detail"></a> `detail` | `string` |
 | <a id="property-kind"></a> `kind` | `string` |
 | <a id="property-token-2"></a> `token` | `string` \| `null` |
 
@@ -914,23 +912,23 @@ Name exactly one: the document or the passage whose change to follow.
 
 #### Properties
 
-| Property | Type |
-| ------ | ------ |
-| <a id="property-adjudicated"></a> `adjudicated` | `number` |
-| <a id="property-adjudicatedrequired"></a> `adjudicatedRequired` | `number` |
-| <a id="property-evaluations"></a> `evaluations` | `number` |
-| <a id="property-falsepositiverate"></a> `falsePositiveRate` | `number` \| `null` |
-| <a id="property-falsepositives"></a> `falsePositives` | `number` |
-| <a id="property-neverfired"></a> `neverFired` | `boolean` |
-| <a id="property-ready"></a> `ready` | `boolean` |
-| <a id="property-reasons"></a> `reasons` | `string`[] |
-| <a id="property-thresholds"></a> `thresholds` | `object` |
-| `thresholds.maxAdjudicatedFalsePositiveRate` | `number` |
-| `thresholds.maxWouldActRate` | `number` |
-| `thresholds.minAdjudicatedFires` | `number` |
-| `thresholds.minShadowEvaluations` | `number` |
-| <a id="property-wouldact"></a> `wouldAct` | `number` |
-| <a id="property-wouldactrate"></a> `wouldActRate` | `number` \| `null` |
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-adjudicated"></a> `adjudicated` | `number` \| `null` | Null when the evidence counters could not be read. |
+| <a id="property-adjudicatedrequired"></a> `adjudicatedRequired` | `number` | - |
+| <a id="property-evaluations"></a> `evaluations` | `number` \| `null` | Null when the evidence counters could not be read (the guardrail is then not ready). |
+| <a id="property-falsepositiverate"></a> `falsePositiveRate` | `number` \| `null` | - |
+| <a id="property-falsepositives"></a> `falsePositives` | `number` \| `null` | Null when the evidence counters could not be read. |
+| <a id="property-neverfired"></a> `neverFired` | `boolean` | - |
+| <a id="property-ready"></a> `ready` | `boolean` | - |
+| <a id="property-reasons"></a> `reasons` | `string`[] | - |
+| <a id="property-thresholds"></a> `thresholds` | `object` | - |
+| `thresholds.maxAdjudicatedFalsePositiveRate` | `number` | - |
+| `thresholds.maxWouldActRate` | `number` | - |
+| `thresholds.minAdjudicatedFires` | `number` | - |
+| `thresholds.minShadowEvaluations` | `number` | - |
+| <a id="property-wouldact"></a> `wouldAct` | `number` \| `null` | Null when the evidence counters could not be read. |
+| <a id="property-wouldactrate"></a> `wouldActRate` | `number` \| `null` | - |
 
 ***
 
@@ -990,11 +988,11 @@ Name exactly one: the document or the passage whose change to follow.
 
 #### Properties
 
-| Property | Type |
-| ------ | ------ |
-| <a id="property-guardrail-2"></a> `guardrail` | [`GuardrailDetail`](#guardraildetail) |
-| <a id="property-ok-4"></a> `ok` | `boolean` |
-| <a id="property-readiness"></a> `readiness?` | [`GuardrailReadiness`](#guardrailreadiness) |
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-guardrail-2"></a> `guardrail` | [`GuardrailDetail`](#guardraildetail) \| `null` | The guardrail as the transition left it. A promotion reads it back after the write: null only if it is gone by then. |
+| <a id="property-ok-4"></a> `ok` | `boolean` | - |
+| <a id="property-readiness"></a> `readiness?` | [`GuardrailReadiness`](#guardrailreadiness) | - |
 
 ***
 
@@ -1957,8 +1955,8 @@ list, such as Azure OpenAI, whose list names base models, not deployments).
 | <a id="property-destinationid"></a> `destinationId` | `string` | - |
 | <a id="property-flushintervalms"></a> `flushIntervalMs` | `number` | - |
 | <a id="property-isactive-1"></a> `isActive` | `boolean` | - |
-| <a id="property-lasterror-1"></a> `lastError` | `string` \| `null` | - |
-| <a id="property-lastheartbeatat-1"></a> `lastHeartbeatAt` | `string` \| `null` | - |
+| <a id="property-lasterror-1"></a> `lastError?` | `string` \| `null` | Absent on the create response, which reports no health yet. |
+| <a id="property-lastheartbeatat-1"></a> `lastHeartbeatAt?` | `string` \| `null` | Absent on the create response, which reports no health yet. |
 | <a id="property-name-16"></a> `name` | `string` | - |
 | <a id="property-signingsecret-2"></a> `signingSecret?` | `string` | A webhook destination's signing secret, only in the response that made it. |
 | <a id="property-sourcetables"></a> `sourceTables` | `string`[] | Empty means the default set: every source except the opt-in ones. |
@@ -1986,7 +1984,7 @@ list, such as Azure OpenAI, whose list names base models, not deployments).
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-items"></a> `items` | [`SiemDestination`](#siemdestination)[] |
+| <a id="property-items"></a> `items` | [`SiemDestinationSummary`](#siemdestinationsummary)[] |
 | <a id="property-sources"></a> `sources` | [`SiemSources`](#siemsources) |
 
 ***
@@ -2083,12 +2081,21 @@ The control plane's published signing keys, one per `kid`.
 
 ### SopCreateResult
 
+The created SOP: `POST /api/v1/sops` answers with the SOP itself (it sends no `ok`).
+
 #### Properties
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-ok-12"></a> `ok` | `boolean` |
-| <a id="property-sopid-2"></a> `sopId?` | `string` |
+| <a id="property-complexitytier"></a> `complexityTier` | `string` |
+| <a id="property-isactive-3"></a> `isActive` | `boolean` |
+| <a id="property-lifecyclestate"></a> `lifecycleState` | `string` |
+| <a id="property-markdowncontent"></a> `markdownContent` | `string` |
+| <a id="property-risktier-1"></a> `riskTier` | `string` |
+| <a id="property-sopid-2"></a> `sopId` | `string` |
+| <a id="property-title-5"></a> `title` | `string` |
+| <a id="property-version-3"></a> `version` | `string` |
+| <a id="property-workspaceid-7"></a> `workspaceId` | `string` |
 
 ***
 
@@ -2102,13 +2109,13 @@ The control plane's published signing keys, one per `kid`.
 
 #### Properties
 
-| Property | Type |
-| ------ | ------ |
-| <a id="property-markdowncontent"></a> `markdownContent` | `string` |
-| <a id="property-risktier-1"></a> `riskTier` | `string` |
-| <a id="property-sopid-3"></a> `sopId` | `string` |
-| <a id="property-title-5"></a> `title` | `string` |
-| <a id="property-version-3"></a> `version` | `string` |
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-markdowncontent-1"></a> `markdownContent` | `string` | - |
+| <a id="property-risktier-2"></a> `riskTier` | `string` \| `null` | Null for a SOP stored without one. |
+| <a id="property-sopid-3"></a> `sopId` | `string` | - |
+| <a id="property-title-6"></a> `title` | `string` | - |
+| <a id="property-version-4"></a> `version` | `string` | - |
 
 ***
 
@@ -2123,8 +2130,8 @@ The body `intutic sops push` sends, in the route's snake_case.
 | <a id="property-complexity_tier"></a> `complexity_tier?` | `string` |
 | <a id="property-markdown_content-1"></a> `markdown_content` | `string` |
 | <a id="property-risk_tier-1"></a> `risk_tier?` | `string` |
-| <a id="property-title-6"></a> `title` | `string` |
-| <a id="property-version-4"></a> `version?` | `string` |
+| <a id="property-title-7"></a> `title` | `string` |
+| <a id="property-version-5"></a> `version?` | `string` |
 
 ***
 
@@ -2142,7 +2149,7 @@ The body `intutic sops push` sends, in the route's snake_case.
 | ------ | ------ |
 | <a id="property-contenthash-1"></a> `contentHash?` | `string` |
 | <a id="property-sopid-4"></a> `sopId` | `string` |
-| <a id="property-title-7"></a> `title` | `string` |
+| <a id="property-title-8"></a> `title` | `string` |
 
 ***
 
@@ -2389,7 +2396,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | <a id="property-email-2"></a> `email` | `string` |
 | <a id="property-memberid-2"></a> `memberId` | `string` |
 | <a id="property-role-1"></a> `role` | `string` |
-| <a id="property-workspaceid-7"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-8"></a> `workspaceId` | `string` |
 
 ***
 
@@ -2403,7 +2410,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | <a id="property-name-20"></a> `name` | `string` |
 | <a id="property-plantier-1"></a> `planTier` | `string` |
 | <a id="property-slug-1"></a> `slug` | `string` |
-| <a id="property-workspaceid-8"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-9"></a> `workspaceId` | `string` |
 
 ***
 
@@ -2418,7 +2425,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-settings"></a> `settings` | `Record`\<`string`, `unknown`\> | Every setting, resolved with its default. |
-| <a id="property-workspaceid-9"></a> `workspaceId` | `string` | - |
+| <a id="property-workspaceid-10"></a> `workspaceId` | `string` | - |
 
 ***
 
@@ -2434,7 +2441,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | ------ | ------ | ------ | ------ |
 | <a id="property-settings-1"></a> `settings` | `Record`\<`string`, `unknown`\> | Every setting, resolved with its default. | [`WorkspaceSettings`](#workspacesettings).[`settings`](#property-settings) |
 | <a id="property-updated"></a> `updated` | `true` | - | - |
-| <a id="property-workspaceid-10"></a> `workspaceId` | `string` | - | [`WorkspaceSettings`](#workspacesettings).[`workspaceId`](#property-workspaceid-9) |
+| <a id="property-workspaceid-11"></a> `workspaceId` | `string` | - | [`WorkspaceSettings`](#workspacesettings).[`workspaceId`](#property-workspaceid-10) |
 
 ## Type Aliases
 
@@ -2631,6 +2638,16 @@ type SiemAdapterType =
   | "splunk_hec"
   | "datadog_logs";
 ```
+
+***
+
+### SiemDestinationSummary
+
+```ts
+type SiemDestinationSummary = Omit<SiemDestination, "config" | "signingSecret">;
+```
+
+A destination as the list answers it: no adapter settings, and no signing secret.
 
 ***
 

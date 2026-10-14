@@ -699,7 +699,7 @@ export interface SopSummary {
 
 /** Paginated result from SOP listing. */
 export interface SopListResult {
-  items: SopSummary[]
+  items: Sop[]
   total: number
   page: number
   limit: number

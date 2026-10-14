@@ -486,7 +486,7 @@ POST /api/v1/sops — one workspace SOP; `markdown_content` without front matter
 ### createTeam()
 
 ```ts
-createTeam(orgId, name): Promise<Team>;
+createTeam(orgId, name): Promise<Pick<Team, "name" | "orgId" | "teamId">>;
 ```
 
 POST /api/v1/orgs/:orgId/teams
@@ -500,14 +500,14 @@ POST /api/v1/orgs/:orgId/teams
 
 #### Returns
 
-`Promise`\<[`Team`](../index.md#team)\>
+`Promise`\<`Pick`\<[`Team`](../index.md#team), `"name"` \| `"orgId"` \| `"teamId"`\>\>
 
 ***
 
 ### createWorkspace()
 
 ```ts
-createWorkspace(teamId, name): Promise<Workspace>;
+createWorkspace(teamId, name): Promise<Pick<Workspace, "name" | "workspaceId"> & object>;
 ```
 
 POST /api/v1/teams/:teamId/workspaces
@@ -521,7 +521,7 @@ POST /api/v1/teams/:teamId/workspaces
 
 #### Returns
 
-`Promise`\<[`Workspace`](../index.md#workspace)\>
+`Promise`\<`Pick`\<[`Workspace`](../index.md#workspace), `"name"` \| `"workspaceId"`\> & `object`\>
 
 ***
 

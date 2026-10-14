@@ -1,0 +1,86 @@
+/** SDK response types of the notification, SIEM, MCP registry, attenuation, compliance, GitHub webhook, gate liveness, cost prediction and routing routes, against their schemas. */
+import type {
+  AttenuationChainResponse,
+  AttenuationResponse,
+  CostPredictionResponse,
+  FrameworkCoverageResponse,
+  GateLivenessResponse,
+  GitHubWebhookResponse,
+  GitHubWebhookSecretResponse,
+  McpServerDecisionResponse,
+  McpServerListResponse,
+  MirrorAdoptionReportResponse,
+  NotificationRuleListResponse,
+  NotificationRuleResponse,
+  NotificationRuleSigningSecretResponse,
+  SiemDestinationCreatedResponse,
+  SiemDestinationListResponse,
+  SiemDestinationResponse,
+  SiemDestinationUpdatedResponse,
+  SiemSigningSecretResponse,
+  Soc2CollectResponse,
+} from '@intutic/shared-types'
+import type {
+  AttenuationChainLink,
+  AttenuationResult,
+  CostPrediction,
+  EvidenceCollectResult,
+  FrameworkCoverage,
+  GateLiveness,
+  GitHubWebhookInfo,
+  GitHubWebhookSecret,
+  McpServerDecision,
+  McpServerList,
+  MirrorAdoptionReport,
+  NotificationRule,
+  NotificationSecretRotation,
+  SiemDestination,
+  SiemDestinationList,
+  SiemSecretRotation,
+  SiemSources,
+} from '../../src/types'
+import { conforms, type Rows } from './conforms'
+
+// listMcpServers: GET /api/v1/mcp/servers
+conforms<McpServerList>()<McpServerListResponse>()
+// approveMcpServer / blockMcpServer / resetMcpServer: POST /api/v1/mcp/servers/:serverId/status
+// enableMcpTool / disableMcpTool: POST /api/v1/mcp/servers/:serverId/tools
+conforms<McpServerDecision>()<McpServerDecisionResponse>()
+
+// listNotificationRules: GET /api/v1/notifications/rules, unwrapped from `rules`
+conforms<NotificationRule>()<Rows<NotificationRuleListResponse, 'rules'>>()
+// createNotificationRule / updateNotificationRule: POST, PUT /api/v1/notifications/rules[/:ruleId]
+conforms<NotificationRule>()<NotificationRuleResponse>()
+// rotateNotificationRuleSecret: POST /api/v1/notifications/rules/:ruleId/signing-secret
+conforms<NotificationSecretRotation>()<NotificationRuleSigningSecretResponse>()
+
+// listSiemDestinations: GET /api/v1/siem/destinations
+conforms<SiemDestinationList>()<SiemDestinationListResponse>()
+// listSiemSources: GET /api/v1/siem/destinations, unwrapped from `sources`
+conforms<SiemSources>()<SiemDestinationListResponse['sources']>()
+// getSiemDestination: GET /api/v1/siem/destinations/:destinationId; createSiemDestination: POST
+// /api/v1/siem/destinations (the one that sends `signingSecret`); updateSiemDestination: PUT …/:destinationId
+conforms<SiemDestination>()<SiemDestinationResponse | SiemDestinationCreatedResponse | SiemDestinationUpdatedResponse>()
+// rotateSiemDestinationSecret: POST /api/v1/siem/destinations/:destinationId/signing-secret
+conforms<SiemSecretRotation>()<SiemSigningSecretResponse>()
+
+// getFrameworkCoverage: GET /api/v1/compliance/frameworks/:frameworkId/coverage
+conforms<FrameworkCoverage>()<FrameworkCoverageResponse>()
+// collectEvidence: POST /api/v1/compliance/soc2-collect
+conforms<EvidenceCollectResult>()<Soc2CollectResponse>()
+
+// getGateLiveness: GET /api/v1/governance/gate-liveness
+conforms<GateLiveness>()<GateLivenessResponse>()
+// getGithubWebhook: GET /api/v1/integrations/github/webhook
+conforms<GitHubWebhookInfo>()<GitHubWebhookResponse>()
+// rotateGithubWebhookSecret: POST /api/v1/integrations/github/webhook/secret
+conforms<GitHubWebhookSecret>()<GitHubWebhookSecretResponse>()
+
+// attenuateKey: POST /api/v1/attenuate
+conforms<AttenuationResult>()<AttenuationResponse>()
+// getAttenuationChain: GET /api/v1/attenuate/chain/:chainId, unwrapped from `chain`
+conforms<AttenuationChainLink>()<Rows<AttenuationChainResponse, 'chain'>>()
+// predictCost: POST /api/v1/predict-cost
+conforms<CostPrediction>()<CostPredictionResponse>()
+// getMirrorAdoptionReport: GET /api/v1/routing/mirror-adoption-report
+conforms<MirrorAdoptionReport>()<MirrorAdoptionReportResponse>()

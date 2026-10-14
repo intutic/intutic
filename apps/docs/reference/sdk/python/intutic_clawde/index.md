@@ -1887,6 +1887,11 @@ class GatewayStatus(TypedDict)
 
 `GET /api/v1/gateways/:id/status`; the twin of the TypeScript SDK's `GatewayStatus`.
 
+`status`, `reportedAt`, `appliedConfigVersion` and
+`desiredConfigVersion` are always sent. The other keys are None when the
+gateway is unreachable, and absent when its last heartbeat did not report
+them.
+
 
 #### Attributes
 

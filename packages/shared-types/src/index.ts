@@ -887,3 +887,6 @@ export type {
 } from './chaos.js'
 
 export { mcpDaemonPolicyGenKey, mcpDaemonPolicyKey, legacyMcpDaemonPolicyKey } from './mcpDaemonPolicyCache.js'
+
+// Control-plane response schemas (src/responses/): what each declared route answers with.
+export * from './responses/index.js'
