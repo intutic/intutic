@@ -31,10 +31,9 @@ type fakeMcpServer struct {
 }
 
 type fakeAPI struct {
-	mu       sync.Mutex
-	servers  []*fakeMcpServer
-	policies []apiPolicy
-	calls    []string
+	mu      sync.Mutex
+	servers []*fakeMcpServer
+	calls   []string
 }
 
 func (f *fakeAPI) record(r *http.Request, detail string) {
@@ -93,21 +92,6 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				srv.DisabledTools = append(srv.DisabledTools, body.Tool)
 			}
 		}
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/policies":
-		_ = json.NewEncoder(w).Encode(map[string]any{"policies": f.policies})
-	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/policies":
-		// The body has the response's field names; the API echoes it back.
-		var p apiPolicy
-		_ = json.NewDecoder(r.Body).Decode(&p)
-		f.record(r, "targetToolPattern="+p.TargetToolPattern+" enforcementAction="+p.EnforcementAction)
-		p.PolicyID = fmt.Sprintf("pol_fake%d", len(f.policies)+1)
-		p.CurrentVersion = 1
-		f.policies = append(f.policies, p)
-		_ = json.NewEncoder(w).Encode(map[string]any{"policy": p})
-	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/policies/"):
-		id := strings.TrimPrefix(r.URL.Path, "/api/v1/policies/")
-		f.policies = slices.DeleteFunc(f.policies, func(p apiPolicy) bool { return p.PolicyID == id })
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	default:
 		w.WriteHeader(http.StatusNotFound)
@@ -266,36 +250,5 @@ resource "intutic_mcp_server_decision" "slack" {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("tool switches = %v, want %v", got, want)
-	}
-}
-
-// target_tool_pattern and enforcement_action are enforced nowhere, so they are
-// optional; the API still requires both on create, so the provider sends the
-// defaults, which match everything and do nothing.
-func TestPolicyWithoutDeprecatedFieldsSendsTheDefaults(t *testing.T) {
-	api := &fakeAPI{}
-	provider := startFakeAPI(t, api)
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: protoV6Factories,
-		Steps: []resource.TestStep{
-			{
-				Config: provider + `
-resource "intutic_policy" "mode" {
-  name              = "Workspace intervention mode"
-  intervention_mode = "OPAQUE"
-}`,
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("intutic_policy.mode", "target_tool_pattern", "*"),
-					resource.TestCheckResourceAttr("intutic_policy.mode", "enforcement_action", "BYPASS"),
-					resource.TestCheckResourceAttr("intutic_policy.mode", "intervention_mode", "OPAQUE"),
-				),
-			},
-		},
-	})
-	api.mu.Lock()
-	defer api.mu.Unlock()
-	want := "POST /api/v1/policies targetToolPattern=* enforcementAction=BYPASS"
-	if !slices.Contains(api.calls, want) {
-		t.Fatalf("calls = %v, want %q", api.calls, want)
 	}
 }

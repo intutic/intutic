@@ -33,7 +33,7 @@ export const API_SCOPE_AREAS = {
   usage: 'usage, cost and routing analytics, cost prediction and provider incidents',
   findings: 'findings, incidents, anomalies, holds and decisions, judge reviews, governance cards, trust scores and break-glass',
   sops: 'SOPs and their lifecycle, skills, the dream cycle, MetaClaw and optimisation suggestions',
-  policies: 'policies, guardrails and policy documents, WASM rules, rule candidates and the evaluator sandbox',
+  policies: 'guardrails and policy documents, WASM rules, rule candidates and the evaluator sandbox',
   compliance: 'compliance coverage, probes and evidence exports, and the audit timeline',
   inventory: 'developer machines, harnesses, MCP servers, self-hosted gateways and governance coverage',
   settings: 'workspace settings, provider credentials, region, orgs and teams, domains, SSO providers and the license',

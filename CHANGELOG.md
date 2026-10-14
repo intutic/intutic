@@ -433,6 +433,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Enforcement policies, ahead of their December 1 sunset.** Nothing ever
+  enforced a policy's tool pattern, action or conditions, and no one depends
+  on them yet, so they go now rather than after a deprecation window. Gone:
+  the policies API (`/api/v1/policies`: list, create, update, delete,
+  versions, enable, disable, rollback) and
+  `POST /api/v1/policies/:policyId/convert-to-guardrail`, which now answer
+  `404`, along with their `Deprecation` and `Sunset` headers; the dashboard's
+  **Policies › Enforcement Policies** page; `intutic policy
+  enable|disable|rollback|export|convert` (the rule and snapshot commands,
+  `intutic policy snapshot|test|compile|install|list-local|replay`, stay);
+  `listPolicies`, `enablePolicy`, `disablePolicy`, `rollbackPolicy`,
+  `CompliancePolicy` and `PolicyChangeResult` from `@intutic/clawde`, and
+  `list_policies`, `enable_policy`, `disable_policy`, `rollback_policy` and
+  `PolicyChangeResult` from `intutic-clawde`; the `Policy*Response` schemas in
+  `@intutic/shared-types`; Terraform's `intutic_policy` (provider 0.3.0); and
+  the `pcas_policies` and `pcas_policy_versions` tables with
+  `policy_guardrails.converted_from_policy_id` (migration 239, which refuses
+  to run while either table holds a row, so it never deletes a policy).
+  **Instead:** write a per-tool rule as a `hook_rule`
+  [policy guardrail](https://docs.intutic.ai/guide/policy-guardrails)
+  (`intutic guardrails`, `intutic_guardrail`), which the gates enforce once it
+  is promoted, and set what a refused agent is told with the
+  `interventionMode` workspace setting.
+- **The intervention-mode fallback to a policy.** The `interventionMode`
+  workspace setting is the only source of the mode; a workspace that has not
+  set it, or holds a value that is not a mode, is `TRANSPARENT`. The mode is
+  no longer read from the lowest-priority active policy, and the
+  once-per-workspace warning about it is gone. **Instead:** set
+  `interventionMode` (Settings › Security › Intervention mode, `intutic
+  settings set interventionMode OPAQUE`, `intutic_workspace_settings`).
 - **Full access for API keys with unrecognised scopes.** A key whose stored
   scopes are all outside the scope registry (free-form strings such as
   `["read"]`, written before scopes were enforced) no longer works as `*`: it

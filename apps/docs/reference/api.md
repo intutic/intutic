@@ -68,8 +68,8 @@ A stored scope outside this table grants nothing. A key holding only such string
 | `findings:write` | Read and change findings, incidents, anomalies, holds and decisions, judge reviews, governance cards, trust scores and break-glass |
 | `sops:read` | Read SOPs and their lifecycle, skills, the dream cycle, MetaClaw and optimisation suggestions |
 | `sops:write` | Read and change SOPs and their lifecycle, skills, the dream cycle, MetaClaw and optimisation suggestions |
-| `policies:read` | Read policies, guardrails and policy documents, WASM rules, rule candidates and the evaluator sandbox |
-| `policies:write` | Read and change policies, guardrails and policy documents, WASM rules, rule candidates and the evaluator sandbox |
+| `policies:read` | Read guardrails and policy documents, WASM rules, rule candidates and the evaluator sandbox |
+| `policies:write` | Read and change guardrails and policy documents, WASM rules, rule candidates and the evaluator sandbox |
 | `compliance:read` | Read compliance coverage, probes and evidence exports, and the audit timeline |
 | `compliance:write` | Read and change compliance coverage, probes and evidence exports, and the audit timeline |
 | `inventory:read` | Read developer machines, harnesses, MCP servers, self-hosted gateways and governance coverage |
@@ -628,7 +628,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 413 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 404 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -1110,20 +1110,6 @@ Every route the control plane serves: 413 routes, grouped by the source file tha
 | GET | `/api/v1/sops/:sopId/proof-tree` | Authenticated | `sops:read` | Get latest proof tree |
 | POST | `/api/v1/sops/:sopId/proof-tree` | OWNER/ADMIN | `sops:write` | Create/update proof tree |
 | GET | `/api/v1/sops/:sopId/proof-tree/diff` | Authenticated | `sops:read` | Diff proof tree versions |
-
-### `policies.ts` <Badge type="tip" text="Cloud" />
-
-| Method | Path | Auth | Key scope | Description |
-|--------|------|------|-----------|-------------|
-| GET | `/api/v1/policies` | OWNER/ADMIN/EM | `policies:read` | Deprecated, like every policies route (sunset 2026-12-01). List live (non-deleted) policies, and where the intervention mode comes from |
-| POST | `/api/v1/policies` | OWNER/ADMIN | `policies:write` | Create a policy (records version 1) |
-| DELETE | `/api/v1/policies/:policyId` | OWNER/ADMIN | `policies:write` | Soft delete (version history is kept for audit) |
-| PUT | `/api/v1/policies/:policyId` | OWNER/ADMIN | `policies:write` | Partial update; bumps the version and keeps a snapshot |
-| POST | `/api/v1/policies/:policyId/convert-to-guardrail` | OWNER/ADMIN | `policies:write` | An active KILL/REASK policy becomes a hook-rule guardrail in SHADOW (201; 200 when already converted; 422 with `reason` when it has no guardrail form) |
-| POST | `/api/v1/policies/:policyId/disable` | OWNER/ADMIN | `policies:write` |  |
-| POST | `/api/v1/policies/:policyId/enable` | OWNER/ADMIN | `policies:write` |  |
-| POST | `/api/v1/policies/:policyId/rollback` | OWNER/ADMIN | `policies:write` | Body `{"version": N}`: restores that version as a new one |
-| GET | `/api/v1/policies/:policyId/versions` | OWNER/ADMIN/EM | `policies:read` | Version history, newest first |
 
 ### `policyGuardrails.ts` <Badge type="tip" text="Cloud" />
 

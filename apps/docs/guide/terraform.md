@@ -1,6 +1,6 @@
 ---
 title: Manage Intutic with Terraform
-description: Manage SOPs, enforcement policies, policy guardrails, workspace settings, virtual keys, gateways, notification rules, SIEM export destinations, custom filters and MCP server decisions with the Intutic Terraform provider.
+description: Manage SOPs, policy guardrails, workspace settings, virtual keys, gateways, notification rules, SIEM export destinations, custom filters and MCP server decisions with the Intutic Terraform provider.
 ---
 
 # Manage Intutic with Terraform <Badge type="tip" text="Cloud" />
@@ -10,7 +10,6 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | Resource | Manages | API |
 |---|---|---|
 | [`intutic_sop`](/reference/terraform/resources/sop) | SOPs (rule sets) | `/api/v1/sops` |
-| [`intutic_policy`](/reference/terraform/resources/policy) | Deprecated enforcement policies. No gate or proxy reads their tool pattern, action or conditions; use `intutic_guardrail` for a per-tool rule and the `interventionMode` setting for the intervention mode. The API sunsets 2026-12-01 | `/api/v1/policies` |
 | [`intutic_guardrail`](/reference/terraform/resources/guardrail) | Policy guardrails you author: a rule in the Guardrail IR, held to the same checks as one extracted from a policy document | `/api/v1/policy-guardrails/guardrails` |
 | [`intutic_workspace_settings`](/reference/terraform/resources/workspace_settings) | Workspace settings, only the keys you set | `/api/v1/workspace/settings` |
 | [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`), with their spend budgets and rate limits | `/api/v1/keys` |
@@ -141,7 +140,7 @@ resource "intutic_notification_rule" "incidents" {
 
 **Secrets.** A virtual key, a gateway token and a webhook signing secret are returned once, when created, and kept in state as sensitive values for you to pass on, for example into a CI secret or a Kubernetes secret. Keep the state in an encrypted backend. An imported key, token or secret is null, since the API cannot return it again. Credentials you supply (a PagerDuty routing key, a SIEM destination's `secret_config`, a provider credential's `fields`) read back masked; the plan compares them through the mask, so it stays empty until one is changed outside Terraform.
 
-**Destroy.** Destroying a SOP or a policy soft-deletes it, keeping its version history. Destroying a guardrail retires it, undoing what it wrote if it was an enforcing allowed-models or egress guardrail, and keeps its history. Destroying a virtual key or a gateway revokes it. Destroying an MCP server decision returns the server to the approval queue and switches its tools back on. Destroying a SIEM destination deactivates it: the API keeps every destination, so it stays listed, switched off. Destroying a custom filter deletes it.
+**Destroy.** Destroying a SOP soft-deletes it, keeping its version history. Destroying a guardrail retires it, undoing what it wrote if it was an enforcing allowed-models or egress guardrail, and keeps its history. Destroying a virtual key or a gateway revokes it. Destroying an MCP server decision returns the server to the approval queue and switches its tools back on. Destroying a SIEM destination deactivates it: the API keeps every destination, so it stays listed, switched off. Destroying a custom filter deletes it.
 
 ## Rotating a webhook signing secret
 

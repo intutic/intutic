@@ -194,9 +194,9 @@ describe('policyCache Unit Tests', () => {
     expect(policy?.allowedServers).toEqual(['filesystem'])
   })
 
-  it("defaults a missing interventionMode to 'TRANSPARENT', a real intervention_mode_type value", async () => {
-    // The old fallback was 'BYPASS' — not an intervention_mode_type value at
-    // all (TRANSPARENT|OPAQUE|SILENT_LOG). A daemon whose Valkey entry had
+  it("defaults a missing interventionMode to 'TRANSPARENT', a real intervention mode", async () => {
+    // The old fallback was 'BYPASS' — not an intervention mode at all
+    // (TRANSPARENT|OPAQUE|SILENT_LOG). A daemon whose Valkey entry had
     // just been invalidated could re-read this fabricated mode from a
     // mode-less response and enforce a state no other component defines.
     // 'TRANSPARENT' matches the resolve route's own fallback and the

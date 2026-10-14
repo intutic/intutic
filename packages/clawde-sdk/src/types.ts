@@ -1382,29 +1382,7 @@ export interface ConfigChain {
   intact: boolean
 }
 
-// Compliance policies and WASM rules
-
-export interface CompliancePolicy {
-  policyId: string
-  workspaceId: string
-  name: string
-  description: string | null
-  riskCategory: string | null
-  targetToolPattern: string
-  enforcementAction: string
-  interventionMode: string | null
-  priority: number | null
-  conditions: unknown
-  isActive: boolean | null
-  currentVersion: number
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PolicyChangeResult {
-  ok: boolean
-  currentVersion?: number
-}
+// WASM rules
 
 export interface RuleCandidateSource {
   candidateId: string

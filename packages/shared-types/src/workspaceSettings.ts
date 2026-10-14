@@ -575,11 +575,8 @@ export interface WorkspaceSettings {
    *
    * Every surface resolves it through
    * `services/control-plane/src/lib/interventionMode.ts`: the stored value
-   * when there is one. Until 2.6.0, a workspace that has not stored it falls
-   * back to the deprecated rule — the mode of its active enforcement policy
-   * with the lowest priority — and migration 234 wrote that mode here for
-   * every workspace that had an active policy. The default matches what the
-   * fallback gives a workspace with no policy.
+   * when it is one of the modes, `TRANSPARENT` otherwise. It is the only
+   * source of the mode.
    */
   interventionMode?: InterventionMode
 
@@ -797,8 +794,7 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // resolution only — a different value here would make the UI show a mode
   // enforcement does not actually run under. See the field doc.
   trajectory_monitor_mode: 'PASSIVE',
-  // What the resolver gives a workspace that has neither the setting nor an
-  // active enforcement policy. See the field doc.
+  // What the resolver gives a workspace that has not set it. See the field doc.
   interventionMode: 'TRANSPARENT',
   // Off by default — mirrors anomalyEnforcementService.ts's own DISABLED
   // default exactly, so a workspace that never configures this sees the

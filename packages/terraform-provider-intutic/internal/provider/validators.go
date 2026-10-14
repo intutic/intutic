@@ -3,9 +3,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
+
+// noSurroundingSpaces matches a value with no leading or trailing whitespace,
+// for names the API trims.
+var noSurroundingSpaces = regexp.MustCompile(`^\S(.*\S)?$`)
 
 // jsonObjectValidator requires a JSON object (not an array or scalar), which is
 // what every JSON-typed field the API accepts here is.

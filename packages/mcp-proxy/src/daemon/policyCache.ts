@@ -293,11 +293,11 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
       ? dlpPatterns.filter((p): p is string => typeof p === 'string')
       : [],
     // 'TRANSPARENT', matching every other default in this pipeline: the
-    // resolve route's own fallback (services/control-plane/src/routes/
-    // evaluate.ts), the schema default on pcas_policies.intervention_mode,
+    // control plane's resolver (services/control-plane/src/lib/
+    // interventionMode.ts), the interventionMode workspace setting's default,
     // and this module's snapshot-seed path below. The old default here was
-    // 'BYPASS', which is not an intervention_mode_type value at all — a
-    // fabricated mode no other component recognises.
+    // 'BYPASS', which is not an intervention mode at all — a fabricated mode
+    // no other component recognises.
     interventionMode: typeof interventionMode === 'string' ? interventionMode : 'TRANSPARENT',
     allowedTools: Array.isArray(allowedTools)
       ? allowedTools.filter((t): t is string => typeof t === 'string')

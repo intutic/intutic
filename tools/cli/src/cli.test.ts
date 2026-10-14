@@ -61,16 +61,13 @@ describe('intutic CLI parsing', () => {
     expect(res.stdout.trim()).toBe(version)
   }, 30_000)
 
-  it("hands a subcommand's own --version to that subcommand", async () => {
-    // `policy rollback` requires --version. The program-level --version used
-    // to match first, print the CLI version and exit 0, so the rollback could
-    // never be issued. A non-integer value makes the handler answer locally
-    // with no network call, which is enough to prove it was reached.
-    const res = await run(['policy', 'rollback', 'pol_1', '--version', 'abc'])
-    expect(res.stdout.trim()).not.toBe(version)
-    expect(`${res.stdout}${res.stderr}`).toContain('Invalid version format: "abc"')
-    expect(res.code).toBe(1)
-  }, 30_000)
+  it('no longer has the workspace-policy commands, which went with the policies API in 2.6.0', async () => {
+    for (const cmd of ['enable', 'disable', 'rollback', 'export', 'convert']) {
+      const res = await run(['policy', cmd, 'pol_1'])
+      expect(res.code, cmd).toBe(1)
+      expect(`${res.stdout}${res.stderr}`, cmd).toContain(`unknown command '${cmd}'`)
+    }
+  }, 60_000)
 
   it('gives install-daemon exactly the options of daemon install', async () => {
     const [shortcut, full] = await Promise.all([

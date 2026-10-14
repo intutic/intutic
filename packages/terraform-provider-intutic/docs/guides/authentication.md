@@ -29,7 +29,7 @@ Tick **This key is for automation (CI, scripts, a service)** when you create the
 | Job | Role | Why |
 |-----|------|-----|
 | `terraform apply` and `terraform destroy` | OWNER or ADMIN | The API refuses the provider's writes from any other role, with one exception: any member may create a virtual key without budgets or rate limits, and revoke their own. |
-| `terraform plan` and `terraform import` of a configuration with `intutic_policy`, `intutic_guardrail` or `intutic_member_budget` | EM, ADMIN or OWNER | Reading policies and guardrails, and the guardrail check a plan runs, need EM or above; below EM, the API shows a member only their own budget. |
+| `terraform plan` and `terraform import` of a configuration with `intutic_guardrail` or `intutic_member_budget` | EM, ADMIN or OWNER | Reading guardrails, and the guardrail check a plan runs, need EM or above; below EM, the API shows a member only their own budget. |
 | `terraform plan` and `terraform import` of any other configuration, and the data sources | Any role | The other reads are open to every member. |
 
 Two things narrow this:

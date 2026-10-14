@@ -36,8 +36,8 @@ pub const STREAM_MARKER: &str = ": intutic-refusal ";
 #[rustfmt::skip]
 pub const OPAQUE_MESSAGE: &str = "Blocked by workspace policy. Ask a workspace admin if you need this action.";
 
-/// The workspace's intervention mode: the `interventionMode` of its active
-/// PCAS policy with the lowest priority, carried on `/auth/key-context`
+/// The workspace's intervention mode: its `interventionMode` workspace
+/// setting, carried on `/auth/key-context`
 /// (`crate::key_context::intervention_mode`).
 ///
 /// Only [`InterventionMode::Opaque`] changes anything here: an agent refused

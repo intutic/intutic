@@ -557,9 +557,9 @@ async function requestResolvedPolicy(
  * which stays enforced. If one settings string could disarm the floor, the
  * floor would not be a floor.
  *
- * This used to compare against 'SHADOW', a value intervention_mode_type
- * (TRANSPARENT|OPAQUE|SILENT_LOG — packages/db/src/enums.ts) can never
- * produce, so the observe-only branch was dead and a SILENT_LOG workspace
+ * This used to compare against 'SHADOW', which no intervention mode
+ * (TRANSPARENT|OPAQUE|SILENT_LOG — the interventionMode workspace setting) can
+ * ever be, so the observe-only branch was dead and a SILENT_LOG workspace
  * shipped fully-blocking snapshots.
  *
  * Extracted so `buildSnapshotRules` and `writePolicySnapshot`'s `@mcp_allowlist`
