@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An OpenAPI 3.1 document for the control plane's REST API.**
+  `apps/docs/public/openapi.json` lists every route with its auth, plan badge,
+  path and query parameters, and the request body schema wherever the handler
+  validates one; routes with no schema say so rather than show an invented
+  shape. A new OpenAPI Reference docs page renders it (vitepress-openapi
+  0.2.5, loaded only on that page, no third-party requests). It is generated
+  from the route source with the route catalog in `reference/api.md`, and CI
+  fails while either is stale. Like the REST API page, the open-source docs
+  build leaves the page and the file out.
+
 ### Changed
 
 - **Behaviour change: `withIntuticProxy()` points providers at the proxy's
