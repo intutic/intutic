@@ -278,11 +278,25 @@ sopsCmd
 
 const policyCmd = program
   .command('policy')
-  .description('Manage compliance and safety policies')
+  .description('WASM rules, the policy snapshot, and the deprecated enforcement policies')
+
+policyCmd
+  .command('convert <policyId>')
+  .description(
+    'Turn a KILL or REASK enforcement policy into a hook-rule guardrail, created in shadow.\n' +
+    '\n' +
+    '  Enforcement policies are deprecated: their tool pattern, action and conditions\n' +
+    '  are enforced nowhere. The guardrail reports what it would block until promoted.'
+  )
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (policyId, opts) => {
+    const { runPolicyConvert } = await import('./commands/policy.js')
+    await runPolicyConvert(policyId, opts)
+  })
 
 policyCmd
   .command('enable <policyId>')
-  .description('Enable a compliance policy')
+  .description('Enable a compliance policy (deprecated)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (policyId, opts) => {
     const { runPolicyEnable } = await import('./commands/policy.js')
@@ -291,7 +305,7 @@ policyCmd
 
 policyCmd
   .command('disable <policyId>')
-  .description('Disable a compliance policy')
+  .description('Disable a compliance policy (deprecated)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (policyId, opts) => {
     const { runPolicyDisable } = await import('./commands/policy.js')
@@ -300,7 +314,7 @@ policyCmd
 
 policyCmd
   .command('rollback <policyId>')
-  .description('Rollback a compliance policy to a specific version')
+  .description('Rollback a compliance policy to a specific version (deprecated)')
   .requiredOption('--version <version>', 'Target version (e.g. 2)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (policyId, opts) => {
@@ -324,7 +338,7 @@ policyCmd
 
 policyCmd
   .command('export')
-  .description('Export compliance policies to stdout')
+  .description('Export compliance policies to stdout (deprecated)')
   .option('--all', 'Export all policies')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
