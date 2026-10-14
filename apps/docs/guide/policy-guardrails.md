@@ -93,11 +93,15 @@ credential belongs to — never by anything the agent or the request says:
 A rule with no roles applies to everyone. When a caller's role is not known —
 a standalone proxy with no control plane, a provider key with no member
 behind it, a role that could not be read — every rule applies, scoped or not:
-a rule that cannot show it does not apply, applies. Roles are compared with
-the member's workspace role only; a role name no member can hold (say
-`contractor`) matches nobody, so the rule then applies only when a caller's
-role is unknown. The review card names a rule's roles and flags one that is
-not a workspace role.
+a rule that cannot show it does not apply, applies.
+
+Roles are compared with the member's workspace role only, so a hook rule may
+name only those five. Creating one, or editing its rule, with any other name
+(say `contractor`) is refused — by the API with a 400 naming the valid roles,
+by `intutic guardrails`, by Terraform at plan time and by the dashboard form.
+A rule written before that check that names one keeps being served, but no
+member matches it: it applies only when a caller's role is unknown. Its
+review card flags the role; edit the rule to a workspace role, or retire it.
 
 A role change — through the members page or API, or a SCIM group whose
 mapped role moves a member — takes effect on the member's next call at the

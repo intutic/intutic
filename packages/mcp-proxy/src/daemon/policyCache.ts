@@ -8,6 +8,7 @@
  */
 import https from 'node:https'
 import http from 'node:http'
+import { createHash } from 'node:crypto'
 import { Redis } from 'ioredis'
 import { describeConnectionError } from '../valkeyErrors.js'
 import { createLogger } from '@intutic/logger'
@@ -20,7 +21,13 @@ import {
   type McpRegistryPolicy,
   type SsoGroupPolicy,
 } from '../policy.js'
-import { parseMcpBudgetPolicy, type McpBudgetPolicy } from '@intutic/shared-types'
+import {
+  parseMcpBudgetPolicy,
+  mcpDaemonPolicyGenKey,
+  mcpDaemonPolicyKey,
+  legacyMcpDaemonPolicyKey,
+  type McpBudgetPolicy,
+} from '@intutic/shared-types'
 
 const logger = createLogger('mcp-proxy.policyCache')
 
@@ -153,6 +160,39 @@ async function readConfigVersion(workspaceId: string): Promise<number | undefine
   } catch {
     return undefined
   }
+}
+
+/**
+ * Who this daemon resolves policy as: the first 32 hex characters of the
+ * SHA-256 of its API key, never the key. The control plane answers
+ * `policy/resolve` for the key's member — their role's hook rules, their
+ * principal — so the shared entry is that caller's, not the workspace's.
+ */
+function callerTag(): string {
+  return createHash('sha256').update(getDaemonApiKey()).digest('hex').slice(0, 32)
+}
+
+/**
+ * The shared-tier key for this daemon's caller at the workspace's current
+ * policy generation (`mcpDaemonPolicyKey`), or null when Valkey cannot answer
+ * now — the shared tier is then skipped, never guessed at. Read BEFORE a
+ * fetch whose result is written under it: an invalidation that lands during
+ * the fetch bumps the generation, and the result is filed where no one reads.
+ */
+async function sharedPolicyKey(workspaceId: string): Promise<string | null> {
+  if (!valkeyReady()) return null
+  try {
+    const generation = (await valkey.get(mcpDaemonPolicyGenKey(workspaceId))) ?? '0'
+    return mcpDaemonPolicyKey(workspaceId, generation, callerTag())
+  } catch {
+    return null
+  }
+}
+
+/** Write-through to the shared tier, best-effort (see the callers). */
+function writeShared(key: string | null, policy: ResolvedPolicy): void {
+  if (key === null || valkey.status !== 'ready') return
+  valkey.set(key, JSON.stringify(policy), 'PX', getPolicyTtlMs()).catch(() => {})
 }
 
 /**
@@ -498,16 +538,14 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
     if (cached.configVersion !== undefined) {
       const current = await readConfigVersion(workspaceId)
       if (current !== undefined && current !== cached.configVersion) {
+        const shared = await sharedPolicyKey(workspaceId)
         const fresh = await fetchFromControlPlane(workspaceId)
         if (fresh) {
           lru.delete(workspaceId)
           evictIfFull()
           lru.set(workspaceId, fresh)
-          try {
-            await valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs())
-          } catch {
-            // Same reasoning as the stale-refresh branch below.
-          }
+          // Same reasoning as the stale-refresh branch below.
+          writeShared(shared, fresh)
           return fresh
         }
       }
@@ -520,29 +558,29 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
 
   if (cached && isStale(cached)) {
     // Return stale, trigger async refresh
-    void fetchFromControlPlane(workspaceId).then(async (fresh) => {
+    void (async () => {
+      const shared = await sharedPolicyKey(workspaceId)
+      const fresh = await fetchFromControlPlane(workspaceId)
       if (fresh) {
         lru.delete(workspaceId)
         evictIfFull()
         lru.set(workspaceId, fresh)
-        try {
-          await valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs())
-        } catch {
-          // Valkey unreachable. This write only shares the refreshed policy
-          // with sibling daemons; the in-process LRU above already holds it,
-          // so resolution stays correct and the peers simply take an HTTP miss.
-          // Deliberately not logged — this runs on a background refresh every
-          // TTL per workspace and would flood the log while Valkey is down.
-          // The connection-level 'error' handler above reports the outage once.
-        }
+        // A failed write only means a sibling daemon of the same caller takes
+        // an HTTP miss; the LRU above already holds the policy. Deliberately
+        // not logged — this runs on a background refresh every TTL per
+        // workspace and would flood the log while Valkey is down. The
+        // connection-level 'error' handler above reports the outage once.
+        writeShared(shared, fresh)
       }
-    })
+    })()
     return cached
   }
 
-  // Cache miss in LRU — check Valkey, when it can answer now
+  // Cache miss in LRU — check Valkey, when it can answer now: this caller's
+  // entry at the workspace's current generation, never another member's.
+  const shared = await sharedPolicyKey(workspaceId)
   try {
-    const valkeyCached = valkeyReady() ? await valkey.get(`mcp_daemon:policy:${workspaceId}`) : null
+    const valkeyCached = shared !== null ? await valkey.get(shared) : null
     if (valkeyCached) {
       // Cast, not validated — this is our own prior write, not a network
       // boundary. But an entry written before this field existed is still a
@@ -580,17 +618,20 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
     // step: `fresh` is already in the LRU and is returned now, without waiting
     // on the write. A failed write is dropped; failing or holding the caller's
     // policy resolution on it would take the daemon down with Valkey.
-    if (valkey.status === 'ready') {
-      valkey.set(`mcp_daemon:policy:${workspaceId}`, JSON.stringify(fresh), 'PX', getPolicyTtlMs()).catch(() => {})
-    }
+    writeShared(shared, fresh)
   }
   return fresh
 }
 
-/** Invalidates policy cache for a workspace (called on SOP update). */
+/**
+ * Invalidates policy cache for a workspace (called on SOP update): this
+ * daemon's LRU entry, and every caller's shared entry, by bumping the
+ * workspace's generation as the control plane does.
+ */
 export function invalidatePolicy(workspaceId: string): void {
   lru.delete(workspaceId)
-  valkey.del(`mcp_daemon:policy:${workspaceId}`, `mcp_daemon:sop_rules:${workspaceId}`).catch(() => {})
+  valkey.incr(mcpDaemonPolicyGenKey(workspaceId)).catch(() => {})
+  valkey.del(legacyMcpDaemonPolicyKey(workspaceId), `mcp_daemon:sop_rules:${workspaceId}`).catch(() => {})
   logger.info({ workspaceId }, 'policy_cache.invalidated')
 }
 

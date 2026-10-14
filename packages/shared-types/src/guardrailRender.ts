@@ -224,6 +224,19 @@ export function hookRuleRoles(ir: Pick<HookRuleIr, 'roles'>): string[] {
   return [...new Set((ir.roles ?? []).map((r) => r.toLowerCase()))].sort()
 }
 
+/** The workspace roles (`workspace_members.role`, lower case) a hook rule's `roles` may name. */
+export const HOOK_RULE_ROLES = ['owner', 'admin', 'em', 'developer', 'viewer'] as const
+
+/**
+ * The entries of `roles` that are not workspace roles (compared without
+ * case), as written. A hook rule is matched against the member's workspace
+ * role, so such a role matches no member: a new or edited hook rule naming
+ * one is refused, and an older one is flagged on its review card.
+ */
+export function unknownHookRuleRoles(roles: readonly string[] | undefined): string[] {
+  return (roles ?? []).filter((r) => !(HOOK_RULE_ROLES as readonly string[]).includes(r.toLowerCase()))
+}
+
 /**
  * Whether a hook rule scoped to `roles` applies to a caller whose workspace
  * role is `memberRole` (`OWNER`, `ADMIN`, `EM`, `DEVELOPER`, `VIEWER`, in any

@@ -40,6 +40,7 @@ type irGrammar struct {
 	ActionTokens      []string                      `json:"actionTokens"`
 	KnownHarnessTools []string                      `json:"knownHarnessTools"`
 	Taints            []string                      `json:"taints"`
+	HookRuleRoles     []string                      `json:"hookRuleRoles"`
 	Patterns          map[string]string             `json:"patterns"`
 	Limits            struct {
 		TitleMaxChars       int `json:"titleMaxChars"`
@@ -78,6 +79,19 @@ func guardrailKinds() []string {
 // jsLength is a string's length as JavaScript counts it (UTF-16 code units),
 // which is what zod's .min/.max compare.
 func jsLength(s string) int { return len(utf16.Encode([]rune(s))) }
+
+// checkHookRuleRole says why role cannot scope a hook rule, or "". A hook
+// rule's roles are matched against the member's workspace role at every
+// gate, so the API refuses any other name on a create or an IR edit (the
+// `workspace_roles` check); the plan refuses it first.
+func checkHookRuleRole(role string) string {
+	for _, r := range grammar.HookRuleRoles {
+		if strings.EqualFold(role, r) {
+			return ""
+		}
+	}
+	return fmt.Sprintf("%q is not a workspace role: a hook rule's roles are %s", role, strings.Join(grammar.HookRuleRoles, ", "))
+}
 
 // checkItem says why value is not a valid item of its kind, or "".
 func checkItem(item, value string) string {

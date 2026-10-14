@@ -201,6 +201,8 @@ export {
   proxyHookRule,
   hookRuleRoles,
   hookRuleAppliesToRole,
+  HOOK_RULE_ROLES,
+  unknownHookRuleRoles,
   renderHookRuleFrontMatterLine,
 } from './guardrailRender.js'
 export type { HookRuleCitation, RenderedHookRule, RenderedWorkspaceSetting, ParsedFrontMatter, GuardrailSopFileInput, ProxyHookRule } from './guardrailRender.js'
@@ -866,3 +868,5 @@ export type {
   ProbeOutcome,
   RunVerdict,
 } from './chaos.js'
+
+export { mcpDaemonPolicyGenKey, mcpDaemonPolicyKey, legacyMcpDaemonPolicyKey } from './mcpDaemonPolicyCache.js'

@@ -34,7 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gates and the MCP proxy are served only their member's rules. A caller whose
   role is not known is held to every rule. A role change applies on the
   member's next call, and on a connected machine at its next sync at the
-  latest.
+  latest. A hook rule may name only workspace roles (owner, admin, em,
+  developer, viewer): any other name is refused when the rule is created or
+  its rule edited, by the API, the CLI, Terraform at plan time and the
+  dashboard. A rule written before that keeps being served and is flagged on
+  its review card.
 
 - **An OpenAPI 3.1 document for the control plane's REST API.**
   `apps/docs/public/openapi.json` lists every route with its auth, plan badge,
@@ -57,6 +61,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ClawdeClientOptions` and `ControlPlaneClientOptions` now carry their
   defaults in their doc comments, and every framework adapter module in
   `intutic_clawde.gate.adapters` declares `__all__`.
+
+### Security
+
+- **The MCP daemon's shared policy cache is per caller.** Its Valkey entry
+  was keyed by workspace only, while the policy it holds is the calling key's
+  member's (their role's hook rules, their SSO groups): two daemons with
+  different members' keys on one Valkey could be served each other's entry,
+  so a member could get a less restrictive rule set. Entries are now keyed by
+  workspace, a policy generation and a hash of the daemon's key, and a policy
+  change bumps the generation, which retires every caller's entry at once.
 
 ### Changed
 
