@@ -75,7 +75,7 @@ QM lets an org set `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `OPENROUTER_BASE_U
   "env": {
     "core": {
       "ANTHROPIC_BASE_URL": "https://your-intutic-proxy.example.com",
-      "OPENAI_BASE_URL": "https://your-intutic-proxy.example.com/openai"
+      "OPENAI_BASE_URL": "https://your-intutic-proxy.example.com/v1"
     }
   }
 }

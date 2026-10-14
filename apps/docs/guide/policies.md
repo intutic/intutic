@@ -28,8 +28,8 @@ bodies — streaming included — for sensitive data.
 ### Enforcement
 
 The action is **per pattern, not per mode**. For secrets it is fixed by what
-the pattern is: private keys and Anthropic API keys **block** (the request is
-refused with a DLP error); everything else **redacts** — the match is replaced with
+the pattern is: private keys, Anthropic API keys and the built-in decoy AWS key
+(a honeytoken) **block** (the request is refused with a DLP error); everything else **redacts** — the match is replaced with
 `[REDACTED_*]` and the redacted body is what reaches your provider.
 
 DLP is configured in `config.yaml` under `intutic_settings.dlp`:
@@ -184,7 +184,7 @@ and available to WASM rules as `dlp_findings`.
 
 ## Enforcement Actions (PCAS)
 
-The Policy Compliance and Action System evaluates every tool use request against your safety guidelines:
+PCAS (Policy-Controlled Agent Sandbox) evaluates every tool use request against your safety guidelines:
 
 ### Risk Categories
 
@@ -196,14 +196,17 @@ Each tool execution is classified by risk level:
 | **Credential Access** | Reading `.env` files, accessing keyrings, querying credential managers |
 | **Destructive** | Running `rm -rf`, deleting cloud infrastructure, executing destructive database queries |
 
-### Four Enforcement Actions
+### Five Enforcement Actions
 
 | Action | What Happens | When It's Used |
 |--------|-------------|----------------|
 | **Bypass** | Tool call passes through unmodified | Fully compliant with all policies |
-| **Enhance** | Safety prompts or warnings are injected into the agent's context | Minor risk but generally safe |
-| **Hijack** | Tool outcome is replaced with a mock response or override | Policy violation that can be safely redirected |
+| **Enhance** | Tool call passes through, with governance annotations or warnings attached | Minor risk but generally safe |
+| **Hijack** | Tool call is modified or steered rather than stopped | Policy violation that can be safely redirected |
+| **Reask** | The attempt is refused with the reason, so the agent can correct course and retry; repeated trips escalate to Kill | A mistake the agent can correct |
 | **Kill** | Tool call is blocked immediately | Serious policy violation or budget breach |
+
+See [Enforcement Actions](/concepts/enforcement-actions) for how each one is decided.
 
 ### Intervention Modes
 

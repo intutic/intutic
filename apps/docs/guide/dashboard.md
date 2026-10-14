@@ -152,7 +152,7 @@ The sign-in page offers a password or an emailed sign-in link:
 
 ```bash
 cd apps/dashboard
-npm run dev
+pnpm dev
 # → http://localhost:5174
 ```
 
