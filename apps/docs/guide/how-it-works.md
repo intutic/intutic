@@ -114,7 +114,7 @@ SOPs include:
 - **Dependencies** — other SOPs this one depends on
 - **Markdown content** — the actual policy rules
 
-Changes to SOPs are classified as `STRENGTHEN`, `CLARIFY`, `NARROW`, or `WEAKEN`; a `WEAKEN` edit made by a person needs an Owner.
+Changes to SOPs are classified as `STRENGTHEN`, `CLARIFY`, `NARROW`, or `WEAKEN`; a `WEAKEN` edit needs an Owner, and the SOP Optimizer applies a change without review only when it is `STRENGTHEN`.
 
 ## Anomaly Detection (ARE)
 

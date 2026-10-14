@@ -283,12 +283,12 @@ When you update a validated SOP, Intutic classifies the change for the audit tra
 
 | Classification | Meaning |
 |----------------|---------|
-| **STRENGTHEN** | Making the rule stricter (e.g., blocking more actions) |
+| **STRENGTHEN** | Making the rule stricter: it adds a safety rule (a keyword such as `must not`, `prohibited`, `require approval`, `deny`), removes none, and is not more than a fifth shorter |
 | **CLARIFY** | Improving wording without changing scope |
 | **NARROW** | Reducing the scope of what the rule covers |
 | **WEAKEN** | Making the rule more permissive |
 
-Every edit needs the OWNER or ADMIN role, and an edit classified `WEAKEN` needs an OWNER: an Admin's is refused with 403 `WEAKEN_REQUIRES_OWNER` and nothing is saved. Approving a Dream Cycle amendment that weakens a guideline needs an OWNER too; a MetaClaw amendment applied by auto-approval is not gated. The classification is returned with every edit, as `antiGaming`.
+Every edit needs the OWNER or ADMIN role, and an edit classified `WEAKEN` needs an OWNER: an Admin's is refused with 403 `WEAKEN_REQUIRES_OWNER` and nothing is saved. Approving a Dream Cycle amendment that weakens a guideline needs an OWNER too. No automated writer gets that exemption: the SOP Optimizer applies a change without review only when it is classified `STRENGTHEN`, and everything else waits for a person (see [What auto-apply applies](/guide/metaclaw#what-auto-apply-applies)). The classification is returned with every edit, as `antiGaming`.
 
 ## Best practices
 

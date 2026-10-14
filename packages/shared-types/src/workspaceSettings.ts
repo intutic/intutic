@@ -200,8 +200,10 @@ export interface WorkspaceSettings {
      */
     ff_shadow_enforcement?: boolean
     /**
-     * Let a MetaClaw evolution proposal auto-apply instead of waiting for
-     * human review. Read directly off raw settings JSON by
+     * Let a MetaClaw evolution proposal from a manually triggered run
+     * auto-apply instead of waiting for human review — only when it reaches
+     * the auto-approve threshold and the anti-gaming gate classifies it
+     * STRENGTHEN; everything else stays PENDING_APPROVAL. Read directly off raw settings JSON by
      * `promptEvolutionService.runEvolutionCycle` — no Valkey mirror, since
      * nothing else needs a hot-path read of it.
      *

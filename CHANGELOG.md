@@ -34,6 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them, so the workspace, session, branch, CI pipeline and incident came back
   empty. Each field now comes from the file when it carries it and from its
   environment variable otherwise, in `@intutic/clawde` and `intutic-clawde`.
+- **Behaviour change: the SOP Optimizer applies a change without review only
+  when it strengthens the guideline.** With `ff_metaclaw_auto_apply` on, a
+  manually started run applied any proposal that cleared the auto-approve
+  threshold, a weakening rewrite included, and did it by retiring the reviewed
+  guideline and putting an unreviewed draft in force. Now a proposal is applied
+  only when the change classification is `STRENGTHEN` (it adds a safety rule,
+  removes none, and is not more than a fifth shorter). Every other proposal,
+  and any the classifier could not classify, waits for review with its
+  classification and the reason. An applied change becomes the next version of
+  the guideline in the same lifecycle state, with an audit row naming
+  `system:metaclaw`. A `WEAKEN` edit needs an Owner whoever makes it: no caller
+  is exempt for not declaring a role. Incident-mining drafts marked
+  auto-approved were never written into a guideline; the docs now say so.
 
 ### Fixed
 
