@@ -23,9 +23,14 @@ use serde::{Deserialize, Serialize};
 pub enum Verdict {
     /// Allow the request to proceed unmodified
     Bypass,
-    /// Allow but inject additional context
+    /// Allow but inject additional context. The WASM ABI has no code for
+    /// this verdict, so no rule can return it; the registry refuses an
+    /// unrecognised verdict as "no verdict" (fail closed). It stays for the
+    /// mapping to the shared `EnforcementAction` enum.
     Enhance { context: String },
-    /// Hold the request, render a decision card for human review
+    /// Steer: rewrite or redact and proceed. As with `Enhance`, the WASM ABI
+    /// has no code for it, so a rule cannot return it; the proxy records
+    /// HIJACK from steering detector findings and DLP redactions instead.
     Hijack { reason: String, confidence: f64 },
     /// Refuse this attempt, tell the agent why, and let it try again.
     ///
