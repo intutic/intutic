@@ -50,7 +50,7 @@ A request the scopes do not cover gets `403`:
 
 `requiredScopes` lists the scopes that would cover the route, any one of them. Creating or editing a key with a scope not in the table below is refused with `400`, and the message names the valid scopes. A request authenticated with a key cannot give a new key, or an existing one, a scope it does not hold itself. An [attenuated child key](#route-catalog) (`POST /api/v1/attenuate`) can only narrow: each scope it asks for must be granted by its parent and by the key that asks, the parent must be the caller's own key, and the child is held to its parent's scopes on every request, so narrowing a parent narrows its children.
 
-Keys whose stored scopes are all outside this table, free-form strings written before scopes were enforced, keep working as `*` until **2.6.0**, when they are refused. The control plane logs `apikey_legacy_scopes` on each use and the dashboard marks such a key; set its scopes, or replace it, before then.
+A stored scope outside this table grants nothing. A key holding only such strings, free-form scopes written before scopes were enforced, is refused with `403 INSUFFICIENT_SCOPE` on every route; set its scopes, or replace it.
 
 <!-- GENERATED:KEY-SCOPES:START -->
 

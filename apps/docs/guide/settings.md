@@ -108,7 +108,7 @@ Create keys (`vk_` prefix) for developers and their agents to reach the Intutic 
 - The **Scopes** column lists each key's scopes. An OWNER or ADMIN can change them with **Edit scopes**; the change applies from the key's next request
 - **Revoke** a compromised key immediately
 
-A key marked **Legacy scopes** holds scope strings from before scopes were enforced. It keeps working with full access until 2.6.0, when it stops; set its scopes before then.
+A key whose scopes are all strings from before scopes were enforced (such as `read`) grants nothing: every request with it gets `403 INSUFFICIENT_SCOPE`. Set its scopes with **Edit scopes**, or replace it.
 
 There is no in-place rotation: create a new key, move clients to it, then revoke the old one.
 Creating and revoking a key is recorded with who did it on the

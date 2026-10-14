@@ -277,7 +277,6 @@ export const ApiKeyResponse = z.object({
   keyPrefix: z.string(),
   label: z.string(),
   scopes: z.array(z.string()),
-  legacyScopes: z.boolean().describe('Every stored scope predates the scope registry: the key works as `*` until 2.6.0.'),
   allowedModels: z.array(z.string()).nullable().describe('The key’s model allowlist; null inherits the workspace’s.'),
   expiresAt: IsoTimestamp.nullable(),
   lastUsedAt: IsoTimestamp.nullable(),

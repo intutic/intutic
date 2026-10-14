@@ -433,6 +433,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Full access for API keys with unrecognised scopes.** A key whose stored
+  scopes are all outside the scope registry (free-form strings such as
+  `["read"]`, written before scopes were enforced) no longer works as `*`: it
+  grants nothing, and every request with it is refused with `403
+  INSUFFICIENT_SCOPE`, like any key lacking a scope. The `apikey_legacy_scopes`
+  log line, the `legacyScopes` field on `GET /api/v1/keys` and the dashboard's
+  **Legacy scopes** badge are gone. **Instead:** give the key registry scopes
+  with **Edit scopes** or `PATCH /api/v1/keys/:keyId`, or replace it.
 - **`ClawdeBudgetExceededError` (`@intutic/clawde`).** Nothing threw it: a
   budget refusal (`BUDGET_EXCEEDED`, `OVERAGE_HARD_CAP_EXCEEDED`) has always
   been a `ClawdeBlockedError` carrying that `code`, which is what to catch.
