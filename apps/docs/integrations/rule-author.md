@@ -40,7 +40,7 @@ mkdir -p .agents/skills/intutic-rule-author
 
 - The agent must produce **both** a should-block and a should-allow mock and verify them with `intutic policy test` before installing.
 - `intutic policy install` refuses rules that fail instantiation — the proxy would refuse to load them, so they would enforce nothing.
-- Secrets in rule sources are flagged by `intutic skill audit`.
+- Secrets (API keys, tokens, passwords) stay out of rule sources and mock contexts. Nothing scans those files for them: `intutic skill audit` reads instruction files and skill directories, not rule sources.
 - Allow-overrides are structurally impossible: the verdict lattice only adds blocks.
 
 See the [WASM rules guide](/guide/wasm-rules) for the full authoring contract and sandbox limits.

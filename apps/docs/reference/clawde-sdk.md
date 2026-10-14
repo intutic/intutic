@@ -276,13 +276,13 @@ A chat call then names the model with the provider's prefix — `bedrock/anthrop
 
 `listIncidents` filters by `status`, `severity`, `type` (an [incident type](/guide/concepts#incident-types); the control plane refuses one it does not know), `page` and `limit`, and returns the page ranked by review priority with `meta` (the total and the review budget). A page of 20 incidents or more arrives TOON-encoded and is decoded before it is returned, with each cell cut at 120 characters: `getIncident` returns a long description whole. `listTraces` takes `since` as an ISO 8601 time or a duration such as `24h`; a page of 20 traces or more arrives TOON-encoded and is decoded before it is returned, with any cell longer than 120 characters cut short as the control plane sent it. `getRuleCandidateSource` refuses a source that does not hash to the `sourceSha256` served with it.
 
-Not covered, on purpose: session establishment (`intutic login`/`logout` — supply `apiKey` directly; `ClawdeClient` registers its own session), the workspace budget (`checkBudget()` above), and commands that act on the machine they run on: `init`, `setup`, `doctor`, `install-daemon`, `connect`, `disconnect`, `exec`, `start`, `sync-context`, `rollback`, `enforce`, `rules`, `judge`, `skill` (its loop commands are covered), `sops status`, `guardrails pull` and `policy compile`, `install`, `list-local` and `snapshot`.
+Not covered, on purpose: session establishment (`intutic login`/`logout` — supply `apiKey` directly; `ClawdeClient` registers its own session), budgets (`intutic budget` and its subcommands; `checkBudget()` above reads the workspace's), and commands that act on the machine they run on: `init`, `setup`, `status`, `doctor`, `daemon` (and `install-daemon`), `enterprise install`, `env`, `connect`, `disconnect`, `exec`, `start`, `chaos`, `sync-context`, `decisions-log-refresh`, `rollback`, `enforce`, `rules`, `judge`, `skill`, `sops status`, `guardrails pull`, and `policy compile` (without `--candidate`), `test`, `install`, `list-local` and `snapshot`.
 
 ---
 
 ## Events
 
-Register callbacks for the refusal verdicts: `kill`, `reask` and `hold`. `chat()` calls them before it throws `ClawdeBlockedError`, with `{ verdict, code, status, message }`, plus `ruleId` (`rule_id` in Python) when the proxy names the rule that decided.
+Register callbacks for the refusal verdicts: `kill`, `reask` and `hold`. `chat()` calls them before it throws `ClawdeBlockedError`, with `{ verdict, code, status, message }`, plus `ruleId` (`rule_id` in Python) when the proxy names the rule that decided and `retryAfterSeconds` (`retry_after_seconds`) when it sent `Retry-After`.
 
 `hijack`, `enhance` and `bypass` are still accepted so existing code keeps working, but they never fire: the proxy applies those verdicts inside the response and does not report them to the client. They will be removed in the next major version.
 

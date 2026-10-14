@@ -58,8 +58,9 @@ hex characters.
 
 Optional keys in `intutic-secrets`: `DATABASE_SSL` (above), `SMTP_URL` (your mail
 relay), `TRACE_SIGNING_PRIVATE_KEY`, `TRACE_SIGNING_RETIRED_KEYS`,
-`LITELLM_PLATFORM_KEY`. Keep `ENCRYPTION_KEY` with your database backups: stored
-credentials are encrypted under it.
+`LITELLM_PLATFORM_KEY`, and `ENCRYPTION_KEY_PREVIOUS` (only while rotating
+`ENCRYPTION_KEY`: the key it replaces). Keep `ENCRYPTION_KEY` with your database
+backups: stored credentials are encrypted under it.
 
 Alerts and approvals go out through the notification hub, which is on with
 every channel: email through `SMTP_URL`, webhooks, Slack and PagerDuty. To turn
