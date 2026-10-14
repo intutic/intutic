@@ -286,9 +286,10 @@ export class Gate {
     toolInput?: unknown,
     incidentId?: string,
     filePath?: string,
+    gateDecisionId?: string,
   ): Promise<void> {
     if (this.client !== null) {
-      await this.client.emit(event, tool, reason, toolInput, incidentId, filePath)
+      await this.client.emit(event, tool, reason, toolInput, incidentId, filePath, gateDecisionId)
     }
   }
 
@@ -516,14 +517,16 @@ export class Gate {
     // Skipped for read-only tools — a network round trip whose checks are
     // DLP regexes over the arguments and SOP rules, neither of which can say
     // anything useful about a directory listing.
+    let decisionId: string | undefined
     if (this.cfg.useHookGate && this.client !== null && !READ_ONLY_TOOLS.has(toolName)) {
       const resp = await this.client.hookGate(toolName, toolInput)
+      // Every answer is reported: the event drives the incident, rule
+      // evidence and plan tracking. It carries the hook gate's decision id,
+      // which the control plane exported to SIEM itself and filed its DLP
+      // refusal's incident under, so neither happens twice.
+      decisionId = resp.decisionId
       if (!resp.allowed) {
-        // A refusal that names an incident was filed by the hook gate itself
-        // (its DLP check); reporting it again filed a second incident. Every
-        // other refusal — a rule, the registry, a check that could not run, a
-        // control plane that gave no verdict — is filed only by this event.
-        if (!resp.incidentId) await this.emit('tool_blocked', toolName, resp.reason, toolInput)
+        await this.emit('tool_blocked', toolName, resp.reason, toolInput, undefined, undefined, resp.decisionId)
         // The hook gate names the MCP registry's own code when the registry
         // refused; anything else it refuses is HOOK_GATE.
         const code = MCP_CODES.has(resp.code ?? '') ? (resp.code as GateRefusalCode) : 'HOOK_GATE'
@@ -532,7 +535,7 @@ export class Gate {
     }
 
     if (!READ_ONLY_TOOLS.has(toolName)) {
-      await this.emit('tool_allowed', toolName, '', toolInput)
+      await this.emit('tool_allowed', toolName, '', toolInput, undefined, undefined, decisionId)
     }
   }
 

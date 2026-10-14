@@ -68,7 +68,7 @@ Every event carries a `sourceTable` naming its source:
 | `evidence_exports` | A compliance evidence download: `kind` (`soc2_archive`, `framework_report` or `human_oversight`), `format`, the framework, the evidence run, the period, whether it was signed, and who downloaded it |
 | `credential_changes` | A credential created, rotated, updated, revoked or deleted: `credential_type` (`api_key`, `gateway_token`, `scim_token` or `provider_credential`), `credential_id` (the key, gateway or token id, or the provider), `label`, `action`, and who made the change: a member, or with `actor_type` `system`, `system:offboarding` for keys revoked when a member is offboarded and `system:gateway-rotation` for a gateway token rotated on its schedule. Never the credential |
 | `budget_alerts` | A [budget alert](/guide/budgets#budget-alerts): a workspace cap, virtual key budget or member budget reaching its alert threshold or its limit, once per budget per day or month. `alert_type` (`THRESHOLD` or `EXCEEDED`), `scope` (`workspace`, `key` or `member`), `subject_id` (the key's or member's id) and `key_prefix` for a key, `enforcement` (`hard` or `soft`), `period` (`daily` or `monthly`), `spend_usd`, `limit_usd` and `pct_used` |
-| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also `TAMPER`: a governance file (a gate, a hook registration, the policy snapshot or a VS Code hook setting) changed outside the sync daemon, which the daemon put back. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
+| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session; a decision of the control plane's hook gate (`source: hook_gate`) also carries its `decision_id`. Also `TAMPER`: a governance file (a gate, a hook registration, the policy snapshot or a VS Code hook setting) changed outside the sync daemon, which the daemon put back. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
 
 ### Who: the `actor` object {#the-actor}
 
@@ -113,6 +113,12 @@ curl -X PUT https://<control-plane>/api/v1/siem/destinations/<id> \
 ```
 
 Hook gates report in batches, and each batch goes to a destination as one delivery: one webhook request, one Splunk or Datadog request, or one batch for a bucket. Decisions from SDK gates that ask the control plane per call (`POST /api/v1/hook-gate`) are delivered one at a time. Decisions made in the proxy, rather than in a hook gate, already stream as `detector_findings` and `governance_incidents`, apart from the response gate's SSO group policy refusals, which are `gate_decisions` too.
+
+#### One record per gate decision
+
+When a gate SDK (`@intutic/gate`, `intutic-clawde`) or the TrueForge bridge asks the control plane's hook gate about a call, the hook gate records the decision itself (`source: hook_gate`, with the full reason, also in an OPAQUE workspace whose agent was told only the generic sentence) and names it in its answer as `decisionId`. The SDK then reports the same call as `tool_blocked` or `tool_allowed` carrying that id as `gateDecisionId`; the report still files the incident and feeds rule evidence and plan tracking, but is not exported again, so each decision is one `gate_decisions` record with its `decision_id`. A decision the SDK made on its own, before asking the hook gate (a snapshot rule, an SOP rule, a refused MCP server), is exported from its report, with `source: hook_events`.
+
+**Upgrade note:** SDKs before 2.5.1 send no `gateDecisionId`. Their report of a hook-gate decision is exported as well, as before, so the decision arrives twice: once with `source: hook_gate` and a `decision_id`, once with `source: hook_events` and none; a DLP refusal they report is also filed as a second incident. Upgrade the SDKs to get one record and one incident per decision.
 
 ### Syslog (CEF) classes
 

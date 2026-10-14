@@ -250,9 +250,12 @@ class Gate:
 
     def _emit(self, event: str, tool: str, reason: str = "",
               tool_input: Optional[dict] = None, incident_id: Optional[str] = None,
-              file_path: Optional[str] = None) -> None:
+              file_path: Optional[str] = None, gate_decision_id: Optional[str] = None) -> None:
         if self.client is not None:
-            self.client.emit(event, tool, reason, tool_input, incident_id, file_path)
+            # Passed only when there is one, so a client subclass whose emit
+            # predates the parameter keeps working.
+            extra = {"gate_decision_id": gate_decision_id} if gate_decision_id else {}
+            self.client.emit(event, tool, reason, tool_input, incident_id, file_path, **extra)
 
     def _report_snapshot_health_once(self, tool: str) -> None:
         """Report snapshot condition exactly once per process.
@@ -480,21 +483,23 @@ class Gate:
         # Whether an unreachable control plane, or one whose checks could not
         # run (GOVERNANCE_UNAVAILABLE), blocks here is the client's
         # fail_closed setting (default True); see client.hook_gate.
+        decision_id: Optional[str] = None
         if self.cfg.use_hook_gate and self.client is not None and tool_name not in READ_ONLY_TOOLS:
             resp = self.client.hook_gate(tool_name, tool_input)
+            # Every answer is reported: the event drives the incident, rule
+            # evidence and plan tracking. It carries the hook gate's decision
+            # id, which the control plane exported to SIEM itself and filed its
+            # DLP refusal's incident under, so neither happens twice.
+            decision_id = resp.decision_id
             if not resp.allowed:
-                # A refusal that names an incident was filed by the hook gate
-                # itself (its DLP check); reporting it again filed a second
-                # incident. Every other refusal is filed only by this event.
-                if not resp.incident_id:
-                    self._emit("tool_blocked", tool_name, resp.reason, tool_input)
+                self._emit("tool_blocked", tool_name, resp.reason, tool_input, gate_decision_id=resp.decision_id)
                 # The hook gate names the MCP registry's own code when the
                 # registry refused; anything else it refuses is HOOK_GATE.
                 code = resp.code if resp.code in MCP_CODES else "HOOK_GATE"
                 raise IntuticGateRefusal(self._shown(resp.reason), code, resp.incident_id)
 
         if tool_name not in READ_ONLY_TOOLS:
-            self._emit("tool_allowed", tool_name, "", tool_input)
+            self._emit("tool_allowed", tool_name, "", tool_input, gate_decision_id=decision_id)
 
     def _guard_mcp(self, tool_name: str, tool_input: dict, note: Optional[dict] = None) -> None:
         """Raise when the workspace's MCP server registry or allowlist refuses
