@@ -55,6 +55,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `<img src=x onerror=…>` became markup. Every value is now escaped, badge
   classes come from a fixed list, and each panel carries a strict
   Content-Security-Policy (`default-src 'none'`, styles by nonce, no scripts).
+- **chromadb advisories under the `crewai` extra, re-checked.** `crewai`
+  requires `chromadb`, and every chromadb release up to 1.5.9, the latest,
+  is affected by CVE-2026-45829, CVE-2026-45830, CVE-2026-45831 and
+  CVE-2026-45833; none has a fixed release, so the lockfile stays at
+  chromadb 1.1.1 (moving to 1.5.9 would fix none of them). All four need a
+  running ChromaDB server; the CrewAI integration only uses the embedded
+  `PersistentClient`, and the two code-injection paths also need
+  `sentence-transformers`, which no extra installs. The CrewAI integration
+  page now covers current crewai releases (chromadb 1.5.x) and warns against
+  exposing the `chroma run` server chromadb installs.
 
 ### Fixed
 
