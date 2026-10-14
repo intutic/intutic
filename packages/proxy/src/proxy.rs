@@ -3780,14 +3780,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // an LLM proxy credential. That endpoint rejects non-vk_ tokens too;
             // this is the second half of the check, so neither side alone is
             // load-bearing.
-            let cp = state
+            let cp_url = state
                 .config
                 .intutic_settings
                 .policy
                 .control_plane_url
-                .as_deref()
-                .zip(credential.virtual_key());
-            match cp {
+                .as_deref();
+            match cp_url.zip(credential.virtual_key()) {
                 Some((url, virtual_key)) => {
                     match validate_key_via_control_plane(&state.http_client, url, virtual_key).await
                     {
@@ -3840,8 +3839,28 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         }
                     }
                 }
-                // No control-plane URL configured, so there is nothing to ask and
-                // the cache is the only authority. Unchanged behaviour: reject.
+                // No control plane configured, but Valkey answered: `intutic
+                // start` runs one whenever Docker is up. Nothing writes its auth
+                // cache without a control plane, so every token misses here.
+                // Whether a token is authenticated follows the configuration,
+                // not Valkey's presence: with no control plane, a provider key
+                // is the caller's own and passes through exactly as on a
+                // standalone proxy (`Unmanaged` below).
+                None if cp_url.is_none() && credential.virtual_key().is_none() => None,
+                // A virtual key with no control plane to vouch for it. Not
+                // "invalid": nothing here could ever have issued or checked it.
+                None if cp_url.is_none() => {
+                    tracing::warn!(token = %key_prefix, "Virtual key sent to a proxy with no control plane");
+                    return json_error(
+                        StatusCode::UNAUTHORIZED,
+                        "unauthorized",
+                        "Intutic virtual keys (vk_...) are issued and checked by a control plane, \
+                         and this proxy has none configured (CONTROL_PLANE_URL). Send your provider \
+                         API key instead, or connect a control plane.",
+                    );
+                }
+                // A control plane is configured and the token is not a virtual
+                // key: a managed proxy admits only virtual keys. Unchanged.
                 None => {
                     tracing::warn!(token = %key_prefix, "Virtual key not found in cache");
                     return json_error(

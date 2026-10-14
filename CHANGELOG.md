@@ -128,6 +128,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A proxy with Valkey and no control plane accepts your provider key.**
+  `intutic start` runs a local Valkey whenever Docker is up, and a proxy that
+  found one looked every token up in Valkey's auth cache, which nothing writes
+  without a control plane: every request got `401 Virtual API key is invalid,
+  expired, or revoked.` Whether a token is authenticated now follows the
+  configuration: with no control plane, a provider key passes through as it
+  does standalone, and a virtual key gets a `401` saying virtual keys need a
+  control plane. A managed proxy is unchanged.
 - **A skill's semantic verdict covers the whole file.** With
   `semanticSkillAnalysisEnabled`, `intutic skill audit` sends the first 65,536
   characters of each `SKILL.md`, and the verdict was keyed by the hash of that
