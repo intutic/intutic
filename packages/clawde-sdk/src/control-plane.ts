@@ -970,22 +970,46 @@ export class ControlPlaneClient {
 
   // ─── Compliance policies and WASM rules (`intutic policy`) ───
 
-  /** GET /api/v1/policies */
+  /**
+   * GET /api/v1/policies
+   * @deprecated Workspace policies are deprecated (sunset 2026-12-01): their tool
+   * pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
+   * rules and the `interventionMode` workspace setting for refusal wording; see
+   * https://docs.intutic.ai/guide/policies#policy-deprecation.
+   */
   public async listPolicies(): Promise<CompliancePolicy[]> {
     return (await this.request<{ policies?: CompliancePolicy[] }>('GET', '/api/v1/policies')).policies ?? []
   }
 
-  /** POST /api/v1/policies/:policyId/enable */
+  /**
+   * POST /api/v1/policies/:policyId/enable
+   * @deprecated Workspace policies are deprecated (sunset 2026-12-01): their tool
+   * pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
+   * rules and the `interventionMode` workspace setting for refusal wording; see
+   * https://docs.intutic.ai/guide/policies#policy-deprecation.
+   */
   public async enablePolicy(policyId: string): Promise<PolicyChangeResult> {
     return this.request('POST', `/api/v1/policies/${seg(policyId)}/enable`)
   }
 
-  /** POST /api/v1/policies/:policyId/disable */
+  /**
+   * POST /api/v1/policies/:policyId/disable
+   * @deprecated Workspace policies are deprecated (sunset 2026-12-01): their tool
+   * pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
+   * rules and the `interventionMode` workspace setting for refusal wording; see
+   * https://docs.intutic.ai/guide/policies#policy-deprecation.
+   */
   public async disablePolicy(policyId: string): Promise<PolicyChangeResult> {
     return this.request('POST', `/api/v1/policies/${seg(policyId)}/disable`)
   }
 
-  /** POST /api/v1/policies/:policyId/rollback */
+  /**
+   * POST /api/v1/policies/:policyId/rollback
+   * @deprecated Workspace policies are deprecated (sunset 2026-12-01): their tool
+   * pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
+   * rules and the `interventionMode` workspace setting for refusal wording; see
+   * https://docs.intutic.ai/guide/policies#policy-deprecation.
+   */
   public async rollbackPolicy(policyId: string, version: number): Promise<PolicyChangeResult> {
     return this.request('POST', `/api/v1/policies/${seg(policyId)}/rollback`, { version })
   }
