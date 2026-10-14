@@ -80,7 +80,7 @@ Treat API keys as secrets. Never commit them to version control. Use environment
 ### Key Format
 
 ```
-vk_abc123def456ghi789
+vk_<32 hex characters>_<workspace id>
 ```
 
 All keys use the `vk_` prefix for easy identification.
@@ -185,8 +185,8 @@ Intutic uses **direct provisioning** — there is no invitation email. The admin
    - **Role** — Viewer, Developer, Engineering Manager or Admin
 3. Click **Create Account** — the system provisions the account immediately and generates a temporary password for you
 4. In the **Account Created** dialog, **Copy Password** and share it with the new member through a secure channel (e.g., a password manager, encrypted message, or in person). It is not shown again
-5. The new member logs in with their email and the temporary password, and is prompted to change it
-6. They can change it again at any time from **Settings › General › Change Password**
+5. The new member logs in with their email and the temporary password. Nothing forces a change, so ask them to set their own password
+6. They change it from **Settings › General › Change Password**
 <!-- ENTERPRISE_ONLY_END -->
 
 ::: warning
@@ -195,11 +195,11 @@ Intutic does not send invitation emails. The admin is responsible for securely c
 
 ### Removing Members
 
-Remove a member to immediately revoke their access. Their historical traces and audit data are preserved.
+Deactivate a member (**Settings › Team Members › Deactivate**) to immediately revoke their access. Their historical traces and audit data are preserved.
 
 ### Changing Roles
 
-Adjust a member's role at any time. Changes take effect immediately.
+Adjust a member's role at any time. Their API keys carry the new role within five minutes, and their dashboard session from its next token refresh (every 15 minutes by default).
 
 ---
 

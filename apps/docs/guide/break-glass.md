@@ -23,23 +23,26 @@ sequenceDiagram
     participant VK as Valkey (Cache)
     actor Admin as Peer/Admin
     participant PR as Proxy Gateway
+    participant LLM as Model provider
 
     Dev->>CP: POST /api/v1/break-glass/request
     Note over CP: Generate bg_token
-    CP->>DB: Insert request (PENDING)
+    CP->>DB: Insert request (PENDING, token SHA-256)
     CP-->>Dev: Return Token & Request ID
     
     Admin->>CP: POST /api/v1/break-glass/approve
-    Note over CP: Verify Admin != Requester
+    Note over CP: Verify Admin is OWNER/ADMIN/EM<br/>and != Requester
     CP->>DB: Update status (APPROVED)
-    CP->>VK: setex bg:token:<token> (TTL = duration)
+    CP->>VK: setex bg:token:sha256(token) (TTL = duration)
     CP-->>Admin: Success
 
     Dev->>PR: Send request with header<br/>X-Intutic-Break-Glass: bg_token
-    PR->>VK: Query token
-    VK-->>PR: Active token found (workspace / policy metadata)
-    Note over PR: Bypass WASM rules, policy pre-checks,<br/>and the anomaly detector chain
-    PR->>CP: Forward request / Log audit trace
+    PR->>VK: GET bg:token:sha256(token)
+    VK-->>PR: Active token found (workspace / scope metadata)
+    Note over PR: Global scope: skip WASM rules, policy pre-check<br/>and the anomaly detector chain.<br/>Scoped: skip the one named rule or detector
+    PR->>LLM: Forward request
+    PR->>VK: Publish execution trace (break_glass = true)
+    VK-->>CP: Trace subscriber stores it (Pub/Sub)
 ```
 
 ---
@@ -57,7 +60,7 @@ Open **Policies › Emergency Overrides** (`/policies/overrides`; Owners, Admins
 To prevent security gaps:
 - Nobody **can approve their own override request**.
 - Approving needs the OWNER, ADMIN or EM role (`POST /api/v1/break-glass/approve` refuses any other role with `403`), so another owner, administrator or engineering manager clicks **Approve** on the request in the **Override requests** card on the same page, which lists each request's requester, status, scope, duration, expiry and approver.
-- Once approved, the control plane activates the token and writes it to the high-performance Valkey cache.
+- Once approved, the control plane activates the token and writes its SHA-256 to the Valkey cache, where it expires after the approved duration.
 
 ---
 
@@ -71,7 +74,7 @@ X-Intutic-Break-Glass: bg_xxxxxxx
 
 For the configured duration, the proxy will:
 1. Validate the token (a single cache GET keyed on the token's SHA-256, scoped to the workspace the approval named).
-2. Mark the request's execution trace `break_glass = true` with the approval's request id, and log the bypass and the approval in the audit trail.
+2. Mark the request's execution trace `break_glass = true` with the approval's request id, and log the bypass with that request id.
 3. Skip what the approval's scope allows:
    - **Global** (no scope): the custom WASM rules, the control plane's policy pre-check, and the whole anomaly detector chain — none of the twelve detector categories run, so no finding is recorded under any category.
    - **`wasm:<ruleId>`**: that one WASM rule is not evaluated. Every other rule, every detector and the pre-check still run and can still block.
@@ -90,7 +93,7 @@ When the member who requested an override is offboarded through [SCIM](/guide/sc
 ## Security and Compliance Auditing
 
 All break-glass activities are logged persistently:
-- **Request logs:** Track who requested the override, the target policies, and the requested duration.
+- **Request logs:** Track who requested the override, its scope, and the requested duration.
 - **Approval logs:** Track who approved the bypass.
 - **Execution logs:** every request served under a break-glass token is recorded on its execution trace as `break_glass = true` with the approval's request id (`break_glass_request_id`), so the traces a token covered can be listed after the fact. The token itself is never written to a trace or a log; the proxy logs the request id on success and a short hash of the token on a denial.
 

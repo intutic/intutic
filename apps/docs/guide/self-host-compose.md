@@ -30,9 +30,9 @@ is private. Log in first with the username and pull token Intutic sent you:
 docker login ghcr.io --username <username>   # paste the pull token when asked
 ```
 
-The installer asks for the first owner's password (12 characters or more) when
-run in a terminal. Otherwise it reads `INTUTIC_ADMIN_PASSWORD`, or generates
-one and prints it once at the end.
+The first owner's password (12 characters or more) comes from
+`INTUTIC_ADMIN_PASSWORD` when it is set. Otherwise the installer asks for it
+when run in a terminal, or generates one and prints it once at the end.
 
 What it does, in order:
 

@@ -35,7 +35,7 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 
 ## When to choose Intutic
 
-- Your agents are coding agents and agent frameworks, such as Windsurf, Cline, Roo Code, Goose or LangGraph alongside Claude Code and Cursor, and you want each tool call decided before it runs.
+- Your agents are coding agents and agent frameworks, such as Windsurf, Cline, Goose or LangGraph alongside Claude Code and Cursor, and you want each tool call decided before it runs.
 - You want risky calls held for approval rather than only allowed or blocked.
 - You need to run the whole product on your own infrastructure, including air-gapped.
 - You want to read the code that blocks a call, and to verify the audit trail yourself.

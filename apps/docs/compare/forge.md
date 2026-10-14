@@ -43,7 +43,7 @@ On audit integrity, Intutic covers what Forge's ledger does (a hash chain, datab
 
 ## When to choose Intutic
 
-- Your agents are coding agents and agent frameworks, such as Windsurf, Cline, Roo Code, Goose or LangGraph alongside Claude Code and Cursor, and you want each tool call decided before it runs.
+- Your agents are coding agents and agent frameworks, such as Windsurf, Cline, Goose or LangGraph alongside Claude Code and Cursor, and you want each tool call decided before it runs.
 - You need to run the whole product on your own infrastructure, including air-gapped.
 - You want to read the code that blocks a call, and to verify the audit trail yourself.
 - You want an approval hold, a sandbox and an egress firewall that work with or without the rest of your security stack.
