@@ -3676,23 +3676,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // No control plane configured, but Valkey answered: `intutic
                 // start` runs one whenever Docker is up. Nothing writes its auth
                 // cache without a control plane, so every token misses here.
-                // Whether a token is authenticated follows the configuration,
-                // not Valkey's presence: with no control plane, a provider key
-                // is the caller's own and passes through exactly as on a
-                // standalone proxy (`Unmanaged` below).
-                None if cp_url.is_none() && credential.virtual_key().is_none() => None,
-                // A virtual key with no control plane to vouch for it. Not
-                // "invalid": nothing here could ever have issued or checked it.
-                None if cp_url.is_none() => {
-                    tracing::warn!(token = %key_prefix, "Virtual key sent to a proxy with no control plane");
-                    return json_error(
-                        StatusCode::UNAUTHORIZED,
-                        "unauthorized",
-                        "Intutic virtual keys (vk_...) are issued and checked by a control plane, \
-                         and this proxy has none configured (CONTROL_PLANE_URL). Send your provider \
-                         API key instead, or connect a control plane.",
-                    );
-                }
+                // One rule for "no control plane", whether or not Valkey is up:
+                // the request is handled exactly as on a standalone proxy
+                // (`Unmanaged` below). A provider key is the caller's own and
+                // passes through; a virtual key is never forwarded, and the
+                // provider key in the proxy's environment goes upstream.
+                None if cp_url.is_none() => None,
                 // A control plane is configured and the token is not a virtual
                 // key: a managed proxy admits only virtual keys. Unchanged.
                 None => {

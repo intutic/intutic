@@ -132,10 +132,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `intutic start` runs a local Valkey whenever Docker is up, and a proxy that
   found one looked every token up in Valkey's auth cache, which nothing writes
   without a control plane: every request got `401 Virtual API key is invalid,
-  expired, or revoked.` Whether a token is authenticated now follows the
-  configuration: with no control plane, a provider key passes through as it
-  does standalone, and a virtual key gets a `401` saying virtual keys need a
-  control plane. A managed proxy is unchanged.
+  expired, or revoked.` There is now one rule for a proxy with no control
+  plane configured, whether or not Valkey is up: it behaves as standalone. A
+  provider key passes through, and a virtual key is accepted with the provider
+  key from the proxy's environment used upstream. A managed proxy is
+  unchanged.
 - **Slash-command and `/intutic predict` answers stream when the client
   streams.** An `/intutic` command's answer came back as one JSON body even on
   a `"stream": true` request, which a streaming client (Claude Code, Cursor)

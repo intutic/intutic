@@ -46,6 +46,10 @@ plane attach later. But if Docker is unavailable or the machine is locked down,
 the proxy simply runs standalone. Bandit learning still persists, to
 `~/.intutic/bandit-state.json`.
 
+With or without Valkey, a proxy with no control plane accepts the same keys:
+your provider key, which it forwards, or an Intutic virtual key, for which it
+uses the provider key in its own environment.
+
 Already have a Valkey elsewhere? Point at it with `VALKEY_URL=redis://host:port`.
 
 ## Step 1 — Install the CLI & Native Proxy Gateway
