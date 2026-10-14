@@ -1348,10 +1348,10 @@ Every route the control plane serves: 412 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/wasm-rules` | Authenticated |  |
+| GET | `/api/v1/wasm-rules` | OWNER/ADMIN/EM |  |
 | POST | `/api/v1/wasm-rules` | OWNER/ADMIN |  |
 | DELETE | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN |  |
-| GET | `/api/v1/wasm-rules/:ruleId` | Authenticated |  |
+| GET | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN/EM |  |
 | PUT | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN |  |
 | POST | `/api/v1/wasm-rules/:ruleId/replay` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/wasm-rules/binaries/:sha256` | Authenticated |  |
