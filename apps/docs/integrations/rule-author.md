@@ -14,7 +14,7 @@ Where the [Kitkat skill](/integrations/kitkat) teaches an agent to *operate* Int
 4. **Dry-run:** `intutic policy test` against both a should-block and a should-allow mock — the skill requires both to pass before install.
 5. **Install:** `intutic policy install --wasm build/rule.wasm --name <name> --priority NN` — validated by instantiation first, then copied to the local rules directory the proxy rescans every ~5 s.
 
-Local rules merge with any centrally synced rules most-restrictive-wins: a KILL from either source ends the request, so a local rule can add restrictions but can never neutralize a central one.
+Local rules merge with any centrally synced rules most-restrictive-wins: a BLOCK from either source ends the request, so a local rule can add restrictions but can never neutralize a central one.
 
 ---
 
