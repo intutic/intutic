@@ -348,7 +348,7 @@ export const CreateApiKeyInputSchema = z.object({
   label: z.string().min(1).max(128),
   /**
    * What the key may do on top of its owner's role; `["*"]` (everything) when
-   * omitted. Every entry must be in the registry (`API_KEY_SCOPES`).
+   * omitted. Every entry must be in the registry (`API_SCOPES`).
    */
   scopes: ApiKeyScopeListSchema.default(['*']),
   expiresInDays: z.number().int().min(1).max(365).optional(),

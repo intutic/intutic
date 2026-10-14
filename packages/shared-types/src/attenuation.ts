@@ -88,7 +88,7 @@ export interface AttenuationChainLink {
 export const AttenuateTokenInputSchema = z.object({
   parentKeyId: z.string().min(1),
   /**
-   * The child key's scopes (`API_KEY_SCOPES`), each one granted by the parent
+   * The child key's scopes (`API_SCOPES`), each one granted by the parent
    * key: a child can only narrow.
    */
   requestedCaps: z

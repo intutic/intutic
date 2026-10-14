@@ -140,7 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full role. A request made with a key now needs both the owner's role and a
   scope covering the route, or it gets `403` with code `INSUFFICIENT_SCOPE` and
   `requiredScopes`. The scopes form one fixed registry
-  (`API_KEY_SCOPES` in `@intutic/shared-types`): `*` (everything, the default
+  (`API_SCOPES` in `@intutic/shared-types`): `*` (everything, the default
   and what existing keys hold), `gateway:use` (agent traffic: LLM calls
   through the proxy, hook gates, hook events, trace sync-back, holds, the SOP
   rules and policy snapshot) and `<area>:read` / `<area>:write` for thirteen

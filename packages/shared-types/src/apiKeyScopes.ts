@@ -28,7 +28,7 @@
  */
 
 /** Every REST area a scope can name, with what it covers. Order is the display order. */
-export const API_KEY_SCOPE_AREAS = {
+export const API_SCOPE_AREAS = {
   traces: 'traces, agent sessions, plans, loop runs, trajectories, agents and the tamper-evident trace chain',
   usage: 'usage, cost and routing analytics, cost prediction and provider incidents',
   findings: 'findings, incidents, anomalies, holds and decisions, judge reviews, governance cards, trust scores and break-glass',
@@ -45,7 +45,7 @@ export const API_KEY_SCOPE_AREAS = {
 } as const
 
 /** A REST area a scope can name. */
-export type ApiKeyScopeArea = keyof typeof API_KEY_SCOPE_AREAS
+export type ApiKeyScopeArea = keyof typeof API_SCOPE_AREAS
 
 /** The scope that covers agent traffic. */
 export const GATEWAY_USE_SCOPE = 'gateway:use' as const
@@ -63,21 +63,21 @@ export interface ApiKeyScopeEntry {
 }
 
 /** The registry: every valid scope, in display order. */
-export const API_KEY_SCOPES: readonly ApiKeyScopeEntry[] = [
+export const API_SCOPES: readonly ApiKeyScopeEntry[] = [
   { scope: ALL_SCOPES, description: "Everything the key owner's role allows (the default)" },
   {
     scope: GATEWAY_USE_SCOPE,
     description:
       'Agent traffic: LLM calls through the proxy, hook-gate checks, hook events, trace sync-back, sessions, holds, SOP rules, the policy snapshot and the workspace settings agents read',
   },
-  ...(Object.entries(API_KEY_SCOPE_AREAS) as Array<[ApiKeyScopeArea, string]>).flatMap(([area, covers]) => [
+  ...(Object.entries(API_SCOPE_AREAS) as Array<[ApiKeyScopeArea, string]>).flatMap(([area, covers]) => [
     { scope: `${area}:read` as ApiKeyScope, description: `Read ${covers}` },
     { scope: `${area}:write` as ApiKeyScope, description: `Read and change ${covers}` },
   ]),
 ]
 
 /** Every valid scope string. */
-export const API_SCOPE_NAMES: readonly ApiKeyScope[] = API_KEY_SCOPES.map((s) => s.scope)
+export const API_SCOPE_NAMES: readonly ApiKeyScope[] = API_SCOPES.map((s) => s.scope)
 
 const SCOPE_SET: ReadonlySet<string> = new Set(API_SCOPE_NAMES)
 

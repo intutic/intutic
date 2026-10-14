@@ -341,8 +341,8 @@ export {
 } from './auth.js'
 
 export {
-  API_KEY_SCOPE_AREAS,
-  API_KEY_SCOPES,
+  API_SCOPE_AREAS,
+  API_SCOPES,
   API_SCOPE_NAMES,
   ALL_SCOPES,
   GATEWAY_USE_SCOPE,
