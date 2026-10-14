@@ -5,6 +5,9 @@
  *   fixtures/guardrail-ir/<name>.md        a SOP file whose front matter is rendered from IRs
  *   fixtures/guardrail-ir/<name>.expected.json
  *                                          the fields the proxy must parse out of that file
+ *   fixtures/guardrail-layer-vectors.json  guardrails (status + IR) → what the control plane
+ *                                          serves each layer → one tool call → the decision
+ *                                          every enforcing layer must reach
  *
  * The expectations are authored here, by hand, from what the IR means. The
  * renderer produces the bytes. Every consumer — `matchSopRule`, the real
@@ -22,7 +25,8 @@ import { mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { canonicalizeIr, validateGuardrailIr, type FrontMatterIr, type HookRuleIr } from '../src/guardrailIr.js'
-import { frontMatterToIrs, parseFrontMatterEnforcing, renderFrontMatterLines, renderGuardrailSopFile, renderHookRule, splitFrontMatter } from '../src/guardrailRender.js'
+import { frontMatterToIrs, parseFrontMatterEnforcing, proxyHookRule, renderFrontMatterLines, renderGuardrailSopFile, renderHookRule, renderHookRuleFrontMatterLine, splitFrontMatter } from '../src/guardrailRender.js'
+import { GUARDRAIL_SOP_TITLE_PREFIX } from '../src/policyGuardrails.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const FIXTURES = join(ROOT, 'fixtures')
@@ -325,4 +329,164 @@ for (const fx of IR_FIXTURES) {
   writeFileSync(join(IR_DIR, `${fx.name}.expected.json`), `${JSON.stringify({ generatedBy: GENERATED_BY, ...expected }, null, 2)}\n`)
 }
 
-console.log(`wrote ${vectors.length} hook-rule vectors (${vectors.reduce((n, v) => n + v.cases.length, 0)} cases) and ${IR_FIXTURES.length} front-matter fixtures`)
+// ─── Layer vectors: one decision, every layer ─────────────────────────
+//
+// A hook-rule guardrail is enforced by the local hook gates (the emitted
+// harness gates, gate-js, intutic-clawde), the MCP proxy, the hosted hook gate
+// (and the AgentCore check, which shares its evaluator) and the LLM proxy.
+// Each vector is a set of guardrails, what the control plane serves for them
+// — the rendered rules `GET /api/v1/sop/rules` and `/policy/resolve` append,
+// and the SOP entries `GET /api/v1/workspace/sops-policy` appends for the
+// proxy — one tool call, and the decision. `block` names the ENFORCING rule
+// that refuses the call; `warn` names the SHADOW rule that would have, while
+// the call goes through; `allow` names none. A refusal wins over a shadow
+// match wherever the rules sit in the list. No vector has two rules of the
+// deciding severity matching one call, so the named rule is never a question
+// of list order.
+
+type LayerDecision = 'block' | 'warn' | 'allow'
+
+interface LayerGuardrail {
+  guardrailId: string
+  status: 'SHADOW' | 'ENFORCING'
+  ir: HookRuleIr
+  citation: { quote: string; sourceUrl: string | null }
+}
+
+interface LayerVector {
+  name: string
+  guardrails: LayerGuardrail[]
+  role: string
+  toolCall: { tool: string; toolInput: Record<string, unknown> }
+  expected: { decision: LayerDecision; ruleId: string | null }
+}
+
+const TF: HookRuleIr = { kind: 'hook_rule', title: 'Reviewed plan before terraform apply', tools: ['Bash'], argContains: ['terraform apply'] }
+const TF_CITE = { quote: 'Engineers must never run terraform apply against production without a reviewed plan.', sourceUrl: `${WIKI}301` }
+const PUSH: HookRuleIr = { kind: 'hook_rule', title: 'Pushes are reviewed', tools: ['Bash'], argContains: ['git push'] }
+const PUSH_CITE = { quote: 'Every git push from an agent session is reviewed.', sourceUrl: `${WIKI}302` }
+const FORCE: HookRuleIr = { kind: 'hook_rule', title: 'No force push', tools: ['Bash'], argContains: ['git push', '--force'] }
+const FORCE_CITE = { quote: 'A force push (git push --force) to any shared branch is prohibited.', sourceUrl: `${WIKI}303` }
+const DRY: HookRuleIr = { kind: 'hook_rule', title: 'kubectl apply must be a dry run', tools: ['Bash'], argContains: ['kubectl apply'], argNotContains: ['--dry-run'] }
+const DRY_CITE = { quote: 'kubectl apply from an agent session must use --dry-run.', sourceUrl: `${WIKI}304` }
+const RMRF: HookRuleIr = { kind: 'hook_rule', title: 'No recursive force delete', tools: ['Bash'], argContains: ['rm -rf'] }
+const RMRF_CITE = { quote: 'Agents never run rm -rf on a workstation.', sourceUrl: null }
+const ISSUE: HookRuleIr = { kind: 'hook_rule', title: 'Issues are filed by humans', tools: ['mcp__github__create_issue'] }
+const ISSUE_CITE = { quote: 'Agents do not file GitHub issues; a human files them after review.', sourceUrl: `${WIKI}305` }
+const WORKFLOWS: HookRuleIr = { kind: 'hook_rule', title: 'Workflow files are owned by platform', tools: ['Write', 'Edit'], argContains: ['.github/workflows/'] }
+const WORKFLOWS_CITE = { quote: 'Changes under .github/workflows/ are made only by the platform team.', sourceUrl: `${WIKI}306` }
+const DOTENV: HookRuleIr = { kind: 'hook_rule', title: 'Environment files stay unread', tools: ['Read'], argContains: ['.env'] }
+const DOTENV_CITE = { quote: 'Agents do not read .env files; secrets come from the vault.', sourceUrl: `${WIKI}307` }
+const PRODDB: HookRuleIr = { kind: 'hook_rule', title: 'No direct production database sessions', tools: ['Bash'], argContains: ['prod-db'] }
+const PRODDB_CITE = { quote: 'Nobody opens a session against prod-db from an agent.', sourceUrl: `${WIKI}308` }
+
+const gr = (guardrailId: string, status: LayerGuardrail['status'], ir: HookRuleIr, citation: LayerGuardrail['citation']): LayerGuardrail => ({ guardrailId, status, ir, citation })
+const call = (tool: string, toolInput: Record<string, unknown>) => ({ tool, toolInput })
+const blocks = (ruleId: string) => ({ decision: 'block' as const, ruleId })
+const warns = (ruleId: string) => ({ decision: 'warn' as const, ruleId })
+const allows = { decision: 'allow' as const, ruleId: null }
+
+const LAYER_VECTORS: LayerVector[] = [
+  { name: 'an enforcing literal refuses the call', guardrails: [gr('pgr_lv01', 'ENFORCING', TF, TF_CITE)], role: 'developer', toolCall: call('Bash', { command: 'terraform apply -auto-approve' }), expected: blocks('guardrail.pgr_lv01') },
+  { name: 'an enforcing literal lets another command through', guardrails: [gr('pgr_lv02', 'ENFORCING', TF, TF_CITE)], role: 'developer', toolCall: call('Bash', { command: 'terraform plan' }), expected: allows },
+  { name: 'a shadow literal flags and allows', guardrails: [gr('pgr_lv03', 'SHADOW', TF, TF_CITE)], role: 'developer', toolCall: call('Bash', { command: 'cd infra && terraform apply' }), expected: warns('guardrail.pgr_lv03') },
+  { name: 'a refusal wins over an earlier shadow match', guardrails: [gr('pgr_lv04a', 'SHADOW', PUSH, PUSH_CITE), gr('pgr_lv04b', 'ENFORCING', FORCE, FORCE_CITE)], role: 'developer', toolCall: call('Bash', { command: 'git push --force origin main' }), expected: blocks('guardrail.pgr_lv04b') },
+  { name: 'the shadow match stands when the refusal does not fire', guardrails: [gr('pgr_lv05a', 'SHADOW', PUSH, PUSH_CITE), gr('pgr_lv05b', 'ENFORCING', FORCE, FORCE_CITE)], role: 'developer', toolCall: call('Bash', { command: 'git push origin main' }), expected: warns('guardrail.pgr_lv05a') },
+  { name: 'a refusal wins over a later shadow match', guardrails: [gr('pgr_lv06a', 'ENFORCING', FORCE, FORCE_CITE), gr('pgr_lv06b', 'SHADOW', PUSH, PUSH_CITE)], role: 'developer', toolCall: call('Bash', { command: 'git push origin main --force' }), expected: blocks('guardrail.pgr_lv06a') },
+  { name: 'an exclusion lets the dry run through', guardrails: [gr('pgr_lv07', 'ENFORCING', DRY, DRY_CITE)], role: 'developer', toolCall: call('Bash', { command: 'kubectl apply --dry-run=client -f deploy.yaml' }), expected: allows },
+  { name: 'an exclusion refuses without it', guardrails: [gr('pgr_lv08', 'ENFORCING', DRY, DRY_CITE)], role: 'developer', toolCall: call('Bash', { command: 'kubectl apply -f deploy.yaml' }), expected: blocks('guardrail.pgr_lv08') },
+  { name: 'an exclusion anywhere in the input counts', guardrails: [gr('pgr_lv09', 'ENFORCING', DRY, DRY_CITE)], role: 'developer', toolCall: call('Bash', { description: 'a --dry-run first', command: 'kubectl apply -f a.yaml' }), expected: allows },
+  { name: 'tool names are matched exactly, case included', guardrails: [gr('pgr_lv10', 'ENFORCING', RMRF, RMRF_CITE)], role: 'developer', toolCall: call('bash', { command: 'rm -rf build' }), expected: allows },
+  { name: 'a longer tool name is another tool', guardrails: [gr('pgr_lv11', 'ENFORCING', RMRF, RMRF_CITE)], role: 'developer', toolCall: call('BashOutput', { command: 'rm -rf build' }), expected: allows },
+  { name: 'a name-only rule refuses any input', guardrails: [gr('pgr_lv12', 'ENFORCING', ISSUE, ISSUE_CITE)], role: 'developer', toolCall: call('mcp__github__create_issue', { title: 'flaky test', body: 'see CI' }), expected: blocks('guardrail.pgr_lv12') },
+  { name: 'a name-only rule ignores a neighbouring tool', guardrails: [gr('pgr_lv13', 'ENFORCING', ISSUE, ISSUE_CITE)], role: 'developer', toolCall: call('mcp__github__create_issue_comment', { body: 'x' }), expected: allows },
+  { name: 'two tools, one path literal', guardrails: [gr('pgr_lv14', 'ENFORCING', WORKFLOWS, WORKFLOWS_CITE)], role: 'developer', toolCall: call('Edit', { file_path: 'repo/.github/workflows/release.yml', old_string: 'a', new_string: 'b' }), expected: blocks('guardrail.pgr_lv14') },
+  { name: 'escaped quotes do not hide a literal', guardrails: [gr('pgr_lv15', 'ENFORCING', TF, TF_CITE)], role: 'developer', toolCall: call('Bash', { command: 'bash -c "terraform apply"' }), expected: blocks('guardrail.pgr_lv15') },
+  { name: 'a newline between the words is not the literal', guardrails: [gr('pgr_lv16', 'ENFORCING', TF, TF_CITE)], role: 'developer', toolCall: call('Bash', { command: 'terraform\napply' }), expected: allows },
+  { name: 'an empty input under a literal rule', guardrails: [gr('pgr_lv17', 'ENFORCING', TF, TF_CITE)], role: 'developer', toolCall: call('Bash', {}), expected: allows },
+  { name: 'a caller with no role is refused like any other', guardrails: [gr('pgr_lv18', 'ENFORCING', TF, TF_CITE)], role: '', toolCall: call('Bash', { command: 'terraform apply' }), expected: blocks('guardrail.pgr_lv18') },
+  { name: 'an admin is refused like any other', guardrails: [gr('pgr_lv19', 'ENFORCING', TF, TF_CITE)], role: 'admin', toolCall: call('Bash', { command: 'terraform apply' }), expected: blocks('guardrail.pgr_lv19') },
+  { name: 'non-ASCII input around a literal', guardrails: [gr('pgr_lv20', 'ENFORCING', RMRF, RMRF_CITE)], role: 'developer', toolCall: call('Bash', { command: 'rm -rf ./données/été' }), expected: blocks('guardrail.pgr_lv20') },
+  { name: 'two enforcing rules: the one that matches decides', guardrails: [gr('pgr_lv21a', 'ENFORCING', TF, TF_CITE), gr('pgr_lv21b', 'ENFORCING', PUSH, PUSH_CITE)], role: 'developer', toolCall: call('Bash', { command: 'git push origin feature' }), expected: blocks('guardrail.pgr_lv21b') },
+  { name: 'a literal in a nested value', guardrails: [gr('pgr_lv22', 'ENFORCING', PRODDB, PRODDB_CITE)], role: 'developer', toolCall: call('Bash', { command: 'psql', env: { PGHOST: 'prod-db.internal', PGPORT: 5432 } }), expected: blocks('guardrail.pgr_lv22') },
+  { name: 'a rule on Read', guardrails: [gr('pgr_lv23', 'ENFORCING', DOTENV, DOTENV_CITE)], role: 'developer', toolCall: call('Read', { file_path: '/repo/.env' }), expected: blocks('guardrail.pgr_lv23') },
+  { name: 'a shadow rule that does not match', guardrails: [gr('pgr_lv24', 'SHADOW', DOTENV, DOTENV_CITE)], role: 'developer', toolCall: call('Read', { file_path: '/repo/README.md' }), expected: allows },
+]
+
+/** Exactly what `listProjectedHookRules` serves for these guardrails, in proposal order. */
+function servedHookRules(gs: readonly LayerGuardrail[]) {
+  return gs.map((x) => {
+    const rendered = renderHookRule(x.ir, x.citation)
+    return {
+      id: `guardrail.${x.guardrailId}`,
+      toolPattern: rendered.toolPattern,
+      ...(rendered.argPattern ? { argPattern: rendered.argPattern } : {}),
+      action: x.status === 'ENFORCING' ? ('block' as const) : ('warn' as const),
+      reason: rendered.reason,
+      origin: 'guardrail' as const,
+    }
+  })
+}
+
+/** The SOP entries `listProjectedGuardrailSops` serves the LLM proxy for these guardrails. */
+function servedSops(gs: readonly LayerGuardrail[]) {
+  return gs.map((x) => {
+    const rendered = renderHookRule(x.ir, x.citation)
+    const line = renderHookRuleFrontMatterLine(proxyHookRule(`guardrail.${x.guardrailId}`, x.ir, rendered.reason))
+    return {
+      title: `${GUARDRAIL_SOP_TITLE_PREFIX}${x.guardrailId} hook_rule: ${[...new Set(x.ir.tools)].sort().join(', ')}`,
+      markdownContent: renderGuardrailSopFile({
+        lines: line,
+        title: x.ir.title,
+        body: `> ${x.citation.quote}\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.`,
+        sourceUrl: x.citation.sourceUrl,
+        cite: createHash('sha256').update(x.citation.quote.normalize('NFC')).digest('hex'),
+        shadow: x.status === 'SHADOW',
+      }),
+      scope: 'workspace' as const,
+    }
+  })
+}
+
+/** Severity first, then list order: the decision every layer must reach. */
+function decideLayer(matches: ReadonlyArray<{ id: string; action: 'block' | 'warn' }>): { decision: LayerDecision; ruleId: string | null } {
+  const block = matches.find((m) => m.action === 'block')
+  if (block) return { decision: 'block', ruleId: block.id }
+  const warn = matches.find((m) => m.action === 'warn')
+  return warn ? { decision: 'warn', ruleId: warn.id } : { decision: 'allow', ruleId: null }
+}
+
+const layerVectors = LAYER_VECTORS.map((v) => {
+  for (const x of v.guardrails) assertValid(x.ir, `${v.name} / ${x.guardrailId}`)
+  const hookRules = servedHookRules(v.guardrails)
+  const sops = servedSops(v.guardrails)
+  const haystack = JSON.stringify(v.toolCall.toolInput ?? {})
+  const patternFires = (r: (typeof hookRules)[number]) => new RegExp(r.toolPattern).test(v.toolCall.tool) && (r.argPattern === undefined || new RegExp(r.argPattern).test(haystack))
+  // The rendered regexes, as every hook gate tests them.
+  const byPattern = decideLayer(hookRules.filter(patternFires))
+  // The IR literals, as the LLM proxy tests them, read back from the served line.
+  const byLiteral = decideLayer(
+    sops.flatMap((s, i) => {
+      const line = s.markdownContent.split('\n').find((l) => l.startsWith('hook_rule:'))
+      if (!line) throw new Error(`${v.name}: served SOP ${i} carries no hook_rule line`)
+      const r = JSON.parse(line.slice('hook_rule:'.length)) as { id: string; tools: string[]; argContains: string[]; argNotContains: string[] }
+      const fires = r.tools.includes(v.toolCall.tool) && r.argContains.every((l) => haystack.includes(l)) && !r.argNotContains.some((l) => haystack.includes(l))
+      return fires ? [{ id: r.id, action: v.guardrails[i]!.status === 'ENFORCING' ? ('block' as const) : ('warn' as const) }] : []
+    }),
+  )
+  for (const [how, got] of [['the rendered patterns', byPattern], ['the IR literals', byLiteral]] as const) {
+    if (got.decision !== v.expected.decision || got.ruleId !== v.expected.ruleId) {
+      throw new Error(`${v.name}: ${how} decide ${JSON.stringify(got)}, the vector says ${JSON.stringify(v.expected)}`)
+    }
+  }
+  const decidingAction = v.expected.decision === 'block' ? 'block' : 'warn'
+  const deciding = v.expected.decision === 'allow' ? [] : hookRules.filter((r) => r.action === decidingAction && patternFires(r))
+  if (deciding.length > 1) throw new Error(`${v.name}: ${deciding.length} rules of the deciding severity match — the named rule would depend on list order`)
+  return { name: v.name, guardrails: v.guardrails, served: { hookRules, sops }, role: v.role, toolCall: v.toolCall, expected: v.expected }
+})
+for (const d of ['block', 'warn', 'allow'] as const) {
+  if (!layerVectors.some((v) => v.expected.decision === d)) throw new Error(`the layer vectors have no ${d} case`)
+}
+writeFileSync(join(FIXTURES, 'guardrail-layer-vectors.json'), `${JSON.stringify({ generatedBy: GENERATED_BY, vectors: layerVectors }, null, 2)}\n`)
+
+console.log(`wrote ${vectors.length} hook-rule vectors (${vectors.reduce((n, v) => n + v.cases.length, 0)} cases), ${IR_FIXTURES.length} front-matter fixtures and ${layerVectors.length} layer vectors`)

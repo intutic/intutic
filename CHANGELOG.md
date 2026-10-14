@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The LLM proxy enforces hook-rule policy guardrails.** A hook rule now
+  reaches the proxy as a `hook_rule:` line in the SOP the workspace policy
+  serves (and the file `intutic guardrails pull` writes). The response gate
+  withholds a call an enforcing rule refuses before the client sees it, with a
+  `TOOL_DENIED` refusal naming `guardrail.<id>`, on streams and off them: a
+  rule that names only the tool decides on the call's first event, and one
+  that constrains arguments holds the call's block until its arguments are
+  complete. A request whose latest turn reports a refused call is refused too.
+  A shadow rule is reported on the trace and refuses nothing. A rule line the
+  proxy cannot read, or arguments that are not JSON under a rule that
+  constrains them, refuse rather than let the call through. The proxy tests
+  the rule's literals as substrings of the serialised input, which is what the
+  rendered pattern the other layers use means.
+- **One decision for every layer, pinned.**
+  `packages/shared-types/fixtures/guardrail-layer-vectors.json` holds
+  guardrails, what is served for them, a tool call and the expected decision;
+  the emitted hook gates, `@intutic/gate`, `intutic-clawde`, the MCP proxy and
+  the LLM proxy each run it, and the proxy now also runs the hook-rule vectors.
+
 - **An OpenAPI 3.1 document for the control plane's REST API.**
   `apps/docs/public/openapi.json` lists every route with its auth, plan badge,
   path and query parameters, and the request body schema wherever the handler
@@ -174,6 +193,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   examples are `intutic_guardrail` hook rules now.
 
 ### Fixed
+
+- **A refusal now wins over an earlier flag-only rule.** `@intutic/gate`,
+  `intutic-clawde` and the MCP proxy took the first SOP rule matching a call,
+  so a `warn` rule (a shadow guardrail, or the high-risk reminder) listed
+  before a matching `block` rule let the call through with only a flag. They
+  now take the most severe match: block, then require-approval, then warn,
+  ties in list order.
 
 - **A skill's semantic verdict covers the whole file.** With
   `semanticSkillAnalysisEnabled`, `intutic skill audit` sends the first 65,536

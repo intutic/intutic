@@ -159,7 +159,8 @@ description escalates to an immediate reask on the very request that carries
 it — fetched content is not the population that types *"ignore my previous
 message"* in earnest, so it does not wait for the multi-technique threshold.
 And the tool-**call** analogue is already response-side: the response gate
-refuses a forbidden tool call before the client ever sees it. There is no
+refuses a forbidden tool call — a `deny_tools` name or an enforcing hook-rule
+[policy guardrail](/guide/policy-guardrails) — before the client ever sees it. There is no
 response-side injection scan of tool results; that asymmetry is the documented
 posture, not an oversight. What the response path does carry is an
 **advisory-only echo scan** of the model's own output: injection phrasing in

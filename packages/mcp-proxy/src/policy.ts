@@ -23,6 +23,9 @@ import {
 
 const log = createLogger('mcp-proxy-policy')
 
+/** Higher decides in {@link PolicyClient.matchRule}: a refusal wins over a hold, a hold over a flag. */
+const RULE_SEVERITY: Readonly<Record<string, number>> = { block: 3, require_approval: 2, warn: 1 }
+
 export interface SopRule {
   id: string
   /** Regex pattern matched against tool name (e.g. "mcp__github__.*" or "Bash") */
@@ -496,9 +499,17 @@ export class PolicyClient {
     )
   }
 
-  /** Find the first matching rule for a given tool name + serialized args. */
+  /**
+   * The rule that decides a call, given its tool name and serialized args: the
+   * most severe matching rule (block, then require_approval, then warn), the
+   * first of that severity in list order. A warn rule listed before a block
+   * rule (a shadow guardrail, or the control plane's catch-all reminder) must
+   * not let the call through with a flag when a later rule refuses it.
+   */
   matchRule(toolName: string, toolInputJson: string): SopRule | null {
+    let decided: SopRule | null = null
     for (const rule of this.rules) {
+      if (decided !== null && (RULE_SEVERITY[rule.action] ?? 0) <= (RULE_SEVERITY[decided.action] ?? 0)) continue
       try {
         const toolRegex = new RegExp(rule.toolPattern)
         if (!toolRegex.test(toolName)) continue
@@ -506,12 +517,13 @@ export class PolicyClient {
           const argRegex = new RegExp(rule.argPattern)
           if (!argRegex.test(toolInputJson)) continue
         }
-        return rule
+        decided = rule
+        if (rule.action === 'block') break
       } catch {
         // Malformed regex in rule — skip silently
       }
     }
-    return null
+    return decided
   }
 
   /** Fetch fresh rules from the control plane. */

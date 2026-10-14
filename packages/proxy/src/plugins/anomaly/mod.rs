@@ -624,12 +624,7 @@ impl DetectorRegistry {
                 })
             })
             .collect();
-        findings.sort_by(|a, b| {
-            b.kind
-                .severity()
-                .cmp(&a.kind.severity())
-                .then(b.disposition.cmp(&a.disposition))
-        });
+        sort_by_severity(&mut findings);
         findings
     }
 
@@ -640,6 +635,19 @@ impl DetectorRegistry {
             .map(|f| f.to_verdict())
             .unwrap_or(Verdict::Bypass)
     }
+}
+
+/// Most severe first, then the most disruptive disposition — the order
+/// [`DetectorRegistry::evaluate_all`] returns, so `first()` is the verdict.
+/// Public for findings raised beside the registry (the proxy's hook-rule
+/// check), which must sort into the same list the same way.
+pub fn sort_by_severity(findings: &mut [AnomalyFinding]) {
+    findings.sort_by(|a, b| {
+        b.kind
+            .severity()
+            .cmp(&a.kind.severity())
+            .then(b.disposition.cmp(&a.disposition))
+    });
 }
 
 impl Default for DetectorRegistry {

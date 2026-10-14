@@ -179,6 +179,7 @@ a legitimate state. Every SOP-derived control then resolves to nothing:
 | `max_calls:` | call ceilings stop applying, and there is no built-in floor |
 | `forbid_with:` | taint co-occurrence stops being refused |
 | `sql_guard:` | destructive SQL against a non-allowlisted database stops being refused |
+| `hook_rule:` | hook-rule guardrails stop being enforced on the model's tool calls |
 
 SOP prompt injection is a no-op as well, so the agent is never told the rules either.
 

@@ -197,8 +197,11 @@ export {
   MAX_QUOTE_IN_REASON,
   renderGuardrailSopFile,
   renderWorkspaceSetting,
+  HOOK_RULE_FRONT_MATTER_KEY,
+  proxyHookRule,
+  renderHookRuleFrontMatterLine,
 } from './guardrailRender.js'
-export type { HookRuleCitation, RenderedHookRule, RenderedWorkspaceSetting, ParsedFrontMatter, GuardrailSopFileInput } from './guardrailRender.js'
+export type { HookRuleCitation, RenderedHookRule, RenderedWorkspaceSetting, ParsedFrontMatter, GuardrailSopFileInput, ProxyHookRule } from './guardrailRender.js'
 
 export {
   GUARDRAIL_STATUSES,

@@ -133,9 +133,11 @@ narrows what is evaluated for one request and never widens it.
 [Policy Clause Ledger](/guide/policy-guardrails) derived from a policy
 document had a model in its derivation, so it launches in shadow like any
 other rung-2 check, whatever it renders to. When a named owner or admin
-promotes it, the emitted artifact — a hook-gate rule, a front-matter key, a
-compiled WASM rule — is enforced by the rung-1 machinery above and is
-indistinguishable from one an operator wrote by hand. The citation it
+promotes it, the emitted artifact — a hook rule (enforced alike by the hook
+gates, the SDK gates, the MCP proxy, the hosted hook gate and the LLM proxy's
+response gate), a front-matter key, a compiled WASM rule — is enforced by the
+rung-1 machinery above and is indistinguishable from one an operator wrote by
+hand. The citation it
 carries says why it exists; the promotion is what lets it act.
 
 This is a deliberate trade, not a hedge: **we don't let an LLM block your

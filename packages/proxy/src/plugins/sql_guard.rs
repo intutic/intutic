@@ -1288,8 +1288,14 @@ fn scan_sql(sql: &str) -> SqlScan {
 /// * OpenAI Responses — `response.output_item.added` (function_call) …
 ///   `response.function_call_arguments.delta` … `response.output_item.done`
 ///   at the same `output_index`.
+///
+/// The same hold serves the hook-rule guardrails (`plugins::hook_rules`): a
+/// block whose tool a hook rule names *and* whose arguments that rule
+/// constrains is held the same way and decided whole. Blocks no argument rule
+/// names flow unheld.
 pub struct StreamHold {
     policies: Vec<SqlGuardPolicy>,
+    hook_rules: crate::plugins::hook_rules::HookRuleSet,
     held: Option<Held>,
 }
 
@@ -1320,6 +1326,11 @@ pub struct HoldStep {
     pub refuse: Option<(SqlViolation, u64)>,
     /// Non-enforcing violations (`warn`, shadow) to log.
     pub notes: Vec<SqlViolation>,
+    /// Withhold the block: an enforcing hook rule refuses it (only when no
+    /// SQL refusal already does).
+    pub refuse_hook: Option<(crate::plugins::hook_rules::HookRuleHit, u64)>,
+    /// Shadow hook rules that fired on a released block, for the trace.
+    pub hook_shadow: Vec<crate::plugins::hook_rules::HookRuleHit>,
 }
 
 fn data_json(line: &str) -> Option<Value> {
@@ -1334,8 +1345,16 @@ impl StreamHold {
     pub fn new(policies: Vec<SqlGuardPolicy>) -> Self {
         Self {
             policies,
+            hook_rules: crate::plugins::hook_rules::HookRuleSet::default(),
             held: None,
         }
+    }
+
+    /// Also hold, and decide whole, the blocks the hook rules in `rules`
+    /// constrain by argument.
+    pub fn with_hook_rules(mut self, rules: crate::plugins::hook_rules::HookRuleSet) -> Self {
+        self.hook_rules = rules;
+        self
     }
 
     /// Feed one SSE line (trimmed, without its newline).
@@ -1454,8 +1473,10 @@ impl StreamHold {
     }
 
     fn maybe_start(&mut self, line: String) -> HoldStep {
-        let start = crate::protocol::tool_use_parser::parse_sse_chunk(&line)
-            .filter(|ev| tool_is(&ev.tool_name, SHELL_TOOLS));
+        let start = crate::protocol::tool_use_parser::parse_sse_chunk(&line).filter(|ev| {
+            (!self.policies.is_empty() && tool_is(&ev.tool_name, SHELL_TOOLS))
+                || self.hook_rules.holds(&ev.tool_name)
+        });
         let (Some(ev), Some(v)) = (start, data_json(&line)) else {
             return HoldStep {
                 emit: vec![line],
@@ -1520,8 +1541,14 @@ impl StreamHold {
             .held
             .take()
             .expect("finish_block runs only while holding");
-        let args: Value =
-            serde_json::from_str(&held.args).unwrap_or_else(|_| Value::String(held.args.clone()));
+        let parsed: Option<Value> = if held.args.trim().is_empty() {
+            Some(Value::Null)
+        } else {
+            serde_json::from_str(&held.args).ok()
+        };
+        let args: Value = parsed
+            .clone()
+            .unwrap_or_else(|| Value::String(held.args.clone()));
         let violations = evaluate(&self.policies, &held.tool, &args);
         let mut step = HoldStep::default();
         for v in violations {
@@ -1534,12 +1561,28 @@ impl StreamHold {
         if step.refuse.is_some() {
             return step;
         }
+        if !self.hook_rules.is_empty() {
+            // Arguments that are not JSON cannot be shown to be free of a
+            // literal, so an argument rule naming this tool refuses them.
+            let input = match &parsed {
+                Some(v) => crate::plugins::hook_rules::CallInput::Parsed(v),
+                None => crate::plugins::hook_rules::CallInput::Unreadable,
+            };
+            let decision = self.hook_rules.decide(&held.tool, input);
+            step.hook_shadow = decision.shadow;
+            if let Some(hit) = decision.refuse {
+                step.refuse_hook = Some((hit, held.block_index));
+                return step;
+            }
+        }
         step.emit = held.lines;
         if let Some(line) = after {
             let next = self.push(line);
             step.emit.extend(next.emit);
             step.notes.extend(next.notes);
+            step.hook_shadow.extend(next.hook_shadow);
             step.refuse = next.refuse;
+            step.refuse_hook = next.refuse_hook;
         }
         step
     }
@@ -1908,6 +1951,103 @@ mod tests {
     }
 
     // ── Streaming hold ──────────────────────────────────────────────────
+
+    fn hook_set(sop_mode: crate::sops::SopMode) -> crate::plugins::hook_rules::HookRuleSet {
+        let sop = crate::sops::Sop {
+            title: "GUARDRAIL:pgr_tf hook_rule: Bash".into(),
+            mode: sop_mode,
+            hook_rules: vec![crate::plugins::hook_rules::parse_line(
+                r#"{"id":"guardrail.pgr_tf","tools":["Bash"],"argContains":["terraform apply"],"reason":"Plan first"}"#,
+            )],
+            ..crate::sops::Sop::default()
+        };
+        crate::plugins::hook_rules::HookRuleSet::from_sops(&[sop], "")
+    }
+
+    fn anthropic_block(tool: &str, fragments: &[&str]) -> Vec<String> {
+        let mut lines = vec![format!(
+            "data: {}",
+            json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_h","name":tool,"input":{}}})
+        )];
+        for f in fragments {
+            lines.push(format!(
+                "data: {}",
+                json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":f}})
+            ));
+        }
+        lines.push(format!(
+            "data: {}",
+            json!({"type":"content_block_stop","index":2})
+        ));
+        lines
+    }
+
+    /// With no SQL guard declared, the hold carries the hook rules alone: a
+    /// block an argument rule names is held and decided whole, refused at its
+    /// own index when the rule fires, released in order when it does not;
+    /// other tools flow unheld.
+    #[test]
+    fn the_hold_decides_hook_rule_blocks_whole() {
+        let mut hold =
+            StreamHold::new(Vec::new()).with_hook_rules(hook_set(crate::sops::SopMode::Enforce));
+        let mut refused = None;
+        for l in anthropic_block("Bash", &["{\"command\": \"terraform", " apply\"}"]) {
+            let step = hold.push(l);
+            assert!(
+                step.emit.is_empty(),
+                "a line of a held block was released early"
+            );
+            if let Some(r) = step.refuse_hook {
+                refused = Some(r);
+            }
+        }
+        let (hit, idx) = refused.expect("the rule fires on the complete arguments");
+        assert_eq!(hit.rule_id, "guardrail.pgr_tf");
+        assert_eq!(idx, 2);
+
+        let block = anthropic_block("Bash", &["{\"command\": \"terraform", " plan\"}"]);
+        let mut out = Vec::new();
+        for l in block.clone() {
+            let step = hold.push(l);
+            assert!(step.refuse_hook.is_none());
+            out.extend(step.emit);
+        }
+        assert_eq!(out, block, "released whole and in order");
+
+        let other = anthropic_block("Read", &["{\"file_path\": \"a\"}"]);
+        let step = hold.push(other[0].clone());
+        assert_eq!(
+            step.emit,
+            vec![other[0].clone()],
+            "an unnamed tool is not held"
+        );
+    }
+
+    /// Arguments that complete as something other than JSON cannot be shown
+    /// to be free of the literal: refused when enforcing, reported in shadow.
+    #[test]
+    fn unreadable_streamed_arguments_fail_closed_under_a_hook_rule() {
+        let mut hold =
+            StreamHold::new(Vec::new()).with_hook_rules(hook_set(crate::sops::SopMode::Enforce));
+        let mut refused = None;
+        for l in anthropic_block("Bash", &["{\"command\": \"terr"]) {
+            refused = refused.or(hold.push(l).refuse_hook);
+        }
+        assert!(refused.expect("refused").0.unevaluable);
+
+        let mut hold =
+            StreamHold::new(Vec::new()).with_hook_rules(hook_set(crate::sops::SopMode::Shadow));
+        let mut shadow = Vec::new();
+        let mut released = 0;
+        for l in anthropic_block("Bash", &["{\"command\": \"terr"]) {
+            let step = hold.push(l);
+            assert!(step.refuse_hook.is_none(), "a shadow rule refused");
+            shadow.extend(step.hook_shadow);
+            released += step.emit.len();
+        }
+        assert_eq!(shadow.len(), 1);
+        assert_eq!(released, 3);
+    }
 
     fn run(hold: &mut StreamHold, lines: &[String]) -> (Vec<String>, Option<(SqlViolation, u64)>) {
         let mut out = Vec::new();

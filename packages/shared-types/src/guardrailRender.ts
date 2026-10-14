@@ -181,6 +181,49 @@ export function renderHookRule(ir: HookRuleIr, citation: HookRuleCitation): Rend
   }
 }
 
+// ─── Hook rules for the LLM proxy ────────────────────────────────────
+
+/** The front-matter key the proxy (`packages/proxy/src/sops.rs`) reads a hook rule from. */
+export const HOOK_RULE_FRONT_MATTER_KEY = 'hook_rule:'
+
+/**
+ * A hook rule as the LLM proxy evaluates it: the IR's tool names and literals
+ * themselves, not the rendered regexes. The proxy's regex engine has no
+ * lookaround, and the rendered argument pattern is nothing but lookarounds
+ * over literals — so the proxy tests the literals as substrings of the same
+ * `JSON.stringify(tool_input)` haystack, which is what the pattern means.
+ * `id` is the rule id every other layer names the rule by (`guardrail.<pgr>`);
+ * `reason` is the rendered reason, byte for byte.
+ */
+export interface ProxyHookRule {
+  id: string
+  tools: string[]
+  argContains: string[]
+  argNotContains: string[]
+  reason: string
+}
+
+export function proxyHookRule(ruleId: string, ir: HookRuleIr, reason: string): ProxyHookRule {
+  return {
+    id: ruleId,
+    tools: [...new Set(ir.tools)].sort(),
+    argContains: [...new Set(ir.argContains ?? [])].sort(),
+    argNotContains: [...new Set(ir.argNotContains ?? [])].sort(),
+    reason: scrubReason(reason),
+  }
+}
+
+/**
+ * One `hook_rule: {json}` front-matter line. JSON on one line is safe here:
+ * a literal may not contain a tab, newline, `"` or `\` (the IR grammar), and
+ * the reason is scrubbed of tabs and newlines, so the value never spans lines.
+ * Keys are in a fixed order, so the line is byte-stable.
+ */
+export function renderHookRuleFrontMatterLine(rule: ProxyHookRule): string {
+  const ordered: ProxyHookRule = { id: rule.id, tools: rule.tools, argContains: rule.argContains, argNotContains: rule.argNotContains, reason: rule.reason }
+  return `${HOOK_RULE_FRONT_MATTER_KEY} ${JSON.stringify(ordered)}`
+}
+
 // ─── Front matter: render ──────────────────────────────────────────────
 
 const FRONT_MATTER_KEY_ORDER = ['roles', 'deny_tools', 'review_before', 'requires_before', 'forbid_after', 'max_calls', 'forbid_with'] as const

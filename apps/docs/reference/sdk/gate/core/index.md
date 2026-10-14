@@ -734,7 +734,9 @@ function firstMatch(
 ): SopRule | null;
 ```
 
-First rule matching this call, in control-plane order.
+The rule that decides this call: the most severe one matching it (block,
+then require_approval, then warn), the first of that severity in
+control-plane order. `null` when none matches.
 
 #### Parameters
 

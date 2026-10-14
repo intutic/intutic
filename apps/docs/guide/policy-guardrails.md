@@ -38,7 +38,7 @@ will see on stderr when it blocks.
 
 | The clause says | Target | Who enforces it | How it gets there |
 | :--- | :--- | :--- | :--- |
-| "never run *this* with *that* in the arguments" | `hook_rule` | the PreToolUse gate scripts in every connected harness, offline | the daemon's policy snapshot, refreshed every 30 s |
+| "never run *this* with *that* in the arguments" | `hook_rule` | every layer a tool call passes: the PreToolUse gate scripts in every connected harness (offline), the SDK gates, the MCP proxy, the hosted hook gate and the AgentCore check, and the LLM proxy, on the tool calls in a model's response | the daemon's policy snapshot, refreshed every 30 s; the rule list the SDK gates and the MCP proxy poll; read at call time by the hosted gate; for the LLM proxy, a `hook_rule:` line in the workspace SOP policy a gateway-mode proxy fetches, or `intutic guardrails pull` for a proxy that reads SOPs from disk |
 | ordering, counts, denied tools, taint: `requires_before`, `forbid_after`, `max_calls`, `forbid_with`, `deny_tools`, `review_before` | `sop_front_matter` | the proxy's SOP detectors | the workspace SOP policy a gateway-mode proxy fetches; `intutic guardrails pull` for a proxy that reads SOPs from disk |
 | a context condition — which harness, role or environment may act, as a `wasm_predicate` clause | `wasm_rule` | a compiled WASM rule in the proxy | the rule-candidate pipeline: compiled from its source of record, gated, shadowed, promoted |
 | which models agents may use (`allowed_models`), or which hosts they may also reach (`egress_allow`) | `workspace_setting` | the proxy's approved-models check and its egress policy, through the workspace settings `allowedModels` and `egressAllow` | a promotion writes the setting, recorded as a settings change by the promoting member; retiring the guardrail undoes its own write |
@@ -46,8 +46,31 @@ will see on stderr when it blocks.
 Hook rules are rendered from literal tool names and up to four literal
 argument fragments — the tool pattern is anchored, the argument pattern is a
 lookahead over the serialised input — so the same rule fires identically in
-the control plane's matcher, the MCP proxy's matcher and the emitted gate
-scripts. A parity fixture file runs every vector through all three.
+the control plane's matcher, the MCP proxy's matcher, the SDK gates and the
+emitted gate scripts. The LLM proxy is served the literals themselves and
+tests what the pattern means: the tool name exactly, case included, and each
+required fragment present in (each excluded fragment absent from) the same
+serialised input. When an enforcing rule and a shadow rule both match a call,
+the enforcing rule decides, wherever the two sit in the list. Two fixture
+files pin it: one runs every rule's cases through each matcher, and a layer
+vector file runs guardrails, what the control plane serves for them, a tool
+call and the expected decision (`block`, `warn` or `allow`, and the deciding
+rule) through the emitted gates, both SDK gates, the MCP proxy, the hosted
+hook gate, the AgentCore check and the LLM proxy. A layer that decides one
+vector differently fails its own test.
+
+The LLM proxy withholds a call an enforcing hook rule refuses before the
+client sees it, the way it withholds a `deny_tools` call: the response
+carries an in-band refusal (`TOOL_DENIED`, the rule id `guardrail.<id>` and
+the cited reason) instead of the call. On a stream, a rule that names only the
+tool refuses on the call's first event; a call whose arguments a rule
+constrains is held until its arguments are complete, then released whole or
+refused. A rule the proxy cannot read, or a call whose arguments are not
+readable JSON under a rule that constrains them, is refused rather than let
+through. The proxy also refuses a request whose latest turn reports a call an
+enforcing rule refuses (the harness ran it anyway), as it does for
+`deny_tools`. A hook rule applies to every caller in every layer: the
+projection carries no roles, and the local gates cannot know a member's role.
 
 ## Shadow first, then a person
 
@@ -265,7 +288,10 @@ Four ways in, one API:
 - **The hook-rule denominator is per call**, counted from the batches the
   gates drain. A machine whose snapshot had not refreshed yet counts as an
   evaluation that did not fire, which biases the would-act rate down by at
-  most one 30-second cycle per machine.
+  most one 30-second cycle per machine. The LLM proxy adds one evaluation per
+  response that carried a tool call, and the hosted hook gate records each
+  would-block as evidence without moving the denominator. A call that passes
+  both a hook gate and the proxy is counted by each.
 - **Extraction fidelity is measured against a recorded golden corpus.** The
   corpus (23 documents, two adversarial) has goldens recorded against a real
   model; a golden is a real extraction, never hand-written. The
