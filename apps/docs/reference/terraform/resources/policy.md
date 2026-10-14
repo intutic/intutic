@@ -6,19 +6,35 @@ title: "intutic_policy"
 
 # intutic_policy <Badge type="tip" text="Cloud" />
 
-An enforcement policy, managed through `/api/v1/policies`: what the proxy does when an agent calls a matching tool. Every change records a new version in the policy's audit history; destroying one soft-deletes it and keeps that history. Needs an OWNER or ADMIN key.
+Deprecated: the policies API (`/api/v1/policies`) is deprecated as of control-plane 2.5.1 and sunsets on 2026-12-01. Write per-tool rules as `intutic_guardrail` with `kind = "hook_rule"`, which the harness gates enforce once the guardrail is promoted, and set the intervention mode with the `interventionMode` key of `intutic_workspace_settings`. A policy's per-tool fields (`target_tool_pattern`, `enforcement_action`, `conditions`, `risk_category`) are stored but enforced nowhere: no gate or proxy reads them. Its one effect is that, while the workspace has not set `interventionMode`, the active policy with the lowest `priority` sets the workspace's intervention mode; that fallback ends in control-plane 2.6.0. `intutic policy convert <id>` turns an active `KILL` or `REASK` policy into a `hook_rule` guardrail in `SHADOW`. Every change records a new version in the policy's audit history; destroying one soft-deletes it and keeps that history. Needs an OWNER or ADMIN key.
 
 ## Example Usage
 
 ```terraform
-resource "intutic_policy" "no_force_push" {
-  name                = "No force push"
-  description         = "Agents may not rewrite shared history."
-  target_tool_pattern = "Bash"
-  enforcement_action  = "KILL"
-  risk_category       = "DESTRUCTIVE"
-  priority            = 10
-  conditions          = jsonencode({ argContains = ["push --force"] })
+# intutic_policy is deprecated: the policies API sunsets on 2026-12-01. A
+# policy's target_tool_pattern, enforcement_action, conditions and
+# risk_category are enforced nowhere, and its only effect is choosing the
+# workspace's intervention mode. Write the rule a policy described as a hook
+# rule guardrail, and set the intervention mode as a workspace setting.
+
+# The harness gates block `git push --force` once this guardrail is enforcing.
+# It starts PROPOSED; approve it for shadow and promote it on evidence in the
+# guardrail review (or with `intutic guardrails`).
+resource "intutic_guardrail" "no_force_push" {
+  name         = "No force push"
+  description  = "Agents may not rewrite shared history."
+  kind         = "hook_rule"
+  title        = "No force push"
+  tools        = ["Bash"]
+  arg_contains = ["push --force"]
+}
+
+# What the agent is told when a call is refused. Once set, this wins over
+# every policy's intervention_mode.
+resource "intutic_workspace_settings" "this" {
+  settings = jsonencode({
+    interventionMode = "TRANSPARENT"
+  })
 }
 ```
 
@@ -27,18 +43,18 @@ resource "intutic_policy" "no_force_push" {
 
 ### Required
 
-- `enforcement_action` (String) One of `BYPASS`, `ENHANCE`, `HIJACK`, `REASK`, `KILL`.
 - `name` (String) The policy's name (1–256 characters).
-- `target_tool_pattern` (String) Tool name or glob the policy applies to; `*` matches all. Letters, digits and `_ - . : / *` only, for example `Bash` or `mcp__github__*`.
 
 ### Optional
 
-- `conditions` (String) Extra match conditions as a JSON object, for example `jsonencode({ ... })`.
+- `conditions` (String, Deprecated) Deprecated, enforced nowhere: a JSON object stored with the policy, read by no gate or proxy; match arguments with an `intutic_guardrail`'s `arg_contains` and `arg_not_contains` instead.
 - `description` (String) What the policy is for (at most 4,000 characters).
-- `intervention_mode` (String) What the agent is told when a call is refused; the active policy with the lowest `priority` sets it for the whole workspace. `TRANSPARENT` (default): the refusal names the rule and its reason. `OPAQUE`: the same calls are refused with the same refusal codes, but the agent is told only "Blocked by workspace policy. Ask a workspace admin if you need this action."; audit records keep the rule. `SILENT_LOG`: the local hook gates let a call a workspace rule would block run and report it as `tool_would_block`; built-in protections, SSO group rules and the MCP server registry still refuse, and the hosted hook gate and the proxies enforce as usual.
-- `is_active` (Boolean) Whether the policy is enforced. Defaults to true.
-- `priority` (Number) 0–10000; the lowest number wins. Defaults to 100.
-- `risk_category` (String) One of `NONE` (default), `DESTRUCTIVE`, `CREDENTIAL_ACCESS`.
+- `enforcement_action` (String, Deprecated) Deprecated, enforced nowhere: stored with the policy, read by no gate or proxy; use a `hook_rule` `intutic_guardrail`, which blocks a matching call once enforcing. One of `BYPASS` (default), `ENHANCE`, `HIJACK`, `REASK`, `KILL`.
+- `intervention_mode` (String, Deprecated) Deprecated: set the `interventionMode` key of `intutic_workspace_settings` instead, which wins once set. Until then, through control-plane 2.5.x, the active policy with the lowest `priority` sets the intervention mode for the whole workspace. The mode is what the agent is told when a call is refused. `TRANSPARENT` (default): the refusal names the rule and its reason. `OPAQUE`: the same calls are refused with the same refusal codes, but the agent is told only "Blocked by workspace policy. Ask a workspace admin if you need this action."; audit records keep the rule. `SILENT_LOG`: the local hook gates let a call a workspace rule would block run and report it as `tool_would_block`; built-in protections, SSO group rules and the MCP server registry still refuse, and the hosted hook gate and the proxies enforce as usual.
+- `is_active` (Boolean) Whether the policy is active; only an active policy's `intervention_mode` can apply. Defaults to true.
+- `priority` (Number, Deprecated) Deprecated: 0–10000, defaults to 100. It only chooses which active policy's `intervention_mode` applies (the lowest number wins), which the `interventionMode` workspace setting replaces.
+- `risk_category` (String, Deprecated) Deprecated, enforced nowhere: stored with the policy, read by no gate or proxy. One of `NONE` (default), `DESTRUCTIVE`, `CREDENTIAL_ACCESS`.
+- `target_tool_pattern` (String, Deprecated) Deprecated, enforced nowhere: stored with the policy, read by no gate or proxy; name tools in an `intutic_guardrail`'s `tools` instead. A tool name or glob, letters, digits and `_ - . : / *` only. Defaults to `*`.
 
 ### Read-Only
 
