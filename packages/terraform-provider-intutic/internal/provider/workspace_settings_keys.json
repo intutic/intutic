@@ -46,7 +46,6 @@
   ],
   "featureFlags": [
     "ff_bandit_routing",
-    "ff_metaclaw_auto_apply",
     "ff_metaclaw_evolution",
     "ff_response_cache_exact",
     "ff_response_cache_semantic",

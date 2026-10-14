@@ -45,8 +45,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   classification and the reason. An applied change becomes the next version of
   the guideline in the same lifecycle state, with an audit row naming
   `system:metaclaw`. A `WEAKEN` edit needs an Owner whoever makes it: no caller
-  is exempt for not declaring a role. Incident-mining drafts marked
-  auto-approved were never written into a guideline; the docs now say so.
+  is exempt for not declaring a role.
+- **Behaviour change: the SOP Optimizer's Approval mode is its only switch,
+  and the optimizer now runs.** It looked for guidelines in a lifecycle state
+  that does not exist, so it never proposed anything; it now works on enforced
+  guidelines (validated and active), at most 5 a cycle, one proposal each, and
+  none for a guideline with a pending proposal or one proposed in the last 24
+  hours. `featureFlags.ff_metaclaw_auto_apply` is removed (a settings `PUT`
+  that sends it is refused, and the Terraform provider rejects it): Approval
+  mode **manual** applies nothing, **auto** lets a run an Owner or Admin
+  starts apply a strengthening proposal, and the hourly sweep only proposes.
+  Each workspace keeps what it had without loosening: the flag on becomes
+  auto, and auto without the flag becomes manual. Incident mining is
+  proposal-only in both modes; auto no longer marks its drafts auto-approved.
 - **Behaviour change: editing a guideline past draft keeps it enforcing.**
   Editing a SOP that is not a draft, or approving an amendment against it,
   retired the version you edited at once and put the edit in a new draft, so
