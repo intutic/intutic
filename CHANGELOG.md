@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The proxy no longer writes the Valkey password to its log.** A
+  `VALKEY_URL` with credentials (`redis://user:password@host:6379`) was
+  printed whole in the startup lines that name the Valkey it connected to, or
+  failed to reach. The password is now shown as `***`.
+
 ## [2.5.1] - 2026-10-14
 
 ### Added
