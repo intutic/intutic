@@ -583,10 +583,42 @@ pub fn manifest_from_invocations(invocations: &[ToolInvocation]) -> Vec<ChangeEn
     out
 }
 
+/// The manifest as a trace stores it: each target through
+/// `dlp::redact_for_storage`. A target is the command, path or URL a call
+/// named, so it is where an address, a phone number or a token in a header
+/// would reach the trace; the detectors keep reading the unredacted entries.
+pub fn redacted_for_storage(mut entries: Vec<ChangeEntry>) -> Vec<ChangeEntry> {
+    for e in &mut entries {
+        if let Some(clean) = crate::dlp::redact_for_storage(&e.target) {
+            e.target = clean;
+        }
+    }
+    entries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn stored_targets_are_dlp_redacted() {
+        let cmd = format!("git config user.email {}@{}", "jane", "example.com");
+        let entries = vec![
+            entry("Bash", ChangeOp::Execute, cmd, TargetKind::Command, None),
+            entry(
+                "Write",
+                ChangeOp::Write,
+                "src/main.rs".into(),
+                TargetKind::Path,
+                Some(12),
+            ),
+        ];
+        let stored = redacted_for_storage(entries);
+        assert_eq!(stored[0].target, "git config user.email [REDACTED_PII]");
+        assert_eq!(stored[1].target, "src/main.rs");
+        assert_eq!(stored[1].bytes, Some(12));
+    }
 
     // ── per_turn_tool_delta ─────────────────────────────────────────────
     //

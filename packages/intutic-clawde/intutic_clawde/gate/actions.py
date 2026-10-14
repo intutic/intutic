@@ -254,6 +254,7 @@ def is_deploy(tool_name: str, tool_input) -> bool:
 
 
 def is_test(tool_name: str, tool_input) -> bool:
+    """True when this call runs a test suite."""
     return ACTION_PREFIX + "run_tests" in classify(tool_name, tool_input)
 
 

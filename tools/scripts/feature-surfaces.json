@@ -18,6 +18,7 @@
     },
     "docsPages": {
       "reference/workspace-settings.md": "the reference for every workspace settings key, which many features share; services/control-plane/__tests__/unit/settingsKeyParity.test.ts holds it to the settings schema",
+      "reference/openapi.md": "renders public/openapi.json, every control plane route as OpenAPI, which every feature with an API surface shares; generated with the route catalog in reference/api.md and held to the route source the same way",
       "compare/noma.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",
       "compare/palo-alto-networks.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",
       "compare/pillar-security.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",
@@ -885,6 +886,28 @@
           { "file": "packages/terraform-provider-intutic/internal/provider/guardrail_ir_grammar.json" },
           { "file": "packages/shared-types/fixtures/guardrail-ir/01-deny-and-review.md" }
         ]
+      }
+    },
+    {
+      "id": "policy-deprecation",
+      "title": "Enforcement policies deprecated: the intervention mode setting and conversion to guardrails",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [{ "ref": "POST /api/v1/policies/:policyId/convert-to-guardrail", "auth": "OWNER/ADMIN" }],
+        "dashboard": [
+          { "file": "apps/dashboard/src/routes/PoliciesPage.tsx", "contains": "Convert to guardrail" },
+          { "file": "apps/dashboard/src/components/settings/InterventionModePanel.tsx" }
+        ],
+        "cli": ["policy convert"],
+        "gateSdk": { "none": "the gates read the resolved intervention mode as before; nothing about policies reaches them" },
+        "clawdeSdk": { "none": "conversion is an operator migration step, not an SDK call" },
+        "mcpTools": { "none": "operator migration, not an agent action" },
+        "kitkat": { "none": "operator migration, not an agent action" },
+        "terraform": ["intutic_policy", "workspace_settings.interventionMode"],
+        "docs": ["guide/policies.md#policy-deprecation"],
+        "website": { "none": "the site never described enforcement policies" },
+        "events": { "none": "a converted guardrail emits the guardrail events any guardrail does" },
+        "enforcement": { "none": "a converted guardrail starts in shadow and enforces through the guardrail lifecycle" }
       }
     },
     {

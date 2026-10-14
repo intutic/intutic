@@ -69,9 +69,10 @@ pub const NATIVE: Budget = Budget {
 /// on a typical call and 21,000,000 on the largest input
 /// [`super::opa::policy_input`] builds ([`super::opa::MAX_INPUT_BYTES`], above
 /// 99.97% of 82,401 real coding-agent tool calls); the deny-writes and
-/// conformance policies 2,900,000. That takes 0.8 ms idle, and up to 260 ms on
-/// the loaded machine. The budget is about five times the largest, so a
-/// heavier policy still fits.
+/// conformance policies 2,900,000. On an idle machine the largest takes about
+/// 1.3 ms (0.8 ms at 32 KB; the Rego guide tables every input size), and an
+/// evaluation took up to 260 ms on the loaded machine. The budget is about
+/// five times the largest, so a heavier policy still fits.
 ///
 /// Using up the whole budget takes 50 ms idle and at most 590 ms loaded; the
 /// deadline is over three times that. `benches/rego_bench.rs` measures the

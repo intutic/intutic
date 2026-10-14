@@ -11,6 +11,7 @@ from .context_resolver import resolve_context
 from .git_context import resolve_git_context
 from .budget_checker import BudgetChecker
 from .circuit_breaker import CircuitBreaker
+from .control_plane import DEFAULT_CONTROL_PLANE_URL
 
 #: The harness a session this SDK registers is recorded under.
 SDK_HARNESS = "clawde_sdk"
@@ -19,6 +20,22 @@ _UNRESOLVED = object()
 
 
 class ClawdeClient:
+    """The data-plane client: `chat()` sends an OpenAI-format request through
+    the Intutic proxy, which governs it and forwards it to the provider, and
+    raises `ClawdeBlockedError` when the proxy refuses it. `check_budget()` and
+    `circuit_breaker()` add a workspace budget check, and `on()` registers
+    callbacks for refusal verdicts. For the operator APIs, use
+    `ControlPlaneClient`.
+
+    `base_url` is the proxy's address: `INTUTIC_BASE_URL`, then
+    http://localhost:4000. `control_plane_url` is used by `check_budget()` and
+    session registration: `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted
+    control plane. `auto_context=False` turns off context resolution and
+    session registration. `timeout` is how long one attempt may take, in
+    seconds, and `retries` how many times a transport failure, a timeout or a
+    5xx answer is retried.
+    """
+
     def __init__(
         self,
         api_key: str,
@@ -38,7 +55,7 @@ class ClawdeClient:
         self.control_plane_url = (
             control_plane_url
             or os.environ.get("INTUTIC_CONTROL_PLANE_URL")
-            or "https://app.intutic.ai"
+            or DEFAULT_CONTROL_PLANE_URL
         )
         self.provider = provider
         self.auto_context = auto_context

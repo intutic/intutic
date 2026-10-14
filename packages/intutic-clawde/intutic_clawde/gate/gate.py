@@ -157,12 +157,21 @@ class IntuticGateHold(IntuticGateRefusal):
 
 @dataclass
 class GateConfig:
+    """How a `Gate` evaluates calls. Every field has a default."""
+
     repo_root: str = "."
+    """Where relative manifest and allowlist paths resolve from."""
     workspace_id: str = ""
+    """Compared with the workspace the policy snapshot was compiled for, and
+    scopes the SOP-rule fetch."""
     allowlist_path: str = ".intutic/image-allowlist.json"
+    """The image allowlist, relative to `repo_root` unless absolute."""
     enforce: bool = True
+    """False turns `Gate.guard()` into a no-op."""
     use_hook_gate: bool = True
+    """Call the control plane's hook gate (needs a client)."""
     use_sop_rules: bool = True
+    """Fetch and apply the workspace's SOP rules (needs a client)."""
 
     def allowlist_abs(self) -> str:
         p = self.allowlist_path
@@ -170,6 +179,13 @@ class GateConfig:
 
 
 class Gate:
+    """The pre-execution gate. `guard()` evaluates one tool call against the
+    local tiers (SSO group policy, policy snapshot, MCP servers, image
+    integrity) and, with a `GateClient`, the control-plane tiers (SOP rules,
+    hook gate), and raises `IntuticGateRefusal` to refuse it. Without a
+    client only the local tiers run.
+    """
+
     def __init__(self, cfg: GateConfig, client: Optional[GateClient] = None):
         self.cfg = cfg
         self.client = client
@@ -250,9 +266,12 @@ class Gate:
 
     def _emit(self, event: str, tool: str, reason: str = "",
               tool_input: Optional[dict] = None, incident_id: Optional[str] = None,
-              file_path: Optional[str] = None) -> None:
+              file_path: Optional[str] = None, gate_decision_id: Optional[str] = None) -> None:
         if self.client is not None:
-            self.client.emit(event, tool, reason, tool_input, incident_id, file_path)
+            # Passed only when there is one, so a client subclass whose emit
+            # predates the parameter keeps working.
+            extra = {"gate_decision_id": gate_decision_id} if gate_decision_id else {}
+            self.client.emit(event, tool, reason, tool_input, incident_id, file_path, **extra)
 
     def _report_snapshot_health_once(self, tool: str) -> None:
         """Report snapshot condition exactly once per process.
@@ -480,21 +499,23 @@ class Gate:
         # Whether an unreachable control plane, or one whose checks could not
         # run (GOVERNANCE_UNAVAILABLE), blocks here is the client's
         # fail_closed setting (default True); see client.hook_gate.
+        decision_id: Optional[str] = None
         if self.cfg.use_hook_gate and self.client is not None and tool_name not in READ_ONLY_TOOLS:
             resp = self.client.hook_gate(tool_name, tool_input)
+            # Every answer is reported: the event drives the incident, rule
+            # evidence and plan tracking. It carries the hook gate's decision
+            # id, which the control plane exported to SIEM itself and filed its
+            # DLP refusal's incident under, so neither happens twice.
+            decision_id = resp.decision_id
             if not resp.allowed:
-                # A refusal that names an incident was filed by the hook gate
-                # itself (its DLP check); reporting it again filed a second
-                # incident. Every other refusal is filed only by this event.
-                if not resp.incident_id:
-                    self._emit("tool_blocked", tool_name, resp.reason, tool_input)
+                self._emit("tool_blocked", tool_name, resp.reason, tool_input, gate_decision_id=resp.decision_id)
                 # The hook gate names the MCP registry's own code when the
                 # registry refused; anything else it refuses is HOOK_GATE.
                 code = resp.code if resp.code in MCP_CODES else "HOOK_GATE"
                 raise IntuticGateRefusal(self._shown(resp.reason), code, resp.incident_id)
 
         if tool_name not in READ_ONLY_TOOLS:
-            self._emit("tool_allowed", tool_name, "", tool_input)
+            self._emit("tool_allowed", tool_name, "", tool_input, gate_decision_id=decision_id)
 
     def _guard_mcp(self, tool_name: str, tool_input: dict, note: Optional[dict] = None) -> None:
         """Raise when the workspace's MCP server registry or allowlist refuses
@@ -561,9 +582,11 @@ _ACTIVE: Optional[Gate] = None
 
 
 def install(gate: Gate) -> None:
+    """Set the process-wide gate that `@guard` and `guard_tools` use."""
     global _ACTIVE
     _ACTIVE = gate
 
 
 def active() -> Optional[Gate]:
+    """The process-wide gate `install` set, or None."""
     return _ACTIVE

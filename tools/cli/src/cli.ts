@@ -231,8 +231,10 @@ const sopsCmd = program
 
 sopsCmd
   .command('push <name>')
-  .description('Push a local offline SOP folder to the central workspace')
+  .description("Push a local SOP folder, or one SOP file (the layout `sops pull` writes), to the central workspace: updates the SOP a file records, creates one for a file without a record")
   .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .option('--force', 'Overwrite a SOP that changed on the server since the file was pulled')
+  .option('--create', 'Create a new SOP for a file whose recorded SOP no longer exists')
   .option('--org', "Push as an org-wide floor instead of a workspace SOP -- applies to every workspace under the caller's org, in addition to that workspace's own SOPs")
   .action(async (name, opts) => {
     const { runSopsPush } = await import('./commands/sops.js')
@@ -278,11 +280,25 @@ sopsCmd
 
 const policyCmd = program
   .command('policy')
-  .description('Manage compliance and safety policies')
+  .description('WASM rules, the policy snapshot, and the deprecated enforcement policies')
+
+policyCmd
+  .command('convert <policyId>')
+  .description(
+    'Turn a KILL or REASK enforcement policy into a hook-rule guardrail, created in shadow.\n' +
+    '\n' +
+    '  Enforcement policies are deprecated: their tool pattern, action and conditions\n' +
+    '  are enforced nowhere. The guardrail reports what it would block until promoted.'
+  )
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (policyId, opts) => {
+    const { runPolicyConvert } = await import('./commands/policy.js')
+    await runPolicyConvert(policyId, opts)
+  })
 
 policyCmd
   .command('enable <policyId>')
-  .description('Enable a compliance policy')
+  .description('Enable a compliance policy (deprecated)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (policyId, opts) => {
     const { runPolicyEnable } = await import('./commands/policy.js')
@@ -291,7 +307,7 @@ policyCmd
 
 policyCmd
   .command('disable <policyId>')
-  .description('Disable a compliance policy')
+  .description('Disable a compliance policy (deprecated)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (policyId, opts) => {
     const { runPolicyDisable } = await import('./commands/policy.js')
@@ -300,7 +316,7 @@ policyCmd
 
 policyCmd
   .command('rollback <policyId>')
-  .description('Rollback a compliance policy to a specific version')
+  .description('Rollback a compliance policy to a specific version (deprecated)')
   .requiredOption('--version <version>', 'Target version (e.g. 2)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (policyId, opts) => {
@@ -324,7 +340,7 @@ policyCmd
 
 policyCmd
   .command('export')
-  .description('Export compliance policies to stdout')
+  .description('Export compliance policies to stdout (deprecated)')
   .option('--all', 'Export all policies')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
@@ -526,7 +542,7 @@ guardrailsCmd
   .option('--target <target>', 'hook_rule | sop_front_matter | wasm_rule | workspace_setting')
   .option('--provenance <provenance>', 'extracted | authored')
   .option('--doc <docId>', 'Only guardrails cited from this document')
-  .option('--limit <n>', 'Max rows (default 50, capped at 200)')
+  .option('--limit <n>', 'Max rows (default 200, capped at 1000)')
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
@@ -741,7 +757,7 @@ for (const [action, desc] of [
     .command(action)
     .description(desc)
     .option('--port <port>', "The proxy's listener port to permit", '4000')
-    .option('--uid <uid>', 'uid the proxy runs as, exempted from the deny (defaults to current user)')
+    .option('--uid <uid>', 'uid the proxy runs as, exempted from the deny (defaults to you: the invoking user under sudo)')
     .option('--allow <cidrs>', 'Comma-separated extra destination CIDRs to permit (control plane, registries, …)')
     .option('--no-dns', 'Also deny outbound DNS (only if a local resolver serves the host)')
     .option('--platform <os>', 'Target ruleset platform: linux | macos | windows (defaults to current OS)')
@@ -1546,9 +1562,9 @@ credentialsCmd
 // commands/attenuate.ts's module doc.
 const attenuateCmd = program
   .command('attenuate')
-  .description('Attenuate an API key to a narrower child key (capability subset + optional TTL)')
+  .description('Attenuate one of your API keys to a child key with narrower scopes (and an optional TTL)')
   .option('--parent-key <keyId>', 'Parent API key ID to attenuate')
-  .option('--caps <caps>', 'Comma-separated capability subset to grant the child key')
+  .option('--caps <scopes>', 'Comma-separated API key scopes for the child key (e.g. gateway:use,traces:read); each must be granted by the parent key')
   .option('--ttl <seconds>', 'Child key TTL in whole seconds, 60 to 86400 (default 14400)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {

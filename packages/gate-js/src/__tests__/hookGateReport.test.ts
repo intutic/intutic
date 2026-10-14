@@ -1,12 +1,15 @@
 /**
- * What `Gate.guard` reports when the hook gate refuses a call.
+ * What `Gate.guard` reports after the hook gate answered.
  *
- * The hook gate files an incident itself only for its DLP check, and says so
- * by naming the incident in its refusal. Every other refusal it gives is
- * filed only through the `tool_blocked` event the gate sends, so that event
- * must still be sent; the DLP refusal's must not, or it is filed twice. The
- * Python gate decides the same way (tests/test_gate_hook_gate_report.py), and
- * the last case here pins the two sources to the same condition.
+ * Every answer is reported — `tool_blocked` for a refusal, `tool_allowed` for
+ * an allow — because that event drives the incident, rule evidence, the
+ * shadow denominator, plan deviations and observed tools. It carries the
+ * answer's `decisionId` as `gateDecisionId`: the hook gate exported the
+ * decision to SIEM itself, and filed its DLP refusal's incident under a key
+ * derived from that id, so the control plane neither exports nor files the
+ * decision twice. The Python gate decides the same way
+ * (tests/test_gate_hook_gate_report.py), and the last case here pins the two
+ * sources to the same condition.
  */
 import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -31,13 +34,18 @@ function snapshotFile(): string {
   return path
 }
 
+interface Reported { event: string; toolName: string; reason: string; gateDecisionId?: string }
+
 class RecordingClient extends GateClient {
-  events: Array<{ event: string; toolName: string; reason: string }> = []
+  events: Reported[] = []
   constructor(private readonly verdict: GateResponse) {
     super({ baseUrl: 'http://127.0.0.1:9', workspaceId: 'ws_test', sessionId: 'sess_hookgate' })
   }
-  override async emit(event: string, toolName: string, reason = ''): Promise<boolean> {
-    this.events.push({ event, toolName, reason })
+  override async emit(
+    event: string, toolName: string, reason = '', _toolInput?: unknown, _incidentId?: string, _filePath?: string,
+    gateDecisionId?: string,
+  ): Promise<boolean> {
+    this.events.push({ event, toolName, reason, ...(gateDecisionId ? { gateDecisionId } : {}) })
     return true
   }
   override async hookGate(): Promise<GateResponse> {
@@ -62,31 +70,47 @@ async function refuse(verdict: GateResponse): Promise<{ client: RecordingClient;
   }
 }
 
-describe('a hook-gate refusal', () => {
-  it('that names an incident is not reported again: the hook gate filed it', async () => {
-    const { client, refusal } = await refuse({ allowed: false, reason: 'DLP: AWS key detected', incidentId: 'gi_1', reached: true })
+const reports = (client: RecordingClient) => client.events.filter((e) => e.event === 'tool_blocked' || e.event === 'tool_allowed')
+
+describe('a hook-gate answer', () => {
+  it('a DLP refusal that names an incident is reported with its decision id: the control plane files it once', async () => {
+    const { client, refusal } = await refuse({
+      allowed: false, reason: 'DLP: AWS key detected', incidentId: 'gi_1', decisionId: 'hgd_1', reached: true,
+    })
     expect(refusal?.code).toBe('HOOK_GATE')
     expect(refusal?.incidentId).toBe('gi_1')
-    expect(client.events.filter((e) => e.event === 'tool_blocked')).toEqual([])
-  })
-
-  it('that names none is reported as tool_blocked: only that event files it', async () => {
-    const { client, refusal } = await refuse({ allowed: false, reason: 'no shell on prod [sop.r1]', reached: true })
-    expect(refusal?.code).toBe('HOOK_GATE')
-    expect(client.events.filter((e) => e.event === 'tool_blocked')).toEqual([
-      { event: 'tool_blocked', toolName: 'Bash', reason: 'no shell on prod [sop.r1]' },
+    expect(reports(client)).toEqual([
+      { event: 'tool_blocked', toolName: 'Bash', reason: 'DLP: AWS key detected', gateDecisionId: 'hgd_1' },
     ])
   })
 
-  it('made because the hook gate gave no verdict is reported', async () => {
+  it('a rule refusal is reported with its decision id', async () => {
+    const { client, refusal } = await refuse({ allowed: false, reason: 'no shell on prod [sop.r1]', decisionId: 'hgd_2', reached: true })
+    expect(refusal?.code).toBe('HOOK_GATE')
+    expect(reports(client)).toEqual([
+      { event: 'tool_blocked', toolName: 'Bash', reason: 'no shell on prod [sop.r1]', gateDecisionId: 'hgd_2' },
+    ])
+  })
+
+  it('an allow is reported with its decision id', async () => {
+    const { client, refusal } = await refuse({ allowed: true, reason: '', decisionId: 'hgd_3', reached: true })
+    expect(refusal).toBeNull()
+    expect(reports(client)).toEqual([{ event: 'tool_allowed', toolName: 'Bash', reason: '', gateDecisionId: 'hgd_3' }])
+  })
+
+  it('an answer without a decision id (an older control plane, no verdict) is reported without one', async () => {
     const { client } = await refuse({ allowed: false, reason: 'hook-gate unreachable — failing closed (failClosed=true)', reached: false })
-    expect(client.events.some((e) => e.event === 'tool_blocked')).toBe(true)
+    expect(reports(client)).toEqual([
+      { event: 'tool_blocked', toolName: 'Bash', reason: 'hook-gate unreachable — failing closed (failClosed=true)' },
+    ])
   })
 
   it('is decided the same way by the Python gate', () => {
     const ts = readFileSync(join(HERE, '../gate.ts'), 'utf-8')
     const py = readFileSync(join(HERE, '../../../intutic-clawde/intutic_clawde/gate/gate.py'), 'utf-8')
-    expect(ts).toContain("if (!resp.incidentId) await this.emit('tool_blocked', toolName, resp.reason, toolInput)")
-    expect(py).toMatch(/if not resp\.incident_id:\n\s+self\._emit\("tool_blocked", tool_name, resp\.reason, tool_input\)/)
+    expect(ts).toContain("await this.emit('tool_blocked', toolName, resp.reason, toolInput, undefined, undefined, resp.decisionId)")
+    expect(py).toContain('self._emit("tool_blocked", tool_name, resp.reason, tool_input, gate_decision_id=resp.decision_id)')
+    expect(ts).toContain("await this.emit('tool_allowed', toolName, '', toolInput, undefined, undefined, decisionId)")
+    expect(py).toContain('self._emit("tool_allowed", tool_name, "", tool_input, gate_decision_id=decision_id)')
   })
 })

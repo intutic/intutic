@@ -6,7 +6,7 @@ title: "intutic_mcp_server_decision"
 
 # intutic_mcp_server_decision <Badge type="tip" text="Cloud" />
 
-The operator decision on one MCP server in the workspace's registry: approve or block it, and switch individual tools off. The server must already be in the registry, which happens when an MCP proxy first reports it; to allow a server before any proxy has seen it, list it in the `mcpAllowedServers` workspace setting instead. Terraform never approves a server that a high-risk tool-set change returned to review: approve that one after reviewing the change, and the next plan is clean. Destroying the resource returns the server to the approval queue and re-enables the tools it disabled. Needs an OWNER or ADMIN key.
+The operator decision on one MCP server in the workspace's registry: approve or block it, and switch individual tools off. The server must already be in the registry, which happens when an MCP proxy first reports it; to allow a server before any proxy has seen it, list it in the `mcpAllowedServers` workspace setting instead. Terraform never approves a server that a high-risk tool-set change returned to review: approve that one after reviewing the change, and the next plan is clean. Destroying the resource returns the server to the approval queue and re-enables the tools its configuration switched off; a tool switched off elsewhere, or before an import, stays off. Needs an OWNER or ADMIN key.
 
 ## Example Usage
 
@@ -28,7 +28,7 @@ resource "intutic_mcp_server_decision" "github" {
 
 ### Optional
 
-- `disabled_tools` (Set of String) Exactly the tools to switch off on this server; every other tool is switched on. Unset leaves the tool switches alone.
+- `disabled_tools` (Set of String) Exactly the tools to switch off on this server; every other tool is switched on. Unset leaves the tool switches alone, and the attribute then shows the tools switched off now.
 
 ### Read-Only
 

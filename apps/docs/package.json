@@ -13,6 +13,7 @@
     "@intutic/theme": "workspace:*",
     "markdown-it-mathjax3": "^5.2.0",
     "vitepress": "^1.6.4",
+    "vitepress-openapi": "0.2.5",
     "vue": "^3.5.42"
   }
 }

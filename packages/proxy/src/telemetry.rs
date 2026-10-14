@@ -280,8 +280,8 @@ pub struct ExecutionTrace {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub response_injection_findings: Vec<crate::injection::ResponseInjectionEcho>,
 
-    /// A sampled copy of this request's full `RequestContext`, for the
-    /// replay corpus.
+    /// A sampled copy of this request's `RequestContext`, for the replay
+    /// corpus.
     ///
     /// `None` on the overwhelming majority of traces — see
     /// `AppState::context_snapshot_rate` (`WASM_CONTEXT_SNAPSHOT_RATE`,
@@ -293,6 +293,10 @@ pub struct ExecutionTrace {
     /// (tool sequences, DLP findings, SOP declarations) onto every single
     /// row in the busiest table in the system for a corpus that only needs
     /// to clear `MIN_REPLAY_CONTEXTS` (50).
+    ///
+    /// Built by `RequestContext::stored_snapshot`: tool calls carry argument
+    /// keys and sizes, not values, unless the workspace set
+    /// `storeToolArguments`, and every string is DLP-redacted for storage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_snapshot: Option<serde_json::Value>,
 
@@ -357,10 +361,23 @@ impl FindingWire {
         }
     }
 
-    /// The finding for a tool call the response gate withheld under the SSO
-    /// group policy. `None` for any other denial: a `deny_tools` hit or a SQL
-    /// guard refusal is not a group rule and records no rule id.
-    pub fn from_sso_group_denial(denial: &crate::plugins::response_gate::Denial) -> Option<Self> {
+    /// The finding for a tool call the response gate withheld under a rule
+    /// with an id of its own — the SSO group policy, or a hook-rule guardrail
+    /// (`guardrail.<pgr>`, which the control plane credits the guardrail with).
+    /// `None` for any other denial: a `deny_tools` hit or a SQL guard refusal
+    /// records no rule id.
+    pub fn from_rule_denial(denial: &crate::plugins::response_gate::Denial) -> Option<Self> {
+        if let crate::plugins::response_gate::DenialReason::HookRule(hit) = &denial.reason {
+            let mut finding = crate::plugins::anomaly::AnomalyFinding::kill(
+                crate::plugins::anomaly::AnomalyKind::UnauthorizedTool,
+                format!("{} [{}]", hit.reason, hit.rule_id),
+            );
+            finding.detector_id = "hook_rule";
+            let mut wire = Self::from_finding(&finding);
+            wire.rule_id = Some(hit.rule_id.clone());
+            wire.tool_name = Some(hit.tool.clone());
+            return Some(wire);
+        }
         let crate::plugins::response_gate::DenialReason::SsoGroup { tool, decision } =
             &denial.reason
         else {
@@ -1054,7 +1071,7 @@ mod tests {
             Some(&gate),
         )
         .expect("refused");
-        let w = FindingWire::from_sso_group_denial(&denial).expect("a group refusal");
+        let w = FindingWire::from_rule_denial(&denial).expect("a group refusal");
         assert_eq!(w.detector_id, "sso_group");
         assert_eq!(w.kind, "UNAUTHORIZED_TOOL");
         assert_eq!(w.disposition, "KILL");
@@ -1071,7 +1088,7 @@ mod tests {
             reason: DenialReason::Tools(vec!["Bash".into()]),
             block_index: 0,
         };
-        assert!(FindingWire::from_sso_group_denial(&deny_list).is_none());
+        assert!(FindingWire::from_rule_denial(&deny_list).is_none());
     }
 
     /// Shadow must be OFF unless someone deliberately turned it on.

@@ -1,0 +1,32 @@
+{
+  "scopes": [
+    "*",
+    "gateway:use",
+    "traces:read",
+    "traces:write",
+    "usage:read",
+    "usage:write",
+    "findings:read",
+    "findings:write",
+    "sops:read",
+    "sops:write",
+    "policies:read",
+    "policies:write",
+    "compliance:read",
+    "compliance:write",
+    "inventory:read",
+    "inventory:write",
+    "settings:read",
+    "settings:write",
+    "members:read",
+    "members:write",
+    "keys:read",
+    "keys:write",
+    "billing:read",
+    "billing:write",
+    "siem:read",
+    "siem:write",
+    "integrations:read",
+    "integrations:write"
+  ]
+}

@@ -168,6 +168,14 @@ resource "intutic_guardrail" "g" {
   name = "x"
   kind = "none"
 }`, `value must be one of`},
+		{"guardrail: a hook rule's roles are workspace roles", `
+resource "intutic_guardrail" "g" {
+  name  = "x"
+  kind  = "hook_rule"
+  title = "t"
+  tools = ["Bash"]
+  roles = ["developer", "contractor"]
+}`, `"contractor" is not a workspace role`},
 		{"guardrail: a hook rule names at most 8 tools", `
 resource "intutic_guardrail" "g" {
   name  = "x"

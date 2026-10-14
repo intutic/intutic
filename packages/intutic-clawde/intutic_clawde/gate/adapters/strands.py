@@ -134,6 +134,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_STRANDS branches
     MultiAgentBase = None  # type: ignore[assignment,misc]
     _HAS_STRANDS = False
 
+__all__ = ["IntuticHookProvider", "install", "install_multiagent"]
+
 #: HookRegistry -> the IntuticHookProvider registered on it. Strands'
 #: ``HookRegistry`` has no public way to enumerate registered providers, so
 #: the provider records itself here in ``register_hooks`` — which runs for

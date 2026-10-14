@@ -9,12 +9,14 @@ Intutic supports **43 AI agent harnesses** out of the box. Run `intutic init` in
 
 ```bash
 intutic init
-#   ✔ cursor → .cursor/rules/intutic-governance.mdc
-#   ✔ claude-code → .claude/rules/intutic-governance.md
-#   ✔ antigravity → GEMINI.md
+#   ✔ cursor → /path/to/project/.cursor/rules/intutic-governance.mdc
+#   ✔ claude-code → /path/to/project/.claude/rules/intutic-governance.md
+#   ✔ antigravity → /path/to/project/GEMINI.md
 #   ○ windsurf (not detected)
 #   …
 ```
+
+Each path is where `intutic connect` will write that harness's rule sets; `intutic init` itself writes none of them.
 
 Every harness connects through the same governance pipeline — proxy interception, SOP evaluation, and real-time enforcement — regardless of the underlying agent.
 
@@ -143,13 +145,14 @@ All harnesses share the same integration flow:
 
 ```
 ┌──────────────┐     ┌─────────────┐     ┌──────────────┐
-│  intutic     │────▶│  Detect     │────▶│  Write       │
-│  init        │     │  harnesses  │     │  config      │
+│  intutic     │────▶│  Detect     │────▶│  Record in   │
+│  init        │     │  harnesses  │     │  config.json │
 └──────────────┘     └─────────────┘     └──────┬───────┘
                                                 │
 ┌──────────────┐     ┌─────────────┐     ┌──────▼───────┐
-│  Enforce     │◀────│  Evaluate   │◀────│  intutic     │
-│  verdict     │     │  SOPs       │     │  connect     │
+│  Evaluate    │◀────│  Write      │◀────│  intutic     │
+│  + enforce   │     │  harness    │     │  connect     │
+│  each call   │     │  config     │     │              │
 └──────────────┘     └─────────────┘     └──────────────┘
 ```
 

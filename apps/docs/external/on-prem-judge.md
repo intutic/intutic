@@ -128,14 +128,6 @@ that does not return them makes every typed call fall back to the free-text judg
 stage only adds latency. Above or inside the band, a request makes three judge calls in place of one;
 `JUDGE_FINALIZE_DEADLINE_MS` covers all of them.
 
-## If the same model should also be served by the shared (non-local) LiteLLM deployment
-
-Adding a model name to `infra/kubernetes/base/litellm/config.yaml` (the SaaS-side LiteLLM
-config) obligates matching entries in `providerPricingService.ts`'s `STATIC_FALLBACK_RATES` and
-`packages/proxy/src/pricing/offline_bundle.json` — `modelNameParity.test.ts` enforces this at
-build time. This only applies if you're extending the shared deployment; a purely local/on-prem
-judge configured via this page has no such obligation.
-
 ## Verifying it worked
 
 Once the gateway is running with `local_judge` on and pointed at a reachable LiteLLM instance

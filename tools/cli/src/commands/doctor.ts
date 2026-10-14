@@ -31,7 +31,7 @@ import pc from 'picocolors'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { isSyncDaemonRunning } from '../lib/process.js'
-import { caTrustCommandFor } from '../lib/caTrust.js'
+import { caTrustCommandFor, LINUX_CA_TRUST_PATHS } from '../lib/caTrust.js'
 import { getPaths } from './install-daemon.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { localProxyProbeBase } from '../lib/localProxy.js'
@@ -445,6 +445,25 @@ function systemTrustRemediation(os: string): string {
 }
 
 /**
+ * Whether the CA sits in a Linux system trust directory: any of the paths
+ * `caTrust.ts` installs to (`enterprise install` writes `intutic-ca.crt`,
+ * `intutic connect` writes `intutic-connect-ca.crt`), plus the same names in
+ * Arch's anchors directory for a manual install there.
+ */
+export function linuxCaTrustInstalled(read: (path: string) => string = (p) => readFileSync(p, 'utf-8')): boolean {
+  const archDir = '/etc/ca-certificates/trust-source/anchors'
+  const names = [...new Set(LINUX_CA_TRUST_PATHS.map((p) => p.slice(p.lastIndexOf('/') + 1)))]
+  const candidates = [...LINUX_CA_TRUST_PATHS, ...names.map((name) => join(archDir, name))]
+  return candidates.some((path) => {
+    try {
+      return read(path).length > 0
+    } catch {
+      return false
+    }
+  })
+}
+
+/**
  * Check 7: CA certificate trust.
  *
  * Verifies that the Intutic proxy CA certificate exists at ~/.intutic/ca.crt
@@ -476,22 +495,7 @@ function checkCertTrust(): CheckResult {
         detail: 'CA cert exists and is trusted by macOS Keychain',
       }
     } else if (os === 'linux') {
-      // Linux: check common CA certificate directories
-      const systemDirs = [
-        '/usr/local/share/ca-certificates',
-        '/etc/pki/ca-trust/source/anchors',
-        '/etc/ca-certificates/trust-source/anchors',
-      ]
-      const installed = systemDirs.some(dir => {
-        try {
-          const files = readFileSync(join(dir, 'intutic-ca.crt'), 'utf-8')
-          return files.length > 0
-        } catch {
-          return false
-        }
-      })
-
-      if (installed) {
+      if (linuxCaTrustInstalled()) {
         return {
           name: 'Cert Trust',
           passed: true,

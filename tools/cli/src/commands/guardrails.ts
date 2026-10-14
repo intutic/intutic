@@ -88,13 +88,14 @@ const enc = encodeURIComponent
 
 // ─── sources ────────────────────────────────────────────────────────
 
+/** A row of GET /api/v1/connectors, and the POST's answer (routes/connectors.ts). */
 interface ConnectorRow {
-  connector_id?: string
-  connectorId?: string
+  connector_id: string
   provider: string
   name: string
-  last_synced_at?: string | null
-  lastSyncedAt?: string | null
+  last_synced_at: string | null
+  /** The scheduled sync's last failed attempt, cleared by the next success. */
+  last_sync_error?: string | null
   config?: Record<string, unknown>
 }
 
@@ -118,10 +119,11 @@ export async function runGuardrailsSourcesList(opts: CommonOpts): Promise<void> 
     return
   }
   for (const c of items) {
-    const id = c.connector_id ?? c.connectorId ?? '?'
-    const synced = c.last_synced_at ?? c.lastSyncedAt ?? null
+    const id = c.connector_id
+    const synced = c.last_synced_at
     const cfg = c.config ?? {}
     log.field(c.name, `${id} — ${c.provider}${cfg.auto_sync === true ? ', auto-sync' : ''}${synced ? `, last synced ${synced}` : ', never synced'}`)
+    if (c.last_sync_error) log.warn(`  ${c.name}: last sync attempt failed: ${c.last_sync_error}`)
   }
   log.info(`${items.length} policy source(s).`)
 }
@@ -168,13 +170,13 @@ export async function runGuardrailsSourcesAdd(
   }
   const client = await getClient(opts.dev)
   try {
-    const res = await client.post<{ connector?: ConnectorRow; connectorId?: string; connector_id?: string }>('/api/v1/connectors', {
+    const res = await client.post<ConnectorRow>('/api/v1/connectors', {
       provider,
       name: opts.name,
       token: credential,
       config,
     })
-    const id = res.connector?.connector_id ?? res.connector?.connectorId ?? res.connectorId ?? res.connector_id ?? '(see dashboard)'
+    const id = res.connector_id
     if (opts.json) {
       emitJson(res)
       return
@@ -287,6 +289,10 @@ export async function runGuardrailsDocsExtract(docId: string, opts: CommonOpts &
     log.warn(`Daily extraction cap reached (${body.cap?.count ?? '?'} of ${body.cap?.cap ?? '?'} calls today). The front-matter lift still ran.`)
     process.exit(1)
   }
+  if (status === 503 && body.result?.skipped === 'cap_unavailable') {
+    log.warn('The cap store was unreachable, so no model call was made. The front-matter lift still ran.')
+    process.exit(1)
+  }
   if (status !== 200 || !body.result) {
     log.error(`Extraction failed (${status}): ${said(body) ?? 'unknown error'}`)
     process.exit(1)
@@ -298,7 +304,6 @@ export async function runGuardrailsDocsExtract(docId: string, opts: CommonOpts &
   }
   if (r.skipped === 'llm_disabled') log.info('Model call skipped (--no-llm); only the front-matter lift ran.')
   else if (r.skipped === 'no_passages') log.warn('The document has no passages to extract from.')
-  else if (r.skipped === 'cap_unavailable') log.warn('The cap store was unreachable, so no model call was made.')
   else if (r.llmUnavailable) log.warn(`The model could not be reached: ${r.error ?? 'no detail'}. The run is recorded with its error.`)
   else log.success(`Extracted ${docId}: ${r.proposals} proposal(s) from ${r.chunks} chunk(s).`)
   log.field('Valid clauses', String(r.valid))

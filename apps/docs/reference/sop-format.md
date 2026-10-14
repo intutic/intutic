@@ -98,16 +98,19 @@ SOPs are written in markdown. The content is synced to harness config files and 
 SOPs follow a 7-state lifecycle:
 
 ```
-DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATED
-                                                                    ↓
-                                                              INVALIDATED
+DRAFT ↔ PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATED
+              ↑                           │            │        │     │
+              │                           └────────────┼────────┘     │
+              │                                        ↓              │
+              │                                   INVALIDATED         │
+              └────────────── re-review after a cascade ──────────────┘
 ```
 
 | State | Description |
 |-------|-------------|
 | `DRAFT` | Initial authoring. Not enforced. |
 | `PENDING_REVIEW` | Submitted for team review. |
-| `GENERATED` | Auto-generated from observed patterns. |
+| `GENERATED` | Passed the Gödel score check on the way out of review. |
 | `HYPOTHESIZED` | Proposed rule being tested in shadow mode. |
 | `REFINED` | Iteratively improved based on feedback. |
 | `VALIDATED` | **Active and enforced.** `HYPOTHESIZED` and `REFINED` SOPs are synced to harnesses too, as guidance no gate enforces. |
@@ -135,7 +138,7 @@ When an SOP is updated, the change is classified:
 | `NARROW` | Reduces the scope of the rule |
 | `WEAKEN` | Makes the rule less restrictive |
 
-The classification is returned with the edit (`antiGaming`). A `WEAKEN` edit made by a person needs the OWNER role; see [SOPs](/guide/sops#change-classification).
+The classification is returned with the edit (`antiGaming`). A `WEAKEN` edit needs the OWNER role, and the SOP Optimizer applies a change without review only when it is `STRENGTHEN`; see [SOPs](/guide/sops#change-classification).
 
 ## Dependencies
 

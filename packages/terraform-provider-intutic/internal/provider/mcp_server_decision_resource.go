@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -13,8 +14,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/intutic/terraform-provider-intutic/internal/client"
@@ -24,6 +27,13 @@ import (
 var mcpStatuses = []string{"approved", "blocked", "candidate"}
 
 const mcpServersPath = "/api/v1/mcp/servers"
+
+// managedToolsKey is the private-state key holding the tools this resource
+// switched off: the configured disabled_tools at its last create or update,
+// `[]` when the configuration leaves the switches alone. Destroy re-enables
+// exactly these. State cannot say it: disabled_tools always holds the
+// server's whole disabled set, so an unset attribute imports and plans clean.
+const managedToolsKey = "managed_disabled_tools"
 
 type mcpServerDecisionResource struct{ client *client.Client }
 
@@ -69,7 +79,8 @@ func (r *mcpServerDecisionResource) Schema(_ context.Context, _ resource.SchemaR
 			"`mcpAllowedServers` workspace setting instead. Terraform never approves a server that a high-risk " +
 			"tool-set change returned to review: approve that one after reviewing the change, and the next plan " +
 			"is clean. Destroying the resource returns the server to the approval queue and re-enables the tools " +
-			"it disabled. Needs an OWNER or ADMIN key.",
+			"its configuration switched off; a tool switched off elsewhere, or before an import, stays off. Needs an " +
+			"OWNER or ADMIN key.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -90,9 +101,11 @@ func (r *mcpServerDecisionResource) Schema(_ context.Context, _ resource.SchemaR
 			"disabled_tools": schema.SetAttribute{
 				ElementType: types.StringType,
 				Optional:    true,
+				Computed:    true,
 				Description: "Exactly the tools to switch off on this server; every other tool is switched on. " +
-					"Unset leaves the tool switches alone.",
-				Validators: []validator.Set{setvalidator.ValueStringsAre(stringvalidator.LengthBetween(1, 256))},
+					"Unset leaves the tool switches alone, and the attribute then shows the tools switched off now.",
+				Validators:    []validator.Set{setvalidator.ValueStringsAre(stringvalidator.LengthBetween(1, 256))},
+				PlanModifiers: []planmodifier.Set{setplanmodifier.UseStateForUnknown()},
 			},
 			"tools": schema.ListAttribute{
 				ElementType: types.StringType,
@@ -152,16 +165,71 @@ func (r *mcpServerDecisionResource) Create(ctx context.Context, req resource.Cre
 				plan.ServerName.ValueString()))
 		return
 	}
-	r.apply(ctx, srv, plan, &resp.Diagnostics)
+	want, managed := configuredTools(ctx, req.Config, &resp.Diagnostics)
+	r.apply(ctx, srv, plan, want, managed, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	setManagedTools(ctx, resp.Private, want, &resp.Diagnostics)
 	r.refresh(ctx, srv.ServerName, &plan, resp.State.Set, &resp.Diagnostics)
 }
 
-// apply moves srv to the plan's status and tool switches.
+// configuredTools is the disabled_tools the configuration sets, and whether
+// it sets any: unset leaves the server's tool switches alone. Read from the
+// configuration, not the plan, which carries the server's current set when
+// the attribute is unset.
+func configuredTools(ctx context.Context, cfg tfsdk.Config, diags *diag.Diagnostics) ([]string, bool) {
+	var v types.Set
+	diags.Append(cfg.GetAttribute(ctx, path.Root("disabled_tools"), &v)...)
+	if v.IsNull() || v.IsUnknown() {
+		return nil, false
+	}
+	out := listStrings(ctx, v, diags)
+	if out == nil {
+		out = []string{}
+	}
+	return out, true
+}
+
+type privateState interface {
+	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}
+
+// setManagedTools records the tools this resource switched off (none when
+// the configuration leaves the switches alone).
+func setManagedTools(ctx context.Context, p privateState, tools []string, diags *diag.Diagnostics) {
+	if tools == nil {
+		tools = []string{}
+	}
+	b, err := json.Marshal(tools)
+	if err != nil {
+		diags.AddError("Recording managed MCP tools failed", err.Error())
+		return
+	}
+	diags.Append(p.SetKey(ctx, managedToolsKey, b)...)
+}
+
+// managedTools reads what setManagedTools recorded. ok is false for state
+// written before the key existed (0.2.x), where a non-null disabled_tools
+// was the managed set.
+func managedTools(ctx context.Context, p privateState, diags *diag.Diagnostics) (tools []string, ok bool) {
+	b, d := p.GetKey(ctx, managedToolsKey)
+	diags.Append(d...)
+	if b == nil {
+		return nil, false
+	}
+	if err := json.Unmarshal(b, &tools); err != nil {
+		diags.AddError("Reading managed MCP tools failed", err.Error())
+		return nil, false
+	}
+	return tools, true
+}
+
+// apply moves srv to the plan's status and, when the configuration sets
+// disabled_tools (managed), to exactly those tool switches.
 func (r *mcpServerDecisionResource) apply(ctx context.Context, srv *apiMcpServer, plan mcpServerDecisionModel,
-	diags *diag.Diagnostics) {
+	want []string, managed bool, diags *diag.Diagnostics) {
 	status := plan.Status.ValueString()
 	if status == "approved" && srv.HeldForReview {
 		diags.AddAttributeError(path.Root("status"), "Server held for review", heldMessage(srv))
@@ -174,10 +242,9 @@ func (r *mcpServerDecisionResource) apply(ctx context.Context, srv *apiMcpServer
 			return
 		}
 	}
-	if plan.DisabledTools.IsNull() || plan.DisabledTools.IsUnknown() {
+	if !managed {
 		return
 	}
-	want := listStrings(ctx, plan.DisabledTools, diags)
 	for _, sw := range toolSwitches(srv.DisabledTools, want) {
 		err := r.client.Post(ctx, mcpServersPath+"/"+esc(srv.ServerID)+"/tools",
 			map[string]any{"tool": sw.tool, "enabled": sw.enabled}, nil)
@@ -241,13 +308,11 @@ func (s *apiMcpServer) applyTo(m *mcpServerDecisionModel) {
 	}
 	m.Tools = stringList(s.Tools)
 	m.HeldForReview = types.BoolValue(s.HeldForReview)
-	if !m.DisabledTools.IsNull() {
-		disabled := s.DisabledTools
-		if disabled == nil {
-			disabled = []string{}
-		}
-		m.DisabledTools = stringSet(disabled)
+	disabled := s.DisabledTools
+	if disabled == nil {
+		disabled = []string{}
 	}
+	m.DisabledTools = stringSet(disabled)
 }
 
 func (r *mcpServerDecisionResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -265,6 +330,10 @@ func (r *mcpServerDecisionResource) Read(ctx context.Context, req resource.ReadR
 		resp.State.RemoveResource(ctx)
 		return
 	}
+	if _, ok := managedTools(ctx, req.Private, &resp.Diagnostics); !ok {
+		// 0.2.x state: a set disabled_tools was what this resource managed.
+		setManagedTools(ctx, resp.Private, listStrings(ctx, state.DisabledTools, &resp.Diagnostics), &resp.Diagnostics)
+	}
 	srv.applyTo(&state)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -281,15 +350,18 @@ func (r *mcpServerDecisionResource) Update(ctx context.Context, req resource.Upd
 		resp.Diagnostics.AddError("Reading the MCP server registry failed", errText(err, state.ServerName.ValueString()+" is gone"))
 		return
 	}
-	r.apply(ctx, srv, plan, &resp.Diagnostics)
+	want, managed := configuredTools(ctx, req.Config, &resp.Diagnostics)
+	r.apply(ctx, srv, plan, want, managed, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	setManagedTools(ctx, resp.Private, want, &resp.Diagnostics)
 	r.refresh(ctx, srv.ServerName, &plan, resp.State.Set, &resp.Diagnostics)
 }
 
 // Delete returns the server to the approval queue and re-enables the tools
-// this resource disabled: the decision is withdrawn, not reversed.
+// this resource's configuration switched off: the decision is withdrawn, not
+// reversed. A tool switched off elsewhere stays off.
 func (r *mcpServerDecisionResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state mcpServerDecisionModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -304,7 +376,11 @@ func (r *mcpServerDecisionResource) Delete(ctx context.Context, req resource.Del
 	if srv == nil {
 		return
 	}
-	for _, t := range listStrings(ctx, state.DisabledTools, &resp.Diagnostics) {
+	managed, ok := managedTools(ctx, req.Private, &resp.Diagnostics)
+	if !ok {
+		managed = listStrings(ctx, state.DisabledTools, &resp.Diagnostics)
+	}
+	for _, t := range managed {
 		if !slices.Contains(srv.DisabledTools, t) {
 			continue
 		}
@@ -322,9 +398,11 @@ func (r *mcpServerDecisionResource) Delete(ctx context.Context, req resource.Del
 	}
 }
 
-// ImportState takes the server name, the identity a configuration uses, and
-// imports the server's current tool switches as managed.
+// ImportState takes the server name, the identity a configuration uses. Read
+// fills disabled_tools with the server's current switches, so a configuration
+// that leaves it unset, or sets the same tools, plans clean. Tools switched
+// off before the import are not this resource's: destroy leaves them off.
 func (r *mcpServerDecisionResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("server_name"), req.ID)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("disabled_tools"), stringSet([]string{}))...)
+	setManagedTools(ctx, resp.Private, nil, &resp.Diagnostics)
 }

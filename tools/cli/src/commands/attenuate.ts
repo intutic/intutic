@@ -6,15 +6,16 @@
  * module doc on the dashboard side). This command is the mint/inspect half:
  *
  * - `intutic attenuate --parent-key <keyId> --caps <a,b,c> [--ttl <seconds>]`
- *   — `POST /api/v1/attenuate`, narrowing a parent `vk_*` key to a child key
- *   scoped to a capability subset (`requestedCaps ⊆ parent.scopes`, enforced
- *   server-side).
+ *   — `POST /api/v1/attenuate`, narrowing one of your `vk_*` keys to a child
+ *   key with narrower scopes (each requested scope granted by the parent,
+ *   enforced server-side).
  * - `intutic attenuate chain <chainId>` — `GET /api/v1/attenuate/chain/:chainId`,
  *   resolving the full delegation lineage for audit purposes.
  *
  * @module
  */
 
+import { API_SCOPE_NAMES, unknownApiKeyScopes } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { getClient } from './skill.js'
 
@@ -41,12 +42,13 @@ interface AttenuationChainLink {
 
 /**
  * `intutic attenuate --parent-key <keyId> --caps <a,b,c> [--ttl <seconds>]`
- * — mints a child key narrowed to a subset of the parent key's capabilities.
+ * — mints a child key narrowed to scopes its parent grants.
  *
- * `--caps` is a comma-separated list, split and trimmed client-side; the
- * server does the actual `requestedCaps ⊆ parent.scopes` subset check and
- * returns `E_ATTENUATION_CAP_VIOLATION` (403) naming exactly which requested
- * capability was not in the parent's scopes.
+ * `--caps` is a comma-separated list of API key scopes (`gateway:use`,
+ * `traces:read`, …), split, trimmed and checked against the registry
+ * client-side; the server checks each is granted by the parent (`*` grants
+ * all, `x:write` grants `x:read`) and returns `ATTENUATION_CAP_VIOLATION`
+ * (403) naming exactly which was not.
  */
 export async function runAttenuate(opts: {
   parentKey?: string
@@ -66,7 +68,12 @@ export async function runAttenuate(opts: {
     .map((cap) => cap.trim())
     .filter(Boolean)
   if (requestedCaps.length === 0) {
-    log.error('--caps is required and must list at least one capability')
+    log.error('--caps is required and must list at least one scope')
+    process.exit(1)
+  }
+  const unknown = unknownApiKeyScopes(requestedCaps)
+  if (unknown.length > 0) {
+    log.error(`Unknown scope${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}. Valid scopes: ${API_SCOPE_NAMES.join(', ')}`)
     process.exit(1)
   }
 
@@ -93,7 +100,7 @@ export async function runAttenuate(opts: {
     log.field('Child Key', result.childKey)
     log.field('Child Key ID', result.childKeyId)
     log.field('Chain ID', result.attenuationChainId)
-    log.field('Granted Capabilities', result.grantedCaps.join(', '))
+    log.field('Granted Scopes', result.grantedCaps.join(', '))
     log.field('Expires At', result.expiresAt)
     log.dim('The child key is shown once and never stored — save it now.')
   } catch (err) {
@@ -127,7 +134,7 @@ export async function runAttenuateChain(
       log.field('Chain ID', link.chainId)
       log.field('Parent Key', link.parentKeyId)
       log.field('Child Key', link.childKeyId)
-      log.field('Granted Capabilities', link.grantedCaps.join(', '))
+      log.field('Granted Scopes', link.grantedCaps.join(', '))
       log.field('Expires At', link.expiresAt)
       log.field('Minted At', link.createdAt)
     }

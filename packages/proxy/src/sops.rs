@@ -33,6 +33,7 @@
 //! between an agent and a capability. Enforcement is the detectors and the
 //! WASM rules, which do not consult the role. See ADR-009.
 
+use crate::plugins::hook_rules::HookRuleDecl;
 use crate::plugins::sql_guard::{SqlGuardPolicy, SqlGuardSeverity};
 use crate::store::{LocalStore, PinScope, PinnedSopBlock};
 use crate::wasm::context::RiskLevel;
@@ -220,9 +221,24 @@ pub struct Sop {
     /// `sql_allow_dsns:` — target patterns destructive SQL may run against.
     /// Case is kept as written; matching lowercases both sides.
     pub sql_allow_dsns: Vec<String>,
+    /// `hook_rule: {json}` — one per line: a hook-rule guardrail, enforced on
+    /// the tool calls in a model's response (`plugins::hook_rules`). A line
+    /// that does not parse is kept as [`HookRuleDecl::Unreadable`], which
+    /// refuses rather than enforcing nothing.
+    pub hook_rules: Vec<HookRuleDecl>,
 }
 
 impl Sop {
+    /// Whether hook rules are the only thing this SOP enforces — evaluated on
+    /// the response's tool calls rather than by a request-side detector.
+    pub fn only_hook_rules(&self) -> bool {
+        !self.hook_rules.is_empty() && {
+            let mut rest = self.clone();
+            rest.hook_rules.clear();
+            !is_enforceable(&rest)
+        }
+    }
+
     /// Does this apply to a node reporting `role`?
     ///
     /// An unscoped SOP applies to everyone. A node that reported no role at
@@ -266,6 +282,7 @@ struct FrontMatter {
     mode: SopMode,
     sql_guard: Option<SqlGuardSeverity>,
     sql_allow_dsns: Vec<String>,
+    hook_rules: Vec<HookRuleDecl>,
     /// Rules that failed to parse, kept so they can be reported rather than
     /// dropped. A malformed ordering rule must not read as "no rule declared".
     rule_errors: Vec<String>,
@@ -424,6 +441,12 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
         forbid_with: cooccur.0,
         sql_guard,
         sql_allow_dsns,
+        // One rule per line, never split on commas: the value is JSON.
+        hook_rules: front
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("hook_rule:"))
+            .map(crate::plugins::hook_rules::parse_line)
+            .collect(),
         rule_errors: {
             let mut e = requires.1;
             e.extend(forbids.1);
@@ -566,8 +589,9 @@ fn parse_cooccurrence(raw: &str) -> Result<(String, String), String> {
     let taint = lhs.trim().to_ascii_lowercase();
     if !matches!(taint.as_str(), "secrets()" | "pii()") {
         return Err(format!(
-            "{:?}: the left side must be `secrets()` or `pii()` — the only two \
-             categories the DLP scanner reports",
+            "{:?}: the left side must be `secrets()` or `pii()` — `secrets()` \
+             covers secrets and credentials, `pii()` personal data including \
+             custom `phi` patterns",
             lhs.trim()
         ));
     }
@@ -658,6 +682,7 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
         && fm.max_calls.is_empty()
         && fm.forbid_with.is_empty()
         && fm.sql_guard.is_none()
+        && fm.hook_rules.is_empty()
         && fm.rule_errors.is_empty()
     {
         return None;
@@ -671,6 +696,13 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
     // that were fine.
     for err in &fm.rule_errors {
         tracing::warn!(sop = %source, "Ignoring unparseable ordering rule: {err}");
+    }
+    // An unreadable hook rule is not ignored: it refuses every tool call
+    // (`plugins::hook_rules`), so say why where an operator will look.
+    for decl in &fm.hook_rules {
+        if let HookRuleDecl::Unreadable { error, .. } = decl {
+            tracing::warn!(sop = %source, "Unreadable hook rule — every tool call is refused while it is in force: {error}");
+        }
     }
     Some(Sop {
         title,
@@ -690,6 +722,7 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
         mode: fm.mode,
         sql_guard: fm.sql_guard,
         sql_allow_dsns: fm.sql_allow_dsns,
+        hook_rules: fm.hook_rules,
     })
 }
 
@@ -1037,7 +1070,7 @@ mod enforceability_tests {
 /// lists that disagree is the same defect class as the tool-name lists in
 /// `actions.rs` — one place, or they drift.
 const ENFORCING_FIELDS: &str = "deny_tools, allow_harnesses, plan_steps, scope_paths, \
-     review_before, requires_before, forbid_after, max_calls, forbid_with, sql_guard or sql_allow_dsns";
+     review_before, requires_before, forbid_after, max_calls, forbid_with, sql_guard, sql_allow_dsns or hook_rule";
 
 /// Does this SOP declare anything the proxy can act on?
 ///
@@ -1063,6 +1096,7 @@ fn is_enforceable(sop: &Sop) -> bool {
         || !sop.max_calls.is_empty()
         || !sop.forbid_with.is_empty()
         || sop.sql_guard.is_some()
+        || !sop.hook_rules.is_empty()
 }
 
 /// What to say when policy loaded but none of it can fire.
@@ -2270,6 +2304,7 @@ mod tests {
             forbid_with: Vec::new(),
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
+            hook_rules: Vec::new(),
         }
     }
 
@@ -2577,6 +2612,7 @@ mod tests {
                 forbid_with: Vec::new(),
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
+                hook_rules: Vec::new(),
             })
             .collect();
         let out = render(&big, "any").unwrap();
@@ -2639,6 +2675,7 @@ mod render_determinism_tests {
             forbid_with: Vec::new(),
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
+            hook_rules: Vec::new(),
         }
     }
 
@@ -2993,7 +3030,59 @@ mod discovery_tests {
             forbid_with: fm.forbid_with,
             sql_guard: fm.sql_guard,
             sql_allow_dsns: fm.sql_allow_dsns,
+            hook_rules: fm.hook_rules,
         }
+    }
+
+    /// A served hook-rule guardrail parses into one rule per `hook_rule:`
+    /// line, is enforceable on its own (so no inert-SOP warning and no "empty
+    /// entry" drop), and is told apart from SOPs that also declare other keys.
+    #[test]
+    fn hook_rule_lines_parse_from_front_matter() {
+        let raw = concat!(
+            "---\n",
+            r#"hook_rule: {"id":"guardrail.pgr_a","tools":["Bash"],"argContains":["terraform apply"],"argNotContains":["-target="],"reason":"Plan first, policy: \"x, y\""}"#,
+            "\n",
+            r#"hook_rule: {"id":"guardrail.pgr_b","tools":["Read"],"argContains":[".env"],"argNotContains":[],"reason":"r"}"#,
+            "\nmode: shadow\n---\n# Guardrail\n",
+        );
+        let s = sop_from_raw("GUARDRAIL:pgr_a hook_rule: Bash", raw);
+        assert_eq!(
+            s.hook_rules.len(),
+            2,
+            "one rule per line, never split on commas"
+        );
+        let crate::plugins::hook_rules::HookRuleDecl::Rule(r) = &s.hook_rules[0] else {
+            panic!("{:?}", s.hook_rules[0]);
+        };
+        assert_eq!(r.id, "guardrail.pgr_a");
+        assert_eq!(r.arg_not_contains, vec!["-target=".to_string()]);
+        assert_eq!(r.reason, "Plan first, policy: \"x, y\"");
+        assert_eq!(parse_front_matter(raw).mode, SopMode::Shadow);
+        assert!(is_enforceable(&s));
+        assert!(s.only_hook_rules());
+
+        let one = concat!(
+            "---\n",
+            r#"hook_rule: {"id":"x","tools":["Bash"]}"#,
+            "\n---\n"
+        );
+        let mixed = sop_from_raw(
+            "mixed",
+            &format!("---\ndeny_tools: WebFetch\n{}", &one[4..]),
+        );
+        assert_eq!(mixed.deny_tools, vec!["WebFetch".to_string()]);
+        assert_eq!(mixed.hook_rules.len(), 1);
+        assert!(!mixed.only_hook_rules());
+
+        // Only hook rules and no prose: still a SOP, not dropped as empty.
+        assert!(parse_sop_content("t".into(), one, "test", SopScope::Workspace).is_some());
+        // An unreadable line is kept — it must refuse, not vanish.
+        let broken = sop_from_raw("broken", "---\nhook_rule: {not json\n---\n");
+        assert!(matches!(
+            broken.hook_rules.as_slice(),
+            [crate::plugins::hook_rules::HookRuleDecl::Unreadable { .. }]
+        ));
     }
 
     #[test]
@@ -3057,6 +3146,16 @@ mod discovery_tests {
             vec![("secrets()".to_string(), "action:http_post".to_string())],
             "here the comma separates the two SIDES of one rule, not two rules"
         );
+    }
+
+    /// The taints are `secrets()` and `pii()`, which also covers custom `phi`
+    /// patterns. `phi()` is refused with the reason (logged at load) rather than loading as a
+    /// rule nothing else (guardrail IR, control-plane replay) understands.
+    #[test]
+    fn forbid_with_refuses_a_phi_taint() {
+        let err = parse_cooccurrence("phi(), action:http_post").expect_err("phi() is not a taint");
+        assert!(err.contains("`pii()`"), "{err}");
+        assert!(parse_cooccurrence("pii(), action:http_post").is_ok());
     }
 
     // ── sql_guard / sql_allow_dsns ──────────────────────────────────────
@@ -3502,6 +3601,7 @@ mod deny_tests {
             forbid_with: Vec::new(),
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
+            hook_rules: Vec::new(),
         }
     }
 
@@ -3596,6 +3696,7 @@ mod harness_policy_tests {
                 forbid_with: Vec::new(),
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
+                hook_rules: Vec::new(),
             },
             Sop {
                 risk_tier: None,
@@ -3615,6 +3716,7 @@ mod harness_policy_tests {
                 forbid_with: Vec::new(),
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
+                hook_rules: Vec::new(),
             },
         ];
         assert_eq!(collect_harnesses(&sops, "reviewer"), vec!["claude-code"]);
@@ -3678,6 +3780,7 @@ mod plan_step_tests {
                 forbid_with: Vec::new(),
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
+                hook_rules: Vec::new(),
             },
             Sop {
                 risk_tier: None,
@@ -3697,6 +3800,7 @@ mod plan_step_tests {
                 forbid_with: Vec::new(),
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
+                hook_rules: Vec::new(),
             },
         ];
         assert_eq!(
@@ -3729,6 +3833,7 @@ mod plan_step_tests {
             forbid_with: Vec::new(),
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
+            hook_rules: Vec::new(),
         }];
         assert!(collect_plan_steps(&sops, "reviewer").is_empty());
         assert!(collect_plan_steps(&sops, "").is_empty());
@@ -3818,6 +3923,7 @@ mod scope_and_review_tests {
             forbid_with: Vec::new(),
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
+            hook_rules: Vec::new(),
         }];
         assert!(collect_scope_paths(&sops, "reviewer").is_empty());
         assert!(collect_review_before(&sops, "reviewer").is_empty());
@@ -3844,6 +3950,7 @@ mod scope_and_review_tests {
             forbid_with: Vec::new(),
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
+            hook_rules: Vec::new(),
         };
         let sops = vec![mk("packages/proxy"), mk("infra"), mk("packages/proxy")];
         assert_eq!(
@@ -3941,6 +4048,7 @@ mod sop_status_snapshot_tests {
             forbid_with: Vec::new(),
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
+            hook_rules: Vec::new(),
         }
     }
 

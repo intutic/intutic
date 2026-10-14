@@ -144,6 +144,14 @@ def _normalise(value) -> str:
 
 
 def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
+    """Read the policy snapshot the sync daemon compiled: from `path`, else
+    `INTUTIC_SNAPSHOT_RULES`, else `~/.intutic/hooks/policy-snapshot.rules`.
+
+    A missing file gives an empty snapshot whose `state` is "absent". A
+    snapshot whose digest does not match its rules, or that was compiled for a
+    workspace other than a non-empty `workspace_id`, is "invalid": its rules
+    and MCP records are dropped.
+    """
     p = path or snapshot_path()
     snap = Snapshot()
     try:

@@ -56,8 +56,9 @@ egress.
 
 **Cloud providers (Cloud tier).** When a control plane is connected, your
 workspace's memory providers (mem0, Supermemory, AgentMemory, or any provider
-via the generic HTTP connector) are also searched, the chunks are ranked by the
-LLM-as-judge (with a deterministic fallback when no judge is reachable), and the
+via the generic HTTP connector) are also searched, the chunks are ranked by
+keyword overlap with your prompt (a self-hosted model breaks the ranking only
+when it cannot decide, and the keyword order stands if that call fails), and the
 winners are inlined with their provider attribution. A provider that is down
 contributes nothing rather than blocking the command.
 
@@ -87,7 +88,9 @@ primitive maps to the [OWASP LLM Top 10 (2025)](https://owasp.org/www-project-to
 risk it mitigates and, for the agent-to-agent surface, the OWASP Agentic-AI
 threat classes. A facet that does not apply to your setup (no MCP tools, single
 agent so no graph) is excluded from the weighting rather than scored zero — you
-are not marked down for a surface you never use. The score bands map to a colour
+are not marked down for a surface you never use. Two conditions cap the
+overall score at 50 rather than adding a facet: a failing guard-liveness probe,
+and egress enforcement that is off or only monitoring. The score bands map to a colour
 you will also see on the [Agents dashboard](/guide/agents) ring: red < 40,
 orange < 65, yellow < 85, green ≥ 85.
 
@@ -106,8 +109,9 @@ apply is dropped and the rest are renormalised):
 | `skills` | 4 | Declared, content-scanned skills | LLM03 | T3 Privilege Compromise |
 | `memory` | 4 | Governed memory providers | LLM08, LLM04 | T1 Memory Poisoning |
 
-The table is a rendering of `FACET_WEIGHTS` and `FACET_RUBRIC` in the control
-plane's `agentPosture.ts`; if the two ever disagree, the code is right.
+The table is a rendering of the proxy's `posture.rs`, which `/fix` and `/draw`
+score with, and its control-plane mirror `FACET_WEIGHTS` / `FACET_RUBRIC` in
+`agentPosture.ts`; if the table and the code ever disagree, the code is right.
 
 ## Blocking vs. passthrough
 

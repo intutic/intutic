@@ -14,7 +14,7 @@ Where the [Kitkat skill](/integrations/kitkat) teaches an agent to *operate* Int
 4. **Dry-run:** `intutic policy test` against both a should-block and a should-allow mock — the skill requires both to pass before install.
 5. **Install:** `intutic policy install --wasm build/rule.wasm --name <name> --priority NN` — validated by instantiation first, then copied to the local rules directory the proxy rescans every ~5 s.
 
-Local rules merge with any centrally synced rules most-restrictive-wins: a KILL from either source ends the request, so a local rule can add restrictions but can never neutralize a central one.
+Local rules merge with any centrally synced rules most-restrictive-wins: a BLOCK from either source ends the request, so a local rule can add restrictions but can never neutralize a central one.
 
 ---
 
@@ -40,7 +40,7 @@ mkdir -p .agents/skills/intutic-rule-author
 
 - The agent must produce **both** a should-block and a should-allow mock and verify them with `intutic policy test` before installing.
 - `intutic policy install` refuses rules that fail instantiation — the proxy would refuse to load them, so they would enforce nothing.
-- Secrets in rule sources are flagged by `intutic skill audit`.
+- Secrets (API keys, tokens, passwords) stay out of rule sources and mock contexts. Nothing scans those files for them: `intutic skill audit` reads instruction files and skill directories, not rule sources.
 - Allow-overrides are structurally impossible: the verdict lattice only adds blocks.
 
 See the [WASM rules guide](/guide/wasm-rules) for the full authoring contract and sandbox limits.

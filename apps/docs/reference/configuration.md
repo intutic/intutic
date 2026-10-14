@@ -19,12 +19,12 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `INTUTIC_PROXY_BIND` | `127.0.0.1`; `0.0.0.0` with `INTUTIC_GATEWAY_REQUIRE_VK` and in the container image | The addresses the proxy listens on: one IP address, or several separated by commas. The default answers only this machine. Open it for clients elsewhere: `0.0.0.0` for every interface, or a list such as `127.0.0.1,172.17.0.1` to add the Docker bridge for an `intutic exec --sandbox` on Linux (Docker Desktop reaches loopback already). Keep a loopback address in the list when Windsurf or Cursor traffic is intercepted. A `CONNECT` from another machine is refused unless the listener is open and the request carries an Intutic key in `Proxy-Authorization` (`Bearer vk_…`, or the key as the proxy URL's user name) that the control plane accepts. A value that is not an IP address stops the proxy at startup |
 | `RUST_LOG` | `intutic_proxy=info,tower_http=info` | Log filter, in `tracing` syntax (`intutic_proxy=debug`, `warn`, …) |
 | `CONTROL_PLANE_URL` | unset | Unset, the proxy runs **standalone**: no control plane, and rules, budgets and allowlists come from local files. Set to a control plane's address, it runs **managed**: Valkey becomes required (startup fails if it cannot connect, rather than accepting requests unauthenticated), and every request is checked against the workspace's policy first, failing closed (`403 policy_denied`) when the check fails or times out unless `intutic_settings.policy.fail_closed` is `false` |
-| `VALKEY_URL` | `redis://127.0.0.1:6379` | Valkey for the auth and budget cache, bandit state and the response cache. Standalone, the proxy tries it for 1.5 seconds and runs without it if it does not answer |
+| `VALKEY_URL` | `redis://127.0.0.1:6379` | Valkey for the auth and budget cache, bandit state and the response cache. Standalone, the proxy tries it for 1.5 seconds and runs without it if it does not answer. With Valkey but no control plane, requests are handled exactly as standalone: a request's own provider key passes through, and for a virtual key (`vk_…`) the provider key in the proxy's environment is used upstream |
 | `INTUTIC_STANDALONE` | unset | `1` or `true`: run standalone without probing for Valkey. Refused together with `CONTROL_PLANE_URL` |
 | `INTUTIC_CHAOS_PLAN` | unset | Set only by [`intutic chaos run`](/guide/chaos-engineering) on the proxy it starts for a repetition: the faults to inject, base64url-encoded JSON. A value that does not decode refuses to start the proxy |
 | `INTUTIC_CHAOS_EVENTS` | unset | Set with `INTUTIC_CHAOS_PLAN`: the file the proxy appends the run's fault, usage and plan events to. An unopenable path refuses to start the proxy |
 | `INTUTIC_WORKSPACE_ID` | unset | The workspace for requests that do not name one (no `x-workspace-id` header and no workspace in the key). Also the workspace a centrally distributed egress policy file must name to be loaded |
-| `INTUTIC_REGION` | unset | A region code (`eu`, …). Rewrites the hosted control plane's policy-check address to that region's control plane (`api.<region>.…`). Any other address is left alone |
+| `INTUTIC_REGION` | unset | A region code (`eu`, …). Rewrites the hosted control plane's policy-check address to that region's control plane (`api.<region>.…`), and the in-cluster `control-plane.intutic.svc` to `control-plane.intutic-<region>.svc`. Any other address is left alone |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Export traces and metrics over OTLP/gRPC to this collector. Unset, nothing is exported. See [OpenTelemetry](/guide/opentelemetry) |
 | `OTEL_SERVICE_NAME` | `intutic-proxy` | The service name on exported traces and metrics |
 
@@ -69,7 +69,7 @@ Models named `bedrock/…`, `vertex/…` and `azure/…` go to AWS Bedrock, Goog
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | The local WASM rule directory; takes precedence over `intutic_settings.wasm_local_dir` |
 | `INTUTIC_DISABLE_REGO_RULES` | unset | `1`: refuse [Rego rules](/guide/rego-policies) (OPA builds) at load, from the rules directory and the control plane. Native WASM rules are unaffected. The MCP proxy reads it too |
 | `INTUTIC_WASM_MANIFEST_ROOT` | unset (off) | The directory WASM rules may read files from: when a tool call names a manifest (`kubectl apply -f k8s/deploy.yaml`), the proxy reads that file under this root and hands its contents to the rule. Unset, rules see only the path. `~/` is expanded |
-| `WASM_CONTEXT_SNAPSHOT_RATE` | `0.05` | The fraction of requests (0–1) whose rule-evaluation context is attached to the trace, so a new rule can be replayed against real traffic before it ships. The context holds the request's tool calls with their arguments, tool names and descriptions, DLP finding names and session counters, not the message text. Traces go to the control plane when one is connected, and to `~/.intutic/logs` otherwise. `0` turns it off |
+| `WASM_CONTEXT_SNAPSHOT_RATE` | `0.05` | The fraction of requests (0–1) whose rule-evaluation context is attached to the trace, so a new rule can be replayed against real traffic before it ships. The context holds the request's tool calls — each one's name and its arguments' top-level keys and size, not the argument values unless the workspace sets [`storeToolArguments`](/reference/workspace-settings) — tool names and descriptions, DLP finding names and session counters, not the message text. Every string in it is redacted for secrets and all five PII detectors, email and phone included. Traces go to the control plane when one is connected, and to `~/.intutic/logs` otherwise. `0` turns it off |
 | `INTUTIC_LOCAL_BUDGET_ENFORCE` | on | `0`, `false` or `no`: keep counting spend against the [local daily cap](/guide/budgets#local-daily-cap) but stop refusing requests over it |
 | `INTUTIC_LOCAL_VAULTS` | unset | `off` turns off the local notes-vault search `/fix` uses. `intutic connect` sets it from the workspace's policy |
 | `OFFLINE_PRICING_PATH` | the bundled price list | A JSON price list to use for cost estimates instead of the one built in. A file that does not parse is logged and ignored |
@@ -198,7 +198,7 @@ Read by the MCP proxy (`intutic-mcp-proxy`) and the MCP daemon (`intutic-mcp-dae
 | `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/verified/policy-snapshot.json` | The verified policy snapshot the daemon seeds its cache from at start |
 | `REDIS_URL` | `redis://localhost:6379` | The daemon's Valkey when `VALKEY_URL` is unset |
 
-Both also read `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_CONTROL_PLANE_URL` (the daemon: `CONTROL_PLANE_URL`), and the daemon exports traces to `OTEL_EXPORTER_OTLP_ENDPOINT`. The remote-bridge headers (`INTUTIC_REMOTE_HEADERS`) are on [MCP governance](/guide/mcp-governance#configuration-reference).
+Both also read `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_CONTROL_PLANE_URL` (the daemon: `CONTROL_PLANE_URL`), and the daemon exports traces to `OTEL_EXPORTER_OTLP_ENDPOINT` under the service name `OTEL_SERVICE_NAME` (default `mcp-daemon`). The remote-bridge headers (`INTUTIC_REMOTE_HEADERS`) are on [MCP governance](/guide/mcp-governance#configuration-reference).
 
 ### Clawde SDK
 
@@ -245,7 +245,8 @@ These configure the control plane in hosted and Self-host deployments.
 | `JWT_SECRET` | ✅ | — | Secret for signing session tokens. At least 32 characters: `openssl rand -hex 32` |
 | `ENCRYPTION_KEY` | ✅ | — | Key for encrypting stored credentials and tokens: `openssl rand -hex 32`. The proxy needs the same value to open stored provider keys. See [Stored credentials](/security#stored-credentials) |
 | `ENCRYPTION_KEY_PREVIOUS` | ❌ | — | Only while rotating `ENCRYPTION_KEY`: the key it replaces (several separated by commas). Stored credentials sealed under it still open, and the control plane re-encrypts provider keys under `ENCRYPTION_KEY` when it starts. See [Rotate the encryption key](/guide/self-host#rotate-the-encryption-key) |
-| `APP_URL` | Self-host | — | The dashboard's address; links in emails and invitations point here |
+| `APP_URL` | Self-host | — | The dashboard's address; links in emails and invitations point here. Its origin is the one browser origin allowed to call the API with credentials (CORS) |
+| `CORS_ALLOWED_ORIGINS` | ❌ | — | Further exact browser origins allowed to call the API with credentials, separated by commas (`https://admin.example.com`). No wildcards |
 | `API_BASE_URL` | Self-host | `http://localhost:3001` | The API's public address. Identity providers send users back here, so it builds the OIDC redirect URI (`/api/v1/auth/sso/callback`), the SAML ACS URL (`/api/v1/auth/saml/acs`) and the SCIM base URL |
 | `OIDC_CALLBACK_URL` | ❌ | built from `API_BASE_URL` | The full OIDC redirect URI, when users reach the API at a different address |
 | `SAML_ACS_URL` | ❌ | built from `API_BASE_URL` | The full SAML ACS URL, likewise |
@@ -366,7 +367,9 @@ model_list:
   - model_name: claude-sonnet-4-5-20250929
     litellm_params:
       model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
-``` `litellm_params.api_key`, `litellm_params.api_base` and `general_settings` (including `master_key` and `database_url`) are ignored: the proxy does not authenticate callers with a master key.
+```
+
+`litellm_params.api_key`, `litellm_params.api_base` and `general_settings` (including `master_key` and `database_url`) are ignored: the proxy does not authenticate callers with a master key.
 
 Intutic's options live under `intutic_settings`:
 

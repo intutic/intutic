@@ -100,22 +100,31 @@ the shared anomaly taxonomy:
 |---|---|---|
 | Consecutive repeat | 5 identical tool calls in a row | `LOOP_DETECTED` |
 | Ping-pong cycle | two tools alternating for 3 full cycles | `LOOP_DETECTED` |
+| Landmark cycle | a period of up to 6 calls repeating 4+ times in the last 24, tolerating one substituted call | `LOOP_DETECTED` |
 | Runaway recursion | graph depth beyond 7 | `LOOP_DETECTED` |
 | Runaway fan-out | more than 50 live nodes in one graph | `LOOP_DETECTED` |
 | Tool contract drift | a tool definition differs from the workspace+harness pin | `TOOL_ABUSE` |
 | Transition plausibility | low-scoring `A -> B` run | `TOOL_ABUSE` |
 | Missing predecessor | `deploy` with no earlier `run_tests` | `SCOPE_VIOLATION` |
 | Forbidden succession | `db_write` after `pii_export` | `SCOPE_VIOLATION` |
+| Call ceiling | a token run more often than its `max_calls:` allows | `SCOPE_VIOLATION` |
+| Plan adherence | too much work outside an SOP's `plan_steps` (below) | `SCOPE_VIOLATION` |
+| Scope path | a change outside an SOP's `scope_paths` (below) | `SCOPE_VIOLATION` |
+| Review hold | an action an SOP's `review_before` names (below) | `SCOPE_VIOLATION` |
+| Declared taint | `forbid_with:` material and its forbidden action in one request | `DATA_EXFILTRATION` |
+| Code as action | a code-execution call bundling credential access with network egress, or a destructive operation | `DATA_EXFILTRATION` / `TOOL_ABUSE` |
 | DLP escalation | 3+ distinct sensitive patterns in one request | `DATA_EXFILTRATION` |
 | Diversity collapse | last 10 calls used one tool | `TOKEN_WASTE` |
 | Context growth | large context after several hops | `TOKEN_WASTE` |
 | Budget exhaustion | no headroom left | `BUDGET_BREACH` |
+| Spend trajectory | today's local spend projected past the daily cap | `BUDGET_BREACH` |
 | Fan-out overspend | graph cost past 1.5× the per-node budget | `SPAWN_BUDGET_BREACH` |
 | Workflow overspend | a loop run past its own `--budget` | `WORKFLOW_BUDGET_BREACH` |
 | Orphaned execution | parent no longer live in the graph | `HALLUCINATION` |
 | Forbidden tool | a tool an SOP in force denies | `UNAUTHORIZED_TOOL` |
 | Cross-harness | a harness the node's SOPs don't permit | `UNAUTHORIZED_TOOL` |
 | Prompt injection | text attempting to override instructions | `PROMPT_INJECTION` |
+| Tool poisoning | model-directed instructions still in a tool description after the proxy's redaction (a backstop) | `PROMPT_INJECTION` |
 
 That is **11 of the 12** runtime anomaly categories. The twelfth,
 `WORKFLOW_GOAL_DRIFT`, asks whether an agent is still doing what it was asked
@@ -150,7 +159,8 @@ description escalates to an immediate reask on the very request that carries
 it — fetched content is not the population that types *"ignore my previous
 message"* in earnest, so it does not wait for the multi-technique threshold.
 And the tool-**call** analogue is already response-side: the response gate
-refuses a forbidden tool call before the client ever sees it. There is no
+refuses a forbidden tool call — a `deny_tools` name or an enforcing hook-rule
+[policy guardrail](/guide/policy-guardrails) — before the client ever sees it. There is no
 response-side injection scan of tool results; that asymmetry is the documented
 posture, not an oversight. What the response path does carry is an
 **advisory-only echo scan** of the model's own output: injection phrasing in
@@ -188,12 +198,16 @@ of a graph that has stopped making progress.
 All detectors run on every request rather than stopping at the first hit — a
 request that trips three checks tells you more than one that trips one — and the
 most severe **killing** finding determines the verdict. Declared conditions
-kill (403). Unmeasured structural thresholds — consecutive repeat, ping-pong,
+and hard ceilings kill (403): ordering, succession, call ceilings, declared
+taint, denied tools and harnesses, an exhausted or overspent budget, DLP
+escalation and a destructive or exfiltrating code blob. A `review_before`
+match holds the run for a person instead. Unmeasured structural thresholds — consecutive repeat, ping-pong,
 recursion depth, fan-out, injection using two or more techniques or arriving in
 tool content — reask: the request is refused with 409 `policy_reask`, and the
 third trip of the same detector becomes a 403 `policy_denied`. The heuristic
-ones — transition plausibility, contract drift, diversity collapse, context
-growth, orphaned execution, a single injection technique — advise:
+ones — landmark cycle, transition plausibility, contract drift, tool
+poisoning, diversity collapse, context growth, spend trajectory, orphaned
+execution, plan adherence, scope path, a single injection technique — advise:
 they are logged, broadcast to siblings and traced, and the request proceeds —
 unless two distinct detectors corroborate, which escalates the finding one
 level.

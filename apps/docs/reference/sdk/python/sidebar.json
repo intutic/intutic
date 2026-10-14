@@ -1,0 +1,66 @@
+[
+  {
+    "text": "Overview",
+    "link": "/reference/sdk/python/"
+  },
+  {
+    "text": "intutic_clawde",
+    "link": "/reference/sdk/python/intutic_clawde/"
+  },
+  {
+    "text": "intutic_clawde.gate",
+    "link": "/reference/sdk/python/intutic_clawde/gate/"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.ag2",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/ag2"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.agent_framework",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/agent_framework"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.autogen",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/autogen"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.autogen_workbench",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/autogen_workbench"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.crewai",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/crewai"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.google_adk",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/google_adk"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.langchain",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/langchain"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.managed_agents",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/managed_agents"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.openai_agents",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/openai_agents"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.pydantic_ai",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/pydantic_ai"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.smolagents",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/smolagents"
+  },
+  {
+    "text": "intutic_clawde.gate.adapters.strands",
+    "link": "/reference/sdk/python/intutic_clawde/gate/adapters/strands"
+  }
+]

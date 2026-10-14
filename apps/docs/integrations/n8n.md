@@ -57,7 +57,7 @@ If n8n was detected, `intutic connect` writes the gate, `INSTALL.md` and the imp
 
 ### 2. Import into n8n
 1. Open your local or self-hosted n8n instance.
-2. Go to **Settings > Import Workflow** and select the generated file at `~/.intutic/n8n/governance-workflow.json`.
+2. Create a workflow, open its **⋯** menu, choose **Import from File…** and select the generated file at `~/.intutic/n8n/governance-workflow.json`.
 3. Activate the imported workflow.
 
 ### 3. Add API Key

@@ -56,6 +56,12 @@ outage. A request the hook gate cannot read (HTTP 400, `INVALID_REQUEST`) is
 refused whatever `failClosed` says. intutic-clawde's `GateClient` behaves the
 same way, held to it by `packages/shared-types/fixtures/hook-gate-response-vectors.json`.
 
+Each hook-gate answer names its decision (`decisionId`). The gate reports the
+call as `tool_blocked` or `tool_allowed` with it as `gateDecisionId`, so the
+control plane files the decision's incident once and exports it to SIEM once,
+as the hook gate's own record. A `GOVERNANCE_UNAVAILABLE` answer keeps the id
+only while failing closed.
+
 A `GateClient` with no API key (what `fromEnv()` builds when neither
 `INTUTIC_API_KEY` nor `~/.intutic/credentials.json` has one) is local-only
 (`client.localOnly`): it sends nothing, the gate skips the SOP register and
@@ -92,7 +98,7 @@ dropped, the SSO group policy still refuses, and every MCP call is refused with
 `POLICY_SNAPSHOT_UNVERIFIED`. A hand-written snapshot for a test needs the line
 too.
 
-Full reference: [Gate SDK](https://docs.intutic.ai/reference/gate-sdk).
+Full reference: [Gate SDK](https://docs.intutic.ai/reference/gate-sdk). Every export, with its signature and defaults: [API reference](https://docs.intutic.ai/reference/sdk/gate/).
 
 ### A note for sibling adapter phases
 

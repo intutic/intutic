@@ -258,6 +258,7 @@ export function isDeploy(toolName: string, toolInput: unknown): boolean {
   return classify(toolName, toolInput).includes(ACTION_PREFIX + 'deploy')
 }
 
+/** True when this call runs a test suite. */
 export function isTest(toolName: string, toolInput: unknown): boolean {
   return classify(toolName, toolInput).includes(ACTION_PREFIX + 'run_tests')
 }

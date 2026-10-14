@@ -61,6 +61,7 @@
   ],
   "knownHarnessTools": ["Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task", "NotebookEdit"],
   "taints": ["secrets()", "pii()"],
+  "hookRuleRoles": ["owner", "admin", "em", "developer", "viewer"],
   "patterns": {
     "token": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
     "role": "^[a-z][a-z0-9_-]{0,31}$",

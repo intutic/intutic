@@ -80,7 +80,7 @@ def test_budget_checker_cache(mock_get, monkeypatch):
     # under a full run on 2026-09-15 while passing alone.
     monkeypatch.delenv("INTUTIC_CONTROL_PLANE_URL", raising=False)
     client = ClawdeClient(api_key="test-key")
-    assert client.control_plane_url == "https://app.intutic.ai"
+    assert client.control_plane_url == "https://api.intutic.ai"
 
     # Mock the REAL control-plane response shape (GET /api/v1/budget),
     # not the historical nonexistent /v1/budget/check shape.
@@ -95,7 +95,7 @@ def test_budget_checker_cache(mock_get, monkeypatch):
     assert res1["remaining_usd"] == 150.0
     assert mock_get.call_count == 1
     called_url = mock_get.call_args[0][0]
-    assert called_url == "https://app.intutic.ai/api/v1/budget"
+    assert called_url == "https://api.intutic.ai/api/v1/budget"
 
     # Second call: hits cache, doesn't hit API again
     res2 = client.check_budget("gpt-4o", 100)

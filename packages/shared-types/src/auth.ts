@@ -15,6 +15,7 @@ import {
   type KeyRateLimit,
   type SpendBudget,
 } from './spendBudgets.js'
+import { unknownApiKeyScopes, unknownScopesMessage } from './apiKeyScopes.js'
 
 // ─── Auth Context ────────────────────────────────────────────────────
 
@@ -71,6 +72,15 @@ export interface AuthContext {
   hardBudgets?: HardBudgetWire[]
   /** The key's requests-per-minute and tokens-per-minute limits, when it has either. */
   rateLimit?: KeyRateLimit
+  /**
+   * What the `vk_` key may do on top of its owner's role (`apiKeyScopes.ts`),
+   * already resolved: `*` for a key whose stored scopes predate the registry,
+   * and narrowed by every key above an attenuated child. Absent on a session
+   * JWT, which has no scopes. The proxy reads it from the cached entry and
+   * refuses LLM traffic from a key without `gateway:use`; an entry without the
+   * field was written before scopes were enforced.
+   */
+  scopes?: string[]
 }
 
 // ─── JWT ─────────────────────────────────────────────────────────────
@@ -320,10 +330,27 @@ export type MagicLinkLoginInput = z.infer<typeof MagicLinkLoginInputSchema>
 
 // ─── API Key ─────────────────────────────────────────────────────────
 
+/**
+ * A key's scope list: at least one, at most every scope, each one in the
+ * registry. An unknown scope is refused with a message naming the valid ones.
+ */
+export const ApiKeyScopeListSchema = z
+  .array(z.string().trim().min(1).max(64))
+  .min(1, 'At least one scope is required; use ["*"] for everything')
+  .max(64)
+  .superRefine((scopes, ctx) => {
+    const unknown = unknownApiKeyScopes(scopes)
+    if (unknown.length > 0) ctx.addIssue({ code: z.ZodIssueCode.custom, message: unknownScopesMessage(unknown) })
+  })
+
 /** API key creation request schema. */
 export const CreateApiKeyInputSchema = z.object({
   label: z.string().min(1).max(128),
-  scopes: z.array(z.string()).default(['*']),
+  /**
+   * What the key may do on top of its owner's role; `["*"]` (everything) when
+   * omitted. Every entry must be in the registry (`API_SCOPES`).
+   */
+  scopes: ApiKeyScopeListSchema.default(['*']),
   expiresInDays: z.number().int().min(1).max(365).optional(),
   /**
    * Optional per-key model allowlist. Omitted or empty inherits the workspace's
@@ -361,10 +388,10 @@ export interface CreateApiKeyResult {
 }
 
 /**
- * `PATCH /api/v1/keys/:id` — replace a key's spend budgets and/or rate limit.
- * The only way to set them: any member creates their own keys, and only an
+ * `PATCH /api/v1/keys/:id` — replace a key's spend budgets, rate limit and/or scopes.
+ * The only way to change them: any member creates their own keys, and only an
  * OWNER or ADMIN may say what a key can spend, so a key is created unlimited
- * and limited afterwards.
+ * and limited afterwards. Scopes are set at creation and may be replaced here.
  * A field left out is unchanged; `budgets: []` removes every budget, and a
  * `rateLimit` field set to `null` removes that limit.
  */
@@ -372,9 +399,14 @@ export const UpdateApiKeyInputSchema = z
   .object({
     budgets: SpendBudgetListSchema.optional(),
     rateLimit: KeyRateLimitSchema.optional(),
+    /** Replaces the key's scopes; applies from the key's next request. */
+    scopes: ApiKeyScopeListSchema.optional(),
   })
   .strict()
-  .refine((v) => v.budgets !== undefined || v.rateLimit !== undefined, 'nothing to change: send budgets or rateLimit')
+  .refine(
+    (v) => v.budgets !== undefined || v.rateLimit !== undefined || v.scopes !== undefined,
+    'nothing to change: send budgets, rateLimit or scopes',
+  )
 
 export type UpdateApiKeyInput = z.infer<typeof UpdateApiKeyInputSchema>
 
@@ -383,7 +415,14 @@ export interface ApiKeyInfo {
   keyId: string
   keyPrefix: string
   label: string
+  /** The scopes as stored on the key. */
   scopes: string[]
+  /**
+   * The stored scopes are all outside the registry (free-form strings written
+   * before scopes were enforced), so the key works as `*` until 2.6.0, when it
+   * is refused. Re-create it, or set its scopes, before then.
+   */
+  legacyScopes: boolean
   /** Per-key model allowlist; `null` when the key inherits the workspace list. */
   allowedModels: string[] | null
   expiresAt: string | null

@@ -10,7 +10,7 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | Resource | Manages | API |
 |---|---|---|
 | [`intutic_sop`](/reference/terraform/resources/sop) | SOPs (rule sets) | `/api/v1/sops` |
-| [`intutic_policy`](/reference/terraform/resources/policy) | Enforcement policies: what the proxy does when an agent calls a matching tool | `/api/v1/policies` |
+| [`intutic_policy`](/reference/terraform/resources/policy) | Deprecated enforcement policies. No gate or proxy reads their tool pattern, action or conditions; use `intutic_guardrail` for a per-tool rule and the `interventionMode` setting for the intervention mode. The API sunsets 2026-12-01 | `/api/v1/policies` |
 | [`intutic_guardrail`](/reference/terraform/resources/guardrail) | Policy guardrails you author: a rule in the Guardrail IR, held to the same checks as one extracted from a policy document | `/api/v1/policy-guardrails/guardrails` |
 | [`intutic_workspace_settings`](/reference/terraform/resources/workspace_settings) | Workspace settings, only the keys you set | `/api/v1/workspace/settings` |
 | [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`), with their spend budgets and rate limits | `/api/v1/keys` |
@@ -83,16 +83,18 @@ resource "intutic_workspace_settings" "this" {
     egressMode       = "enforce"
     egressAllow      = ["api.github.com", "registry.npmjs.org"]
     mcpDefaultPolicy = "deny"
+    interventionMode = "OPAQUE"
     featureFlags     = { ff_shadow_enforcement = true }
   })
 }
 
-resource "intutic_policy" "no_force_push" {
-  name                = "No force push"
-  target_tool_pattern = "Bash"
-  enforcement_action  = "KILL"
-  risk_category       = "DESTRUCTIVE"
-  conditions          = jsonencode({ argContains = ["push --force"] })
+resource "intutic_guardrail" "no_force_push" {
+  name         = "No force push"
+  description  = "Agents may not rewrite shared history."
+  kind         = "hook_rule"
+  title        = "No force push"
+  tools        = ["Bash"]
+  arg_contains = ["push --force"]
 }
 
 resource "intutic_guardrail" "reviewed_apply" {
@@ -131,7 +133,7 @@ resource "intutic_notification_rule" "incidents" {
 
 **Workspace settings: only the keys you set.** `intutic_workspace_settings` sends and compares only the top-level keys in its `settings`, each one whole, because the API replaces a top-level value whole. `featureFlags` is the exception and is managed flag by flag. A key you do not set is never sent, so settings changed in the dashboard or by another tool stay as they are. Removing a key from the configuration stops managing it; destroying the resource changes nothing in the workspace.
 
-**SOP lifecycle stays in review.** A new SOP starts as a draft. Moving it through review and shadow to validated is gated on evidence, so it stays in the [SOP workflow](/guide/sops). Editing a SOP that is no longer a draft creates a new draft version with a new id, exactly as an edit in the dashboard does; the plan shows `lifecycle_state` going back to `DRAFT` before you apply.
+**SOP lifecycle stays in review.** A new SOP starts as a draft. Moving it through review and shadow to validated is gated on evidence, so it stays in the [SOP workflow](/guide/sops). Editing a SOP that is no longer a draft creates a new draft version with a new id, exactly as an edit in the dashboard does; the plan shows `lifecycle_state` going back to `DRAFT` before you apply. The version you edited keeps enforcing until the new one is promoted to validated, and Terraform tracks the new one.
 
 **Guardrails: the rule is code, its lifecycle stays in review.** An `intutic_guardrail` starts `PROPOSED`, exactly as a guardrail extracted from a policy document does: it enforces and measures nothing until an owner or admin approves it for shadow, and promotion to enforcing waits on the same shadow evidence, through the [guardrail review](/guide/policy-guardrails#authoring-guardrails-directly) or `intutic guardrails promote`. Terraform never approves or promotes; `status` and the shadow counters are read-only attributes, so a promotion in the dashboard leaves the next plan empty. Changing `name` or `description` edits the guardrail in place and keeps its evidence. Changing the rule itself (any IR attribute) creates the next version with a new id, back in `PROPOSED` with no evidence, and retires the old one; the plan shows the new `version` and `status` before you apply. The plan also runs the API's validator, so a rule the API would refuse, such as one naming a tool no harness in the workspace has called, fails at plan time. Write a known harness tool in its canonical case (`WebFetch`, not `webfetch`): the API would store the canonical spelling, and the difference would never converge.
 

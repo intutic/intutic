@@ -28,7 +28,7 @@ intutic init
 ```
 
 ```
-  ✔ codex → AGENTS.md
+  ✔ codex → /path/to/project/AGENTS.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
@@ -124,8 +124,8 @@ with exit code 2, with the reason on stderr. Every decision is appended to
 |----------|-------|
 | Harness type | `codex` |
 | Rules file | `AGENTS.md` (the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->`) |
-| Config file | `.env.intutic`, `~/.codex/config.toml` (`openai_base_url`) |
-| Hook files | `~/.codex/hooks.json`, `<repo>/.codex/hooks.json`, `.intutic/hooks/codex-check.js` |
+| Config file | `.env.intutic`, `~/.codex/config.toml` or `$CODEX_HOME/config.toml` (`openai_base_url`) |
+| Hook files | `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`), `<repo>/.codex/hooks.json`, `.intutic/hooks/codex-check.js` |
 | Detection | `CODEX_HOME` env var or `codex` in `PATH` |
 | Format | Shell environment variables |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |

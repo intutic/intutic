@@ -164,7 +164,8 @@ ${bodyHtml}
 
 interface SopItem {
   sopId: string
-  name: string
+  /** `GET /api/v1/sops` names a SOP by `title`; it never sent `name`. */
+  title: string
   lifecycle_state?: string
   lifecycleState?: string
   godel_score?: number | null
@@ -205,7 +206,7 @@ async function buildSopsHtml(): Promise<string> {
       const updated = s.updatedAt ?? s.updated_at
       const dateStr = updated ? new Date(updated).toLocaleDateString() : '—'
       body += `<tr>
-  <td>${s.name}</td>
+  <td>${s.title}</td>
   <td><span class="badge badge-${state}">${state}</span></td>
   <td>${scoreDisplay}</td>
   <td>${dateStr}</td>

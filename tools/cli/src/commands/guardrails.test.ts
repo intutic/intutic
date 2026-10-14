@@ -292,10 +292,22 @@ describe('intutic guardrails sources / docs / search', () => {
     expect(printed()).toContain('1 policy source(s)')
   })
 
+  it("sources list shows a source's last failed sync attempt", async () => {
+    fetchMock.mockResolvedValue(ok({ items: [{ connector_id: 'cc_1', provider: 'notion', name: 'runbooks', config: {}, last_synced_at: null, last_sync_error: 'Notion answered 401' }] }))
+    await runGuardrailsSourcesList({})
+    expect(printed() + errors()).toContain('last sync attempt failed: Notion answered 401')
+  })
+
+  it('docs extract names an unreachable cap store (503) rather than a generic failure', async () => {
+    fetchMock.mockResolvedValueOnce(ok({ error: 'Extraction cap store unavailable; not spending a model call', result: { skipped: 'cap_unavailable' } }, 503))
+    await expect(runGuardrailsDocsExtract('psd_1', {})).rejects.toThrow('process.exit(1)')
+    expect(printed() + errors()).toContain('cap store was unreachable')
+  })
+
   it('sources add validates the provider and posts the connector', async () => {
     await swallowExit(runGuardrailsSourcesAdd('dropbox', { name: 'x', token: 't' }))
     expect(fetchMock).not.toHaveBeenCalled()
-    fetchMock.mockResolvedValue(ok({ connector: { connector_id: 'cc_9', provider: 'github', name: 'policies' } }, 201))
+    fetchMock.mockResolvedValue(ok({ connector_id: 'cc_9', provider: 'github', name: 'policies', config: { repo_url: 'acme/policies' }, last_synced_at: null }, 201))
     await runGuardrailsSourcesAdd('github', { name: 'policies', token: 'ghs_fake_token_value', config: '{"repo_url":"acme/policies"}' })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(new URL(url).pathname).toBe('/api/v1/connectors')
@@ -312,7 +324,7 @@ describe('intutic guardrails sources / docs / search', () => {
     const keyPath = path.join(dir, 'key.json')
     // No PEM here on purpose: the credential body is whatever the file holds, and the secret scan refuses a real one in source.
     await fs.writeFile(keyPath, '{"type":"service_account","client_email":"reader@acme.iam.gserviceaccount.com"}\n')
-    fetchMock.mockResolvedValue(ok({ connector: { connector_id: 'cc_g', provider: 'gdrive', name: 'policies' } }, 201))
+    fetchMock.mockResolvedValue(ok({ connector_id: 'cc_g', provider: 'gdrive', name: 'policies', config: { folder_id: '1AbC' }, last_synced_at: null }, 201))
     await runGuardrailsSourcesAdd('gdrive', { name: 'policies', tokenFile: keyPath, config: '{"folder_id":"1AbC"}' })
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toEqual({ provider: 'gdrive', name: 'policies', token: '{"type":"service_account","client_email":"reader@acme.iam.gserviceaccount.com"}', config: { folder_id: '1AbC' } })

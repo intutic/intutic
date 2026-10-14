@@ -3,8 +3,9 @@
 //! Workspace policy reaches the proxy on that route, which it already calls
 //! to validate a virtual key: the SSO group policy for the response gate
 //! (`sso_groups`), the workspace's PII detector actions (`dlp::workspace`),
-//! its intervention mode ([`intervention_mode`]) and whether its plan includes
-//! LLM judging ([`llm_judge_enabled`]). All read the same
+//! its intervention mode ([`intervention_mode`]), whether its plan includes
+//! LLM judging ([`llm_judge_enabled`]) and whether it stores tool-call
+//! arguments in replay contexts ([`store_tool_arguments`]). All read the same
 //! answer, fetched once per key and cached here for [`CACHE_TTL`], so adding
 //! a field to the route never adds a request.
 //!
@@ -131,11 +132,74 @@ pub fn llm_judge_enabled(body: &Value) -> bool {
     body.get("llmJudgeEnabled").and_then(Value::as_bool) != Some(false)
 }
 
+/// The workspace role of the member a key belongs to (`role`: `OWNER`,
+/// `ADMIN`, `EM`, `DEVELOPER` or `VIEWER`), from a key-context body. `None`
+/// when absent, null or blank: the role is then not known.
+pub fn member_role(body: &Value) -> Option<String> {
+    body.get("role")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .map(str::to_string)
+}
+
+/// The member role behind one virtual key, through the cached [`fetch`].
+/// `None` whenever it cannot be shown — the control plane did not answer, or
+/// refused the key — and a hook rule scoped to roles then applies
+/// (`plugins::hook_rules`): a role that cannot be read never exempts anyone.
+pub async fn fetch_member_role(
+    client: &reqwest::Client,
+    control_plane_url: &str,
+    virtual_key: &crate::credential::VirtualKey,
+    timeout: Duration,
+    policy_version: Option<u64>,
+) -> Option<String> {
+    match fetch(
+        client,
+        control_plane_url,
+        virtual_key,
+        timeout,
+        policy_version,
+    )
+    .await
+    {
+        Ok(Answer::Body(body)) => member_role(&body),
+        Ok(Answer::Refused(status)) => {
+            tracing::debug!(%status, "key-context refused the key; its member role is unknown");
+            None
+        }
+        Err(reason) => {
+            tracing::warn!(reason = %reason, "member role unavailable; role-scoped hook rules apply to this request");
+            None
+        }
+    }
+}
+
+/// Whether the workspace keeps tool-call argument values in its sampled
+/// replay contexts, from a key-context body (`storeToolArguments`). Only an
+/// explicit `true` stores them: absent (a control plane older than the
+/// field) or null (unreadable) keeps argument keys and sizes only, the
+/// default since the setting existed.
+pub fn store_tool_arguments(body: &Value) -> bool {
+    body.get("storeToolArguments").and_then(Value::as_bool) == Some(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn member_role_reads_the_role_and_nothing_else() {
+        assert_eq!(
+            member_role(&serde_json::json!({"role": "DEVELOPER"})).as_deref(),
+            Some("DEVELOPER")
+        );
+        assert_eq!(member_role(&serde_json::json!({"role": null})), None);
+        assert_eq!(member_role(&serde_json::json!({"role": "  "})), None);
+        assert_eq!(member_role(&serde_json::json!({"workspaceId": "ws"})), None);
+    }
 
     fn key(token: &str) -> crate::credential::VirtualKey {
         crate::credential::RequestCredential::classify(token)
@@ -206,6 +270,16 @@ mod tests {
         assert!(judge(serde_json::json!({"workspaceId": "ws_old"})));
         assert!(judge(serde_json::json!({"llmJudgeEnabled": null})));
         assert!(judge(serde_json::json!({"llmJudgeEnabled": "false"})));
+    }
+
+    #[test]
+    fn only_an_explicit_true_stores_tool_arguments() {
+        let stored = |v: Value| store_tool_arguments(&v);
+        assert!(stored(serde_json::json!({"storeToolArguments": true})));
+        assert!(!stored(serde_json::json!({"storeToolArguments": false})));
+        assert!(!stored(serde_json::json!({"workspaceId": "ws_old"})));
+        assert!(!stored(serde_json::json!({"storeToolArguments": null})));
+        assert!(!stored(serde_json::json!({"storeToolArguments": "true"})));
     }
 
     #[tokio::test]

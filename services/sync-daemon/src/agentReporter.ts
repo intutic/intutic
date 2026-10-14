@@ -121,6 +121,15 @@ interface AgentFacets {
      * could not be read.
      */
     sha256?: string
+    /**
+     * sha256 of the WHOLE `SKILL.md`, and its length in characters. The
+     * control plane keys a semantic verdict by `fullSha256`, so a skill judged
+     * clean that gains a tail past the 65536-character transport cap no
+     * longer matches it; a `fullLength` over the cap is reported
+     * `partially_scanned`, never clean. Absent when `SKILL.md` could not be read.
+     */
+    fullSha256?: string
+    fullLength?: number
   }>
   loops: { configured: boolean }
   harness: { type: string; config_synced: boolean }
@@ -410,11 +419,13 @@ export async function collectSkillsIn(dir: string, source: string): Promise<Agen
 
     try {
       const content = await readFile(skillMdPath, 'utf8')
+      // The deterministic scan reads the whole file, never the transport copy.
       const result = scanSkillContent(content)
-      // The verdict lookup key: the same (possibly truncated) text the CLI sends
-      // the judge and the control plane hashes, or a SKILL.md over the cap never
-      // finds its verdict.
+      // `sha256` is the (possibly truncated) text the judge receives, kept for
+      // control planes that predate `fullSha256`; a current one looks the
+      // verdict up by the whole file's hash.
       const sha256 = createHash('sha256').update(skillContentForTransport(content), 'utf8').digest('hex')
+      const fullSha256 = createHash('sha256').update(content, 'utf8').digest('hex')
       out.push({
         name: e.name,
         source,
@@ -422,6 +433,8 @@ export async function collectSkillsIn(dir: string, source: string): Promise<Agen
         clean: result.clean,
         findingsCount: result.findings.length,
         sha256,
+        fullSha256,
+        fullLength: content.length,
         ...(scripts ? { scripts } : {}),
       })
     } catch {

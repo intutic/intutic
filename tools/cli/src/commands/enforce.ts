@@ -36,11 +36,36 @@ export interface EnforceOptions {
   platform?: string
 }
 
+/** Who is running the command: the process uid and its environment. */
+export interface EnforceContext {
+  uid?: number
+  env: NodeJS.ProcessEnv
+}
+
+const processContext = (): EnforceContext => ({
+  uid: typeof process.getuid === 'function' ? process.getuid() : undefined,
+  env: process.env,
+})
+
+/**
+ * The uid to exempt when `--uid` is not given. Under `sudo` the command runs
+ * as root, but the proxy (`intutic start`) runs as the invoking user, whose
+ * uid sudo exports as `SUDO_UID`; exempting root would deny that user's proxy
+ * egress. Anywhere else the binary's own default (the current user) is right,
+ * so this returns undefined and no flag is passed.
+ */
+export function sudoInvokerUid(ctx: EnforceContext = processContext()): string | undefined {
+  if (ctx.uid !== 0) return undefined
+  const sudoUid = ctx.env.SUDO_UID?.trim()
+  return sudoUid && /^\d+$/.test(sudoUid) ? sudoUid : undefined
+}
+
 /** Translate parsed options into the binary's `enforce` flags. */
-export function enforceFlagArgs(opts: EnforceOptions): string[] {
+export function enforceFlagArgs(opts: EnforceOptions, ctx: EnforceContext = processContext()): string[] {
   const args: string[] = []
   if (opts.port) args.push('--port', opts.port)
-  if (opts.uid) args.push('--uid', opts.uid)
+  const uid = opts.uid ?? sudoInvokerUid(ctx)
+  if (uid) args.push('--uid', uid)
   if (opts.allow) args.push('--allow', opts.allow)
   if (opts.dns === false) args.push('--no-dns')
   if (opts.platform) args.push('--platform', opts.platform)

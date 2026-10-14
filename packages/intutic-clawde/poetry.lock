@@ -1881,14 +1881,14 @@ test = ["coverage", "pytest (>=7,<8.1)", "pytest-cov", "pytest-mock (>=3)"]
 name = "griffelib"
 version = "2.2.0"
 description = "Signatures for entire Python programs. Extract the structure, the frame, the skeleton of your project, to generate API documentation or find breaking changes in your API."
-optional = true
+optional = false
 python-versions = ">=3.10"
-groups = ["main"]
-markers = "extra == \"openai-agents\" or extra == \"pydantic-ai\""
+groups = ["main", "dev"]
 files = [
     {file = "griffelib-2.2.0-py3-none-any.whl", hash = "sha256:d71c3bc2bbed9f958488634fe788b843a9f705d6d2838ca32cd6c25eeb64dfc4"},
     {file = "griffelib-2.2.0.tar.gz", hash = "sha256:e1bc36fe9cd21d4b6b659b456346755e4cfdc5676c0a5214083126ee12612b3c"},
 ]
+markers = {main = "extra == \"openai-agents\" or extra == \"pydantic-ai\""}
 
 [package.extras]
 pypi = ["pip (>=24.0)", "platformdirs (>=4.2)", "wheel (>=0.42)"]
@@ -8289,4 +8289,4 @@ strands = ["strands-agents"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "ab1d91e9126aad8fa1e5f6e96718472044d53150682845ccbc1a4fdd8641ad98"
+content-hash = "efd363565d528ea317a0ba507aa5ab83974d83435db94d421bbf07cc39be6214"

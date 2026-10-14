@@ -47,12 +47,12 @@ describe('runAttenuate', () => {
         childKey: 'vk_child123',
         childKeyId: 'vk_child_id',
         attenuationChainId: 'att_1',
-        grantedCaps: ['read', 'write'],
+        grantedCaps: ['gateway:use', 'traces:read'],
         expiresAt: '2026-08-21T00:00:00.000Z',
       }),
     })
 
-    await runAttenuate({ parentKey: 'vk_parent', caps: ' read , write ' })
+    await runAttenuate({ parentKey: 'vk_parent', caps: ' gateway:use , traces:read ' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
@@ -60,7 +60,7 @@ describe('runAttenuate', () => {
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body)).toEqual({
       parentKeyId: 'vk_parent',
-      requestedCaps: ['read', 'write'],
+      requestedCaps: ['gateway:use', 'traces:read'],
     })
     expect(init.headers.Authorization).toBe('Bearer vk_test_key')
 
@@ -76,23 +76,23 @@ describe('runAttenuate', () => {
         childKey: 'vk_child',
         childKeyId: 'id',
         attenuationChainId: 'att_2',
-        grantedCaps: ['read'],
+        grantedCaps: ['traces:read'],
         expiresAt: '2026-08-21T00:00:00.000Z',
       }),
     })
 
-    await runAttenuate({ parentKey: 'vk_parent', caps: 'read', ttl: '3600' })
+    await runAttenuate({ parentKey: 'vk_parent', caps: 'traces:read', ttl: '3600' })
 
     const [, init] = fetchMock.mock.calls[0]
     expect(JSON.parse(init.body)).toEqual({
       parentKeyId: 'vk_parent',
-      requestedCaps: ['read'],
+      requestedCaps: ['traces:read'],
       ttlSeconds: 3600,
     })
   })
 
   it('exits 1 without calling the API when --parent-key is missing', async () => {
-    await expect(runAttenuate({ caps: 'read' })).rejects.toThrow('process.exit(1)')
+    await expect(runAttenuate({ caps: 'traces:read' })).rejects.toThrow('process.exit(1)')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -101,9 +101,17 @@ describe('runAttenuate', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('exits 1 without calling the API when a scope is not in the registry, naming the valid ones', async () => {
+    await expect(runAttenuate({ parentKey: 'vk_parent', caps: 'traces:read,bash' })).rejects.toThrow('process.exit(1)')
+    expect(fetchMock).not.toHaveBeenCalled()
+    const printed = errSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n') + logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n')
+    expect(printed).toContain('Unknown scope: bash')
+    expect(printed).toContain('gateway:use')
+  })
+
   it('exits 1 when --ttl is not a positive number', async () => {
     await expect(
-      runAttenuate({ parentKey: 'vk_parent', caps: 'read', ttl: 'not-a-number' }),
+      runAttenuate({ parentKey: 'vk_parent', caps: 'traces:read', ttl: 'not-a-number' }),
     ).rejects.toThrow('process.exit(1)')
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -111,7 +119,7 @@ describe('runAttenuate', () => {
   // The server takes whole seconds from 60 to 86400; anything else used to
   // pass this check and come back as a 422.
   it.each(['30', '90.5', '86401'])('exits 1 without calling the API for --ttl %s', async (ttl) => {
-    await expect(runAttenuate({ parentKey: 'vk_parent', caps: 'read', ttl })).rejects.toThrow('process.exit(1)')
+    await expect(runAttenuate({ parentKey: 'vk_parent', caps: 'traces:read', ttl })).rejects.toThrow('process.exit(1)')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -163,7 +171,7 @@ describe('runAttenuateChain', () => {
             parentKeyId: 'vk_parent',
             childKeyId: 'vk_child',
             workspaceId: 'ws_test',
-            grantedCaps: ['read'],
+            grantedCaps: ['traces:read'],
             expiresAt: '2026-08-21T00:00:00.000Z',
             createdAt: '2026-08-20T00:00:00.000Z',
           },

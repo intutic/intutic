@@ -68,7 +68,7 @@ Every event carries a `sourceTable` naming its source:
 | `evidence_exports` | A compliance evidence download: `kind` (`soc2_archive`, `framework_report` or `human_oversight`), `format`, the framework, the evidence run, the period, whether it was signed, and who downloaded it |
 | `credential_changes` | A credential created, rotated, updated, revoked or deleted: `credential_type` (`api_key`, `gateway_token`, `scim_token` or `provider_credential`), `credential_id` (the key, gateway or token id, or the provider), `label`, `action`, and who made the change: a member, or with `actor_type` `system`, `system:offboarding` for keys revoked when a member is offboarded and `system:gateway-rotation` for a gateway token rotated on its schedule. Never the credential |
 | `budget_alerts` | A [budget alert](/guide/budgets#budget-alerts): a workspace cap, virtual key budget or member budget reaching its alert threshold or its limit, once per budget per day or month. `alert_type` (`THRESHOLD` or `EXCEEDED`), `scope` (`workspace`, `key` or `member`), `subject_id` (the key's or member's id) and `key_prefix` for a key, `enforcement` (`hard` or `soft`), `period` (`daily` or `monthly`), `spend_usd`, `limit_usd` and `pct_used` |
-| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session. Also `TAMPER`: a governance file (a gate, a hook registration, the policy snapshot or a VS Code hook setting) changed outside the sync daemon, which the daemon put back. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
+| `gate_decisions` | **Opt-in.** Every verdict a hook gate records: allow, block, flag, would-block (shadow mode), hold and approved bypass, with the tool name, reason, rule, harness and session; a decision of the control plane's hook gate (`source: hook_gate`) also carries its `decision_id`. Also `TAMPER`: a governance file (a gate, a hook registration, the policy snapshot or a VS Code hook setting) changed outside the sync daemon, which the daemon put back. Also every tool call the proxy's response gate withholds under the SSO group policy, as a block with source `proxy_response_gate`. The tool's input is not included |
 
 ### Who: the `actor` object {#the-actor}
 
@@ -114,12 +114,22 @@ curl -X PUT https://<control-plane>/api/v1/siem/destinations/<id> \
 
 Hook gates report in batches, and each batch goes to a destination as one delivery: one webhook request, one Splunk or Datadog request, or one batch for a bucket. Decisions from SDK gates that ask the control plane per call (`POST /api/v1/hook-gate`) are delivered one at a time. Decisions made in the proxy, rather than in a hook gate, already stream as `detector_findings` and `governance_incidents`, apart from the response gate's SSO group policy refusals, which are `gate_decisions` too.
 
+#### One record per gate decision
+
+When a gate SDK (`@intutic/gate`, `intutic-clawde`) or the TrueForge bridge asks the control plane's hook gate about a call, the hook gate records the decision itself (`source: hook_gate`, with the full reason, also in an OPAQUE workspace whose agent was told only the generic sentence) and names it in its answer as `decisionId`. The SDK then reports the same call as `tool_blocked` or `tool_allowed` carrying that id as `gateDecisionId`; the report still files the incident and feeds rule evidence and plan tracking, but is not exported again, so each decision is one `gate_decisions` record with its `decision_id`. A decision the SDK made on its own, before asking the hook gate (a snapshot rule, an SOP rule, a refused MCP server), is exported from its report, with `source: hook_events`.
+
+**Upgrade note:** SDKs before 2.5.1 send no `gateDecisionId`. Their report of a hook-gate decision is exported as well, as before, so the decision arrives twice: once with `source: hook_gate` and a `decision_id`, once with `source: hook_events` and none; a DLP refusal they report is also filed as a second incident. Upgrade the SDKs to get one record and one incident per decision.
+
 ### Syslog (CEF) classes
 
-Each source has its own CEF event class, so a SIEM rule can match on it:
+Each source has its own CEF event class, so a SIEM rule can match on it. The header reads `CEF:0|Intutic|GovernanceStream|2.0|<class>|<name>|<severity>|`; `2.0` is the version of these classes, not of the control plane, and changes only when a class changes.
 
 | Source | Event class | Severity |
 |---|---|---|
+| `execution_traces` | `AGENT_MODEL_REQUEST`: one model request an agent's session made through the proxy | 1 |
+| `detector_findings` | `DETECTOR_FINDING` | 10, 7, 4 or 1 for a CRITICAL, HIGH, MEDIUM, or LOW or INFORMATIONAL finding |
+| `stored_plans` | `PLAN_GOVERNANCE_UPDATE` | 4 |
+| `enforcement_devices` | `DEVICE_ENFORCEMENT_DISABLED_UPDATE` for a device whose firewall enforcement was switched off, `DEVICE_ENFORCEMENT_STALE` for a device that stopped reporting its posture | 7 and 4 |
 | `governance_incidents` | `GOVERNANCE_VIOLATION` for a HIGH or CRITICAL incident, `GOVERNANCE_NOTICE` otherwise; `WASM_RULE_REFUSED` for a [custom filter a proxy refused to load](/guide/wasm-rules#when-a-rule-cannot-load) and `SYSTEM_ANOMALY` for a dependency a proxy could not reach (see [incident types](/guide/concepts#incident-types); one filed before 2.4.0 is a `GOVERNANCE_VIOLATION`) | 10, 7, 4 or 1 for CRITICAL, HIGH, MEDIUM or LOW; both system types are filed HIGH, 7 |
 | `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block or a tamper, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
 | `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
@@ -135,7 +145,21 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 | `credential_changes` | `CREDENTIAL_CHANGE` | 5 |
 | `budget_alerts` | `BUDGET_THRESHOLD` or `BUDGET_EXCEEDED` | 4; an exceeded budget 7 when it is hard, 5 when soft |
 
-Every class carries the member as `suid` (member id) and `suser` (email) when the event has an [actor](#the-actor).
+A class ends in `_UPDATE` (and its name in "(Updated)") when the event is a change to an existing record, as plan decisions, guideline transitions and a disabled firewall are; the mutation type is also in `cs3`. Every class carries the member as `suid` (member id) and `suser` (email) when the event has an [actor](#the-actor).
+
+#### Changed in 2.5.1
+
+Traces, detector findings and device events had no class of their own: all of them went out as `AGENT_TOOL_CALL` at severity 5, under header version `1.0`. If a Sentinel, Splunk or ArcSight rule matches on any of these, update it:
+
+| Event | Before 2.5.1 | From 2.5.1 |
+|---|---|---|
+| Header device version | `1.0` | `2.0` |
+| `execution_traces` | `AGENT_TOOL_CALL`, severity 5 | `AGENT_MODEL_REQUEST`, severity 1 |
+| `detector_findings` | `AGENT_TOOL_CALL`, severity 5 | `DETECTOR_FINDING`, severity from the finding |
+| `enforcement_devices`, firewall enforcement disabled | `AGENT_TOOL_CALL_UPDATE`, severity 5 | `DEVICE_ENFORCEMENT_DISABLED_UPDATE`, severity 7 |
+| `enforcement_devices`, device stopped reporting | `AGENT_TOOL_CALL_UPDATE`, severity 5 | `DEVICE_ENFORCEMENT_STALE`, severity 4 |
+
+The stopped-reporting alert changes no record, so its `mutationType` is now `INSERT` (it was `UPDATE`) at every destination, webhook, Splunk, Datadog and bucket included; one already waiting in the dead-letter queue is retried as an `INSERT` too. Nothing else changed for JSON destinations: they carry the event, not a CEF class. Every other source keeps its class.
 
 An incident's `msg` is its description.
 

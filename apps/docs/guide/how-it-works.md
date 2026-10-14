@@ -5,25 +5,24 @@ Intutic is a **transparent governance layer** that sits between your AI agents a
 ## Architecture Overview
 
 ```
-┌──────────────┐     ┌──────────────────────────────────────────┐
-│  Claude Code │     │            Intutic Control Plane         │
-│  Cursor      │────▶│                                          │
-│  Aider       │     │  ┌──────────┐  ┌──────┐  ┌───────────┐  │
-│  Windsurf    │     │  │  Proxy   │──│ PCAS │──│  Circuit  │  │
-│  Antigravity │     │  │ Gateway  │  │      │  │  Breaker  │  │
-│  Codex       │     │  └────┬─────┘  └──────┘  └─────┬─────┘  │
-│  OpenHands   │     │       │                        │        │
-│  n8n         │     │  ┌────▼─────┐  ┌──────┐  ┌─────▼─────┐  │
-└──────────────┘     │  │  FinOps  │  │  ARE │  │   SOP     │  │
-                     │  │  Ledger  │  │      │  │  Registry │  │
-                     │  └──────────┘  └──────┘  └───────────┘  │
-                     └──────────────────────────────────────────┘
-                                      │
-                              ┌───────▼───────┐
-                              │  LLM Provider │
-                              │  (Anthropic,  │
-                              │   OpenAI, …)  │
-                              └───────────────┘
+┌──────────────┐  LLM calls  ┌────────────────────────┐        ┌───────────────┐
+│  Claude Code │────────────▶│     Proxy Gateway      │───────▶│  LLM Provider │
+│  Cursor      │             │  DLP · detectors ·     │        │  (Anthropic,  │
+│  Aider       │             │  SOP rules · budgets   │        │   OpenAI, …)  │
+│  Windsurf    │             └───────────┬────────────┘        └───────────────┘
+│  Antigravity │                         │ policy check, key context,
+│  Codex       │                         │ SOP snapshot, traces
+│  OpenHands   │ hook events ┌───────────▼──────────────────────────────────┐
+│  n8n         │────────────▶│            Intutic Control Plane             │
+└──────────────┘             │  ┌───────────┐  ┌──────┐  ┌───────────────┐  │
+                             │  │  Circuit  │──│ PCAS │  │  SOP Registry │  │
+                             │  │  Breaker  │  │      │  │               │  │
+                             │  └───────────┘  └──────┘  └───────────────┘  │
+                             │  ┌───────────┐  ┌──────┐                     │
+                             │  │  FinOps   │  │  ARE │                     │
+                             │  │  Ledger   │  │      │                     │
+                             │  └───────────┘  └──────┘                     │
+                             └──────────────────────────────────────────────┘
 ```
 
 ## The Proxy Gateway
@@ -35,11 +34,11 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 | Harness | Config File | Mechanism |
 |---------|-------------|-----------|
 | Cursor | `.cursor/hooks.json`, `~/.cursor/hooks.json` | Project and user hooks; see [Cursor](/integrations/cursor) |
-| Claude Code | `.claude/settings.json` | PreToolUse hook and deny rules |
+| Claude Code | `.claude/settings.json`, `~/.claude/settings.json` | PreToolUse hook and deny rules |
 | Windsurf | `~/.codeium/windsurf/hooks.json`, `.windsurf/hooks.json`, Windsurf's user `settings.json` | Cascade hooks + HTTP proxy setting |
 | Aider | `.aider.conf.yml` | `openai-api-base`, and `ANTHROPIC_BASE_URL` under `set-env` |
 | Antigravity | `~/.gemini/settings.json`, `~/.gemini/config/hooks.json` | BeforeTool / PreToolUse hooks |
-| Codex | `~/.codex/config.toml`, `~/.codex/hooks.json`, `.env.intutic` | `openai_base_url`, a PreToolUse hook, and `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` for shells that source the env file |
+| Codex | `~/.codex/config.toml`, `~/.codex/hooks.json`, `.codex/hooks.json`, `.env.intutic` | `openai_base_url`, a PreToolUse hook, and `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` for shells that source the env file |
 | OpenHands | `config.toml` | `[llm] base_url` merged in, plus a PreToolUse hook in `.openhands/hooks.json` |
 | n8n | `~/.intutic/hooks/n8n-governance-hook.js` | External hook the n8n server loads through `EXTERNAL_HOOK_FILES` |
 | Cline | `.clinerules/hooks/PreToolUse` | PreToolUse hook; the base URL is set by hand in Cline's settings panel |
@@ -49,14 +48,14 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 | Goose | `~/.agents/plugins/intutic-governance/hooks/hooks.json`, `~/.config/goose/config.yaml` | JSON plugin hook structure, plus the proxy URL |
 | Open WebUI | `~/.open-webui/intutic-governance-filter.py` | Python inlet() filter hook |
 | OpenClaw | `~/.openclaw/openclaw.json`, `~/.intutic/hooks/openclaw/intutic-governance.cjs` | `before_tool_call` plugin, listed in `plugins.load.paths` |
-| Hermes | `~/.hermes/config.yaml` | YAML configuration file |
+| Hermes | `~/.hermes/config.yaml`, `~/.intutic/hooks/hermes-check.sh` | Shell hook registered under `hooks.pre_tool_call` |
 | Pi | `~/.pi/agent/extensions/intutic-governance.js`, `~/.pi/agent/models.json` | `tool_call` extension; `baseUrl` for the Anthropic and OpenAI providers |
 
 Where the rule sets themselves go is a separate question; see [Where rule sets go](#where-rule-sets-go).
 
 ### Proxy Response Post-Processor
 
-The proxy gateway contains a dedicated Rust post-processing engine (`packages/proxy/src/postprocessor/` — `mod.rs`, `formatter.rs`, `notification_client.rs`). It acts as a consumer for workspace-level Valkey notification queues (`gov:notify:workspace:{workspaceId}`), session-specific queues (`gov:notify:{sessionId}`) and, for a node in a multi-agent graph, its graph queue (`gov:notify:graph:{workspaceId}:{graphId}:{nodeId}`).
+The proxy gateway contains a dedicated Rust post-processing engine (`packages/proxy/src/postprocessor/` — `mod.rs`, `formatter.rs`, `formatters/`, `notification_client.rs`). It acts as a consumer for workspace-level Valkey notification queues (`gov:notify:workspace:{workspaceId}`), session-specific queues (`gov:notify:{sessionId}`) and, for a node in a multi-agent graph, its graph queue (`gov:notify:graph:{workspaceId}:{graphId}:{nodeId}`).
 
 When a streaming response from an LLM provider finishes (not on the OpenAI Responses API, where notifications stay queued):
 1. It queries Valkey to drain any pending policy or budget notifications queued for that session.
@@ -66,13 +65,13 @@ When a streaming response from an LLM provider finishes (not on the OpenAI Respo
 
 ## Enforcement Actions (PCAS)
 
-The **Policy Compliance and Action System** evaluates every request against your SOPs and applies one of five enforcement actions:
+**PCAS** (Policy-Controlled Agent Sandbox) evaluates every request against your SOPs and applies one of five enforcement actions:
 
 | Action | What happens | When it's used |
 |--------|--------------|----------------|
 | **BYPASS** | Request passes through unmodified | Compliant with all SOPs |
-| **ENHANCE** | Request is modified (prompt enrichment, model upgrade) | SOP suggests improvements |
-| **HIJACK** | Request is rerouted to a different model or modified substantially | Cost optimization, capability routing |
+| **ENHANCE** | Request passes through with governance annotations or warnings attached | SOP suggests improvements |
+| **HIJACK** | Request is modified or steered rather than stopped: an advisory finding is recorded and the request goes ahead | Findings that should redirect the agent, not stop it |
 | **REASK** | Request is refused with the reason, so the agent can correct course and retry; repeated trips escalate to KILL | Structural thresholds (repeats, cycles, depth, fan-out) |
 | **KILL** | Request is blocked entirely | Policy violation, budget breach, deterministic anomaly (loop, forbidden succession, credential sweep) |
 
@@ -93,9 +92,13 @@ If any check fails, the circuit breaker applies the appropriate enforcement acti
 SOPs (Standard Operating Procedures) are the policy documents that define governance rules. They follow a 7-state lifecycle:
 
 ```
-DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATED
-                                                                    ↓
-                                                              INVALIDATED
+DRAFT ◀──▶ PENDING_REVIEW ──▶ GENERATED ──▶ HYPOTHESIZED ──▶ REFINED ──▶ VALIDATED
+                 ▲                                │             │            │
+                 │                                ▼             ▼            │
+                 │                         ┌───────────────────────────┐     │
+                 │                         │        INVALIDATED        │◀────┤
+                 │                         └───────────────────────────┘     │
+                 └────────────────────── cascade re-review ──────────────────┘
 ```
 
 | State | Meaning |
@@ -103,10 +106,10 @@ DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATE
 | `DRAFT` | Initial authoring, not yet active |
 | `PENDING_REVIEW` | Submitted for team review |
 | `GENERATED` | Passed the Gödel score threshold on promotion from `PENDING_REVIEW` (auto-generated SOPs start as `DRAFT`) |
-| `HYPOTHESIZED` | Proposed rule being tested |
-| `REFINED` | Iteratively improved based on feedback |
+| `HYPOTHESIZED` | Proposed rule in shadow: judged alongside the validated SOPs, with what it would have done recorded, enforcing nothing |
+| `REFINED` | Improved from its shadow results; still shadow only |
 | `VALIDATED` | Active and enforced |
-| `INVALIDATED` | Retired or superseded |
+| `INVALIDATED` | Retired or superseded. A cascade can instead send a `VALIDATED` SOP back to `PENDING_REVIEW` |
 
 SOPs include:
 - **Risk tier** — `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`
@@ -114,7 +117,7 @@ SOPs include:
 - **Dependencies** — other SOPs this one depends on
 - **Markdown content** — the actual policy rules
 
-Changes to SOPs are classified as `STRENGTHEN`, `CLARIFY`, `NARROW`, or `WEAKEN`; a `WEAKEN` edit made by a person needs an Owner.
+Changes to SOPs are classified as `STRENGTHEN`, `CLARIFY`, `NARROW`, or `WEAKEN`; a `WEAKEN` edit needs an Owner, and the SOP Optimizer applies a change without review only when it is `STRENGTHEN`.
 
 ## Anomaly Detection (ARE)
 

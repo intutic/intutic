@@ -141,9 +141,25 @@ class TestMatching:
         r = rules(DIGEST_RULE)
         assert soprules.first_match(r, "read_file", APPLY) is None
 
-    def test_first_rule_wins_in_control_plane_order(self):
+    def test_the_most_severe_matching_rule_decides_wherever_it_sits(self):
         warn = {**DIGEST_RULE, "id": "sp_first", "action": "warn"}
-        assert soprules.first_match(rules(warn, DIGEST_RULE), "shell", APPLY).id == "sp_first"
+        hold = {**DIGEST_RULE, "id": "sp_hold", "action": "require_approval"}
+        assert soprules.first_match(rules(warn, DIGEST_RULE), "shell", APPLY).id == "sp_pin"
+        assert soprules.first_match(rules(warn, hold), "shell", APPLY).id == "sp_hold"
+        assert soprules.first_match(rules(warn, hold, DIGEST_RULE), "shell", APPLY).id == "sp_pin"
+        assert soprules.first_match(rules(hold, warn), "shell", APPLY).id == "sp_hold"
+
+    def test_among_rules_of_the_deciding_severity_the_first_wins(self):
+        warn1 = {**DIGEST_RULE, "id": "sp_warn1", "action": "warn"}
+        warn2 = {**DIGEST_RULE, "id": "sp_warn2", "action": "warn"}
+        assert soprules.first_match(rules(warn1, warn2), "shell", APPLY).id == "sp_warn1"
+        second = {**DIGEST_RULE, "id": "sp_pin2"}
+        assert soprules.first_match(rules(DIGEST_RULE, second), "shell", APPLY).id == "sp_pin"
+
+    def test_a_broken_block_rule_does_not_hide_a_matching_warn_rule(self):
+        warn = {**DIGEST_RULE, "id": "sp_warn", "action": "warn"}
+        broken = {**DIGEST_RULE, "id": "sp_old", "toolPattern": "([unclosed"}
+        assert soprules.first_match(rules(warn, broken), "shell", APPLY).id == "sp_warn"
 
     def test_an_uncompilable_rule_is_skipped_not_raised(self):
         # Exactly what an older control plane produces: `[^:]+` truncates the

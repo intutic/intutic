@@ -56,7 +56,7 @@ SOPs follow a 7-state lifecycle:
 |-------|---------|
 | `DRAFT` | Initial authoring — not enforced yet |
 | `PENDING_REVIEW` | Submitted for team review |
-| `GENERATED` | Auto-generated from observed agent patterns |
+| `GENERATED` | Passed the Gödel score check on the way out of review |
 | `HYPOTHESIZED` | Proposed rule being tested against real traffic |
 | `REFINED` | Iteratively improved based on feedback and data |
 | `VALIDATED` | Active and enforced by the proxy |
@@ -66,18 +66,18 @@ Only SOPs in the `VALIDATED` state are actively enforced. Learn more in [Standar
 
 ## Enforcement Actions (PCAS)
 
-The **Policy Compliance and Action System** evaluates every LLM request against your active SOPs and applies one of five actions:
+The **Policy Compliance and Action System** evaluates every LLM request against your active SOPs and applies one of five actions. The rules that choose an action are SOPs, policy guardrails, custom filters and the detectors; an enforcement policy's action is not read by anything, and enforcement policies are [deprecated](/guide/policies#policy-deprecation).
 
 | Action | Effect | Example scenario |
 |--------|--------|-----------------|
 | **BYPASS** | Request passes through unmodified | Fully compliant with all policies |
-| **ENHANCE** | Request is enriched (prompt injection, context added) | SOP suggests adding security context to the prompt |
+| **ENHANCE** | Request passes through unmodified, with governance metadata attached. A policy and evaluator action: the proxy records no ENHANCE trace | A detector raises an advisory finding |
 | **HIJACK** | Request is modified or steered before it proceeds (a corrective notice for the agent, a redacted credential) | A detector finding steers the agent back toward its SOP |
 | **REASK** | The attempt is refused and the reason handed back to the agent, which may retry a bounded number of times before it escalates to a block | An agent repeating the same call in a loop |
 | **KILL** | Request is blocked entirely | Budget exceeded, unauthorized tool call, or policy violation |
 
-::: info HIJACK decisions require review
-When PCAS applies a HIJACK action, the decision is routed to the human review queue so an administrator can approve or reject it.
+::: info HIJACK is applied, not proposed
+A HIJACK takes effect without waiting for anyone: the steered or redacted call proceeds. A tool call the response DLP rewrote is recorded as an enforced decision, for audit, with nothing to approve. A call that must wait for a person's approval is a hold (a `REQUIRE_APPROVAL:` rule), not a HIJACK.
 :::
 
 ## Traces
@@ -177,9 +177,9 @@ Only OWNER and ADMIN roles can assign or change roles for other team members.
 ```
 Harnesses → Proxy Gateway → PCAS (evaluates SOPs) → Enforcement Action
                                     ↓
-                              ARE (anomalies)
+                        Traces → Compliance Scores
                                     ↓
-                        Traces → Compliance Scores → Trust Scores
+                     ARE (anomalies) → Incidents → Trust Scores
 ```
 
 Your SOPs define the rules. PCAS enforces them. The ARE watches for anomalies. Traces record everything. Scores summarize it all.

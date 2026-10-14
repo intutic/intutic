@@ -333,6 +333,35 @@ resource "intutic_virtual_key" "ci" {
 	)
 }
 
+func TestAccVirtualKeyScopes(t *testing.T) {
+	cfg := `
+resource "intutic_virtual_key" "agent" {
+  label  = "tf-acc agent"
+  scopes = ["gateway:use", "traces:read"]
+}`
+	accTest(t,
+		// A scope outside the registry fails at plan time, before any request.
+		// First, so the post-test destroy runs against a valid configuration.
+		resource.TestStep{
+			Config: `
+resource "intutic_virtual_key" "agent" {
+  label  = "tf-acc agent"
+  scopes = ["admin"]
+}`,
+			ExpectError: regexp.MustCompile(`value must be one of`),
+		},
+		resource.TestStep{
+			Config: cfg,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("intutic_virtual_key.agent", "scopes.#", "2"),
+				resource.TestCheckResourceAttr("intutic_virtual_key.agent", "scopes.0", "gateway:use"),
+				resource.TestCheckResourceAttr("intutic_virtual_key.agent", "scopes.1", "traces:read"),
+			),
+		},
+		clean(cfg),
+	)
+}
+
 func TestAccVirtualKeyLimits(t *testing.T) {
 	limited := `
 resource "intutic_virtual_key" "budgeted" {
@@ -755,6 +784,28 @@ resource "intutic_wasm_rule" "filter" {
 		resource.TestStep{Config: cfg(v2, "")},
 		clean(cfg(v2, "")),
 	)
+}
+
+// The two resources write the same settings record, and Terraform applies
+// them in parallel. The control plane used to keep only one of the two
+// changes ("Provider produced inconsistent result after apply").
+func TestAccWorkspaceSettingsAndBudgetInOneApply(t *testing.T) {
+	cfg := func(host string, pct int) string {
+		return fmt.Sprintf(`
+resource "intutic_workspace_settings" "this" {
+  settings = jsonencode({ egressAllow = [%q] })
+}
+resource "intutic_workspace_budget" "this" {
+  monthly_budget_usd  = 1000
+  alert_threshold_pct = %d
+}`, host, pct)
+	}
+	steps := []resource.TestStep{}
+	for round := 1; round <= 4; round++ {
+		c := cfg(fmt.Sprintf("round-%d.example.com", round), 60+round)
+		steps = append(steps, resource.TestStep{Config: c}, clean(c))
+	}
+	accTest(t, steps...)
 }
 
 func TestAccMcpServerDecision(t *testing.T) {

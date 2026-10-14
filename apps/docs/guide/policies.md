@@ -28,8 +28,8 @@ bodies — streaming included — for sensitive data.
 ### Enforcement
 
 The action is **per pattern, not per mode**. For secrets it is fixed by what
-the pattern is: private keys and Anthropic API keys **block** (the request is
-refused with a DLP error); everything else **redacts** — the match is replaced with
+the pattern is: private keys, Anthropic API keys and the built-in decoy AWS key
+(a honeytoken) **block** (the request is refused with a DLP error); everything else **redacts** — the match is replaced with
 `[REDACTED_*]` and the redacted body is what reaches your provider.
 
 DLP is configured in `config.yaml` under `intutic_settings.dlp`:
@@ -69,6 +69,16 @@ authors, `git config user.email`, `package.json` contacts, test fixtures. On
 trajectories), the email detector matched in 215 calls — mostly test
 addresses such as `example.com` ones, git configuration and author credits in
 licence headers — and the card, IBAN and SSN detectors matched nothing.
+Redacting those on the way to the model breaks the edit: shown
+`[REDACTED_PII]` in place of a `package.json` author, an agent writes the
+placeholder back into the file.
+
+What Intutic keeps is a different matter. Whatever the live actions, every
+detector — email and phone included — and every secret pattern redacts the
+copies the proxy keeps: the [replay contexts](/reference/configuration) it
+samples onto traces and the targets in a trace's change manifest. A request
+or response with a match is not written to the response cache at all. The
+shared detector definition records this as each detector's `stored_action`.
 
 Set a detector's action under `dlp.detectors`. Detectors you leave out keep
 their defaults:
@@ -184,7 +194,7 @@ and available to WASM rules as `dlp_findings`.
 
 ## Enforcement Actions (PCAS)
 
-The Policy Compliance and Action System evaluates every tool use request against your safety guidelines:
+Every gate and proxy records what it did with a request or tool call as one of the enforcement actions below, and classifies the call by risk. The rules that decide are your SOPs, policy guardrails, custom filters, the detectors and the built-in protections. An enforcement policy (`/api/v1/policies`, `intutic_policy`) is not one of them: see [Enforcement policies are deprecated](#policy-deprecation).
 
 ### Risk Categories
 
@@ -196,20 +206,31 @@ Each tool execution is classified by risk level:
 | **Credential Access** | Reading `.env` files, accessing keyrings, querying credential managers |
 | **Destructive** | Running `rm -rf`, deleting cloud infrastructure, executing destructive database queries |
 
-### Four Enforcement Actions
+### Five Enforcement Actions
 
 | Action | What Happens | When It's Used |
 |--------|-------------|----------------|
 | **Bypass** | Tool call passes through unmodified | Fully compliant with all policies |
-| **Enhance** | Safety prompts or warnings are injected into the agent's context | Minor risk but generally safe |
-| **Hijack** | Tool outcome is replaced with a mock response or override | Policy violation that can be safely redirected |
+| **Enhance** | Tool call passes through, with governance annotations or warnings attached | Minor risk but generally safe |
+| **Hijack** | Tool call is modified or steered rather than stopped | Policy violation that can be safely redirected |
+| **Reask** | The attempt is refused with the reason, so the agent can correct course and retry; repeated trips escalate to Kill | A mistake the agent can correct |
 | **Kill** | Tool call is blocked immediately | Serious policy violation or budget breach |
+
+See [Enforcement Actions](/concepts/enforcement-actions) for how each one is decided.
 
 ### Intervention Modes
 
 What the agent is told when a call is refused. The workspace's mode is the
-mode of its active policy with the lowest priority number, whatever that
-policy's tool pattern; with no active policy it is Transparent.
+`interventionMode` [workspace setting](/reference/workspace-settings#detection-and-enforcement),
+which you set in **Settings › Security › Intervention mode**, with
+`intutic settings set interventionMode OPAQUE`, or with Terraform's
+`intutic_workspace_settings`. Without it the mode is Transparent.
+
+Until 2.6.0, a workspace that has not set it still gets the deprecated rule:
+the mode of its active enforcement policy with the lowest priority number,
+whatever that policy's tool pattern. Upgrading to 2.5.1 copied that mode into
+the setting for every workspace that had an active policy, so nothing changed;
+once the setting is stored, a policy's mode no longer counts.
 
 | Mode | Behavior |
 |------|----------|
@@ -250,6 +271,43 @@ MCP proxies on their next poll, within a minute.
 policy guardrail becomes a shadowed finding and counts toward the guardrail's
 would-act rate; every other would-block is kept as rule evidence and exported
 to SIEM as `WOULD_BLOCK`.
+
+### Enforcement policies are deprecated {#policy-deprecation}
+
+Enforcement policies (`/api/v1/policies`, the dashboard's **Policies ›
+Enforcement Policies**, `intutic policy enable|disable|rollback|export` and
+Terraform's `intutic_policy`) are deprecated as of 2.5.1. No gate or proxy
+reads a policy's tool pattern, enforcement action, conditions or risk
+category, so a policy has never refused or changed a tool call. Its one effect
+was the workspace's intervention mode, which is now a setting (above).
+
+The policies API answers with `Deprecation` and `Sunset` headers and a `Link`
+to this section. It is removed in the first release after **December 1,
+2026**; the fallback that lets a policy set the intervention mode is removed in
+2.6.0.
+
+What to use instead:
+
+| You used a policy for | Use |
+|-----------------------|-----|
+| Refusing a tool call (`KILL`, `REASK`) | A `hook_rule` [policy guardrail](/guide/policy-guardrails) on the tool, with literal argument substrings. The harness gates enforce it once promoted |
+| Allowing, annotating or steering a call (`BYPASS`, `ENHANCE`, `HIJACK`) | Nothing: the policy had no per-tool effect to replace. Delete it when you no longer need its version history |
+| The workspace's intervention mode | The `interventionMode` setting |
+
+To convert a policy, use **Convert to guardrail** on its row, `intutic policy
+convert <policy_id>`, or `POST /api/v1/policies/:policyId/convert-to-guardrail`.
+An active `KILL` or `REASK` policy whose tool pattern is one tool name becomes a
+guardrail on that tool. Its `conditions` carry over when they hold only
+`argContains` and `argNotContains`, each a string or a list of strings. The
+guardrail is created in **shadow**: it reports what it would block and blocks
+nothing, because the policy never blocked anything. Promote it on that
+evidence like any other guardrail. Converting a policy twice returns the same
+guardrail, which records the policy it came from. The policy itself is left as
+it is.
+
+A policy with a glob pattern (`*`, `mcp__github__*`) or with other conditions
+has no guardrail form: the conversion says why, and you author the guardrail
+that lists the tools it should cover.
 
 ---
 

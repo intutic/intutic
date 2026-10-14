@@ -30,34 +30,31 @@ Observability tools and LLM gateways (like LangSmith or Portkey) work on model t
 
 ## 🏗️ Architecture
 
-Intutic runs as a high-performance local or self-hosted proxy (written in Rust) alongside a lightweight bidirectional config sync daemon (`sync-daemon`):
+Intutic runs as a local or self-hosted proxy, written in Rust, between your agents and their model providers. With `intutic connect`, a sync daemon (`sync-daemon`) also installs a tool-call gate in each harness that supports one and keeps its rules files in sync:
 
 ```mermaid
 flowchart TD
-    subgraph DevEnvironment[" 💻 Developer Environment "]
-        Agent["🤖 AI Coding Agent<br><i>(Claude Code, Cursor, Aider, LangGraph)</i>"]
-        SOP["📝 SOP Rules<br><i>(.intutic/sops/ + workspace SOPs)</i>"]
+    subgraph Dev[" 💻 Developer machine "]
+        Agent["🤖 AI coding agent<br><i>(Claude Code, Cursor, Codex, Aider, LangGraph, …)</i>"]
+        SOP["📝 SOP rules<br><i>(.intutic/sops/)</i>"]
+        Gate["🚦 Tool-call gate<br><i>(harness hook; runs before each tool call)</i>"]
     end
 
-    subgraph HotPathProxy[" ⚡ Intutic Hot-Path Proxy (:4000) "]
-        Engine["🔒 WASM Policy Engine<br><i>(In-Process Evaluation)</i>"]
-        DLP["🔐 Secret DLP & Masking"]
-        PCAS["🛡️ PCAS Action Primitives<br><code>BYPASS</code> | <code>ENHANCE</code> | <code>HIJACK</code> | <code>REASK</code> | <code>KILL</code>"]
+    subgraph Proxy[" ⚡ Intutic proxy (:4000) "]
+        Checks["🔒 Checks on each request and response<br><i>SOP rules · WASM/Rego rules · DLP · anomaly detectors</i>"]
+        Verdicts["Verdicts<br><code>BYPASS</code> | <code>ENHANCE</code> | <code>HIJACK</code> | <code>REASK</code> | <code>KILL</code>"]
     end
 
-    subgraph SyncDaemon[" 🔄 Sync Daemon "]
-        Reconcile["Bidirectional Config Reconciler<br><i>(Harness Config Sync)</i>"]
-    end
+    Providers["🌐 LLM providers<br><i>Anthropic · OpenAI · Gemini · Bedrock · Vertex · Azure · OpenRouter · …</i>"]
+    Daemon["🔄 Sync daemon<br><i>(intutic connect)</i>"]
 
-    subgraph UpstreamProviders[" 🌐 Upstream Providers "]
-        Providers["Anthropic API / OpenAI / LiteLLM / Ollama"]
-    end
-
-    Agent -->|1. Tool Call / Prompt| HotPathProxy
-    SOP -->|2. Rule Sync| Reconcile
-    Reconcile -->|3. Hot-Reload Rules| Engine
-    HotPathProxy -->|4. Clean Request| UpstreamProviders
-    Engine -->|5. Block/Hijack Verdict| Agent
+    Agent -->|1. Model request| Proxy
+    Proxy -->|2. Allowed request| Providers
+    Providers -->|3. Response with tool calls| Proxy
+    Proxy -->|4. Response, or refusal| Agent
+    Agent -->|5. Each tool call| Gate
+    SOP -->|Reloaded every 30 s| Checks
+    Daemon -->|Writes gates and rules files| Gate
 ```
 
 ---

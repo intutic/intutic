@@ -17,6 +17,7 @@
     "featureFlags",
     "governanceCardLabelingEnabled",
     "imageProvenance",
+    "interventionMode",
     "loop_review",
     "mcpAllowedServers",
     "mcpAllowedTools",
@@ -39,6 +40,7 @@
     "semanticSkillAnalysisEnabled",
     "ssoKeyMaxIdleDays",
     "sso_group_policy",
+    "storeToolArguments",
     "trajectory_monitor_mode",
     "upstreamRetry",
     "virusTotalSkillLookupEnabled",
@@ -46,7 +48,6 @@
   ],
   "featureFlags": [
     "ff_bandit_routing",
-    "ff_metaclaw_auto_apply",
     "ff_metaclaw_evolution",
     "ff_response_cache_exact",
     "ff_response_cache_semantic",

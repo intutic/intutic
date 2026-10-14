@@ -76,13 +76,17 @@ It recognizes a block by the `[Intutic Governance] BLOCKED:` prefix in `step.err
 ### 4. Trace attribution
 
 ```python
+from smolagents import OpenAIServerModel
 from intutic_clawde.gate import intutic_headers
 
-llm = ChatOpenAI(
-    base_url="http://localhost:4000/v1",
-    default_headers=intutic_headers(session_id=run_id, harness="smolagents"),
+model = OpenAIServerModel(
+    model_id="gpt-5-mini",
+    api_base="http://localhost:4000/v1",
+    client_kwargs={"default_headers": intutic_headers(session_id=run_id, harness="smolagents")},
 )
 ```
+
+`client_kwargs` is passed straight to the `openai.OpenAI` client smolagents builds.
 
 ## What gets written
 

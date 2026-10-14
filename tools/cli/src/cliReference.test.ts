@@ -101,4 +101,47 @@ describe('cli.md matches the registered command tree', async () => {
       expect(body, `\`intutic ${path}\` takes ${flag}, which its cli.md section does not name`).toMatch(named)
     }
   })
+
+  // And the reverse, row by row: every flag an Options table lists is one the
+  // command takes, spelled as `--help` spells it (`--version <version>`, not
+  // `--version <v>`), and a Default cell agrees with a default commander
+  // applies. Defaults applied in code (`opts.limit ?? 50`) are not visible
+  // here and stay hand-checked.
+  it.each([...all].map(([heading, body]) => [headingPath(heading), body] as const))('the Options tables of `intutic %s` match its registered options', (path, body) => {
+    const cmd = path.split(' ').reduce<Command | undefined>((at, name) => at?.commands.find((c) => c.name() === name), program)
+    if (!cmd) return // reported by the registered-command test above
+    // A section that covers its subcommands (`enforce`) lists their options too.
+    const covered = [cmd, ...cmd.commands.filter((sub) => body.includes(`\`${sub.name()}\``))]
+    const options = covered.flatMap((c) => c.options)
+    for (const row of optionRows(body)) {
+      const [first, ...rest] = row.cells
+      for (const spelled of [...first.matchAll(/`(-[^`]+)`/g)].map((m) => m[1].replace(/\\\|/g, '|'))) {
+        const name = spelled.split(/[\s=]/)[0]
+        const option = options.find((o) => o.long === name || o.short === name)
+        expect(option, `cli.md lists ${spelled} for \`intutic ${path}\`, which it does not take`).toBeDefined()
+        if (!option || option.short === name) continue
+        expect(spelled, `cli.md spells \`intutic ${path}\`'s option as ${spelled}; --help says ${option.flags}`).toBe(option.flags.replace(/^-\w,\s*/, ''))
+        if (option.short) expect(first, `cli.md's row for ${name} on \`intutic ${path}\` omits its short form ${option.short}`).toContain(`\`${option.short}\``)
+        const dflt = option.defaultValue as unknown
+        if (row.defaultCell !== undefined && (typeof dflt === 'string' || typeof dflt === 'number')) {
+          expect(rest[row.defaultCell - 1], `cli.md's Default for ${name} on \`intutic ${path}\` disagrees with the registered default ${dflt}`).toContain(`\`${dflt}\``)
+        }
+      }
+    }
+  })
 })
+
+/** Rows of every table in `body` whose header starts `| Option |`, with the Default column's index when it has one. */
+function optionRows(body: string): Array<{ cells: string[]; defaultCell?: number }> {
+  const rows: Array<{ cells: string[]; defaultCell?: number }> = []
+  const lines = body.split('\n')
+  const cellsOf = (line: string) => line.replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((c) => c.trim())
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\|\s*Option\s*\|/.test(lines[i])) continue
+    const header = cellsOf(lines[i])
+    const at = header.indexOf('Default')
+    const defaultCell = at > 0 ? at : undefined
+    for (i += 2; i < lines.length && lines[i].startsWith('|'); i++) rows.push({ cells: cellsOf(lines[i]), defaultCell })
+  }
+  return rows
+}

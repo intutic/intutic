@@ -197,8 +197,15 @@ export {
   MAX_QUOTE_IN_REASON,
   renderGuardrailSopFile,
   renderWorkspaceSetting,
+  HOOK_RULE_FRONT_MATTER_KEY,
+  proxyHookRule,
+  hookRuleRoles,
+  hookRuleAppliesToRole,
+  HOOK_RULE_ROLES,
+  unknownHookRuleRoles,
+  renderHookRuleFrontMatterLine,
 } from './guardrailRender.js'
-export type { HookRuleCitation, RenderedHookRule, RenderedWorkspaceSetting, ParsedFrontMatter, GuardrailSopFileInput } from './guardrailRender.js'
+export type { HookRuleCitation, RenderedHookRule, RenderedWorkspaceSetting, ParsedFrontMatter, GuardrailSopFileInput, ProxyHookRule } from './guardrailRender.js'
 
 export {
   GUARDRAIL_STATUSES,
@@ -277,6 +284,7 @@ export {
   E_SCIM_DUPLICATE,
   E_SCIM_AUTH_FAILED,
   E_FORBIDDEN,
+  E_INSUFFICIENT_SCOPE,
   E_BUDGET_EXCEEDED,
   E_RATE_LIMITED,
   E_APPEND_ONLY_VIOLATION,
@@ -323,6 +331,7 @@ export {
   UpdateRoleInputSchema,
   CreateApiKeyInputSchema,
   UpdateApiKeyInputSchema,
+  ApiKeyScopeListSchema,
   SignupInputSchema,
   OrgSignupInputSchema,
   VerifyEmailInputSchema,
@@ -330,6 +339,24 @@ export {
   MagicLinkRequestInputSchema,
   MagicLinkLoginInputSchema,
 } from './auth.js'
+
+export {
+  API_SCOPE_AREAS,
+  API_SCOPES,
+  API_SCOPE_NAMES,
+  ALL_SCOPES,
+  GATEWAY_USE_SCOPE,
+  AUTOMATION_KEY_SCOPES,
+  isApiKeyScope,
+  unknownApiKeyScopes,
+  scopeGrants,
+  scopesGrantAny,
+  effectiveApiKeyScopes,
+  compactScopes,
+  intersectScopes,
+  unknownScopesMessage,
+} from './apiKeyScopes.js'
+export type { ApiKeyScope, ApiKeyScopeArea, ApiKeyScopeEntry } from './apiKeyScopes.js'
 
 export type {
   AuthContext,
@@ -378,7 +405,6 @@ export type {
 export {
   CreateSsoProviderSchema,
   UpdateUserProfileSchema,
-  CreateScimTokenSchema,
 } from './identity.js'
 
 export type {
@@ -392,8 +418,6 @@ export type {
   ScimUserResource,
   ScimListResponse,
   ScimPatchOp,
-  ScimTokenInfo,
-  CreateScimTokenInput,
   OffboardingStepResult,
   OffboardingResult,
 } from './identity.js'
@@ -734,6 +758,9 @@ export {
   EXCERPT_RADIUS,
   SKILL_CONTENT_TRANSPORT_CHARS,
   skillContentForTransport,
+  skillExceedsTransportCap,
+  SKILL_PARTIAL_SCAN_REASON,
+  type SemanticSkillVerdict,
   type SkillScanCategory,
   type SkillScanEngine,
   type SkillScanPattern,
@@ -858,3 +885,8 @@ export type {
   ProbeOutcome,
   RunVerdict,
 } from './chaos.js'
+
+export { mcpDaemonPolicyGenKey, mcpDaemonPolicyKey, legacyMcpDaemonPolicyKey } from './mcpDaemonPolicyCache.js'
+
+// Control-plane response schemas (src/responses/): what each declared route answers with.
+export * from './responses/index.js'

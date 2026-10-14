@@ -115,7 +115,7 @@ export async function collectDeviceInventory(opts: {
   const skills: InventorySkill[] = skillSets.flat().map((s) => ({
     name: s.name,
     source: s.source,
-    ...(s.sha256 ? { sha256: s.sha256 } : {}),
+    ...((s.fullSha256 ?? s.sha256) ? { sha256: s.fullSha256 ?? s.sha256 } : {}),
     scanned: s.scanned,
     clean: s.clean,
     findingsCount: s.findingsCount,

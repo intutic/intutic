@@ -57,8 +57,8 @@ Upload or install a renewed license and changes resume at once.
 ## Without a valid license
 
 A deployment with no license, a license that fails its signature check, or one
-whose term has not started yet answers only sign-in, health checks and the
-license itself. Everything else returns `402 LICENSE_REQUIRED`, and the
+whose term has not started yet answers only sign-in, health checks, its
+trace-signing public keys and the license itself. Everything else returns `402 LICENSE_REQUIRED`, and the
 dashboard shows the license upload instead of its pages.
 
 ## Seats

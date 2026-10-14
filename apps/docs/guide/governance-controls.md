@@ -53,7 +53,8 @@ separate system from the files on disk, and the two connect over three
 commands (`push`, `pull`, `status`), not a live sync. `intutic sops push` now
 carries each file's own declared title, risk tier and version faithfully
 (one control-plane SOP per file, not a folder concatenated under one
-hardcoded tier), `intutic sops pull` brings the registry's SOPs back down as
+hardcoded tier) and updates the SOP a pulled file records instead of
+creating a duplicate, `intutic sops pull` brings the registry's SOPs back down as
 files, and `intutic sops status` reports drift between the two, read-only.
 See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow
 and what still requires a human to notice drift rather than a dashboard

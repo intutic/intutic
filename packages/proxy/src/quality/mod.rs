@@ -28,7 +28,8 @@ impl RequestPreProcessor {
     /// Process an incoming request before forwarding to LLM.
     ///
     /// Returns:
-    /// - `Some(response_bytes)` if the request was intercepted
+    /// - `Some(answer_text)` if the request was intercepted; the caller frames
+    ///   it for the route and for `"stream"` (`proxy::synthetic_answer`)
     /// - `None` if the request should proceed to the LLM normally
     ///
     /// The control plane answers commands only for a virtual key. A command in
@@ -39,9 +40,8 @@ impl RequestPreProcessor {
         session_id: &str,
         workspace_id: &str,
         messages: &serde_json::Value,
-        protocol: &crate::protocol::Protocol,
         virtual_key: Option<&crate::credential::VirtualKey>,
-    ) -> Option<Vec<u8>> {
+    ) -> Option<String> {
         let last_message = get_last_user_message(messages)?;
 
         // 1. Check for /intutic or @intutic slash commands
@@ -56,13 +56,13 @@ impl RequestPreProcessor {
             if !is_judge_with_args && !is_predict {
                 debug!(session_id, command = %command_line, "Intercepted slash command");
                 let Some(virtual_key) = virtual_key else {
-                    return Some(format_as_llm_response(
+                    return Some(
                         "### ⚠️ Command Unavailable\n\n\
                         `/intutic` commands are answered by the Intutic control plane, which \
                         needs an Intutic virtual key. This request was made with a provider \
-                        key, so the command was not run and not forwarded to the LLM.",
-                        protocol,
-                    ));
+                        key, so the command was not run and not forwarded to the LLM."
+                            .to_string(),
+                    );
                 };
                 return slash_interceptor::handle(
                     &self.http_client,
@@ -70,7 +70,6 @@ impl RequestPreProcessor {
                     session_id,
                     workspace_id,
                     command_line,
-                    protocol,
                     virtual_key,
                 )
                 .await;
@@ -146,54 +145,6 @@ fn get_last_user_message(messages: &serde_json::Value) -> Option<String> {
         }
         _ => None,
     }
-}
-
-/// Format text as a fake LLM response in OpenAI chat completion format.
-///
-/// Used by the slash commands to return responses
-/// without making an actual LLM call.
-pub fn format_as_llm_response(text: &str, protocol: &crate::protocol::Protocol) -> Vec<u8> {
-    let response = match protocol {
-        crate::protocol::Protocol::Anthropic => {
-            serde_json::json!({
-                "id": "msg_intutic_cmd",
-                "type": "message",
-                "role": "assistant",
-                "content": [{
-                    "type": "text",
-                    "text": text,
-                }],
-                "model": "intutic",
-                "stop_reason": "end_turn",
-                "stop_sequence": null,
-                "usage": {
-                    "input_tokens": 0,
-                    "output_tokens": 0
-                }
-            })
-        }
-        _ => {
-            serde_json::json!({
-                "id": "intutic-cmd",
-                "object": "chat.completion",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": text,
-                    },
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0
-                }
-            })
-        }
-    };
-
-    serde_json::to_vec(&response).unwrap_or_default()
 }
 
 #[cfg(test)]

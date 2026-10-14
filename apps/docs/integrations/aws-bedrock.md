@@ -23,7 +23,7 @@ model_list:
 
 ## Credentials
 
-**A workspace's own credential.** Provision it under Settings → Provider Keys, with `intutic credentials set`, the SDKs' `setProviderCredential`, or the Terraform `intutic_provider_credential` resource. It takes a region and either an access key pair or a Bedrock API key:
+**A workspace's own credential.** Provision it under Settings › Security › Provider Keys, with `intutic credentials set`, the SDKs' `setProviderCredential`, or the Terraform `intutic_provider_credential` resource. It takes a region and either an access key pair or a Bedrock API key:
 
 ```bash
 intutic credentials set bedrock --field awsRegion=us-east-1 \

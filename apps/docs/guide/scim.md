@@ -51,6 +51,21 @@ refuses them until the workspace is back on a plan with SCIM.
 
 ---
 
+## Request validation
+
+A request that is not the resource its endpoint takes is refused with `400`
+and `"scimType": "invalidSyntax"`, `detail` naming each attribute: a new user
+without `userName`, a user PATCH without `Operations`, a group whose `members`
+is not a list, or an attribute Intutic reads with the wrong JSON type
+(`active: "no"`). A boolean may be a JSON boolean or the string `"true"` or
+`"false"` in any case, as Microsoft Entra ID sends it (`"active": "False"`),
+and a PATCH `op` is matched in any case (`"Replace"`, RFC 7644 §3.5.2). A
+`startIndex` or `count` that is not an integer is refused with
+`"scimType": "invalidValue"`. Attributes Intutic does not model, and extension
+schemas such as Entra ID's enterprise user, are accepted and ignored.
+
+---
+
 ## User Endpoints
 
 ### POST /scim/v2/Users — Provision User
@@ -89,7 +104,7 @@ List all provisioned users in the workspace with optional filtering and paginati
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `filter` | string | SCIM filter expression (e.g., `userName eq "jane@example.com"`) |
+| `filter` | string | `userName eq "jane@example.com"`, `externalId eq "00u1abcd"` or `emails[type eq "work"].value eq "jane@example.com"`. Any other filter is refused with `400` and `"scimType": "invalidFilter"` (RFC 7644 §3.4.2.2), never answered with the full list |
 | `startIndex` | number | 1-based pagination start index |
 | `count` | number | Maximum results per page (default 100, at most 200) |
 
@@ -139,8 +154,37 @@ Partial update of user attributes. Commonly used by IdPs to deactivate users (`a
 **Response:** `200 OK` with updated SCIM User resource
 
 ::: info
-Setting `active: false` via PATCH triggers the full offboarding cascade (see below).
+Setting `active: false` via PATCH triggers the full offboarding cascade (see below),
+in each form an IdP sends it: `{"op": "Replace", "path": "active", "value": "False"}`
+as Entra ID does, or the path-less `{"op": "Replace", "value": {"active": false}}`.
 :::
+
+---
+
+### PUT /scim/v2/Users/:id — Replace User
+
+Some providers are configured to replace rather than patch (RFC 7644 §3.5.1). A
+replace carrying `"active": false` deprovisions exactly as the equivalent PATCH
+does — it runs the same cascade. Only `userName`, `name` and `active` are modelled;
+other attributes in the payload are ignored rather than stored.
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+  "userName": "jane@corp.com",
+  "active": false
+}
+```
+
+---
+
+### DELETE /scim/v2/Users/:id — Deprovision User
+
+Deactivate the user's membership in the workspace, triggering the offboarding cascade.
+
+**Response:** `204 No Content`
+
+**Error codes:** `404` user not found, `409` offboarding already in progress, `503` cache unavailable
 
 ---
 
@@ -233,29 +277,6 @@ keys, and their machine's gates then refuse every high-risk tool.
 Name a user in a group's `members` by the `id` that `/scim/v2/Users` returned
 for them, as identity providers do. Group resources list users by that id.
 
-### PUT /scim/v2/Users/:id — Replace User
-
-Some providers are configured to replace rather than patch (RFC 7644 §3.5.1). A
-replace carrying `"active": false` deprovisions exactly as the equivalent PATCH
-does — it runs the same cascade. Only `userName`, `name` and `active` are modelled;
-other attributes in the payload are ignored rather than stored.
-
-```json
-{
-  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
-  "userName": "jane@corp.com",
-  "active": false
-}
-```
-
-### DELETE /scim/v2/Users/:id — Deprovision User
-
-Deactivate the user's membership in the workspace, triggering the offboarding cascade.
-
-**Response:** `204 No Content`
-
-**Error codes:** `404` user not found, `409` offboarding already in progress, `503` cache unavailable
-
 ---
 
 ## Group Endpoints
@@ -289,7 +310,9 @@ is `null` for a structural group that grants nothing.
 
 ### GET /scim/v2/Groups — List Groups
 
-Returns every group in the workspace with its direct members.
+Returns every group in the workspace with its direct members. `filter` may be
+`displayName eq "Engineering"` (case-insensitive) or `externalId eq "00g1abcd"`;
+any other filter is refused with `400` and `"scimType": "invalidFilter"`.
 
 **Response:** `200 OK` with a `ListResponse` whose `Resources` are group resources.
 
@@ -328,10 +351,17 @@ Accepts a SCIM `PatchOp`. A `members` value may be an array or a single object.
 | Operation | Effect |
 |-----------|--------|
 | `add` on `members` | Adds the users or groups |
+| `remove` on `members[value eq "usr_abc123"]` | Removes that member only, whatever `value` says. Microsoft Entra ID and Okta both remove a member this way. Several ids may be joined with `or`; an id that is not a member is a no-op |
 | `remove` on `members` with values | Removes those members |
 | `remove` on `members` with no value | Removes every member |
 | `replace` on `members` | Replaces the member list with the values sent |
+| `replace` on `members[value eq "…"]` | Replaces the matching members with the values sent |
+| `add` or `replace` with no path and a `members` value | As `add` or `replace` on `members` |
 | `replace` on `displayName` (or no path) | Renames the group; an object value may also set `mappedRole` |
+
+A `members` filter other than `value eq` (or a sub-attribute path such as
+`members[value eq "…"].display`) is refused with `400` and
+`"scimType": "invalidFilter"`. Operations are applied in order, so the ones before it in the same request stay applied and the ones after it do not run.
 
 An edge that would make a group contain itself, directly or through nesting, is
 refused with a `400`.

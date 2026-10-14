@@ -1,0 +1,89 @@
+---
+page_title: "Policy as code: a GitOps workflow"
+subcategory: ""
+description: |-
+  Keep SOPs, guardrails and workspace settings in a repository, plan them on every pull request, apply them on merge, and detect drift on a schedule.
+---
+
+# Policy as code: a GitOps workflow
+
+This guide keeps a workspace's governance in a repository: SOPs as Markdown files, guardrails and settings as Terraform. A pull request shows the plan, a merge applies it, and a scheduled plan reports anything changed outside Terraform.
+
+## Lay out the repository
+
+```text
+intutic/
+  versions.tf      provider and backend
+  main.tf          SOPs, guardrails, settings, budgets, MCP decisions
+  backend.hcl      backend settings, passed to terraform init
+  sops/
+    production-deploys.md
+    secrets-handling.md
+```
+
+{{ tffile "examples/guides/gitops-workflow/versions.tf" }}
+
+State holds the virtual keys, gateway tokens and webhook signing secrets the provider creates, so use a backend that encrypts state and restricts who can read it. Any backend works; `s3` is only an example.
+
+{{ tffile "examples/guides/gitops-workflow/main.tf" }}
+
+Each SOP is a Markdown file reviewed like any other change; adding one is a new file and a line in `local.sops`.
+
+## What Terraform manages, and what review decides
+
+Terraform manages the content: a SOP's text and tiers, a guardrail's rule, the settings keys you name. Moving a SOP or a guardrail towards enforcement is a review decision made in the dashboard (or, for guardrails, with `intutic guardrails`), because each step waits on evidence. Terraform never makes those decisions, and they do not show up as drift: a guardrail approved for shadow still plans clean.
+
+A merged change interacts with that lifecycle:
+
+- **SOPs.** A new SOP starts in `DRAFT`. Editing a draft changes it in place. Editing a SOP that has left `DRAFT` creates a new `DRAFT` version with a new id, which the plan shows as an `id` known after apply; the approved version keeps enforcing until the new one is reviewed and promoted to `VALIDATED`, which retires it.
+- **Guardrails.** A new guardrail starts `PROPOSED`. Changing `name` or `description` edits it in place and keeps its evidence. Changing the rule itself creates the next version under a new id, `PROPOSED` with no evidence, and retires the current one; the plan shows the new `version` and `status`. The plan also asks the API to validate the rule, so a guardrail the API would refuse fails the pull request's plan, not the apply.
+- **Settings.** Only the keys in `settings` are managed. A key changed in the dashboard that the configuration does not name is left alone.
+- **Enforcement policies.** `intutic_policy` is deprecated, and the policies API sunsets on 2026-12-01. A policy's per-tool fields are enforced nowhere, so manage per-tool rules as `intutic_guardrail` with `kind = "hook_rule"`, which go through the guardrail lifecycle above, and set the intervention mode with the `interventionMode` key in `settings`. Until a workspace sets `interventionMode`, the active policy with the lowest `priority` still sets it for the whole workspace, through control-plane 2.5.x, so a priority change there can still change how every refusal is worded.
+
+
+## Run it from CI
+
+{{ codefile "yaml" "examples/guides/gitops-workflow/terraform.yml" }}
+
+Three jobs:
+
+- **plan**, on every pull request that touches `intutic/`: format check, `validate`, and a `plan` whose output reviewers read next to the diff.
+- **apply**, on merge to `main`: plans again against the current state and applies that plan.
+- **drift**, every morning and on demand: `terraform plan -detailed-exitcode` exits 0 when the workspace matches `main`, 1 on an error, and 2 when it does not match, which fails the job.
+
+Anyone who can push a branch can change the workflow its pull request runs, so the key a pull request can reach should not be able to write. The workflow uses two keys:
+
+- `INTUTIC_API_KEY`, an OWNER or ADMIN automation key, lives in the secrets of a protected `intutic` environment that only the apply job uses.
+- `INTUTIC_PLAN_API_KEY`, a repository secret for the plan and drift jobs, can belong to a member with the EM role: a plan only reads, and EM can read everything this configuration manages. If the configuration manages `intutic_virtual_key` resources, both keys must belong to the same member, because the API shows a member only their own keys; the plan key then has the apply key's role and can write, so give it only to plan jobs you trust.
+
+Each job also needs whatever credentials your backend reads, which the example leaves out. GitHub does not pass secrets to workflows run from forks, so a pull request from a fork gets a failed plan rather than a key. The [authentication guide](https://registry.terraform.io/providers/intutic/intutic/latest/docs/guides/authentication) explains the roles.
+
+## Respond to drift
+
+A drift run's plan names what changed. For example, after someone sets `mcpDefaultPolicy` to `allow` in the dashboard:
+
+```text
+  # intutic_workspace_settings.this will be updated in-place
+  ~ resource "intutic_workspace_settings" "this" {
+      ~ settings = jsonencode(
+          ~ {
+              ~ mcpDefaultPolicy = "allow" -> "deny"
+                # (2 unchanged attributes hidden)
+            }
+        )
+    }
+```
+
+Then either:
+
+- **Revert it:** run the apply job (or merge any change), and Terraform writes the configured value back.
+- **Keep it:** change the configuration to match in a pull request, and the next plan is clean.
+
+A SOP or guardrail edited in the dashboard is different. If the edit replaced it with a new version, the version in state is retired, and the plan proposes to create it again, which would leave two. To keep the dashboard's version instead, remove the old one from state and import the new one:
+
+```shell
+terraform state rm 'intutic_sop.this["production-deploys"]'
+terraform import 'intutic_sop.this["production-deploys"]' sp_V1StGXR8_Z5jdHi6B-myT
+```
+
+Then copy its Markdown into `sops/production-deploys.md` so the next plan is clean. The [import guide](https://registry.terraform.io/providers/intutic/intutic/latest/docs/guides/importing-resources) lists every resource's import ID.

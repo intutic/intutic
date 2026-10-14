@@ -21,7 +21,7 @@ export interface ApiClient {
   reportStatus(status: DaemonStatus): Promise<{ ack: boolean; configVersion: number }>
   reportHashes(report: SopHashReport): Promise<{ driftCount: number }>
   getMe(): Promise<{ email: string; memberId: string; workspaceId: string; role: string }>
-  login(email: string, password: string): Promise<{ accessToken: string; refreshToken: string; workspaceId: string; email: string; memberId: string }>
+  login(email: string, password: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; member: { memberId: string; workspaceId: string; email: string; role: string } }>
   /** Generic GET request for arbitrary API paths. */
   get<T>(path: string): Promise<T>
   /**
@@ -160,7 +160,7 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
       return request('GET', '/api/v1/auth/me')
     },
 
-    async login(email: string, password: string): Promise<{ accessToken: string; refreshToken: string; workspaceId: string; email: string; memberId: string }> {
+    async login(email: string, password: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; member: { memberId: string; workspaceId: string; email: string; role: string } }> {
       return request('POST', '/api/v1/auth/login', { email, password })
     },
 

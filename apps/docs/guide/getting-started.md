@@ -46,6 +46,10 @@ plane attach later. But if Docker is unavailable or the machine is locked down,
 the proxy simply runs standalone. Bandit learning still persists, to
 `~/.intutic/bandit-state.json`.
 
+With or without Valkey, a proxy with no control plane accepts the same keys:
+your provider key, which it forwards, or an Intutic virtual key, for which it
+uses the provider key in its own environment.
+
 Already have a Valkey elsewhere? Point at it with `VALKEY_URL=redis://host:port`.
 
 ## Step 1 — Install the CLI & Native Proxy Gateway
@@ -101,6 +105,9 @@ You'll be prompted for your email and password. On success:
 ```
 Intutic — Authentication
 Control plane: https://your-control-plane.example
+Email: you@company.com
+Password:
+ℹ Authenticating...
 ✔ Authenticated as you@company.com
   Workspace: wk_k8x9m2p4
 ```
@@ -149,13 +156,12 @@ files; `intutic connect` (Step 4) writes those.
 ```
 Intutic — Workspace Initialization
 ✔ Workspace root: /home/dev/my-project
+ℹ Detecting AI harnesses...
 
-Detecting AI harnesses...
-
-  ✔ cursor       → .cursor/rules/intutic-governance.mdc
-  ✔ claude-code  → .claude/rules/intutic-governance.md
-  ○ windsurf     (not detected)
-  ○ aider        (not detected)
+  ✔ cursor → /home/dev/my-project/.cursor/rules/intutic-governance.mdc
+  ✔ claude-code → /home/dev/my-project/.claude/rules/intutic-governance.md
+  ○ antigravity (not detected)
+  ○ windsurf (not detected)
   ...
 
 ✔ Detected 2 harnesses
@@ -198,9 +204,14 @@ If no Valkey can be started — no Docker, no `valkey-server` on your PATH — t
 proxy runs anyway:
 
 ```
+ℹ No Valkey detected on port 6379. Trying to start one…
 ⚠ Could not start Valkey — running standalone.
 ℹ Routing, policies, DLP and local spend caps all work.
 ℹ Bandit learning persists to ~/.intutic; the response cache is per-process.
+ℹ
+ℹ To get a shared, durable cache later:
+ℹ Intutic needs a Valkey (or Redis) on port 6379.
+…
 ℹ Starting proxy on port 4000 (standalone)…
 INFO intutic_proxy: Listening on 127.0.0.1:4000
 ```
@@ -255,7 +266,13 @@ intutic connect
 
 ```
 Intutic — Sync Daemon
+  Workspace: wk_k8x9m2p4
+  Control Plane: https://your-control-plane.example
+  Poll Interval: 30s
+  Harnesses: cursor, claude-code
+…
 ℹ Starting sync daemon... (Ctrl+C to stop)
+…
 ℹ Port 4000 is free. Spawning managed proxy gateway...
 ✔ Managed proxy gateway process spawned.
 ℹ Applying configuration v14...
@@ -290,7 +307,7 @@ learned standalone keeps that learning when a control plane takes over, and the
 control plane signals the handover by setting the workspace's reward mode to
 `cloud`, at which point the local loop stands down within 60 seconds.
 
-### 3. Route Your Agent
+### Route your agent
 
 Set your agent's base URL environment variable to point at the local Intutic proxy:
 
@@ -359,18 +376,21 @@ it shows the control plane's enforcement action and compliance score instead.
 
 ```
 Intutic — Execution Traces (local)
+  No control plane connected — reading directly from ~/.intutic/logs/. No compliance score locally.
 ┌────────────────┬─────────────────────┬──────────────────┬────────────────┬───────────┐
 │ Trace ID       │ Timestamp           │ Model            │ Verdict        │ Cost      │
 ├────────────────┼─────────────────────┼──────────────────┼────────────────┼───────────┤
-│ tr_p4n8q1      │ 2026-07-04 07:30:01 │ claude-sonnet-4… │ killed         │ $0.0000   │
-│ tr_m3k7n2      │ 2026-07-04 07:28:44 │ claude-sonnet-4… │ allowed        │ $0.0123   │
+│ 3f2a9c1e-7b... │ 2026-07-04 07:30:01 │ claude-sonnet-4… │ killed         │ $0.0000   │
+│ 9d41b0a2-5c... │ 2026-07-04 07:28:44 │ claude-sonnet-4… │ allowed        │ $0.0123   │
 └────────────────┴─────────────────────┴──────────────────┴────────────────┴───────────┘
+Showing 2 of 2 traces (last 24 hours)
 ```
 
-Drill into the blocked trace:
+Drill into the blocked trace. The table shortens trace IDs; `inspect` takes
+the full one, which `intutic traces list --json` prints:
 
 ```bash
-intutic traces inspect tr_p4n8q1
+intutic traces inspect 3f2a9c1e-7b4d-4e8a-9c21-5d6f7a8b9c0d
 ```
 
 Or check your full system status in another terminal:

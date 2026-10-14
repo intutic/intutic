@@ -19,10 +19,12 @@ import type { Gate } from './gate.js'
 // threaded through every call site.
 let _active: Gate | null = null
 
+/** Set the process-wide gate that wrapped tools use; `null` clears it. */
 export function install(gate: Gate | null): void {
   _active = gate
 }
 
+/** The process-wide gate {@link install} set, or `null`. */
 export function active(): Gate | null {
   return _active
 }

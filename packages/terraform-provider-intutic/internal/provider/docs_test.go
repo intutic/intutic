@@ -2,7 +2,10 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -83,6 +86,33 @@ func TestDocsSiteIndexListsEveryResource(t *testing.T) {
 	for k := range listed {
 		if !want[k] {
 			t.Errorf("templates-docs-site/index.md.tmpl lists %s, which the provider does not have", k)
+		}
+	}
+}
+
+// Member ids are `mbr_…` (newId('mbr') in the control plane). The
+// intutic_member_budget example and its import command showed `mem_…`, an id
+// no member has, so a copied example could only fail.
+func TestExamplesUseTheMemberIdPrefixTheAPIIssues(t *testing.T) {
+	wrong := regexp.MustCompile(`\bmem_[0-9A-Za-z]`)
+	for _, root := range []string{"../../examples", "../../templates", "../../templates-docs-site", "../../docs", "../../README.md"} {
+		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			for i, line := range strings.Split(string(b), "\n") {
+				if wrong.MatchString(line) {
+					t.Errorf("%s:%d uses a mem_ member id; member ids are mbr_…: %s", p, i+1, strings.TrimSpace(line))
+				}
+			}
+			return nil
+		})
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Fatal(err)
 		}
 	}
 }

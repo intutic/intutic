@@ -29,6 +29,7 @@
 pub mod anomaly;
 pub mod budget_gate;
 pub mod hijack;
+pub mod hook_rules;
 pub mod response_gate;
 pub mod semantic_cache;
 pub mod sql_guard;

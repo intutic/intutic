@@ -7,7 +7,181 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Response schemas in the OpenAPI document.** 162 control-plane operations
+  now publish their response body in `openapi.json`
+  (`x-intutic-response-schema: zod`): every one the SDKs (`@intutic/clawde`,
+  `intutic-clawde`, `@intutic/gate`), the CLI and the Terraform provider call,
+  apart from the evidence download, which answers with a file. The schemas live in
+  `@intutic/shared-types` (`src/responses/`, exported as zod schemas with
+  their inferred types), and each route declares the one it answers with, so
+  the document is generated from the code, not written beside it. CI holds
+  them true: the compiler checks each handler's body against its schema, a
+  test makes a real request to every declared route and fails on a field the
+  schema lacks, does not list, or types differently, and the SDK operations
+  fixture's mock bodies are checked against the same schemas. The TypeScript
+  SDK's response types are pinned to the schemas at compile time, and the
+  Python SDK's TypedDicts and the Terraform provider's response structs by a
+  test, so none can name a field the control plane does not send.
+
+- **The LLM proxy enforces hook-rule policy guardrails.** A hook rule now
+  reaches the proxy as a `hook_rule:` line in the SOP the workspace policy
+  serves (and the file `intutic guardrails pull` writes). The response gate
+  withholds a call an enforcing rule refuses before the client sees it, with a
+  `TOOL_DENIED` refusal naming `guardrail.<id>`, on streams and off them: a
+  rule that names only the tool decides on the call's first event, and one
+  that constrains arguments holds the call's block until its arguments are
+  complete. A request whose latest turn reports a refused call is refused too.
+  A shadow rule is reported on the trace and refuses nothing. A rule line the
+  proxy cannot read, or arguments that are not JSON under a rule that
+  constrains them, refuse rather than let the call through. The proxy tests
+  the rule's literals as substrings of the serialised input, which is what the
+  rendered pattern the other layers use means.
+- **One decision for every layer, pinned.**
+  `packages/shared-types/fixtures/guardrail-layer-vectors.json` holds
+  guardrails, what is served for them, a tool call and the expected decision;
+  the emitted hook gates, `@intutic/gate`, `intutic-clawde`, the MCP proxy and
+  the LLM proxy each run it, and the proxy now also runs the hook-rule vectors.
+- **Hook rules scoped to roles are enforced.** A hook-rule guardrail that names
+  workspace roles applies only to members holding one of them, at every layer,
+  by the role of the member behind the caller's key. The LLM proxy reads it
+  from the key context and applies the rule's `roles`; the hook gates, the SDK
+  gates and the MCP proxy are served only their member's rules. A caller whose
+  role is not known is held to every rule. A role change applies on the
+  member's next call, and on a connected machine at its next sync at the
+  latest. A hook rule may name only workspace roles (owner, admin, em,
+  developer, viewer): any other name is refused when the rule is created or
+  its rule edited, by the API, the CLI, Terraform at plan time and the
+  dashboard. A rule written before that keeps being served and is flagged on
+  its review card.
+
+- **An OpenAPI 3.1 document for the control plane's REST API.**
+  `apps/docs/public/openapi.json` lists every route with its auth, plan badge,
+  path parameters, and the schema of every request body and query string:
+  each route that reads one validates it, and the generator refuses a handler
+  that reads either without a schema. A new OpenAPI Reference docs page renders it (vitepress-openapi
+  0.2.5, loaded only on that page, no third-party requests). It is generated
+  from the route source with the route catalog in `reference/api.md`, and CI
+  fails while either is stale. Like the REST API page, the open-source docs
+  build leaves the page and the file out.
+- **SDK API reference on the docs site, generated from the source.**
+  `/reference/sdk/` documents every export of `@intutic/gate` (each subpath in
+  its `exports`), `@intutic/clawde` and the Python `intutic-clawde` package
+  (each public module's `__all__`), built by `pnpm gen:sdk-reference` with
+  TypeDoc and a griffe-based Markdown renderer. CI fails when the committed
+  pages are stale: the TypeScript half in `lint:claims`, the Python half in
+  the Python SDK job. The clawde and Tool Gate SDK pages stay as guides and
+  link to it; their hand-kept option tables and `ControlPlaneClient` method
+  table are gone. The options of `GateConfig`, `GateClientOptions`,
+  `ClawdeClientOptions` and `ControlPlaneClientOptions` now carry their
+  defaults in their doc comments, and every framework adapter module in
+  `intutic_clawde.gate.adapters` declares `__all__`.
+
+### Security
+
+- **The MCP daemon's shared policy cache is per caller.** Its Valkey entry
+  was keyed by workspace only, while the policy it holds is the calling key's
+  member's (their role's hook rules, their SSO groups): two daemons with
+  different members' keys on one Valkey could be served each other's entry,
+  so a member could get a less restrictive rule set. Entries are now keyed by
+  workspace, a policy generation and a hash of the daemon's key, and a policy
+  change bumps the generation, which retires every caller's entry at once.
+
 ### Changed
+
+- **Behaviour change: a request body or query string that does not match its
+  route's schema is a `400`.** Every control plane route that reads one now
+  validates it. A value of the wrong type that a handler used to drop or
+  replace with its default (`?limit=abc`, `firewall.active: "yes"` in a device
+  report, a loop budget of `"lots"`), and a body that crashed a handler into a
+  `500` (a JSON `null`, a SCIM user without `userName`, a SCIM user PATCH
+  without `Operations`), is refused with the route's own `400`; SCIM answers
+  `invalidSyntax`, or `invalidValue` for paging. A numeric limit out of range
+  is still clamped, and attributes and parameters a route does not read are
+  still ignored. The requests the CLI, the SDKs, the dashboard and the
+  Terraform provider send all pass.
+- **Behaviour change: replay contexts keep tool-call argument keys, not
+  values.** The context the proxy samples onto 5% of traces
+  (`WASM_CONTEXT_SNAPSHOT_RATE`) carried every tool call's full arguments.
+  Each call now keeps its name, `argument_keys` (the top-level keys) and
+  `argument_bytes`, and the context says `tool_arguments: "keys_only"`. A
+  workspace that replays rules reading `tool_calls[].arguments` can opt in
+  with the new `storeToolArguments` setting (off by default); the values are
+  then kept as `tool_arguments: "redacted"`. Snapshots from older proxies are
+  reduced to keys and sizes when they are ingested, the ones a control plane
+  already stored are reduced when it upgrades, and `intutic policy replay`
+  says how many contexts withheld arguments.
+- **What the proxy keeps is redacted for every PII detector, email and phone
+  included.** Live defaults are unchanged (card, IBAN and SSN redact; email and
+  phone off, because an agent shown a redacted address writes the placeholder
+  back into the file). The copies the proxy keeps are another matter: replay
+  contexts and change-manifest targets are redacted for every secret pattern
+  and all five detectors, whatever their live actions, recorded as each
+  detector's new `stored_action` in `pii_detectors.json`.
+- **The response cache does not store an exchange DLP matches.** An entry holds
+  the prompt text and the answer for 24 hours; a prompt or answer with a secret
+  or any PII match is now served without being cached. The cost posture
+  descriptions, which all turn exact caching on, say what the cache keeps.
+
+- **Breaking for SIEM rules: traces, detector findings and device events get
+  their own CEF classes.** All of them went out over syslog as
+  `AGENT_TOOL_CALL` (device events as `AGENT_TOOL_CALL_UPDATE`) at severity 5,
+  though none is a tool call. Now `execution_traces` is
+  `AGENT_MODEL_REQUEST` (severity 1), `detector_findings` is
+  `DETECTOR_FINDING` (severity from the finding: 10, 7, 4 or 1), a disabled
+  firewall is `DEVICE_ENFORCEMENT_DISABLED_UPDATE` (7) and a device that
+  stopped reporting is `DEVICE_ENFORCEMENT_STALE` (4). The CEF header's
+  device version goes from `1.0` to `2.0`, so a rule can tell the two apart.
+  The stopped-reporting alert changes no record, so it is no longer labelled
+  "(Updated)": its `mutationType` is `INSERT` at every destination, and one
+  already in the dead-letter queue is retried as an `INSERT`. A source with
+  no class is refused instead of sent under a default, and a test fails when
+  an exported source has none. Update Sentinel, Splunk or ArcSight rules that
+  match the old classes; the SIEM export guide's "Changed in 2.5.1" lists
+  old and new.
+- **The gate SDKs report every hook-gate answer with its decision id.** The
+  control plane's hook gate (`POST /api/v1/hook-gate`) now names each verdict
+  it gives (allow, refusal, degraded allow) with a `decisionId`, an additive
+  response field, and its own SIEM `gate_decisions` record carries it as
+  `decision_id`. `@intutic/gate` and `intutic_clawde.gate` read it
+  (`GateResponse.decisionId` / `decision_id`; a `GOVERNANCE_UNAVAILABLE`
+  refusal keeps it only while failing closed) and send the `tool_blocked` or
+  `tool_allowed` event that reports the call with it as `gateDecisionId`
+  (`GateClient.emit(..., gateDecisionId)` / `emit(..., gate_decision_id=)`),
+  so the control plane files the decision's incident once and exports the
+  decision to SIEM once. The report of a DLP refusal, whose incident the hook
+  gate files itself, no longer files a second one, and the refusal's
+  `incidentId` now names the stored incident. In an OPAQUE workspace the incident filed from the
+  report names the rule, not the generic sentence. Both SDKs run the updated
+  shared `hook-gate-response-vectors.json`.
+  **Upgrade note:** an SDK older than this release sends no
+  `gateDecisionId`; each hook-gate decision it reports still reaches a SIEM
+  destination twice (once from the hook gate with a `decision_id`, once from
+  the report without one), and a DLP refusal it reports is still filed as a
+  second incident, as before. Upgrade both SDKs for one record and one
+  incident per decision.
+- **Behaviour change: API key scopes are enforced.** A key's `scopes` were
+  stored and never read, so every key could do everything its owner's role
+  allowed, and an attenuated child key that "narrowed" its parent kept the
+  full role. A request made with a key now needs both the owner's role and a
+  scope covering the route, or it gets `403` with code `INSUFFICIENT_SCOPE` and
+  `requiredScopes`. The scopes form one fixed registry
+  (`API_SCOPES` in `@intutic/shared-types`): `*` (everything, the default
+  and what existing keys hold), `gateway:use` (agent traffic: LLM calls
+  through the proxy, hook gates, hook events, trace sync-back, holds, the SOP
+  rules and policy snapshot) and `<area>:read` / `<area>:write` for thirteen
+  areas of the REST API, `write` covering `read`. Creating or editing a key
+  with an unknown scope is refused with `400` naming the valid ones; a key
+  cannot grant a scope it does not hold. The proxy refuses LLM traffic from a
+  key without `gateway:use`. Child keys (`intutic attenuate --caps`) take
+  registry scopes, must descend from the caller's own key, and are held to
+  every ancestor's scopes on each request. The Terraform provider validates
+  `scopes` at plan time. **Compatibility:** a key whose stored scopes are all
+  outside the registry (free-form strings such as `["read"]`) keeps working as
+  `*` until **2.6.0**, when it is refused; the control plane logs
+  `apikey_legacy_scopes` on each use and the dashboard marks the key. See
+  [API key scopes](https://docs.intutic.ai/reference/api#api-key-scopes).
 
 - **Behaviour change: `withIntuticProxy()` points providers at the proxy's
   `/v1` routes.** `@intutic/gate/vercel` (and its `@intutic/gate/eve`
@@ -34,9 +208,153 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them, so the workspace, session, branch, CI pipeline and incident came back
   empty. Each field now comes from the file when it carries it and from its
   environment variable otherwise, in `@intutic/clawde` and `intutic-clawde`.
+- **Behaviour change: the SOP Optimizer applies a change without review only
+  when it strengthens the guideline.** With `ff_metaclaw_auto_apply` on, a
+  manually started run applied any proposal that cleared the auto-approve
+  threshold, a weakening rewrite included, and did it by retiring the reviewed
+  guideline and putting an unreviewed draft in force. Now a proposal is applied
+  only when the change classification is `STRENGTHEN` (it adds a safety rule,
+  removes none, and is not more than a fifth shorter). Every other proposal,
+  and any the classifier could not classify, waits for review with its
+  classification and the reason. An applied change becomes the next version of
+  the guideline in the same lifecycle state, with an audit row naming
+  `system:metaclaw`. A `WEAKEN` edit needs an Owner whoever makes it: no caller
+  is exempt for not declaring a role.
+- **Behaviour change: the SOP Optimizer's Approval mode is its only switch,
+  and the optimizer now runs.** It looked for guidelines in a lifecycle state
+  that does not exist, so it never proposed anything; it now works on enforced
+  guidelines (validated and active), at most 5 a cycle, one proposal each, and
+  none for a guideline with a pending proposal or one proposed in the last 24
+  hours. `featureFlags.ff_metaclaw_auto_apply` is removed (a settings `PUT`
+  that sends it is refused, and the Terraform provider rejects it): Approval
+  mode **manual** applies nothing, **auto** lets a run an Owner or Admin
+  starts apply a strengthening proposal, and the hourly sweep only proposes.
+  Each workspace keeps what it had without loosening: the flag on becomes
+  auto, and auto without the flag becomes manual. Incident mining is
+  proposal-only in both modes; auto no longer marks its drafts auto-approved.
+- **Behaviour change: editing a guideline past draft keeps it enforcing.**
+  Editing a SOP that is not a draft, or approving an amendment against it,
+  retired the version you edited at once and put the edit in a new draft, so
+  a validated guideline stopped enforcing until the draft was carried through
+  review and shadow. The edited version now keeps its state until the new
+  version is promoted to validated, which is when it is retired.
+
+### Deprecated
+
+- **Enforcement policies, sunset December 1, 2026.** No gate or proxy ever
+  read a policy's tool pattern, enforcement action, conditions or risk
+  category, so a policy never refused or changed a tool call; the docs,
+  dashboard and Terraform provider said otherwise and now say what is true.
+  A policy's one effect, the workspace's intervention mode, is now the
+  `interventionMode` workspace setting (dashboard Settings › Security, `intutic
+  settings set interventionMode`, `intutic_workspace_settings`). Every gate
+  reads the setting first; until 2.6.0 a workspace that has not set it still
+  takes the mode of its lowest-priority active policy, and the upgrade copies
+  that mode into the setting for every workspace with an active policy, so
+  nothing changes. `intutic policy convert <id>`, the dashboard's **Convert
+  to guardrail** and `POST /api/v1/policies/:policyId/convert-to-guardrail`
+  turn an active `KILL` or `REASK` policy on one tool into a `hook_rule`
+  guardrail in shadow (its `argContains` / `argNotContains` conditions carry
+  over), never enforcing, since the policy never blocked anything; converting
+  twice returns the same guardrail. The policies API answers with
+  `Deprecation`, `Sunset` and `Link` headers, `intutic policy
+  enable|disable|rollback|export` print a notice on stderr, and the Terraform
+  provider (0.3.0) deprecates `intutic_policy` and its fields, makes
+  `target_tool_pattern` and `enforcement_action` optional, and accepts
+  `interventionMode` in `intutic_workspace_settings`. The "no force push"
+  examples are `intutic_guardrail` hook rules now.
 
 ### Fixed
 
+- **Security: SCIM deprovisioning from Microsoft Entra ID now offboards the
+  member.** Entra writes the PATCH `op` capitalised and booleans as strings
+  (`{"op": "Replace", "path": "active", "value": "False"}`, or the path-less
+  `{"op": "Replace", "value": {"active": "False"}}`); the user PATCH matched
+  `replace` and `false` exactly, so the member stayed active with every API
+  key and session while Entra recorded the user as deprovisioned. `op` and
+  attribute names are now matched in any case (RFC 7644 §3.5.2), a SCIM
+  boolean may be `"true"`/`"false"` in any case, and each form runs the
+  offboarding cascade, as a PUT with `"active": "False"` does. An emails
+  replace takes the address whose `primary` is `"True"`. Members an Entra
+  sync should have deprovisioned before this release are still active and
+  need deprovisioning again.
+- **Client response types that disagreed with the control plane**, found by
+  the response schemas (the route is right in each case):
+  - `intutic login` with a password read the workspace and email from the top
+    of the login answer, which nests them under `member`, so it saved neither
+    and printed "Authenticated as undefined".
+  - `@intutic/clawde` and `intutic-clawde`: `SopCreateResult` is the created
+    SOP the route returns (it never sent `ok`); `BundleUploadResult` drops
+    `error` and `detail`, which only a failed upload carries (and a failed
+    call raises); `SiemDestinationList.items` are `SiemDestinationSummary`
+    rows, which carry no `config` or `signingSecret`; a SIEM destination's
+    `lastHeartbeatAt` and `lastError` are optional (the create answer has
+    neither); `GatewayStatus`'s heartbeat fields are optional (a live gateway
+    omits what it did not report); a guardrail write or transition's
+    `guardrail` and a readiness's counters may be `null`; `SopDetail.riskTier`
+    may be `null`; `createTeam` and `createWorkspace` return only the fields
+    the routes send.
+  - The CLI: `gateway status` printed "undefined" for heartbeat fields a
+    gateway did not report; `guardrails sources add` read the new source's id
+    from a wrapper the route does not send; SIEM destination and SOP record
+    types follow the routes.
+  - The VS Code extension's SOP browser showed "undefined" for every SOP: it
+    read `name`, and the route sends `title`.
+- **A refusal now wins over an earlier flag-only rule.** `@intutic/gate`,
+  `intutic-clawde` and the MCP proxy took the first SOP rule matching a call,
+  so a `warn` rule (a shadow guardrail, or the high-risk reminder) listed
+  before a matching `block` rule let the call through with only a flag. They
+  now take the most severe match: block, then require-approval, then warn,
+  ties in list order.
+
+- **A proxy with Valkey and no control plane accepts your provider key.**
+  `intutic start` runs a local Valkey whenever Docker is up, and a proxy that
+  found one looked every token up in Valkey's auth cache, which nothing writes
+  without a control plane: every request got `401 Virtual API key is invalid,
+  expired, or revoked.` There is now one rule for a proxy with no control
+  plane configured, whether or not Valkey is up: it behaves as standalone. A
+  provider key passes through, and a virtual key is accepted with the provider
+  key from the proxy's environment used upstream. A managed proxy is
+  unchanged.
+- **Slash-command and `/intutic predict` answers stream when the client
+  streams.** An `/intutic` command's answer came back as one JSON body even on
+  a `"stream": true` request, which a streaming client (Claude Code, Cursor)
+  reads as nothing. The proxy's own answers now use the route's SSE format on
+  a streaming request (Anthropic Messages, OpenAI chat completions and the
+  Responses API) and name the request's model: the streamed cost prediction
+  always said `claude-3-5-sonnet`.
+- **A custom rule cannot allow a call by returning HIJACK or ENHANCE.** The
+  proxy's merge of WASM and Rego verdicts ignored both, which would have let
+  the call through. No runner produces them, and a rule has no way to supply
+  a rewrite or guidance, so a rule that ever returned one is now refused as
+  one that reached no verdict (`GOVERNANCE_UNAVAILABLE`). The docs no longer
+  say a WASM rule can rewrite a request, and the SDK guide says what to
+  return instead.
+- **`phi()` is not a taint.** The taint detector matched a `phi()` that the
+  SOP parser, the guardrail IR and the control plane's replay all refuse;
+  the dead branch is gone. `pii()` covers custom `phi` patterns, and the
+  parser's error now says so.
+- **A skill's semantic verdict covers the whole file.** With
+  `semanticSkillAnalysisEnabled`, `intutic skill audit` sends the first 65,536
+  characters of each `SKILL.md`, and the verdict was keyed by the hash of that
+  text, so a skill judged clean could gain any tail past the cap and keep its
+  verdict; the judge also read only the first 16 KiB of what it was sent. The
+  CLI and the sync daemon now send the SHA-256 and length of the whole file
+  (`fullSha256`, `fullLength`), and the verdict is keyed by the whole file. The
+  judge reads everything it is sent, in up to four overlapping windows, each
+  counted against the daily judge cap; a flag in any window flags the skill. A
+  file longer than 65,536 characters is never reported clean: it is
+  `partially_scanned` and needs review ("Only the first 64K (65,536) characters
+  were checked"), and `intutic skill audit` names it in a warning. The
+  deterministic pattern scan still reads the whole file.
+- **Terraform provider 0.2.1: import, refusal and example fixes.** An
+  imported `intutic_mcp_server_decision` that leaves `disabled_tools` unset
+  plans clean (`disabled_tools` now shows the server's switched-off tools);
+  `intutic_workspace_budget` refuses an import id other than the key's
+  workspace ("Wrong workspace"); an API refusal shows the explanation it
+  carries in `detail` (a 403 names the roles the route allows) instead of a
+  bare `Forbidden`; and the `intutic_member_budget` example uses the `mbr_…`
+  member id shape. See `packages/terraform-provider-intutic/CHANGELOG.md`.
 - **Subpath types for `moduleResolution: node`.** `@intutic/gate` and
   `@intutic/sync-daemon` pointed `typesVersions` at `src/*.ts`, which their
   tarballs do not contain, so a consumer on `moduleResolution: node` got no
@@ -50,6 +368,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `parse_register`, `SopRegister` and `READ_ONLY_TOOLS` (which the docs already
   listed as exported) are importable from `intutic_clawde.gate` and in its
   `__all__`.
+- **The clawde SDKs default to the API host.** With no `controlPlaneUrl`
+  (`control_plane_url`) and no `INTUTIC_CONTROL_PLANE_URL`, `ClawdeClient`'s
+  budget check and session registration and `ControlPlaneClient` called
+  `https://app.intutic.ai`, the dashboard, which does not serve `/api/v1`.
+  Both SDKs now default to `https://api.intutic.ai`, as `@intutic/gate`, the
+  Python gate client and the CLI already did, from one constant per language
+  (`DEFAULT_CONTROL_PLANE_URL`).
+- **The rule-author skill describes what the proxy does.** It said a rule that
+  breaks the sandbox limits is silently disabled (every request it cannot
+  judge is refused with `GOVERNANCE_UNAVAILABLE`) and that a KILL from any rule
+  ends the request (WASM rules return BLOCK). The download, the copy
+  `intutic connect` writes and the repo's own copy are fixed, and
+  `tools/scripts/check-rule-author-skill-copies.js` (`lint:claims`) fails when
+  the download or the embedded copy differs from `.agents/skills/`.
+- **Docs drift gates.** `lint:claims` gains `check-docs-code-blocks.js` (a
+  fence line with text after it, which leaves a code block open, and
+  `intutic init` samples that show relative paths: 21 integration pages did,
+  now fixed) and `check-doc-tables.js` (enforcement-action tables and counts
+  against `EnforcementAction`, SOP lifecycle tables and diagrams against
+  `VALID_SOP_TRANSITIONS`, the graph-guardrails detector table against the
+  proxy's detector registry, the clawde SDK's "What's covered" against the
+  operations fixture, and the tier matrix against the plan map), and
+  `check-harness-counts.js` reads "N supported agent tools", "36 of the 43"
+  and the other phrasings it missed. The MCP coverage table now matches the
+  gate registry, which had Windsurf as unconfirmed.
+
+- **`sudo intutic enforce apply` exempts you, not root.** Under `sudo` the
+  firewall's default `--uid` was root's, so the proxy you run with
+  `intutic start` was denied egress. The CLI and `intutic-proxy enforce` now
+  default to the invoking user (`SUDO_UID`) when running as root under sudo.
+  The Jamf and Intune firewall manifests run as root with no sudo, so their
+  script now passes the console user's uid (`stat -f %u /dev/console` on
+  macOS, seat0's active session on Linux).
+- **`intutic doctor` finds the CA `intutic connect` trusted on Linux.** It
+  looked only for `intutic-ca.crt`; connect installs `intutic-connect-ca.crt`.
+- **`intutic loop start`, `complete`, `kill` and `list` exit 1** when the
+  control-plane call fails or is refused, instead of printing the error and
+  exiting 0.
+- **`intutic policy snapshot`** no longer says the previous snapshot is
+  untouched when a refused key rewrote it, and `intutic policy replay` names
+  the plan rather than your role when the plan refused it.
+- **`intutic guardrails`:** `list --limit` help states the server's default
+  200 and cap 1000; `sources list` shows a source's last failed sync; `docs
+  extract` reports an unreachable cap store (503) as such and exits 1.
+- **`intutic integrity chain`** says older roots were not walked rather than
+  printing the endpoint's one-row probe as a count.
+- **`intutic judge configure`** prints docs links instead of paths into
+  Intutic's own source tree.
+- **`intutic sops push` updates the SOP a file came from instead of creating
+  a duplicate.** `sops pull` now records each file's SOP in its front matter
+  (`intutic_id:`, `intutic_revision:`), and push edits that SOP through the
+  dashboard's edit path: a DRAFT in place, an approved SOP as a new DRAFT
+  version while the approved one keeps enforcing. The recorded revision is
+  the precondition, so a SOP edited on the control plane since the pull is
+  refused (`--force` overwrites); an unchanged file is a no-op; a deleted SOP
+  needs `--create`; a WEAKEN edit's Owner refusal is printed. A file with no
+  record is created and then recorded. Push also takes a single file, the
+  layout pull writes, as well as a folder; pull and status read both layouts,
+  match files by the recorded id, and pull keeps a file's other front-matter
+  keys. The SOP listing and detail now carry `priorVersionId`.
+- **The AutoGen `.env.intutic` comment leads with `IntuticWorkbench`**, which
+  governs `AssistantAgent`'s own tool calls, as the integration page does.
 
 ### Removed
 
@@ -60,6 +440,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`_internal` from `@intutic/gate/harness`.** A test hook exported from the
   public subpath. The tests now read the hook script through
   `intuticSandboxBootstrap()`.
+- **`CreateScimTokenSchema` and `CreateScimTokenInput` (`@intutic/shared-types`).**
+  Nothing used them, and they disagreed with the API (a 255-character label,
+  365 days): the control plane validates a new SCIM token with its own schema
+  (label 1–128 characters, required; 1–3650 days), which the OpenAPI document
+  describes. `ScimTokenInfo` goes too: no API response or client used its shape.
 
 ## [2.5.0] - 2026-10-13
 

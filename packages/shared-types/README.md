@@ -23,6 +23,7 @@ One source module per domain under `src/`. Among them:
 | `notifications` | Notification channels, alert templates, delivery status |
 | `billing` | Subscription tiers, usage metering, invoice types |
 | `observability` | Trace spans, metric definitions, log schemas |
+| `responses/` | The control plane's response schemas (`<Thing>Response`, zod with the inferred type): what each route that declares one answers with, as published in the OpenAPI document |
 
 ## Usage
 

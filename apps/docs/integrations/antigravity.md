@@ -127,7 +127,7 @@ intutic init
 ```
 
 ```
-  ✔ antigravity → GEMINI.md
+  ✔ antigravity → /path/to/project/GEMINI.md
 ```
 
 The harness is detected from a `.gemini/` directory or an `.agents/hooks.json` file in the project, Antigravity's app-data directories (`~/.gemini/antigravity`, `~/.gemini/antigravity-cli`, `~/.gemini/antigravity-ide`), `antigravity` or `gemini` on `PATH`, or a `~/.gemini/settings.json` with a setting of its own. `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).

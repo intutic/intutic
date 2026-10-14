@@ -11,12 +11,12 @@ Every compliance number in Intutic starts with the same eleven probes (see [Secu
 | Probe | What it checks |
 |---|---|
 | `policy_check` | Workspace policy completeness (budget, residency, allowed models) |
-| `mfa_enforcement` | Reports `not_enforced` — MFA is not tracked in the schema, so this control cannot be attested; member-hygiene counts ride along as context |
+| `mfa_enforcement` | Not tracked: Intutic does not record whether members use MFA, so this probe always reports `not_enforced` with `tracked: false` (shown as **Not tracked**) and cannot attest the control — enforce MFA at your identity provider and keep its policy as the evidence. Member-hygiene counts ride along as context |
 | `data_residency` | Residency violations in the last 30 days — `not_enforced` when region locking itself is off |
 | `audit_log_integrity` | Re-derives sealed Merkle roots from the live trace rows and walks the root chain, and checks that the append-only guards and every foreign key are still enforced; a failure raises a [notification](/concepts/trace-integrity#alerts) |
 | `token_rotation` | API keys unused for 90+ days |
 | `sop_coverage` | Count of active SOPs |
-| `auto_apply_provenance` | Every ON auto-apply flag attributable to a human actor |
+| `auto_apply_provenance` | Every ON auto-apply flag, and the SOP approval mode in auto, attributable to a human actor |
 | `sop_git_drift` | File-plane vs DB-plane SOP drift, as last reported by `intutic sops status` |
 | `guard_liveness` | Whether the proxy's scheduled guard probes still fire, as last reported through the sync daemon |
 | `guardrail_authority` | Every enforcing policy guardrail was promoted by a named member |

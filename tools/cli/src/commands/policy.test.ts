@@ -12,13 +12,14 @@ vi.mock('../config/store.js', () => ({
 }))
 vi.mock('../config/paths.js', () => ({ resolveControlPlaneUrl: vi.fn(() => 'https://api.test.invalid') }))
 
-const { postWithStatusMock, getWithStatusMock, postFormMock } = vi.hoisted(() => ({
+const { postWithStatusMock, getWithStatusMock, postFormMock, getMock } = vi.hoisted(() => ({
   postWithStatusMock: vi.fn(),
   getWithStatusMock: vi.fn(),
   postFormMock: vi.fn(),
+  getMock: vi.fn(),
 }))
 vi.mock('../lib/api.js', () => ({
-  createApiClient: () => ({ postWithStatus: postWithStatusMock, getWithStatus: getWithStatusMock, postForm: postFormMock }),
+  createApiClient: () => ({ postWithStatus: postWithStatusMock, getWithStatus: getWithStatusMock, postForm: postFormMock, get: getMock }),
 }))
 
 import {
@@ -34,6 +35,9 @@ import {
   parseRuleFileName,
   runPolicyInstall,
   runPolicyReplay,
+  runPolicyConvert,
+  runPolicyExport,
+  POLICY_DEPRECATION_NOTICE,
   DEFAULT_ALLOW_MOCK,
   HOST_IMPORT_NAMES,
   unsupportedImports,
@@ -402,6 +406,28 @@ describe('runPolicyReplay end to end', () => {
     expect(postWithStatusMock).toHaveBeenCalledWith('/api/v1/wasm-rules/wasm_abc/replay', {})
   })
 
+  it('names the plan, not the role, when the plan refused the replay', async () => {
+    postWithStatusMock.mockResolvedValue({
+      status: 403,
+      body: { error: 'Upgrade required — custom WASM rules need a higher plan', code: 'FEATURE_NOT_AVAILABLE' },
+    })
+    await replay('wasm_abc')
+    expect(exitCode).toBe(1)
+    const printed = vi.mocked(console.error).mock.calls.flat().join('\n')
+    expect(printed).toContain('Upgrade required')
+    expect(printed).not.toContain('your role')
+  })
+
+  it("names the roles when the caller's role is refused", async () => {
+    postWithStatusMock.mockResolvedValue({
+      status: 403,
+      body: { error: 'Forbidden', code: 'FORBIDDEN', detail: 'Requires the OWNER, ADMIN or EM role' },
+    })
+    await replay('wasm_abc')
+    expect(exitCode).toBe(1)
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain('Requires the OWNER, ADMIN or EM role')
+  })
+
   it('rejects a non-positive --limit before making a network call', async () => {
     await replay('wasm_abc', { limit: '0' })
     expect(exitCode).toBe(1)
@@ -444,6 +470,28 @@ describe('runPolicyReplay end to end', () => {
     })
     await replay('wasm_abc')
     expect(exitCode).toBeNull()
+  })
+
+  it('prints the note when contexts carried argument keys and sizes, not values', async () => {
+    const note = '58 of 60 contexts carry their tool calls\' argument keys and sizes ... `storeToolArguments: true` ...'
+    postWithStatusMock.mockResolvedValue({
+      status: 200,
+      body: {
+        ruleId: 'wasm_abc',
+        since: null,
+        contextCount: 60,
+        wouldActCount: 0,
+        wouldActRate: 0,
+        verdictCounts: { '0': 60 },
+        sampleMatches: [],
+        argumentsWithheld: 58,
+        argumentsNote: note,
+      },
+    })
+    await replay('wasm_abc')
+    expect(exitCode).toBeNull()
+    const printed = vi.mocked(console.log).mock.calls.map((c) => String(c[0])).join('\n')
+    expect(printed).toContain('storeToolArguments: true')
   })
 })
 
@@ -573,5 +621,72 @@ describe('runPolicyCompile --candidate', () => {
     const refused = { postForm: vi.fn(async () => ({ status: 200, body: { accepted: false, gates: [{ gate: 'default_allow', passed: false, detail: 'fires on the empty context' }] } })) }
     await expect(uploadCandidateBundle(asClient(refused), 'rc_cited', wasm, HASH)).rejects.toThrow('process.exit(1)')
     expect(exitCode).toBe(1)
+  })
+})
+
+/**
+ * Enforcement policies are deprecated: every command on their API says so
+ * first, on stderr, and `policy convert` turns one into a shadow guardrail.
+ */
+describe('deprecated enforcement-policy commands', () => {
+  let exitCode: number | null
+  let stdout: string[]
+  let stderr: string[]
+
+  beforeEach(() => {
+    exitCode = null
+    stdout = []
+    stderr = []
+    postWithStatusMock.mockReset()
+    getMock.mockReset()
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code ?? 0
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => void stdout.push(args.join(' ')))
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => void stderr.push(args.join(' ')))
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function run(fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn()
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith('process.exit(')) throw err
+    }
+  }
+
+  it('policy export prints the deprecation notice to stderr and keeps stdout valid JSON', async () => {
+    getMock.mockResolvedValue({ ok: true, policies: [{ policyId: 'pol_a' }] })
+    await run(() => runPolicyExport({ all: true }))
+    expect(exitCode).toBeNull()
+    expect(stderr.some((l) => l.includes(POLICY_DEPRECATION_NOTICE))).toBe(true)
+    expect(JSON.parse(stdout.join('\n'))).toEqual([{ policyId: 'pol_a' }])
+  })
+
+  it('policy convert posts to the convert route and names the shadow guardrail', async () => {
+    postWithStatusMock.mockResolvedValue({ status: 201, body: { ok: true, created: true, guardrailId: 'pgr_new', status: 'SHADOW' } })
+    await run(() => runPolicyConvert('pol_kill', {}))
+    expect(exitCode).toBeNull()
+    expect(postWithStatusMock).toHaveBeenCalledWith('/api/v1/policies/pol_kill/convert-to-guardrail')
+    expect(stderr.some((l) => l.includes(POLICY_DEPRECATION_NOTICE))).toBe(true)
+    expect(stdout.join('\n')).toContain('pgr_new, in SHADOW')
+  })
+
+  it('policy convert names the guardrail a policy already became', async () => {
+    postWithStatusMock.mockResolvedValue({ status: 200, body: { ok: true, created: false, guardrailId: 'pgr_old', status: 'ENFORCING' } })
+    await run(() => runPolicyConvert('pol_kill', {}))
+    expect(exitCode).toBeNull()
+    expect(stdout.join('\n')).toContain('already converted: guardrail pgr_old (ENFORCING)')
+  })
+
+  it('policy convert exits 1 with the reason when the policy has no guardrail form', async () => {
+    postWithStatusMock.mockResolvedValue({ status: 422, body: { ok: false, error: 'Policy has no guardrail form', reason: 'BYPASS has no per-tool effect today' } })
+    await run(() => runPolicyConvert('pol_bypass', {}))
+    expect(exitCode).toBe(1)
+    expect(stderr.join('\n')).toContain('BYPASS has no per-tool effect today')
   })
 })

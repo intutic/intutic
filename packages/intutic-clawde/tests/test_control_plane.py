@@ -23,7 +23,11 @@ def test_defaults_base_url():
     with patch.dict(os.environ, {}, clear=False):
         os.environ.pop("INTUTIC_CONTROL_PLANE_URL", None)
         client = ControlPlaneClient(api_key="vk_test")
-        assert client.base_url == "https://app.intutic.ai"
+        # The API host, not the dashboard's: app.intutic.ai serves the web app.
+        assert client.base_url == "https://api.intutic.ai"
+        # One default for the whole package: the gate client resolves the same host.
+        from intutic_clawde.gate.client import GateClient
+        assert GateClient(api_key="vk_test").base_url == client.base_url
 
 
 def test_respects_env_base_url():

@@ -59,13 +59,17 @@ On deny, either callback returns a synthetic error dict (`{"status": "error", "e
 ### 4. Trace attribution
 
 ```python
+from google.adk.models.lite_llm import LiteLlm  # needs google-adk[extensions]
 from intutic_clawde.gate import intutic_headers
 
-llm = ChatOpenAI(
-    base_url="http://localhost:4000/v1",
-    default_headers=intutic_headers(session_id=run_id, harness="google-adk"),
+model = LiteLlm(
+    model="openai/gpt-5-mini",
+    api_base="http://localhost:4000/v1",
+    extra_headers=intutic_headers(session_id=run_id, harness="google-adk"),
 )
 ```
+
+`LiteLlm` passes `api_base` and `extra_headers` through to each LiteLLM completion call.
 
 ## What gets written
 

@@ -21,7 +21,11 @@
  * `packages/mcp-proxy/src/policy.ts`), deliberately:
  *
  *   * rules are tried in the order the control plane returned them
- *   * first match wins
+ *   * the most severe matching rule decides (block, then require_approval,
+ *     then warn); among rules of that severity, the first in list order. A
+ *     warn rule listed before a block rule (a shadow guardrail, or the
+ *     control plane's catch-all reminder) must not let the call through
+ *     with a flag when a later rule refuses it
  *   * `toolPattern` is tested against the tool name, `argPattern` against the
  *     serialised tool input
  *   * the serialisation is the `JSON.stringify(tool_input ?? {})` shape every
@@ -209,15 +213,26 @@ function compiles(pattern: string): boolean {
   }
 }
 
-/** First rule matching this call, in control-plane order. */
+// Higher decides: a refusal wins over a hold, a hold over a flag.
+const SEVERITY: Readonly<Record<string, number>> = { [ACTION_BLOCK]: 3, [ACTION_APPROVAL]: 2, [ACTION_WARN]: 1 }
+
+/**
+ * The rule that decides this call: the most severe one matching it (block,
+ * then require_approval, then warn), the first of that severity in
+ * control-plane order. `null` when none matches.
+ */
 export function firstMatch(
   rules: readonly SopRule[],
   toolName: string,
   toolInput: Record<string, unknown> | null | undefined,
 ): SopRule | null {
   const payload = serialiseToolInput(toolInput)
+  let decided: SopRule | null = null
   for (const rule of rules) {
-    if (ruleMatches(rule, toolName, payload)) return rule
+    if (decided !== null && (SEVERITY[rule.action] ?? 0) <= (SEVERITY[decided.action] ?? 0)) continue
+    if (!ruleMatches(rule, toolName, payload)) continue
+    decided = rule
+    if (rule.action === ACTION_BLOCK) break
   }
-  return null
+  return decided
 }

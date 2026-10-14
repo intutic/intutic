@@ -38,7 +38,7 @@ will see on stderr when it blocks.
 
 | The clause says | Target | Who enforces it | How it gets there |
 | :--- | :--- | :--- | :--- |
-| "never run *this* with *that* in the arguments" | `hook_rule` | the PreToolUse gate scripts in every connected harness, offline | the daemon's policy snapshot, refreshed every 30 s |
+| "never run *this* with *that* in the arguments" | `hook_rule` | every layer a tool call passes: the PreToolUse gate scripts in every connected harness (offline), the SDK gates, the MCP proxy, the hosted hook gate and the AgentCore check, and the LLM proxy, on the tool calls in a model's response | the daemon's policy snapshot, refreshed every 30 s; the rule list the SDK gates and the MCP proxy poll; read at call time by the hosted gate; for the LLM proxy, a `hook_rule:` line in the workspace SOP policy a gateway-mode proxy fetches, or `intutic guardrails pull` for a proxy that reads SOPs from disk |
 | ordering, counts, denied tools, taint: `requires_before`, `forbid_after`, `max_calls`, `forbid_with`, `deny_tools`, `review_before` | `sop_front_matter` | the proxy's SOP detectors | the workspace SOP policy a gateway-mode proxy fetches; `intutic guardrails pull` for a proxy that reads SOPs from disk |
 | a context condition — which harness, role or environment may act, as a `wasm_predicate` clause | `wasm_rule` | a compiled WASM rule in the proxy | the rule-candidate pipeline: compiled from its source of record, gated, shadowed, promoted |
 | which models agents may use (`allowed_models`), or which hosts they may also reach (`egress_allow`) | `workspace_setting` | the proxy's approved-models check and its egress policy, through the workspace settings `allowedModels` and `egressAllow` | a promotion writes the setting, recorded as a settings change by the promoting member; retiring the guardrail undoes its own write |
@@ -46,8 +46,72 @@ will see on stderr when it blocks.
 Hook rules are rendered from literal tool names and up to four literal
 argument fragments — the tool pattern is anchored, the argument pattern is a
 lookahead over the serialised input — so the same rule fires identically in
-the control plane's matcher, the MCP proxy's matcher and the emitted gate
-scripts. A parity fixture file runs every vector through all three.
+the control plane's matcher, the MCP proxy's matcher, the SDK gates and the
+emitted gate scripts. The LLM proxy is served the literals themselves and
+tests what the pattern means: the tool name exactly, case included, and each
+required fragment present in (each excluded fragment absent from) the same
+serialised input. When an enforcing rule and a shadow rule both match a call,
+the enforcing rule decides, wherever the two sit in the list. Two fixture
+files pin it: one runs every rule's cases through each matcher, and a layer
+vector file runs guardrails, what the control plane serves for them, a tool
+call and the expected decision (`block`, `warn` or `allow`, and the deciding
+rule) through the emitted gates, both SDK gates, the MCP proxy, the hosted
+hook gate, the AgentCore check and the LLM proxy. A layer that decides one
+vector differently fails its own test.
+
+The LLM proxy withholds a call an enforcing hook rule refuses before the
+client sees it, the way it withholds a `deny_tools` call: the response
+carries an in-band refusal (`TOOL_DENIED`, the rule id `guardrail.<id>` and
+the cited reason) instead of the call. On a stream, a rule that names only the
+tool refuses on the call's first event; a call whose arguments a rule
+constrains is held until its arguments are complete, then released whole or
+refused. A rule the proxy cannot read, or a call whose arguments are not
+readable JSON under a rule that constrains them, is refused rather than let
+through. The proxy also refuses a request whose latest turn reports a call an
+enforcing rule refuses (the harness ran it anyway), as it does for
+`deny_tools`.
+
+### Hook rules scoped to roles
+
+A hook rule can name the workspace roles it applies to (`owner`, `admin`,
+`em`, `developer`, `viewer`). Every layer then holds a member to it only when
+their workspace role is one of those, by the role of the member the
+credential belongs to — never by anything the agent or the request says:
+
+- **Hook gates on a connected machine** (Claude Code, Cursor and the other
+  emitted gates, and the policy-snapshot tier of the SDK gates) enforce the
+  snapshot the sync daemon builds with the member's own API key. The control
+  plane serves that key only the rules for its member's role, so a rule
+  scoped to other roles never reaches the machine.
+- **The SDK gates' SOP-rule tier** (`@intutic/gate`, `intutic-clawde`) and
+  **the MCP proxy** are served the same way, per key.
+- **The hosted hook gate and the AgentCore check** decide with the role of
+  the member behind the calling key.
+- **The LLM proxy** is served every rule with its roles, and applies them per
+  request by the role the control plane names for the request's virtual key.
+
+A rule with no roles applies to everyone. When a caller's role is not known —
+a standalone proxy with no control plane, a provider key with no member
+behind it, a role that could not be read — every rule applies, scoped or not:
+a rule that cannot show it does not apply, applies.
+
+Roles are compared with the member's workspace role only, so a hook rule may
+name only those five. Creating one, or editing its rule, with any other name
+(say `contractor`) is refused — by the API with a 400 naming the valid roles,
+by `intutic guardrails`, by Terraform at plan time and by the dashboard form.
+A rule written before that check that names one keeps being served, but no
+member matches it: it applies only when a caller's role is unknown. Its
+review card flags the role; edit the rule to a workspace role, or retire it.
+
+A role change — through the members page or API, or a SCIM group whose
+mapped role moves a member — takes effect on the member's next call at the
+hosted hook gate, the AgentCore check and the LLM proxy. Connected machines
+rebuild their snapshot when the control plane pushes the change, and at the
+latest on their next sync, 30 seconds by default (`intutic connect
+--interval`). The MCP proxy picks it up within its 60-second refresh (at
+once in daemon mode, which watches the workspace's config version). An SDK
+gate reads its rules once per process, so a running process keeps the rules
+it started with until it is restarted.
 
 ## Shadow first, then a person
 
@@ -265,7 +329,10 @@ Four ways in, one API:
 - **The hook-rule denominator is per call**, counted from the batches the
   gates drain. A machine whose snapshot had not refreshed yet counts as an
   evaluation that did not fire, which biases the would-act rate down by at
-  most one 30-second cycle per machine.
+  most one 30-second cycle per machine. The LLM proxy adds one evaluation per
+  response that carried a tool call, and the hosted hook gate records each
+  would-block as evidence without moving the denominator. A call that passes
+  both a hook gate and the proxy is counted by each.
 - **Extraction fidelity is measured against a recorded golden corpus.** The
   corpus (23 documents, two adversarial) has goldens recorded against a real
   model; a golden is a real extraction, never hand-written. The

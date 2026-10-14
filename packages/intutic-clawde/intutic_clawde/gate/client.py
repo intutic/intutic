@@ -2,7 +2,7 @@
 
 Endpoints used:
 
-  POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?, degraded?}
+  POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?, degraded?, decisionId?}
   POST /api/v1/hook-events     batched telemetry       -> creates governance_incidents rows
   POST /api/v1/judge/finalize  LLM judge verdict       -> {verdict, triggered, ...}
   POST /api/v1/decisions       record a hold           -> joins the review queue (hold.py)
@@ -46,6 +46,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import requests
+
+from ..control_plane import DEFAULT_CONTROL_PLANE_URL
 
 DEFAULT_TIMEOUT = 2.0
 EVENT_TIMEOUT = 2.0
@@ -118,14 +120,27 @@ class GateResponse:
     # refusals, GOVERNANCE_UNAVAILABLE when its checks could not run, and
     # INVALID_REQUEST when it could not read the request.
     code: Optional[str] = None
+    # The hook gate's id for this decision, when this answer is its own
+    # verdict: every verdict it gives names one, and a GOVERNANCE_UNAVAILABLE
+    # refusal keeps it only while fail_closed refuses too. The gate reports the
+    # call with it (`gateDecisionId`), so the control plane exports the
+    # decision to SIEM once and files its incident once.
+    decision_id: Optional[str] = None
 
 
 class GateClient:
     """Control-plane client for the pre-execution gate.
 
-    `harness` defaults to "langgraph" and is sent as `harnessType` on every
-    gate call and event, so incidents attribute to the right adapter. Override
-    it when wrapping a different framework.
+    `base_url` is the control plane's address: `INTUTIC_CONTROL_PLANE_URL`,
+    then Intutic's hosted control plane. Without an `api_key` the client is
+    `local_only`. `harness` defaults to "langgraph" and is sent as
+    `harnessType` on every gate call and event, so incidents attribute to the
+    right adapter. Override it when wrapping a different framework.
+    `fail_closed` blocks a call when the hook gate gives no verdict (the
+    control plane cannot be reached, answers without one, or answers
+    `GOVERNANCE_UNAVAILABLE`); False lets such a call go ahead. `timeout` is
+    how long one control-plane request may take, in seconds. `transport` and
+    `get_transport` replace the HTTP POST and GET calls, for tests.
     """
 
     def __init__(self, base_url: Optional[str] = None, api_key: str = "",
@@ -135,7 +150,7 @@ class GateClient:
                  transport: Optional[Transport] = None,
                  get_transport: Optional[GetTransport] = None):
         self.base_url = (base_url or os.environ.get("INTUTIC_CONTROL_PLANE_URL")
-                         or "https://api.intutic.ai").rstrip("/")
+                         or DEFAULT_CONTROL_PLANE_URL).rstrip("/")
         self.api_key = api_key
         self.workspace_id = workspace_id
         self.session_id = session_id
@@ -224,13 +239,13 @@ class GateClient:
                 )
             if exc.body.get("code") == GOVERNANCE_UNAVAILABLE:
                 return self._no_verdict(f"governance check unavailable ({GOVERNANCE_UNAVAILABLE})",
-                                        GOVERNANCE_UNAVAILABLE)
+                                        GOVERNANCE_UNAVAILABLE, exc.body.get("decisionId"))
             return self._no_verdict(f"unreachable ({type(exc).__name__})")
         except Exception as exc:
             return self._no_verdict(f"unreachable ({type(exc).__name__})")
         if d.get("allowed") is False and d.get("code") == GOVERNANCE_UNAVAILABLE:
             return self._no_verdict(f"governance check unavailable ({GOVERNANCE_UNAVAILABLE})",
-                                    GOVERNANCE_UNAVAILABLE)
+                                    GOVERNANCE_UNAVAILABLE, d.get("decisionId"))
         if not isinstance(d.get("allowed"), bool):
             return self._no_verdict("answered without a verdict")
         return GateResponse(
@@ -238,12 +253,21 @@ class GateClient:
             reason=str(d.get("reason", "")),
             incident_id=d.get("incidentId"),
             code=d.get("code") if isinstance(d.get("code"), str) else None,
+            decision_id=d.get("decisionId") if isinstance(d.get("decisionId"), str) else None,
         )
 
-    def _no_verdict(self, what: str, code: Optional[str] = None) -> GateResponse:
-        """The answer when the hook gate gave no verdict: `fail_closed` decides."""
+    def _no_verdict(self, what: str, code: Optional[str] = None,
+                    decision_id: Any = None) -> GateResponse:
+        """The answer when the hook gate gave no verdict: `fail_closed` decides.
+
+        A GOVERNANCE_UNAVAILABLE refusal's `decision_id` is kept when failing
+        closed, which refuses as the hook gate did, and dropped when failing
+        open: the call then runs, and its report must not stand for the
+        refusal.
+        """
         if self.fail_closed:
             return GateResponse(allowed=False, reached=False, code=code,
+                                decision_id=decision_id if isinstance(decision_id, str) else None,
                                 reason=f"hook-gate {what} — failing closed (fail_closed=True)")
         return GateResponse(allowed=True, reached=False, code=code,
                             reason=f"hook-gate {what} — failing open (fail_closed=False)")
@@ -252,8 +276,12 @@ class GateClient:
 
     def emit(self, event: str, tool_name: str, reason: str = "",
              tool_input: Optional[dict] = None, incident_id: Optional[str] = None,
-             file_path: Optional[str] = None) -> bool:
+             file_path: Optional[str] = None, gate_decision_id: Optional[str] = None) -> bool:
         """Fire-and-forget telemetry. Never raises.
+
+        `gate_decision_id` is the hook gate's `decisionId` for the call this
+        event reports: the control plane then files the decision's incident
+        once and does not export it to SIEM a second time.
 
         A `tool_blocked` event creates a governance_incidents row whose
         description embeds our reason verbatim:
@@ -285,6 +313,8 @@ class GateClient:
             ev["toolInput"] = tool_input
         if incident_id:
             ev["incidentId"] = incident_id
+        if gate_decision_id:
+            ev["gateDecisionId"] = gate_decision_id
         if file_path:
             ev["filePath"] = file_path[:512]
         try:
@@ -398,7 +428,7 @@ class GateClient:
         workspace `intutic login` already bound, instead of duplicating the key.
         With no key in either place the client is `local_only`.
         """
-        base = os.environ.get("INTUTIC_CONTROL_PLANE_URL", "https://api.intutic.ai")
+        base = os.environ.get("INTUTIC_CONTROL_PLANE_URL", DEFAULT_CONTROL_PLANE_URL)
         key = os.environ.get("INTUTIC_API_KEY", "")
         ws = os.environ.get("INTUTIC_WORKSPACE_ID", "")
 

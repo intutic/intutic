@@ -1,0 +1,1872 @@
+{
+  "generatedBy": "packages/shared-types/scripts/generate-guardrail-fixtures.ts",
+  "vectors": [
+    {
+      "name": "an enforcing literal refuses the call",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv01",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Reviewed plan before terraform apply",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "terraform apply"
+            ]
+          },
+          "citation": {
+            "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=301"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv01",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+            "action": "block",
+            "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv01 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv01\",\"tools\":[\"Bash\"],\"argContains\":[\"terraform apply\"],\"argNotContains\":[],\"reason\":\"Reviewed plan before terraform apply — policy: \\\"Engineers must never run terraform apply against production without a reviewed plan.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=301\ncite: e0a93e64fa4633ed8940c28e29c1cd73e41c7303d7172d5436b8edcee16805dd\n---\n# Reviewed plan before terraform apply\n\n> Engineers must never run terraform apply against production without a reviewed plan.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "terraform apply -auto-approve"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv01"
+      }
+    },
+    {
+      "name": "an enforcing literal lets another command through",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv02",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Reviewed plan before terraform apply",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "terraform apply"
+            ]
+          },
+          "citation": {
+            "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=301"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv02",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+            "action": "block",
+            "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv02 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv02\",\"tools\":[\"Bash\"],\"argContains\":[\"terraform apply\"],\"argNotContains\":[],\"reason\":\"Reviewed plan before terraform apply — policy: \\\"Engineers must never run terraform apply against production without a reviewed plan.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=301\ncite: e0a93e64fa4633ed8940c28e29c1cd73e41c7303d7172d5436b8edcee16805dd\n---\n# Reviewed plan before terraform apply\n\n> Engineers must never run terraform apply against production without a reviewed plan.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "terraform plan"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "a shadow literal flags and allows",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv03",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Reviewed plan before terraform apply",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "terraform apply"
+            ]
+          },
+          "citation": {
+            "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=301"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv03",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+            "action": "warn",
+            "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv03 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv03\",\"tools\":[\"Bash\"],\"argContains\":[\"terraform apply\"],\"argNotContains\":[],\"reason\":\"Reviewed plan before terraform apply — policy: \\\"Engineers must never run terraform apply against production without a reviewed plan.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=301\ncite: e0a93e64fa4633ed8940c28e29c1cd73e41c7303d7172d5436b8edcee16805dd\nmode: shadow\n---\n# Reviewed plan before terraform apply\n\n> Engineers must never run terraform apply against production without a reviewed plan.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "cd infra && terraform apply"
+        }
+      },
+      "expected": {
+        "decision": "warn",
+        "ruleId": "guardrail.pgr_lv03"
+      }
+    },
+    {
+      "name": "a refusal wins over an earlier shadow match",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv04a",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Pushes are reviewed",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "git push"
+            ]
+          },
+          "citation": {
+            "quote": "Every git push from an agent session is reviewed.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=302"
+          }
+        },
+        {
+          "guardrailId": "pgr_lv04b",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "No force push",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "git push",
+              "--force"
+            ]
+          },
+          "citation": {
+            "quote": "A force push (git push --force) to any shared branch is prohibited.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=303"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv04a",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*git\\ push)",
+            "action": "warn",
+            "reason": "Pushes are reviewed — policy: \"Every git push from an agent session is reviewed.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)",
+            "origin": "guardrail"
+          },
+          {
+            "id": "guardrail.pgr_lv04b",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*\\-\\-force)(?=[\\s\\S]*git\\ push)",
+            "action": "block",
+            "reason": "No force push — policy: \"A force push (git push --force) to any shared branch is prohibited.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=303)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv04a hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv04a\",\"tools\":[\"Bash\"],\"argContains\":[\"git push\"],\"argNotContains\":[],\"reason\":\"Pushes are reviewed — policy: \\\"Every git push from an agent session is reviewed.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=302\ncite: f70dc8bfbda1a0a023b067981d0fe1f6877f6c4b3e9bb798fa3c7ca52cceaf45\nmode: shadow\n---\n# Pushes are reviewed\n\n> Every git push from an agent session is reviewed.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          },
+          {
+            "title": "GUARDRAIL:pgr_lv04b hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv04b\",\"tools\":[\"Bash\"],\"argContains\":[\"--force\",\"git push\"],\"argNotContains\":[],\"reason\":\"No force push — policy: \\\"A force push (git push --force) to any shared branch is prohibited.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=303)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=303\ncite: 7de825f6764e217e31a33b7cb42aa9d52c9bc9ba032b95b579506be407d68fff\n---\n# No force push\n\n> A force push (git push --force) to any shared branch is prohibited.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "git push --force origin main"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv04b"
+      }
+    },
+    {
+      "name": "the shadow match stands when the refusal does not fire",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv05a",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Pushes are reviewed",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "git push"
+            ]
+          },
+          "citation": {
+            "quote": "Every git push from an agent session is reviewed.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=302"
+          }
+        },
+        {
+          "guardrailId": "pgr_lv05b",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "No force push",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "git push",
+              "--force"
+            ]
+          },
+          "citation": {
+            "quote": "A force push (git push --force) to any shared branch is prohibited.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=303"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv05a",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*git\\ push)",
+            "action": "warn",
+            "reason": "Pushes are reviewed — policy: \"Every git push from an agent session is reviewed.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)",
+            "origin": "guardrail"
+          },
+          {
+            "id": "guardrail.pgr_lv05b",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*\\-\\-force)(?=[\\s\\S]*git\\ push)",
+            "action": "block",
+            "reason": "No force push — policy: \"A force push (git push --force) to any shared branch is prohibited.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=303)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv05a hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv05a\",\"tools\":[\"Bash\"],\"argContains\":[\"git push\"],\"argNotContains\":[],\"reason\":\"Pushes are reviewed — policy: \\\"Every git push from an agent session is reviewed.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=302\ncite: f70dc8bfbda1a0a023b067981d0fe1f6877f6c4b3e9bb798fa3c7ca52cceaf45\nmode: shadow\n---\n# Pushes are reviewed\n\n> Every git push from an agent session is reviewed.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          },
+          {
+            "title": "GUARDRAIL:pgr_lv05b hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv05b\",\"tools\":[\"Bash\"],\"argContains\":[\"--force\",\"git push\"],\"argNotContains\":[],\"reason\":\"No force push — policy: \\\"A force push (git push --force) to any shared branch is prohibited.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=303)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=303\ncite: 7de825f6764e217e31a33b7cb42aa9d52c9bc9ba032b95b579506be407d68fff\n---\n# No force push\n\n> A force push (git push --force) to any shared branch is prohibited.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "git push origin main"
+        }
+      },
+      "expected": {
+        "decision": "warn",
+        "ruleId": "guardrail.pgr_lv05a"
+      }
+    },
+    {
+      "name": "a refusal wins over a later shadow match",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv06a",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "No force push",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "git push",
+              "--force"
+            ]
+          },
+          "citation": {
+            "quote": "A force push (git push --force) to any shared branch is prohibited.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=303"
+          }
+        },
+        {
+          "guardrailId": "pgr_lv06b",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Pushes are reviewed",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "git push"
+            ]
+          },
+          "citation": {
+            "quote": "Every git push from an agent session is reviewed.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=302"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv06a",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*\\-\\-force)(?=[\\s\\S]*git\\ push)",
+            "action": "block",
+            "reason": "No force push — policy: \"A force push (git push --force) to any shared branch is prohibited.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=303)",
+            "origin": "guardrail"
+          },
+          {
+            "id": "guardrail.pgr_lv06b",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*git\\ push)",
+            "action": "warn",
+            "reason": "Pushes are reviewed — policy: \"Every git push from an agent session is reviewed.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv06a hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv06a\",\"tools\":[\"Bash\"],\"argContains\":[\"--force\",\"git push\"],\"argNotContains\":[],\"reason\":\"No force push — policy: \\\"A force push (git push --force) to any shared branch is prohibited.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=303)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=303\ncite: 7de825f6764e217e31a33b7cb42aa9d52c9bc9ba032b95b579506be407d68fff\n---\n# No force push\n\n> A force push (git push --force) to any shared branch is prohibited.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          },
+          {
+            "title": "GUARDRAIL:pgr_lv06b hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv06b\",\"tools\":[\"Bash\"],\"argContains\":[\"git push\"],\"argNotContains\":[],\"reason\":\"Pushes are reviewed — policy: \\\"Every git push from an agent session is reviewed.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=302\ncite: f70dc8bfbda1a0a023b067981d0fe1f6877f6c4b3e9bb798fa3c7ca52cceaf45\nmode: shadow\n---\n# Pushes are reviewed\n\n> Every git push from an agent session is reviewed.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "git push origin main --force"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv06a"
+      }
+    },
+    {
+      "name": "an exclusion lets the dry run through",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv07",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "kubectl apply must be a dry run",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "kubectl apply"
+            ],
+            "argNotContains": [
+              "--dry-run"
+            ]
+          },
+          "citation": {
+            "quote": "kubectl apply from an agent session must use --dry-run.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=304"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv07",
+            "toolPattern": "^Bash$",
+            "argPattern": "^(?=[\\s\\S]*kubectl\\ apply)(?![\\s\\S]*\\-\\-dry\\-run)",
+            "action": "block",
+            "reason": "kubectl apply must be a dry run — policy: \"kubectl apply from an agent session must use --dry-run.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=304)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv07 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv07\",\"tools\":[\"Bash\"],\"argContains\":[\"kubectl apply\"],\"argNotContains\":[\"--dry-run\"],\"reason\":\"kubectl apply must be a dry run — policy: \\\"kubectl apply from an agent session must use --dry-run.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=304)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=304\ncite: a725279814e9bdc4afb28de19e1e6fb572b5b7c239ca2768fab2fafb5512b444\n---\n# kubectl apply must be a dry run\n\n> kubectl apply from an agent session must use --dry-run.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "kubectl apply --dry-run=client -f deploy.yaml"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "an exclusion refuses without it",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv08",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "kubectl apply must be a dry run",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "kubectl apply"
+            ],
+            "argNotContains": [
+              "--dry-run"
+            ]
+          },
+          "citation": {
+            "quote": "kubectl apply from an agent session must use --dry-run.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=304"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv08",
+            "toolPattern": "^Bash$",
+            "argPattern": "^(?=[\\s\\S]*kubectl\\ apply)(?![\\s\\S]*\\-\\-dry\\-run)",
+            "action": "block",
+            "reason": "kubectl apply must be a dry run — policy: \"kubectl apply from an agent session must use --dry-run.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=304)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv08 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv08\",\"tools\":[\"Bash\"],\"argContains\":[\"kubectl apply\"],\"argNotContains\":[\"--dry-run\"],\"reason\":\"kubectl apply must be a dry run — policy: \\\"kubectl apply from an agent session must use --dry-run.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=304)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=304\ncite: a725279814e9bdc4afb28de19e1e6fb572b5b7c239ca2768fab2fafb5512b444\n---\n# kubectl apply must be a dry run\n\n> kubectl apply from an agent session must use --dry-run.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "kubectl apply -f deploy.yaml"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv08"
+      }
+    },
+    {
+      "name": "an exclusion anywhere in the input counts",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv09",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "kubectl apply must be a dry run",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "kubectl apply"
+            ],
+            "argNotContains": [
+              "--dry-run"
+            ]
+          },
+          "citation": {
+            "quote": "kubectl apply from an agent session must use --dry-run.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=304"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv09",
+            "toolPattern": "^Bash$",
+            "argPattern": "^(?=[\\s\\S]*kubectl\\ apply)(?![\\s\\S]*\\-\\-dry\\-run)",
+            "action": "block",
+            "reason": "kubectl apply must be a dry run — policy: \"kubectl apply from an agent session must use --dry-run.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=304)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv09 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv09\",\"tools\":[\"Bash\"],\"argContains\":[\"kubectl apply\"],\"argNotContains\":[\"--dry-run\"],\"reason\":\"kubectl apply must be a dry run — policy: \\\"kubectl apply from an agent session must use --dry-run.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=304)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=304\ncite: a725279814e9bdc4afb28de19e1e6fb572b5b7c239ca2768fab2fafb5512b444\n---\n# kubectl apply must be a dry run\n\n> kubectl apply from an agent session must use --dry-run.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "description": "a --dry-run first",
+          "command": "kubectl apply -f a.yaml"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "tool names are matched exactly, case included",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv10",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "No recursive force delete",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "rm -rf"
+            ]
+          },
+          "citation": {
+            "quote": "Agents never run rm -rf on a workstation.",
+            "sourceUrl": null
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv10",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*rm\\ \\-rf)",
+            "action": "block",
+            "reason": "No recursive force delete — policy: \"Agents never run rm -rf on a workstation.\"",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv10 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv10\",\"tools\":[\"Bash\"],\"argContains\":[\"rm -rf\"],\"argNotContains\":[],\"reason\":\"No recursive force delete — policy: \\\"Agents never run rm -rf on a workstation.\\\"\"}\ncite: 45f0e717cbcf9f73d277f5247f8051fa1e3a34298da6da9cac0c902fb9345f07\n---\n# No recursive force delete\n\n> Agents never run rm -rf on a workstation.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "bash",
+        "toolInput": {
+          "command": "rm -rf build"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "a longer tool name is another tool",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv11",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "No recursive force delete",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "rm -rf"
+            ]
+          },
+          "citation": {
+            "quote": "Agents never run rm -rf on a workstation.",
+            "sourceUrl": null
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv11",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*rm\\ \\-rf)",
+            "action": "block",
+            "reason": "No recursive force delete — policy: \"Agents never run rm -rf on a workstation.\"",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv11 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv11\",\"tools\":[\"Bash\"],\"argContains\":[\"rm -rf\"],\"argNotContains\":[],\"reason\":\"No recursive force delete — policy: \\\"Agents never run rm -rf on a workstation.\\\"\"}\ncite: 45f0e717cbcf9f73d277f5247f8051fa1e3a34298da6da9cac0c902fb9345f07\n---\n# No recursive force delete\n\n> Agents never run rm -rf on a workstation.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "BashOutput",
+        "toolInput": {
+          "command": "rm -rf build"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "a name-only rule refuses any input",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv12",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Issues are filed by humans",
+            "tools": [
+              "mcp__github__create_issue"
+            ]
+          },
+          "citation": {
+            "quote": "Agents do not file GitHub issues; a human files them after review.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=305"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv12",
+            "toolPattern": "^mcp__github__create_issue$",
+            "action": "block",
+            "reason": "Issues are filed by humans — policy: \"Agents do not file GitHub issues; a human files them after review.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=305)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv12 hook_rule: mcp__github__create_issue",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv12\",\"tools\":[\"mcp__github__create_issue\"],\"argContains\":[],\"argNotContains\":[],\"reason\":\"Issues are filed by humans — policy: \\\"Agents do not file GitHub issues; a human files them after review.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=305)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=305\ncite: 8588f8e02eab8bb76c5c7cc60f2aa5edfa6f31c887ccf8781be50df2e2101436\n---\n# Issues are filed by humans\n\n> Agents do not file GitHub issues; a human files them after review.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "mcp__github__create_issue",
+        "toolInput": {
+          "title": "flaky test",
+          "body": "see CI"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv12"
+      }
+    },
+    {
+      "name": "a name-only rule ignores a neighbouring tool",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv13",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Issues are filed by humans",
+            "tools": [
+              "mcp__github__create_issue"
+            ]
+          },
+          "citation": {
+            "quote": "Agents do not file GitHub issues; a human files them after review.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=305"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv13",
+            "toolPattern": "^mcp__github__create_issue$",
+            "action": "block",
+            "reason": "Issues are filed by humans — policy: \"Agents do not file GitHub issues; a human files them after review.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=305)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv13 hook_rule: mcp__github__create_issue",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv13\",\"tools\":[\"mcp__github__create_issue\"],\"argContains\":[],\"argNotContains\":[],\"reason\":\"Issues are filed by humans — policy: \\\"Agents do not file GitHub issues; a human files them after review.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=305)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=305\ncite: 8588f8e02eab8bb76c5c7cc60f2aa5edfa6f31c887ccf8781be50df2e2101436\n---\n# Issues are filed by humans\n\n> Agents do not file GitHub issues; a human files them after review.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "mcp__github__create_issue_comment",
+        "toolInput": {
+          "body": "x"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "two tools, one path literal",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv14",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Workflow files are owned by platform",
+            "tools": [
+              "Write",
+              "Edit"
+            ],
+            "argContains": [
+              ".github/workflows/"
+            ]
+          },
+          "citation": {
+            "quote": "Changes under .github/workflows/ are made only by the platform team.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=306"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv14",
+            "toolPattern": "^(Edit|Write)$",
+            "argPattern": "(?=[\\s\\S]*\\.github\\/workflows\\/)",
+            "action": "block",
+            "reason": "Workflow files are owned by platform — policy: \"Changes under .github/workflows/ are made only by the platform team.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=306)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv14 hook_rule: Edit, Write",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv14\",\"tools\":[\"Edit\",\"Write\"],\"argContains\":[\".github/workflows/\"],\"argNotContains\":[],\"reason\":\"Workflow files are owned by platform — policy: \\\"Changes under .github/workflows/ are made only by the platform team.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=306)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=306\ncite: 0d5127267094f0b9b1f622757da8ec17b8a09e4477f06f99d7e5a1163c0d7d23\n---\n# Workflow files are owned by platform\n\n> Changes under .github/workflows/ are made only by the platform team.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Edit",
+        "toolInput": {
+          "file_path": "repo/.github/workflows/release.yml",
+          "old_string": "a",
+          "new_string": "b"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv14"
+      }
+    },
+    {
+      "name": "escaped quotes do not hide a literal",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv15",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Reviewed plan before terraform apply",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "terraform apply"
+            ]
+          },
+          "citation": {
+            "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=301"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv15",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+            "action": "block",
+            "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv15 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv15\",\"tools\":[\"Bash\"],\"argContains\":[\"terraform apply\"],\"argNotContains\":[],\"reason\":\"Reviewed plan before terraform apply — policy: \\\"Engineers must never run terraform apply against production without a reviewed plan.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=301\ncite: e0a93e64fa4633ed8940c28e29c1cd73e41c7303d7172d5436b8edcee16805dd\n---\n# Reviewed plan before terraform apply\n\n> Engineers must never run terraform apply against production without a reviewed plan.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "bash -c \"terraform apply\""
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv15"
+      }
+    },
+    {
+      "name": "a newline between the words is not the literal",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv16",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Reviewed plan before terraform apply",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "terraform apply"
+            ]
+          },
+          "citation": {
+            "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=301"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv16",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+            "action": "block",
+            "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv16 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv16\",\"tools\":[\"Bash\"],\"argContains\":[\"terraform apply\"],\"argNotContains\":[],\"reason\":\"Reviewed plan before terraform apply — policy: \\\"Engineers must never run terraform apply against production without a reviewed plan.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=301\ncite: e0a93e64fa4633ed8940c28e29c1cd73e41c7303d7172d5436b8edcee16805dd\n---\n# Reviewed plan before terraform apply\n\n> Engineers must never run terraform apply against production without a reviewed plan.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "terraform\napply"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "an empty input under a literal rule",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv17",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Reviewed plan before terraform apply",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "terraform apply"
+            ]
+          },
+          "citation": {
+            "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=301"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv17",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+            "action": "block",
+            "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv17 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv17\",\"tools\":[\"Bash\"],\"argContains\":[\"terraform apply\"],\"argNotContains\":[],\"reason\":\"Reviewed plan before terraform apply — policy: \\\"Engineers must never run terraform apply against production without a reviewed plan.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=301\ncite: e0a93e64fa4633ed8940c28e29c1cd73e41c7303d7172d5436b8edcee16805dd\n---\n# Reviewed plan before terraform apply\n\n> Engineers must never run terraform apply against production without a reviewed plan.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {}
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "a caller whose role is unknown is refused like any other",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv18",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Reviewed plan before terraform apply",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "terraform apply"
+            ]
+          },
+          "citation": {
+            "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=301"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv18",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+            "action": "block",
+            "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv18 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv18\",\"tools\":[\"Bash\"],\"argContains\":[\"terraform apply\"],\"argNotContains\":[],\"reason\":\"Reviewed plan before terraform apply — policy: \\\"Engineers must never run terraform apply against production without a reviewed plan.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=301\ncite: e0a93e64fa4633ed8940c28e29c1cd73e41c7303d7172d5436b8edcee16805dd\n---\n# Reviewed plan before terraform apply\n\n> Engineers must never run terraform apply against production without a reviewed plan.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": null,
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "terraform apply"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv18"
+      }
+    },
+    {
+      "name": "an admin is refused like any other",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv19",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Reviewed plan before terraform apply",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "terraform apply"
+            ]
+          },
+          "citation": {
+            "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=301"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv19",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+            "action": "block",
+            "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv19 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv19\",\"tools\":[\"Bash\"],\"argContains\":[\"terraform apply\"],\"argNotContains\":[],\"reason\":\"Reviewed plan before terraform apply — policy: \\\"Engineers must never run terraform apply against production without a reviewed plan.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=301\ncite: e0a93e64fa4633ed8940c28e29c1cd73e41c7303d7172d5436b8edcee16805dd\n---\n# Reviewed plan before terraform apply\n\n> Engineers must never run terraform apply against production without a reviewed plan.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "admin",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "terraform apply"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv19"
+      }
+    },
+    {
+      "name": "non-ASCII input around a literal",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv20",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "No recursive force delete",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "rm -rf"
+            ]
+          },
+          "citation": {
+            "quote": "Agents never run rm -rf on a workstation.",
+            "sourceUrl": null
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv20",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*rm\\ \\-rf)",
+            "action": "block",
+            "reason": "No recursive force delete — policy: \"Agents never run rm -rf on a workstation.\"",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv20 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv20\",\"tools\":[\"Bash\"],\"argContains\":[\"rm -rf\"],\"argNotContains\":[],\"reason\":\"No recursive force delete — policy: \\\"Agents never run rm -rf on a workstation.\\\"\"}\ncite: 45f0e717cbcf9f73d277f5247f8051fa1e3a34298da6da9cac0c902fb9345f07\n---\n# No recursive force delete\n\n> Agents never run rm -rf on a workstation.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "rm -rf ./données/été"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv20"
+      }
+    },
+    {
+      "name": "two enforcing rules: the one that matches decides",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv21a",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Reviewed plan before terraform apply",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "terraform apply"
+            ]
+          },
+          "citation": {
+            "quote": "Engineers must never run terraform apply against production without a reviewed plan.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=301"
+          }
+        },
+        {
+          "guardrailId": "pgr_lv21b",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Pushes are reviewed",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "git push"
+            ]
+          },
+          "citation": {
+            "quote": "Every git push from an agent session is reviewed.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=302"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv21a",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*terraform\\ apply)",
+            "action": "block",
+            "reason": "Reviewed plan before terraform apply — policy: \"Engineers must never run terraform apply against production without a reviewed plan.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)",
+            "origin": "guardrail"
+          },
+          {
+            "id": "guardrail.pgr_lv21b",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*git\\ push)",
+            "action": "block",
+            "reason": "Pushes are reviewed — policy: \"Every git push from an agent session is reviewed.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv21a hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv21a\",\"tools\":[\"Bash\"],\"argContains\":[\"terraform apply\"],\"argNotContains\":[],\"reason\":\"Reviewed plan before terraform apply — policy: \\\"Engineers must never run terraform apply against production without a reviewed plan.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=301)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=301\ncite: e0a93e64fa4633ed8940c28e29c1cd73e41c7303d7172d5436b8edcee16805dd\n---\n# Reviewed plan before terraform apply\n\n> Engineers must never run terraform apply against production without a reviewed plan.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          },
+          {
+            "title": "GUARDRAIL:pgr_lv21b hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv21b\",\"tools\":[\"Bash\"],\"argContains\":[\"git push\"],\"argNotContains\":[],\"reason\":\"Pushes are reviewed — policy: \\\"Every git push from an agent session is reviewed.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=302\ncite: f70dc8bfbda1a0a023b067981d0fe1f6877f6c4b3e9bb798fa3c7ca52cceaf45\n---\n# Pushes are reviewed\n\n> Every git push from an agent session is reviewed.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "git push origin feature"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv21b"
+      }
+    },
+    {
+      "name": "a literal in a nested value",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv22",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "No direct production database sessions",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "prod-db"
+            ]
+          },
+          "citation": {
+            "quote": "Nobody opens a session against prod-db from an agent.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=308"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv22",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*prod\\-db)",
+            "action": "block",
+            "reason": "No direct production database sessions — policy: \"Nobody opens a session against prod-db from an agent.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=308)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv22 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv22\",\"tools\":[\"Bash\"],\"argContains\":[\"prod-db\"],\"argNotContains\":[],\"reason\":\"No direct production database sessions — policy: \\\"Nobody opens a session against prod-db from an agent.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=308)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=308\ncite: c1c4392fdde5f0bcae4e9c1fefe955c8dfb551946c124ecf5ae31874d59d2f2a\n---\n# No direct production database sessions\n\n> Nobody opens a session against prod-db from an agent.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "psql",
+          "env": {
+            "PGHOST": "prod-db.internal",
+            "PGPORT": 5432
+          }
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv22"
+      }
+    },
+    {
+      "name": "a rule on Read",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv23",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Environment files stay unread",
+            "tools": [
+              "Read"
+            ],
+            "argContains": [
+              ".env"
+            ]
+          },
+          "citation": {
+            "quote": "Agents do not read .env files; secrets come from the vault.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=307"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv23",
+            "toolPattern": "^Read$",
+            "argPattern": "(?=[\\s\\S]*\\.env)",
+            "action": "block",
+            "reason": "Environment files stay unread — policy: \"Agents do not read .env files; secrets come from the vault.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=307)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv23 hook_rule: Read",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv23\",\"tools\":[\"Read\"],\"argContains\":[\".env\"],\"argNotContains\":[],\"reason\":\"Environment files stay unread — policy: \\\"Agents do not read .env files; secrets come from the vault.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=307)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=307\ncite: 1a352468d2c27615689690081b17b96b3376c9ca54d8ff86b7189bc27988281c\n---\n# Environment files stay unread\n\n> Agents do not read .env files; secrets come from the vault.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Read",
+        "toolInput": {
+          "file_path": "/repo/.env"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv23"
+      }
+    },
+    {
+      "name": "a shadow rule that does not match",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv24",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Environment files stay unread",
+            "tools": [
+              "Read"
+            ],
+            "argContains": [
+              ".env"
+            ]
+          },
+          "citation": {
+            "quote": "Agents do not read .env files; secrets come from the vault.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=307"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv24",
+            "toolPattern": "^Read$",
+            "argPattern": "(?=[\\s\\S]*\\.env)",
+            "action": "warn",
+            "reason": "Environment files stay unread — policy: \"Agents do not read .env files; secrets come from the vault.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=307)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv24 hook_rule: Read",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv24\",\"tools\":[\"Read\"],\"argContains\":[\".env\"],\"argNotContains\":[],\"reason\":\"Environment files stay unread — policy: \\\"Agents do not read .env files; secrets come from the vault.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=307)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=307\ncite: 1a352468d2c27615689690081b17b96b3376c9ca54d8ff86b7189bc27988281c\nmode: shadow\n---\n# Environment files stay unread\n\n> Agents do not read .env files; secrets come from the vault.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Read",
+        "toolInput": {
+          "file_path": "/repo/README.md"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "a role-scoped rule applies to a member in its role",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv25",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Developers do not open production database sessions",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "prod-db"
+            ],
+            "roles": [
+              "developer"
+            ]
+          },
+          "citation": {
+            "quote": "A developer never opens a session against prod-db from an agent; the on-call admin does.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=309"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv25",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*prod\\-db)",
+            "action": "block",
+            "reason": "Developers do not open production database sessions — policy: \"A developer never opens a session against prod-db from an agent; the on-call admin does.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=309)",
+            "origin": "guardrail",
+            "roles": [
+              "developer"
+            ]
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv25 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv25\",\"tools\":[\"Bash\"],\"argContains\":[\"prod-db\"],\"argNotContains\":[],\"reason\":\"Developers do not open production database sessions — policy: \\\"A developer never opens a session against prod-db from an agent; the on-call admin does.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=309)\",\"roles\":[\"developer\"]}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=309\ncite: 538e716c3ff85b0c3d9148a086c01951fc3ae5322280612ab4ec87fc210ed49e\n---\n# Developers do not open production database sessions\n\n> A developer never opens a session against prod-db from an agent; the on-call admin does.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "psql -h prod-db.internal"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv25"
+      }
+    },
+    {
+      "name": "a role-scoped rule does not apply outside its role",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv26",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Developers do not open production database sessions",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "prod-db"
+            ],
+            "roles": [
+              "developer"
+            ]
+          },
+          "citation": {
+            "quote": "A developer never opens a session against prod-db from an agent; the on-call admin does.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=309"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv26 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv26\",\"tools\":[\"Bash\"],\"argContains\":[\"prod-db\"],\"argNotContains\":[],\"reason\":\"Developers do not open production database sessions — policy: \\\"A developer never opens a session against prod-db from an agent; the on-call admin does.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=309)\",\"roles\":[\"developer\"]}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=309\ncite: 538e716c3ff85b0c3d9148a086c01951fc3ae5322280612ab4ec87fc210ed49e\n---\n# Developers do not open production database sessions\n\n> A developer never opens a session against prod-db from an agent; the on-call admin does.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "admin",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "psql -h prod-db.internal"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "a role-scoped rule applies when the caller's role is unknown",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv27",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Developers do not open production database sessions",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "prod-db"
+            ],
+            "roles": [
+              "developer"
+            ]
+          },
+          "citation": {
+            "quote": "A developer never opens a session against prod-db from an agent; the on-call admin does.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=309"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv27",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*prod\\-db)",
+            "action": "block",
+            "reason": "Developers do not open production database sessions — policy: \"A developer never opens a session against prod-db from an agent; the on-call admin does.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=309)",
+            "origin": "guardrail",
+            "roles": [
+              "developer"
+            ]
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv27 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv27\",\"tools\":[\"Bash\"],\"argContains\":[\"prod-db\"],\"argNotContains\":[],\"reason\":\"Developers do not open production database sessions — policy: \\\"A developer never opens a session against prod-db from an agent; the on-call admin does.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=309)\",\"roles\":[\"developer\"]}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=309\ncite: 538e716c3ff85b0c3d9148a086c01951fc3ae5322280612ab4ec87fc210ed49e\n---\n# Developers do not open production database sessions\n\n> A developer never opens a session against prod-db from an agent; the on-call admin does.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": null,
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "psql -h prod-db.internal"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv27"
+      }
+    },
+    {
+      "name": "a rule scoped to two roles applies to each",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv28",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Releases are cut by leads in person",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "gh release create"
+            ],
+            "roles": [
+              "developer",
+              "em"
+            ]
+          },
+          "citation": {
+            "quote": "Neither a developer nor an em cuts a release (gh release create) from an agent session.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=312"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv28",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*gh\\ release\\ create)",
+            "action": "block",
+            "reason": "Releases are cut by leads in person — policy: \"Neither a developer nor an em cuts a release (gh release create) from an agent session.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=312)",
+            "origin": "guardrail",
+            "roles": [
+              "developer",
+              "em"
+            ]
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv28 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv28\",\"tools\":[\"Bash\"],\"argContains\":[\"gh release create\"],\"argNotContains\":[],\"reason\":\"Releases are cut by leads in person — policy: \\\"Neither a developer nor an em cuts a release (gh release create) from an agent session.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=312)\",\"roles\":[\"developer\",\"em\"]}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=312\ncite: 440ac97ce1328fcdd69ab09233bfcc7f0f76c84af81827747b3fee5bbbaf004b\n---\n# Releases are cut by leads in person\n\n> Neither a developer nor an em cuts a release (gh release create) from an agent session.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "em",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "gh release create v2.1.0"
+        }
+      },
+      "expected": {
+        "decision": "block",
+        "ruleId": "guardrail.pgr_lv28"
+      }
+    },
+    {
+      "name": "a rule scoped to two roles leaves a third alone",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv29",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Releases are cut by leads in person",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "gh release create"
+            ],
+            "roles": [
+              "developer",
+              "em"
+            ]
+          },
+          "citation": {
+            "quote": "Neither a developer nor an em cuts a release (gh release create) from an agent session.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=312"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv29 hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv29\",\"tools\":[\"Bash\"],\"argContains\":[\"gh release create\"],\"argNotContains\":[],\"reason\":\"Releases are cut by leads in person — policy: \\\"Neither a developer nor an em cuts a release (gh release create) from an agent session.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=312)\",\"roles\":[\"developer\",\"em\"]}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=312\ncite: 440ac97ce1328fcdd69ab09233bfcc7f0f76c84af81827747b3fee5bbbaf004b\n---\n# Releases are cut by leads in person\n\n> Neither a developer nor an em cuts a release (gh release create) from an agent session.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "owner",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "gh release create v2.1.0"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "a refusal outside its role leaves the shadow match standing",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv30a",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Pushes are reviewed",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "git push"
+            ]
+          },
+          "citation": {
+            "quote": "Every git push from an agent session is reviewed.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=302"
+          }
+        },
+        {
+          "guardrailId": "pgr_lv30b",
+          "status": "ENFORCING",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Viewers never force push",
+            "tools": [
+              "Bash"
+            ],
+            "argContains": [
+              "git push",
+              "--force"
+            ],
+            "roles": [
+              "viewer"
+            ]
+          },
+          "citation": {
+            "quote": "A viewer may not force push (git push --force) to any branch.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=310"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv30a",
+            "toolPattern": "^Bash$",
+            "argPattern": "(?=[\\s\\S]*git\\ push)",
+            "action": "warn",
+            "reason": "Pushes are reviewed — policy: \"Every git push from an agent session is reviewed.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)",
+            "origin": "guardrail"
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv30a hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv30a\",\"tools\":[\"Bash\"],\"argContains\":[\"git push\"],\"argNotContains\":[],\"reason\":\"Pushes are reviewed — policy: \\\"Every git push from an agent session is reviewed.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=302)\"}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=302\ncite: f70dc8bfbda1a0a023b067981d0fe1f6877f6c4b3e9bb798fa3c7ca52cceaf45\nmode: shadow\n---\n# Pushes are reviewed\n\n> Every git push from an agent session is reviewed.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          },
+          {
+            "title": "GUARDRAIL:pgr_lv30b hook_rule: Bash",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv30b\",\"tools\":[\"Bash\"],\"argContains\":[\"--force\",\"git push\"],\"argNotContains\":[],\"reason\":\"Viewers never force push — policy: \\\"A viewer may not force push (git push --force) to any branch.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=310)\",\"roles\":[\"viewer\"]}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=310\ncite: f6ebd49f9daaf965ce211a3ee779c8db11bcdfc96a11a0df6988bd568928ca2d\n---\n# Viewers never force push\n\n> A viewer may not force push (git push --force) to any branch.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Bash",
+        "toolInput": {
+          "command": "git push --force origin main"
+        }
+      },
+      "expected": {
+        "decision": "warn",
+        "ruleId": "guardrail.pgr_lv30a"
+      }
+    },
+    {
+      "name": "a role-scoped shadow rule outside its role reports nothing",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv31",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Viewers do not read environment files",
+            "tools": [
+              "Read"
+            ],
+            "argContains": [
+              ".env"
+            ],
+            "roles": [
+              "viewer"
+            ]
+          },
+          "citation": {
+            "quote": "A viewer does not read .env files.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=311"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv31 hook_rule: Read",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv31\",\"tools\":[\"Read\"],\"argContains\":[\".env\"],\"argNotContains\":[],\"reason\":\"Viewers do not read environment files — policy: \\\"A viewer does not read .env files.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=311)\",\"roles\":[\"viewer\"]}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=311\ncite: cb817deac4af1766cc92086f0106c7c15851c1414689b3b2929353a5866f1a70\nmode: shadow\n---\n# Viewers do not read environment files\n\n> A viewer does not read .env files.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "developer",
+      "toolCall": {
+        "tool": "Read",
+        "toolInput": {
+          "file_path": "/repo/.env"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "ruleId": null
+      }
+    },
+    {
+      "name": "a role-scoped shadow rule in its role flags and allows",
+      "guardrails": [
+        {
+          "guardrailId": "pgr_lv32",
+          "status": "SHADOW",
+          "ir": {
+            "kind": "hook_rule",
+            "title": "Viewers do not read environment files",
+            "tools": [
+              "Read"
+            ],
+            "argContains": [
+              ".env"
+            ],
+            "roles": [
+              "viewer"
+            ]
+          },
+          "citation": {
+            "quote": "A viewer does not read .env files.",
+            "sourceUrl": "https://wiki.acme.dev/pages/viewpage.action?pageId=311"
+          }
+        }
+      ],
+      "served": {
+        "hookRules": [
+          {
+            "id": "guardrail.pgr_lv32",
+            "toolPattern": "^Read$",
+            "argPattern": "(?=[\\s\\S]*\\.env)",
+            "action": "warn",
+            "reason": "Viewers do not read environment files — policy: \"A viewer does not read .env files.\" (https://wiki.acme.dev/pages/viewpage.action?pageId=311)",
+            "origin": "guardrail",
+            "roles": [
+              "viewer"
+            ]
+          }
+        ],
+        "sops": [
+          {
+            "title": "GUARDRAIL:pgr_lv32 hook_rule: Read",
+            "markdownContent": "---\nhook_rule: {\"id\":\"guardrail.pgr_lv32\",\"tools\":[\"Read\"],\"argContains\":[\".env\"],\"argNotContains\":[],\"reason\":\"Viewers do not read environment files — policy: \\\"A viewer does not read .env files.\\\" (https://wiki.acme.dev/pages/viewpage.action?pageId=311)\",\"roles\":[\"viewer\"]}\nsource: https://wiki.acme.dev/pages/viewpage.action?pageId=311\ncite: cb817deac4af1766cc92086f0106c7c15851c1414689b3b2929353a5866f1a70\nmode: shadow\n---\n# Viewers do not read environment files\n\n> A viewer does not read .env files.\n\nProjected from the cited policy passage above; the hook_rule line is what the proxy enforces.\n",
+            "scope": "workspace"
+          }
+        ]
+      },
+      "role": "viewer",
+      "toolCall": {
+        "tool": "Read",
+        "toolInput": {
+          "file_path": "/repo/.env"
+        }
+      },
+      "expected": {
+        "decision": "warn",
+        "ruleId": "guardrail.pgr_lv32"
+      }
+    }
+  ]
+}

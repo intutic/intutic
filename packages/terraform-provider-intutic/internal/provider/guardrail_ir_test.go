@@ -126,3 +126,16 @@ func TestSameIRReadsPredicatesSemantically(t *testing.T) {
 		t.Fatal("a role is part of the rule")
 	}
 }
+
+func TestHookRuleRolesAreWorkspaceRoles(t *testing.T) {
+	for _, role := range []string{"owner", "admin", "em", "developer", "viewer", "DEVELOPER"} {
+		if msg := checkHookRuleRole(role); msg != "" {
+			t.Errorf("%q refused: %s", role, msg)
+		}
+	}
+	for _, role := range []string{"contractor", "deployer", "dev"} {
+		if checkHookRuleRole(role) == "" {
+			t.Errorf("%q accepted as a workspace role", role)
+		}
+	}
+}

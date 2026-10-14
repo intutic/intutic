@@ -92,6 +92,14 @@ export const SECURITY_POSTURES: readonly PosturePreset[] = [
 ] as const
 
 /**
+ * What every cost posture's response cache keeps, said where the posture is
+ * chosen: all three turn exact caching on, and a cache is stored data.
+ */
+const CACHE_STORAGE_NOTE =
+  'Cached answers are kept with their prompt text for 24 hours, scoped to this workspace; ' +
+  'an exchange in which DLP finds a secret or personal data is never cached.'
+
+/**
  * Cost postures: how aggressively the workspace pursues savings.
  *
  * Deliberately conservative about what "savings" may claim: routing quality is
@@ -106,7 +114,8 @@ export const COST_POSTURES: readonly PosturePreset[] = [
     description:
       'Bandit routing enforces its selections, and both response caches serve ' +
       'repeats without an upstream call. Routing learns from measured integrity ' +
-      'and cost; it detects malformed and truncated responses, not subtly worse ones.',
+      'and cost; it detects malformed and truncated responses, not subtly worse ones. ' +
+      CACHE_STORAGE_NOTE,
     settings: {},
     featureFlags: {
       ff_bandit_routing: true,
@@ -121,7 +130,8 @@ export const COST_POSTURES: readonly PosturePreset[] = [
     description:
       'Routing runs in shadow — it reports what it would have picked and what that ' +
       'would have saved, while every request is served by the model you asked for. ' +
-      'Exact-match caching on; semantic caching off.',
+      'Exact-match caching on; semantic caching off. ' +
+      CACHE_STORAGE_NOTE,
     settings: {},
     featureFlags: {
       ff_bandit_routing: false,
@@ -135,7 +145,8 @@ export const COST_POSTURES: readonly PosturePreset[] = [
     title: 'Quality first',
     description:
       'No routing, no semantic cache: every request is served by the requested ' +
-      'model, fresh, with only exact repeats of a whole request served from cache.',
+      'model, fresh, with only exact repeats of a whole request served from cache. ' +
+      CACHE_STORAGE_NOTE,
     settings: {},
     featureFlags: {
       ff_bandit_routing: false,

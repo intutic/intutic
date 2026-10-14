@@ -249,7 +249,7 @@ func (r *guardrailResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Description: "`max_calls` (required): the most calls allowed, 1 to 1000.",
 			},
 			"taint":     irString("`forbid_with` (required): `secrets()` or `pii()`."),
-			"roles":     irList("Every kind but `allowed_models` and `egress_allow`: the lower-case roles the rule applies to (at most 8). Unset, it applies to everyone."),
+			"roles":     irList("Every kind but `allowed_models` and `egress_allow`: the lower-case roles the rule applies to (at most 8). Unset, it applies to everyone. On a `hook_rule` these must be workspace roles (`owner`, `admin`, `em`, `developer`, `viewer`; any other name is refused at plan time), enforced at every gate by the role of the member behind the caller's key; a caller whose role is not known is held to the rule. On the front-matter kinds they are the agent role a request names."),
 			"models":    irList("`allowed_models` (required, 1 to 32): model ids, compared exactly as the proxy compares them."),
 			"hosts":     irList("`egress_allow` (required, 1 to 32): hosts (`api.example.com`), suffixes (`.example.com`) or IPv4 addresses and CIDRs no wider than /8."),
 			"rationale": irString("`wasm_predicate` (required): why the rule re-asks, at most 480 characters."),
@@ -353,6 +353,15 @@ func (r *guardrailResource) ValidateConfig(ctx context.Context, req resource.Val
 		}
 		for _, msg := range checkIRValue(ctx, f, v) {
 			resp.Diagnostics.AddAttributeError(path.Root(a.attr), "Invalid "+a.attr, msg)
+		}
+	}
+	if kind == "hook_rule" && !m.Roles.IsNull() && !m.Roles.IsUnknown() {
+		var roles []string
+		resp.Diagnostics.Append(m.Roles.ElementsAs(ctx, &roles, false)...)
+		for _, role := range roles {
+			if msg := checkHookRuleRole(role); msg != "" {
+				resp.Diagnostics.AddAttributeError(path.Root("roles"), "Invalid roles", msg)
+			}
 		}
 	}
 	if (kind == "requires_before" || kind == "forbid_after") && !m.First.IsNull() && !m.First.IsUnknown() && m.First.Equal(m.Then) {

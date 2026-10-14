@@ -39,7 +39,7 @@ It is a hybrid system divided between the **Local Rust Proxy** and the **Remote 
 
 **Yes, absolutely.** The open-core version is fully functional as a developer sandbox:
 *   Developers can define personal, local-only guidelines in `.intutic/sops/` subdirectories.
-*   The sync daemon compiles and merges these local guidelines into each harness's rules file in real-time, such as `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`.
+*   Once a control plane is connected, the sync daemon (`intutic connect`) also merges these local guidelines into each harness's rules file as they change, such as `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`.
 *   The local proxy reads the same files: it injects the SOPs that apply into each request and blocks tool calls they list under `deny_tools`, and custom WASM rules run in its sandbox.
 *   This setup protects developer privacy: local rule deviations are kept entirely offline in your workspace, while providing active stream-level interception and rule enforcement. Central database logging, trajectory analysis and config-drift reporting are only enabled when connected to the commercial control plane.
 
@@ -64,10 +64,10 @@ This allows you to enforce a wide variety of development standards, including:
 The token cost prediction works via a multi-tiered fallback architecture:
 
 #### Tier 1: Workspace Baseline (Connected)
-In a connected workspace, the control plane records each call's output and reasoning tokens in Valkey, per model and input-size bucket (`0-1k`, `1k-5k`, `5k-20k`, `20k-50k`, `50k+` tokens). With at least 3 samples for the model and bucket, `@intutic predict` (and `intutic predict-cost`) uses their average output and reasoning tokens, with `medium` confidence (`high` from 10 samples).
+In a connected workspace, the control plane records each call's output and reasoning tokens in Valkey, per model and input-size bucket (`0-1k`, `1k-5k`, `5k-20k`, `20k-50k`, `50k+` tokens). With at least 3 samples for the model and bucket, `@intutic predict` (and `intutic predict-cost`) uses their average output and reasoning tokens, with `medium` confidence (`high` from 10 samples). The same tokens are also recorded in a baseline across every workspace on the control plane; until a workspace has 3 samples of its own, the estimate uses that shared baseline when it has more samples.
 
 #### Tier 2: Static Token Multipliers (Zero-Data Fallback)
-With fewer than 3 samples (a brand new workspace, or a standalone proxy, which has no baseline), the engine falls back to static, model-specific token ratio multipliers:
+With fewer than 3 samples in either baseline (a model or input size nobody has used yet, or a standalone proxy, which has no baseline), the engine falls back to static, model-specific token ratio multipliers:
 *   **Claude models:** Estimated output is `0.8` $\times$ input tokens.
 *   **GPT-4 models:** Estimated output is `0.6` $\times$ input tokens.
 *   **Reasoning models (o1/o3/o4):** Estimated output is `2.0` $\times$ input tokens.
@@ -84,9 +84,9 @@ Once the output token count is estimated, the system multiplies both input and e
 
 If the agent LLM attempts to deviate or ignore the instructions (which is common because LLMs suffer from prompt-drift and instruction fatigue), the **Intutic Proxy Layer actively intercepts and blocks/corrects the action.** 
 
-The local Rust proxy acts as an inline firewalled gateway between the developer's agent client (e.g., Claude Code, Cursor) and the LLM providers (Anthropic, OpenAI, Gemini). It enforces rules through three active gates:
+The local Rust proxy acts as an inline firewalled gateway between the developer's agent client (e.g., Claude Code, Cursor) and the LLM providers (Anthropic, OpenAI, Gemini). It enforces rules through four mechanisms:
 
-1.  **Tool-Call Interception (`UnauthorizedToolDetector`):** If the LLM generates a tool call that an SOP in force lists under `deny_tools`, the proxy **intercepts and blocks** the request *before* the agent harness can execute it, returning a synthetic error message (e.g., `Forbidden tool call: bash — denied by an SOP in force for this node`). It is a denylist rather than an allowlist by design: open core has no way to enumerate every tool a harness might legitimately use, and an allowlist that gets it wrong blocks real work.
+1.  **Tool-Call Interception (`UnauthorizedToolDetector`):** If the LLM generates a tool call that an SOP in force lists under `deny_tools`, the proxy **withholds** the model's response *before* the agent harness can execute the call, and returns a refusal the agent reads instead (e.g., `[Intutic] Blocked tool call: bash. This tool is denied by an SOP in force for this agent role.`). It is a denylist rather than an allowlist by design: open core has no way to enumerate every tool a harness might legitimately use, and an allowlist that gets it wrong blocks real work.
 2.  **Response scanning:** The proxy scans response bodies with the same DLP pattern set and redacts findings before they reach the client. (Streaming responses are scrubbed mid-stream: every complete SSE line is scanned with the same pattern set and redacted before it reaches the client — or the judge, cache and trace. Input-side DLP remains the boundary that keeps secrets from ever leaving the machine; output-side findings are contained by redaction.) When judging is on for the session (`/intutic judge` or `/intutic start --auto-judge`) and the judge finds a deviation (e.g., writing a raw hex color code instead of a CSS variable), its verdict is appended to the response as a **Synthesis Card** detailing the violation, so the agent sees the correction on its next turn. A response the judge could not check is marked as unverified rather than passed as clean.
 3.  **Local Configuration File Integrity (`driftWatcher.ts`):** The sync daemon runs `driftWatcher.ts`, a local filesystem watcher using `chokidar` that monitors critical workspace files (like each harness's rules file, such as `.cursor/rules/intutic-governance.mdc`, or `.intutic/sops`). If the agent attempts to modify or delete these local guidelines, `driftWatcher.ts` immediately restores them, preventing the agent from silently disabling its own rules.
 4.  **Active Anomaly Correction (Enterprise Feature):** In remote connected environments, the control plane classifies each trace against the anomaly taxonomy as the agent interacts — `TOKEN_WASTE` measured against the developer's own median-cost baseline, `LOOP_DETECTED`, `SCOPE_VIOLATION`, `UNAUTHORIZED_TOOL`, and `WORKFLOW_GOAL_DRIFT`, raised when a session's plan-match score falls below threshold. When one fires, the `correctivePromptService` maps the anomaly to a steering recommendation (a corrective system prompt) and pushes it to the session's Valkey queue (`gov:notify:${sessionId}`) to be dynamically injected back into the agent's context window. The trigger is anomaly classification against measured thresholds — no embedding centroid is computed.
@@ -108,13 +108,13 @@ Predictions are per request, not per session. Each turn of an agent session carr
 If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with zero connection to the control plane or SaaS free tier), here is exactly what works and what does not:
 
 #### What works 100% locally in Standalone Open-Core:
-*   **Local Rule Synthesis & Syncing:** The `sync-daemon` scans `.intutic/sops/` and dynamically compiles/merges your local markdown guidelines into each harness's rules file (such as `.cursor/rules/intutic-governance.mdc`, `.windsurf/rules/intutic-governance.md` or the rules section of `AGENTS.md`) as files change.
 *   **Local Interception & Policy Enforcement:** The local Rust proxy intercepts LLM prompt/response streams, injects the local SOPs that apply into each request, blocks the tools they deny, runs your custom WASM rules, and redacts secrets with its DLP patterns.
 *   **Local Cost & Token Ledger:** Local JSON/JSONL logs store session traces and aggregate token metrics, query counts, and daily spend.
-*   **Local Cost Predictions:** `@intutic predict` queries your local JSONL history to compute sliding-window averages.
+*   **Local Cost Predictions:** `@intutic predict` estimates from the static per-model multipliers (see question 6); a standalone proxy keeps no token baseline.
 *   **Local Spending Caps (Rust Proxy):** Enforces global daily limits set in `~/.intutic/config.json` natively inside the proxy gateway.
 
 #### What is Gated (Requires control plane / SaaS Tier):
+*   **Writing SOPs into harness rules files:** the sync daemon (`intutic connect`) merges `.intutic/sops/` into each harness's rules file (such as `.cursor/rules/intutic-governance.mdc` or the rules section of `AGENTS.md`), and it needs a control plane. Standalone, the proxy injects the same SOPs into each request instead.
 *   **Ticket Board Integrations (Jira / Linear):** `@intutic initialize` cannot log into enterprise APIs to pull issues. Scoping local rules via `--sops` still works, but cost attribution to a Jira key is unavailable.
 *   **Central Governance Dashboard:** The web UI for tracking team-wide spending, compute budgets, and developer audits is disabled.
 *   **Corporate Policy Distribution:** Centralized policy management and automated distribution of tamper-proof global SOPs to developers requires the control plane.
@@ -206,7 +206,7 @@ Intutic supports local-first development by letting developers test custom promp
     ```bash
     intutic sops push <rule-group-name>
     ```
-    This packages the rule group's markdown files, posts them to `/api/v1/sops`, and writes them to the central the control plane’s datastore `sops` table.
+    This pushes each of the rule group's markdown files to the control plane's SOP registry: a new SOP for a file pushed the first time, an update to the same SOP afterwards (each file records the SOP it was pushed to).
 *   **Workspace-wide Distribution:** During subsequent sync cycles, the sync daemons of all other developers in the workspace automatically fetch the newly promoted rule with the workspace's sync config and write it into their respective adapter configs (like `.cursor/rules/intutic-governance.mdc` or `.claude/rules/intutic-governance.md`).
 
 ---

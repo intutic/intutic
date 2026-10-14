@@ -92,6 +92,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_AG2 branches
     ToolErrorEvent = None  # type: ignore[assignment]
     _HAS_AG2 = False
 
+__all__ = ["IntuticMiddleware", "make_intutic_middleware"]
+
 
 def _make_on_tool_execution(gate: Optional[Gate]):
     async def on_tool_execution(self: Any, call_next: Any, event: Any, context: Any) -> Any:

@@ -50,12 +50,15 @@ Vague rules like "be careful with data" don't give agents clear boundaries. Writ
 
 ## The SOP lifecycle
 
-SOPs follow a 7-state lifecycle. Only `VALIDATED` SOPs are actively enforced; `HYPOTHESIZED` and `REFINED` SOPs run in shadow.
+SOPs follow a 7-state lifecycle. Only `VALIDATED` SOPs are actively enforced; `HYPOTHESIZED` and `REFINED` SOPs run in shadow. A deleted SOP, or one a new version replaced, is enforced by nothing, whatever its state.
 
 ```
-DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATED
-                                                                    ↓
-                                                              INVALIDATED
+DRAFT ↔ PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATED
+              ↑                           │            │        │     │
+              │                           └────────────┼────────┘     │
+              │                                        ↓              │
+              │                                   INVALIDATED         │
+              └────────────── re-review after a cascade ──────────────┘
 ```
 
 | State | When to use |
@@ -69,6 +72,10 @@ DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATE
 | **INVALIDATED** | Retired, superseded, or found to be incorrect |
 
 Every transition needs the OWNER or ADMIN role, as creating and editing a SOP do. Moving from `PENDING_REVIEW` to `GENERATED` also needs the SOP's Gödel score to pass its threshold.
+
+### Editing a SOP past draft
+
+A draft is edited in place. Editing a SOP in any later state, or approving an amendment against it, creates the next version as a new `DRAFT` with a new id, which goes through the same lifecycle. The version you edited keeps its state meanwhile: a `VALIDATED` SOP keeps enforcing while the new version is reviewed and tested, and is retired only when the new version is promoted to `VALIDATED`. A workspace is never left without the enforcing version of a guideline because an edit is in review.
 
 ### The compiled graph gate
 
@@ -172,6 +179,7 @@ a legitimate state. Every SOP-derived control then resolves to nothing:
 | `max_calls:` | call ceilings stop applying, and there is no built-in floor |
 | `forbid_with:` | taint co-occurrence stops being refused |
 | `sql_guard:` | destructive SQL against a non-allowlisted database stops being refused |
+| `hook_rule:` | hook-rule guardrails stop being enforced on the model's tool calls |
 
 SOP prompt injection is a no-op as well, so the agent is never told the rules either.
 
@@ -274,7 +282,7 @@ In addition to organization-wide policies synced from the centralized control pl
 * **Initialization & Scoping**: When you run `@intutic initialize`, the control plane lists both open board tickets and detected local rules folders as numbered choices.
 * **Activating SOPs**: Start the session scoping to a subset of local SOPs using option indices or names with the `--sops` flag (e.g., `@intutic start 1 --sops=3` or `@intutic start --sops=security-dlp`).
 * **Execution**: During the scoped session, the local daemon merges only the selected active local rules with corporate policies before writing them to each harness's rules file (such as `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`) and evaluating pre-flight prompts. If no options are specified, all detected local SOP folders are active by default.
-* **Privacy Preservation**: If a personal prose rule is violated, the anomaly is flagged in the developer's console output to offer steering guidance. `deny_tools:` front matter in the same files is enforced harder: a call to a denied tool is blocked outright (403, `UNAUTHORIZED_TOOL`), and `allow_harnesses:` restricts which harnesses a role may use, but **no incident is logged in the remote organization database/dashboard**. `plan_steps:` is advisory rather than blocking — it declares the steps the SOP's task should consist of, and work drifting outside them raises a `SCOPE_VIOLATION` that steers. See [Graph guardrails](/guide/graph-guardrails#did-it-stay-inside-the-plan).
+* **Privacy Preservation**: If a personal prose rule is violated, the anomaly is flagged in the developer's console output to offer steering guidance. `deny_tools:` front matter in the same files is enforced harder: a call to a denied tool is blocked outright (the proxy withholds the response that carries it and the agent reads an `UNAUTHORIZED_TOOL` refusal instead), and `allow_harnesses:` restricts which harnesses a role may use, but **no incident is logged in the remote organization database/dashboard**. `plan_steps:` is advisory rather than blocking — it declares the steps the SOP's task should consist of, and work drifting outside them raises a `SCOPE_VIOLATION` that steers. See [Graph guardrails](/guide/graph-guardrails#did-it-stay-inside-the-plan).
 * **Sharing & Version Control**: Since these rules are standard text files, you can check them into Git version control to share with specific teammates or add the `.intutic/sops/` folder to `.gitignore` to keep them strictly private to your machine.
 
 ## Change classification
@@ -283,12 +291,12 @@ When you update a validated SOP, Intutic classifies the change for the audit tra
 
 | Classification | Meaning |
 |----------------|---------|
-| **STRENGTHEN** | Making the rule stricter (e.g., blocking more actions) |
+| **STRENGTHEN** | Making the rule stricter: it adds a safety rule (a keyword such as `must not`, `prohibited`, `require approval`, `deny`), removes none, and is not more than a fifth shorter |
 | **CLARIFY** | Improving wording without changing scope |
 | **NARROW** | Reducing the scope of what the rule covers |
 | **WEAKEN** | Making the rule more permissive |
 
-Every edit needs the OWNER or ADMIN role, and an edit classified `WEAKEN` needs an OWNER: an Admin's is refused with 403 `WEAKEN_REQUIRES_OWNER` and nothing is saved. Approving a Dream Cycle amendment that weakens a guideline needs an OWNER too; a MetaClaw amendment applied by auto-approval is not gated. The classification is returned with every edit, as `antiGaming`.
+Every edit needs the OWNER or ADMIN role, and an edit classified `WEAKEN` needs an OWNER: an Admin's is refused with 403 `WEAKEN_REQUIRES_OWNER` and nothing is saved. Approving a Dream Cycle amendment that weakens a guideline needs an OWNER too. No automated writer gets that exemption: the SOP Optimizer applies a change without review only when it is classified `STRENGTHEN`, and everything else waits for a person (see [What auto-apply applies](/guide/metaclaw#what-auto-apply-applies)). The classification is returned with every edit, as `antiGaming`.
 
 ## Best practices
 

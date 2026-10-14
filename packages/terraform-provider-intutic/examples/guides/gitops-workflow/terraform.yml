@@ -1,0 +1,77 @@
+# .github/workflows/intutic.yml: plan on pull requests, apply on merge to main,
+# and look for drift every morning. The configuration lives in intutic/.
+name: intutic
+
+on:
+  pull_request:
+    paths: ["intutic/**"]
+  push:
+    branches: [main]
+    paths: ["intutic/**"]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time, so an apply never races a plan for the state lock.
+concurrency:
+  group: intutic
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: intutic
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      INTUTIC_API_KEY: ${{ secrets.INTUTIC_PLAN_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend-config=backend.hcl
+      - run: terraform validate
+      - run: terraform plan
+
+  apply:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Protect this environment (required reviewers, main only) and keep the
+    # apply key in its secrets, out of reach of pull-request jobs.
+    environment: intutic
+    env:
+      INTUTIC_API_KEY: ${{ secrets.INTUTIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+      - run: terraform init -backend-config=backend.hcl
+      - run: terraform plan -out=tfplan
+      - run: terraform apply tfplan
+
+  drift:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      INTUTIC_API_KEY: ${{ secrets.INTUTIC_PLAN_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+      - run: terraform init -backend-config=backend.hcl
+      # Exit code 2 means the workspace no longer matches main: the job fails
+      # and the plan in its log shows what changed.
+      - run: terraform plan -detailed-exitcode

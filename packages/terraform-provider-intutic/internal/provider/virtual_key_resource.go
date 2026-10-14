@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -24,6 +26,23 @@ import (
 // Virtual-key routes: routes/keys.ts, validated by CreateApiKeyInputSchema
 // and UpdateApiKeyInputSchema. The key's spend budgets and rate limit change
 // in place through PATCH /api/v1/keys/:id; every other input replaces the key.
+
+// The scopes a key can hold: shared-types' API_SCOPE_NAMES, which the API
+// validates against. Checked here so an unknown scope fails at plan time rather
+// than as a 400 mid-apply; shared-types' test suite asserts this file matches.
+//
+//go:embed api_key_scopes.json
+var apiKeyScopesJSON []byte
+
+var validKeyScopes = func() []string {
+	var f struct {
+		Scopes []string `json:"scopes"`
+	}
+	if err := json.Unmarshal(apiKeyScopesJSON, &f); err != nil {
+		panic(err)
+	}
+	return f.Scopes
+}()
 
 type virtualKeyResource struct{ client *client.Client }
 
@@ -53,16 +72,16 @@ type keyRateLimit struct {
 }
 
 type apiKey struct {
-	KeyID            string   `json:"keyId"`
-	Key              string   `json:"key"`
-	KeyPrefix        string   `json:"keyPrefix"`
-	Label            string   `json:"label"`
-	Scopes           []string `json:"scopes"`
-	AllowedModels    []string `json:"allowedModels"`
-	ExpiresAt        *string  `json:"expiresAt"`
-	RevokedAt        *string  `json:"revokedAt"`
-	CreatedAt        string   `json:"createdAt"`
-	IsServiceAccount *bool    `json:"isServiceAccount"`
+	KeyID            string        `json:"keyId"`
+	Key              string        `json:"key"`
+	KeyPrefix        string        `json:"keyPrefix"`
+	Label            string        `json:"label"`
+	Scopes           []string      `json:"scopes"`
+	AllowedModels    []string      `json:"allowedModels"`
+	ExpiresAt        *string       `json:"expiresAt"`
+	RevokedAt        *string       `json:"revokedAt"`
+	CreatedAt        string        `json:"createdAt"`
+	IsServiceAccount *bool         `json:"isServiceAccount"`
 	Budgets          []spendBudget `json:"budgets"`
 	RateLimit        keyRateLimit  `json:"rateLimit"`
 }
@@ -99,7 +118,15 @@ func (r *virtualKeyResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,
-				Description: "Scopes recorded on the key; defaults to `[\"*\"]`. Attenuated child keys can only narrow them.",
+				Description: "What the key may do on top of its owner's role; defaults to `[\"*\"]` (everything the role allows). " +
+					"`gateway:use` covers agent traffic (LLM calls through the proxy, hook gates, SDKs, the sync daemon) and is " +
+					"the least-privilege choice for a key that only runs agents or CI; `<area>:read` and `<area>:write` cover an " +
+					"area of the REST API, and `write` includes `read`. Requests outside the scopes get 403 `INSUFFICIENT_SCOPE`. " +
+					"The valid scopes are listed under [API key scopes](https://docs.intutic.ai/reference/api#api-key-scopes). Changing them replaces the key.",
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
+					listvalidator.ValueStringsAre(stringvalidator.OneOf(validKeyScopes...)),
+				},
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.RequiresReplaceIfConfigured(),
 					listplanmodifier.UseStateForUnknown(),

@@ -9,7 +9,7 @@ looks and what `INTUTIC_SOPS_DIR` is for.
 
 ## The keys
 
-Ten keys can block, steer or hold a run. Everything else in a SOP is prose,
+Eleven keys can block, steer or hold a run. Everything else in a SOP is prose,
 injected into the agent's context and advisory by construction — the model may
 ignore it.
 
@@ -18,13 +18,14 @@ ignore it.
 | `deny_tools:` | `Bash, WebFetch` | Blocks the tool outright (403). |
 | `allow_harnesses:` | `claude-code, cursor` | Restricts which harnesses a role may use. |
 | `plan_steps:` | `Read, Edit, Bash, action:run_tests` | Work drifting outside the declared steps is steered. |
-| `scope_paths:` | `src, docs` | File access outside these paths is steered. |
+| `scope_paths:` | `src, docs` | A file write outside these paths is steered; reads are not checked. |
 | `review_before:` | `action:deploy` | Holds the run for human approval — at every hook gate before the call runs, and at the proxy after it. |
 | `requires_before:` | `A -> B` | B is refused unless A appeared earlier. |
 | `forbid_after:` | `A -> B` | B is refused if A appeared earlier. |
 | `max_calls:` | `A <= N` | Refuses the N+1th call of A. |
 | `forbid_with:` | `taint(), token` | Refuses the two together in one request. |
 | `sql_guard:` | `refuse` or `warn`, with `sql_allow_dsns:` | Refuses (or logs) destructive SQL in a shell call aimed at a database not on the allowlist. See [Destructive SQL](#destructive-sql). |
+| `hook_rule:` | one JSON object per line | Refuses a tool call by tool name and argument literals. See [Hook rules](#hook-rules). |
 
 ::: warning Two shapes that look right and match nothing
 
@@ -53,14 +54,16 @@ own detectors are concerned, it is.
 
 The parser reads keys by line prefix and ignores every key it does not know,
 so a SOP may carry annotations the proxy never acts on. Intutic's own tooling
-writes three: the first two come from generating front matter from a cited
-policy passage:
+writes five: the first two come from generating front matter from a cited
+policy passage, the last two are `intutic sops pull`/`push`'s sync record:
 
 | Key | Shape | What it is |
 | :--- | :--- | :--- |
 | `source:` | a URL | Where the rule's text came from — the upstream page. |
 | `cite:` | a hex digest | The hash of the exact passage the rule was derived from. |
 | `content_hash:` | a hex digest | `intutic sops pull` and `intutic guardrails pull`'s marker: the hash of the body when the file was written, so a later pull can tell an upstream change from a local edit. |
+| `intutic_id:` | a SOP id (`sp_…`) | The control-plane SOP this file was last pulled from or pushed to; `intutic sops push` updates it instead of creating a new one. |
+| `intutic_revision:` | an integer | That SOP's edit counter at the last sync, sent as the push's precondition so an edit made on the control plane since is refused, not overwritten. Not the `version:` semver. |
 
 None of them blocks, steers or holds anything. They exist so a rule on disk still
 says which sentence it stands on; the enforcing keys above are the only ones
@@ -168,9 +171,10 @@ forbid_with: secrets(), action:http_post
 ```
 
 Refuses a request where a secret is present *and* the named token appears. The
-left side is `secrets()` or `pii()` — the two categories the DLP scanner reports.
+left side is `secrets()` or `pii()`, the only two taints.
 `secrets()` covers credentials as well as keys, so a database URL with a password
-in it counts.
+in it counts, and `pii()` covers custom `phi` patterns as well as personal data:
+there is no separate `phi()`. A rule naming one is ignored with a warning in the proxy log, and the rest of the SOP still loads.
 
 ::: warning This is co-occurrence, not flow
 The DLP scan reports that a secret is **present in the request**, with an offset
@@ -255,6 +259,40 @@ from a program (`python -c …`), and migration tools (`prisma migrate reset`,
 `rails db:drop`) — none of these are SQL-client invocations, and a migration
 command passes untouched. The response gate must be on
 (`intutic_settings.response_gate.enabled`, the default); with it off, so is this.
+
+## Hook rules
+
+A hook-rule [policy guardrail](/guide/policy-guardrails) reaches the proxy as
+one `hook_rule:` line, in the SOP the control plane serves for it (and the file
+`intutic guardrails pull` writes). The value is one JSON object on one line:
+
+```yaml
+---
+hook_rule: {"id":"guardrail.pgr_x","tools":["Bash"],"argContains":["kubectl apply"],"argNotContains":["--dry-run"],"reason":"kubectl apply must be a dry run"}
+---
+```
+
+The rule fires on a call to one of `tools` — the exact name, case included —
+whose arguments, serialised as compact JSON, contain every `argContains`
+literal and none of the `argNotContains` ones. The response gate withholds the
+call before the client sees it and answers with a `TOOL_DENIED` refusal naming
+`id`; `mode: shadow` in the same block reports instead. The proxy also refuses a
+request whose latest turn reports a call the rule refuses.
+
+A rule scoped to workspace roles carries them, lower case:
+`"roles":["developer","em"]`. The proxy applies it only to a request whose
+virtual key belongs to a member holding one of those roles, by the role the
+control plane's key context names for the key (cached per key for 30 seconds,
+and read again on the key's next request once the workspace's policy changes,
+which a role change announces). With no control plane or no virtual key the
+role is not known, and the rule applies. This is the member's role, not the
+agent role a `roles:` line scopes by.
+
+A `hook_rule:` line the proxy cannot read — not JSON, no `tools`, an empty
+literal, or a key it does not know — is not ignored: it refuses every tool call
+while it is in force, and the load names it. A call whose arguments are not
+JSON is refused by a rule that constrains arguments, since whether a literal is
+in them cannot be shown. A rule that names only tools decides on the name.
 
 ## The `action:` vocabulary
 
