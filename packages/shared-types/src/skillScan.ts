@@ -554,12 +554,34 @@ export const SKILL_CONTENT_TRANSPORT_CHARS = 65536
 
 /**
  * A skill's content as the semantic judge receives it — truncated to
- * {@link SKILL_CONTENT_TRANSPORT_CHARS} — and therefore the text its verdict is
- * keyed by. The control plane hashes what it received; the sync daemon hashes
- * this to look the verdict up. Hashing the whole file on one side and the
- * truncated copy on the other meant a `SKILL.md` over the cap was judged but
- * its verdict never found.
+ * {@link SKILL_CONTENT_TRANSPORT_CHARS}. Clients send it together with the
+ * whole file's sha256 and length (`fullSha256`, `fullLength`): the control
+ * plane keys the verdict by the whole file's hash, so a skill judged clean
+ * cannot gain a tail past the cap and keep its verdict, and a file longer
+ * than the cap is `partially_scanned`, never `clean`.
  */
 export function skillContentForTransport(content: string): string {
   return content.length > SKILL_CONTENT_TRANSPORT_CHARS ? content.slice(0, SKILL_CONTENT_TRANSPORT_CHARS) : content
+}
+
+/**
+ * The semantic judge's verdict on one `SKILL.md`, as the control plane stores
+ * it and attaches it to a reported skill.
+ *
+ * - `clean` / `suspicious` / `malicious`: the judge read the whole file.
+ *   A flag from any part of the file flags the skill.
+ * - `partially_scanned`: the judge found nothing in what it read, but the file
+ *   is longer than {@link SKILL_CONTENT_TRANSPORT_CHARS}, so the rest was never
+ *   read. Never `clean`: posture treats it as needing review.
+ * - `unjudged`: a judge call failed, or the daily judge cap ran out before every
+ *   part was read. Not stored, so the next report retries.
+ */
+export type SemanticSkillVerdict = 'clean' | 'suspicious' | 'malicious' | 'partially_scanned' | 'unjudged'
+
+/** Why a `partially_scanned` skill needs review — shown in posture and the CLI. */
+export const SKILL_PARTIAL_SCAN_REASON = 'Only the first 64K (65,536) characters were checked'
+
+/** Whether a file of `fullLength` characters is longer than the semantic judge can receive. */
+export function skillExceedsTransportCap(fullLength: number): boolean {
+  return fullLength > SKILL_CONTENT_TRANSPORT_CHARS
 }

@@ -37,6 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A skill's semantic verdict covers the whole file.** With
+  `semanticSkillAnalysisEnabled`, `intutic skill audit` sends the first 65,536
+  characters of each `SKILL.md`, and the verdict was keyed by the hash of that
+  text, so a skill judged clean could gain any tail past the cap and keep its
+  verdict; the judge also read only the first 16 KiB of what it was sent. The
+  CLI and the sync daemon now send the SHA-256 and length of the whole file
+  (`fullSha256`, `fullLength`), and the verdict is keyed by the whole file. The
+  judge reads everything it is sent, in up to four overlapping windows, each
+  counted against the daily judge cap; a flag in any window flags the skill. A
+  file longer than 65,536 characters is never reported clean: it is
+  `partially_scanned` and needs review ("Only the first 64K (65,536) characters
+  were checked"), and `intutic skill audit` names it in a warning. The
+  deterministic pattern scan still reads the whole file.
 - **Subpath types for `moduleResolution: node`.** `@intutic/gate` and
   `@intutic/sync-daemon` pointed `typesVersions` at `src/*.ts`, which their
   tarballs do not contain, so a consumer on `moduleResolution: node` got no

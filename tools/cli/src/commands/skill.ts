@@ -17,6 +17,8 @@ import { createApiClient } from '../lib/api.js'
 import {
   scanSkillContent,
   skillContentForTransport,
+  skillExceedsTransportCap,
+  SKILL_PARTIAL_SCAN_REASON,
   SKILL_SCAN_PATTERNS,
   scanScriptContent,
   SCRIPT_SCAN_PATTERNS,
@@ -102,6 +104,14 @@ export interface SkillReportEntry {
    * explains.
    */
   content?: string
+  /**
+   * sha256 and length (characters) of the WHOLE file, sent with `content`.
+   * The control plane keys the semantic verdict by `fullSha256`, so a skill
+   * judged clean that gains a tail past the cap no longer matches it, and a
+   * `fullLength` over the cap is judged `partially_scanned`, never clean.
+   */
+  fullSha256?: string
+  fullLength?: number
 }
 
 /**
@@ -220,8 +230,16 @@ export async function auditSkillFile(
   }
 
   const contentLines = content.split('\n')
+  // The deterministic scan reads the whole file; only the judge's copy is capped.
   const result = scanSkillContent(content)
   const sha256 = createHash('sha256').update(content, 'utf8').digest('hex')
+
+  if (attachContent && skillExceedsTransportCap(content.length) && !quiet) {
+    log.warn(
+      `[${filePath}] ${content.length} characters, longer than the semantic judge reads. ` +
+        `${SKILL_PARTIAL_SCAN_REASON}: the skill is reported as partially scanned and needs review.`,
+    )
+  }
 
   if (!result.clean && !quiet) {
     for (const finding of result.findings) {
@@ -258,7 +276,9 @@ export async function auditSkillFile(
     sha256,
     scanned: true,
     kind: 'skill_md',
-    ...(attachContent ? { content: capContentForTransport(content) } : {}),
+    ...(attachContent
+      ? { content: capContentForTransport(content), fullSha256: sha256, fullLength: content.length }
+      : {}),
   }
 }
 
