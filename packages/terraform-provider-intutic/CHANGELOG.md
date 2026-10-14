@@ -1,4 +1,4 @@
-## 0.2.1 (Unreleased)
+## 0.3.0 (Unreleased)
 
 BREAKING CHANGES:
 
@@ -6,6 +6,17 @@ BREAKING CHANGES:
 ENHANCEMENTS:
 
 * resource/intutic_virtual_key: `scopes` is validated against the control plane's scope registry (`*`, `gateway:use`, and `<area>:read` / `<area>:write` for each REST area) at plan time, and its description says what each kind grants. The control plane now enforces scopes: a request with a key needs both its owner's role and a scope covering the route, and LLM traffic through the proxy needs `gateway:use`. A key with the default `["*"]` is unaffected. A configuration naming a scope outside the registry, which the API used to store and ignore, now fails at plan time.
+
+DEPRECATIONS:
+
+* resource/intutic_policy: deprecated. The policies API is deprecated as of control-plane 2.5.1 and sunsets on 2026-12-01; its responses carry `Deprecation` and `Sunset` headers, and `terraform plan` warns on every `intutic_policy`. Write per-tool rules as `intutic_guardrail` with `kind = "hook_rule"` (`tools`, `arg_contains`, `arg_not_contains`), which the harness gates enforce once the guardrail is promoted through review, and set the intervention mode with the `interventionMode` key of `intutic_workspace_settings`. `intutic policy convert <id>` turns an active `KILL` or `REASK` policy into a `hook_rule` guardrail in `SHADOW`.
+* resource/intutic_policy: `target_tool_pattern`, `enforcement_action`, `conditions` and `risk_category` are deprecated. No gate or proxy reads them, so a policy blocks no tool call; the resource description no longer says the proxy acts on matching calls.
+* resource/intutic_policy: `priority` and `intervention_mode` are deprecated. A policy's only effect is that the active one with the lowest `priority` sets the workspace's intervention mode. The `interventionMode` workspace setting replaces this and wins once set; a workspace that has not set it falls back to the policy until control-plane 2.6.0. The control plane copies each workspace's current mode into the setting, so nothing changes on upgrade.
+
+ENHANCEMENTS:
+
+* resource/intutic_policy: `target_tool_pattern` and `enforcement_action` are optional, defaulting to `*` and `BYPASS` (the API still requires both; neither has any effect). Removing either from a configuration plans an update to the default; convert a `KILL` or `REASK` policy first, since conversion reads them.
+* resource/intutic_workspace_settings: accepts the `interventionMode` key (`TRANSPARENT`, `OPAQUE` or `SILENT_LOG`), the workspace's intervention mode.
 
 BUG FIXES:
 

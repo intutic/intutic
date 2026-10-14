@@ -3,7 +3,7 @@
   "info": {
     "title": "Intutic Control Plane API",
     "version": "v1",
-    "description": "Generated from the control plane's route source. 412 operations; 98 validate their JSON body and 36 their query string with a schema, shown here. 33 read a body no schema validates. No route declares a response schema, so responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
+    "description": "Generated from the control plane's route source. 413 operations; 98 validate their JSON body and 36 their query string with a schema, shown here. 33 read a body no schema validates. No route declares a response schema, so responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
   },
   "servers": [
     {
@@ -10456,7 +10456,7 @@
         "tags": [
           "policies.ts"
         ],
-        "summary": "List live (non-deleted) policies",
+        "summary": "Deprecated, like every policies route (sunset 2026-12-01). List live (non-deleted) policies, and where the intervention mode comes from",
         "description": "**Auth:** OWNER/ADMIN/EM\n\n**Plan:** Cloud",
         "security": [
           {
@@ -10627,6 +10627,55 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "none"
+      }
+    },
+    "/api/v1/policies/{policyId}/convert-to-guardrail": {
+      "post": {
+        "operationId": "postApiV1PoliciesPolicyIdConvertToGuardrail",
+        "tags": [
+          "policies.ts"
+        ],
+        "summary": "An active KILL/REASK policy becomes a hook-rule guardrail in SHADOW (201; 200 when already converted; 422 with `reason` when it has no guardrail form)",
+        "description": "**Auth:** OWNER/ADMIN\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "policyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. No response schema in the route source."
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Unprocessable Content"
+          }
+        },
+        "x-intutic-auth": "OWNER/ADMIN",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "none",
         "x-intutic-response-schema": "none"
       }
     },
@@ -23322,6 +23371,14 @@
               "ACTIVE",
               "PASSIVE",
               "OFF"
+            ]
+          },
+          "interventionMode": {
+            "type": "string",
+            "enum": [
+              "TRANSPARENT",
+              "OPAQUE",
+              "SILENT_LOG"
             ]
           },
           "virusTotalSkillLookupEnabled": {

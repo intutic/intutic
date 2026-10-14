@@ -15,6 +15,7 @@ import type { SsoGroupPolicy } from './attenuation.js'
 import type { McpBudgetSettings } from './mcpBudgets.js'
 import type { PiiDetectorSettings } from './piiDetectors.js'
 import type { UpstreamRetrySettings } from './upstreamRetry.js'
+import type { InterventionMode } from './policy.js'
 
 // Re-export so callers only need one import
 export type { McpProxyFailBehavior, McpProxyMode, BypassEnforcementTier }
@@ -554,6 +555,23 @@ export interface WorkspaceSettings {
   trajectory_monitor_mode?: 'ACTIVE' | 'PASSIVE' | 'OFF'
 
   /**
+   * What an agent is told when a call is refused on workspace policy, for the
+   * whole workspace: `TRANSPARENT` names the rule and its reason, `OPAQUE`
+   * refuses the same calls with one generic sentence while audit records keep
+   * the rule, and `SILENT_LOG` lets the local hook gates run a call a workspace
+   * rule would block and report it as `tool_would_block`.
+   *
+   * Every surface resolves it through
+   * `services/control-plane/src/lib/interventionMode.ts`: the stored value
+   * when there is one. Until 2.6.0, a workspace that has not stored it falls
+   * back to the deprecated rule — the mode of its active enforcement policy
+   * with the lowest priority — and migration 234 wrote that mode here for
+   * every workspace that had an active policy. The default matches what the
+   * fallback gives a workspace with no policy.
+   */
+  interventionMode?: InterventionMode
+
+  /**
    * Additive MCP tool allowlist, enforced by the MCP governance proxy
    * (`packages/mcp-proxy`) and served to it by
    * `services/control-plane/src/lib/mcpCuration.ts` (both the `/sop/rules`
@@ -767,6 +785,9 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // resolution only — a different value here would make the UI show a mode
   // enforcement does not actually run under. See the field doc.
   trajectory_monitor_mode: 'PASSIVE',
+  // What the resolver gives a workspace that has neither the setting nor an
+  // active enforcement policy. See the field doc.
+  interventionMode: 'TRANSPARENT',
   // Off by default — mirrors anomalyEnforcementService.ts's own DISABLED
   // default exactly, so a workspace that never configures this sees the
   // identical values whether resolved here or read directly from the DB.

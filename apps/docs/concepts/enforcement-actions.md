@@ -175,7 +175,7 @@ The request is permitted and passes through the proxy without modification. This
 **When it happens:**
 - No SOP matches the tool call
 - The matched SOP explicitly allows the action
-- Budget is within limits, no DLP matches, PCAS permissions grant access
+- Budget is within limits, no DLP matches, and no SSO group policy withholds the tool
 
 **In the proxy verdict mapping:**
 

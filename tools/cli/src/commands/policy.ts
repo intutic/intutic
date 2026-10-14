@@ -61,7 +61,79 @@ async function getClient(dev?: boolean) {
   return createApiClient(controlPlaneUrl, apiKey)
 }
 
+/**
+ * Printed first by every command on the enforcement-policy API (enable,
+ * disable, rollback, export, convert) — not by the WASM rule and snapshot
+ * commands that share `intutic policy`. To stderr, so `policy export` output
+ * stays valid JSON.
+ */
+export const POLICY_DEPRECATION_NOTICE =
+  'Enforcement policies are deprecated; the policies API is removed after 2026-12-01. ' +
+  "A policy's tool pattern, action and conditions are enforced nowhere. " +
+  'Per-tool rules are guardrails: `intutic policy convert <policyId>` turns a KILL or REASK policy into one, in shadow. ' +
+  'The intervention mode is the interventionMode workspace setting: `intutic settings set interventionMode OPAQUE`.'
+
+function warnPolicyDeprecated(): void {
+  console.error(`⚠ ${POLICY_DEPRECATION_NOTICE}`)
+}
+
+/** What `POST /api/v1/policies/:policyId/convert-to-guardrail` answers. */
+interface ConvertResponse {
+  ok?: boolean
+  created?: boolean
+  guardrailId?: string
+  status?: string
+  error?: string
+  reason?: string
+}
+
+/**
+ * `intutic policy convert <policyId>` — make the guardrail an active KILL or
+ * REASK policy described: a hook rule on its tool, created in SHADOW, so it
+ * reports what it would block and blocks nothing until it is promoted.
+ * Converting the same policy again names the guardrail it already became.
+ */
+export async function runPolicyConvert(policyId: string, opts: { dev?: boolean }): Promise<void> {
+  warnPolicyDeprecated()
+  log.header(`Intutic — Convert Policy to Guardrail: ${policyId}`)
+
+  const client = await getClient(opts.dev)
+  let res: { status: number; body: ConvertResponse }
+  try {
+    res = await client.postWithStatus<ConvertResponse>(
+      `/api/v1/policies/${encodeURIComponent(policyId)}/convert-to-guardrail`,
+    )
+  } catch (err) {
+    log.error(`Failed to convert policy: ${errMessage(err)}`)
+    process.exit(1)
+  }
+
+  const { status, body } = res
+  if ((status === 200 || status === 201) && body.guardrailId) {
+    if (body.created) {
+      log.success(`Converted policy "${policyId}" to guardrail ${body.guardrailId}, in SHADOW.`)
+    } else {
+      log.success(`Policy "${policyId}" was already converted: guardrail ${body.guardrailId} (${body.status ?? 'unknown status'}).`)
+    }
+    log.field('Guardrail', body.guardrailId)
+    log.info('In shadow it reports what it would block and blocks nothing.')
+    log.info(`Review its evidence with \`intutic guardrails show ${body.guardrailId}\`, then \`intutic guardrails promote ${body.guardrailId}\`.`)
+    return
+  }
+  if (status === 422) {
+    log.error(`Policy "${policyId}" has no guardrail form: ${body.reason ?? body.error ?? 'no reason given'}`)
+    process.exit(1)
+  }
+  if (status === 404) {
+    log.error(`Policy "${policyId}" not found.`)
+    process.exit(1)
+  }
+  log.error(`Failed to convert policy (HTTP ${status}): ${body.error ?? 'unknown error'}`)
+  process.exit(1)
+}
+
 export async function runPolicyEnable(policyId: string, opts: { dev?: boolean }): Promise<void> {
+  warnPolicyDeprecated()
   log.header(`Intutic — Enable Policy: ${policyId}`)
 
   const client = await getClient(opts.dev)
@@ -86,6 +158,7 @@ export async function runPolicyEnable(policyId: string, opts: { dev?: boolean })
 }
 
 export async function runPolicyDisable(policyId: string, opts: { dev?: boolean }): Promise<void> {
+  warnPolicyDeprecated()
   log.header(`Intutic — Disable Policy: ${policyId}`)
 
   const client = await getClient(opts.dev)
@@ -113,6 +186,7 @@ export async function runPolicyRollback(
   policyId: string,
   opts: { version: string; dev?: boolean }
 ): Promise<void> {
+  warnPolicyDeprecated()
   log.header(`Intutic — Rollback Policy: ${policyId}`)
 
   const targetVer = parseInt(opts.version, 10)
@@ -174,6 +248,7 @@ export interface CompliancePolicy {
 }
 
 export async function runPolicyExport(opts: { all?: boolean; dev?: boolean }): Promise<void> {
+  warnPolicyDeprecated()
   if (!opts.all) {
     log.warn('Export command expects `--all` flag. Exporting all policies by default.')
   }
