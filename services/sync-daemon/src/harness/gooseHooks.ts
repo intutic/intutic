@@ -220,7 +220,9 @@ export function mergeGooseConfigYaml(raw: string, proxyUrl: string, hookScript: 
     else return null
   }
   if (proxyUrl) {
-    const host = proxyUrl.replace(/\/+$/, '')
+    // A loop, not `/\/+$/`: CodeQL flags that regex as polynomial on a long run of slashes.
+    let host = proxyUrl
+    while (host.endsWith('/')) host = host.slice(0, -1)
     doc.set('ANTHROPIC_HOST', host)
     doc.set('OPENAI_HOST', host)
     if (doc.has('OPENAI_BASE_URL')) doc.set('OPENAI_BASE_URL', `${host}/v1`)

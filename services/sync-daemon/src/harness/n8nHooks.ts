@@ -197,8 +197,10 @@ async function readControlPlaneHost(): Promise<string> {
     for (const line of raw.split('\n')) {
       const eq = line.indexOf('=')
       if (eq < 0 || line.slice(0, eq).trim() !== 'INTUTIC_HOST') continue
-      const host = line.slice(eq + 1).trim()
-      if (host) return host.replace(/\/+$/, '')
+      // A loop, not `/\/+$/`: CodeQL flags that regex as polynomial on a long run of slashes.
+      let host = line.slice(eq + 1).trim()
+      while (host.endsWith('/')) host = host.slice(0, -1)
+      if (host) return host
     }
   } catch {
     // Not written yet (first run): the default below.

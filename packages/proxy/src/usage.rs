@@ -234,28 +234,53 @@ mod tests {
     fn reasoning_output_is_read_where_the_provider_reports_it() {
         let chat = json!({ "usage": { "prompt_tokens": 10, "completion_tokens": 900,
             "completion_tokens_details": { "reasoning_tokens": 640 } } });
-        assert_eq!(TokenUsage::from_openai_chat(&chat).reasoning_output, Some(640));
+        assert_eq!(
+            TokenUsage::from_openai_chat(&chat).reasoning_output,
+            Some(640)
+        );
 
         let responses = json!({ "usage": { "input_tokens": 10, "output_tokens": 500,
             "output_tokens_details": { "reasoning_tokens": 320 } } });
-        assert_eq!(TokenUsage::from_responses(&responses).reasoning_output, Some(320));
+        assert_eq!(
+            TokenUsage::from_responses(&responses).reasoning_output,
+            Some(320)
+        );
 
         let gemini = json!({ "usageMetadata": { "promptTokenCount": 10, "candidatesTokenCount": 40,
             "thoughtsTokenCount": 210 } });
-        assert_eq!(TokenUsage::from_gemini_metadata(&gemini).reasoning_output, Some(210));
+        assert_eq!(
+            TokenUsage::from_gemini_metadata(&gemini).reasoning_output,
+            Some(210)
+        );
 
         // Anthropic counts thinking inside output_tokens and breaks nothing out.
         let anthropic = json!({ "usage": { "input_tokens": 10, "output_tokens": 700 } });
-        assert_eq!(TokenUsage::from_anthropic(&anthropic).reasoning_output, None);
-        assert_eq!(TokenUsage::from_openai_chat(&json!({ "usage": { "completion_tokens": 5 } })).reasoning_output, None);
+        assert_eq!(
+            TokenUsage::from_anthropic(&anthropic).reasoning_output,
+            None
+        );
+        assert_eq!(
+            TokenUsage::from_openai_chat(&json!({ "usage": { "completion_tokens": 5 } }))
+                .reasoning_output,
+            None
+        );
     }
 
     #[test]
     fn merge_keeps_a_reasoning_count_a_later_chunk_does_not_repeat() {
-        let mut acc = TokenUsage { reasoning_output: Some(64), ..Default::default() };
-        acc.merge_from(TokenUsage { output: Some(100), ..Default::default() });
+        let mut acc = TokenUsage {
+            reasoning_output: Some(64),
+            ..Default::default()
+        };
+        acc.merge_from(TokenUsage {
+            output: Some(100),
+            ..Default::default()
+        });
         assert_eq!(acc.reasoning_output, Some(64));
-        acc.merge_from(TokenUsage { reasoning_output: Some(80), ..Default::default() });
+        acc.merge_from(TokenUsage {
+            reasoning_output: Some(80),
+            ..Default::default()
+        });
         assert_eq!(acc.reasoning_output, Some(80));
     }
 

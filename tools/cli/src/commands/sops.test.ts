@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { stripVTControlCharacters } from 'node:util'
 
 vi.mock('../config/store.js', () => ({
   loadCredentials: vi.fn(async () => ({ apiKey: 'vk_test', workspaceId: 'ws_test' })),
@@ -378,8 +379,9 @@ describe('runSopsStatus', () => {
     await runSopsStatus({})
   }
 
+  // CI forces colour, so the status lines carry ANSI codes.
   function output(): string {
-    return logLines.join('\n')
+    return stripVTControlCharacters(logLines.join('\n'))
   }
 
   it('a file matching the control plane\'s content hash reports in-sync', async () => {
