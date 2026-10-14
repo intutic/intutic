@@ -16,6 +16,7 @@ import { normalizeRequest, normalizeResponse } from './schema-enforcer'
 import { resolveContext } from './context-resolver'
 import { resolveGitContext } from './git-context'
 import { BudgetChecker } from './budget-checker'
+import { DEFAULT_CONTROL_PLANE_URL } from './control-plane'
 import { CircuitBreaker } from './circuit-breaker'
 import { ClawdeEventEmitter } from './event-emitter'
 import { deriveIdentity, identityHeaders, type GraphIdentity } from './graph-identity'
@@ -57,7 +58,7 @@ export class ClawdeClient {
     this.apiKey = options.apiKey
     this.baseUrl = options.baseUrl || process.env.INTUTIC_BASE_URL || 'http://localhost:4000'
     this.controlPlaneUrl =
-      options.controlPlaneUrl || process.env.INTUTIC_CONTROL_PLANE_URL || 'https://app.intutic.ai'
+      options.controlPlaneUrl || process.env.INTUTIC_CONTROL_PLANE_URL || DEFAULT_CONTROL_PLANE_URL
     this.provider = options.provider
     this.autoContext = options.autoContext ?? true
     this.timeout = options.timeout ?? 30000

@@ -19,7 +19,7 @@ intutic init
 The CLI detects Cline and registers it as a harness:
 
 ```
-  ✔ cline → .clinerules/intutic-governance.md
+  ✔ cline → /path/to/project/.clinerules/intutic-governance.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).

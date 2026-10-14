@@ -56,7 +56,7 @@ SOPs follow a 7-state lifecycle:
 |-------|---------|
 | `DRAFT` | Initial authoring — not enforced yet |
 | `PENDING_REVIEW` | Submitted for team review |
-| `GENERATED` | Auto-generated from observed agent patterns |
+| `GENERATED` | Passed the Gödel score check on the way out of review |
 | `HYPOTHESIZED` | Proposed rule being tested against real traffic |
 | `REFINED` | Iteratively improved based on feedback and data |
 | `VALIDATED` | Active and enforced by the proxy |

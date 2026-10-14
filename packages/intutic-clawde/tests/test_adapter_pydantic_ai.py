@@ -133,3 +133,21 @@ class TestGuardAgent:
         first = agent._user_toolsets[0]
         guard_agent(agent, gate=g)
         assert agent._user_toolsets[0] is first
+
+
+def test_module_doc_names_only_real_pydantic_ai_internals():
+    """The module doc is the record of how the veto reaches the model; every
+    `ToolManager.<name>` / `WrapperToolset.<name>` it cites must exist in the
+    installed pydantic-ai. It once cited `ToolManager.execute`, which no
+    supported release has."""
+    import re
+
+    import intutic_clawde.gate.adapters.pydantic_ai as adapter
+    from pydantic_ai.tool_manager import ToolManager
+    from pydantic_ai.toolsets.wrapper import WrapperToolset
+
+    owners = {"ToolManager": ToolManager, "WrapperToolset": WrapperToolset}
+    cited = re.findall(r"\b(ToolManager|WrapperToolset)\.(\w+)", adapter.__doc__ or "")
+    assert cited, "the module doc no longer names the pydantic-ai methods it relies on"
+    missing = sorted({f"{owner}.{name}" for owner, name in cited if not hasattr(owners[owner], name)})
+    assert missing == [], f"the module doc cites methods pydantic-ai does not have: {missing}"

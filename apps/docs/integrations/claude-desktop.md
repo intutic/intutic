@@ -17,7 +17,7 @@ intutic init
 The CLI detects Claude Desktop and registers it as a harness:
 
 ```
-  ✔ claude-desktop → ~/Library/Application Support/Claude/claude_desktop_config.json
+  ✔ claude-desktop → /Users/you/Library/Application Support/Claude/claude_desktop_config.json
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).

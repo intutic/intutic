@@ -184,6 +184,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `parse_register`, `SopRegister` and `READ_ONLY_TOOLS` (which the docs already
   listed as exported) are importable from `intutic_clawde.gate` and in its
   `__all__`.
+- **The clawde SDKs default to the API host.** With no `controlPlaneUrl`
+  (`control_plane_url`) and no `INTUTIC_CONTROL_PLANE_URL`, `ClawdeClient`'s
+  budget check and session registration and `ControlPlaneClient` called
+  `https://app.intutic.ai`, the dashboard, which does not serve `/api/v1`.
+  Both SDKs now default to `https://api.intutic.ai`, as `@intutic/gate`, the
+  Python gate client and the CLI already did, from one constant per language
+  (`DEFAULT_CONTROL_PLANE_URL`).
+- **The rule-author skill describes what the proxy does.** It said a rule that
+  breaks the sandbox limits is silently disabled (every request it cannot
+  judge is refused with `GOVERNANCE_UNAVAILABLE`) and that a KILL from any rule
+  ends the request (WASM rules return BLOCK). The download, the copy
+  `intutic connect` writes and the repo's own copy are fixed, and
+  `tools/scripts/check-rule-author-skill-copies.js` (`lint:claims`) fails when
+  the download or the embedded copy differs from `.agents/skills/`.
+- **Docs drift gates.** `lint:claims` gains `check-docs-code-blocks.js` (a
+  fence line with text after it, which leaves a code block open, and
+  `intutic init` samples that show relative paths: 21 integration pages did,
+  now fixed) and `check-doc-tables.js` (enforcement-action tables and counts
+  against `EnforcementAction`, SOP lifecycle tables and diagrams against
+  `VALID_SOP_TRANSITIONS`, the graph-guardrails detector table against the
+  proxy's detector registry, the clawde SDK's "What's covered" against the
+  operations fixture, and the tier matrix against the plan map), and
+  `check-harness-counts.js` reads "N supported agent tools", "36 of the 43"
+  and the other phrasings it missed. The MCP coverage table now matches the
+  gate registry, which had Windsurf as unconfirmed.
 
 ### Removed
 

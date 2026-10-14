@@ -426,9 +426,9 @@ export const HarnessType = {
    * `'hook'` (no on-disk file this deployment reads) or `'delegated'` (it
    * does not wrap another already-gated harness). The gate instead runs OUT
    * OF PROCESS, in `services/trueforge-bridge` — an Intutic-operated service
-   * that watches each session's turn/event stream (SSE subscribe, or
-   * `listTurnEventsRoute` polling as a fallback; there is no webhook —
-   * TrueForge never pushes anything to an external system), resolves a
+   * that watches each session's current turn over its SSE subscription
+   * (reopened after a backoff when it drops; there is no polling mode and no
+   * webhook — TrueForge never pushes anything to an external system), resolves a
    * pending call's `source_event_id` back to the real tool name and
    * arguments via the referenced `model.message` event, evaluates it through
    * the same `packages/gate-js` machinery every other JS/TS-native row here

@@ -131,6 +131,12 @@ import type {
   MirrorAdoptionReport,
 } from './types'
 
+/**
+ * Intutic's hosted control plane: the API host, as `@intutic/gate` and the CLI
+ * default to. The dashboard host serves the web app, not the API.
+ */
+export const DEFAULT_CONTROL_PLANE_URL = 'https://api.intutic.ai'
+
 /** The connector providers `intutic guardrails sources` lists: the ones that are policy sources. */
 const POLICY_SOURCE_PROVIDERS = new Set(['notion', 'confluence', 'github', 'gdrive'])
 
@@ -193,7 +199,7 @@ export class ControlPlaneClient {
     }
     this.apiKey = options.apiKey
     this.baseUrl =
-      options.baseUrl || process.env.INTUTIC_CONTROL_PLANE_URL || 'https://app.intutic.ai'
+      options.baseUrl || process.env.INTUTIC_CONTROL_PLANE_URL || DEFAULT_CONTROL_PLANE_URL
   }
 
   private async send(
