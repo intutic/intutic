@@ -117,6 +117,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `partially_scanned` and needs review ("Only the first 64K (65,536) characters
   were checked"), and `intutic skill audit` names it in a warning. The
   deterministic pattern scan still reads the whole file.
+- **Terraform provider 0.2.1: import, refusal and example fixes.** An
+  imported `intutic_mcp_server_decision` that leaves `disabled_tools` unset
+  plans clean (`disabled_tools` now shows the server's switched-off tools);
+  `intutic_workspace_budget` refuses an import id other than the key's
+  workspace ("Wrong workspace"); an API refusal shows the explanation it
+  carries in `detail` (a 403 names the roles the route allows) instead of a
+  bare `Forbidden`; and the `intutic_member_budget` example uses the `mbr_…`
+  member id shape. See `packages/terraform-provider-intutic/CHANGELOG.md`.
 - **Subpath types for `moduleResolution: node`.** `@intutic/gate` and
   `@intutic/sync-daemon` pointed `typesVersions` at `src/*.ts`, which their
   tarballs do not contain, so a consumer on `moduleResolution: node` got no

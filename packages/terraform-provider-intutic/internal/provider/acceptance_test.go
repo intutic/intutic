@@ -757,6 +757,28 @@ resource "intutic_wasm_rule" "filter" {
 	)
 }
 
+// The two resources write the same settings record, and Terraform applies
+// them in parallel. The control plane used to keep only one of the two
+// changes ("Provider produced inconsistent result after apply").
+func TestAccWorkspaceSettingsAndBudgetInOneApply(t *testing.T) {
+	cfg := func(host string, pct int) string {
+		return fmt.Sprintf(`
+resource "intutic_workspace_settings" "this" {
+  settings = jsonencode({ egressAllow = [%q] })
+}
+resource "intutic_workspace_budget" "this" {
+  monthly_budget_usd  = 1000
+  alert_threshold_pct = %d
+}`, host, pct)
+	}
+	steps := []resource.TestStep{}
+	for round := 1; round <= 4; round++ {
+		c := cfg(fmt.Sprintf("round-%d.example.com", round), 60+round)
+		steps = append(steps, resource.TestStep{Config: c}, clean(c))
+	}
+	accTest(t, steps...)
+}
+
 func TestAccMcpServerDecision(t *testing.T) {
 	server := os.Getenv("INTUTIC_TEST_MCP_SERVER")
 	if server == "" {

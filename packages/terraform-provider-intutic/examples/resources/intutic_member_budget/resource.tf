@@ -10,6 +10,6 @@ resource "intutic_member_budget" "default" {
 # One member's own month budget replaces the default month budget for them;
 # the default day budget still applies.
 resource "intutic_member_budget" "lead" {
-  member_id          = "mem_0123456789abcdef"
+  member_id          = "mbr_0123456789abcdef"
   monthly_budget_usd = 1000
 }

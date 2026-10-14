@@ -1161,7 +1161,7 @@ A member's own budget for a period replaces the default's for that period. See [
 
 ```bash
 intutic budget member default --daily 20 --monthly 300 --monthly-enforcement soft
-intutic budget member mem_abc123 --monthly 1000
+intutic budget member mbr_abc123 --monthly 1000
 ```
 
 ---

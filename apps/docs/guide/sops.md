@@ -50,7 +50,7 @@ Vague rules like "be careful with data" don't give agents clear boundaries. Writ
 
 ## The SOP lifecycle
 
-SOPs follow a 7-state lifecycle. Only `VALIDATED` SOPs are actively enforced; `HYPOTHESIZED` and `REFINED` SOPs run in shadow.
+SOPs follow a 7-state lifecycle. Only `VALIDATED` SOPs are actively enforced; `HYPOTHESIZED` and `REFINED` SOPs run in shadow. A deleted SOP, or one a new version replaced, is enforced by nothing, whatever its state.
 
 ```
 DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATED

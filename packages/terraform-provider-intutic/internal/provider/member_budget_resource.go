@@ -56,7 +56,8 @@ func (r *memberBudgetResource) Schema(_ context.Context, _ resource.SchemaReques
 		"member_id": schema.StringAttribute{
 			Required: true,
 			Description: "The member whose spend this limits — across the virtual keys they own — or `default` for " +
-				"the budget every member without their own gets for that period.",
+				"the budget every member without their own gets for that period. A member id is `mbr_…`; the " +
+				"`intutic_members` data source lists them.",
 			Validators:    []validator.String{stringvalidator.LengthBetween(1, 64)},
 			PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 		},
