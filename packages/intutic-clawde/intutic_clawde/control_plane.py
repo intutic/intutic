@@ -4,7 +4,7 @@ administration, as distinct from ClawdeClient's data-plane chat calls.
 Deliberately a separate class, not new methods on ClawdeClient:
 ClawdeClient.base_url targets the *proxy* (default http://localhost:4000);
 the control plane is a different origin entirely (default
-https://app.intutic.ai, or a self-hosted CONTROL_PLANE_URL). Bolting
+https://api.intutic.ai, or a self-hosted CONTROL_PLANE_URL). Bolting
 management calls onto ClawdeClient would silently need a second base URL
 on a class whose whole contract today is "one client, one proxy."
 
@@ -107,7 +107,9 @@ from .types import (
     WasmReplayResult,
 )
 
-DEFAULT_CONTROL_PLANE_URL = "https://app.intutic.ai"
+#: Intutic's hosted control plane: the API host, as the gate and the CLI default
+#: to. The dashboard host serves the web app, not the API.
+DEFAULT_CONTROL_PLANE_URL = "https://api.intutic.ai"
 
 #: The connector providers ``intutic guardrails sources`` lists: the ones that are policy sources.
 POLICY_SOURCE_PROVIDERS = frozenset({"notion", "confluence", "github", "gdrive"})

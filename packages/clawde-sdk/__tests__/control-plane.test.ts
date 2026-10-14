@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { createServer, Server } from 'http'
 import { ControlPlaneClient } from '../src/control-plane'
 import { ClawdeConnectionError } from '../src/errors'
@@ -355,14 +355,21 @@ describe('ControlPlaneClient', () => {
     await expect(client.whoami()).rejects.toThrow(ClawdeConnectionError)
   })
 
-  it('defaults baseUrl to https://app.intutic.ai when unset', () => {
+  it('defaults to the hosted API host, the one @intutic/gate and the CLI use, when nothing names one', async () => {
     const original = process.env.INTUTIC_CONTROL_PLANE_URL
     delete process.env.INTUTIC_CONTROL_PLANE_URL
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ email: 'a@b.com', memberId: 'm', workspaceId: 'w', role: 'OWNER' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
     try {
-      // No network call — this only proves the constructor doesn't throw
-      // and picks the documented default; the URL itself is private.
-      expect(() => new ControlPlaneClient({ apiKey: 'vk_test' })).not.toThrow()
+      await new ControlPlaneClient({ apiKey: 'vk_test' }).whoami()
+      // Not the dashboard host: app.intutic.ai serves the web app, not /api/v1.
+      expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://api.intutic.ai/api/v1/auth/me')
     } finally {
+      fetchSpy.mockRestore()
       if (original !== undefined) process.env.INTUTIC_CONTROL_PLANE_URL = original
     }
   })
