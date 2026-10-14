@@ -105,7 +105,9 @@ shows the countdown on the affected gateway row: **"Scheduled for removal — N 
 
 A cell already marked for removal has its deadline cleared — not extended, cleared — the moment
 reconciliation finds the org back at or under capacity. There is no other user-facing way to
-cancel a pending deprovision; re-upgrading the plan is the mechanism.
+cancel a pending deprovision; re-upgrading the plan is the mechanism. After a failed-payment
+downgrade, paying the overdue invoice while the subscription is still open gives the plan back and
+clears the marks the same way ([Failed payments](./plans#failed-payments)).
 
 ### Failure and rollback behavior
 

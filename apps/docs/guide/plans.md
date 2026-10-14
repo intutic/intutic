@@ -81,6 +81,18 @@ Trace retention is 3 years on every plan.
 
 A trial that ends without a purchase moves the workspace to the free plan.
 
+## Failed payments
+
+When the card on a subscription is declined, the payment is retried. After
+the third failed attempt the workspace, or every workspace of the
+organization, moves to the free plan, and the `billing.dunning.downgraded`
+notification goes to any rule that asks for it. The plan comes back as soon
+as the overdue payment is made while the subscription is still open: update
+the payment method under **Settings › Billing › Manage billing**, then pay
+the open invoice from the invoice history there or wait for the next retry.
+`billing.dunning.restored` announces it. A subscription that has ended does
+not come back; choose a plan again on the Upgrade page.
+
 ## Plan badges in these docs {#badges}
 
 A badge next to a page or section title says which plan it needs:

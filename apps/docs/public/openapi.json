@@ -3,7 +3,7 @@
   "info": {
     "title": "Intutic Control Plane API",
     "version": "v1",
-    "description": "Generated from the control plane's route source. 413 operations; 131 validate their JSON body and 68 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 162 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
+    "description": "Generated from the control plane's route source. 415 operations; 131 validate their JSON body and 70 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 162 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
   },
   "servers": [
     {
@@ -79,6 +79,10 @@
     {
       "name": "dreamCycle.ts",
       "description": "Routes defined in `dreamCycle.ts`."
+    },
+    {
+      "name": "emailUnsubscribe.ts",
+      "description": "Routes defined in `emailUnsubscribe.ts`."
     },
     {
       "name": "enterpriseTrial.ts",
@@ -5391,6 +5395,74 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
+        "x-intutic-response-schema": "none"
+      }
+    },
+    "/api/v1/email/unsubscribe": {
+      "get": {
+        "operationId": "getApiV1EmailUnsubscribe",
+        "tags": [
+          "emailUnsubscribe.ts"
+        ],
+        "summary": "The confirmation page behind the unsubscribe link in promotional email; records nothing",
+        "description": "**Auth:** Signed unsubscribe token (`token` query)\n\n**Plan:** Cloud",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        },
+        "x-intutic-auth": "Signed unsubscribe token (`token` query)",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "none"
+      },
+      "post": {
+        "operationId": "postApiV1EmailUnsubscribe",
+        "tags": [
+          "emailUnsubscribe.ts"
+        ],
+        "summary": "Records the opt-out from promotional email: the confirmation page, or a mail client's one-click request (RFC 8058)",
+        "description": "**Auth:** Signed unsubscribe token (`token` query)\n\n**Plan:** Cloud",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        },
+        "x-intutic-auth": "Signed unsubscribe token (`token` query)",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -23199,6 +23271,8 @@
               "inventory.ungoverned.detected",
               "provider.outage.detected",
               "billing.subscription.past_due",
+              "billing.dunning.downgraded",
+              "billing.dunning.restored",
               "skill.malware.detected",
               "skill.semantic.flagged"
             ]
@@ -33516,6 +33590,8 @@
                     "inventory.ungoverned.detected",
                     "provider.outage.detected",
                     "billing.subscription.past_due",
+                    "billing.dunning.downgraded",
+                    "billing.dunning.restored",
                     "skill.malware.detected",
                     "skill.semantic.flagged"
                   ]
@@ -33689,6 +33765,8 @@
               "inventory.ungoverned.detected",
               "provider.outage.detected",
               "billing.subscription.past_due",
+              "billing.dunning.downgraded",
+              "billing.dunning.restored",
               "skill.malware.detected",
               "skill.semantic.flagged"
             ]
@@ -42402,6 +42480,8 @@
               "inventory.ungoverned.detected",
               "provider.outage.detected",
               "billing.subscription.past_due",
+              "billing.dunning.downgraded",
+              "billing.dunning.restored",
               "skill.malware.detected",
               "skill.semantic.flagged"
             ]
