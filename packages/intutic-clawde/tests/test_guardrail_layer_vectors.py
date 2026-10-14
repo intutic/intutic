@@ -79,7 +79,12 @@ def _guard(v, tmp_path, monkeypatch):
 
 
 def test_reads_the_vector_file_with_every_decision_represented():
-    assert len(VECTORS) >= 24
+    assert len(VECTORS) >= 32
+    # Rules scoped to roles, as served to a member of the vector's role: the
+    # control plane serves a member's key only its role's rules.
+    scoped = [v for v in VECTORS if '"roles":' in json.dumps(v, separators=(",", ":"))]
+    assert len(scoped) >= 8
+    assert {v["expected"]["decision"] for v in scoped} >= {"block", "allow"}
     assert {v["expected"]["decision"] for v in VECTORS} >= {"block", "warn", "allow"}
 
 

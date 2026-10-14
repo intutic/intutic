@@ -27,11 +27,21 @@
 //!
 //! # Roles
 //!
-//! A served hook rule carries no `roles:` line. The control plane's hook-rule
-//! projection carries no roles to any layer, and the local gates cannot know the
-//! member's role anyway, so every layer applies a hook rule to every caller —
-//! the proxy included. A hand-written SOP that adds `roles:` scopes its hook
-//! rules the way it scopes its other keys ([`crate::sops::Sop::applies_to`]).
+//! A rule scoped to workspace roles carries them in its line (`"roles":
+//! ["developer"]`, lower case) and applies only to a caller whose member role
+//! is one of them — the role the control plane's `/auth/key-context` names
+//! for the request's virtual key, which `proxy.rs` reads (cached per key, and
+//! refetched when the workspace's config version moves) only for a set that
+//! has a scoped rule. Every other layer decides the same way
+//! (`hookRuleAppliesToRole` in `@intutic/shared-types`): a rule with no roles
+//! applies to everyone, and a caller whose role is not known — a standalone
+//! proxy, a provider key, a key-context answer that did not come — is held to
+//! every rule, scoped or not ([`HookRuleSet::for_member_role`]).
+//!
+//! That is a different role from the one a `roles:` front-matter line scopes
+//! by: the agent-graph role a request header claims. A hand-written SOP that
+//! adds `roles:` still scopes its hook rules that way
+//! ([`crate::sops::Sop::applies_to`]); the served guardrail SOPs never do.
 //!
 //! # Decisions
 //!
@@ -70,9 +80,24 @@ pub struct HookRule {
     pub arg_contains: Vec<String>,
     pub arg_not_contains: Vec<String>,
     pub reason: String,
+    /// Lower-cased workspace roles the rule applies to; empty for everyone.
+    pub roles: Vec<String>,
 }
 
 impl HookRule {
+    /// Whether the rule applies to a caller whose member role is
+    /// `member_role` (`None` when it is not known, which every rule applies
+    /// to). Case-insensitive: key-context names roles in upper case.
+    pub fn applies_to_member(&self, member_role: Option<&str>) -> bool {
+        if self.roles.is_empty() {
+            return true;
+        }
+        match member_role.map(str::trim).filter(|r| !r.is_empty()) {
+            None => true,
+            Some(role) => self.roles.iter().any(|r| r.eq_ignore_ascii_case(role)),
+        }
+    }
+
     fn constrains_arguments(&self) -> bool {
         !self.arg_contains.is_empty() || !self.arg_not_contains.is_empty()
     }
@@ -118,6 +143,8 @@ struct Wire {
     arg_not_contains: Vec<String>,
     #[serde(default)]
     reason: String,
+    #[serde(default)]
+    roles: Vec<String>,
 }
 
 /// Parse the value of one `hook_rule:` line.
@@ -151,12 +178,21 @@ pub fn parse_line(raw: &str) -> HookRuleDecl {
         // one matches nothing: neither is a rule anyone wrote on purpose.
         return unreadable("hook_rule: an argument literal is empty".to_string());
     }
+    if wire.roles.iter().any(|r| r.trim().is_empty()) {
+        // An empty role names no one; read as a typo, not as "nobody".
+        return unreadable("hook_rule: a role is empty".to_string());
+    }
     HookRuleDecl::Rule(HookRule {
         id: wire.id,
         tools: wire.tools,
         arg_contains: wire.arg_contains,
         arg_not_contains: wire.arg_not_contains,
         reason: wire.reason,
+        roles: wire
+            .roles
+            .iter()
+            .map(|r| r.trim().to_ascii_lowercase())
+            .collect(),
     })
 }
 
@@ -335,6 +371,26 @@ impl HookRuleSet {
         self.rules.is_empty()
     }
 
+    /// Whether any rule here is scoped to roles — the only case in which the
+    /// caller's member role has to be read.
+    pub fn has_role_scoped(&self) -> bool {
+        self.rules
+            .iter()
+            .any(|a| matches!(&a.decl, HookRuleDecl::Rule(r) if !r.roles.is_empty()))
+    }
+
+    /// The rules that apply to a caller whose member role is `member_role`:
+    /// a scoped rule outside it is dropped; with the role unknown (`None`)
+    /// every rule stays. An unreadable rule always stays — it refuses because
+    /// it cannot be read, roles included.
+    pub fn for_member_role(mut self, member_role: Option<&str>) -> Self {
+        self.rules.retain(|a| match &a.decl {
+            HookRuleDecl::Rule(r) => r.applies_to_member(member_role),
+            HookRuleDecl::Unreadable { .. } => true,
+        });
+        self
+    }
+
     /// Whether any rule here can refuse (is not in shadow mode).
     pub fn has_enforcing(&self) -> bool {
         self.rules.iter().any(|a| !a.shadow)
@@ -447,12 +503,70 @@ mod tests {
         assert_eq!(r.reason, "Reviewed plan first");
     }
 
+    const PRODDB_DEV: &str = r#"{"id":"guardrail.pgr_db","tools":["Bash"],"argContains":["prod-db"],"argNotContains":[],"reason":"No prod-db sessions","roles":["developer","em"]}"#;
+
+    #[test]
+    fn a_scoped_rule_applies_only_to_its_roles_and_to_an_unknown_role() {
+        let HookRuleDecl::Rule(r) = parse_line(PRODDB_DEV) else {
+            panic!("did not parse");
+        };
+        assert_eq!(r.roles, vec!["developer", "em"]);
+        let set = HookRuleSet::from_sops(&[sop("s", SopMode::Enforce, &[PRODDB_DEV, TF])], "");
+        assert!(set.has_role_scoped());
+        let input = json!({"command": "psql -h prod-db"});
+        let refused = |role: Option<&str>| {
+            set.clone()
+                .for_member_role(role)
+                .decide("Bash", CallInput::Parsed(&input))
+                .refuse
+                .map(|h| h.rule_id)
+        };
+        // key-context names roles in upper case.
+        assert_eq!(
+            refused(Some("DEVELOPER")).as_deref(),
+            Some("guardrail.pgr_db")
+        );
+        assert_eq!(refused(Some("em")).as_deref(), Some("guardrail.pgr_db"));
+        assert_eq!(refused(Some("ADMIN")), None);
+        assert_eq!(refused(None).as_deref(), Some("guardrail.pgr_db"));
+        assert_eq!(refused(Some(" ")).as_deref(), Some("guardrail.pgr_db"));
+        // The unscoped rule beside it applies to every role.
+        let tf = json!({"command": "terraform apply"});
+        let kept = set.clone().for_member_role(Some("ADMIN"));
+        assert!(!kept.has_role_scoped());
+        assert_eq!(
+            kept.decide("Bash", CallInput::Parsed(&tf))
+                .refuse
+                .map(|h| h.rule_id)
+                .as_deref(),
+            Some("guardrail.pgr_tf")
+        );
+    }
+
+    #[test]
+    fn an_unreadable_rule_survives_the_role_filter_and_an_empty_role_is_unreadable() {
+        let set = HookRuleSet::from_sops(&[sop("s", SopMode::Enforce, &["{"])], "");
+        assert!(set
+            .for_member_role(Some("ADMIN"))
+            .decide("Read", CallInput::Parsed(&NULL_INPUT))
+            .refuse
+            .is_some());
+        assert!(matches!(
+            parse_line(r#"{"id":"guardrail.pgr_x","tools":["Bash"],"roles":[""]}"#),
+            HookRuleDecl::Unreadable { .. }
+        ));
+        assert!(matches!(
+            parse_line(r#"{"id":"guardrail.pgr_x","tools":["Bash"],"roles":"developer"}"#),
+            HookRuleDecl::Unreadable { .. }
+        ));
+    }
+
     #[test]
     fn a_line_with_a_field_this_proxy_does_not_know_is_unreadable() {
         // A newer control plane's narrowing this proxy cannot apply: reading
         // the rest and ignoring it would enforce a different rule.
         let d = parse_line(
-            r#"{"id":"guardrail.pgr_x","tools":["Bash"],"argContains":[],"argNotContains":[],"reason":"r","roles":["sre"]}"#,
+            r#"{"id":"guardrail.pgr_x","tools":["Bash"],"argContains":[],"argNotContains":[],"reason":"r","argMatches":["^x"]}"#,
         );
         assert!(
             matches!(d, HookRuleDecl::Unreadable { id: Some(ref id), .. } if id == "guardrail.pgr_x"),

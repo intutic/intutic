@@ -131,11 +131,65 @@ pub fn llm_judge_enabled(body: &Value) -> bool {
     body.get("llmJudgeEnabled").and_then(Value::as_bool) != Some(false)
 }
 
+/// The workspace role of the member a key belongs to (`role`: `OWNER`,
+/// `ADMIN`, `EM`, `DEVELOPER` or `VIEWER`), from a key-context body. `None`
+/// when absent, null or blank: the role is then not known.
+pub fn member_role(body: &Value) -> Option<String> {
+    body.get("role")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .map(str::to_string)
+}
+
+/// The member role behind one virtual key, through the cached [`fetch`].
+/// `None` whenever it cannot be shown — the control plane did not answer, or
+/// refused the key — and a hook rule scoped to roles then applies
+/// (`plugins::hook_rules`): a role that cannot be read never exempts anyone.
+pub async fn fetch_member_role(
+    client: &reqwest::Client,
+    control_plane_url: &str,
+    virtual_key: &crate::credential::VirtualKey,
+    timeout: Duration,
+    policy_version: Option<u64>,
+) -> Option<String> {
+    match fetch(
+        client,
+        control_plane_url,
+        virtual_key,
+        timeout,
+        policy_version,
+    )
+    .await
+    {
+        Ok(Answer::Body(body)) => member_role(&body),
+        Ok(Answer::Refused(status)) => {
+            tracing::debug!(%status, "key-context refused the key; its member role is unknown");
+            None
+        }
+        Err(reason) => {
+            tracing::warn!(reason = %reason, "member role unavailable; role-scoped hook rules apply to this request");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn member_role_reads_the_role_and_nothing_else() {
+        assert_eq!(
+            member_role(&serde_json::json!({"role": "DEVELOPER"})).as_deref(),
+            Some("DEVELOPER")
+        );
+        assert_eq!(member_role(&serde_json::json!({"role": null})), None);
+        assert_eq!(member_role(&serde_json::json!({"role": "  "})), None);
+        assert_eq!(member_role(&serde_json::json!({"workspaceId": "ws"})), None);
+    }
 
     fn key(token: &str) -> crate::credential::VirtualKey {
         crate::credential::RequestCredential::classify(token)

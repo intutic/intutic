@@ -276,6 +276,15 @@ call before the client sees it and answers with a `TOOL_DENIED` refusal naming
 `id`; `mode: shadow` in the same block reports instead. The proxy also refuses a
 request whose latest turn reports a call the rule refuses.
 
+A rule scoped to workspace roles carries them, lower case:
+`"roles":["developer","em"]`. The proxy applies it only to a request whose
+virtual key belongs to a member holding one of those roles, by the role the
+control plane's key context names for the key (cached per key for 30 seconds,
+and read again on the key's next request once the workspace's policy changes,
+which a role change announces). With no control plane or no virtual key the
+role is not known, and the rule applies. This is the member's role, not the
+agent role a `roles:` line scopes by.
+
 A `hook_rule:` line the proxy cannot read — not JSON, no `tools`, an empty
 literal, or a key it does not know — is not ignored: it refuses every tool call
 while it is in force, and the load names it. A call whose arguments are not

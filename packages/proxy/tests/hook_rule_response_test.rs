@@ -4,8 +4,11 @@
 //!
 //! The SOP files are the control plane's own projection, read out of
 //! `packages/shared-types/fixtures/guardrail-layer-vectors.json` (the
-//! `served.sops` of three vectors) and written where a standalone proxy reads
-//! them — the file `intutic guardrails pull` writes. A real request goes
+//! `served.sops` of five vectors, two of them scoped to roles) and written
+//! where a standalone proxy reads them — the file `intutic guardrails pull`
+//! writes. The stand-in control plane's key-context names the key's member
+//! a DEVELOPER, so a rule scoped to developers refuses and one scoped to
+//! viewers does not. A real request goes
 //! through the real router to a wiremock upstream. `plugins::hook_rules`
 //! pins the decisions and `guardrail_layer_vectors_test.rs` pins them
 //! against every layer; this pins the wiring: the name check on the first
@@ -20,8 +23,8 @@ use std::sync::Arc;
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// `served.sops[0]` of the named layer vector: `(title, markdown)`.
-fn served_sop(vector: &str) -> (String, String) {
+/// `served.sops[index]` of the named layer vector: `(title, markdown)`.
+fn served_sop(vector: &str, index: usize) -> (String, String) {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../shared-types/fixtures/guardrail-layer-vectors.json");
     let file: serde_json::Value =
@@ -33,7 +36,7 @@ fn served_sop(vector: &str) -> (String, String) {
         .iter()
         .find(|v| v["name"] == vector)
         .unwrap_or_else(|| panic!("no vector named {vector:?}"));
-    let sop = &v["served"]["sops"][0];
+    let sop = &v["served"]["sops"][index];
     (
         sop["title"].as_str().unwrap().to_string(),
         sop["markdownContent"].as_str().unwrap().to_string(),
@@ -151,6 +154,20 @@ async fn an_enforcing_hook_rule_withholds_the_call_and_a_shadow_one_does_not() {
         )))
         .mount(&upstream)
         .await;
+    for (marker, command) in [
+        ("case-json-proddb", "psql -h prod-db.internal"),
+        ("case-json-force", "git push --force origin main"),
+    ] {
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(body_string_contains(marker))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tool_call_body(
+                "Bash",
+                serde_json::json!({ "command": command }),
+            )))
+            .mount(&upstream)
+            .await;
+    }
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .and(body_string_contains("case-json-history"))
@@ -167,6 +184,7 @@ async fn an_enforcing_hook_rule_withholds_the_call_and_a_shadow_one_does_not() {
         .and(path("/api/v1/auth/key-context"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "workspaceId": "ws_test",
+            "role": "DEVELOPER",
             "ssoGroups": { "policy": null, "memberGroups": null }
         })))
         .mount(&cp)
@@ -181,15 +199,22 @@ async fn an_enforcing_hook_rule_withholds_the_call_and_a_shadow_one_does_not() {
 
     let sops_dir = std::env::temp_dir().join(format!("intutic-hookrule-{}", std::process::id()));
     std::fs::create_dir_all(&sops_dir).unwrap();
-    for (i, vector) in [
-        "an exclusion refuses without it",
-        "a name-only rule refuses any input",
-        "a shadow literal flags and allows",
+    for (i, (vector, index)) in [
+        ("an exclusion refuses without it", 0),
+        ("a name-only rule refuses any input", 0),
+        ("a shadow literal flags and allows", 0),
+        // Bash with `prod-db`, scoped to developers.
+        ("a role-scoped rule applies to a member in its role", 0),
+        // Bash with `git push` and `--force`, scoped to viewers.
+        (
+            "a refusal outside its role leaves the shadow match standing",
+            1,
+        ),
     ]
     .into_iter()
     .enumerate()
     {
-        let (_, markdown) = served_sop(vector);
+        let (_, markdown) = served_sop(vector, index);
         std::fs::write(sops_dir.join(format!("guardrail-{i}.md")), markdown).unwrap();
     }
 
@@ -325,6 +350,20 @@ async fn an_enforcing_hook_rule_withholds_the_call_and_a_shadow_one_does_not() {
     assert!(!body.contains("call_hookrule"), "{body}");
     assert!(body.contains("[Intutic] Blocked tool call"), "{body}");
     assert_eq!(rule.as_deref(), Some("guardrail.pgr_lv08"));
+
+    // Scoped to the key's member role (DEVELOPER, from key-context): refused.
+    let (status, rule, body) = send("case-json-proddb", false, None).await;
+    assert!(status.is_success(), "{status}: {body}");
+    assert!(!body.contains("call_hookrule"), "{body}");
+    assert_eq!(rule.as_deref(), Some("guardrail.pgr_lv25"));
+    // Scoped to another role: the call goes through.
+    let (status, rule, body) = send("case-json-force", false, None).await;
+    assert!(status.is_success(), "{status}: {body}");
+    assert!(
+        body.contains("call_hookrule"),
+        "a rule scoped to viewers withheld a developer's call:\n{body}"
+    );
+    assert_eq!(rule, None, "{body}");
 
     // Request side: the turn this request reports on carries a refused call
     // the harness ran anyway. Refused like a deny_tools call in history.

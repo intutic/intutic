@@ -2,8 +2,12 @@
  * The guardrail layer vectors through the emitted harness gates.
  *
  * Each vector is a set of hook-rule guardrails, the rules `GET /api/v1/sop/rules`
- * serves for them (ENFORCING as `block`, SHADOW as `warn`, in served order),
- * one tool call and the decision every layer must reach. This file builds one
+ * serves for them to a member of the vector's role (ENFORCING as `block`,
+ * SHADOW as `warn`, in served order; a rule scoped to other roles is not
+ * served, which is how the snapshot holds a member to their role's rules —
+ * the control plane's `guardrailRoles.test.ts` drives the daemon's real
+ * `refreshPolicySnapshot` with each member's key), one tool call and the
+ * decision every layer must reach. This file builds one
  * policy snapshot per vector the way the daemon builds one
  * (`buildSnapshotRules` over the served rules, keeping the `sop.guardrail.*`
  * patterns), writes it with a real digest, and drives one node gate and one
@@ -174,7 +178,14 @@ describe('guardrail layer vectors through the emitted gates', () => {
   it('has gates and vectors to iterate over, and every served guardrail rule survived the snapshot writer', () => {
     expect(gates.map((g) => g.name)).toEqual([...CHOSEN])
     expect(gates.map((g) => g.runner).sort()).toEqual(['bash', 'node'])
-    expect(vectors.length).toBeGreaterThanOrEqual(24)
+    expect(vectors.length).toBeGreaterThanOrEqual(32)
+    // Rules scoped to roles, as served to a member of the vector's role: the
+    // control plane serves a member's key only its role's rules, so this layer
+    // must decide what it is served — a scoped rule it holds, none it lacks.
+    const scoped = vectors.filter((v) => JSON.stringify(v).includes('"roles":'))
+    expect(scoped.length, 'role-scoped vectors').toBeGreaterThanOrEqual(8)
+    expect(scoped.some((v) => v.expected.decision === 'allow')).toBe(true)
+    expect(scoped.some((v) => v.expected.decision === 'block')).toBe(true)
     const decisions = new Set(vectors.map((v) => v.expected.decision))
     for (const d of ['block', 'warn', 'allow']) expect(decisions, d).toContain(d)
     vectors.forEach((v, i) => {

@@ -80,7 +80,14 @@ describe('guardrail layer vectors through Gate.guard', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('reads the vector file, with every decision represented', () => {
-    expect(vectors.length).toBeGreaterThanOrEqual(24)
+    expect(vectors.length).toBeGreaterThanOrEqual(32)
+    // Rules scoped to roles, as served to a member of the vector's role: the
+    // control plane serves a member's key only its role's rules, so this layer
+    // must decide what it is served — a scoped rule it holds, none it lacks.
+    const scoped = vectors.filter((v) => JSON.stringify(v).includes('"roles":'))
+    expect(scoped.length, 'role-scoped vectors').toBeGreaterThanOrEqual(8)
+    expect(scoped.some((v) => v.expected.decision === 'allow')).toBe(true)
+    expect(scoped.some((v) => v.expected.decision === 'block')).toBe(true)
     const decisions = new Set(vectors.map((v) => v.expected.decision))
     for (const d of ['block', 'warn', 'allow']) expect(decisions, d).toContain(d)
   })

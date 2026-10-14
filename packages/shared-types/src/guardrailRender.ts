@@ -193,7 +193,10 @@ export const HOOK_RULE_FRONT_MATTER_KEY = 'hook_rule:'
  * over literals — so the proxy tests the literals as substrings of the same
  * `JSON.stringify(tool_input)` haystack, which is what the pattern means.
  * `id` is the rule id every other layer names the rule by (`guardrail.<pgr>`);
- * `reason` is the rendered reason, byte for byte.
+ * `reason` is the rendered reason, byte for byte. `roles`, present only when
+ * the IR scopes the rule, are the lower-cased workspace roles it applies to:
+ * the proxy reads the member's role from key-context per request and applies
+ * the rule as {@link hookRuleAppliesToRole} says.
  */
 export interface ProxyHookRule {
   id: string
@@ -201,16 +204,40 @@ export interface ProxyHookRule {
   argContains: string[]
   argNotContains: string[]
   reason: string
+  roles?: string[]
 }
 
 export function proxyHookRule(ruleId: string, ir: HookRuleIr, reason: string): ProxyHookRule {
+  const roles = hookRuleRoles(ir)
   return {
     id: ruleId,
     tools: [...new Set(ir.tools)].sort(),
     argContains: [...new Set(ir.argContains ?? [])].sort(),
     argNotContains: [...new Set(ir.argNotContains ?? [])].sort(),
     reason: scrubReason(reason),
+    ...(roles.length ? { roles } : {}),
   }
+}
+
+/** A hook rule's roles, lower-cased, deduplicated and sorted; `[]` when it applies to everyone. */
+export function hookRuleRoles(ir: Pick<HookRuleIr, 'roles'>): string[] {
+  return [...new Set((ir.roles ?? []).map((r) => r.toLowerCase()))].sort()
+}
+
+/**
+ * Whether a hook rule scoped to `roles` applies to a caller whose workspace
+ * role is `memberRole` (`OWNER`, `ADMIN`, `EM`, `DEVELOPER`, `VIEWER`, in any
+ * case). A rule with no roles applies to everyone. A caller whose role is not
+ * known — no member behind the credential, a role that could not be read —
+ * is held to every rule: a rule that cannot show it does not apply, applies.
+ * Every layer decides by this (the Rust proxy by its port in
+ * `plugins/hook_rules.rs`), pinned by `guardrail-layer-vectors.json`.
+ */
+export function hookRuleAppliesToRole(roles: readonly string[] | undefined, memberRole: string | null | undefined): boolean {
+  if (!roles || roles.length === 0) return true
+  if (!memberRole) return true
+  const role = memberRole.toLowerCase()
+  return roles.some((r) => r.toLowerCase() === role)
 }
 
 /**
@@ -220,7 +247,14 @@ export function proxyHookRule(ruleId: string, ir: HookRuleIr, reason: string): P
  * Keys are in a fixed order, so the line is byte-stable.
  */
 export function renderHookRuleFrontMatterLine(rule: ProxyHookRule): string {
-  const ordered: ProxyHookRule = { id: rule.id, tools: rule.tools, argContains: rule.argContains, argNotContains: rule.argNotContains, reason: rule.reason }
+  const ordered: ProxyHookRule = {
+    id: rule.id,
+    tools: rule.tools,
+    argContains: rule.argContains,
+    argNotContains: rule.argNotContains,
+    reason: rule.reason,
+    ...(rule.roles?.length ? { roles: rule.roles } : {}),
+  }
   return `${HOOK_RULE_FRONT_MATTER_KEY} ${JSON.stringify(ordered)}`
 }
 

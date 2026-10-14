@@ -4764,9 +4764,40 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let gov = crate::sops::governance_fields_from(&enforcing_sops, &node.agent_role);
     // Hook-rule guardrails, enforcing and shadow together: each rule carries
     // its SOP's mode. Enforced on the response's tool calls below, and on the
-    // calls of the turn this request reports on.
-    let hook_rule_set =
-        crate::plugins::hook_rules::HookRuleSet::from_sops(&resolved_sops, &node.agent_role);
+    // calls of the turn this request reports on. A rule scoped to workspace
+    // roles applies only to a member in one of them, by the role key-context
+    // names for this virtual key (the cached per-key read Step 5a's SSO group
+    // gate shares) — read only when the set has such a rule. No control plane,
+    // no virtual key, or no answer: the role is not known and every rule
+    // applies.
+    let hook_rule_set = {
+        let set =
+            crate::plugins::hook_rules::HookRuleSet::from_sops(&resolved_sops, &node.agent_role);
+        if set.has_role_scoped() {
+            let policy_cfg = &state.config.intutic_settings.policy;
+            let member_role = match policy_cfg
+                .control_plane_url
+                .as_deref()
+                .zip(credential.virtual_key())
+            {
+                Some((cp_url, virtual_key)) => {
+                    let policy_version = state.control_plane.policy_version(&workspace_id).await;
+                    crate::key_context::fetch_member_role(
+                        &state.http_client,
+                        cp_url,
+                        virtual_key,
+                        std::time::Duration::from_millis(policy_cfg.timeout_ms),
+                        policy_version,
+                    )
+                    .await
+                }
+                None => None,
+            };
+            set.for_member_role(member_role.as_deref())
+        } else {
+            set
+        }
+    };
     // The destructive-SQL rule, enforced on the response side below.
     // The shadow set is resolved apart from the enforcing one, so a shadow
     // SOP's allowlist can never widen an enforcing SOP's. Empty — the default

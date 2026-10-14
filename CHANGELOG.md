@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guardrails, what is served for them, a tool call and the expected decision;
   the emitted hook gates, `@intutic/gate`, `intutic-clawde`, the MCP proxy and
   the LLM proxy each run it, and the proxy now also runs the hook-rule vectors.
+- **Hook rules scoped to roles are enforced.** A hook-rule guardrail that names
+  workspace roles applies only to members holding one of them, at every layer,
+  by the role of the member behind the caller's key. The LLM proxy reads it
+  from the key context and applies the rule's `roles`; the hook gates, the SDK
+  gates and the MCP proxy are served only their member's rules. A caller whose
+  role is not known is held to every rule. A role change applies on the
+  member's next call, and on a connected machine at its next sync at the
+  latest.
 
 - **An OpenAPI 3.1 document for the control plane's REST API.**
   `apps/docs/public/openapi.json` lists every route with its auth, plan badge,

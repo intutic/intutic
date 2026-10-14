@@ -199,6 +199,8 @@ export {
   renderWorkspaceSetting,
   HOOK_RULE_FRONT_MATTER_KEY,
   proxyHookRule,
+  hookRuleRoles,
+  hookRuleAppliesToRole,
   renderHookRuleFrontMatterLine,
 } from './guardrailRender.js'
 export type { HookRuleCitation, RenderedHookRule, RenderedWorkspaceSetting, ParsedFrontMatter, GuardrailSopFileInput, ProxyHookRule } from './guardrailRender.js'

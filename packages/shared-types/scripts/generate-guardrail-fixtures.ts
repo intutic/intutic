@@ -25,7 +25,7 @@ import { mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { canonicalizeIr, validateGuardrailIr, type FrontMatterIr, type HookRuleIr } from '../src/guardrailIr.js'
-import { frontMatterToIrs, parseFrontMatterEnforcing, proxyHookRule, renderFrontMatterLines, renderGuardrailSopFile, renderHookRule, renderHookRuleFrontMatterLine, splitFrontMatter } from '../src/guardrailRender.js'
+import { frontMatterToIrs, hookRuleAppliesToRole, hookRuleRoles, parseFrontMatterEnforcing, proxyHookRule, renderFrontMatterLines, renderGuardrailSopFile, renderHookRule, renderHookRuleFrontMatterLine, splitFrontMatter } from '../src/guardrailRender.js'
 import { GUARDRAIL_SOP_TITLE_PREFIX } from '../src/policyGuardrails.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -337,7 +337,8 @@ for (const fx of IR_FIXTURES) {
 // Each vector is a set of guardrails, what the control plane serves for them
 // — the rendered rules `GET /api/v1/sop/rules` and `/policy/resolve` append,
 // and the SOP entries `GET /api/v1/workspace/sops-policy` appends for the
-// proxy — one tool call, and the decision. `block` names the ENFORCING rule
+// proxy — the caller's workspace role (lower case, or null when it is not
+// known), one tool call, and the decision. `block` names the ENFORCING rule
 // that refuses the call; `warn` names the SHADOW rule that would have, while
 // the call goes through; `allow` names none. A refusal wins over a shadow
 // match wherever the rules sit in the list. No vector has two rules of the
@@ -356,7 +357,7 @@ interface LayerGuardrail {
 interface LayerVector {
   name: string
   guardrails: LayerGuardrail[]
-  role: string
+  role: string | null
   toolCall: { tool: string; toolInput: Record<string, unknown> }
   expected: { decision: LayerDecision; ruleId: string | null }
 }
@@ -379,6 +380,14 @@ const DOTENV: HookRuleIr = { kind: 'hook_rule', title: 'Environment files stay u
 const DOTENV_CITE = { quote: 'Agents do not read .env files; secrets come from the vault.', sourceUrl: `${WIKI}307` }
 const PRODDB: HookRuleIr = { kind: 'hook_rule', title: 'No direct production database sessions', tools: ['Bash'], argContains: ['prod-db'] }
 const PRODDB_CITE = { quote: 'Nobody opens a session against prod-db from an agent.', sourceUrl: `${WIKI}308` }
+const PRODDB_DEV: HookRuleIr = { kind: 'hook_rule', title: 'Developers do not open production database sessions', tools: ['Bash'], argContains: ['prod-db'], roles: ['developer'] }
+const PRODDB_DEV_CITE = { quote: 'A developer never opens a session against prod-db from an agent; the on-call admin does.', sourceUrl: `${WIKI}309` }
+const FORCE_VIEWER: HookRuleIr = { kind: 'hook_rule', title: 'Viewers never force push', tools: ['Bash'], argContains: ['git push', '--force'], roles: ['viewer'] }
+const FORCE_VIEWER_CITE = { quote: 'A viewer may not force push (git push --force) to any branch.', sourceUrl: `${WIKI}310` }
+const DOTENV_VIEWER: HookRuleIr = { kind: 'hook_rule', title: 'Viewers do not read environment files', tools: ['Read'], argContains: ['.env'], roles: ['viewer'] }
+const DOTENV_VIEWER_CITE = { quote: 'A viewer does not read .env files.', sourceUrl: `${WIKI}311` }
+const RELEASE_LEADS: HookRuleIr = { kind: 'hook_rule', title: 'Releases are cut by leads in person', tools: ['Bash'], argContains: ['gh release create'], roles: ['developer', 'em'] }
+const RELEASE_LEADS_CITE = { quote: 'Neither a developer nor an em cuts a release (gh release create) from an agent session.', sourceUrl: `${WIKI}312` }
 
 const gr = (guardrailId: string, status: LayerGuardrail['status'], ir: HookRuleIr, citation: LayerGuardrail['citation']): LayerGuardrail => ({ guardrailId, status, ir, citation })
 const call = (tool: string, toolInput: Record<string, unknown>) => ({ tool, toolInput })
@@ -404,31 +413,59 @@ const LAYER_VECTORS: LayerVector[] = [
   { name: 'escaped quotes do not hide a literal', guardrails: [gr('pgr_lv15', 'ENFORCING', TF, TF_CITE)], role: 'developer', toolCall: call('Bash', { command: 'bash -c "terraform apply"' }), expected: blocks('guardrail.pgr_lv15') },
   { name: 'a newline between the words is not the literal', guardrails: [gr('pgr_lv16', 'ENFORCING', TF, TF_CITE)], role: 'developer', toolCall: call('Bash', { command: 'terraform\napply' }), expected: allows },
   { name: 'an empty input under a literal rule', guardrails: [gr('pgr_lv17', 'ENFORCING', TF, TF_CITE)], role: 'developer', toolCall: call('Bash', {}), expected: allows },
-  { name: 'a caller with no role is refused like any other', guardrails: [gr('pgr_lv18', 'ENFORCING', TF, TF_CITE)], role: '', toolCall: call('Bash', { command: 'terraform apply' }), expected: blocks('guardrail.pgr_lv18') },
+  { name: 'a caller whose role is unknown is refused like any other', guardrails: [gr('pgr_lv18', 'ENFORCING', TF, TF_CITE)], role: null, toolCall: call('Bash', { command: 'terraform apply' }), expected: blocks('guardrail.pgr_lv18') },
   { name: 'an admin is refused like any other', guardrails: [gr('pgr_lv19', 'ENFORCING', TF, TF_CITE)], role: 'admin', toolCall: call('Bash', { command: 'terraform apply' }), expected: blocks('guardrail.pgr_lv19') },
   { name: 'non-ASCII input around a literal', guardrails: [gr('pgr_lv20', 'ENFORCING', RMRF, RMRF_CITE)], role: 'developer', toolCall: call('Bash', { command: 'rm -rf ./données/été' }), expected: blocks('guardrail.pgr_lv20') },
   { name: 'two enforcing rules: the one that matches decides', guardrails: [gr('pgr_lv21a', 'ENFORCING', TF, TF_CITE), gr('pgr_lv21b', 'ENFORCING', PUSH, PUSH_CITE)], role: 'developer', toolCall: call('Bash', { command: 'git push origin feature' }), expected: blocks('guardrail.pgr_lv21b') },
   { name: 'a literal in a nested value', guardrails: [gr('pgr_lv22', 'ENFORCING', PRODDB, PRODDB_CITE)], role: 'developer', toolCall: call('Bash', { command: 'psql', env: { PGHOST: 'prod-db.internal', PGPORT: 5432 } }), expected: blocks('guardrail.pgr_lv22') },
   { name: 'a rule on Read', guardrails: [gr('pgr_lv23', 'ENFORCING', DOTENV, DOTENV_CITE)], role: 'developer', toolCall: call('Read', { file_path: '/repo/.env' }), expected: blocks('guardrail.pgr_lv23') },
   { name: 'a shadow rule that does not match', guardrails: [gr('pgr_lv24', 'SHADOW', DOTENV, DOTENV_CITE)], role: 'developer', toolCall: call('Read', { file_path: '/repo/README.md' }), expected: allows },
+  // Role-scoped rules: a rule names the workspace roles it applies to, and
+  // every layer holds the caller to it by the role of the member behind the
+  // credential. Outside its roles it does nothing; when that role is not
+  // known it applies.
+  { name: 'a role-scoped rule applies to a member in its role', guardrails: [gr('pgr_lv25', 'ENFORCING', PRODDB_DEV, PRODDB_DEV_CITE)], role: 'developer', toolCall: call('Bash', { command: 'psql -h prod-db.internal' }), expected: blocks('guardrail.pgr_lv25') },
+  { name: 'a role-scoped rule does not apply outside its role', guardrails: [gr('pgr_lv26', 'ENFORCING', PRODDB_DEV, PRODDB_DEV_CITE)], role: 'admin', toolCall: call('Bash', { command: 'psql -h prod-db.internal' }), expected: allows },
+  { name: 'a role-scoped rule applies when the caller\'s role is unknown', guardrails: [gr('pgr_lv27', 'ENFORCING', PRODDB_DEV, PRODDB_DEV_CITE)], role: null, toolCall: call('Bash', { command: 'psql -h prod-db.internal' }), expected: blocks('guardrail.pgr_lv27') },
+  { name: 'a rule scoped to two roles applies to each', guardrails: [gr('pgr_lv28', 'ENFORCING', RELEASE_LEADS, RELEASE_LEADS_CITE)], role: 'em', toolCall: call('Bash', { command: 'gh release create v2.1.0' }), expected: blocks('guardrail.pgr_lv28') },
+  { name: 'a rule scoped to two roles leaves a third alone', guardrails: [gr('pgr_lv29', 'ENFORCING', RELEASE_LEADS, RELEASE_LEADS_CITE)], role: 'owner', toolCall: call('Bash', { command: 'gh release create v2.1.0' }), expected: allows },
+  { name: 'a refusal outside its role leaves the shadow match standing', guardrails: [gr('pgr_lv30a', 'SHADOW', PUSH, PUSH_CITE), gr('pgr_lv30b', 'ENFORCING', FORCE_VIEWER, FORCE_VIEWER_CITE)], role: 'developer', toolCall: call('Bash', { command: 'git push --force origin main' }), expected: warns('guardrail.pgr_lv30a') },
+  { name: 'a role-scoped shadow rule outside its role reports nothing', guardrails: [gr('pgr_lv31', 'SHADOW', DOTENV_VIEWER, DOTENV_VIEWER_CITE)], role: 'developer', toolCall: call('Read', { file_path: '/repo/.env' }), expected: allows },
+  { name: 'a role-scoped shadow rule in its role flags and allows', guardrails: [gr('pgr_lv32', 'SHADOW', DOTENV_VIEWER, DOTENV_VIEWER_CITE)], role: 'viewer', toolCall: call('Read', { file_path: '/repo/.env' }), expected: warns('guardrail.pgr_lv32') },
 ]
 
-/** Exactly what `listProjectedHookRules` serves for these guardrails, in proposal order. */
-function servedHookRules(gs: readonly LayerGuardrail[]) {
-  return gs.map((x) => {
+/**
+ * Exactly what `listProjectedHookRules` serves a caller of workspace role
+ * `role` for these guardrails, in proposal order: the rules that apply to
+ * that role, each carrying its roles when it is scoped. This is what
+ * `GET /api/v1/policy/resolve` and `GET /api/v1/sop/rules` answer the
+ * member's own key with — the hook gates' snapshot, gate-js, intutic-clawde
+ * and the MCP proxy — so those layers never see a rule outside the role.
+ */
+function servedHookRules(gs: readonly LayerGuardrail[], role: string | null) {
+  return gs.flatMap((x) => {
+    const roles = hookRuleRoles(x.ir)
+    if (!hookRuleAppliesToRole(roles, role)) return []
     const rendered = renderHookRule(x.ir, x.citation)
-    return {
-      id: `guardrail.${x.guardrailId}`,
-      toolPattern: rendered.toolPattern,
-      ...(rendered.argPattern ? { argPattern: rendered.argPattern } : {}),
-      action: x.status === 'ENFORCING' ? ('block' as const) : ('warn' as const),
-      reason: rendered.reason,
-      origin: 'guardrail' as const,
-    }
+    return [
+      {
+        id: `guardrail.${x.guardrailId}`,
+        toolPattern: rendered.toolPattern,
+        ...(rendered.argPattern ? { argPattern: rendered.argPattern } : {}),
+        action: x.status === 'ENFORCING' ? ('block' as const) : ('warn' as const),
+        reason: rendered.reason,
+        origin: 'guardrail' as const,
+        ...(roles.length ? { roles } : {}),
+      },
+    ]
   })
 }
 
-/** The SOP entries `listProjectedGuardrailSops` serves the LLM proxy for these guardrails. */
+/**
+ * The SOP entries `listProjectedGuardrailSops` serves the LLM proxy for these
+ * guardrails — every one, whoever asks: the feed is per workspace, and the
+ * proxy applies each line's `roles` per request by the key's member role.
+ */
 function servedSops(gs: readonly LayerGuardrail[]) {
   return gs.map((x) => {
     const rendered = renderHookRule(x.ir, x.citation)
@@ -458,7 +495,7 @@ function decideLayer(matches: ReadonlyArray<{ id: string; action: 'block' | 'war
 
 const layerVectors = LAYER_VECTORS.map((v) => {
   for (const x of v.guardrails) assertValid(x.ir, `${v.name} / ${x.guardrailId}`)
-  const hookRules = servedHookRules(v.guardrails)
+  const hookRules = servedHookRules(v.guardrails, v.role)
   const sops = servedSops(v.guardrails)
   const haystack = JSON.stringify(v.toolCall.toolInput ?? {})
   const patternFires = (r: (typeof hookRules)[number]) => new RegExp(r.toolPattern).test(v.toolCall.tool) && (r.argPattern === undefined || new RegExp(r.argPattern).test(haystack))
@@ -469,8 +506,8 @@ const layerVectors = LAYER_VECTORS.map((v) => {
     sops.flatMap((s, i) => {
       const line = s.markdownContent.split('\n').find((l) => l.startsWith('hook_rule:'))
       if (!line) throw new Error(`${v.name}: served SOP ${i} carries no hook_rule line`)
-      const r = JSON.parse(line.slice('hook_rule:'.length)) as { id: string; tools: string[]; argContains: string[]; argNotContains: string[] }
-      const fires = r.tools.includes(v.toolCall.tool) && r.argContains.every((l) => haystack.includes(l)) && !r.argNotContains.some((l) => haystack.includes(l))
+      const r = JSON.parse(line.slice('hook_rule:'.length)) as { id: string; tools: string[]; argContains: string[]; argNotContains: string[]; roles?: string[] }
+      const fires = hookRuleAppliesToRole(r.roles, v.role) && r.tools.includes(v.toolCall.tool) && r.argContains.every((l) => haystack.includes(l)) && !r.argNotContains.some((l) => haystack.includes(l))
       return fires ? [{ id: r.id, action: v.guardrails[i]!.status === 'ENFORCING' ? ('block' as const) : ('warn' as const) }] : []
     }),
   )

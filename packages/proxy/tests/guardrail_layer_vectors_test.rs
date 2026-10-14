@@ -10,7 +10,11 @@
 //!   gates, gate-js, intutic-clawde, the MCP proxy and the hosted hook gate run
 //!   the same file; here each vector's SOP entries are served by a stand-in
 //!   control plane on `GET /api/v1/workspace/sops-policy` and fetched by the
-//!   gateway resolver — the real feed and the real parser — then the call is
+//!   gateway resolver — the real feed and the real parser — the caller's
+//!   member role is read from the stand-in's `GET /api/v1/auth/key-context`
+//!   (upper case, as the control plane names it; absent for a vector whose
+//!   role is not known) by the read `proxy.rs` makes, and the set is scoped
+//!   to it as `proxy.rs` scopes it; then the call is
 //!   decided directly, inside an Anthropic and an OpenAI response body, and
 //!   inside an Anthropic and an OpenAI stream whose arguments arrive in
 //!   fragments, through the response gate's own hold.
@@ -35,6 +39,7 @@ use serde_json::{json, Value};
 use intutic_proxy::config::ResponseGateConfig;
 use intutic_proxy::credential::RequestCredential;
 use intutic_proxy::gateway::{init_gateway_config, GatewayConfig};
+use intutic_proxy::key_context::fetch_member_role;
 use intutic_proxy::plugins::hook_rules::{parse_line, CallInput, HookRuleDecision, HookRuleSet};
 use intutic_proxy::plugins::response_gate::{
     gate_response_hook_rules, gate_stream_line_hook_rules, DenialReason,
@@ -61,7 +66,7 @@ struct LayerFile {
 struct LayerVector {
     name: String,
     served: Served,
-    role: String,
+    role: Option<String>,
     #[serde(rename = "toolCall")]
     tool_call: ToolCall,
     expected: Expected,
@@ -203,23 +208,42 @@ fn stream_outcome(
     (outcome(&seen), call_released)
 }
 
-async fn stand_in(vectors: Arc<Vec<Vec<Value>>>) -> SocketAddr {
+/// Each vector's served SOPs and caller role.
+type StandIn = Arc<Vec<(Vec<Value>, Option<String>)>>;
+
+/// The bearer names the vector: `vk_lv<index>_…`.
+fn vector_index(headers: &axum::http::HeaderMap) -> usize {
+    headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|a| a.split("vk_lv").nth(1))
+        .and_then(|rest| rest.split('_').next())
+        .and_then(|n| n.parse().ok())
+        .expect("a vector-indexed virtual key")
+}
+
+async fn stand_in(vectors: StandIn) -> SocketAddr {
     async fn sops_policy(
-        State(vectors): State<Arc<Vec<Vec<Value>>>>,
+        State(vectors): State<StandIn>,
         headers: axum::http::HeaderMap,
     ) -> Json<Value> {
-        // The bearer names the vector: `vk_lv<index>_…`.
-        let index: usize = headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|a| a.split("vk_lv").nth(1))
-            .and_then(|rest| rest.split('_').next())
-            .and_then(|n| n.parse().ok())
-            .expect("a vector-indexed virtual key");
-        Json(json!({ "workspaceId": format!("ws_lv{index}"), "sops": vectors[index] }))
+        let index = vector_index(&headers);
+        Json(json!({ "workspaceId": format!("ws_lv{index}"), "sops": vectors[index].0 }))
+    }
+    async fn key_context(
+        State(vectors): State<StandIn>,
+        headers: axum::http::HeaderMap,
+    ) -> Json<Value> {
+        let index = vector_index(&headers);
+        let mut body = json!({ "workspaceId": format!("ws_lv{index}") });
+        if let Some(role) = &vectors[index].1 {
+            body["role"] = json!(role.to_uppercase());
+        }
+        Json(body)
     }
     let app = Router::new()
         .route("/api/v1/workspace/sops-policy", get(sops_policy))
+        .route("/api/v1/auth/key-context", get(key_context))
         .with_state(vectors);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -235,9 +259,17 @@ async fn the_proxy_decides_every_shared_hook_rule_vector_as_every_layer_does() {
     let file: LayerFile = serde_json::from_str(&fixture("guardrail-layer-vectors.json"))
         .expect("the layer vector file parses");
     assert!(
-        file.vectors.len() >= 24,
+        file.vectors.len() >= 32,
         "only {} layer vectors",
         file.vectors.len()
+    );
+    assert!(
+        file.vectors.iter().any(|v| v.role.is_none()
+            && v.served
+                .sops
+                .iter()
+                .any(|s| s.to_string().contains(r#"\"roles\":"#))),
+        "no vector holds a caller whose role is unknown to a scoped rule"
     );
     for d in ["block", "warn", "allow"] {
         assert!(
@@ -250,7 +282,12 @@ async fn the_proxy_decides_every_shared_hook_rule_vector_as_every_layer_does() {
         require_vk: true,
         ..Default::default()
     });
-    let served = Arc::new(file.vectors.iter().map(|v| v.served.sops.clone()).collect());
+    let served: StandIn = Arc::new(
+        file.vectors
+            .iter()
+            .map(|v| (v.served.sops.clone(), v.role.clone()))
+            .collect(),
+    );
     let addr = stand_in(served).await;
     let cp = format!("http://{addr}");
     let client = reqwest::Client::new();
@@ -269,7 +306,21 @@ async fn the_proxy_decides_every_shared_hook_rule_vector_as_every_layer_does() {
             sops.len(),
             v.served.sops.len()
         );
-        let set = HookRuleSet::from_sops(&sops, &v.role);
+        let member_role = fetch_member_role(
+            &client,
+            &cp,
+            key.virtual_key().expect("a virtual key"),
+            std::time::Duration::from_secs(5),
+            None,
+        )
+        .await;
+        assert_eq!(
+            member_role.as_deref().map(str::to_lowercase),
+            v.role,
+            "{}: the member role read from key-context",
+            v.name
+        );
+        let set = HookRuleSet::from_sops(&sops, "").for_member_role(member_role.as_deref());
         let tool = v.tool_call.tool.as_str();
         let input = &v.tool_call.tool_input;
 
@@ -280,7 +331,13 @@ async fn the_proxy_decides_every_shared_hook_rule_vector_as_every_layer_does() {
         let openai = json!({"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_lv","type":"function","function":{"name":tool,"arguments":input.to_string()}}]},"finish_reason":"tool_calls"}]});
         for (shape, body) in [("Anthropic body", anthropic), ("OpenAI body", openai)] {
             let (denial, decision, saw_call) = gate_response_hook_rules(&cfg, Some(&body), &set);
-            assert!(saw_call, "{}: {shape}: the call was not seen", v.name);
+            // A set the role filter emptied has nothing to look for.
+            assert_eq!(
+                saw_call,
+                !set.is_empty(),
+                "{}: {shape}: the call was not seen",
+                v.name
+            );
             assert_eq!(outcome(&decision), v.expected, "{}: {shape}", v.name);
             assert_eq!(
                 denial.is_some(),

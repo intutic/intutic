@@ -60,7 +60,7 @@ resource "intutic_guardrail" "approved_models" {
 - `models` (List of String) `allowed_models` (required, 1 to 32): model ids, compared exactly as the proxy compares them.
 - `predicate` (String) `wasm_predicate` (required): the predicate in the closed rule DSL, as JSON (`jsonencode({ all = [...] })`). Its verdict is always re-ask.
 - `rationale` (String) `wasm_predicate` (required): why the rule re-asks, at most 480 characters.
-- `roles` (List of String) Every kind but `allowed_models` and `egress_allow`: the lower-case roles the rule applies to (at most 8). Unset, it applies to everyone.
+- `roles` (List of String) Every kind but `allowed_models` and `egress_allow`: the lower-case roles the rule applies to (at most 8). Unset, it applies to everyone. On a `hook_rule` these are workspace roles (`owner`, `admin`, `em`, `developer`, `viewer`), enforced at every gate by the role of the member behind the caller's key; a caller whose role is not known is held to the rule. On the front-matter kinds they are the agent role a request names.
 - `taint` (String) `forbid_with` (required): `secrets()` or `pii()`.
 - `then` (String) `requires_before`, `forbid_after` (required): the second token.
 - `title` (String) `hook_rule`, `wasm_predicate` (required): the title, 1 to 80 characters, that starts the block message.
