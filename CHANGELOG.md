@@ -185,9 +185,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   printing the endpoint's one-row probe as a count.
 - **`intutic judge configure`** prints docs links instead of paths into
   Intutic's own source tree.
-- **`intutic sops push <name>` pushes a file `sops pull` wrote.** Pull writes
-  `.intutic/sops/<slug>.md`, and push read only folders; push now takes a
-  folder, or a file named with or without `.md`.
+- **`intutic sops push` updates the SOP a file came from instead of creating
+  a duplicate.** `sops pull` now records each file's SOP in its front matter
+  (`intutic_id:`, `intutic_revision:`), and push edits that SOP through the
+  dashboard's edit path: a DRAFT in place, an approved SOP as a new DRAFT
+  version while the approved one keeps enforcing. The recorded revision is
+  the precondition, so a SOP edited on the control plane since the pull is
+  refused (`--force` overwrites); an unchanged file is a no-op; a deleted SOP
+  needs `--create`; a WEAKEN edit's Owner refusal is printed. A file with no
+  record is created and then recorded. Push also takes a single file, the
+  layout pull writes, as well as a folder; pull and status read both layouts,
+  match files by the recorded id, and pull keeps a file's other front-matter
+  keys. The SOP listing and detail now carry `priorVersionId`.
 - **The AutoGen `.env.intutic` comment leads with `IntuticWorkbench`**, which
   governs `AssistantAgent`'s own tool calls, as the integration page does.
 

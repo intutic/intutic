@@ -18,12 +18,16 @@ the two.
 intutic sops push deploy-checklist
 ```
 
-Reads every `.md` file under `.intutic/sops/deploy-checklist/` and creates
+Reads every `.md` file under `.intutic/sops/deploy-checklist/` and pushes
 **one control-plane SOP per file** — each carrying that file's own declared
 front matter faithfully. With no such folder it pushes the single file
 `.intutic/sops/deploy-checklist.md`, the layout `sops pull` writes, so a
-pulled SOP pushes back by its file name (`.md` optional). Each push creates
-a new SOP; it does not update one that already has the title.
+pulled SOP pushes back by its file name (`.md` optional).
+
+A file that records its SOP — `intutic_id:` and `intutic_revision:` in its
+front matter, written by `pull` and by every successful push — **updates that
+SOP**; a file without one creates a new SOP and records it. Commit the files
+with these keys: they are how a teammate's push lands on the same SOP.
 
 ```yaml
 ---
@@ -52,8 +56,36 @@ different questions: "does this response violate the policy text" (judge) vs.
 "is this specific tool call allowed right now" (proxy, from the file).
 :::
 
+### Updating a SOP
+
+An update goes through the same edit path as the dashboard
+(`PUT /api/v1/sops/:id`), so the lifecycle applies:
+
+- **A DRAFT** is edited in place.
+- **An approved SOP** gets a new DRAFT version. The approved version keeps
+  enforcing until the draft is promoted, and the file now records the draft,
+  so the next push edits the draft and the next `pull` does not write the
+  approved version back as a second file.
+- **An edit that loosens the guideline** (classified WEAKEN) needs an Owner;
+  the control plane's refusal is printed and the file is left as it is.
+
+A file that matches its SOP sends nothing (`up to date`). The file's
+`intutic_revision:` goes along as the precondition: if the SOP was edited on
+the control plane since you pulled, the push is refused —
+
+```text
+✖ deploy-checklist.md: "Never Deploy Without Tests" changed on the server since you pulled it (revision 4 there, 3 recorded here). Run `intutic sops pull` to fetch it, or push with --force to overwrite it.
+```
+
+— and `--force` overwrites it. A push that would fork a second DRAFT of an
+approved SOP that already has one is refused the same way. A recorded SOP
+that was deleted on the control plane is refused too; `--create` creates a
+new one and records it. Each file's result is printed, and the command exits
+`1` if any file failed.
+
 `--org` pushes as a mandatory org-wide floor instead (`/api/v1/workspace/org-sops`)
-— see [Organizations, Teams & Billing](/guide/organizations).
+— see [Organizations, Teams & Billing](/guide/organizations). Org floors are
+always created; there is no update path for them.
 
 ## `intutic sops pull`
 
@@ -64,8 +96,12 @@ intutic sops pull
 The round trip the other direction: every SOP in the workspace, written to
 `.intutic/sops/<slug-of-title>.md` with front matter reconstructed from the
 row (`title:`, `risk_tier:`, `version:`, plus a `content_hash:` marker — see
-below). Two SOPs sharing a title get distinct file names (the second suffixed
-with part of its `sopId`) rather than one silently overwriting the other.
+below — and the `intutic_id:`/`intutic_revision:` record `push` reads). A SOP
+whose id a local file already records — flat or in a `<name>/` folder — is
+written into that file, and only its synced keys and body are replaced: the
+enforcing keys the proxy reads stay. Two SOPs sharing a title get distinct
+file names (the second suffixed with part of its `sopId`) rather than one
+silently overwriting the other.
 
 ### Refusing to clobber local edits
 
@@ -97,17 +133,19 @@ the *current* local body's hash:
 intutic sops status
 ```
 
-Does not modify any local file. For every local `.intutic/sops/*.md` file
-(except the `guardrail-*.md` files `intutic guardrails pull` writes, which
-have no control-plane SOP to compare against), matched by title against the workspace's control-plane SOPs, reports one of:
+Does not modify any local file. For every local `.intutic/sops/*.md` and
+`.intutic/sops/<name>/*.md` file (except the `guardrail-*.md` files
+`intutic guardrails pull` writes, which have no control-plane SOP to compare
+against), matched to its SOP by the recorded `intutic_id:` — by title for a
+file without one — reports one of:
 
 | Status | Meaning |
 |---|---|
 | `in-sync` | Local body hash matches the control plane's `content_hash`. |
-| `local-ahead` | Recorded pull hash is stale — you edited this file since the last pull. `push` to publish. |
+| `local-ahead` | Recorded pull hash is stale — you edited this file since the last pull, and the SOP's revision has not moved. `push` to publish. |
 | `remote-ahead` | Unedited since the last pull, but the control plane's content has moved. `pull` to catch up. |
-| `diverged` | No recorded pull hash, and the local body does not match the control plane either. Could be a file never pulled, or one edited long after a very old pull — `status` cannot tell those apart from local information alone. |
-| `push-only` | No SOP with a matching title exists on the control plane yet. |
+| `diverged` | Edited here and on the control plane since the last sync (the recorded revision moved). Or: no recorded pull hash, and the local body does not match the control plane either — a file never pulled, or one edited long after a very old pull, which `status` cannot tell apart. |
+| `push-only` | No SOP with a matching title exists on the control plane yet, or the SOP the file records is gone. |
 
 Every matched (non-`push-only`) result is also reported to the control plane
 over `POST /api/v1/sops/git-drift-report`, best-effort — a report failure
@@ -134,8 +172,7 @@ that changed after the last `status` run and before the next one. Run
 `status` on the cadence your compliance posture actually needs; the probe
 can only be as fresh as its last report.
 
-**Matching is by title, not a stable id.** Neither plane carries an
-identifier the other side already has: a freshly pushed file has no `sopId`
-until after the push; a local filename is not a title. Renaming a SOP's
-`title:` breaks the match on the next `pull`/`status` — the old file and the
-renamed control-plane row will no longer recognise each other.
+**A file without a sync record is matched by title.** A file that was never
+pulled or pushed carries no `intutic_id:`, so `status` falls back to its
+title, and renaming it breaks that match. Once a file is synced, the id
+holds through renames on either side.

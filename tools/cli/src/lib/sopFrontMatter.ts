@@ -33,6 +33,19 @@ export interface ParsedSopFile {
    * for a file `pull` never wrote (hand-authored, or pushed but not pulled).
    */
   contentHash: string | null
+  /**
+   * From an `intutic_id:` key: the control-plane SOP this file was last
+   * pulled from or pushed to. `null` for a file never synced, which `sops
+   * push` creates as a new SOP.
+   */
+  intuticId: string | null
+  /**
+   * From an `intutic_revision:` key: the SOP's `version_counter` when this
+   * file was last synced — the precondition `sops push` sends, so an edit
+   * made on the server since is refused rather than overwritten. Not the
+   * `version:` semver.
+   */
+  revision: number | null
   /** Everything after the front-matter fence, or the whole trimmed input when there is none. */
   body: string
 }
@@ -80,8 +93,73 @@ export function parseSopFile(raw: string): ParsedSopFile {
     riskTier,
     version: scalar(front, 'version:'),
     contentHash: scalar(front, 'content_hash:'),
+    intuticId: scalar(front, 'intutic_id:'),
+    revision: parseRevision(scalar(front, 'intutic_revision:')),
     body,
   }
+}
+
+function parseRevision(raw: string | null): number | null {
+  if (raw === null || !/^\d+$/.test(raw)) return null
+  return Number(raw)
+}
+
+/** The sync record `sops pull`/`push` keep in a file's front matter. */
+export interface SopSyncRecord {
+  intuticId: string
+  revision: number
+}
+
+/**
+ * Set `key: value` lines inside a file's front-matter fence, replacing a line
+ * that already sets the key and keeping every other line — the enforcing keys
+ * the proxy reads (`deny_tools:`, `requires_before:`, …) included. The text
+ * after the fence is kept verbatim unless `body` is given. A file with no
+ * fence gets one holding only these keys. Unknown keys are inert to the
+ * proxy's parser, so the sync record never changes what a SOP enforces.
+ */
+export function setFrontMatter(raw: string, fields: Record<string, string>, body?: string): string {
+  const trimmed = raw.trimStart()
+  const set = (frontLines: string[]): string[] => {
+    const out = [...frontLines]
+    for (const [key, value] of Object.entries(fields)) {
+      const line = `${key}: ${value}`
+      const at = out.findIndex((l) => l.trim().startsWith(`${key}:`))
+      if (at === -1) out.push(line)
+      else out[at] = line
+    }
+    return out
+  }
+  if (trimmed.startsWith('---')) {
+    const rest = trimmed.slice(3)
+    const end = rest.indexOf('\n---')
+    if (end !== -1) {
+      // rest.slice(0, end) starts with the newline after the opening fence.
+      const frontLines = rest.slice(0, end).split('\n').slice(1)
+      const closing = rest.slice(end + 1)
+      const afterFence = closing.slice(3)
+      const tail = body === undefined ? afterFence : `\n\n${body}\n`
+      return ['---', ...set(frontLines), '---'].join('\n') + tail
+    }
+  }
+  const text = body ?? parseSopFile(raw).body
+  return ['---', ...set([]), '---', '', text, ''].join('\n')
+}
+
+/**
+ * Record the SOP a file is synced with — `intutic_id:`, `intutic_revision:`
+ * and `content_hash:` (so `sops pull` treats the file as unedited) — keeping
+ * everything else in the file. Optional `extra` keys (a `version:` the server
+ * assigned) are set alongside.
+ */
+export function withSyncRecord(raw: string, record: SopSyncRecord, extra: Record<string, string> = {}): string {
+  const hash = createHash('sha256').update(parseSopFile(raw).body, 'utf8').digest('hex')
+  return setFrontMatter(raw, {
+    ...extra,
+    content_hash: hash,
+    intutic_id: record.intuticId,
+    intutic_revision: String(record.revision),
+  })
 }
 
 /**
@@ -96,6 +174,7 @@ export function renderSopFile(sop: {
   riskTier: string
   version: string
   body: string
+  record?: SopSyncRecord
 }): string {
   const hash = createHash('sha256').update(sop.body, 'utf8').digest('hex')
   return [
@@ -104,6 +183,7 @@ export function renderSopFile(sop: {
     `risk_tier: ${sop.riskTier}`,
     `version: ${sop.version}`,
     `content_hash: ${hash}`,
+    ...(sop.record ? [`intutic_id: ${sop.record.intuticId}`, `intutic_revision: ${sop.record.revision}`] : []),
     '---',
     '',
     sop.body,

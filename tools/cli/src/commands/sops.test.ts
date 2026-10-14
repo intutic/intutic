@@ -154,36 +154,6 @@ describe('runSopsPush', () => {
     expect(exitCode).toBe(1)
   })
 
-  // `pull` writes flat `.intutic/sops/<slug>.md` files; push used to read
-  // only `.intutic/sops/<name>/`, so a pulled SOP could not be pushed back.
-  it('pushes back a file `sops pull` wrote, by its name with or without .md', async () => {
-    getMock.mockImplementation(async (url: string) =>
-      url.startsWith('/api/v1/sops?')
-        ? { items: [{ sopId: 'sop_1', title: 'Never Deploy Without Tests' }], total: 1 }
-        : { sopId: 'sop_1', title: 'Never Deploy Without Tests', riskTier: 'HIGH', version: '2.1.0', markdownContent: 'Run the tests first.' },
-    )
-    await runSopsPull({})
-    const pulled = path.join(workspaceRootRef.value, '.intutic', 'sops', 'never-deploy-without-tests.md')
-    await expect(fs.stat(pulled)).resolves.toBeTruthy()
-
-    for (const name of ['never-deploy-without-tests', 'never-deploy-without-tests.md']) {
-      postMock.mockClear()
-      try {
-        await runSopsPush(name, {})
-      } catch (err) {
-        if (!(err instanceof Error) || !err.message.startsWith('process.exit(')) throw err
-      }
-      expect(exitCode).toBeNull()
-      expect(postMock).toHaveBeenCalledTimes(1)
-      expect(postMock).toHaveBeenCalledWith('/api/v1/sops', expect.objectContaining({
-        title: 'Never Deploy Without Tests',
-        risk_tier: 'HIGH',
-        version: '2.1.0',
-        markdown_content: 'Run the tests first.',
-      }))
-    }
-  })
-
   it('exits 1 when the named local folder does not exist', async () => {
     try {
       await runSopsPush('does-not-exist', {})

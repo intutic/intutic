@@ -231,8 +231,10 @@ const sopsCmd = program
 
 sopsCmd
   .command('push <name>')
-  .description("Push a local SOP folder, or one SOP file (the layout `sops pull` writes), to the central workspace")
+  .description("Push a local SOP folder, or one SOP file (the layout `sops pull` writes), to the central workspace: updates the SOP a file records, creates one for a file without a record")
   .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .option('--force', 'Overwrite a SOP that changed on the server since the file was pulled')
+  .option('--create', 'Create a new SOP for a file whose recorded SOP no longer exists')
   .option('--org', "Push as an org-wide floor instead of a workspace SOP -- applies to every workspace under the caller's org, in addition to that workspace's own SOPs")
   .action(async (name, opts) => {
     const { runSopsPush } = await import('./commands/sops.js')
