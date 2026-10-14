@@ -331,8 +331,8 @@ class PolicySourceSyncResult(TypedDict):
 
 class GuardrailTransitionResult(TypedDict, total=False):
     ok: bool
-    #: The guardrail as the transition left it. A promotion reads it back after the write: None only if it is gone by then.
-    guardrail: Optional[Dict[str, Any]]
+    #: The guardrail as the transition left it.
+    guardrail: Dict[str, Any]
     readiness: Dict[str, Any]
 
 
@@ -347,8 +347,8 @@ class AuthoredGuardrailInput(TypedDict, total=False):
 
 class AuthoredGuardrailWriteResult(TypedDict):
     ok: bool
-    #: The guardrail read back after the write; None only if it is gone by then.
-    guardrail: Optional[Dict[str, Any]]
+    #: The guardrail read back after the write.
+    guardrail: Dict[str, Any]
     #: The IR changed: a new version, PROPOSED with no evidence, replaced the old one, which is now RETIRED.
     forked: bool
     supersedes: Optional[str]

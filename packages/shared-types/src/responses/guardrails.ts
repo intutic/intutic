@@ -327,7 +327,7 @@ export const GuardrailDetailResponse = z.object({ guardrail: GuardrailDetail })
 export type GuardrailDetailResponse = z.infer<typeof GuardrailDetailResponse>
 
 /** The guardrail as it stands after a write, read back by id. */
-const ReadBack = GuardrailDetail.nullable().describe('The guardrail read back after the write; null only if it is gone by then')
+const ReadBack = GuardrailDetail.describe('The guardrail read back after the write. Never null: a write whose read-back finds nothing answers 500 GUARDRAIL_READ_BACK_FAILED')
 
 /**
  * `POST /api/v1/policy-guardrails/guardrails` (201) and

@@ -292,8 +292,11 @@ Four ways in, one API:
   `description` and `ir`; `PUT` and `DELETE` on
   `/api/v1/policy-guardrails/guardrails/:guardrailId`; and
   `POST /api/v1/policy-guardrails/guardrails/validate`, which runs the checks
-  without writing anything. A refusal is a 400 that names the check. See the
-  [route catalog](/reference/api#route-catalog).
+  without writing anything. A refusal is a 400 that names the check. A write
+  answers with the guardrail as it now stands; in the rare case it cannot be
+  read back after the write, the answer is a 500 with code
+  `GUARDRAIL_READ_BACK_FAILED` (and its `guardrailId`), never a success
+  without a guardrail. See the [route catalog](/reference/api#route-catalog).
 
 ## What this is not
 

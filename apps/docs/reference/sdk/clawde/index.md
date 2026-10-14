@@ -94,7 +94,7 @@ Any of the three. A changed IR creates the next version; `description: null` cle
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-forked"></a> `forked` | `boolean` | The IR changed: a new version, PROPOSED with no evidence, replaced the old one, which is now RETIRED. |
-| <a id="property-guardrail"></a> `guardrail` | [`GuardrailDetail`](#guardraildetail) \| `null` | The guardrail read back after the write; null only if it is gone by then. |
+| <a id="property-guardrail"></a> `guardrail` | [`GuardrailDetail`](#guardraildetail) | The guardrail read back after the write. |
 | <a id="property-ok"></a> `ok` | `true` | - |
 | <a id="property-supersedes"></a> `supersedes` | `string` \| `null` | - |
 
@@ -990,7 +990,7 @@ Name exactly one: the document or the passage whose change to follow.
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
-| <a id="property-guardrail-2"></a> `guardrail` | [`GuardrailDetail`](#guardraildetail) \| `null` | The guardrail as the transition left it. A promotion reads it back after the write: null only if it is gone by then. |
+| <a id="property-guardrail-2"></a> `guardrail` | [`GuardrailDetail`](#guardraildetail) | The guardrail as the transition left it. |
 | <a id="property-ok-4"></a> `ok` | `boolean` | - |
 | <a id="property-readiness"></a> `readiness?` | [`GuardrailReadiness`](#guardrailreadiness) | - |
 
