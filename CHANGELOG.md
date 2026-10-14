@@ -42,9 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **An OpenAPI 3.1 document for the control plane's REST API.**
   `apps/docs/public/openapi.json` lists every route with its auth, plan badge,
-  path and query parameters, and the request body schema wherever the handler
-  validates one; routes with no schema say so rather than show an invented
-  shape. A new OpenAPI Reference docs page renders it (vitepress-openapi
+  path parameters, and the schema of every request body and query string:
+  each route that reads one validates it, and the generator refuses a handler
+  that reads either without a schema. A new OpenAPI Reference docs page renders it (vitepress-openapi
   0.2.5, loaded only on that page, no third-party requests). It is generated
   from the route source with the route catalog in `reference/api.md`, and CI
   fails while either is stale. Like the REST API page, the open-source docs
@@ -74,6 +74,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Behaviour change: a request body or query string that does not match its
+  route's schema is a `400`.** Every control plane route that reads one now
+  validates it. A value of the wrong type that a handler used to drop or
+  replace with its default (`?limit=abc`, `firewall.active: "yes"` in a device
+  report, a loop budget of `"lots"`), and a body that crashed a handler into a
+  `500` (a JSON `null`, a SCIM user without `userName`, a SCIM user PATCH
+  without `Operations`), is refused with the route's own `400`; SCIM answers
+  `invalidSyntax`, or `invalidValue` for paging. A numeric limit out of range
+  is still clamped, and attributes and parameters a route does not read are
+  still ignored. The requests the CLI, the SDKs, the dashboard and the
+  Terraform provider send all pass.
 - **Behaviour change: replay contexts keep tool-call argument keys, not
   values.** The context the proxy samples onto 5% of traces
   (`WASM_CONTEXT_SNAPSHOT_RATE`) carried every tool call's full arguments.

@@ -51,6 +51,19 @@ refuses them until the workspace is back on a plan with SCIM.
 
 ---
 
+## Request validation
+
+A request that is not the resource its endpoint takes is refused with `400`
+and `"scimType": "invalidSyntax"`, `detail` naming each attribute: a new user
+without `userName`, a user PATCH without `Operations`, a group whose `members`
+is not a list, or an attribute Intutic reads with the wrong JSON type
+(`active: "false"` rather than `false`). A `startIndex` or `count` that is not
+an integer is refused with `"scimType": "invalidValue"`. Attributes Intutic
+does not model, and extension schemas such as Entra ID's enterprise user, are
+accepted and ignored.
+
+---
+
 ## User Endpoints
 
 ### POST /scim/v2/Users — Provision User
