@@ -1274,6 +1274,22 @@ struct WorkspaceSopsResponse {
     sops: Vec<WorkspaceSopEntry>,
 }
 
+/// The SOPs a `GET /api/v1/workspace/sops-policy` answer carries, parsed as
+/// the local path parses a file and sorted by title.
+fn workspace_sops_from_body(workspace_id: &str, body: WorkspaceSopsResponse) -> Vec<Sop> {
+    let mut sops: Vec<Sop> = body
+        .sops
+        .into_iter()
+        .filter_map(|entry| {
+            let source = format!("workspace:{workspace_id}:{}", entry.title);
+            let scope = SopScope::from_wire(entry.scope.as_deref());
+            parse_sop_content(entry.title, &entry.markdown_content, &source, scope)
+        })
+        .collect();
+    sops.sort_by(|a, b| a.title.cmp(&b.title));
+    sops
+}
+
 struct WorkspaceCached {
     sops: Vec<Sop>,
     read_at: Instant,
@@ -1348,17 +1364,7 @@ async fn fetch_workspace_sops(
             .await
             .map_err(|e| tracing::warn!(workspace_id = %workspace_id, error = %e, "workspace SOP response did not parse"))
             .ok()?;
-        let mut sops: Vec<Sop> = body
-            .sops
-            .into_iter()
-            .filter_map(|entry| {
-                let source = format!("workspace:{workspace_id}:{}", entry.title);
-                let scope = SopScope::from_wire(entry.scope.as_deref());
-                parse_sop_content(entry.title, &entry.markdown_content, &source, scope)
-            })
-            .collect();
-        sops.sort_by(|a, b| a.title.cmp(&b.title));
-        Some(sops)
+        Some(workspace_sops_from_body(workspace_id, body))
     }
     .await;
 
@@ -2284,6 +2290,35 @@ mod mode_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `GET /api/v1/workspace/sops-policy` answer in
+    /// `packages/shared-types/fixtures/responses/sops-policy.json`, which the
+    /// shared-types tests hold to `SopsPolicyResponse` (the schema the control
+    /// plane's route is held to), deserializes into the struct the fetch uses
+    /// and parses into the SOPs it describes.
+    #[test]
+    fn workspace_sops_policy_fixture_parses_into_its_sops() {
+        let body: WorkspaceSopsResponse = serde_json::from_str(include_str!(
+            "../../shared-types/fixtures/responses/sops-policy.json"
+        ))
+        .expect("the sops-policy fixture deserializes");
+        let sops = workspace_sops_from_body("ws_fixture", body);
+        let titles: Vec<&str> = sops.iter().map(|s| s.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            [
+                "GUARDRAIL:pgr_fixture No recursive deletes",
+                "Never push to main",
+                "Reviewed plan before terraform apply",
+            ]
+        );
+        assert_eq!(sops[0].mode, SopMode::Shadow);
+        assert_eq!(sops[0].deny_tools, ["rm_rf"]);
+        assert_eq!(sops[1].scope, SopScope::Org);
+        assert_eq!(sops[1].deny_tools, ["git_push_main"]);
+        assert_eq!(sops[2].scope, SopScope::Workspace);
+        assert_eq!(sops[2].deny_tools, ["terraform_destroy"]);
+    }
 
     fn sop(title: &str, roles: &[&str]) -> Sop {
         Sop {

@@ -1,6 +1,6 @@
 /**
  * Responses of the control plane routes in notifications.ts, siem.ts, mcpServers.ts, attenuate.ts, compliance.ts, githubWebhooks.ts,
- * openaiAgentTraces.ts, gateLiveness.ts, intelligence.ts and routing.ts.
+ * openaiAgentTraces.ts, agentcoreGateway.ts, gateLiveness.ts, intelligence.ts and routing.ts.
  *
  * @module
  */
@@ -221,6 +221,31 @@ export type McpServerListResponse = z.infer<typeof McpServerListResponse>
 export const McpServerDecisionResponse = z.object({ ok: z.literal(true), server: McpServerResponse })
 export type McpServerDecisionResponse = z.infer<typeof McpServerDecisionResponse>
 
+/**
+ * `POST /api/v1/mcp/servers/observe`: a proxy reported a server it governs.
+ * The row's status after the sighting, and the scored change when the
+ * sighting's tool definitions differ from the stored ones.
+ */
+export const McpServerObserveResponse = z.object({
+  ok: z.literal(true),
+  status: z.enum(['candidate', 'approved', 'blocked']),
+  created: z.boolean().describe('The first sighting of this server in the workspace.'),
+  toolChange: z
+    .object({
+      changeId: z.string(),
+      serverId: z.string(),
+      score: z.number().int().describe('0–100.'),
+      level: z.enum(['none', 'low', 'medium', 'high']),
+      reasons: z.array(z.object({ rule: z.string(), tool: z.string(), points: z.number(), detail: z.string() })),
+      added: z.array(z.string()),
+      removed: z.array(z.string()),
+      changed: z.array(z.string()),
+      held: z.boolean().describe('The change returned the server to the approval queue (`mcpHighRiskToolChange: hold`).'),
+    })
+    .optional(),
+})
+export type McpServerObserveResponse = z.infer<typeof McpServerObserveResponse>
+
 // ─── Token attenuation (routes/attenuate.ts) ────────────────────────
 
 /** `POST /api/v1/attenuate`: the child key, returned once. */
@@ -427,6 +452,22 @@ export const OpenAiAgentTracesIngestResponse = z.object({
   redactions: z.number().int().describe('DLP matches redacted from the recorded spans.'),
 })
 export type OpenAiAgentTracesIngestResponse = z.infer<typeof OpenAiAgentTracesIngestResponse>
+
+// ─── AgentCore gateway (routes/agentcoreGateway.ts) ─────────────────
+
+/**
+ * `POST /api/v1/integrations/agentcore/gateway-check`: the verdict on one
+ * tool call through an AgentCore gateway. A refusal answers 200 with
+ * `allowed: false` (a DLP or SOP block), or 403 when a check could not run
+ * under fail-closed (`code: GOVERNANCE_UNAVAILABLE`).
+ */
+export const AgentCoreGatewayCheckResponse = z.object({
+  allowed: z.boolean(),
+  reason: z.string().optional(),
+  code: z.string().optional().describe('`GOVERNANCE_UNAVAILABLE` when a check could not run.'),
+  degraded: z.boolean().optional().describe('A shadow workspace\'s allow for a call a check could not evaluate.'),
+})
+export type AgentCoreGatewayCheckResponse = z.infer<typeof AgentCoreGatewayCheckResponse>
 
 // ─── Gate liveness (routes/gateLiveness.ts) ─────────────────────────
 

@@ -1,5 +1,5 @@
 /**
- * Responses of the control plane routes in gateways.ts, gatewayHeartbeat.ts, workspace.ts, providerCredentials.ts, harnessConfig.ts, sync.ts, devices.ts and sessions.ts.
+ * Responses of the control plane routes in gateways.ts, gatewayHeartbeat.ts, workspace.ts, providerCredentials.ts, harnessConfig.ts, sync.ts, devices.ts and sessions.ts, and the proxy's `GET /api/v1/auth/key-context`.
  *
  * @module
  */
@@ -165,6 +165,35 @@ export type GatewayResolutionResponse = z.infer<typeof GatewayResolutionResponse
 
 const StringList = z.array(z.string())
 
+/** The workspace's retry and fallback setting (`UpstreamRetrySettingsSchema`), as stored. */
+const UpstreamRetry = z.object({
+  enabled: z.boolean().optional(),
+  maxAttempts: z.number().int().optional(),
+  initialBackoffMs: z.number().int().optional(),
+  maxBackoffMs: z.number().int().optional(),
+  budgetMs: z.number().int().optional(),
+  onStatus: z.array(z.number().int()).optional(),
+  fallbacks: z
+    .record(z.array(z.object({ model: z.string().optional(), provider: z.enum(UPSTREAM_PROVIDERS).optional() })))
+    .optional(),
+})
+
+/** Detector id → action (`piiDetectors`). */
+const PiiDetectorActions = z.record(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
+
+/** The workspace's own trace bucket (`byocStorage`); its secrets are `__redacted__` where a route returns them. */
+const ByocStorage = z.object({
+  provider: z.enum(['gcs', 's3', 'disabled']),
+  bucketName: z.string().optional(),
+  prefix: z.string().optional(),
+  projectId: z.string().optional(),
+  region: z.string().optional(),
+  accessKeyId: z.string().optional(),
+  secretAccessKey: z.string().optional(),
+  credentials: z.string().optional(),
+  mode: z.enum(['mirror', 'primary']).optional(),
+})
+
 /**
  * Workspace settings as the control plane answers them: the stored settings
  * merged over the defaults (`resolveWorkspaceSettings`), BYOC secrets
@@ -180,35 +209,10 @@ export const ResolvedWorkspaceSettings = z
       .object({ highRiskTools: StringList, requiredGroups: StringList, requireOboFor: StringList })
       .nullable()
       .optional(),
-    piiDetectors: z.record(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS)).nullable().optional(),
+    piiDetectors: PiiDetectorActions.nullable().optional(),
     storeToolArguments: z.boolean().optional(),
-    upstreamRetry: z
-      .object({
-        enabled: z.boolean().optional(),
-        maxAttempts: z.number().int().optional(),
-        initialBackoffMs: z.number().int().optional(),
-        maxBackoffMs: z.number().int().optional(),
-        budgetMs: z.number().int().optional(),
-        onStatus: z.array(z.number().int()).optional(),
-        fallbacks: z
-          .record(z.array(z.object({ model: z.string().optional(), provider: z.enum(UPSTREAM_PROVIDERS).optional() })))
-          .optional(),
-      })
-      .nullable()
-      .optional(),
-    byocStorage: z
-      .object({
-        provider: z.enum(['gcs', 's3', 'disabled']),
-        bucketName: z.string().optional(),
-        prefix: z.string().optional(),
-        projectId: z.string().optional(),
-        region: z.string().optional(),
-        accessKeyId: z.string().optional(),
-        secretAccessKey: z.string().optional(),
-        credentials: z.string().optional(),
-        mode: z.enum(['mirror', 'primary']).optional(),
-      })
-      .optional(),
+    upstreamRetry: UpstreamRetry.nullable().optional(),
+    byocStorage: ByocStorage.optional(),
     mcpProxyMode: z.nativeEnum(McpProxyMode),
     bypassEnforcementTier: z.nativeEnum(BypassEnforcementTier),
     featureFlags: z
@@ -330,6 +334,75 @@ export const SopsPolicyResponse = z.object({
 })
 export type SopsPolicyResponse = z.infer<typeof SopsPolicyResponse>
 
+/**
+ * `GET /api/v1/workspace/egress-policy`: the workspace's central egress
+ * policy, which the sync daemon hands the proxy.
+ */
+export const EgressPolicyResponse = z.object({
+  workspaceId: z.string(),
+  mode: z
+    .enum(['off', 'monitor', 'enforce'])
+    .nullable()
+    .describe('Null: central management is not configured, and the proxy keeps its local config. `off` is an admin turning it off.'),
+  allow: z.array(z.string()).describe('Exact hosts, `.suffix` domains or CIDRs the proxy may reach, unioned with its local list.'),
+})
+export type EgressPolicyResponse = z.infer<typeof EgressPolicyResponse>
+
+/**
+ * `GET /api/v1/workspace/decisions-digest`: the last governance decisions,
+ * newest first, each a one-line summary rendered by the control plane. The
+ * sync daemon writes them into `.intutic/DECISIONS.md`.
+ */
+export const DecisionsDigestResponse = z.object({
+  workspaceId: z.string(),
+  entries: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(['decision', 'incident', 'settings_change', 'detector_adjudication']),
+      timestamp: IsoTimestamp,
+      summary: z.string(),
+    }),
+  ),
+})
+export type DecisionsDigestResponse = z.infer<typeof DecisionsDigestResponse>
+
+/**
+ * `GET /api/v1/auth/key-context`: what the proxy reads about a virtual key and
+ * its workspace (`packages/proxy/src/key_context.rs` and the readers it
+ * feeds). A field that could not be read is null, never absent; each reader
+ * says what null means to it.
+ */
+export const KeyContextResponse = z.object({
+  workspaceId: z.string(),
+  memberId: z.string(),
+  role: z.enum(['OWNER', 'ADMIN', 'EM', 'DEVELOPER', 'VIEWER']),
+  orgId: z.string().nullable(),
+  allowedModels: z.array(z.string()).nullable().describe("The key's own model allowlist; null inherits the workspace list."),
+  byokRequired: z.boolean().nullable().describe('Whether the workspace must bring its own provider key; null reads as required under `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=paid`.'),
+  keyId: z.string().nullable(),
+  hardBudgets: z
+    .array(z.object({ scope: z.enum(['workspace', 'key', 'member']), period: z.enum(['day', 'month']), limitUsd: z.number() }))
+    .nullable(),
+  rateLimit: z.object({ rpm: z.number().int().nullable().optional(), tpm: z.number().int().nullable().optional() }).nullable(),
+  scopes: z.array(z.string()).nullable(),
+  ssoGroups: z
+    .object({
+      policy: z
+        .object({ highRiskTools: StringList, requiredGroups: StringList, requireOboFor: StringList })
+        .nullable(),
+      memberGroups: StringList.nullable().describe('Null when the workspace has no policy, or the key has no active member.'),
+    })
+    .nullable()
+    .describe('Null when the read failed.'),
+  piiDetectors: PiiDetectorActions.nullable().describe('Null when unreadable; the proxy applies its policy fail mode.'),
+  upstreamRetry: UpstreamRetry.nullable(),
+  storeToolArguments: z.boolean().nullable().describe('Only `true` keeps tool-call argument values in replay contexts.'),
+  budget: z.object({ dailyUsd: z.number(), monthlyUsd: z.number() }).nullable().describe('Null when the caps could not be read: the proxy refuses as BUDGET_UNVERIFIABLE.'),
+  interventionMode: z.enum(['TRANSPARENT', 'OPAQUE', 'SILENT_LOG']).nullable(),
+  llmJudgeEnabled: z.boolean().nullable(),
+})
+export type KeyContextResponse = z.infer<typeof KeyContextResponse>
+
 // ─── Provider credentials (routes/providerCredentials.ts) ────────────
 
 /** A provider's provisioning status. Never the credential itself. */
@@ -395,7 +468,11 @@ export const SyncConfigResponse = z.object({
     }),
   ).describe('Active SOPs in HYPOTHESIZED, REFINED or VALIDATED state.'),
   proxyUrl: z.string().describe("The workspace's proxy URL, else its online gateway's endpoint, else empty."),
-  settings: ResolvedWorkspaceSettings,
+  settings: ResolvedWorkspaceSettings.extend({
+    byocStorage: ByocStorage.omit({ accessKeyId: true, secretAccessKey: true, credentials: true })
+      .optional()
+      .describe('Without its credentials, which no daemon reads: never sent here.'),
+  }),
   appliedEdits: z
     .array(
       z.object({
@@ -423,6 +500,23 @@ export const SopHashReportResponse = z.object({
   driftCount: z.number().int().describe('Drifted files recorded from this report.'),
 })
 export type SopHashReportResponse = z.infer<typeof SopHashReportResponse>
+
+/** `GET /api/v1/sync/report`: the sync daemon's last heartbeat, as the dashboard shows it. */
+export const SyncReportResponse = z.object({
+  ok: z.literal(true),
+  harnesses: z.array(
+    z.object({
+      harnessType: z.string(),
+      drifted: z.boolean().describe('Its rules file has an unresolved drift record.'),
+      lastSynced: z.string().optional(),
+    }),
+  ),
+  activeProcesses: z.array(z.string()),
+  connectedSince: z.string().nullable(),
+  lastSyncAt: z.string().nullable(),
+  components: z.record(z.unknown()).nullable().describe('The heartbeat\'s component report, as the daemon sent it.'),
+})
+export type SyncReportResponse = z.infer<typeof SyncReportResponse>
 
 // ─── Devices (routes/devices.ts) ─────────────────────────────────────
 

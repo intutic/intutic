@@ -1,0 +1,23 @@
+{
+  "$comment": "A GET /api/v1/auth/key-context answer with every field set. packages/shared-types holds it to KeyContextResponse (src/__tests__/responseFixtures.test.ts), the control plane's e2e suite holds the route to the same schema, and the Rust proxy reads it through every key-context reader (packages/proxy/src/key_context.rs tests), so a field renamed or retyped on either side fails a test.",
+  "workspaceId": "ws_fixture",
+  "memberId": "mbr_fixture",
+  "role": "DEVELOPER",
+  "orgId": "org_fixture",
+  "allowedModels": ["gpt-4o"],
+  "byokRequired": true,
+  "keyId": "key_fixture",
+  "hardBudgets": [{ "scope": "key", "period": "day", "limitUsd": 25 }],
+  "rateLimit": { "rpm": 60, "tpm": 100000 },
+  "scopes": ["gateway:use"],
+  "ssoGroups": {
+    "policy": { "highRiskTools": ["bash"], "requiredGroups": ["eng-prod"], "requireOboFor": ["database_write"] },
+    "memberGroups": ["eng-prod"]
+  },
+  "piiDetectors": { "pii.email": "redact" },
+  "upstreamRetry": { "enabled": true, "maxAttempts": 3, "onStatus": [503], "fallbacks": { "gpt-4o": [{ "provider": "anthropic" }] } },
+  "storeToolArguments": true,
+  "budget": { "dailyUsd": 50, "monthlyUsd": 1000 },
+  "interventionMode": "OPAQUE",
+  "llmJudgeEnabled": false
+}

@@ -37,6 +37,7 @@ import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { getJson, postJson } from './httpJson.js'
 import type { SopRule } from './policy.js'
+import type { ApprovedBypassListResponse, ApprovedBypassResponse, WireFields } from '@intutic/shared-types'
 import type { CallerIdentity } from './identity.js'
 
 const log = createLogger('mcp-proxy-hold')
@@ -71,15 +72,8 @@ function newHoldId(): string {
   return `hold_${Date.now().toString(36)}_${node_crypto.randomBytes(4).toString('hex')}`
 }
 
-interface BypassEntry {
-  workspaceId?: unknown
-  sopRuleId?: unknown
-  toolNameNormalized?: unknown
-  targetHash?: unknown
-  holdId?: unknown
-  decidedBy?: unknown
-  expiresAt?: unknown
-}
+/** One approved bypass as `GET /api/v1/decisions/approved-bypasses` sends it, each field checked before use. */
+type BypassEntry = WireFields<ApprovedBypassResponse>
 
 export class ApprovalHolds {
   constructor(
@@ -140,7 +134,7 @@ export class ApprovalHolds {
       log.warn({ action: 'bypass_lookup_failed', err: (err as Error).message }, 'Could not look up approved bypasses — the call stays held')
       return null
     }
-    const list = (body as { bypasses?: unknown } | null)?.bypasses
+    const list = (body as WireFields<ApprovedBypassListResponse> | null)?.bypasses
     if (!Array.isArray(list)) return null
     const now = Date.now()
     for (const raw of list as BypassEntry[]) {

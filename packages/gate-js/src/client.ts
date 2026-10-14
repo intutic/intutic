@@ -82,6 +82,24 @@ export interface GateResponse {
   decisionId?: string | undefined
 }
 
+/**
+ * The fields {@link GateClient.hookGate} reads from a `POST /api/v1/hook-gate`
+ * answer, each checked before use. `src/__tests__/response-types.ts` pins
+ * them to the control plane's response schema.
+ */
+export interface HookGateAnswer {
+  allowed?: unknown
+  reason?: unknown
+  incidentId?: unknown
+  code?: unknown
+  decisionId?: unknown
+}
+
+/** The field {@link GateClient.approvedBypasses} reads from `GET /api/v1/decisions/approved-bypasses`. */
+export interface ApprovedBypassesAnswer {
+  bypasses?: unknown
+}
+
 /** The hook gate's code for a call whose checks could not run. */
 const GOVERNANCE_UNAVAILABLE = 'GOVERNANCE_UNAVAILABLE'
 
@@ -254,7 +272,7 @@ export class GateClient {
         reached: false,
       }
     }
-    let d: Record<string, unknown>
+    let d: HookGateAnswer
     try {
       d = await this.post(
         '/api/v1/hook-gate',
@@ -380,7 +398,7 @@ export class GateClient {
    */
   async approvedBypasses(): Promise<unknown[] | null> {
     try {
-      const d = await this.request('GET', '/api/v1/decisions/approved-bypasses', undefined, this.timeoutMs)
+      const d: ApprovedBypassesAnswer = await this.request('GET', '/api/v1/decisions/approved-bypasses', undefined, this.timeoutMs)
       return Array.isArray(d.bypasses) ? d.bypasses : null
     } catch {
       return null

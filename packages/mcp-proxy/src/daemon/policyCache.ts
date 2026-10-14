@@ -12,6 +12,7 @@ import { scryptSync } from 'node:crypto'
 import { Redis } from 'ioredis'
 import { describeConnectionError } from '../valkeyErrors.js'
 import { createLogger } from '@intutic/logger'
+import type { PolicyResolveResponse, WireFields } from '@intutic/shared-types'
 import {
   UNRESTRICTED_REGISTRY,
   parsePrincipal,
@@ -273,6 +274,11 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
     return null
   }
   if (!isRecord(parsed)) return null
+  return policyFromBody(parsed as WireFields<PolicyResolveResponse>)
+}
+
+/** The fields of a `GET /api/v1/policy/resolve` body, each checked. */
+function policyFromBody(parsed: WireFields<PolicyResolveResponse>): PolicyResponseBody {
 
   const sopRules                  = parsed['sopRules']
   const interventionMode          = parsed['interventionMode']

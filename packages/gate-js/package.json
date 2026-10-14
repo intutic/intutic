@@ -76,7 +76,7 @@
   "scripts": {
     "lint": "eslint src",
     "build": "tsc",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.response-types.json",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
@@ -90,6 +90,7 @@
     "@ai-sdk/workflow": "^2.0.58",
     "@mastra/core": "^1.74.0",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@intutic/shared-types": "workspace:*",
     "@openai/agents": "0.16.1",
     "@openai/agents-realtime": "0.16.1",
     "@truefoundry/trueforge-core": "^0.1.4",

@@ -215,10 +215,12 @@ export const SopRuleResponse = z.object({
 })
 export type SopRuleResponse = z.infer<typeof SopRuleResponse>
 
-/** `GET /api/v1/sop/rules`: the rule set and MCP curation the MCP proxy polls. */
-export const SopRulesResponse = listEnvelope('rules', 'camel').extend({
-  ok: z.literal(true),
-  rules: z.array(SopRuleResponse),
+/**
+ * The workspace's MCP curation (`lib/mcpCuration.ts`), which
+ * `GET /api/v1/sop/rules` and `GET /api/v1/policy/resolve` both send, so the
+ * per-session and daemon-mode MCP proxies see the same curation.
+ */
+const McpCuration = z.object({
   allowedTools: z.array(z.string()).describe('Empty means unrestricted.'),
   toolDescriptionOverrides: z.record(z.string()),
   allowedServers: z.array(z.string()).describe('Empty means unrestricted.'),
@@ -264,13 +266,31 @@ export const SopRulesResponse = listEnvelope('rules', 'camel').extend({
     .object({ memberId: z.string(), email: z.string(), role: z.string(), ssoGroups: z.array(z.string()) })
     .nullable()
     .describe('The member behind the caller\'s key, with their SSO groups; null when there is none.'),
-  interventionMode: InterventionMode,
   mcpProxyFailBehavior: z.enum(['open', 'closed']).optional(),
   mcpInjectionAction: z.enum(['warn', 'block']).optional(),
   mcpAnomalyMode: z.enum(['enforce', 'warn', 'off']).optional(),
   mcpAnomalyOverrides: z.record(z.enum(['steer', 'reask', 'kill', 'off'])).optional(),
 })
+
+/** `GET /api/v1/sop/rules`: the rule set and MCP curation the MCP proxy polls. */
+export const SopRulesResponse = listEnvelope('rules', 'camel')
+  .extend({ ok: z.literal(true), rules: z.array(SopRuleResponse) })
+  .merge(McpCuration)
+  .extend({ interventionMode: InterventionMode })
 export type SopRulesResponse = z.infer<typeof SopRulesResponse>
+
+/**
+ * `GET /api/v1/policy/resolve`: the same rules and curation as
+ * `GET /api/v1/sop/rules`, as the sync daemon and the daemon-mode MCP proxy
+ * cache them, plus the flags the daemon's policy snapshot carries.
+ */
+export const PolicyResolveResponse = McpCuration.extend({
+  workspaceId: z.string(),
+  sopRules: z.array(SopRuleResponse),
+  interventionMode: InterventionMode,
+  sqlDropStrictBlock: z.boolean().describe('`ff_sql_drop_strict_block`: the daemon\'s destructive-SQL hook rule blocks instead of warning.'),
+})
+export type PolicyResolveResponse = z.infer<typeof PolicyResolveResponse>
 
 // ─── Decisions and rule candidates (routes/decisions.ts) ─────────────
 
@@ -298,6 +318,25 @@ export type ApprovedBypassResponse = z.infer<typeof ApprovedBypassResponse>
 /** `GET /api/v1/decisions/approved-bypasses`. */
 export const ApprovedBypassListResponse = z.object({ ok: z.literal(true), bypasses: z.array(ApprovedBypassResponse) })
 export type ApprovedBypassListResponse = z.infer<typeof ApprovedBypassListResponse>
+
+/**
+ * `GET /api/v1/decisions/:entryId`: one decision-queue entry, found by its
+ * entry id or by the hold id a gate gave the agent (`hold_…`). The MCP
+ * proxy's `intutic_hold_status` tool reads `status`.
+ */
+export const DecisionDetailResponse = z.object({
+  entry_id: z.string(),
+  session_id: z.string().nullable(),
+  workspace_id: z.string(),
+  original_tool_call: z.unknown().describe('The held tool call, as the gate reported it.'),
+  hijacked_tool_call: z.unknown(),
+  outcome: z.string(),
+  trace_id: z.string().nullable(),
+  rationale: z.string().nullable(),
+  status: z.string().nullable().describe('`PENDING_REVIEW` until a person decides it; `APPROVED` or `REJECTED` after.'),
+  created_at: IsoTimestamp.nullable(),
+})
+export type DecisionDetailResponse = z.infer<typeof DecisionDetailResponse>
 
 /** `POST /api/v1/decisions/:entryId/review`. */
 export const DecisionReviewResponse = z.object({
@@ -334,6 +373,28 @@ export type RuleCandidateBundleResponse = z.infer<typeof RuleCandidateBundleResp
 
 const CascadeBand = z.object({ lo: z.number(), hi: z.number() })
 
+/** Stage one of the judge cascade, as a verdict reports it. */
+const CascadeSummary = z.object({
+  decision: z.enum(['clean', 'violation', 'review']),
+  score: z.number().nullable().describe('Null when stage 1 did not answer.'),
+  band: CascadeBand,
+  model: z.string(),
+  reviewId: z.string().optional(),
+})
+
+/** `POST /api/v1/judge/chunk`: the verdict on one streamed segment of a response. */
+export const JudgeChunkResponse = z.object({
+  verdict: z.enum(['TRIGGERED', 'PASS']),
+  triggered: z.boolean().describe('An organization SOP was violated.'),
+  personalTriggered: z.boolean().describe('A personal (local-only) SOP was violated; never persisted.'),
+  explanation: z.string(),
+  cascade: CascadeSummary.optional().describe('When the cascade\'s stage 1 graded the segment.'),
+  independent: z.boolean().describe('False when the judge is the monitored model grading itself.'),
+  judgeSource: z.literal('platform'),
+  judgeModel: z.string(),
+})
+export type JudgeChunkResponse = z.infer<typeof JudgeChunkResponse>
+
 /** `POST /api/v1/judge/finalize`: the final verdict on a response. */
 export const JudgeFinalizeResponse = z.object({
   verdict: z.enum(['TRIGGERED', 'REVIEW', 'PASS']).describe('`REVIEW`: held for a person; no org verdict exists yet.'),
@@ -347,15 +408,7 @@ export const JudgeFinalizeResponse = z.object({
   typedAdvisory: z
     .object({ violation: z.boolean(), pViolation: z.number(), threshold: z.number(), model: z.string(), independent: z.boolean() })
     .optional(),
-  cascade: z
-    .object({
-      decision: z.enum(['clean', 'violation', 'review']),
-      score: z.number().nullable().describe('Null when stage 1 did not answer.'),
-      band: CascadeBand,
-      model: z.string(),
-      reviewId: z.string().optional(),
-    })
-    .optional(),
+  cascade: CascadeSummary.optional(),
   personalCascade: z.object({ decision: z.enum(['clean', 'violation', 'review']), score: z.number() }).optional(),
 })
 export type JudgeFinalizeResponse = z.infer<typeof JudgeFinalizeResponse>

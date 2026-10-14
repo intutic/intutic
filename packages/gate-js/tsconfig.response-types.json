@@ -1,0 +1,13 @@
+{
+  // Type-checks the client's answer types against the control plane's
+  // response schemas (__tests__/response-types/, see conforms.ts there). Apart
+  // from tsconfig.test.json because that one points `zod` at zod 4 for the
+  // eve types, and the schemas are zod 3. Run by the `typecheck` script.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["__tests__/response-types"],
+  "exclude": ["node_modules", "dist"]
+}

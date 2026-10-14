@@ -2,13 +2,23 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { handler, composeRequestInterceptor, checkToolCall, readConfig } from './handler.js'
+import { handler, composeRequestInterceptor, checkToolCall, readConfig, type GatewayCheckResponse } from './handler.js'
 import type {
   McpRequestInterceptorEvent,
   McpResponseInterceptorEvent,
   McpInterceptorOutput,
   JsonRpcErrorBody,
 } from './types.js'
+import type { AgentCoreGatewayCheckResponse } from '@intutic/shared-types'
+
+// Compile-time (`pnpm typecheck`): `GatewayCheckResponse` names only fields
+// the gateway-check route sends, with types it admits. The control plane's
+// tests hold the route to `AgentCoreGatewayCheckResponse`.
+type Unsent = Exclude<keyof GatewayCheckResponse, keyof AgentCoreGatewayCheckResponse>
+const unsent: [Unsent] extends [never] ? true : Unsent = true
+const admitted = (wire: AgentCoreGatewayCheckResponse): GatewayCheckResponse => wire
+void unsent
+void admitted
 
 interface ResponseVector {
   name: string

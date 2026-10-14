@@ -190,6 +190,63 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// A key-context answer with every field set
+    /// (`packages/shared-types/fixtures/responses/key-context.json`, which the
+    /// shared-types tests hold to `KeyContextResponse`, the schema the control
+    /// plane's route is held to), read through every reader of the route. A
+    /// field renamed or retyped on either side reads as its default here.
+    #[test]
+    fn every_reader_reads_the_key_context_fixture() {
+        let body: Value = serde_json::from_str(include_str!(
+            "../../shared-types/fixtures/responses/key-context.json"
+        ))
+        .expect("the key-context fixture is JSON");
+
+        let record = crate::proxy::key_record_from_context(&body, "vk_fixture")
+            .expect("the fixture names a workspace");
+        assert_eq!(record.team_id.as_deref(), Some("ws_fixture"));
+        assert_eq!(record.user_id.as_deref(), Some("mbr_fixture"));
+        assert_eq!(record.org_id.as_deref(), Some("org_fixture"));
+        assert_eq!(record.models, ["gpt-4o"]);
+        assert_eq!(record.byok_required, Some(true));
+        assert_eq!(record.key_id.as_deref(), Some("key_fixture"));
+        assert_eq!(record.max_budget, Some(50.0));
+        let budgets = record.hard_budgets.expect("hardBudgets");
+        assert_eq!(budgets.len(), 1);
+        assert_eq!(budgets[0].scope, crate::key_limits::BudgetScope::Key);
+        assert_eq!(budgets[0].period, crate::key_limits::BudgetPeriod::Day);
+        assert_eq!(budgets[0].limit_usd, 25.0);
+        let rate = record.rate_limit.expect("rateLimit");
+        assert_eq!((rate.rpm, rate.tpm), (Some(60), Some(100_000)));
+
+        assert_eq!(member_role(&body).as_deref(), Some("DEVELOPER"));
+        assert_eq!(
+            intervention_mode(&body),
+            crate::refusal::InterventionMode::Opaque
+        );
+        assert!(!llm_judge_enabled(&body));
+        assert!(store_tool_arguments(&body));
+
+        let gate = crate::sso_groups::parse_key_context(&body)
+            .expect("ssoGroups reads")
+            .expect("the fixture sets a policy");
+        assert_eq!(gate.policy.high_risk_tools, ["bash"]);
+        assert_eq!(gate.policy.required_groups, ["eng-prod"]);
+        assert_eq!(gate.policy.require_obo_for, ["database_write"]);
+        assert_eq!(gate.member_groups, Some(vec!["eng-prod".to_string()]));
+
+        let pii = crate::dlp::workspace::parse_key_context(&body)
+            .expect("piiDetectors reads")
+            .expect("the fixture sets an action");
+        assert_eq!(pii.get("pii.email").map(String::as_str), Some("redact"));
+
+        let retry = crate::routing::retry::parse_key_context(&body).expect("upstreamRetry reads");
+        assert_eq!(retry.enabled, Some(true));
+        assert_eq!(retry.max_attempts, Some(3));
+        assert_eq!(retry.on_status, Some(vec![503]));
+        assert!(retry.fallbacks.is_some());
+    }
+
     #[test]
     fn member_role_reads_the_role_and_nothing_else() {
         assert_eq!(

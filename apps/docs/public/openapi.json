@@ -3,7 +3,7 @@
   "info": {
     "title": "Intutic Control Plane API",
     "version": "v1",
-    "description": "Generated from the control plane's route source. 413 operations; 131 validate their JSON body and 68 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 162 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
+    "description": "Generated from the control plane's route source. 413 operations; 131 validate their JSON body and 68 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 171 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
   },
   "servers": [
     {
@@ -1315,7 +1315,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyContextResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -1324,7 +1331,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/auth/login": {
@@ -4566,7 +4573,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionDetailResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -4581,7 +4595,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/decisions/{entryId}/review": {
@@ -7600,7 +7614,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCoreGatewayCheckResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -7609,13 +7630,20 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCoreGatewayCheckResponse"
+                }
+              }
+            }
           }
         },
         "x-intutic-auth": "OWNER/ADMIN/EM/DEVELOPER",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/integrations/github/webhook": {
@@ -8530,7 +8558,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JudgeChunkResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -8548,7 +8583,7 @@
         "x-intutic-auth": "API key (`vk_…`)",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/judge/finalize": {
@@ -9676,7 +9711,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerObserveResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -9691,7 +9733,7 @@
         "x-intutic-auth": "OWNER/ADMIN/EM/DEVELOPER",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/members": {
@@ -13114,7 +13156,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResolveResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -13132,7 +13181,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/predict-cost": {
@@ -16087,7 +16136,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncReportResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -16099,7 +16155,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/sync/sop-hash": {
@@ -18440,7 +18496,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionsDigestResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -18452,7 +18515,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/workspace/egress-policy": {
@@ -18473,7 +18536,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EgressPolicyResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -18488,7 +18558,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/workspace/gateway": {
@@ -20680,6 +20750,28 @@
           "toolName"
         ],
         "additionalProperties": false
+      },
+      "AgentCoreGatewayCheckResponse": {
+        "type": "object",
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "description": "`GOVERNANCE_UNAVAILABLE` when a check could not run."
+          },
+          "degraded": {
+            "type": "boolean",
+            "description": "A shadow workspace's allow for a call a check could not evaluate."
+          }
+        },
+        "required": [
+          "allowed"
+        ]
       },
       "ApiKeyCreateResponse": {
         "type": "object",
@@ -23719,6 +23811,70 @@
         ],
         "additionalProperties": false
       },
+      "DecisionDetailResponse": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workspace_id": {
+            "type": "string"
+          },
+          "original_tool_call": {
+            "description": "The held tool call, as the gate reported it."
+          },
+          "hijacked_tool_call": {},
+          "outcome": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rationale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`PENDING_REVIEW` until a person decides it; `APPROVED` or `REJECTED` after."
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "entry_id",
+          "session_id",
+          "workspace_id",
+          "outcome",
+          "trace_id",
+          "rationale",
+          "status",
+          "created_at"
+        ]
+      },
       "DecisionIngestResponse": {
         "type": "object",
         "properties": {
@@ -23765,6 +23921,51 @@
           "ok",
           "status",
           "bypassWritten"
+        ]
+      },
+      "DecisionsDigestResponse": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "decision",
+                    "incident",
+                    "settings_change",
+                    "detector_adjudication"
+                  ]
+                },
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "summary": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "timestamp",
+                "summary"
+              ]
+            }
+          }
+        },
+        "required": [
+          "workspaceId",
+          "entries"
         ]
       },
       "DeviceDisconnectListResponse": {
@@ -24062,6 +24263,42 @@
           "txtRecordName",
           "txtRecordValue",
           "expiresAt"
+        ]
+      },
+      "EgressPolicyResponse": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "monitor",
+                  "enforce"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null: central management is not configured, and the proxy keeps its local config. `off` is an admin turning it off."
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact hosts, `.suffix` domains or CIDRs the proxy may reach, unioned with its local list."
+          }
+        },
+        "required": [
+          "workspaceId",
+          "mode",
+          "allow"
         ]
       },
       "EnhanceSchema": {
@@ -26811,754 +27048,747 @@
             "const": true
           },
           "guardrail": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "guardrailId": {
+            "type": "object",
+            "properties": {
+              "guardrailId": {
+                "type": "string"
+              },
+              "provenance": {
+                "type": "string",
+                "enum": [
+                  "extracted",
+                  "authored"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Authored only; null for an extracted guardrail"
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Authored only"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "supersedes": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The guardrail id of the version this one replaced"
+              },
+              "target": {
+                "type": "string",
+                "enum": [
+                  "hook_rule",
+                  "sop_front_matter",
+                  "wasm_rule",
+                  "workspace_setting"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "PROPOSED",
+                  "SHADOW",
+                  "ENFORCING",
+                  "REJECTED",
+                  "RETIRED"
+                ]
+              },
+              "ir": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "hook_rule"
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "tools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "minItems": 1,
+                        "maxItems": 8
+                      },
+                      "argContains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "maxItems": 4
+                      },
+                      "argNotContains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "maxItems": 4
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "title",
+                      "tools"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "deny_tools"
+                      },
+                      "tools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "tools"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "review_before"
+                      },
+                      "tokens": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "tokens"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "requires_before"
+                      },
+                      "first": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "then": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "first",
+                      "then"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "forbid_after"
+                      },
+                      "first": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "then": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "first",
+                      "then"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "max_calls"
+                      },
+                      "token": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "token",
+                      "limit"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "forbid_with"
+                      },
+                      "taint": {
+                        "type": "string",
+                        "enum": [
+                          "secrets()",
+                          "pii()"
+                        ]
+                      },
+                      "token": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "taint",
+                      "token"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "wasm_predicate"
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "maxLength": 480
+                      },
+                      "predicate": {},
+                      "verdict": {
+                        "type": "number",
+                        "const": 3
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "title",
+                      "rationale",
+                      "verdict"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "allowed_models"
+                      },
+                      "models": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                        },
+                        "minItems": 1,
+                        "maxItems": 32
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "models"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "egress_allow"
+                      },
+                      "hosts": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 253
+                        },
+                        "minItems": 1,
+                        "maxItems": 32
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "hosts"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "none"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "maxLength": 480
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "rendered": {
+                "anyOf": [
+                  {
                     "type": "string"
                   },
-                  "provenance": {
-                    "type": "string",
-                    "enum": [
-                      "extracted",
-                      "authored"
-                    ]
+                  {
+                    "type": "number"
                   },
-                  "name": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "Authored only; null for an extracted guardrail"
-                  },
-                  "description": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "Authored only"
-                  },
-                  "version": {
-                    "type": "integer"
-                  },
-                  "supersedes": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "The guardrail id of the version this one replaced"
-                  },
-                  "target": {
-                    "type": "string",
-                    "enum": [
-                      "hook_rule",
-                      "sop_front_matter",
-                      "wasm_rule",
-                      "workspace_setting"
-                    ]
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "PROPOSED",
-                      "SHADOW",
-                      "ENFORCING",
-                      "REJECTED",
-                      "RETIRED"
-                    ]
-                  },
-                  "ir": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "hook_rule"
-                          },
-                          "title": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 80
-                          },
-                          "tools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "minItems": 1,
-                            "maxItems": 8
-                          },
-                          "argContains": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "maxItems": 4
-                          },
-                          "argNotContains": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "maxItems": 4
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "title",
-                          "tools"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "deny_tools"
-                          },
-                          "tools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "minItems": 1,
-                            "maxItems": 16
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "tools"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "review_before"
-                          },
-                          "tokens": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "minItems": 1,
-                            "maxItems": 16
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "tokens"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "requires_before"
-                          },
-                          "first": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "then": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "first",
-                          "then"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "forbid_after"
-                          },
-                          "first": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "then": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "first",
-                          "then"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "max_calls"
-                          },
-                          "token": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "limit": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 1000
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "token",
-                          "limit"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "forbid_with"
-                          },
-                          "taint": {
-                            "type": "string",
-                            "enum": [
-                              "secrets()",
-                              "pii()"
-                            ]
-                          },
-                          "token": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "taint",
-                          "token"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "wasm_predicate"
-                          },
-                          "title": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 80
-                          },
-                          "rationale": {
-                            "type": "string",
-                            "maxLength": 480
-                          },
-                          "predicate": {},
-                          "verdict": {
-                            "type": "number",
-                            "const": 3
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "title",
-                          "rationale",
-                          "verdict"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "allowed_models"
-                          },
-                          "models": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
-                            },
-                            "minItems": 1,
-                            "maxItems": 32
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "models"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "egress_allow"
-                          },
-                          "hosts": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 253
-                            },
-                            "minItems": 1,
-                            "maxItems": 32
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "hosts"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "none"
-                          },
-                          "reason": {
-                            "type": "string",
-                            "maxLength": 480
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "reason"
-                        ],
-                        "additionalProperties": false
-                      }
-                    ]
-                  },
-                  "rendered": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "null"
-                      },
-                      {
-                        "type": "array"
-                      },
-                      {
-                        "type": "object",
-                        "additionalProperties": {}
-                      }
-                    ],
-                    "description": "What the enforcer reads, by target: hook_rule `{kind, toolPattern, argPattern?, reason}`; front matter `{kind, lines}`; wasm `{kind, source}`; workspace_setting `{kind, key, values}`"
-                  },
-                  "roles": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "scope": {
-                    "type": "string",
-                    "description": "`workspace` or `org`"
-                  },
-                  "shadowEvaluations": {
-                    "type": "integer"
-                  },
-                  "shadowWouldAct": {
-                    "type": "integer"
-                  },
-                  "enforcingFires": {
-                    "type": "integer"
-                  },
-                  "sourceStale": {
+                  {
                     "type": "boolean"
                   },
-                  "ruleCandidateId": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "wasm_rule only: the rule candidate it was handed to on shadow approval"
+                  {
+                    "type": "null"
                   },
-                  "proposedAt": {
+                  {
+                    "type": "array"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                ],
+                "description": "What the enforcer reads, by target: hook_rule `{kind, toolPattern, argPattern?, reason}`; front matter `{kind, lines}`; wasm `{kind, source}`; workspace_setting `{kind, key, values}`"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "scope": {
+                "type": "string",
+                "description": "`workspace` or `org`"
+              },
+              "shadowEvaluations": {
+                "type": "integer"
+              },
+              "shadowWouldAct": {
+                "type": "integer"
+              },
+              "enforcingFires": {
+                "type": "integer"
+              },
+              "sourceStale": {
+                "type": "boolean"
+              },
+              "ruleCandidateId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "wasm_rule only: the rule candidate it was handed to on shadow approval"
+              },
+              "proposedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "shadowAt": {
+                "anyOf": [
+                  {
                     "type": "string",
                     "format": "date-time"
                   },
-                  "shadowAt": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "promotedAt": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "rejectedReason": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "clause": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "clauseId": {
-                            "type": "string"
-                          },
-                          "quote": {
-                            "type": "string"
-                          },
-                          "quoteOffset": {
-                            "type": "integer",
-                            "description": "Offset of the quote in the passage text; -1 when only the normalised forms matched"
-                          },
-                          "passageHash": {
-                            "type": "string"
-                          },
-                          "passageId": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "extractor": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "clauseId",
-                          "quote",
-                          "quoteOffset",
-                          "passageHash",
-                          "passageId",
-                          "extractor"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "Null for an authored guardrail"
-                  },
-                  "document": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "docId": {
-                            "type": "string"
-                          },
-                          "title": {
-                            "type": "string"
-                          },
-                          "provider": {
-                            "type": "string"
-                          },
-                          "sourceUrl": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "docId",
-                          "title",
-                          "provider",
-                          "sourceUrl"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "Null for an authored guardrail"
-                  },
-                  "validation": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "null"
-                      },
-                      {
-                        "type": "array"
-                      },
-                      {
-                        "type": "object",
-                        "additionalProperties": {}
-                      }
-                    ],
-                    "description": "The validator checks, `[{name, passed, detail}]` in the order they ran: the clause's for an extracted guardrail, the row's for an authored one"
-                  },
-                  "passage": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "passageId": {
-                            "type": "string"
-                          },
-                          "text": {
-                            "type": "string"
-                          },
-                          "headingPath": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "retired": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "passageId",
-                          "text",
-                          "headingPath",
-                          "retired"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "events": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "eventId": {
-                          "type": "string"
-                        },
-                        "event": {
-                          "type": "string",
-                          "enum": [
-                            "PROPOSED",
-                            "SHADOW_APPROVED",
-                            "PROMOTED",
-                            "REJECTED",
-                            "RETIRED",
-                            "SOURCE_STALE",
-                            "SOURCE_RECONFIRMED",
-                            "CITATION_REBOUND",
-                            "RENDER_REBOUND",
-                            "UPDATED"
-                          ]
-                        },
-                        "actorId": {
-                          "type": [
-                            "string",
-                            "null"
-                          ],
-                          "description": "The member who acted; null for the system"
-                        },
-                        "detail": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "array"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            }
-                          ],
-                          "description": "The event's jsonb detail object"
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      },
-                      "required": [
-                        "eventId",
-                        "event",
-                        "actorId",
-                        "detail",
-                        "createdAt"
-                      ]
-                    }
-                  },
-                  "supersededBy": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "The id of the version that replaced this one"
+                  {
+                    "type": "null"
                   }
-                },
-                "required": [
-                  "guardrailId",
-                  "provenance",
-                  "name",
-                  "description",
-                  "version",
-                  "supersedes",
-                  "target",
-                  "status",
-                  "ir",
-                  "rendered",
-                  "roles",
-                  "scope",
-                  "shadowEvaluations",
-                  "shadowWouldAct",
-                  "enforcingFires",
-                  "sourceStale",
-                  "ruleCandidateId",
-                  "proposedAt",
-                  "shadowAt",
-                  "promotedAt",
-                  "rejectedReason",
-                  "clause",
-                  "document",
-                  "validation",
-                  "passage",
-                  "events",
-                  "supersededBy"
                 ]
               },
-              {
-                "type": "null"
+              "promotedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "rejectedReason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "clause": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "clauseId": {
+                        "type": "string"
+                      },
+                      "quote": {
+                        "type": "string"
+                      },
+                      "quoteOffset": {
+                        "type": "integer",
+                        "description": "Offset of the quote in the passage text; -1 when only the normalised forms matched"
+                      },
+                      "passageHash": {
+                        "type": "string"
+                      },
+                      "passageId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "extractor": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "clauseId",
+                      "quote",
+                      "quoteOffset",
+                      "passageHash",
+                      "passageId",
+                      "extractor"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Null for an authored guardrail"
+              },
+              "document": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "docId": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "sourceUrl": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "docId",
+                      "title",
+                      "provider",
+                      "sourceUrl"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Null for an authored guardrail"
+              },
+              "validation": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "array"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                ],
+                "description": "The validator checks, `[{name, passed, detail}]` in the order they ran: the clause's for an extracted guardrail, the row's for an authored one"
+              },
+              "passage": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "passageId": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "headingPath": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "retired": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "passageId",
+                      "text",
+                      "headingPath",
+                      "retired"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "event": {
+                      "type": "string",
+                      "enum": [
+                        "PROPOSED",
+                        "SHADOW_APPROVED",
+                        "PROMOTED",
+                        "REJECTED",
+                        "RETIRED",
+                        "SOURCE_STALE",
+                        "SOURCE_RECONFIRMED",
+                        "CITATION_REBOUND",
+                        "RENDER_REBOUND",
+                        "UPDATED"
+                      ]
+                    },
+                    "actorId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The member who acted; null for the system"
+                    },
+                    "detail": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "array"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      ],
+                      "description": "The event's jsonb detail object"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "event",
+                    "actorId",
+                    "detail",
+                    "createdAt"
+                  ]
+                }
+              },
+              "supersededBy": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The id of the version that replaced this one"
               }
+            },
+            "required": [
+              "guardrailId",
+              "provenance",
+              "name",
+              "description",
+              "version",
+              "supersedes",
+              "target",
+              "status",
+              "ir",
+              "rendered",
+              "roles",
+              "scope",
+              "shadowEvaluations",
+              "shadowWouldAct",
+              "enforcingFires",
+              "sourceStale",
+              "ruleCandidateId",
+              "proposedAt",
+              "shadowAt",
+              "promotedAt",
+              "rejectedReason",
+              "clause",
+              "document",
+              "validation",
+              "passage",
+              "events",
+              "supersededBy"
             ],
-            "description": "The guardrail read back after the write; null only if it is gone by then"
+            "description": "The guardrail read back after the write. Never null: a write whose read-back finds nothing answers 500 GUARDRAIL_READ_BACK_FAILED"
           },
           "readiness": {
             "type": "object",
@@ -28800,754 +29030,747 @@
             "const": true
           },
           "guardrail": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "guardrailId": {
+            "type": "object",
+            "properties": {
+              "guardrailId": {
+                "type": "string"
+              },
+              "provenance": {
+                "type": "string",
+                "enum": [
+                  "extracted",
+                  "authored"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Authored only; null for an extracted guardrail"
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Authored only"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "supersedes": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The guardrail id of the version this one replaced"
+              },
+              "target": {
+                "type": "string",
+                "enum": [
+                  "hook_rule",
+                  "sop_front_matter",
+                  "wasm_rule",
+                  "workspace_setting"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "PROPOSED",
+                  "SHADOW",
+                  "ENFORCING",
+                  "REJECTED",
+                  "RETIRED"
+                ]
+              },
+              "ir": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "hook_rule"
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "tools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "minItems": 1,
+                        "maxItems": 8
+                      },
+                      "argContains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "maxItems": 4
+                      },
+                      "argNotContains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "maxItems": 4
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "title",
+                      "tools"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "deny_tools"
+                      },
+                      "tools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "tools"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "review_before"
+                      },
+                      "tokens": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "tokens"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "requires_before"
+                      },
+                      "first": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "then": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "first",
+                      "then"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "forbid_after"
+                      },
+                      "first": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "then": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "first",
+                      "then"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "max_calls"
+                      },
+                      "token": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "token",
+                      "limit"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "forbid_with"
+                      },
+                      "taint": {
+                        "type": "string",
+                        "enum": [
+                          "secrets()",
+                          "pii()"
+                        ]
+                      },
+                      "token": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "taint",
+                      "token"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "wasm_predicate"
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "maxLength": 480
+                      },
+                      "predicate": {},
+                      "verdict": {
+                        "type": "number",
+                        "const": 3
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "title",
+                      "rationale",
+                      "verdict"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "allowed_models"
+                      },
+                      "models": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                        },
+                        "minItems": 1,
+                        "maxItems": 32
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "models"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "egress_allow"
+                      },
+                      "hosts": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 253
+                        },
+                        "minItems": 1,
+                        "maxItems": 32
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "hosts"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "none"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "maxLength": 480
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "rendered": {
+                "anyOf": [
+                  {
                     "type": "string"
                   },
-                  "provenance": {
-                    "type": "string",
-                    "enum": [
-                      "extracted",
-                      "authored"
-                    ]
+                  {
+                    "type": "number"
                   },
-                  "name": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "Authored only; null for an extracted guardrail"
-                  },
-                  "description": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "Authored only"
-                  },
-                  "version": {
-                    "type": "integer"
-                  },
-                  "supersedes": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "The guardrail id of the version this one replaced"
-                  },
-                  "target": {
-                    "type": "string",
-                    "enum": [
-                      "hook_rule",
-                      "sop_front_matter",
-                      "wasm_rule",
-                      "workspace_setting"
-                    ]
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "PROPOSED",
-                      "SHADOW",
-                      "ENFORCING",
-                      "REJECTED",
-                      "RETIRED"
-                    ]
-                  },
-                  "ir": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "hook_rule"
-                          },
-                          "title": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 80
-                          },
-                          "tools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "minItems": 1,
-                            "maxItems": 8
-                          },
-                          "argContains": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "maxItems": 4
-                          },
-                          "argNotContains": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "maxItems": 4
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "title",
-                          "tools"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "deny_tools"
-                          },
-                          "tools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "minItems": 1,
-                            "maxItems": 16
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "tools"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "review_before"
-                          },
-                          "tokens": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 64
-                            },
-                            "minItems": 1,
-                            "maxItems": 16
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "tokens"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "requires_before"
-                          },
-                          "first": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "then": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "first",
-                          "then"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "forbid_after"
-                          },
-                          "first": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "then": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "first",
-                          "then"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "max_calls"
-                          },
-                          "token": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "limit": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 1000
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "token",
-                          "limit"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "forbid_with"
-                          },
-                          "taint": {
-                            "type": "string",
-                            "enum": [
-                              "secrets()",
-                              "pii()"
-                            ]
-                          },
-                          "token": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 64
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "taint",
-                          "token"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "wasm_predicate"
-                          },
-                          "title": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 80
-                          },
-                          "rationale": {
-                            "type": "string",
-                            "maxLength": 480
-                          },
-                          "predicate": {},
-                          "verdict": {
-                            "type": "number",
-                            "const": 3
-                          },
-                          "roles": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
-                            },
-                            "maxItems": 8
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "title",
-                          "rationale",
-                          "verdict"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "allowed_models"
-                          },
-                          "models": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
-                            },
-                            "minItems": 1,
-                            "maxItems": 32
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "models"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "egress_allow"
-                          },
-                          "hosts": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 253
-                            },
-                            "minItems": 1,
-                            "maxItems": 32
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "hosts"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "const": "none"
-                          },
-                          "reason": {
-                            "type": "string",
-                            "maxLength": 480
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "reason"
-                        ],
-                        "additionalProperties": false
-                      }
-                    ]
-                  },
-                  "rendered": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "null"
-                      },
-                      {
-                        "type": "array"
-                      },
-                      {
-                        "type": "object",
-                        "additionalProperties": {}
-                      }
-                    ],
-                    "description": "What the enforcer reads, by target: hook_rule `{kind, toolPattern, argPattern?, reason}`; front matter `{kind, lines}`; wasm `{kind, source}`; workspace_setting `{kind, key, values}`"
-                  },
-                  "roles": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "scope": {
-                    "type": "string",
-                    "description": "`workspace` or `org`"
-                  },
-                  "shadowEvaluations": {
-                    "type": "integer"
-                  },
-                  "shadowWouldAct": {
-                    "type": "integer"
-                  },
-                  "enforcingFires": {
-                    "type": "integer"
-                  },
-                  "sourceStale": {
+                  {
                     "type": "boolean"
                   },
-                  "ruleCandidateId": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "wasm_rule only: the rule candidate it was handed to on shadow approval"
+                  {
+                    "type": "null"
                   },
-                  "proposedAt": {
+                  {
+                    "type": "array"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                ],
+                "description": "What the enforcer reads, by target: hook_rule `{kind, toolPattern, argPattern?, reason}`; front matter `{kind, lines}`; wasm `{kind, source}`; workspace_setting `{kind, key, values}`"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "scope": {
+                "type": "string",
+                "description": "`workspace` or `org`"
+              },
+              "shadowEvaluations": {
+                "type": "integer"
+              },
+              "shadowWouldAct": {
+                "type": "integer"
+              },
+              "enforcingFires": {
+                "type": "integer"
+              },
+              "sourceStale": {
+                "type": "boolean"
+              },
+              "ruleCandidateId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "wasm_rule only: the rule candidate it was handed to on shadow approval"
+              },
+              "proposedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "shadowAt": {
+                "anyOf": [
+                  {
                     "type": "string",
                     "format": "date-time"
                   },
-                  "shadowAt": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "promotedAt": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "rejectedReason": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "clause": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "clauseId": {
-                            "type": "string"
-                          },
-                          "quote": {
-                            "type": "string"
-                          },
-                          "quoteOffset": {
-                            "type": "integer",
-                            "description": "Offset of the quote in the passage text; -1 when only the normalised forms matched"
-                          },
-                          "passageHash": {
-                            "type": "string"
-                          },
-                          "passageId": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "extractor": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "clauseId",
-                          "quote",
-                          "quoteOffset",
-                          "passageHash",
-                          "passageId",
-                          "extractor"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "Null for an authored guardrail"
-                  },
-                  "document": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "docId": {
-                            "type": "string"
-                          },
-                          "title": {
-                            "type": "string"
-                          },
-                          "provider": {
-                            "type": "string"
-                          },
-                          "sourceUrl": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "docId",
-                          "title",
-                          "provider",
-                          "sourceUrl"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "Null for an authored guardrail"
-                  },
-                  "validation": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "null"
-                      },
-                      {
-                        "type": "array"
-                      },
-                      {
-                        "type": "object",
-                        "additionalProperties": {}
-                      }
-                    ],
-                    "description": "The validator checks, `[{name, passed, detail}]` in the order they ran: the clause's for an extracted guardrail, the row's for an authored one"
-                  },
-                  "passage": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "passageId": {
-                            "type": "string"
-                          },
-                          "text": {
-                            "type": "string"
-                          },
-                          "headingPath": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "retired": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "passageId",
-                          "text",
-                          "headingPath",
-                          "retired"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "events": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "eventId": {
-                          "type": "string"
-                        },
-                        "event": {
-                          "type": "string",
-                          "enum": [
-                            "PROPOSED",
-                            "SHADOW_APPROVED",
-                            "PROMOTED",
-                            "REJECTED",
-                            "RETIRED",
-                            "SOURCE_STALE",
-                            "SOURCE_RECONFIRMED",
-                            "CITATION_REBOUND",
-                            "RENDER_REBOUND",
-                            "UPDATED"
-                          ]
-                        },
-                        "actorId": {
-                          "type": [
-                            "string",
-                            "null"
-                          ],
-                          "description": "The member who acted; null for the system"
-                        },
-                        "detail": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "array"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            }
-                          ],
-                          "description": "The event's jsonb detail object"
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      },
-                      "required": [
-                        "eventId",
-                        "event",
-                        "actorId",
-                        "detail",
-                        "createdAt"
-                      ]
-                    }
-                  },
-                  "supersededBy": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "The id of the version that replaced this one"
+                  {
+                    "type": "null"
                   }
-                },
-                "required": [
-                  "guardrailId",
-                  "provenance",
-                  "name",
-                  "description",
-                  "version",
-                  "supersedes",
-                  "target",
-                  "status",
-                  "ir",
-                  "rendered",
-                  "roles",
-                  "scope",
-                  "shadowEvaluations",
-                  "shadowWouldAct",
-                  "enforcingFires",
-                  "sourceStale",
-                  "ruleCandidateId",
-                  "proposedAt",
-                  "shadowAt",
-                  "promotedAt",
-                  "rejectedReason",
-                  "clause",
-                  "document",
-                  "validation",
-                  "passage",
-                  "events",
-                  "supersededBy"
                 ]
               },
-              {
-                "type": "null"
+              "promotedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "rejectedReason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "clause": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "clauseId": {
+                        "type": "string"
+                      },
+                      "quote": {
+                        "type": "string"
+                      },
+                      "quoteOffset": {
+                        "type": "integer",
+                        "description": "Offset of the quote in the passage text; -1 when only the normalised forms matched"
+                      },
+                      "passageHash": {
+                        "type": "string"
+                      },
+                      "passageId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "extractor": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "clauseId",
+                      "quote",
+                      "quoteOffset",
+                      "passageHash",
+                      "passageId",
+                      "extractor"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Null for an authored guardrail"
+              },
+              "document": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "docId": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "sourceUrl": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "docId",
+                      "title",
+                      "provider",
+                      "sourceUrl"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Null for an authored guardrail"
+              },
+              "validation": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "array"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                ],
+                "description": "The validator checks, `[{name, passed, detail}]` in the order they ran: the clause's for an extracted guardrail, the row's for an authored one"
+              },
+              "passage": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "passageId": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "headingPath": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "retired": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "passageId",
+                      "text",
+                      "headingPath",
+                      "retired"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "event": {
+                      "type": "string",
+                      "enum": [
+                        "PROPOSED",
+                        "SHADOW_APPROVED",
+                        "PROMOTED",
+                        "REJECTED",
+                        "RETIRED",
+                        "SOURCE_STALE",
+                        "SOURCE_RECONFIRMED",
+                        "CITATION_REBOUND",
+                        "RENDER_REBOUND",
+                        "UPDATED"
+                      ]
+                    },
+                    "actorId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The member who acted; null for the system"
+                    },
+                    "detail": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "array"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      ],
+                      "description": "The event's jsonb detail object"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "event",
+                    "actorId",
+                    "detail",
+                    "createdAt"
+                  ]
+                }
+              },
+              "supersededBy": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The id of the version that replaced this one"
               }
+            },
+            "required": [
+              "guardrailId",
+              "provenance",
+              "name",
+              "description",
+              "version",
+              "supersedes",
+              "target",
+              "status",
+              "ir",
+              "rendered",
+              "roles",
+              "scope",
+              "shadowEvaluations",
+              "shadowWouldAct",
+              "enforcingFires",
+              "sourceStale",
+              "ruleCandidateId",
+              "proposedAt",
+              "shadowAt",
+              "promotedAt",
+              "rejectedReason",
+              "clause",
+              "document",
+              "validation",
+              "passage",
+              "events",
+              "supersededBy"
             ],
-            "description": "The guardrail read back after the write; null only if it is gone by then"
+            "description": "The guardrail read back after the write. Never null: a write whose read-back finds nothing answers 500 GUARDRAIL_READ_BACK_FAILED"
           },
           "forked": {
             "type": "boolean",
@@ -31601,6 +31824,97 @@
         ],
         "additionalProperties": false
       },
+      "JudgeChunkResponse": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "TRIGGERED",
+              "PASS"
+            ]
+          },
+          "triggered": {
+            "type": "boolean",
+            "description": "An organization SOP was violated."
+          },
+          "personalTriggered": {
+            "type": "boolean",
+            "description": "A personal (local-only) SOP was violated; never persisted."
+          },
+          "explanation": {
+            "type": "string"
+          },
+          "cascade": {
+            "type": "object",
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "clean",
+                  "violation",
+                  "review"
+                ]
+              },
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Null when stage 1 did not answer."
+              },
+              "band": {
+                "type": "object",
+                "properties": {
+                  "lo": {
+                    "type": "number"
+                  },
+                  "hi": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "lo",
+                  "hi"
+                ]
+              },
+              "model": {
+                "type": "string"
+              },
+              "reviewId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "decision",
+              "score",
+              "band",
+              "model"
+            ],
+            "description": "When the cascade's stage 1 graded the segment."
+          },
+          "independent": {
+            "type": "boolean",
+            "description": "False when the judge is the monitored model grading itself."
+          },
+          "judgeSource": {
+            "type": "string",
+            "const": "platform"
+          },
+          "judgeModel": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "triggered",
+          "personalTriggered",
+          "explanation",
+          "independent",
+          "judgeSource",
+          "judgeModel"
+        ]
+      },
       "JudgeFinalizeResponse": {
         "type": "object",
         "properties": {
@@ -31742,6 +32056,370 @@
           "independent",
           "judgeSource",
           "judgeModel"
+        ]
+      },
+      "KeyContextResponse": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "memberId": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "EM",
+              "DEVELOPER",
+              "VIEWER"
+            ]
+          },
+          "orgId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allowedModels": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's own model allowlist; null inherits the workspace list."
+          },
+          "byokRequired": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the workspace must bring its own provider key; null reads as required under `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=paid`."
+          },
+          "keyId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hardBudgets": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "workspace",
+                        "key",
+                        "member"
+                      ]
+                    },
+                    "period": {
+                      "type": "string",
+                      "enum": [
+                        "day",
+                        "month"
+                      ]
+                    },
+                    "limitUsd": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "period",
+                    "limitUsd"
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rateLimit": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "rpm": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "tpm": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ssoGroups": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "policy": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "highRiskTools": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "requiredGroups": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "requireOboFor": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "highRiskTools",
+                          "requiredGroups",
+                          "requireOboFor"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "memberGroups": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Null when the workspace has no policy, or the key has no active member."
+                  }
+                },
+                "required": [
+                  "policy",
+                  "memberGroups"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the read failed."
+          },
+          "piiDetectors": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": [
+                    "off",
+                    "redact",
+                    "block"
+                  ]
+                },
+                "propertyNames": {
+                  "enum": [
+                    "pii.card",
+                    "pii.iban",
+                    "pii.ssn",
+                    "pii.email",
+                    "pii.phone"
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when unreadable; the proxy applies its policy fail mode."
+          },
+          "upstreamRetry": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "maxAttempts": {
+                    "type": "integer"
+                  },
+                  "initialBackoffMs": {
+                    "type": "integer"
+                  },
+                  "maxBackoffMs": {
+                    "type": "integer"
+                  },
+                  "budgetMs": {
+                    "type": "integer"
+                  },
+                  "onStatus": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "fallbacks": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "model": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "anthropic",
+                              "openai",
+                              "gemini",
+                              "mistral",
+                              "openrouter",
+                              "deepseek",
+                              "bedrock",
+                              "vertex_ai",
+                              "vertex",
+                              "azure_openai",
+                              "azure"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "storeToolArguments": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Only `true` keeps tool-call argument values in replay contexts."
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "dailyUsd": {
+                    "type": "number"
+                  },
+                  "monthlyUsd": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "dailyUsd",
+                  "monthlyUsd"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the caps could not be read: the proxy refuses as BUDGET_UNVERIFIABLE."
+          },
+          "interventionMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "TRANSPARENT",
+                  "OPAQUE",
+                  "SILENT_LOG"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "llmJudgeEnabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "workspaceId",
+          "memberId",
+          "role",
+          "orgId",
+          "allowedModels",
+          "byokRequired",
+          "keyId",
+          "hardBudgets",
+          "rateLimit",
+          "scopes",
+          "ssoGroups",
+          "piiDetectors",
+          "upstreamRetry",
+          "storeToolArguments",
+          "budget",
+          "interventionMode",
+          "llmJudgeEnabled"
         ]
       },
       "labelSchema": {
@@ -33058,6 +33736,115 @@
           "highRiskToolChange",
           "budgets",
           "pendingCount"
+        ]
+      },
+      "McpServerObserveResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "approved",
+              "blocked"
+            ]
+          },
+          "created": {
+            "type": "boolean",
+            "description": "The first sighting of this server in the workspace."
+          },
+          "toolChange": {
+            "type": "object",
+            "properties": {
+              "changeId": {
+                "type": "string"
+              },
+              "serverId": {
+                "type": "string"
+              },
+              "score": {
+                "type": "integer",
+                "description": "0–100."
+              },
+              "level": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "rule": {
+                      "type": "string"
+                    },
+                    "tool": {
+                      "type": "string"
+                    },
+                    "points": {
+                      "type": "number"
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "rule",
+                    "tool",
+                    "points",
+                    "detail"
+                  ]
+                }
+              },
+              "added": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "removed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "changed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "held": {
+                "type": "boolean",
+                "description": "The change returned the server to the approval queue (`mcpHighRiskToolChange: hold`)."
+              }
+            },
+            "required": [
+              "changeId",
+              "serverId",
+              "score",
+              "level",
+              "reasons",
+              "added",
+              "removed",
+              "changed",
+              "held"
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "status",
+          "created"
         ]
       },
       "MemberBudgetsResponse": {
@@ -35441,6 +36228,385 @@
           "ok",
           "policies",
           "interventionMode"
+        ]
+      },
+      "PolicyResolveResponse": {
+        "type": "object",
+        "properties": {
+          "allowedTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Empty means unrestricted."
+          },
+          "toolDescriptionOverrides": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "allowedServers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Empty means unrestricted."
+          },
+          "mcpInjectionPatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mcpRegistry": {
+            "type": "object",
+            "properties": {
+              "defaultPolicy": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "deny"
+                ]
+              },
+              "approvedServers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "blockedServers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "heldServers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "disabledTools": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "description": "Server name → tools disabled within it."
+              }
+            },
+            "required": [
+              "defaultPolicy",
+              "approvedServers",
+              "blockedServers",
+              "heldServers",
+              "disabledTools"
+            ]
+          },
+          "mcpBudgets": {
+            "type": "object",
+            "properties": {
+              "budgets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "server",
+                        "tool",
+                        "member",
+                        "member_server"
+                      ]
+                    },
+                    "server": {
+                      "type": "string"
+                    },
+                    "tool": {
+                      "type": "string"
+                    },
+                    "memberId": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string",
+                      "enum": [
+                        "hour",
+                        "day"
+                      ]
+                    },
+                    "limit": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "scope",
+                    "period",
+                    "limit"
+                  ]
+                }
+              },
+              "warnAtPct": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "budgets",
+              "warnAtPct"
+            ]
+          },
+          "piiDetectors": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": [
+                    "off",
+                    "redact",
+                    "block"
+                  ]
+                },
+                "propertyNames": {
+                  "enum": [
+                    "pii.card",
+                    "pii.iban",
+                    "pii.ssn",
+                    "pii.email",
+                    "pii.phone"
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Detector id → action; null when the stored setting no longer validates."
+          },
+          "wasmRules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ruleId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "integer"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "ENFORCE",
+                    "SHADOW"
+                  ]
+                }
+              },
+              "required": [
+                "ruleId",
+                "name",
+                "sha256",
+                "priority",
+                "mode"
+              ]
+            }
+          },
+          "ssoGroupPolicy": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "highRiskTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requiredGroups": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requireOboFor": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "highRiskTools",
+                  "requiredGroups",
+                  "requireOboFor"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "memberId": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "ssoGroups": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "memberId",
+                  "email",
+                  "role",
+                  "ssoGroups"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The member behind the caller's key, with their SSO groups; null when there is none."
+          },
+          "mcpProxyFailBehavior": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "mcpInjectionAction": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "block"
+            ]
+          },
+          "mcpAnomalyMode": {
+            "type": "string",
+            "enum": [
+              "enforce",
+              "warn",
+              "off"
+            ]
+          },
+          "mcpAnomalyOverrides": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "steer",
+                "reask",
+                "kill",
+                "off"
+              ]
+            }
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "sopRules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "The SOP id, or `guardrail:<guardrailId>`."
+                },
+                "toolPattern": {
+                  "type": "string",
+                  "description": "A regular expression over the tool name."
+                },
+                "argPattern": {
+                  "type": "string",
+                  "description": "A regular expression over the JSON-encoded arguments."
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "block",
+                    "warn",
+                    "require_approval"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "origin": {
+                  "type": "string",
+                  "const": "guardrail"
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The lower-cased roles a guardrail rule is scoped to; absent when it applies to everyone."
+                }
+              },
+              "required": [
+                "id",
+                "toolPattern",
+                "action",
+                "reason"
+              ]
+            }
+          },
+          "interventionMode": {
+            "type": "string",
+            "enum": [
+              "TRANSPARENT",
+              "OPAQUE",
+              "SILENT_LOG"
+            ]
+          },
+          "sqlDropStrictBlock": {
+            "type": "boolean",
+            "description": "`ff_sql_drop_strict_block`: the daemon's destructive-SQL hook rule blocks instead of warning."
+          }
+        },
+        "required": [
+          "allowedTools",
+          "toolDescriptionOverrides",
+          "allowedServers",
+          "mcpInjectionPatterns",
+          "mcpRegistry",
+          "mcpBudgets",
+          "piiDetectors",
+          "wasmRules",
+          "ssoGroupPolicy",
+          "principal",
+          "workspaceId",
+          "sopRules",
+          "interventionMode",
+          "sqlDropStrictBlock"
         ]
       },
       "PolicyUpdatedResponse": {
@@ -39811,14 +40977,6 @@
             ],
             "description": "The member behind the caller's key, with their SSO groups; null when there is none."
           },
-          "interventionMode": {
-            "type": "string",
-            "enum": [
-              "TRANSPARENT",
-              "OPAQUE",
-              "SILENT_LOG"
-            ]
-          },
           "mcpProxyFailBehavior": {
             "type": "string",
             "enum": [
@@ -39852,6 +41010,14 @@
                 "off"
               ]
             }
+          },
+          "interventionMode": {
+            "type": "string",
+            "enum": [
+              "TRANSPARENT",
+              "OPAQUE",
+              "SILENT_LOG"
+            ]
           }
         },
         "required": [
@@ -40476,15 +41642,6 @@
                   "region": {
                     "type": "string"
                   },
-                  "accessKeyId": {
-                    "type": "string"
-                  },
-                  "secretAccessKey": {
-                    "type": "string"
-                  },
-                  "credentials": {
-                    "type": "string"
-                  },
                   "mode": {
                     "type": "string",
                     "enum": [
@@ -40495,7 +41652,8 @@
                 },
                 "required": [
                   "provider"
-                ]
+                ],
+                "description": "Without its credentials, which no daemon reads: never sent here."
               },
               "mcpProxyMode": {
                 "type": "string",
@@ -40946,6 +42104,75 @@
           "sops",
           "proxyUrl",
           "settings"
+        ]
+      },
+      "SyncReportResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "harnesses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "harnessType": {
+                  "type": "string"
+                },
+                "drifted": {
+                  "type": "boolean",
+                  "description": "Its rules file has an unresolved drift record."
+                },
+                "lastSynced": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "harnessType",
+                "drifted"
+              ]
+            }
+          },
+          "activeProcesses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "connectedSince": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSyncAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "components": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The heartbeat's component report, as the daemon sent it."
+          }
+        },
+        "required": [
+          "ok",
+          "harnesses",
+          "activeProcesses",
+          "connectedSince",
+          "lastSyncAt",
+          "components"
         ]
       },
       "SyncStatusAckResponse": {

@@ -275,7 +275,7 @@ Get the current authenticated user's info.
 
 **Response:** `200 OK` with member object
 
-**Error codes:** `404` member not found
+**Error codes:** `404` member not found (a valid token for a member removed since it was issued), as `{ "error": "Member not found", "code": "E_NOT_FOUND", "requestId": ... }`
 
 ---
 

@@ -1,0 +1,12 @@
+{
+  // Type-checks the panels' item types against the control plane's response
+  // schemas (test/response-types/). The build config covers src/ only, so this
+  // pass is what compiles the assertions. Run by the `typecheck` script.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["test/response-types"],
+  "exclude": ["node_modules", "dist"]
+}

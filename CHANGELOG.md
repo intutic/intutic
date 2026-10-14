@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Response schemas for the routes the machine clients call.** Nine more
+  control-plane operations publish their response body in `openapi.json`,
+  171 in all: `GET /api/v1/policy/resolve`, `GET /api/v1/auth/key-context`,
+  `GET /api/v1/decisions/:entryId`, `POST /api/v1/judge/chunk`,
+  `GET /api/v1/sync/report`, `GET /api/v1/workspace/egress-policy`,
+  `GET /api/v1/workspace/decisions-digest`,
+  `POST /api/v1/mcp/servers/observe` and
+  `POST /api/v1/integrations/agentcore/gateway-check`. The clients that read
+  them are pinned to the schemas: the MCP proxy and the sync daemon read
+  their answers as `WireFields<…>` (new in `@intutic/shared-types`: every
+  field the schema declares, each `unknown` until checked), `@intutic/gate`,
+  the AgentCore interceptor and the VS Code extension check their own types
+  against the schemas at compile time, and the LLM proxy's tests read
+  captured key-context and workspace-policy answers
+  (`packages/shared-types/fixtures/responses/`) that are held to their
+  schemas.
+
+### Security
+
+- **The sync daemon's config no longer carries the workspace's storage
+  credentials.** `POST /api/v1/sync/config`, and the config the sync
+  WebSocket pushes, went to every member's machine with the workspace's own
+  trace bucket settings in full: the access key id and the stored (encrypted)
+  secret access key or service-account credentials, which
+  `GET /api/v1/workspace/settings` shows as `__redacted__`. The daemon reads
+  none of them, so they are no longer sent; the rest of `byocStorage`
+  (provider, bucket, prefix, project, region, mode) is unchanged.
+- **The VS Code extension's panels escape what they render.** The SOP,
+  incident and WASM rule panels put titles, names and other API values into
+  the webview's HTML as they were, so a SOP titled
+  `<img src=x onerror=…>` became markup. Every value is now escaped, badge
+  classes come from a fixed list, and each panel carries a strict
+  Content-Security-Policy (`default-src 'none'`, styles by nonce, no scripts).
+
+### Fixed
+
+- **`GET /api/v1/auth/me` answers 404 for a member that no longer exists.** A
+  valid token for a member removed since it was issued answered 500
+  `Internal server error`; it now answers 404 with
+  `{ "error": "Member not found", "code": "E_NOT_FOUND" }`.
+- **A guardrail write never answers success without the guardrail.** Create,
+  update and promote read the guardrail back after the write and answered
+  `{ "ok": true, "guardrail": null }` when the read found nothing, which a
+  client such as the Terraform provider stored as an empty resource. Such a
+  write now answers 500 `GUARDRAIL_READ_BACK_FAILED` with the `guardrailId`,
+  and `guardrail` is no longer nullable in the response schemas or the SDK
+  types.
+- **`intutic sops pull` writes no `risk_tier:` for a SOP without a tier.** It
+  wrote `risk_tier: null`; the key is now left out, and a pull over a file
+  whose SOP lost its tier removes the line. `sops status` and `sops push`
+  read such a file as untiered and send no tier.
+- **Terraform: a SOP's null columns read as null.** `intutic_sop` decoded
+  `riskTier`, `complexityTier`, `versionCounter` and `contentHash` into plain
+  strings and integers, so a SOP written without tiers imported with
+  `risk_tier = ""`, and one without a version counter was updated with
+  `version_counter = 0`, which the API refuses. They now read as null, and an
+  update sends no counter when there is none.
+- **The VS Code incidents panel shows incidents.** It read `items`, while
+  `GET /api/v1/incidents` sends its rows under `data` (TOON-encoded from 20
+  rows, which the panel's request of 20 always got), and named fields the
+  route never sends. It now asks for 19 and shows each incident's type,
+  status, severity and date; the SOP panel shows the risk tier in place of a
+  score the route never sent.
+
+### Removed
+
+- **Workspace DLP patterns in the MCP proxy.** The proxy read `dlpPatterns`
+  from `GET /api/v1/sop/rules`, which never sent it, and from
+  `GET /api/v1/policy/resolve`, which always sent `[]`: no workspace setting
+  holds custom DLP patterns, so the field and the scanner path it fed carried
+  nothing. Both routes and the proxy drop it. Custom DLP patterns stay a
+  setting of the LLM proxy's own configuration (`dlp.patterns`).
+
 ## [2.5.1] - 2026-10-14
 
 ### Added

@@ -800,16 +800,28 @@ async fn parse_key_context(
     let body: serde_json::Value = resp.json().await.map_err(|e| {
         tracing::warn!(error = %e, "Control-plane key validation returned unparseable JSON");
     })?;
-    let Some(workspace_id) = body.get("workspaceId").and_then(|v| v.as_str()) else {
-        tracing::warn!("Control-plane key validation response had no workspaceId");
-        return Err(());
-    };
+    match key_record_from_context(&body, token) {
+        Some(record) => Ok(Some(record)),
+        None => {
+            tracing::warn!("Control-plane key validation response had no workspaceId");
+            Err(())
+        }
+    }
+}
+
+/// The key record a `/auth/key-context` body describes; `None` when it names
+/// no workspace.
+pub(crate) fn key_record_from_context(
+    body: &serde_json::Value,
+    token: &str,
+) -> Option<VirtualKeyRecord> {
+    let workspace_id = body.get("workspaceId").and_then(|v| v.as_str())?;
 
     // Spend is left at zero: this path establishes identity, and the caller
     // reads spend from the cache. `hardBudgets` carries every hard cap; for a
     // control plane older than that field, the daily cap the route states is
     // kept for when the cache has none.
-    Ok(Some(VirtualKeyRecord {
+    Some(VirtualKeyRecord {
         token: token.to_string(),
         key_name: None,
         team_id: Some(workspace_id.to_string()),
@@ -817,7 +829,7 @@ async fn parse_key_context(
             .get("memberId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        max_budget: key_context_daily_cap(&body),
+        max_budget: key_context_daily_cap(body),
         spend: 0.0,
         // The key's own allowlist (migration 181), same field name and same
         // shape as the cached entry; empty when the key set none.
@@ -839,7 +851,7 @@ async fn parse_key_context(
             .map(|s| s.to_string()),
         hard_budgets: crate::key_limits::parse_hard_budgets(body.get("hardBudgets")),
         rate_limit: crate::key_limits::parse_rate_limit(body.get("rateLimit")),
-    }))
+    })
 }
 
 /// POST /api/v1/policy/check on the control plane.

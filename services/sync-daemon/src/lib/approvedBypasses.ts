@@ -40,6 +40,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
+import type { ApprovedBypassListResponse, ApprovedBypassResponse, WireFields } from '@intutic/shared-types'
 import { writeFileAtomic } from './atomicWrite.js'
 
 const log = createLogger('sync-approved-bypasses')
@@ -104,11 +105,11 @@ export async function fetchApprovedBypasses(
     }
     const body = (await res.json()) as unknown
     if (typeof body !== 'object' || body === null) return null
-    const rec = body as Record<string, unknown>
+    const rec = body as WireFields<ApprovedBypassListResponse>
     const rows = Array.isArray(rec.bypasses) ? rec.bypasses : []
     return rows.filter((r): r is ApprovedBypassEntry => {
       if (typeof r !== 'object' || r === null) return false
-      const x = r as Record<string, unknown>
+      const x = r as WireFields<ApprovedBypassResponse>
       return (
         typeof x.workspaceId === 'string' &&
         typeof x.sopRuleId === 'string' &&

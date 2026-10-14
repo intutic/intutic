@@ -12,6 +12,13 @@
  */
 
 import { INCIDENT_TYPES, budgetWindow, describeMcpBudget, type McpBudgetPolicy } from '@intutic/shared-types'
+import type {
+  ApprovedBypassListResponse,
+  ApprovedBypassResponse,
+  DecisionDetailResponse,
+  KeyContextResponse,
+  WireFields,
+} from '@intutic/shared-types'
 import { z } from 'zod'
 import { budgetCounterKey } from './budget.js'
 
@@ -61,7 +68,7 @@ export async function governanceStatus(
             : 'Control plane unreachable',
     }
   }
-  const key = (res.data ?? {}) as { workspaceId?: unknown; role?: unknown }
+  const key = (res.data ?? {}) as WireFields<KeyContextResponse>
   return {
     connected: true,
     controlPlane: controlPlaneUrl,
@@ -136,7 +143,7 @@ export interface HoldStatus {
  * bypasses. An approval lets the identical retry through only while a bypass
  * exists for it, which needs the workspace's review-hold bypass setting on.
  */
-export function holdStatus(holdId: string, decision: { status?: unknown }, bypasses: unknown): HoldStatus {
+export function holdStatus(holdId: string, decision: WireFields<DecisionDetailResponse>, bypasses: unknown): HoldStatus {
   const status = typeof decision.status === 'string' ? decision.status : 'UNKNOWN'
   if (status === 'PENDING_REVIEW') {
     return {
@@ -152,9 +159,9 @@ export function holdStatus(holdId: string, decision: { status?: unknown }, bypas
     return { holdId, status, retry: 'do_not_retry', message: 'Rejected. Do not retry this call; continue without it or ask the user.' }
   }
   if (status === 'APPROVED') {
-    const list = (bypasses as { bypasses?: unknown } | null)?.bypasses
+    const list = (bypasses as WireFields<ApprovedBypassListResponse> | null)?.bypasses
     const bypass = Array.isArray(list)
-      ? (list as Array<Record<string, unknown>>).find(
+      ? (list as Array<WireFields<ApprovedBypassResponse>>).find(
           (b) => b.holdId === holdId && typeof b.expiresAt === 'string' && Date.parse(b.expiresAt) > Date.now(),
         )
       : undefined

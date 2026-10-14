@@ -31,6 +31,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
+import type { EgressPolicyResponse, WireFields } from '@intutic/shared-types'
 import { writeFileAtomic } from './atomicWrite.js'
 
 const log = createLogger('sync-egress-policy')
@@ -96,7 +97,7 @@ export async function fetchWorkspaceEgressPolicy(
     }
     const body = (await res.json()) as unknown
     if (typeof body !== 'object' || body === null) return null
-    const rec = body as Record<string, unknown>
+    const rec = body as WireFields<EgressPolicyResponse>
     const mode =
       rec.mode === 'off' || rec.mode === 'monitor' || rec.mode === 'enforce' ? rec.mode : null
     const allow = Array.isArray(rec.allow)
