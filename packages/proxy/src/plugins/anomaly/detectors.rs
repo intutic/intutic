@@ -1234,10 +1234,12 @@ impl AnomalyDetector for TaintCooccurrenceDetector {
                 "secrets()" => c == "secret" || c == "credential",
                 // An operator writing `pii()` means personal data, and does not
                 // care which internal bucket a pattern was filed under. PHI is
-                // PII, so `pii()` covers both; `phi()` exists for the narrower
-                // case where a rule is specifically about health information.
+                // PII, so `pii()` covers both. There is no `phi()`: the SOP
+                // parser, the guardrail IR and the control plane's replay all
+                // take only `secrets()` and `pii()`, so a narrower taint here
+                // could never be declared — and would disagree with the replay
+                // twin (`sopKeyReplay.ts`) if it ever were.
                 "pii()" => c == "pii" || c == "phi",
-                "phi()" => c == "phi",
                 _ => false,
             };
             if !ctx.dlp_findings.iter().any(|f| matches_taint(&f.category)) {
@@ -2631,6 +2633,29 @@ mod tests {
 
         // ...and pii() does not, because those are different declarations.
         ctx.forbid_with = vec![("pii()".into(), "action:http_post".into())];
+        assert!(TaintCooccurrenceDetector.detect(&ctx).is_none());
+    }
+
+    /// `pii()` covers a custom `phi` pattern; there is no separate `phi()`.
+    ///
+    /// The SOP parser accepts only `secrets()` and `pii()`, as do the guardrail
+    /// IR and the control plane's replay. A `phi()` arm here matched what no
+    /// rule could declare, and a taint the replay does not know would make the
+    /// two disagree on the same request.
+    #[test]
+    fn pii_covers_phi_and_phi_is_not_a_taint() {
+        let mut ctx = ctx_with_sequence(&["action:http_post"]);
+        ctx.dlp_findings = vec![crate::wasm::context::DlpFinding {
+            category: "phi".into(),
+            pattern_name: "mrn".into(),
+            action: "redact".into(),
+            offset: 0,
+            length: 12,
+        }];
+        ctx.forbid_with = vec![("pii()".into(), "action:http_post".into())];
+        assert!(TaintCooccurrenceDetector.detect(&ctx).is_some());
+
+        ctx.forbid_with = vec![("phi()".into(), "action:http_post".into())];
         assert!(TaintCooccurrenceDetector.detect(&ctx).is_none());
     }
 

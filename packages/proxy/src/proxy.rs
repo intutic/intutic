@@ -3480,153 +3480,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             estimate.confidence,
                         );
 
+                        // Framed for the route and the request's `stream`,
+                        // naming the request's model: this used to answer a
+                        // stream with a fixed `claude-3-5-sonnet`, and a
+                        // Responses client with a chat-completions body.
                         let is_streaming = body_json
                             .get("stream")
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
-                        if is_streaming {
-                            let (tx, rx) = tokio::sync::mpsc::channel::<
-                                Result<axum::body::Bytes, std::io::Error>,
-                            >(10);
-                            let provider_clone = provider.clone();
-
-                            tokio::spawn(async move {
-                                let chunk = match provider_clone {
-                                    Provider::Anthropic => {
-                                        let start_event = serde_json::json!({
-                                            "type": "message_start",
-                                            "message": {
-                                                "id": "msg_predict",
-                                                "type": "message",
-                                                "role": "assistant",
-                                                "content": [],
-                                                "model": "claude-3-5-sonnet",
-                                                "usage": { "input_tokens": 0, "output_tokens": 0 }
-                                            }
-                                        });
-                                        let block_start = serde_json::json!({
-                                            "type": "content_block_start",
-                                            "index": 0,
-                                            "content_block": { "type": "text", "text": "" }
-                                        });
-                                        let delta = serde_json::json!({
-                                            "type": "content_block_delta",
-                                            "index": 0,
-                                            "delta": { "type": "text_delta", "text": text }
-                                        });
-                                        let block_stop = serde_json::json!({
-                                            "type": "content_block_stop",
-                                            "index": 0
-                                        });
-                                        let msg_delta = serde_json::json!({
-                                            "type": "message_delta",
-                                            "delta": { "stop_reason": "end_turn", "stop_sequence": null },
-                                            "usage": { "output_tokens": 0 }
-                                        });
-
-                                        format!(
-                                            "event: message_start\ndata: {}\n\nevent: content_block_start\ndata: {}\n\nevent: content_block_delta\ndata: {}\n\nevent: content_block_stop\ndata: {}\n\nevent: message_delta\ndata: {}\n\nevent: message_stop\ndata: {{\"type\": \"message_stop\"}}\n\n",
-                                            start_event, block_start, delta, block_stop, msg_delta
-                                        )
-                                    }
-                                    _ => {
-                                        let delta_chunk = serde_json::json!({
-                                            "id": "chatcmpl-predict",
-                                            "object": "chat.completion.chunk",
-                                            "choices": [{
-                                                "index": 0,
-                                                "delta": { "content": text },
-                                                "finish_reason": serde_json::Value::Null
-                                            }]
-                                        });
-                                        format!("data: {}\n\ndata: [DONE]\n\n", delta_chunk)
-                                    }
-                                };
-
-                                let _ = tx.send(Ok(axum::body::Bytes::from(chunk))).await;
-                            });
-
-                            let mut resp_headers = axum::http::HeaderMap::new();
-                            resp_headers.insert(
-                                axum::http::HeaderName::from_static("content-type"),
-                                axum::http::HeaderValue::from_static("text/event-stream"),
-                            );
-
-                            let mut response = Response::builder().status(StatusCode::OK);
-                            if let Some(headers_mut) = response.headers_mut() {
-                                *headers_mut = resp_headers;
-                            }
-                            return response
-                                .body(Body::from_stream(ReceiverStream::new(rx)))
-                                .unwrap_or_else(|_| {
-                                    json_error(
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                        "predict_error",
-                                        "Failed to construct streaming response",
-                                    )
-                                });
-                        } else {
-                            let resp_json = match provider.wire_shape() {
-                                Provider::Anthropic => {
-                                    serde_json::json!({
-                                        "id": "msg_predict",
-                                        "type": "message",
-                                        "role": "assistant",
-                                        "content": [{ "type": "text", "text": text }],
-                                        "model": model,
-                                        "stop_reason": "end_turn",
-                                        "stop_sequence": null,
-                                        "usage": { "input_tokens": estimate.input_tokens, "output_tokens": 0 }
-                                    })
-                                }
-                                Provider::Gemini => {
-                                    serde_json::json!({
-                                        "candidates": [{
-                                            "content": {
-                                                "parts": [{ "text": text }],
-                                                "role": "model"
-                                            },
-                                            "finishReason": "STOP"
-                                        }],
-                                        "usageMetadata": {
-                                            "promptTokenCount": estimate.input_tokens,
-                                            "candidatesTokenCount": 0,
-                                            "totalTokenCount": estimate.input_tokens
-                                        }
-                                    })
-                                }
-                                _ => {
-                                    serde_json::json!({
-                                        "id": "chatcmpl-predict",
-                                        "object": "chat.completion",
-                                        "choices": [{
-                                            "index": 0,
-                                            "message": { "role": "assistant", "content": text },
-                                            "finish_reason": "stop"
-                                        }],
-                                        "usage": {
-                                            "prompt_tokens": estimate.input_tokens,
-                                            "completion_tokens": 0,
-                                            "total_tokens": estimate.input_tokens
-                                        }
-                                    })
-                                }
-                            };
-
-                            return Response::builder()
-                                .status(StatusCode::OK)
-                                .header("content-type", "application/json")
-                                .body(Body::from(
-                                    serde_json::to_vec(&resp_json).unwrap_or_default(),
-                                ))
-                                .unwrap_or_else(|_| {
-                                    json_error(
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                        "predict_error",
-                                        "Failed to construct response",
-                                    )
-                                });
-                        }
+                        return synthetic_answer(
+                            wire_for(&protocol, &provider),
+                            &model,
+                            &text,
+                            is_streaming,
+                        );
                     }
                 }
             }
@@ -3852,49 +3719,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
 
             if answer_locally {
-                let wire = wire_for(&protocol, &provider);
                 let is_streaming = body_json
                     .get("stream")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-
-                if is_streaming {
-                    let (tx, rx) =
-                        tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(10);
-                    let sse = crate::commands::streaming_body(wire, &model, &card);
-                    tokio::spawn(async move {
-                        let _ = tx.send(Ok(axum::body::Bytes::from(sse))).await;
-                    });
-                    let mut response = Response::builder().status(StatusCode::OK);
-                    if let Some(h) = response.headers_mut() {
-                        h.insert(
-                            axum::http::HeaderName::from_static("content-type"),
-                            axum::http::HeaderValue::from_static("text/event-stream"),
-                        );
-                    }
-                    return response
-                        .body(Body::from_stream(ReceiverStream::new(rx)))
-                        .unwrap_or_else(|_| {
-                            json_error(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "command_error",
-                                "Failed to construct streaming response",
-                            )
-                        });
-                } else {
-                    let body = crate::commands::non_streaming_body(wire, &model, &card);
-                    return Response::builder()
-                        .status(StatusCode::OK)
-                        .header("content-type", "application/json")
-                        .body(Body::from(serde_json::to_vec(&body).unwrap_or_default()))
-                        .unwrap_or_else(|_| {
-                            json_error(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "command_error",
-                                "Failed to construct response",
-                            )
-                        });
-                }
+                return synthetic_answer(
+                    wire_for(&protocol, &provider),
+                    &model,
+                    &card,
+                    is_streaming,
+                );
             }
         }
     }
@@ -3916,14 +3750,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // an LLM proxy credential. That endpoint rejects non-vk_ tokens too;
             // this is the second half of the check, so neither side alone is
             // load-bearing.
-            let cp = state
+            let cp_url = state
                 .config
                 .intutic_settings
                 .policy
                 .control_plane_url
-                .as_deref()
-                .zip(credential.virtual_key());
-            match cp {
+                .as_deref();
+            match cp_url.zip(credential.virtual_key()) {
                 Some((url, virtual_key)) => {
                     match validate_key_via_control_plane(&state.http_client, url, virtual_key).await
                     {
@@ -3976,8 +3809,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         }
                     }
                 }
-                // No control-plane URL configured, so there is nothing to ask and
-                // the cache is the only authority. Unchanged behaviour: reject.
+                // No control plane configured, but Valkey answered: `intutic
+                // start` runs one whenever Docker is up. Nothing writes its auth
+                // cache without a control plane, so every token misses here.
+                // One rule for "no control plane", whether or not Valkey is up:
+                // the request is handled exactly as on a standalone proxy
+                // (`Unmanaged` below). A provider key is the caller's own and
+                // passes through; a virtual key is never forwarded, and the
+                // provider key in the proxy's environment goes upstream.
+                None if cp_url.is_none() => None,
+                // A control plane is configured and the token is not a virtual
+                // key: a managed proxy admits only virtual keys. Unchanged.
                 None => {
                     tracing::warn!(token = %key_prefix, "Virtual key not found in cache");
                     return json_error(
@@ -5665,7 +5507,23 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     }
                 }
             }
-            _ => {}
+            // Workspace shadow enforcement: what the rule would have done is
+            // logged, and the request goes ahead.
+            crate::wasm::context::Verdict::Reask { policy_id, .. }
+            | crate::wasm::context::Verdict::Hold { policy_id, .. } => {
+                tracing::info!(
+                    workspace_id = %workspace_id,
+                    rule_id = policy_id.as_deref().unwrap_or("wasm"),
+                    "SHADOW: a WASM rule would have stopped this request"
+                );
+            }
+            // `Hijack` and `Enhance` never come from a custom rule: the
+            // registry refuses one as a rule that reached no verdict
+            // (`PluginRegistry::unenforceable`). Listed, not `_`, so a new
+            // verdict has to be decided here rather than allowed by default.
+            crate::wasm::context::Verdict::Bypass
+            | crate::wasm::context::Verdict::Hijack { .. }
+            | crate::wasm::context::Verdict::Enhance { .. } => {}
         }
     }
 
@@ -5776,14 +5634,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let messages = body_json.get("messages").cloned();
         if let Some(msgs) = &messages {
             let pre_processor = RequestPreProcessor::new(&control_plane_url);
-            if let Some(intercepted) = pre_processor
-                .process(
-                    &session_id,
-                    &workspace_id,
-                    msgs,
-                    &protocol,
-                    credential.virtual_key(),
-                )
+            if let Some(answer) = pre_processor
+                .process(&session_id, &workspace_id, msgs, credential.virtual_key())
                 .await
             {
                 tracing::info!(
@@ -5791,17 +5643,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     session_id = %session_id,
                     "Request intercepted by pre-processor"
                 );
-                return Response::builder()
-                    .status(StatusCode::OK)
-                    .header("content-type", "application/json")
-                    .body(Body::from(intercepted))
-                    .unwrap_or_else(|_| {
-                        json_error(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "preprocess_error",
-                            "Pre-processor failed",
-                        )
-                    });
+                let stream = body_json
+                    .get("stream")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                return synthetic_answer(wire_for(&protocol, &provider), &model, &answer, stream);
             }
         }
 
@@ -10299,6 +10145,42 @@ fn delta_shape(protocol: &crate::protocol::Protocol, provider: &Provider) -> Del
 /// `/v1/chat/completions` from `/v1/responses`, because `Provider` does not
 /// carry that distinction — so a synthesised body for a Codex CLI client came
 /// out as a `chat.completion` it cannot parse.
+/// An answer the proxy gives itself — a command's reply, the cost
+/// prediction — framed as the client asked: the route's SSE stream when the
+/// request said `"stream": true`, its JSON body otherwise. A JSON body on a
+/// stream the client parses as `text/event-stream` reads as nothing at all.
+/// `model` is the request's: the answer is not from a model of its own.
+fn synthetic_answer(
+    wire: crate::commands::WireProvider,
+    model: &str,
+    text: &str,
+    stream: bool,
+) -> Response {
+    let (content_type, body) = if stream {
+        (
+            "text/event-stream",
+            crate::commands::streaming_body(wire, model, text).into_bytes(),
+        )
+    } else {
+        (
+            "application/json",
+            serde_json::to_vec(&crate::commands::non_streaming_body(wire, model, text))
+                .unwrap_or_default(),
+        )
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", content_type)
+        .body(Body::from(body))
+        .unwrap_or_else(|_| {
+            json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "command_error",
+                "Failed to construct response",
+            )
+        })
+}
+
 fn wire_for(
     protocol: &crate::protocol::Protocol,
     provider: &Provider,

@@ -395,6 +395,11 @@ export { allocate, reason_ptr, reason_len } from "../../assembly/index";
 Keep the reason under 480 bytes, which is all the host reads. A reask (`3`)
 always carries the proxy's own message.
 
+There is no code for the [ENHANCE or HIJACK](/concepts/enforcement-actions)
+verdicts. A rule never receives the request body, so it cannot rewrite it, and
+the reason is a refusal message, not guidance the proxy injects. To steer an
+agent rather than stop it, return `3` (reask).
+
 ### 3. Compile to WebAssembly
 
 Compile using the AssemblyScript compiler with runtime exports enabled:

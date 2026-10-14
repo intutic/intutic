@@ -21,7 +21,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const VICTIM: &str = "ws_capture_victim";
 
-/// A managed control plane that has issued no key matching the request's
+/// A managed control plane's cache that holds no key matching the request's
 /// bearer: what Valkey answers for any provider key.
 struct NoSuchKey;
 
@@ -99,12 +99,21 @@ impl ControlPlaneCache for NoSuchKey {
     }
 }
 
+/// `control_plane_url` is what makes a proxy managed: with none configured, a
+/// provider key is the caller's own and passes through whatever the cache says.
 async fn serve(
     store: Arc<MemoryStore>,
     control_plane: Arc<dyn ControlPlaneCache>,
+    control_plane_url: Option<&str>,
 ) -> std::net::SocketAddr {
+    let yaml = match control_plane_url {
+        Some(url) => {
+            format!("model_list: []\nintutic_settings:\n  policy:\n    control_plane_url: {url}\n")
+        }
+        None => "model_list: []\nintutic_settings: {}\n".to_string(),
+    };
     let config: intutic_proxy::config::ProxyConfig =
-        serde_yaml::from_str("model_list: []\nintutic_settings: {}\n").expect("config parses");
+        serde_yaml::from_str(&yaml).expect("config parses");
     let state = intutic_proxy::proxy::AppState {
         config,
         wasm_registry: intutic_proxy::wasm::registry::PluginRegistry::new(None)
@@ -171,7 +180,14 @@ async fn only_an_admitted_request_has_its_token_captured() {
     let token = ["sk-ant-", "api03-", "capture-fixture"].concat();
 
     let managed_store = Arc::new(MemoryStore::new());
-    let managed = serve(Arc::clone(&managed_store), Arc::new(NoSuchKey)).await;
+    // Refused at authentication, before anything asks the control plane.
+    let cp = MockServer::start().await;
+    let managed = serve(
+        Arc::clone(&managed_store),
+        Arc::new(NoSuchKey),
+        Some(&cp.uri()),
+    )
+    .await;
     assert_eq!(
         send(managed, &token).await,
         reqwest::StatusCode::UNAUTHORIZED
@@ -186,6 +202,7 @@ async fn only_an_admitted_request_has_its_token_captured() {
     let standalone = serve(
         Arc::clone(&standalone_store),
         Arc::new(intutic_proxy::store::NullControlPlaneCache),
+        None,
     )
     .await;
     assert!(send(standalone, &token).await.is_success());

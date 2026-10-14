@@ -171,9 +171,10 @@ forbid_with: secrets(), action:http_post
 ```
 
 Refuses a request where a secret is present *and* the named token appears. The
-left side is `secrets()` or `pii()` — the two categories the DLP scanner reports.
+left side is `secrets()` or `pii()`, the only two taints.
 `secrets()` covers credentials as well as keys, so a database URL with a password
-in it counts, and `pii()` covers custom `phi` patterns as well as personal data.
+in it counts, and `pii()` covers custom `phi` patterns as well as personal data:
+there is no separate `phi()`. A rule naming one is ignored with a warning in the proxy log, and the rest of the SOP still loads.
 
 ::: warning This is co-occurrence, not flow
 The DLP scan reports that a secret is **present in the request**, with an offset
