@@ -406,7 +406,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Nothing used them, and they disagreed with the API (a 255-character label,
   365 days): the control plane validates a new SCIM token with its own schema
   (label 1–128 characters, required; 1–3650 days), which the OpenAPI document
-  describes.
+  describes. `ScimTokenInfo` goes too: no API response or client used its shape.
 
 ## [2.5.0] - 2026-10-13
 

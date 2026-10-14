@@ -418,7 +418,6 @@ export type {
   ScimUserResource,
   ScimListResponse,
   ScimPatchOp,
-  ScimTokenInfo,
   OffboardingStepResult,
   OffboardingResult,
 } from './identity.js'

@@ -151,13 +151,3 @@ export interface OffboardingResult {
   completedAt: string
 }
 
-
-// ── SCIM Token ──
-
-export interface ScimTokenInfo {
-  tokenId: string
-  workspaceId: string
-  label: string | null
-  expiresAt: string | null
-  createdAt: string
-}
