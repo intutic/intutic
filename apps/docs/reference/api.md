@@ -108,11 +108,11 @@ Authenticate with email and password.
 
 ### POST /api/v1/auth/refresh
 
-Refresh an access token using a refresh token.
+Refresh an access token using a refresh token, from the request body or from the `HttpOnly` refresh cookie a browser sign-in sets.
 
 **Auth:** None (public)
 
-**Request body:**
+**Request body** (API clients; omit it to use the cookie):
 
 ```json
 {
@@ -120,9 +120,11 @@ Refresh an access token using a refresh token.
 }
 ```
 
-**Response:** `200 OK` with new access token
+Refreshing from the cookie (`__Secure-intutic_refresh`, sent only to `/api/v1/auth/`) requires the `X-Intutic-CSRF` header, any value.
 
-**Error codes:** `400` validation, `401` expired or invalid token
+**Response:** `200 OK` with a new access token and new session cookies. The body also carries the new refresh token, except to a request that sent `X-Intutic-CSRF`, which gets it as the cookie only.
+
+**Error codes:** `400` validation, `401` expired, invalid or missing token, `403` cookie refresh without `X-Intutic-CSRF`
 
 ---
 
@@ -628,7 +630,7 @@ Every route the control plane serves: 413 routes, grouped by the source file tha
 | POST | `/api/v1/auth/magic-link/login` | None (one-time link token) | Sign in with a magic-link token |
 | POST | `/api/v1/auth/magic-link/request` | None | Email a one-time sign-in link |
 | GET | `/api/v1/auth/me` | Authenticated | Get current user info |
-| POST | `/api/v1/auth/refresh` | None (refresh token) | Refresh access token |
+| POST | `/api/v1/auth/refresh` | None (refresh token in the body, or the refresh cookie with X-Intutic-CSRF) | Refresh access token |
 | POST | `/api/v1/auth/resend-verification` | None | Send the verification email again (2 per minute per address) |
 | GET | `/api/v1/auth/session` | Authenticated |  |
 | POST | `/api/v1/auth/signup` | None | Self-serve signup with workspace auto-provisioning |

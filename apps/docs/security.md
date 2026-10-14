@@ -132,6 +132,20 @@ Intutic provides enterprise-grade identity and access management:
 
 The key encryption key is derived from `ENCRYPTION_KEY`, which you keep in your own secret store. Holding it in a cloud KMS (Google Cloud KMS, AWS KMS) is not available yet.
 
+**Secrets in blocked tool calls are not stored.** When a gate refuses a tool call, the control plane records the block — session, tool, verdict, reason, time — with a copy of the call's arguments in which every credential the DLP patterns detect is replaced by `[REDACTED <kind>]`, for example `[REDACTED AWS access key]`; a private key is removed header to footer. A DLP block therefore never stores the secret that caused it, and neither does any other block. Blocks recorded before this release had their arguments withheld whole (`{"withheld": "Tool arguments withheld: AWS access key detected"}`) by a one-off migration; the rest of each record is unchanged.
+
+---
+
+## Dashboard Sessions & Browser Security <Badge type="tip" text="Cloud" />
+
+**Sessions live in HttpOnly cookies.** Signing in sets two cookies, both `HttpOnly`, `Secure` and `SameSite=Strict`, so no script on the page can read either: the access token (`__Host-intutic_session`, 15 minutes by default) and the refresh token (`__Secure-intutic_refresh`, `REFRESH_TOKEN_EXPIRY_DAYS`, 30 days by default), which is sent only to `/api/v1/auth/` and nowhere else. The dashboard stores no token in `localStorage` or `sessionStorage`. Refreshing from the cookie requires the `X-Intutic-CSRF` request header, which a plain form cannot send and which only the dashboard's own origin may send cross-origin. Signing out revokes the member's refresh tokens, expires both cookies, and clears the profile and the trace and policy lists the dashboard cached for offline viewing.
+
+API clients are unchanged: the CLI and scripts still send a refresh token in the request body (`POST /api/v1/auth/refresh` with `{ "refreshToken": "..." }`) and receive one in the response. A request carrying `X-Intutic-CSRF` gets its refresh token as the cookie only. A browser that signed in before this release keeps its session: its next refresh sends the stored token once, moves the session onto the cookie, and deletes the stored copy.
+
+**Cross-origin access is an exact allow-list.** Only the dashboard's own origin (`APP_URL`) may call the API from a browser with credentials, plus any exact origins listed in `CORS_ALLOWED_ORIGINS`. Wildcard hosting domains are not allowed.
+
+**Content-Security-Policy.** The dashboard and these docs are served with a strict CSP: scripts only from their own origin (the docs also allow, by hash, the three inline scripts every page carries), no plugins, no framing (`frame-ancestors 'none'`), fonts self-hosted, and the dashboard connects only to its own origin and the API's. Both also send `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and a `Permissions-Policy` that turns off the camera, microphone, geolocation, payment and USB APIs.
+
 ---
 
 ## Compliance <Badge type="tip" text="Cloud" />

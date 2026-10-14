@@ -294,6 +294,10 @@ Change your account password from **Settings › General › Change Password**.
 - We recommend using a password manager
 - If SSO is enabled, you may not need a password at all
 
+## Dashboard Sessions
+
+The dashboard keeps your session in two `HttpOnly`, `Secure`, `SameSite=Strict` cookies — an access token and a refresh token — and stores no token where page script can read it. The refresh token is sent only to the sign-in endpoints, and refreshing from it needs the `X-Intutic-CSRF` header the dashboard sends. **Sign out** revokes your refresh tokens, expires both cookies and clears the profile and lists the dashboard cached in the browser. See [Dashboard Sessions & Browser Security](/security#dashboard-sessions-browser-security) for the cookies, CORS and the Content-Security-Policy.
+
 ---
 
 ## Related
