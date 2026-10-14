@@ -307,7 +307,7 @@ export class ControlPlaneClient {
   }
 
   /** POST /api/v1/orgs/:orgId/teams */
-  public async createTeam(orgId: string, name: string): Promise<Team> {
+  public async createTeam(orgId: string, name: string): Promise<Pick<Team, 'teamId' | 'orgId' | 'name'>> {
     return this.request('POST', `/api/v1/orgs/${encodeURIComponent(orgId)}/teams`, { name })
   }
 
@@ -321,7 +321,7 @@ export class ControlPlaneClient {
   }
 
   /** POST /api/v1/teams/:teamId/workspaces */
-  public async createWorkspace(teamId: string, name: string): Promise<Workspace> {
+  public async createWorkspace(teamId: string, name: string): Promise<Pick<Workspace, 'workspaceId' | 'name'> & { teamId: string; orgId: string }> {
     return this.request('POST', `/api/v1/teams/${encodeURIComponent(teamId)}/workspaces`, { name })
   }
 

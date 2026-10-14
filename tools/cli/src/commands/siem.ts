@@ -35,8 +35,9 @@ interface SiemDestination {
   sourceTables: string[]
   batchSize: number
   flushIntervalMs: number
-  lastHeartbeatAt: string | null
-  lastError: string | null
+  /** Absent on the create response, which reports no health yet. */
+  lastHeartbeatAt?: string | null
+  lastError?: string | null
   config?: Record<string, unknown>
   signingSecret?: string
 }

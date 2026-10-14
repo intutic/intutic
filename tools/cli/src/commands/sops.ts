@@ -131,7 +131,7 @@ interface PushContext {
 interface SopRecordResponse {
   sopId?: string
   title?: string
-  riskTier?: string
+  riskTier?: string | null
   version?: string
   markdownContent?: string
   lifecycleState?: string
@@ -222,7 +222,8 @@ async function createFile(
 ): Promise<PushOutcome> {
   let sopId: string | undefined
   try {
-    const res = await ctx.client.post<{ ok: boolean; sopId?: string }>('/api/v1/sops', {
+    // The route answers with the created SOP itself; it sends no `ok`.
+    const res = await ctx.client.post<{ sopId?: string }>('/api/v1/sops', {
       title,
       markdown_content: parsed.body,
       // Declared, not guessed: an unstated risk_tier gets the DB's own

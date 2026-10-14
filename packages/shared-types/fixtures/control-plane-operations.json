@@ -157,7 +157,6 @@
           "domain": "acme.com",
           "txtRecordName": "_intutic-verify.acme.com",
           "txtRecordValue": "intutic-verify=abc",
-          "expiresAt": "2026-10-10T00:00:00.000Z",
           "status": "verified",
           "verifiedAt": "2026-10-09T00:00:00.000Z"
         }
@@ -167,7 +166,6 @@
         "domain": "acme.com",
         "txtRecordName": "_intutic-verify.acme.com",
         "txtRecordValue": "intutic-verify=abc",
-        "expiresAt": "2026-10-10T00:00:00.000Z",
         "status": "verified",
         "verifiedAt": "2026-10-09T00:00:00.000Z"
       }
@@ -453,7 +451,6 @@
           "uptimeSeconds": 60,
           "activeWorkspaces": 1,
           "litellmReachable": true,
-          "lastError": null,
           "reportedAt": "2026-10-09T00:00:00.000Z",
           "appliedConfigVersion": 2,
           "desiredConfigVersion": 2
@@ -465,7 +462,6 @@
         "uptimeSeconds": 60,
         "activeWorkspaces": 1,
         "litellmReachable": true,
-        "lastError": null,
         "reportedAt": "2026-10-09T00:00:00.000Z",
         "appliedConfigVersion": 2,
         "desiredConfigVersion": 2
@@ -517,7 +513,7 @@
       "response": {
         "status": 200,
         "body": {
-          "ok": true
+          "revoked": true
         }
       },
       "returns": null
@@ -809,7 +805,9 @@
       "response": {
         "status": 200,
         "body": {
-          "ok": true
+          "provider": "anthropic",
+          "routingLive": true,
+          "provisioned": false
         }
       },
       "returns": null
@@ -1404,11 +1402,7 @@
               "batchSize": 100,
               "flushIntervalMs": 5000,
               "lastHeartbeatAt": null,
-              "lastError": null,
-              "config": {
-                "url": "https://splunk.example.com",
-                "token": "****"
-              }
+              "lastError": null
             }
           ],
           "sources": {
@@ -1435,11 +1429,7 @@
             "batchSize": 100,
             "flushIntervalMs": 5000,
             "lastHeartbeatAt": null,
-            "lastError": null,
-            "config": {
-              "url": "https://splunk.example.com",
-              "token": "****"
-            }
+            "lastError": null
           }
         ],
         "sources": {
@@ -1522,11 +1512,7 @@
               "batchSize": 100,
               "flushIntervalMs": 5000,
               "lastHeartbeatAt": null,
-              "lastError": null,
-              "config": {
-                "url": "https://splunk.example.com",
-                "token": "****"
-              }
+              "lastError": null
             }
           ],
           "sources": {
@@ -1590,8 +1576,6 @@
           "sourceTables": [],
           "batchSize": 100,
           "flushIntervalMs": 5000,
-          "lastHeartbeatAt": null,
-          "lastError": null,
           "config": {
             "url": "https://splunk.example.com",
             "token": "****"
@@ -1606,8 +1590,6 @@
         "sourceTables": [],
         "batchSize": 100,
         "flushIntervalMs": 5000,
-        "lastHeartbeatAt": null,
-        "lastError": null,
         "config": {
           "url": "https://splunk.example.com",
           "token": "****"
@@ -2342,8 +2324,8 @@
             "full": 5,
             "partial": 3,
             "states": {
-              "passing": 5,
-              "failing": 1
+              "failing": 1,
+              "evidenced": 5
             }
           }
         }
@@ -2359,8 +2341,8 @@
           "full": 5,
           "partial": 3,
           "states": {
-            "passing": 5,
-            "failing": 1
+            "failing": 1,
+            "evidenced": 5
           }
         }
       }
@@ -5287,9 +5269,9 @@
           "accepted": true,
           "gates": [
             {
-              "gate": "source_hash",
+              "gate": "compiles_and_links",
               "passed": true,
-              "detail": "matches"
+              "detail": "links against the proxy host imports"
             }
           ],
           "ruleId": "wr_1",
@@ -5300,9 +5282,9 @@
         "accepted": true,
         "gates": [
           {
-            "gate": "source_hash",
+            "gate": "compiles_and_links",
             "passed": true,
-            "detail": "matches"
+            "detail": "links against the proxy host imports"
           }
         ],
         "ruleId": "wr_1",
@@ -5443,13 +5425,27 @@
       "response": {
         "status": 201,
         "body": {
-          "ok": true,
-          "sopId": "sop_1"
+          "sopId": "sop_1",
+          "workspaceId": "ws_1",
+          "title": "Deploys",
+          "version": "1.0.0",
+          "markdownContent": "Pin images.",
+          "riskTier": "HIGH",
+          "complexityTier": "TIER_0",
+          "isActive": true,
+          "lifecycleState": "DRAFT"
         }
       },
       "returns": {
-        "ok": true,
-        "sopId": "sop_1"
+        "sopId": "sop_1",
+        "workspaceId": "ws_1",
+        "title": "Deploys",
+        "version": "1.0.0",
+        "markdownContent": "Pin images.",
+        "riskTier": "HIGH",
+        "complexityTier": "TIER_0",
+        "isActive": true,
+        "lifecycleState": "DRAFT"
       }
     },
     {

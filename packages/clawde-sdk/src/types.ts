@@ -294,11 +294,12 @@ export interface GatewayRotateResult {
 
 export interface GatewayStatus {
   status: 'online' | 'degraded' | 'unreachable' | 'pending'
-  proxyVersion: string | null
-  uptimeSeconds: number | null
-  activeWorkspaces: number | null
-  litellmReachable: boolean | null
-  lastError: string | null
+  /** The fields below are null when the gateway is unreachable, and absent when its last heartbeat did not report them. */
+  proxyVersion?: string | null
+  uptimeSeconds?: number | null
+  activeWorkspaces?: number | null
+  litellmReachable?: boolean | null
+  lastError?: string | null
   reportedAt: string | null
   /** The config version the gateway reported running in its last heartbeat; null when unreachable or not reported. */
   appliedConfigVersion: number | null
@@ -455,8 +456,10 @@ export interface SiemDestination {
   sourceTables: string[]
   batchSize: number
   flushIntervalMs: number
-  lastHeartbeatAt: string | null
-  lastError: string | null
+  /** Absent on the create response, which reports no health yet. */
+  lastHeartbeatAt?: string | null
+  /** Absent on the create response, which reports no health yet. */
+  lastError?: string | null
   /** The adapter settings, with credentials masked. */
   config?: Record<string, unknown>
   /** A webhook destination's signing secret, only in the response that made it. */
@@ -468,8 +471,11 @@ export interface SiemSources {
   defaults: string[]
 }
 
+/** A destination as the list answers it: no adapter settings, and no signing secret. */
+export type SiemDestinationSummary = Omit<SiemDestination, 'config' | 'signingSecret'>
+
 export interface SiemDestinationList {
-  items: SiemDestination[]
+  items: SiemDestinationSummary[]
   sources: SiemSources
 }
 
@@ -983,12 +989,16 @@ export interface GuardrailReadiness {
   ready: boolean
   reasons: string[]
   neverFired: boolean
-  evaluations: number
-  wouldAct: number
+  /** Null when the evidence counters could not be read (the guardrail is then not ready). */
+  evaluations: number | null
+  /** Null when the evidence counters could not be read. */
+  wouldAct: number | null
   wouldActRate: number | null
-  adjudicated: number
+  /** Null when the evidence counters could not be read. */
+  adjudicated: number | null
   adjudicatedRequired: number
-  falsePositives: number
+  /** Null when the evidence counters could not be read. */
+  falsePositives: number | null
   falsePositiveRate: number | null
   thresholds: {
     minShadowEvaluations: number
@@ -1000,7 +1010,8 @@ export interface GuardrailReadiness {
 
 export interface GuardrailTransitionResult {
   ok: boolean
-  guardrail: GuardrailDetail
+  /** The guardrail as the transition left it. A promotion reads it back after the write: null only if it is gone by then. */
+  guardrail: GuardrailDetail | null
   readiness?: GuardrailReadiness
 }
 
@@ -1025,7 +1036,8 @@ export interface AuthoredGuardrailUpdate {
 
 export interface AuthoredGuardrailWriteResult {
   ok: true
-  guardrail: GuardrailDetail
+  /** The guardrail read back after the write; null only if it is gone by then. */
+  guardrail: GuardrailDetail | null
   /** The IR changed: a new version, PROPOSED with no evidence, replaced the old one, which is now RETIRED. */
   forked: boolean
   supersedes: string | null
@@ -1413,8 +1425,6 @@ export interface BundleUploadResult {
   gates?: Array<{ gate: string; passed: boolean; detail: string }>
   ruleId?: string
   mode?: string
-  error?: string
-  detail?: string
 }
 
 export interface WasmReplayOptions {
@@ -1445,7 +1455,8 @@ export interface SopSummary {
 export interface SopDetail {
   sopId: string
   title: string
-  riskTier: string
+  /** Null for a SOP stored without one. */
+  riskTier: string | null
   version: string
   markdownContent: string
   [key: string]: unknown
@@ -1460,9 +1471,17 @@ export interface SopInput {
   version?: string
 }
 
+/** The created SOP: `POST /api/v1/sops` answers with the SOP itself (it sends no `ok`). */
 export interface SopCreateResult {
-  ok: boolean
-  sopId?: string
+  sopId: string
+  workspaceId: string
+  title: string
+  version: string
+  markdownContent: string
+  riskTier: string
+  complexityTier: string
+  isActive: boolean
+  lifecycleState: string
 }
 
 export interface OrgSopInput {

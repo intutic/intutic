@@ -123,13 +123,13 @@ export async function runLogin(opts: { apiKey?: string; dev?: boolean; controlPl
       const result = await client.login(email, password)
       await saveCredentials({
         apiKey: result.accessToken,
-        workspaceId: result.workspaceId,
+        workspaceId: result.member.workspaceId,
         controlPlaneUrl,
-        email: result.email,
+        email: result.member.email,
         storedAt: newIso(),
       })
-      log.success(`Authenticated as ${result.email}`)
-      log.field('Workspace', result.workspaceId)
+      log.success(`Authenticated as ${result.member.email}`)
+      log.field('Workspace', result.member.workspaceId)
     } catch (err) {
       log.error(`Login failed: ${err instanceof Error ? err.message : String(err)}`)
       process.exit(1)

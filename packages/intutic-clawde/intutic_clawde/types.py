@@ -33,8 +33,14 @@ class BudgetCheckResult(TypedDict):
     allowed: bool
     remaining_usd: float
 
-class GatewayStatus(TypedDict):
-    """``GET /api/v1/gateways/:id/status``; the twin of the TypeScript SDK's ``GatewayStatus``."""
+class GatewayStatus(TypedDict, total=False):
+    """``GET /api/v1/gateways/:id/status``; the twin of the TypeScript SDK's ``GatewayStatus``.
+
+    ``status``, ``reportedAt``, ``appliedConfigVersion`` and
+    ``desiredConfigVersion`` are always sent. The other keys are None when the
+    gateway is unreachable, and absent when its last heartbeat did not report
+    them.
+    """
     status: Literal["online", "degraded", "unreachable", "pending"]
     proxyVersion: Optional[str]
     uptimeSeconds: Optional[int]
@@ -325,7 +331,8 @@ class PolicySourceSyncResult(TypedDict):
 
 class GuardrailTransitionResult(TypedDict, total=False):
     ok: bool
-    guardrail: Dict[str, Any]
+    #: The guardrail as the transition left it. A promotion reads it back after the write: None only if it is gone by then.
+    guardrail: Optional[Dict[str, Any]]
     readiness: Dict[str, Any]
 
 
@@ -340,7 +347,8 @@ class AuthoredGuardrailInput(TypedDict, total=False):
 
 class AuthoredGuardrailWriteResult(TypedDict):
     ok: bool
-    guardrail: Dict[str, Any]
+    #: The guardrail read back after the write; None only if it is gone by then.
+    guardrail: Optional[Dict[str, Any]]
     #: The IR changed: a new version, PROPOSED with no evidence, replaced the old one, which is now RETIRED.
     forked: bool
     supersedes: Optional[str]
@@ -489,8 +497,6 @@ class BundleUploadResult(TypedDict, total=False):
     gates: List[Dict[str, Any]]
     ruleId: str
     mode: str
-    error: str
-    detail: str
 
 
 class WasmReplayResult(TypedDict):
@@ -514,9 +520,18 @@ class SopInput(TypedDict, total=False):
     version: str
 
 
-class SopCreateResult(TypedDict, total=False):
-    ok: bool
+class SopCreateResult(TypedDict):
+    """The created SOP: ``POST /api/v1/sops`` answers with the SOP itself (no ``ok``)."""
+
     sopId: str
+    workspaceId: str
+    title: str
+    version: str
+    markdownContent: str
+    riskTier: str
+    complexityTier: str
+    isActive: bool
+    lifecycleState: str
 
 
 class AttenuationResult(TypedDict):

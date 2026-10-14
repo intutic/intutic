@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Response schemas in the OpenAPI document.** 162 control-plane operations
+  now publish their response body in `openapi.json`
+  (`x-intutic-response-schema: zod`): every one the SDKs (`@intutic/clawde`,
+  `intutic-clawde`, `@intutic/gate`), the CLI and the Terraform provider call,
+  apart from the evidence download, which answers with a file. The schemas live in
+  `@intutic/shared-types` (`src/responses/`, exported as zod schemas with
+  their inferred types), and each route declares the one it answers with, so
+  the document is generated from the code, not written beside it. CI holds
+  them true: the compiler checks each handler's body against its schema, a
+  test makes a real request to every declared route and fails on a field the
+  schema lacks, does not list, or types differently, and the SDK operations
+  fixture's mock bodies are checked against the same schemas. The TypeScript
+  SDK's response types are pinned to the schemas at compile time, and the
+  Python SDK's TypedDicts and the Terraform provider's response structs by a
+  test, so none can name a field the control plane does not send.
+
 - **The LLM proxy enforces hook-rule policy guardrails.** A hook rule now
   reaches the proxy as a `hook_rule:` line in the SOP the workspace policy
   serves (and the file `intutic guardrails pull` writes). The response gate
@@ -262,6 +278,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replace takes the address whose `primary` is `"True"`. Members an Entra
   sync should have deprovisioned before this release are still active and
   need deprovisioning again.
+- **Client response types that disagreed with the control plane**, found by
+  the response schemas (the route is right in each case):
+  - `intutic login` with a password read the workspace and email from the top
+    of the login answer, which nests them under `member`, so it saved neither
+    and printed "Authenticated as undefined".
+  - `@intutic/clawde` and `intutic-clawde`: `SopCreateResult` is the created
+    SOP the route returns (it never sent `ok`); `BundleUploadResult` drops
+    `error` and `detail`, which only a failed upload carries (and a failed
+    call raises); `SiemDestinationList.items` are `SiemDestinationSummary`
+    rows, which carry no `config` or `signingSecret`; a SIEM destination's
+    `lastHeartbeatAt` and `lastError` are optional (the create answer has
+    neither); `GatewayStatus`'s heartbeat fields are optional (a live gateway
+    omits what it did not report); a guardrail write or transition's
+    `guardrail` and a readiness's counters may be `null`; `SopDetail.riskTier`
+    may be `null`; `createTeam` and `createWorkspace` return only the fields
+    the routes send.
+  - The CLI: `gateway status` printed "undefined" for heartbeat fields a
+    gateway did not report; `guardrails sources add` read the new source's id
+    from a wrapper the route does not send; SIEM destination and SOP record
+    types follow the routes.
+  - The VS Code extension's SOP browser showed "undefined" for every SOP: it
+    read `name`, and the route sends `title`.
 - **A refusal now wins over an earlier flag-only rule.** `@intutic/gate`,
   `intutic-clawde` and the MCP proxy took the first SOP rule matching a call,
   so a `warn` rule (a shadow guardrail, or the high-risk reminder) listed

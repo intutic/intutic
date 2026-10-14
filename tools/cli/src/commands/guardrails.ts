@@ -88,13 +88,12 @@ const enc = encodeURIComponent
 
 // ─── sources ────────────────────────────────────────────────────────
 
+/** A row of GET /api/v1/connectors, and the POST's answer (routes/connectors.ts). */
 interface ConnectorRow {
-  connector_id?: string
-  connectorId?: string
+  connector_id: string
   provider: string
   name: string
-  last_synced_at?: string | null
-  lastSyncedAt?: string | null
+  last_synced_at: string | null
   /** The scheduled sync's last failed attempt, cleared by the next success. */
   last_sync_error?: string | null
   config?: Record<string, unknown>
@@ -120,8 +119,8 @@ export async function runGuardrailsSourcesList(opts: CommonOpts): Promise<void> 
     return
   }
   for (const c of items) {
-    const id = c.connector_id ?? c.connectorId ?? '?'
-    const synced = c.last_synced_at ?? c.lastSyncedAt ?? null
+    const id = c.connector_id
+    const synced = c.last_synced_at
     const cfg = c.config ?? {}
     log.field(c.name, `${id} — ${c.provider}${cfg.auto_sync === true ? ', auto-sync' : ''}${synced ? `, last synced ${synced}` : ', never synced'}`)
     if (c.last_sync_error) log.warn(`  ${c.name}: last sync attempt failed: ${c.last_sync_error}`)
@@ -171,13 +170,13 @@ export async function runGuardrailsSourcesAdd(
   }
   const client = await getClient(opts.dev)
   try {
-    const res = await client.post<{ connector?: ConnectorRow; connectorId?: string; connector_id?: string }>('/api/v1/connectors', {
+    const res = await client.post<ConnectorRow>('/api/v1/connectors', {
       provider,
       name: opts.name,
       token: credential,
       config,
     })
-    const id = res.connector?.connector_id ?? res.connector?.connectorId ?? res.connectorId ?? res.connector_id ?? '(see dashboard)'
+    const id = res.connector_id
     if (opts.json) {
       emitJson(res)
       return

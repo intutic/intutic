@@ -74,11 +74,12 @@ interface GatewayRotateResponse {
 
 interface GatewayStatusResponse {
   status: 'online' | 'degraded' | 'unreachable' | 'pending'
-  proxyVersion: string | null
-  uptimeSeconds: number | null
-  activeWorkspaces: number | null
-  litellmReachable: boolean | null
-  lastError: string | null
+  /** The fields below are null when the gateway is unreachable, and absent when its last heartbeat did not report them. */
+  proxyVersion?: string | null
+  uptimeSeconds?: number | null
+  activeWorkspaces?: number | null
+  litellmReachable?: boolean | null
+  lastError?: string | null
   reportedAt: string | null
   /** The config version the proxy reported running; null when unreachable or not reported. */
   appliedConfigVersion: number | null
@@ -214,11 +215,11 @@ export async function runGatewayStatus(gatewayId: string, opts: GatewayCliOpts):
     log.header('Intutic — Gateway Status')
     log.field('Status', colorStatus(res.status))
     log.field('Proxy version', res.proxyVersion ?? '—')
-    log.field('Uptime (s)', res.uptimeSeconds !== null ? String(res.uptimeSeconds) : '—')
-    log.field('Active workspaces', res.activeWorkspaces !== null ? String(res.activeWorkspaces) : '—')
+    log.field('Uptime (s)', typeof res.uptimeSeconds === 'number' ? String(res.uptimeSeconds) : '—')
+    log.field('Active workspaces', typeof res.activeWorkspaces === 'number' ? String(res.activeWorkspaces) : '—')
     log.field(
       'LiteLLM reachable',
-      res.litellmReachable === null ? '— (not reported by this proxy version)' : String(res.litellmReachable),
+      typeof res.litellmReachable === 'boolean' ? String(res.litellmReachable) : '— (not reported by this proxy version)',
     )
     log.field('Last error', res.lastError ?? '—')
     log.field('Reported at', res.reportedAt ?? '— (no heartbeat received within the TTL window)')
