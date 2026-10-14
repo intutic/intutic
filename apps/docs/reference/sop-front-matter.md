@@ -18,7 +18,7 @@ ignore it.
 | `deny_tools:` | `Bash, WebFetch` | Blocks the tool outright (403). |
 | `allow_harnesses:` | `claude-code, cursor` | Restricts which harnesses a role may use. |
 | `plan_steps:` | `Read, Edit, Bash, action:run_tests` | Work drifting outside the declared steps is steered. |
-| `scope_paths:` | `src, docs` | File access outside these paths is steered. |
+| `scope_paths:` | `src, docs` | A file write outside these paths is steered; reads are not checked. |
 | `review_before:` | `action:deploy` | Holds the run for human approval — at every hook gate before the call runs, and at the proxy after it. |
 | `requires_before:` | `A -> B` | B is refused unless A appeared earlier. |
 | `forbid_after:` | `A -> B` | B is refused if A appeared earlier. |
@@ -170,7 +170,7 @@ forbid_with: secrets(), action:http_post
 Refuses a request where a secret is present *and* the named token appears. The
 left side is `secrets()` or `pii()` — the two categories the DLP scanner reports.
 `secrets()` covers credentials as well as keys, so a database URL with a password
-in it counts.
+in it counts, and `pii()` covers custom `phi` patterns as well as personal data.
 
 ::: warning This is co-occurrence, not flow
 The DLP scan reports that a secret is **present in the request**, with an offset
