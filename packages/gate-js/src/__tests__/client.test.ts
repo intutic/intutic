@@ -12,7 +12,7 @@ interface ResponseVector {
   name: string
   response: { status: number; body: unknown } | null
   failClosed: boolean
-  expect: { allowed: boolean; reached: boolean; code?: string; reasonContains?: string }
+  expect: { allowed: boolean; reached: boolean; code?: string; reasonContains?: string; decisionId?: string | null }
 }
 
 // Shared with intutic-clawde's GateClient, which runs the same vectors.
@@ -105,6 +105,7 @@ describe('GateClient.hookGate', () => {
       expect({ allowed: resp.allowed, reached: resp.reached }).toEqual({ allowed: v.expect.allowed, reached: v.expect.reached })
       expect(resp.code).toBe(v.expect.code)
       if (v.expect.reasonContains) expect(resp.reason).toContain(v.expect.reasonContains)
+      if (v.expect.decisionId !== undefined) expect(resp.decisionId ?? null).toBe(v.expect.decisionId)
     })
   })
 
@@ -130,6 +131,15 @@ describe('GateClient.hookGate', () => {
     const client = new GateClient({ baseUrl, apiKey: 'k', workspaceId: 'ws_1', sessionId: 's_1', harness: 'mastra' })
     await client.emit('tool_allowed', 'shell')
     expect((lastBody!['events'] as Array<Record<string, unknown>>)[0]).toMatchObject({ harnessType: 'mastra', gateSource: 'sdk' })
+  })
+
+  it('emit carries the hook gate\'s decision id, so the control plane exports the decision once', async () => {
+    respond = () => ({ status: 200, body: { ok: true } })
+    const client = new GateClient({ baseUrl, apiKey: 'k', workspaceId: 'ws_1', sessionId: 's_1' })
+    await client.emit('tool_blocked', 'shell', 'no shell [sop.r1]', {}, undefined, undefined, 'hgd_1')
+    expect((lastBody!['events'] as Array<Record<string, unknown>>)[0]).toMatchObject({ gateDecisionId: 'hgd_1' })
+    await client.emit('tool_allowed', 'shell')
+    expect((lastBody!['events'] as Array<Record<string, unknown>>)[0]).not.toHaveProperty('gateDecisionId')
   })
 
   it('emit rejects an event name outside the documented schema', async () => {

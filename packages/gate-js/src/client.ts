@@ -5,7 +5,7 @@
  *
  * Endpoints used:
  *
- *   POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?, degraded?}
+ *   POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?, degraded?, decisionId?}
  *   POST /api/v1/hook-events     batched telemetry       -> creates governance_incidents rows
  *   POST /api/v1/decisions       record a hold           -> joins the review queue (hold.ts)
  *   GET  /api/v1/decisions/approved-bypasses             -> approvals that let a held call through
@@ -72,6 +72,14 @@ export interface GateResponse {
   code?: string | undefined
   /** False when the hook gate gave no verdict and `failClosed` decided it. */
   reached: boolean
+  /**
+   * The hook gate's id for this decision, when this answer is its own verdict:
+   * every verdict it gives names one, and a `GOVERNANCE_UNAVAILABLE` refusal
+   * keeps it only while `failClosed` refuses too. The gate reports the call
+   * with it (`gateDecisionId`), so the control plane exports the decision to
+   * SIEM once and files its incident once.
+   */
+  decisionId?: string | undefined
 }
 
 /** The hook gate's code for a call whose checks could not run. */
@@ -248,13 +256,13 @@ export class GateClient {
         }
       }
       if (exc instanceof HttpStatusError && exc.body.code === GOVERNANCE_UNAVAILABLE) {
-        return this.noVerdict(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`, GOVERNANCE_UNAVAILABLE)
+        return this.noVerdict(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`, GOVERNANCE_UNAVAILABLE, exc.body.decisionId)
       }
       const name = exc instanceof Error ? exc.constructor.name : 'Error'
       return this.noVerdict(`unreachable (${name})`)
     }
     if (d.allowed === false && d.code === GOVERNANCE_UNAVAILABLE) {
-      return this.noVerdict(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`, GOVERNANCE_UNAVAILABLE)
+      return this.noVerdict(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`, GOVERNANCE_UNAVAILABLE, d.decisionId)
     }
     if (typeof d.allowed !== 'boolean') return this.noVerdict('answered without a verdict')
     return {
@@ -263,13 +271,22 @@ export class GateClient {
       incidentId: typeof d.incidentId === 'string' ? d.incidentId : undefined,
       code: typeof d.code === 'string' ? d.code : undefined,
       reached: true,
+      decisionId: typeof d.decisionId === 'string' ? d.decisionId : undefined,
     }
   }
 
-  /** The answer when the hook gate gave no verdict: `failClosed` decides. */
-  private noVerdict(what: string, code?: string): GateResponse {
+  /**
+   * The answer when the hook gate gave no verdict: `failClosed` decides. A
+   * `GOVERNANCE_UNAVAILABLE` refusal's `decisionId` is kept when failing
+   * closed, which refuses as the hook gate did, and dropped when failing open:
+   * the call then runs, and its report must not stand for the refusal.
+   */
+  private noVerdict(what: string, code?: string, decisionId?: unknown): GateResponse {
     return this.failClosed
-      ? { allowed: false, reason: `hook-gate ${what} — failing closed (failClosed=true)`, code, reached: false }
+      ? {
+          allowed: false, reason: `hook-gate ${what} — failing closed (failClosed=true)`, code, reached: false,
+          decisionId: typeof decisionId === 'string' ? decisionId : undefined,
+        }
       : { allowed: true, reason: `hook-gate ${what} — failing open (failClosed=false)`, code, reached: false }
   }
 
@@ -277,7 +294,10 @@ export class GateClient {
    * Fire-and-forget telemetry. Never throws.
    *
    * A `tool_blocked` event creates a `governance_incidents` row whose
-   * description embeds the reason verbatim.
+   * description embeds the reason verbatim. `gateDecisionId` is the hook
+   * gate's `decisionId` for the call this event reports: the control plane
+   * then files the decision's incident once and does not export it to SIEM a
+   * second time.
    */
   async emit(
     event: string,
@@ -286,6 +306,7 @@ export class GateClient {
     toolInput?: unknown,
     incidentId?: string,
     filePath?: string,
+    gateDecisionId?: string,
   ): Promise<boolean> {
     if (!VALID_EVENTS.has(event)) return false
     const ev: Record<string, unknown> = {
@@ -305,6 +326,7 @@ export class GateClient {
     }
     if (toolInput !== undefined) ev.toolInput = toolInput
     if (incidentId) ev.incidentId = incidentId
+    if (gateDecisionId) ev.gateDecisionId = gateDecisionId
     if (filePath) ev.filePath = filePath.slice(0, 512)
     try {
       await this.post('/api/v1/hook-events', { events: [ev] }, EVENT_TIMEOUT_MS)

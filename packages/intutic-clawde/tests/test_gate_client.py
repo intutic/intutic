@@ -90,6 +90,8 @@ class TestHookGate:
         assert r.code == want.get("code")
         if "reasonContains" in want:
             assert want["reasonContains"] in r.reason
+        if "decisionId" in want:
+            assert r.decision_id == want["decisionId"]
 
     def test_harness_defaults_to_langgraph(self):
         c, t = make_client((200, {"allowed": True}))
@@ -110,6 +112,14 @@ class TestEmit:
         assert c.emit("tool_allowed", "shell") is True
         assert t.calls[0]["body"]["events"][0]["gateSource"] == "sdk"
         assert t.calls[0]["body"]["events"][0]["harnessType"] == "langgraph"
+
+    def test_carries_the_hook_gates_decision_id(self):
+        # The control plane then exports the decision to SIEM once.
+        c, t = make_client((200, {}), (200, {}))
+        c.emit("tool_blocked", "shell", "no shell [sop.r1]", {}, gate_decision_id="hgd_1")
+        c.emit("tool_allowed", "shell")
+        assert t.calls[0]["body"]["events"][0]["gateDecisionId"] == "hgd_1"
+        assert "gateDecisionId" not in t.calls[1]["body"]["events"][0]
 
     def test_never_raises(self):
         c, _ = make_client(ConnectionError("down"))

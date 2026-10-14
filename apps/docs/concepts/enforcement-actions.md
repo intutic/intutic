@@ -39,7 +39,7 @@ Tool call arrives
   no hit at any stage ──▶ allowed
 ```
 
-1. **DLP Scanner** — credential patterns matched against the serialised tool arguments, and destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`) matched against each argument string as the tool receives it, with the SQL keywords split by any whitespace, a block or `--` comment, or an escaped `\n`. The SQL patterns are the ones the MCP governance proxy uses. A hit blocks the call and opens an incident.
+1. **DLP Scanner** — credential patterns matched against the serialised tool arguments, and destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`) matched against each argument string as the tool receives it, with the SQL keywords split by any whitespace, a block or `--` comment, or an escaped `\n`. The SQL patterns are the ones the MCP governance proxy uses. A hit blocks the call and opens an incident, which the response names as `incidentId`.
 2. **BLOCK: SOP match** — `VALIDATED` SOPs whose title begins `BLOCK:` are compiled to a pattern and tested against the tool name, and, in the `BLOCK:<tool> WHERE <args>:<reason>` form, against the serialised arguments too. The gate evaluates only `BLOCK:` titles. A title beginning `REQUIRE_APPROVAL:` is the same rule at the `hold` tier: the harness hook gates refuse the call and record it for **Findings › Review Queue › Held Changes** (approving it with `intutic decision approve <holdId>` or from Slack lets that exact call through once while the workspace's review-hold bypass is on, and otherwise records the decision); the MCP proxy and the [SDK gates](/reference/gate-sdk#holds) hold it the same way through the same decisions API (see [Approval holds](/guide/mcp-governance#approval-holds)); the proxy, which has no reviewer in the loop, treats it as a block.
 3. **SSO group policy** — decides the caller's [group clearance](/concepts/circuit-breaker#_3-sso-group-clearance) for the tool, from their SCIM groups while SCIM provisioning is on and from their last SSO sign-in otherwise. `DENIED` or `REQUIRES_OBO` blocks, and the reason names the deciding rule (`[sso_group.high_risk.<tool>]`).
 4. **MCP server registry** — on an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance): a blocked or held server, a server not approved under `mcpDefaultPolicy: deny`, or a disabled tool blocks, with the MCP proxy's reason; then a server missing from a non-empty [`mcpAllowedServers`](/guide/mcp-governance#the-allowlist-mcpallowedservers) list blocks. The response names the refusal in `code` (`SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`, `SERVER_NOT_ALLOWED`) and `ruleId`, and a server refused as unapproved joins the approval queue on the MCP Servers page.
@@ -66,6 +66,10 @@ refuses by default. Each check that could not run is logged and counted in the
 `governance_check_unavailable` metric, by surface, check and outcome (`refused` or
 `allowed_shadow`). The [AgentCore gateway check](/integrations/agentcore) and the
 [QM security screen](/integrations/qm) follow the same rules in their own response shapes.
+
+Every answer but a 400 carries a `decisionId`, the `decision_id` of the decision's
+[SIEM `gate_decisions` record](/guide/siem-export#one-record-per-gate-decision). A gate SDK
+reports the call with it, so the decision is exported and filed once.
 
 ::: warning The harness hook gates do not consult the gate
 `POST /api/v1/hook-gate` is called synchronously by the [gate SDKs](/reference/gate-sdk)

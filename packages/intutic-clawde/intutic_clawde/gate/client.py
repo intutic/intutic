@@ -2,7 +2,7 @@
 
 Endpoints used:
 
-  POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?, degraded?}
+  POST /api/v1/hook-gate       synchronous allow/deny  -> {allowed, reason, incidentId?, code?, degraded?, decisionId?}
   POST /api/v1/hook-events     batched telemetry       -> creates governance_incidents rows
   POST /api/v1/judge/finalize  LLM judge verdict       -> {verdict, triggered, ...}
   POST /api/v1/decisions       record a hold           -> joins the review queue (hold.py)
@@ -118,6 +118,12 @@ class GateResponse:
     # refusals, GOVERNANCE_UNAVAILABLE when its checks could not run, and
     # INVALID_REQUEST when it could not read the request.
     code: Optional[str] = None
+    # The hook gate's id for this decision, when this answer is its own
+    # verdict: every verdict it gives names one, and a GOVERNANCE_UNAVAILABLE
+    # refusal keeps it only while fail_closed refuses too. The gate reports the
+    # call with it (`gateDecisionId`), so the control plane exports the
+    # decision to SIEM once and files its incident once.
+    decision_id: Optional[str] = None
 
 
 class GateClient:
@@ -224,13 +230,13 @@ class GateClient:
                 )
             if exc.body.get("code") == GOVERNANCE_UNAVAILABLE:
                 return self._no_verdict(f"governance check unavailable ({GOVERNANCE_UNAVAILABLE})",
-                                        GOVERNANCE_UNAVAILABLE)
+                                        GOVERNANCE_UNAVAILABLE, exc.body.get("decisionId"))
             return self._no_verdict(f"unreachable ({type(exc).__name__})")
         except Exception as exc:
             return self._no_verdict(f"unreachable ({type(exc).__name__})")
         if d.get("allowed") is False and d.get("code") == GOVERNANCE_UNAVAILABLE:
             return self._no_verdict(f"governance check unavailable ({GOVERNANCE_UNAVAILABLE})",
-                                    GOVERNANCE_UNAVAILABLE)
+                                    GOVERNANCE_UNAVAILABLE, d.get("decisionId"))
         if not isinstance(d.get("allowed"), bool):
             return self._no_verdict("answered without a verdict")
         return GateResponse(
@@ -238,12 +244,21 @@ class GateClient:
             reason=str(d.get("reason", "")),
             incident_id=d.get("incidentId"),
             code=d.get("code") if isinstance(d.get("code"), str) else None,
+            decision_id=d.get("decisionId") if isinstance(d.get("decisionId"), str) else None,
         )
 
-    def _no_verdict(self, what: str, code: Optional[str] = None) -> GateResponse:
-        """The answer when the hook gate gave no verdict: `fail_closed` decides."""
+    def _no_verdict(self, what: str, code: Optional[str] = None,
+                    decision_id: Any = None) -> GateResponse:
+        """The answer when the hook gate gave no verdict: `fail_closed` decides.
+
+        A GOVERNANCE_UNAVAILABLE refusal's `decision_id` is kept when failing
+        closed, which refuses as the hook gate did, and dropped when failing
+        open: the call then runs, and its report must not stand for the
+        refusal.
+        """
         if self.fail_closed:
             return GateResponse(allowed=False, reached=False, code=code,
+                                decision_id=decision_id if isinstance(decision_id, str) else None,
                                 reason=f"hook-gate {what} — failing closed (fail_closed=True)")
         return GateResponse(allowed=True, reached=False, code=code,
                             reason=f"hook-gate {what} — failing open (fail_closed=False)")
@@ -252,8 +267,12 @@ class GateClient:
 
     def emit(self, event: str, tool_name: str, reason: str = "",
              tool_input: Optional[dict] = None, incident_id: Optional[str] = None,
-             file_path: Optional[str] = None) -> bool:
+             file_path: Optional[str] = None, gate_decision_id: Optional[str] = None) -> bool:
         """Fire-and-forget telemetry. Never raises.
+
+        `gate_decision_id` is the hook gate's `decisionId` for the call this
+        event reports: the control plane then files the decision's incident
+        once and does not export it to SIEM a second time.
 
         A `tool_blocked` event creates a governance_incidents row whose
         description embeds our reason verbatim:
@@ -285,6 +304,8 @@ class GateClient:
             ev["toolInput"] = tool_input
         if incident_id:
             ev["incidentId"] = incident_id
+        if gate_decision_id:
+            ev["gateDecisionId"] = gate_decision_id
         if file_path:
             ev["filePath"] = file_path[:512]
         try:

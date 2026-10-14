@@ -25,6 +25,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an exported source has none. Update Sentinel, Splunk or ArcSight rules that
   match the old classes; the SIEM export guide's "Changed in 2.5.1" lists
   old and new.
+- **The gate SDKs report every hook-gate answer with its decision id.** The
+  control plane's hook gate (`POST /api/v1/hook-gate`) now names each verdict
+  it gives (allow, refusal, degraded allow) with a `decisionId`, an additive
+  response field, and its own SIEM `gate_decisions` record carries it as
+  `decision_id`. `@intutic/gate` and `intutic_clawde.gate` read it
+  (`GateResponse.decisionId` / `decision_id`; a `GOVERNANCE_UNAVAILABLE`
+  refusal keeps it only while failing closed) and send the `tool_blocked` or
+  `tool_allowed` event that reports the call with it as `gateDecisionId`
+  (`GateClient.emit(..., gateDecisionId)` / `emit(..., gate_decision_id=)`),
+  so the control plane files the decision's incident once and exports the
+  decision to SIEM once. The report of a DLP refusal, whose incident the hook
+  gate files itself, no longer files a second one, and the refusal's
+  `incidentId` now names the stored incident. In an OPAQUE workspace the incident filed from the
+  report names the rule, not the generic sentence. Both SDKs run the updated
+  shared `hook-gate-response-vectors.json`.
+  **Upgrade note:** an SDK older than this release sends no
+  `gateDecisionId`; each hook-gate decision it reports still reaches a SIEM
+  destination twice (once from the hook gate with a `decision_id`, once from
+  the report without one), and a DLP refusal it reports is still filed as a
+  second incident, as before. Upgrade both SDKs for one record and one
+  incident per decision.
 - **Behaviour change: `withIntuticProxy()` points providers at the proxy's
   `/v1` routes.** `@intutic/gate/vercel` (and its `@intutic/gate/eve`
   re-export) passed the bare proxy URL as `baseURL`, and `@ai-sdk/openai` and
