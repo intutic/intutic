@@ -3,6 +3,14 @@
 BUG FIXES:
 
 * resource/intutic_notification_rule: `filter_severity` is validated against the severities events carry (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`), in any case. Lowercase values, as the example used to show, were stored as written and matched no event, so the rule never fired; the control plane now stores them uppercase and has uppercased existing rules. A configured list that differs from the stored one only in case plans no change. A value that is not a severity now fails at plan time.
+* resource/intutic_mcp_server_decision: an imported decision whose configuration leaves `disabled_tools` unset plans clean. Import used to record the server's tool switches as managed, so the first plan showed an in-place update removing them. `disabled_tools` now always shows the tools switched off on the server; unset still leaves the switches alone. Destroy re-enables the tools the configuration switched off, as before, but not tools switched off before an import.
+* resource/intutic_workspace_budget: importing an id other than the provider key's workspace fails with "Wrong workspace", as `intutic_workspace_settings` does. It used to succeed and manage the key's workspace under the wrong id.
+* resource/intutic_workspace_settings, resource/intutic_workspace_budget: applying both in one run no longer fails with "Provider produced inconsistent result after apply". The control plane wrote the two changes to the same settings record at once and kept only one; it now applies them one after the other.
+* provider: an API refusal shows its explanation. A 403 names the roles the route allows in `detail`, which the provider did not read, so a missing role showed as a bare `Forbidden`.
+
+NOTES:
+
+* resource/intutic_member_budget: the example and import command use a real member id shape, `mbr_…`; they showed `mem_…`, which no member has.
 
 ## 0.2.0 (October 13, 2026)
 

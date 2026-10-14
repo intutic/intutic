@@ -25,7 +25,7 @@ resource "intutic_member_budget" "default" {
 # One member's own month budget replaces the default month budget for them;
 # the default day budget still applies.
 resource "intutic_member_budget" "lead" {
-  member_id          = "mem_0123456789abcdef"
+  member_id          = "mbr_0123456789abcdef"
   monthly_budget_usd = 1000
 }
 ```
@@ -35,7 +35,7 @@ resource "intutic_member_budget" "lead" {
 
 ### Required
 
-- `member_id` (String) The member whose spend this limits — across the virtual keys they own — or `default` for the budget every member without their own gets for that period.
+- `member_id` (String) The member whose spend this limits — across the virtual keys they own — or `default` for the budget every member without their own gets for that period. A member id is `mbr_…`; the `intutic_members` data source lists them.
 
 ### Optional
 
@@ -56,6 +56,6 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 
 ```shell
 # Import by member id, or `default` for the default member budget.
-terraform import intutic_member_budget.lead mem_0123456789abcdef
+terraform import intutic_member_budget.lead mbr_0123456789abcdef
 terraform import intutic_member_budget.default default
 ```

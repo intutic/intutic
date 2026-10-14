@@ -57,6 +57,38 @@ func TestErrorCarriesServerMessageAndDetails(t *testing.T) {
 	}
 }
 
+// A role refusal carries its explanation in `detail` (a string naming the
+// roles the route allows), not `details`. The provider used to drop it and
+// print a bare "Forbidden".
+func TestErrorCarriesForbiddenDetail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"Forbidden","code":"E_FORBIDDEN","detail":"Requires the OWNER or ADMIN role"}`))
+	}))
+	defer srv.Close()
+
+	err := New(srv.URL, "k", "test").Get(context.Background(), "/x", nil)
+	if err == nil || !strings.Contains(err.Error(), "Forbidden: Requires the OWNER or ADMIN role") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(err.Error(), `"Requires`) {
+		t.Fatalf("a string detail is printed unquoted: %v", err)
+	}
+}
+
+func TestErrorKeepsStructuredDetail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"Invalid rule","detail":{"field":"pattern"}}`))
+	}))
+	defer srv.Close()
+
+	err := New(srv.URL, "k", "test").Get(context.Background(), "/x", nil)
+	if err == nil || !strings.Contains(err.Error(), "Invalid rule") || !strings.Contains(err.Error(), "pattern") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestIsNotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

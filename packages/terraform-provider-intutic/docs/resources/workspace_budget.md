@@ -46,6 +46,7 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by workspace id; there is one budget per workspace.
+# Import by workspace id: the provider key's workspace, the only one it can
+# manage. Any other id is refused ("Wrong workspace").
 terraform import intutic_workspace_budget.this ws_0123456789abcdef
 ```

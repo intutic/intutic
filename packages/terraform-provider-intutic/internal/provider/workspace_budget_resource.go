@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/float64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -76,7 +77,7 @@ func (r *workspaceBudgetResource) Schema(_ context.Context, _ resource.SchemaReq
 				Optional: true,
 				Description: "Daily cap in USD (0–100,000); 0 is no daily cap. A UTC day. Omit it to hold the workspace to " +
 					"the $100 default daily cap; removing it from a configuration returns a saved cap to that default.",
-				Validators:  []validator.Float64{float64validator.Between(0, 100_000)},
+				Validators: []validator.Float64{float64validator.Between(0, 100_000)},
 			},
 			"monthly_budget_usd": schema.Float64Attribute{
 				Required:    true,
@@ -162,6 +163,14 @@ func (r *workspaceBudgetResource) Read(ctx context.Context, req resource.ReadReq
 		resp.Diagnostics.AddError("Reading the workspace budget failed", err.Error())
 		return
 	}
+	// The API serves the key's workspace whatever id is in state, so an import
+	// of another workspace's id would otherwise manage this one's caps.
+	if state.ID.ValueString() != out.WorkspaceID {
+		resp.Diagnostics.AddError("Wrong workspace",
+			fmt.Sprintf("This resource manages workspace %s, but the provider's API key belongs to %s.",
+				state.ID.ValueString(), out.WorkspaceID))
+		return
+	}
 	out.applyTo(&state)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -181,8 +190,11 @@ func (r *workspaceBudgetResource) Update(ctx context.Context, req resource.Updat
 
 // Delete leaves the caps as they are: a workspace always has caps, and
 // guessing values to reset them to would be a change nobody configured.
-func (r *workspaceBudgetResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {}
+func (r *workspaceBudgetResource) Delete(_ context.Context, _ resource.DeleteRequest, _ *resource.DeleteResponse) {
+}
 
+// ImportState takes the workspace id, which must be the provider key's
+// workspace: Read refuses any other.
 func (r *workspaceBudgetResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }

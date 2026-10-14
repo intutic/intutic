@@ -77,7 +77,7 @@ HYPOTHESIZED, REFINED, VALIDATED ──> INVALIDATED
 VALIDATED ──> PENDING_REVIEW
 ```
 
-`PENDING_REVIEW → GENERATED` must pass a Gödel score threshold; `REFINED → VALIDATED` is refused while the SOP's compiled graph is missing or stale, unless the admin acknowledges it with a reason. `HYPOTHESIZED` and `REFINED` SOPs are evaluated in shadow; only `VALIDATED` enforces. Invalidating a SOP sends the SOPs that depend on it back to `PENDING_REVIEW`.
+`PENDING_REVIEW → GENERATED` must pass a Gödel score threshold; `REFINED → VALIDATED` is refused while the SOP's compiled graph is missing or stale, unless the admin acknowledges it with a reason. `HYPOTHESIZED` and `REFINED` SOPs are evaluated in shadow; only `VALIDATED` enforces. Deleting a SOP, or replacing it with a new version, stops it enforcing at once: it keeps its state, but every gate reads only active SOPs. Invalidating a SOP sends the SOPs that depend on it back to `PENDING_REVIEW`.
 
 Each change emits a `sop.lifecycle.transitioned` event carrying the acting user, the from and to states, and the reason.
 

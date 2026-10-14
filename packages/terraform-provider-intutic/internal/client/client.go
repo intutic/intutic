@@ -184,12 +184,15 @@ func retryDelay(retryAfter string, attempt int) time.Duration {
 }
 
 // errorMessage pulls the human part out of the control plane's error body:
-// `{"error": "...", "message": "...", "details": {...}}`. Validation details
-// are kept, because they name the field the API refused.
+// `{"error": "...", "message": "...", "detail": ..., "details": {...}}`.
+// `detail` is how a refusal explains itself (a 403 names the roles the route
+// allows); `details` is how validation names the field it refused. Both are
+// kept: a string is printed as text, anything else as JSON.
 func errorMessage(raw []byte) string {
 	var body struct {
 		Error   string          `json:"error"`
 		Message string          `json:"message"`
+		Detail  json.RawMessage `json:"detail"`
 		Details json.RawMessage `json:"details"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil || (body.Error == "" && body.Message == "") {
@@ -206,8 +209,25 @@ func errorMessage(raw []byte) string {
 		}
 	}
 	msg := strings.Join(parts, ": ")
-	if len(body.Details) > 0 && string(body.Details) != "null" && string(body.Details) != "{}" {
-		msg += " " + string(body.Details)
+	if d := detailText(body.Detail); d != "" {
+		msg += ": " + d
+	}
+	if d := detailText(body.Details); d != "" {
+		msg += " " + d
 	}
 	return msg
+}
+
+// detailText renders an error body's detail field: a JSON string as its
+// text, an empty value as "", anything else as compact JSON.
+func detailText(raw json.RawMessage) string {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" || s == "{}" || s == `""` {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	return s
 }
