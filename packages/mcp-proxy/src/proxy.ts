@@ -61,6 +61,7 @@ import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
 import { callerIdentity, type CallerIdentity } from './identity.js'
 import { OPAQUE_REFUSAL_MESSAGE, normalizeToolDefinition, type McpToolDefinition } from '@intutic/shared-types'
+import type { DecisionDetailResponse, WireFields } from '@intutic/shared-types'
 import { PACKAGE_VERSION } from './version.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -876,9 +877,9 @@ export class McpGovernanceProxy {
               : describeFailure(decision, `report hold ${holdId}`)
         } else {
           // Only an approval needs the bypasses, to say whether a retry passes.
-          const status = (decision.data as { status?: unknown }).status
+          const status = (decision.data as WireFields<DecisionDetailResponse>).status
           const bypasses = status === 'APPROVED' ? await callControlPlane('/api/v1/decisions/approved-bypasses') : null
-          text = JSON.stringify(holdStatus(holdId, decision.data as { status?: unknown }, bypasses?.ok ? bypasses.data : null), null, 2)
+          text = JSON.stringify(holdStatus(holdId, decision.data as WireFields<DecisionDetailResponse>, bypasses?.ok ? bypasses.data : null), null, 2)
         }
         return { content: [{ type: 'text' as const, text }] }
       }

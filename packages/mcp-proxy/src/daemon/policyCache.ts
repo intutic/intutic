@@ -12,6 +12,7 @@ import { scryptSync } from 'node:crypto'
 import { Redis } from 'ioredis'
 import { describeConnectionError } from '../valkeyErrors.js'
 import { createLogger } from '@intutic/logger'
+import type { PolicyResolveResponse, WireFields } from '@intutic/shared-types'
 import {
   UNRESTRICTED_REGISTRY,
   parsePrincipal,
@@ -50,7 +51,6 @@ valkey.on('error', (err: Error) => {
 export interface ResolvedPolicy {
   workspaceId:   string
   sopRules:      Record<string, unknown>[]
-  dlpPatterns:   string[]
   interventionMode: string
   /**
    * Additive MCP tool allowlist; empty means unrestricted. Was silently
@@ -238,7 +238,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type PolicyResponseBody = Pick<
   ResolvedPolicy,
   | 'sopRules'
-  | 'dlpPatterns'
   | 'interventionMode'
   | 'allowedTools'
   | 'toolDescriptionOverrides'
@@ -275,9 +274,13 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
     return null
   }
   if (!isRecord(parsed)) return null
+  return policyFromBody(parsed as WireFields<PolicyResolveResponse>)
+}
+
+/** The fields of a `GET /api/v1/policy/resolve` body, each checked. */
+function policyFromBody(parsed: WireFields<PolicyResolveResponse>): PolicyResponseBody {
 
   const sopRules                  = parsed['sopRules']
-  const dlpPatterns               = parsed['dlpPatterns']
   const interventionMode          = parsed['interventionMode']
   const allowedTools              = parsed['allowedTools']
   const toolDescriptionOverrides  = parsed['toolDescriptionOverrides']
@@ -289,15 +292,12 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
 
   return {
     sopRules:    Array.isArray(sopRules) ? sopRules.filter(isRecord) : [],
-    dlpPatterns: Array.isArray(dlpPatterns)
-      ? dlpPatterns.filter((p): p is string => typeof p === 'string')
-      : [],
     // 'TRANSPARENT', matching every other default in this pipeline: the
-    // resolve route's own fallback (services/control-plane/src/routes/
-    // evaluate.ts), the schema default on pcas_policies.intervention_mode,
+    // control plane's resolver (services/control-plane/src/lib/
+    // interventionMode.ts), the interventionMode workspace setting's default,
     // and this module's snapshot-seed path below. The old default here was
-    // 'BYPASS', which is not an intervention_mode_type value at all — a
-    // fabricated mode no other component recognises.
+    // 'BYPASS', which is not an intervention mode at all — a fabricated mode
+    // no other component recognises.
     interventionMode: typeof interventionMode === 'string' ? interventionMode : 'TRANSPARENT',
     allowedTools: Array.isArray(allowedTools)
       ? allowedTools.filter((t): t is string => typeof t === 'string')
@@ -386,7 +386,6 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
           resolve({
             workspaceId,
             sopRules:         parsed.sopRules,
-            dlpPatterns:      parsed.dlpPatterns,
             interventionMode: parsed.interventionMode,
             allowedTools:     parsed.allowedTools,
             toolDescriptionOverrides: parsed.toolDescriptionOverrides,
@@ -489,7 +488,6 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
     const entry: ResolvedPolicy = {
       workspaceId,
       sopRules: raw.filter(isRecord),
-      dlpPatterns: [],
       interventionMode:
         typeof parsed['interventionMode'] === 'string' ? parsed['interventionMode'] : 'TRANSPARENT',
       // The sync daemon's snapshot (services/sync-daemon/src/lib/policySnapshot.ts)
@@ -592,7 +590,7 @@ export async function resolvePolicy(workspaceId: string): Promise<ResolvedPolicy
       // valid prior write of an older shape, so the three curation fields
       // are normalized rather than trusted blindly off the cast.
       const raw = JSON.parse(valkeyCached) as Partial<ResolvedPolicy> &
-        Pick<ResolvedPolicy, 'workspaceId' | 'sopRules' | 'dlpPatterns' | 'interventionMode' | 'cachedAt'>
+        Pick<ResolvedPolicy, 'workspaceId' | 'sopRules' | 'interventionMode' | 'cachedAt'>
       const parsed: ResolvedPolicy = {
         ...raw,
         allowedTools: Array.isArray(raw.allowedTools) ? raw.allowedTools : [],

@@ -26,9 +26,8 @@ const program = new Command()
 
 // Positional options: `--version` and `--help` belong to the program only when
 // they come before a subcommand. Without this, commander matches program
-// options anywhere on the line, so `intutic policy rollback <id> --version 2`
-// printed the CLI version and exited before `policy rollback` ever saw its own
-// required `--version`.
+// options anywhere on the line, so a subcommand option named `--version` would
+// print the CLI version and exit before its command ever saw it.
 program
   .name('intutic')
   .description('Intutic CLI — AI governance control plane for developer workspaces')
@@ -280,49 +279,7 @@ sopsCmd
 
 const policyCmd = program
   .command('policy')
-  .description('WASM rules, the policy snapshot, and the deprecated enforcement policies')
-
-policyCmd
-  .command('convert <policyId>')
-  .description(
-    'Turn a KILL or REASK enforcement policy into a hook-rule guardrail, created in shadow.\n' +
-    '\n' +
-    '  Enforcement policies are deprecated: their tool pattern, action and conditions\n' +
-    '  are enforced nowhere. The guardrail reports what it would block until promoted.'
-  )
-  .option('--dev', 'Use local control plane (http://localhost:3001)')
-  .action(async (policyId, opts) => {
-    const { runPolicyConvert } = await import('./commands/policy.js')
-    await runPolicyConvert(policyId, opts)
-  })
-
-policyCmd
-  .command('enable <policyId>')
-  .description('Enable a compliance policy (deprecated)')
-  .option('--dev', 'Use local control plane (http://localhost:3001)')
-  .action(async (policyId, opts) => {
-    const { runPolicyEnable } = await import('./commands/policy.js')
-    await runPolicyEnable(policyId, opts)
-  })
-
-policyCmd
-  .command('disable <policyId>')
-  .description('Disable a compliance policy (deprecated)')
-  .option('--dev', 'Use local control plane (http://localhost:3001)')
-  .action(async (policyId, opts) => {
-    const { runPolicyDisable } = await import('./commands/policy.js')
-    await runPolicyDisable(policyId, opts)
-  })
-
-policyCmd
-  .command('rollback <policyId>')
-  .description('Rollback a compliance policy to a specific version (deprecated)')
-  .requiredOption('--version <version>', 'Target version (e.g. 2)')
-  .option('--dev', 'Use local control plane (http://localhost:3001)')
-  .action(async (policyId, opts) => {
-    const { runPolicyRollback } = await import('./commands/policy.js')
-    await runPolicyRollback(policyId, opts)
-  })
+  .description('WASM rules and the policy snapshot')
 
 policyCmd
   .command('snapshot')
@@ -336,16 +293,6 @@ policyCmd
   .action(async (opts) => {
     const { runPolicySnapshot } = await import('./commands/policy.js')
     await runPolicySnapshot(opts)
-  })
-
-policyCmd
-  .command('export')
-  .description('Export compliance policies to stdout (deprecated)')
-  .option('--all', 'Export all policies')
-  .option('--dev', 'Use local control plane (http://localhost:3001)')
-  .action(async (opts) => {
-    const { runPolicyExport } = await import('./commands/policy.js')
-    await runPolicyExport(opts)
   })
 
 policyCmd

@@ -1,8 +1,6 @@
-/** SDK response types of the policy, WASM rule, SOP and decision routes, against their schemas. */
+/** SDK response types of the WASM rule, SOP and decision routes, against their schemas. */
 import type {
   DecisionReviewResponse,
-  PolicyListResponse,
-  PolicyVersionResponse,
   RuleCandidateBundleResponse,
   RuleCandidateSourceResponse,
   SopCreatedResponse,
@@ -12,9 +10,7 @@ import type {
 } from '@intutic/shared-types'
 import type {
   BundleUploadResult,
-  CompliancePolicy,
   DecisionReviewResult,
-  PolicyChangeResult,
   RuleCandidateSource,
   SopCreateResult,
   SopDetail,
@@ -23,12 +19,6 @@ import type {
 } from '../../src/types'
 import { conforms, type Rows } from './conforms'
 
-// listPolicies: GET /api/v1/policies, unwrapped from `policies`. The handler
-// always sends `conditions` (an object or null); zod types an `unknown`
-// field as optional, so it is required here as the handler sends it.
-conforms<CompliancePolicy>()<Rows<PolicyListResponse, 'policies'> & { conditions: unknown }>()
-// enablePolicy / disablePolicy / rollbackPolicy: POST /api/v1/policies/:policyId/{enable,disable,rollback}
-conforms<PolicyChangeResult>()<PolicyVersionResponse>()
 // getRuleCandidateSource: GET /api/v1/rule-candidates/:candidateId/source
 conforms<RuleCandidateSource>()<RuleCandidateSourceResponse>()
 // uploadRuleCandidateBundle: POST /api/v1/rule-candidates/:candidateId/bundle (either answer)

@@ -54,10 +54,13 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "typecheck": "tsc -p ./ --noEmit && tsc -p tsconfig.test.json",
+    "test": "tsc -p ./ && node --test test/*.test.mjs"
   },
   "dependencies": {},
   "devDependencies": {
+    "@intutic/shared-types": "workspace:*",
     "@types/vscode": "^1.90.0",
     "typescript": "^5.5"
   }

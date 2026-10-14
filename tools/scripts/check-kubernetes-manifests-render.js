@@ -120,6 +120,111 @@ function placeholderSecretProblems(where, docs) {
   return problems
 }
 
+/**
+ * Transport security for the hosted stack (docs/runbooks/tls-hardening-rollout.md).
+ * Until 2026-10-14 every external Ingress answered plain HTTP and TLS 1.1 (no
+ * FrontendConfig), no response carried HSTS, Postgres ran with ssl off, and
+ * Valkey took commands from any pod that could reach it, with VALKEY_URL in a
+ * ConfigMap. Each rule below holds whenever the overlay renders the object it
+ * is about, so an overlay that deletes postgres or valkey (prod's HA swap) is
+ * not asked for them.
+ */
+const HSTS = /^Strict-Transport-Security:\s*max-age=(\d+)/i
+const transportChecked = { ingresses: 0, postgres: 0, valkey: 0 }
+
+function transportSecurityProblems(where, docs) {
+  const problems = []
+  const byKind = (kind) => docs.filter((d) => d.kind === kind)
+  const named = (kind, name) => byKind(kind).find((d) => d.metadata?.name === name)
+
+  for (const ing of byKind('Ingress')) {
+    const ann = ing.metadata?.annotations ?? {}
+    if (ann['kubernetes.io/ingress.class'] !== 'gce') continue
+    transportChecked.ingresses += 1
+    const label = `${where}: Ingress ${ing.metadata.name}`
+    const fcName = ann['networking.gke.io/v1beta1.FrontendConfig']
+    const fc = fcName && named('FrontendConfig', fcName)
+    if (!fc) {
+      problems.push(`${label} has no FrontendConfig (annotation networking.gke.io/v1beta1.FrontendConfig naming one this overlay renders): it would serve plain HTTP and the load balancer's default TLS policy.`)
+    } else {
+      if (fc.spec?.redirectToHttps?.enabled !== true) {
+        problems.push(`${label}: FrontendConfig ${fcName} does not set redirectToHttps.enabled: true.`)
+      }
+      if (!fc.spec?.sslPolicy) {
+        problems.push(`${label}: FrontendConfig ${fcName} names no sslPolicy, so TLS 1.0/1.1 stay accepted.`)
+      }
+    }
+    // Every backend Service this overlay renders must send HSTS through its
+    // BackendConfig. A Service from another repository (the website) is not
+    // in the render and is checked there.
+    const backends = new Set()
+    for (const rule of ing.spec?.rules ?? []) {
+      for (const path of rule.http?.paths ?? []) {
+        if (path.backend?.service?.name) backends.add(path.backend.service.name)
+      }
+    }
+    for (const svcName of backends) {
+      const svc = named('Service', svcName)
+      if (!svc) continue
+      let bcName
+      try {
+        const raw = svc.metadata?.annotations?.['cloud.google.com/backend-config']
+        bcName = raw ? JSON.parse(raw).default : undefined
+      } catch {
+        bcName = undefined
+      }
+      const bc = bcName && named('BackendConfig', bcName)
+      const headers = bc?.spec?.customResponseHeaders?.headers ?? []
+      const hsts = headers.map((h) => HSTS.exec(h)).find(Boolean)
+      if (!hsts || Number(hsts[1]) < 31536000) {
+        problems.push(`${label} routes to Service ${svcName}, whose BackendConfig ${bcName ?? '(none)'} adds no Strict-Transport-Security header with max-age of at least a year.`)
+      }
+    }
+  }
+
+  const pg = named('StatefulSet', 'postgres')
+  if (pg) {
+    transportChecked.postgres += 1
+    const c = (pg.spec?.template?.spec?.containers ?? []).find((x) => x.name === 'postgres')
+    const args = (c?.args ?? []).join(' ')
+    for (const want of ['ssl=on', 'ssl_min_protocol_version=TLSv1.2', 'hba_file=']) {
+      if (!args.includes(want)) problems.push(`${where}: postgres runs without ${want} in its args.`)
+    }
+    const hba = named('ConfigMap', 'postgres-hba')?.data?.['pg_hba.conf'] ?? ''
+    if (!/^hostssl\s+all\s+all\s+all\s+scram-sha-256\s*$/m.test(hba)) {
+      problems.push(`${where}: the postgres-hba ConfigMap has no "hostssl all all all scram-sha-256" rule.`)
+    }
+    if (!/^hostnossl\s+all\s+all\s+all\s+reject\s*$/m.test(hba)) {
+      problems.push(`${where}: the postgres-hba ConfigMap has no "hostnossl all all all reject" rule.`)
+    }
+  }
+
+  const valkey = named('Deployment', 'valkey')
+  if (valkey) {
+    transportChecked.valkey += 1
+    const c = (valkey.spec?.template?.spec?.containers ?? []).find((x) => x.name === 'valkey')
+    if (!(c?.args ?? []).includes('--aclfile')) {
+      problems.push(`${where}: valkey runs without --aclfile, so it accepts commands from any client.`)
+    }
+    // VALKEY_URL carries the password: from a Secret only, never a literal or
+    // a ConfigMap.
+    for (const d of docs) {
+      const pod = d.spec?.template?.spec
+      for (const ct of [...(pod?.initContainers ?? []), ...(pod?.containers ?? [])]) {
+        for (const e of ct.env ?? []) {
+          if (e.name === 'VALKEY_URL' && !e.valueFrom?.secretKeyRef) {
+            problems.push(`${where}: ${d.kind} ${d.metadata?.name} container ${ct.name} sets VALKEY_URL from somewhere other than a Secret.`)
+          }
+        }
+      }
+      if (d.kind === 'ConfigMap' && d.data && 'VALKEY_URL' in d.data) {
+        problems.push(`${where}: ConfigMap ${d.metadata?.name} carries VALKEY_URL; it holds the Valkey password and belongs in the valkey-auth Secret.`)
+      }
+    }
+  }
+  return problems
+}
+
 for (const overlay of overlays) {
   const dir = join(OVERLAYS_DIR, overlay)
   if (!existsSync(dir)) {
@@ -137,6 +242,7 @@ for (const overlay of overlays) {
   const overlayDocs = loadAll(rendered).filter((d) => d != null)
   failures.push(...upstreamProblems(`overlay "${overlay}"`, overlayDocs))
   failures.push(...placeholderSecretProblems(`overlay "${overlay}"`, overlayDocs))
+  failures.push(...transportSecurityProblems(`overlay "${overlay}"`, overlayDocs))
 
   // The regression this gate exists to catch: SOP policy silently
   // undeliverable to the cluster proxy. Only assert on overlays that carry a
@@ -213,6 +319,26 @@ for (const overlay of overlays) {
           `gateway.intutic.ai — TLS for the gateway would never validate.`,
       )
     }
+  }
+}
+
+// The cells namespace kustomization (applied on its own, not by an overlay):
+// its Gateway must keep the same TLS floor as the Ingresses.
+const CELLS_DIR = join(ROOT, 'infra', 'kubernetes', 'cells')
+let cellsTlsChecked = false
+if (existsSync(join(CELLS_DIR, 'kustomization.yaml'))) {
+  try {
+    const docs = loadAll(execFileSync('kubectl', ['kustomize', CELLS_DIR], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }))
+      .filter((d) => d != null)
+    const policy = docs.find(
+      (d) => d.kind === 'GCPGatewayPolicy' && d.spec?.targetRef?.kind === 'Gateway' && d.spec?.targetRef?.name === 'intutic-cells-gateway',
+    )
+    cellsTlsChecked = true
+    if (!policy?.spec?.default?.sslPolicy) {
+      failures.push('infra/kubernetes/cells renders no GCPGatewayPolicy with an sslPolicy for intutic-cells-gateway: the cells load balancer would keep accepting TLS 1.0/1.1.')
+    }
+  } catch (err) {
+    failures.push(`infra/kubernetes/cells failed to render:\n${err.stderr || err.message}`)
   }
 }
 
@@ -426,6 +552,16 @@ if (!gatewayChecked) {
   )
 }
 
+if (transportChecked.ingresses === 0 || transportChecked.postgres === 0 || transportChecked.valkey === 0) {
+  failures.push(
+    `the transport-security checks did not all run (Ingresses ${transportChecked.ingresses}, postgres ${transportChecked.postgres}, ` +
+      `valkey ${transportChecked.valkey}) — a vacuous pass here is worse than no check.`,
+  )
+}
+if (existsSync(CELLS_DIR) && !cellsTlsChecked) {
+  failures.push('infra/kubernetes/cells exists but its TLS policy check never ran.')
+}
+
 if (upstreamsChecked === 0) {
   failures.push('no rendered workload sets a *_UPSTREAM_URL — the LiteLLM-upstream check never ran.')
 }
@@ -439,5 +575,6 @@ if (failures.length > 0) {
 console.log(
   `[PASS] kubernetes manifests: ${overlays.length} overlay(s), ${cellsRemoteRendered} cells-remote ` +
     `kustomization(s) and ${helmCharts} Helm chart render(s) pass, SOPS wiring intact, ` +
-    `${upstreamsChecked} provider upstream(s) off LiteLLM, no placeholder Secret.`,
+    `${upstreamsChecked} provider upstream(s) off LiteLLM, no placeholder Secret, ` +
+    `${transportChecked.ingresses} Ingress(es) HTTPS-only with HSTS, Postgres TLS and Valkey auth wired.`,
 )

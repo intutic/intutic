@@ -18,7 +18,6 @@ import { PolicyClient } from '../../policy.js'
 const FULL = {
   workspaceId: 'ws_snap',
   sopRules: [{ id: 'r1', toolPattern: '^Bash$', action: 'block', reason: 'no shell' }],
-  dlpPatterns: ['acme_[a-z]{8}'],
   interventionMode: 'TRANSPARENT',
   allowedTools: ['read_file'],
   toolDescriptionOverrides: { read_file: 'Reads one file' },
@@ -36,7 +35,6 @@ const SNAPSHOT = {
     { id: 'r1', toolPattern: '^Bash$', action: 'block', reason: 'no shell' },
     { id: 'r2', toolPattern: '^Write$', action: 'block', reason: 'no writes' },
   ],
-  dlpPatterns: [],
   interventionMode: 'TRANSPARENT',
   allowedTools: [],
   toolDescriptionOverrides: {},
@@ -91,7 +89,6 @@ describe('PolicyClient and the daemon snapshot answer', () => {
     expect(client.getAllowedTools()).toEqual(['read_file'])
     expect(client.getAllowedServers()).toEqual(['filesystem'])
     expect(client.getToolDescriptionOverrides()).toEqual({ read_file: 'Reads one file' })
-    expect(client.getDlpPatterns()).toEqual(['acme_[a-z]{8}'])
     expect(client.getInjectionPatterns()).toEqual(['exfiltrate now'])
     expect(client.getInjectionAction()).toBe('block')
     expect(client.getAnomalyOverrides()).toEqual({ code_as_action: 'steer' })

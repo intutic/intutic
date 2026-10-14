@@ -37,11 +37,12 @@ describe('API key scopes', () => {
     expect(scopeGrants(['traces:read'], '*')).toBe(false)
   })
 
-  it('reads stored scopes: known as-is, all-unknown as * flagged legacy, mixed ignoring the unknown', () => {
-    expect(effectiveApiKeyScopes(['traces:read'])).toEqual({ scopes: ['traces:read'], legacy: false, ignored: [] })
-    expect(effectiveApiKeyScopes(['read', 'write'])).toEqual({ scopes: ['*'], legacy: true, ignored: ['read', 'write'] })
-    expect(effectiveApiKeyScopes(['traces:read', 'bash'])).toEqual({ scopes: ['traces:read'], legacy: false, ignored: ['bash'] })
-    expect(effectiveApiKeyScopes(null)).toEqual({ scopes: ['*'], legacy: false, ignored: [] })
+  it('reads stored scopes: known as-is, all-unknown as nothing, mixed ignoring the unknown', () => {
+    expect(effectiveApiKeyScopes(['traces:read'])).toEqual({ scopes: ['traces:read'], ignored: [] })
+    // Only strings outside the registry: nothing granted (before 2.6.0, '*').
+    expect(effectiveApiKeyScopes(['read', 'write'])).toEqual({ scopes: [], ignored: ['read', 'write'] })
+    expect(effectiveApiKeyScopes(['traces:read', 'bash'])).toEqual({ scopes: ['traces:read'], ignored: ['bash'] })
+    expect(effectiveApiKeyScopes(null)).toEqual({ scopes: ['*'], ignored: [] })
   })
 
   it('intersects a child with its parent: a child can only narrow', () => {

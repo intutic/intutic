@@ -91,43 +91,6 @@ const DLP_PATTERNS: DlpPattern[] = [
   { regex: /-----BEGIN\s+EC\s+PRIVATE KEY-----/, description: 'EC private key material', redactable: true },
 ]
 
-/**
- * Control-plane-supplied patterns, compiled. The daemon has fetched and
- * cached `dlpPatterns` since the policy cache existed, and this scanner never
- * read them — a workspace's custom patterns were a setting wired to nothing.
- * The hardcoded floor above stays regardless: an unreachable control plane
- * must degrade to the floor, never to no scanning.
- */
-let dynamicPatterns: DlpPattern[] = []
-
-/**
- * Replace the dynamic pattern set from control-plane regex sources.
- * Invalid sources are dropped loudly by count — a pattern that does not
- * compile enforces nothing, and silence there is how it stays broken.
- * Returns the number dropped so the caller can log it.
- */
-export function setDynamicPatterns(sources: readonly string[]): number {
-  const compiled: typeof dynamicPatterns = []
-  let dropped = 0
-  for (const src of sources) {
-    try {
-      compiled.push({
-        regex: new RegExp(src),
-        description: `Workspace DLP pattern: ${src}`,
-        redactable: true,
-      })
-    } catch {
-      dropped += 1
-    }
-  }
-  dynamicPatterns = compiled
-  return dropped
-}
-
-function allPatterns(): DlpPattern[] {
-  return dynamicPatterns.length ? [...DLP_PATTERNS, ...dynamicPatterns] : DLP_PATTERNS
-}
-
 /** The detectors `INTUTIC_MCP_DLP_DETECTORS` names, with their actions. */
 let localPii: PiiDetectorSettings = {}
 /** The workspace's `piiDetectors` setting, when the last policy carried one. */
@@ -159,7 +122,7 @@ configurePii(process.env['INTUTIC_MCP_DLP_DETECTORS'])
  * it (`PolicyClient.getPiiDetectors`): the baseline for every detector it
  * names, which `INTUTIC_MCP_DLP_DETECTORS` may only tighten — the rule the
  * LLM proxy applies (`effectivePiiActions`). Called before each scan in both
- * directions, like `setDynamicPatterns`. An unreadable setting scans with
+ * directions. An unreadable setting scans with
  * the local config alone; refusing the call instead under fail-closed is the
  * interceptor's decision, not this scanner's.
  */
@@ -179,7 +142,7 @@ export function setWorkspacePii(setting: WorkspacePiiDetectors): void {
 export function redactText(text: string): { redacted: string; findings: DlpFinding[] } {
   const findings: DlpFinding[] = []
   let redacted = text
-  for (const p of allPatterns()) {
+  for (const p of DLP_PATTERNS) {
     if (!p.redactable || !('regex' in p)) continue
     const { regex, description } = p
     const global = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : regex.flags + 'g')
@@ -241,7 +204,7 @@ export function scanToolInput(toolInput: unknown): DlpScanResult {
   // a workspace pattern that blocked results but not the input that exfiltrates
   // them would be scanning the wrong side.
   let words: PhraseText[] | null = null
-  for (const p of allPatterns()) {
+  for (const p of DLP_PATTERNS) {
     let hit: boolean
     if ('phrase' in p) {
       words ??= strings.map((s) => phraseText(s))

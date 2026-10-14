@@ -25,7 +25,7 @@ import { runPredictCost } from '../commands/predict-cost.js'
 import { runRoutingAdoptionReport } from '../commands/routing.js'
 import { runSopsPull } from '../commands/sops.js'
 import { runBudget } from '../commands/budget.js'
-import { runPolicyExport } from '../commands/policy.js'
+import { runPolicyReplay } from '../commands/policy.js'
 import { runGuardrailsSourcesList } from '../commands/guardrails.js'
 import { getClient as getSkillClient } from '../commands/skill.js'
 import { runStatus } from '../commands/status.js'
@@ -47,7 +47,7 @@ const COMMANDS: Array<[string, Run]> = [
   ['routing adoption-report', (dev) => runRoutingAdoptionReport({ dev, candidateModel: 'm' })],
   ['sops pull', (dev) => runSopsPull({ dev })],
   ['budget', (dev) => runBudget({ dev })],
-  ['policy export', (dev) => runPolicyExport({ dev })],
+  ['policy replay', (dev) => runPolicyReplay('wasm_1', { dev })],
   ['guardrails sources list', (dev) => runGuardrailsSourcesList({ dev })],
   ['loop (skill client)', async (dev) => (await getSkillClient(dev)).get('/api/v1/probe')],
 ]

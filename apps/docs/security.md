@@ -93,6 +93,12 @@ All network communication is encrypted with TLS 1.2+:
 |---|---|
 | Proxy → LLM Provider | HTTPS (TLS 1.2+) |
 
+<!-- ENTERPRISE_ONLY_START -->
+**Intutic Cloud.** The dashboard, the API, the docs, the hosted gateway and managed cells accept HTTPS only: a plain HTTP request is redirected (301) to HTTPS, or not served at all. Their load balancers accept TLS 1.2 and 1.3 with AEAD cipher suites (AES-GCM, ChaCha20-Poly1305) and nothing older, and browser-facing hosts send `Strict-Transport-Security` with a one-year lifetime.
+
+Inside the cluster, connections to PostgreSQL use TLS 1.2 or later, every client checks the server's certificate against Intutic's own CA and host name, and the database refuses connections without TLS. Valkey accepts commands only from clients that authenticate with its password. Calls between Intutic's own services inside the cluster, and to its self-hosted judge models inside the same private network, are not encrypted.
+
+<!-- ENTERPRISE_ONLY_END -->
 ### At Rest
 
 | Data | Storage | Encryption |
@@ -199,6 +205,7 @@ Connected harnesses get an enforcement tier from the governance layers found act
 | Layer | Controls |
 |---|---|
 | **Network** | VPC isolation, private subnets, no public database endpoints |
+| **Transport** | HTTPS only on every public endpoint (TLS 1.2+, HSTS); TLS with certificate verification to PostgreSQL; password-authenticated Valkey |
 | **Compute** | GKE with node auto-upgrade, workload identity, pod security standards |
 | **Secrets** | A managed secret store — never committed to source control |
 | **Monitoring** | Structured logging with trace context |

@@ -62,7 +62,7 @@ function createMockControlPlane(rules: Record<string, unknown[]>): http.Server {
     const url = new URL(req.url ?? '', 'http://127.0.0.1')
     if (url.pathname === '/api/v1/sop/rules') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ rules: rules[url.searchParams.get('workspaceId') ?? ''] ?? [], dlpPatterns: [], allowedTools: [] }))
+      res.end(JSON.stringify({ rules: rules[url.searchParams.get('workspaceId') ?? ''] ?? [], allowedTools: [] }))
       return
     }
     req.resume()

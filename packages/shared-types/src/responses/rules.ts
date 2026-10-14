@@ -1,5 +1,5 @@
 /**
- * Responses of the control plane routes in policies.ts, wasmRules.ts, sops.ts, decisions.ts, judge.ts and hookEvents.ts.
+ * Responses of the control plane routes in wasmRules.ts, sops.ts, decisions.ts, judge.ts and hookEvents.ts.
  *
  * @module
  */
@@ -9,88 +9,6 @@ import { PII_ACTIONS, PII_DETECTOR_IDS } from '../piiDetectors.js'
 import { DeletedResponse, IsoTimestamp, listEnvelope } from './common.js'
 
 const InterventionMode = z.enum(['TRANSPARENT', 'OPAQUE', 'SILENT_LOG'])
-
-// ─── Enforcement policies (routes/policies.ts, deprecated) ────────────
-
-/** A `pcas_policies` row as the routes select it. */
-export const PolicyResponse = z.object({
-  policyId: z.string(),
-  workspaceId: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
-  riskCategory: z.enum(['NONE', 'DESTRUCTIVE', 'CREDENTIAL_ACCESS']).nullable(),
-  targetToolPattern: z.string(),
-  /** `OBSERVED` is never written by these routes, but a row may carry it. */
-  enforcementAction: z.enum(['BYPASS', 'ENHANCE', 'HIJACK', 'REASK', 'KILL', 'OBSERVED']),
-  interventionMode: InterventionMode.nullable(),
-  priority: z.number().int().nullable(),
-  conditions: z.unknown().describe('The policy conditions: a JSON object, or null.'),
-  isActive: z.boolean().nullable(),
-  currentVersion: z.number().int(),
-  createdAt: IsoTimestamp,
-  updatedAt: IsoTimestamp,
-  deletedAt: IsoTimestamp.nullable(),
-})
-export type PolicyResponse = z.infer<typeof PolicyResponse>
-
-/** `GET /api/v1/policies`: the live policies, newest first, and where the workspace's intervention mode comes from. */
-export const PolicyListResponse = z.object({
-  ok: z.literal(true),
-  policies: z.array(PolicyResponse),
-  interventionMode: z.object({
-    mode: InterventionMode,
-    source: z.enum(['setting', 'policy', 'default']).describe('The `interventionMode` setting, the lowest-priority active policy (deprecated fallback), or the default.'),
-    policyId: z.string().nullable().describe('The policy whose mode applies, when `source` is `policy`.'),
-  }),
-})
-export type PolicyListResponse = z.infer<typeof PolicyListResponse>
-
-/** `POST /api/v1/policies`: the created policy. */
-export const PolicyCreatedResponse = z.object({ ok: z.literal(true), policy: PolicyResponse })
-export type PolicyCreatedResponse = z.infer<typeof PolicyCreatedResponse>
-
-/** `PUT /api/v1/policies/:policyId`: the policy as updated, and its new version. */
-export const PolicyUpdatedResponse = z.object({ ok: z.literal(true), policy: PolicyResponse, currentVersion: z.number().int() })
-export type PolicyUpdatedResponse = z.infer<typeof PolicyUpdatedResponse>
-
-/** `DELETE /api/v1/policies/:policyId`: soft-deleted. */
-export const PolicyDeletedResponse = z.object({ ok: z.literal(true) })
-export type PolicyDeletedResponse = z.infer<typeof PolicyDeletedResponse>
-
-/** Enable, disable or roll back a policy: the version the change recorded. */
-export const PolicyVersionResponse = z.object({ ok: z.literal(true), currentVersion: z.number().int() })
-export type PolicyVersionResponse = z.infer<typeof PolicyVersionResponse>
-
-/** The hook rule a converted policy became (`lib/policyConversion.ts`). */
-const ConvertedHookRule = z.object({
-  kind: z.literal('hook_rule'),
-  title: z.string(),
-  tools: z.array(z.string()),
-  argContains: z.array(z.string()).optional(),
-  argNotContains: z.array(z.string()).optional(),
-})
-
-/**
- * `POST /api/v1/policies/:policyId/convert-to-guardrail`: the guardrail made
- * from the policy (201, or 200 when a concurrent conversion made it first),
- * or the one an earlier conversion made (200, without `ir`).
- */
-export const PolicyGuardrailConversionResponse = z.union([
-  z.object({
-    ok: z.literal(true),
-    created: z.boolean(),
-    guardrailId: z.string(),
-    status: z.literal('SHADOW'),
-    ir: ConvertedHookRule,
-  }),
-  z.object({
-    ok: z.literal(true),
-    created: z.literal(false),
-    guardrailId: z.string(),
-    status: z.string().describe('The existing guardrail\'s status.'),
-  }),
-])
-export type PolicyGuardrailConversionResponse = z.infer<typeof PolicyGuardrailConversionResponse>
 
 // ─── WASM rules (routes/wasmRules.ts) ─────────────────────────────────
 
@@ -215,10 +133,12 @@ export const SopRuleResponse = z.object({
 })
 export type SopRuleResponse = z.infer<typeof SopRuleResponse>
 
-/** `GET /api/v1/sop/rules`: the rule set and MCP curation the MCP proxy polls. */
-export const SopRulesResponse = listEnvelope('rules', 'camel').extend({
-  ok: z.literal(true),
-  rules: z.array(SopRuleResponse),
+/**
+ * The workspace's MCP curation (`lib/mcpCuration.ts`), which
+ * `GET /api/v1/sop/rules` and `GET /api/v1/policy/resolve` both send, so the
+ * per-session and daemon-mode MCP proxies see the same curation.
+ */
+const McpCuration = z.object({
   allowedTools: z.array(z.string()).describe('Empty means unrestricted.'),
   toolDescriptionOverrides: z.record(z.string()),
   allowedServers: z.array(z.string()).describe('Empty means unrestricted.'),
@@ -264,13 +184,31 @@ export const SopRulesResponse = listEnvelope('rules', 'camel').extend({
     .object({ memberId: z.string(), email: z.string(), role: z.string(), ssoGroups: z.array(z.string()) })
     .nullable()
     .describe('The member behind the caller\'s key, with their SSO groups; null when there is none.'),
-  interventionMode: InterventionMode,
   mcpProxyFailBehavior: z.enum(['open', 'closed']).optional(),
   mcpInjectionAction: z.enum(['warn', 'block']).optional(),
   mcpAnomalyMode: z.enum(['enforce', 'warn', 'off']).optional(),
   mcpAnomalyOverrides: z.record(z.enum(['steer', 'reask', 'kill', 'off'])).optional(),
 })
+
+/** `GET /api/v1/sop/rules`: the rule set and MCP curation the MCP proxy polls. */
+export const SopRulesResponse = listEnvelope('rules', 'camel')
+  .extend({ ok: z.literal(true), rules: z.array(SopRuleResponse) })
+  .merge(McpCuration)
+  .extend({ interventionMode: InterventionMode })
 export type SopRulesResponse = z.infer<typeof SopRulesResponse>
+
+/**
+ * `GET /api/v1/policy/resolve`: the same rules and curation as
+ * `GET /api/v1/sop/rules`, as the sync daemon and the daemon-mode MCP proxy
+ * cache them, plus the flags the daemon's policy snapshot carries.
+ */
+export const PolicyResolveResponse = McpCuration.extend({
+  workspaceId: z.string(),
+  sopRules: z.array(SopRuleResponse),
+  interventionMode: InterventionMode,
+  sqlDropStrictBlock: z.boolean().describe('`ff_sql_drop_strict_block`: the daemon\'s destructive-SQL hook rule blocks instead of warning.'),
+})
+export type PolicyResolveResponse = z.infer<typeof PolicyResolveResponse>
 
 // ─── Decisions and rule candidates (routes/decisions.ts) ─────────────
 
@@ -298,6 +236,25 @@ export type ApprovedBypassResponse = z.infer<typeof ApprovedBypassResponse>
 /** `GET /api/v1/decisions/approved-bypasses`. */
 export const ApprovedBypassListResponse = z.object({ ok: z.literal(true), bypasses: z.array(ApprovedBypassResponse) })
 export type ApprovedBypassListResponse = z.infer<typeof ApprovedBypassListResponse>
+
+/**
+ * `GET /api/v1/decisions/:entryId`: one decision-queue entry, found by its
+ * entry id or by the hold id a gate gave the agent (`hold_…`). The MCP
+ * proxy's `intutic_hold_status` tool reads `status`.
+ */
+export const DecisionDetailResponse = z.object({
+  entry_id: z.string(),
+  session_id: z.string().nullable(),
+  workspace_id: z.string(),
+  original_tool_call: z.unknown().describe('The held tool call, as the gate reported it.'),
+  hijacked_tool_call: z.unknown(),
+  outcome: z.string(),
+  trace_id: z.string().nullable(),
+  rationale: z.string().nullable(),
+  status: z.string().nullable().describe('`PENDING_REVIEW` until a person decides it; `APPROVED` or `REJECTED` after.'),
+  created_at: IsoTimestamp.nullable(),
+})
+export type DecisionDetailResponse = z.infer<typeof DecisionDetailResponse>
 
 /** `POST /api/v1/decisions/:entryId/review`. */
 export const DecisionReviewResponse = z.object({
@@ -334,6 +291,28 @@ export type RuleCandidateBundleResponse = z.infer<typeof RuleCandidateBundleResp
 
 const CascadeBand = z.object({ lo: z.number(), hi: z.number() })
 
+/** Stage one of the judge cascade, as a verdict reports it. */
+const CascadeSummary = z.object({
+  decision: z.enum(['clean', 'violation', 'review']),
+  score: z.number().nullable().describe('Null when stage 1 did not answer.'),
+  band: CascadeBand,
+  model: z.string(),
+  reviewId: z.string().optional(),
+})
+
+/** `POST /api/v1/judge/chunk`: the verdict on one streamed segment of a response. */
+export const JudgeChunkResponse = z.object({
+  verdict: z.enum(['TRIGGERED', 'PASS']),
+  triggered: z.boolean().describe('An organization SOP was violated.'),
+  personalTriggered: z.boolean().describe('A personal (local-only) SOP was violated; never persisted.'),
+  explanation: z.string(),
+  cascade: CascadeSummary.optional().describe('When the cascade\'s stage 1 graded the segment.'),
+  independent: z.boolean().describe('False when the judge is the monitored model grading itself.'),
+  judgeSource: z.literal('platform'),
+  judgeModel: z.string(),
+})
+export type JudgeChunkResponse = z.infer<typeof JudgeChunkResponse>
+
 /** `POST /api/v1/judge/finalize`: the final verdict on a response. */
 export const JudgeFinalizeResponse = z.object({
   verdict: z.enum(['TRIGGERED', 'REVIEW', 'PASS']).describe('`REVIEW`: held for a person; no org verdict exists yet.'),
@@ -347,15 +326,7 @@ export const JudgeFinalizeResponse = z.object({
   typedAdvisory: z
     .object({ violation: z.boolean(), pViolation: z.number(), threshold: z.number(), model: z.string(), independent: z.boolean() })
     .optional(),
-  cascade: z
-    .object({
-      decision: z.enum(['clean', 'violation', 'review']),
-      score: z.number().nullable().describe('Null when stage 1 did not answer.'),
-      band: CascadeBand,
-      model: z.string(),
-      reviewId: z.string().optional(),
-    })
-    .optional(),
+  cascade: CascadeSummary.optional(),
   personalCascade: z.object({ decision: z.enum(['clean', 'violation', 'review']), score: z.number() }).optional(),
 })
 export type JudgeFinalizeResponse = z.infer<typeof JudgeFinalizeResponse>

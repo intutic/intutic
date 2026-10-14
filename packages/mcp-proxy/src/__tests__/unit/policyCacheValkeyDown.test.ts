@@ -31,7 +31,7 @@ describe('policyCache with a Valkey that never answers', () => {
       requests++
       const workspaceId = new URL(req.url ?? '', `http://${req.headers.host}`).searchParams.get('workspaceId')
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ workspaceId, sopRules: [], dlpPatterns: [], mcpInjectionPatterns: [], interventionMode: 'BLOCK' }))
+      res.end(JSON.stringify({ workspaceId, sopRules: [], mcpInjectionPatterns: [], interventionMode: 'BLOCK' }))
     })
     process.env['VALKEY_URL'] = `redis://127.0.0.1:${await listen(blackHole)}`
     process.env['CONTROL_PLANE_URL'] = `http://127.0.0.1:${await listen(controlPlane)}`

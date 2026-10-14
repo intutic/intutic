@@ -38,6 +38,15 @@ export function listEnvelope<K extends string, C extends z.infer<typeof RowCase>
   return z.object({ listProperty: z.literal(listProperty), rowCase: z.literal(rowCase) })
 }
 
+/**
+ * A response as a client reads it defensively: every field the schema
+ * declares (of any branch of a union), each `unknown` until the client checks
+ * it. A client that casts a body to `WireFields<SomeResponse>` instead of
+ * `Record<string, unknown>` can read only fields the route sends, so a field
+ * renamed on either side fails `tsc` rather than reading as absent forever.
+ */
+export type WireFields<T> = { [K in T extends unknown ? keyof T : never]?: unknown }
+
 /** `{ deleted: true }`, the answer of a delete that has nothing else to say. */
 export const DeletedResponse = z.object({ deleted: z.literal(true) })
 export type DeletedResponse = z.infer<typeof DeletedResponse>

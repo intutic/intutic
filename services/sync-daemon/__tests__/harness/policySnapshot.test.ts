@@ -347,8 +347,8 @@ describe('buildSnapshotRules', () => {
   })
 
   it('SILENT_LOG demotes the dynamic tier only — the static floor is untouched', () => {
-    // The demotion is keyed on SILENT_LOG, the one intervention_mode_type
-    // value that means observe-only (this check used to compare against
+    // The demotion is keyed on SILENT_LOG, the one intervention mode
+    // that means observe-only (this check used to compare against
     // 'SHADOW', which the enum can never produce — a dead branch, so a
     // SILENT_LOG workspace shipped fully-blocking snapshots).
     const rules = buildSnapshotRules(policy({ interventionMode: 'SILENT_LOG' }))

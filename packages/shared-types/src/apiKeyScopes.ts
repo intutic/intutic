@@ -33,7 +33,7 @@ export const API_SCOPE_AREAS = {
   usage: 'usage, cost and routing analytics, cost prediction and provider incidents',
   findings: 'findings, incidents, anomalies, holds and decisions, judge reviews, governance cards, trust scores and break-glass',
   sops: 'SOPs and their lifecycle, skills, the dream cycle, MetaClaw and optimisation suggestions',
-  policies: 'policies, guardrails and policy documents, WASM rules, rule candidates and the evaluator sandbox',
+  policies: 'guardrails and policy documents, WASM rules, rule candidates and the evaluator sandbox',
   compliance: 'compliance coverage, probes and evidence exports, and the audit timeline',
   inventory: 'developer machines, harnesses, MCP servers, self-hosted gateways and governance coverage',
   settings: 'workspace settings, provider credentials, region, orgs and teams, domains, SSO providers and the license',
@@ -111,23 +111,22 @@ export function scopesGrantAny(granted: readonly string[], anyOf: readonly strin
 }
 
 /**
- * What a key's stored scopes mean today.
+ * What a key's stored scopes grant.
  *
- * - All known: those scopes.
- * - None known (a key written with free-form scope strings before scopes were
- *   enforced, such as `["read"]`): `*`, flagged `legacy`, for one release —
- *   until 2.6.0, when such a key is refused. The control plane logs a
- *   deprecation warning on each use and the dashboard marks the key.
- * - Some known: the known ones; the unknown ones grant nothing.
+ * - The ones in the registry, compacted; strings outside it grant nothing and
+ *   are listed in `ignored`. A key whose stored scopes are all outside the
+ *   registry (free-form strings written before scopes were enforced, such as
+ *   `["read"]`) grants nothing, so every request with it is refused with
+ *   `INSUFFICIENT_SCOPE`, like any key lacking a scope. (Before 2.6.0 such a
+ *   key worked as `*`.)
  * - Missing (a NULL column): `*`, the column's default.
  */
-export function effectiveApiKeyScopes(stored: unknown): { scopes: ApiKeyScope[]; legacy: boolean; ignored: string[] } {
-  if (!Array.isArray(stored)) return { scopes: [ALL_SCOPES], legacy: false, ignored: [] }
+export function effectiveApiKeyScopes(stored: unknown): { scopes: ApiKeyScope[]; ignored: string[] } {
+  if (!Array.isArray(stored)) return { scopes: [ALL_SCOPES], ignored: [] }
   const strings = stored.filter((s): s is string => typeof s === 'string')
   const known = strings.filter(isApiKeyScope)
   const ignored = strings.filter((s) => !SCOPE_SET.has(s))
-  if (known.length === 0) return { scopes: [ALL_SCOPES], legacy: true, ignored }
-  return { scopes: compactScopes(known), legacy: false, ignored }
+  return { scopes: compactScopes(known), ignored }
 }
 
 /**

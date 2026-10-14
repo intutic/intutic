@@ -37,17 +37,20 @@ type sopModel struct {
 	ContentHash     types.String `tfsdk:"content_hash"`
 }
 
+// apiSop is SopResponse (responses/rules.ts). The tiers are null for a SOP
+// written without them (the SOP health check writes none); versionCounter and
+// contentHash are optional there.
 type apiSop struct {
-	SopID           string `json:"sopId"`
-	Title           string `json:"title"`
-	Version         string `json:"version"`
-	MarkdownContent string `json:"markdownContent"`
-	RiskTier        string `json:"riskTier"`
-	ComplexityTier  string `json:"complexityTier"`
-	IsActive        bool   `json:"isActive"`
-	LifecycleState  string `json:"lifecycleState"`
-	VersionCounter  int64  `json:"versionCounter"`
-	ContentHash     string `json:"contentHash"`
+	SopID           string  `json:"sopId"`
+	Title           string  `json:"title"`
+	Version         string  `json:"version"`
+	MarkdownContent string  `json:"markdownContent"`
+	RiskTier        *string `json:"riskTier"`
+	ComplexityTier  *string `json:"complexityTier"`
+	IsActive        bool    `json:"isActive"`
+	LifecycleState  string  `json:"lifecycleState"`
+	VersionCounter  *int64  `json:"versionCounter"`
+	ContentHash     *string `json:"contentHash"`
 }
 
 func newSopResource() resource.Resource { return &sopResource{} }
@@ -217,7 +220,10 @@ func (r *sopResource) Update(ctx context.Context, req resource.UpdateRequest, re
 
 	// Only the fields that changed: the API's anti-gaming analysis compares the
 	// markdown it is sent against the stored copy.
-	body := map[string]any{"version_counter": state.VersionCounter.ValueInt64()}
+	body := map[string]any{}
+	if !state.VersionCounter.IsNull() {
+		body["version_counter"] = state.VersionCounter.ValueInt64()
+	}
 	if !plan.Title.Equal(state.Title) {
 		body["title"] = plan.Title.ValueString()
 	}
@@ -288,10 +294,10 @@ func (s *apiSop) applyTo(m *sopModel) {
 	m.ID = types.StringValue(s.SopID)
 	m.Title = types.StringValue(s.Title)
 	m.MarkdownContent = types.StringValue(s.MarkdownContent)
-	m.RiskTier = types.StringValue(s.RiskTier)
-	m.ComplexityTier = types.StringValue(s.ComplexityTier)
+	m.RiskTier = stringOrNull(s.RiskTier)
+	m.ComplexityTier = stringOrNull(s.ComplexityTier)
 	m.Version = types.StringValue(s.Version)
 	m.LifecycleState = types.StringValue(s.LifecycleState)
-	m.VersionCounter = types.Int64Value(s.VersionCounter)
-	m.ContentHash = types.StringValue(s.ContentHash)
+	m.VersionCounter = int64OrNull(s.VersionCounter)
+	m.ContentHash = stringOrNull(s.ContentHash)
 }

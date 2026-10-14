@@ -14,7 +14,13 @@
       "GET /intutic/spend": "loopback diagnostics of the local proxy",
       "GET /intutic/instance": "loopback diagnostics of the local proxy",
       "GET /intutic/probes": "loopback diagnostics of the local proxy",
-      "POST /intutic/attest-sandbox": "loopback endpoint the sandbox entrypoint calls; part of sandboxed execution, which predates this manifest"
+      "POST /intutic/attest-sandbox": "loopback endpoint the sandbox entrypoint calls; part of sandboxed execution, which predates this manifest",
+      "GET /api/v1/email/unsubscribe": "the unsubscribe link in promotional email, a legal requirement of sending it rather than a product feature; documented in the API reference",
+      "POST /api/v1/email/unsubscribe": "the unsubscribe link's confirmation and RFC 8058 one-click target, a legal requirement of sending promotional email rather than a product feature"
+    },
+    "eventTypes": {
+      "billing.dunning.downgraded": "billing lifecycle notice (a failed payment moved the account to Free); billing is no governance feature this manifest lists, and its sibling billing.subscription.past_due is in the baseline; documented in guide/plans.md#failed-payments",
+      "billing.dunning.restored": "billing lifecycle notice (payment brought the plan back); same reason as billing.dunning.downgraded"
     },
     "docsPages": {
       "reference/workspace-settings.md": "the reference for every workspace settings key, which many features share; services/control-plane/__tests__/unit/settingsKeyParity.test.ts holds it to the settings schema",
@@ -889,25 +895,24 @@
       }
     },
     {
-      "id": "policy-deprecation",
-      "title": "Enforcement policies deprecated: the intervention mode setting and conversion to guardrails",
+      "id": "intervention-mode",
+      "title": "Intervention mode: what a refused agent is told, one workspace setting for every gate",
       "plan": "Cloud",
       "surfaces": {
-        "api": [{ "ref": "POST /api/v1/policies/:policyId/convert-to-guardrail", "auth": "OWNER/ADMIN" }],
+        "api": { "none": "the interventionMode key of the workspace settings routes, which their own feature lists" },
         "dashboard": [
-          { "file": "apps/dashboard/src/routes/PoliciesPage.tsx", "contains": "Convert to guardrail" },
           { "file": "apps/dashboard/src/components/settings/InterventionModePanel.tsx" }
         ],
-        "cli": ["policy convert"],
-        "gateSdk": { "none": "the gates read the resolved intervention mode as before; nothing about policies reaches them" },
-        "clawdeSdk": { "none": "conversion is an operator migration step, not an SDK call" },
-        "mcpTools": { "none": "operator migration, not an agent action" },
-        "kitkat": { "none": "operator migration, not an agent action" },
-        "terraform": ["intutic_policy", "workspace_settings.interventionMode"],
-        "docs": ["guide/policies.md#policy-deprecation"],
-        "website": { "none": "the site never described enforcement policies" },
-        "events": { "none": "a converted guardrail emits the guardrail events any guardrail does" },
-        "enforcement": { "none": "a converted guardrail starts in shadow and enforces through the guardrail lifecycle" }
+        "cli": { "none": "set with intutic settings set interventionMode, the generic settings command" },
+        "gateSdk": { "none": "the gates read the resolved mode from the policy snapshot or the SOP register" },
+        "clawdeSdk": { "none": "a workspace setting, read and written with the settings methods" },
+        "mcpTools": { "none": "a workspace setting, not an agent action" },
+        "kitkat": { "none": "a workspace setting, not an agent action" },
+        "terraform": ["workspace_settings.interventionMode"],
+        "docs": ["guide/policies.md#intervention-modes"],
+        "website": { "none": "the site does not describe the intervention modes" },
+        "events": { "none": "a change is recorded as the settings change it is" },
+        "enforcement": [{ "file": "services/control-plane/src/lib/interventionMode.ts", "contains": "interventionModeFromSettings" }]
       }
     },
     {
@@ -924,7 +929,6 @@
         "kitkat": { "none": "not agent-facing" },
         "terraform": [
           "intutic_sop",
-          "intutic_policy",
           "intutic_workspace_settings",
           "intutic_virtual_key",
           "intutic_workspace",

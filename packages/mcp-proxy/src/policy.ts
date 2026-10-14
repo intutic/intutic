@@ -11,6 +11,7 @@ import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
 import { HttpStatusError, httpRequest } from './httpJson.js'
 import type { ResolvedPolicy } from './daemon/policyCache.js'
+import type { PolicyResolveResponse, SopRulesResponse, WireFields } from '@intutic/shared-types'
 import {
   isOpaqueInterventionMode,
   parseMcpBudgetPolicy,
@@ -71,9 +72,18 @@ export function isSopRule(value: unknown): value is SopRule {
   )
 }
 
-interface SopRulesResponse {
-  rules: SopRule[]
-}
+/**
+ * The fields {@link PolicyClient} reads from a policy: the two routes'
+ * (`GET /api/v1/sop/rules`, and `GET /api/v1/policy/resolve` through the
+ * daemon), plus the settings names the sync daemon's policy snapshot uses for
+ * the curation lists.
+ */
+type CurationSource = WireFields<SopRulesResponse> &
+  WireFields<PolicyResolveResponse> & {
+    mcpAllowedTools?: unknown
+    mcpToolDescriptionOverrides?: unknown
+    mcpAllowedServers?: unknown
+  }
 
 /**
  * The workspace's MCP server registry decisions, as the control plane sends
@@ -181,13 +191,6 @@ const UNKNOWN_REGISTRY_RETRY_MS = 5_000
 
 export class PolicyClient {
   private rules: SopRule[] = []
-  /**
-   * Workspace DLP regex sources, delivered to the scanner on every refresh.
-   * The daemon has cached these since the policy cache existed; this client
-   * received and dropped them — a workspace's custom patterns were a setting
-   * wired to nothing.
-   */
-  private dlpPatterns: string[] = []
   /** Workspace injection-pattern sources (`mcpInjectionPatterns`); empty = floor only. */
   private injectionPatterns: string[] = []
   /**
@@ -384,14 +387,9 @@ export class PolicyClient {
     return this.rules
   }
 
-  /** Workspace DLP regex sources from the last successful refresh. */
   /** Workspace-supplied prompt-injection regex sources; empty means the hardcoded floor alone. */
   getInjectionPatterns(): readonly string[] {
     return this.injectionPatterns
-  }
-
-  getDlpPatterns(): readonly string[] {
-    return this.dlpPatterns
   }
 
   /** The additive tool allowlist; empty means unrestricted. */
@@ -432,7 +430,7 @@ export class PolicyClient {
   }
 
   /** Parse the optional curation fields shared by both refresh paths. */
-  private absorbCuration(source: Record<string, unknown>): void {
+  private absorbCuration(source: CurationSource): void {
     const allowed = source['allowedTools'] ?? source['mcpAllowedTools']
     this.allowedTools = Array.isArray(allowed)
       ? allowed.filter((t): t is string => typeof t === 'string')
@@ -570,10 +568,7 @@ export class PolicyClient {
             log.info({ action: 'policy_snapshot_rules_only', ruleCount: this.rules.length }, 'Daemon answered from its snapshot; kept the loaded curation')
             return
           }
-          this.dlpPatterns = (policy.dlpPatterns ?? []).filter(
-            (p): p is string => typeof p === 'string',
-          )
-          this.absorbCuration(policy as unknown as Record<string, unknown>)
+          this.absorbCuration(policy as unknown as CurationSource)
           // Re-parsed, not trusted: a daemon on an older version, or an entry it
           // cached before a field existed, can carry a registry without one.
           if (policy.mcpRegistry) this.registry = parseRegistry(policy.mcpRegistry) ?? this.registry
@@ -609,13 +604,9 @@ export class PolicyClient {
       if (err instanceof HttpStatusError && (err.status === 401 || err.status === 403)) this.principal = undefined
       throw err
     }
-    const parsed = JSON.parse(body) as SopRulesResponse & Record<string, unknown>
-    const rules = Array.isArray(parsed.rules) ? parsed.rules : []
+    const parsed = JSON.parse(body) as WireFields<SopRulesResponse>
+    const rules = Array.isArray(parsed.rules) ? (parsed.rules as SopRule[]) : []
     this.rules = rules
-    const dlp = parsed['dlpPatterns']
-    this.dlpPatterns = Array.isArray(dlp)
-      ? dlp.filter((p): p is string => typeof p === 'string')
-      : []
     this.absorbCuration(parsed)
     // A control plane that sends no registry has none: unrestricted, not unknown.
     this.registry = parseRegistry(parsed['mcpRegistry']) ?? UNRESTRICTED_REGISTRY

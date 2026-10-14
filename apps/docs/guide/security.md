@@ -152,7 +152,6 @@ Some dashboard features are restricted to specific roles:
 |---------|--------------|
 | Overview › Spend tab | Owner, Admin, or EM |
 | Activity › AI Inventory | Owner, Admin, EM, or Developer |
-| Policies › Enforcement Policies | Owner, Admin, or EM |
 | Policies › Policy Guardrails | Owner, Admin, or EM |
 | Policies › Custom Filters (WASM) | Owner, Admin, or EM |
 | Policies › Emergency Overrides | Owner, Admin, or EM |

@@ -1,3 +1,18 @@
+## 0.4.0 (Unreleased)
+
+BREAKING CHANGES:
+
+* resource/intutic_policy: removed, along with the control plane's policies API (`/api/v1/policies`). No gate or proxy ever enforced a policy's per-tool fields. Write per-tool rules as `intutic_guardrail` with `kind = "hook_rule"` (`tools`, `arg_contains`, `arg_not_contains`), which the harness gates enforce once the guardrail is promoted through review, and set the intervention mode with the `interventionMode` key of `intutic_workspace_settings`. Before upgrading, delete every `intutic_policy` block from your configuration and run `terraform state rm` on each one: this version no longer knows the resource type, so a configuration or state that still holds one fails to plan.
+
+ENHANCEMENTS:
+
+* resource/intutic_notification_rule: accepts the event types `billing.dunning.downgraded` (the third failed payment moved the account to the free plan) and `billing.dunning.restored` (the overdue payment was made and the plan is back).
+* resource/intutic_workspace_settings: the `interventionMode` key is the only source of the workspace's intervention mode; a workspace that has not set it uses `TRANSPARENT`. Before, a workspace without the setting took the mode of its lowest-priority active policy.
+
+BUG FIXES:
+
+* resource/intutic_sop: `risk_tier`, `complexity_tier`, `version_counter` and `content_hash` read as null when the API sends none. A SOP written without tiers (the SOP health check writes none) imported with `risk_tier = ""` and `complexity_tier = ""`, and a SOP without a version counter was updated with `version_counter = 0`, which the API refuses; an update now sends no counter when there is none.
+
 ## 0.3.0 (October 14, 2026)
 
 BREAKING CHANGES:

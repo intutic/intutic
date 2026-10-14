@@ -60,6 +60,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
+import type { PolicyResolveResponse, WireFields } from '@intutic/shared-types'
 import {
   encodeInterventionModeRecord,
   encodeMcpAllowlistRecord,
@@ -479,7 +480,7 @@ function toGuardPattern(
 /** The `principal` of a resolve response, or null when it names no member. */
 function parsePrincipal(value: unknown): ResolvedPolicy['principal'] {
   if (typeof value !== 'object' || value === null) return null
-  const p = value as Record<string, unknown>
+  const p = value as WireFields<NonNullable<PolicyResolveResponse['principal']>>
   if (typeof p.memberId !== 'string' || !p.memberId) return null
   return {
     memberId: p.memberId,
@@ -514,14 +515,14 @@ async function requestResolvedPolicy(
     }
     const body = (await res.json()) as unknown
     if (typeof body !== 'object' || body === null) return null
-    const rec = body as Record<string, unknown>
+    const rec = body as WireFields<PolicyResolveResponse>
     const rules = Array.isArray(rec.sopRules) ? rec.sopRules : []
     return {
       workspaceId: typeof rec.workspaceId === 'string' ? rec.workspaceId : opts.workspaceId,
       interventionMode: typeof rec.interventionMode === 'string' ? rec.interventionMode : 'TRANSPARENT',
       sopRules: rules.filter((r): r is ResolvedPolicy['sopRules'][number] => {
         if (typeof r !== 'object' || r === null) return false
-        const x = r as Record<string, unknown>
+        const x = r as WireFields<PolicyResolveResponse['sopRules'][number]>
         return (
           typeof x.id === 'string' &&
           typeof x.toolPattern === 'string' &&
@@ -557,9 +558,9 @@ async function requestResolvedPolicy(
  * which stays enforced. If one settings string could disarm the floor, the
  * floor would not be a floor.
  *
- * This used to compare against 'SHADOW', a value intervention_mode_type
- * (TRANSPARENT|OPAQUE|SILENT_LOG — packages/db/src/enums.ts) can never
- * produce, so the observe-only branch was dead and a SILENT_LOG workspace
+ * This used to compare against 'SHADOW', which no intervention mode
+ * (TRANSPARENT|OPAQUE|SILENT_LOG — the interventionMode workspace setting) can
+ * ever be, so the observe-only branch was dead and a SILENT_LOG workspace
  * shipped fully-blocking snapshots.
  *
  * Extracted so `buildSnapshotRules` and `writePolicySnapshot`'s `@mcp_allowlist`

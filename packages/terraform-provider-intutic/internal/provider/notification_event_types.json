@@ -61,6 +61,8 @@
     "inventory.ungoverned.detected",
     "provider.outage.detected",
     "billing.subscription.past_due",
+    "billing.dunning.downgraded",
+    "billing.dunning.restored",
     "skill.malware.detected",
     "skill.semantic.flagged"
   ]

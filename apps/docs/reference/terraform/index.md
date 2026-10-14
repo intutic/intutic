@@ -38,7 +38,6 @@ provider "intutic" {
 ## Resources
 
 - [intutic_sop](./resources/sop)
-- [intutic_policy](./resources/policy) (deprecated; sunsets 2026-12-01)
 - [intutic_guardrail](./resources/guardrail)
 - [intutic_workspace_settings](./resources/workspace_settings)
 - [intutic_virtual_key](./resources/virtual_key)

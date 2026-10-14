@@ -454,6 +454,8 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(false);
     let valkey_url =
         std::env::var("VALKEY_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+    // What the log lines below name: the URL can carry the Valkey password.
+    let valkey_url_shown = telemetry::redact_url(&valkey_url);
 
     if standalone_forced && managed {
         return Err(anyhow::anyhow!(
@@ -476,7 +478,7 @@ async fn main() -> anyhow::Result<()> {
     } else if !managed {
         match tokio::time::timeout(PROBE_TIMEOUT, telemetry::connect_valkey(&valkey_url)).await {
             Ok(Ok(v)) => {
-                tracing::info!("Connected to Valkey at {}", valkey_url);
+                tracing::info!("Connected to Valkey at {}", valkey_url_shown);
                 Some(v)
             }
             Ok(Err(e)) => {
@@ -485,7 +487,7 @@ async fn main() -> anyhow::Result<()> {
                      ~/.intutic, the response cache is in-memory, and control-plane features \
                      (auth, budgets, WASM rule distribution, auto-judge) are inactive. \
                      Connect a control plane with CONTROL_PLANE_URL to enable them.",
-                    valkey_url,
+                    valkey_url_shown,
                     e
                 );
                 None
@@ -494,7 +496,7 @@ async fn main() -> anyhow::Result<()> {
                 tracing::info!(
                     "Valkey at {} did not answer within {:?}. Running standalone; \
                      set VALKEY_URL if it lives elsewhere.",
-                    valkey_url,
+                    valkey_url_shown,
                     PROBE_TIMEOUT
                 );
                 None
@@ -503,12 +505,12 @@ async fn main() -> anyhow::Result<()> {
     } else {
         match telemetry::connect_valkey(&valkey_url).await {
             Ok(v) => {
-                tracing::info!("Connected to Valkey at {}", valkey_url);
+                tracing::info!("Connected to Valkey at {}", valkey_url_shown);
                 Some(v)
             }
             Err(e) => {
                 return Err(anyhow::anyhow!(
-                    "Could not connect to Valkey at {valkey_url}: {e}\n\n\
+                    "Could not connect to Valkey at {valkey_url_shown}: {e}\n\n\
                      CONTROL_PLANE_URL is set, so this proxy is control-plane managed and \
                      Valkey holds the auth and budget cache it depends on. Running without \
                      it would leave requests unauthenticated, so this is fatal rather than \

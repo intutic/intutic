@@ -16,7 +16,7 @@
 import * as node_crypto from 'node:crypto'
 import { createStderrLogger as createLogger } from './stderrLog.js'
 import { evaluateMcpRegistry, evaluateSsoGroupClearance, holdApprovalHint } from '@intutic/shared-types'
-import { scanToolInput, formatDlpBlockReason, setDynamicPatterns, setWorkspacePii } from './dlp.js'
+import { scanToolInput, formatDlpBlockReason, setWorkspacePii } from './dlp.js'
 import type { DlpFinding } from './dlp.js'
 import { scanText, injectionSeverity, setDynamicInjectionPatterns } from './injection.js'
 import { evaluateSequenceDetectors, resolveEffectiveDisposition, REASK_MAX_ATTEMPTS } from './anomaly/index.js'
@@ -403,13 +403,7 @@ export class ToolCallInterceptor {
     const clearance = this.checkSsoGroupClearance(toolName, toolInput)
     if (clearance) return clearance
 
-    // 1. DLP scan — with the workspace's own patterns loaded first, so a
-    // control-plane-defined pattern reaches the same scanner as the floor.
-    try {
-      setDynamicPatterns(this.policy.getDlpPatterns())
-    } catch {
-      // Pattern delivery must never take the scanner down; the floor stands.
-    }
+    // 1. DLP scan.
     // The workspace's PII detector actions, the baseline this machine's
     // INTUTIC_MCP_DLP_DETECTORS may only tighten. When the control plane
     // could not read them, which detectors the workspace requires is

@@ -626,33 +626,6 @@ POST /api/v1/mcp/servers/:serverId/tools — switch one tool off (OWNER, ADMIN).
 
 ***
 
-### ~~disablePolicy()~~
-
-```ts
-disablePolicy(policyId): Promise<PolicyChangeResult>;
-```
-
-POST /api/v1/policies/:policyId/disable
-
-#### Parameters
-
-| Parameter | Type |
-| ------ | ------ |
-| `policyId` | `string` |
-
-#### Returns
-
-`Promise`\<[`PolicyChangeResult`](../index.md#policychangeresult)\>
-
-#### Deprecated
-
-Workspace policies are deprecated (sunset 2026-12-01): their tool
-pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
-rules and the `interventionMode` workspace setting for refusal wording; see
-https://docs.intutic.ai/guide/policies#policy-deprecation.
-
-***
-
 ### downloadEvidence()
 
 ```ts
@@ -754,33 +727,6 @@ POST /api/v1/mcp/servers/:serverId/tools — switch one tool on (OWNER, ADMIN).
 #### Returns
 
 `Promise`\<[`McpServerDecision`](../index.md#mcpserverdecision)\>
-
-***
-
-### ~~enablePolicy()~~
-
-```ts
-enablePolicy(policyId): Promise<PolicyChangeResult>;
-```
-
-POST /api/v1/policies/:policyId/enable
-
-#### Parameters
-
-| Parameter | Type |
-| ------ | ------ |
-| `policyId` | `string` |
-
-#### Returns
-
-`Promise`\<[`PolicyChangeResult`](../index.md#policychangeresult)\>
-
-#### Deprecated
-
-Workspace policies are deprecated (sunset 2026-12-01): their tool
-pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
-rules and the `interventionMode` workspace setting for refusal wording; see
-https://docs.intutic.ai/guide/policies#policy-deprecation.
 
 ***
 
@@ -1681,27 +1627,6 @@ GET /api/v1/workspace/org-sops — the org-wide SOP floors of the key's org.
 
 ***
 
-### ~~listPolicies()~~
-
-```ts
-listPolicies(): Promise<CompliancePolicy[]>;
-```
-
-GET /api/v1/policies
-
-#### Returns
-
-`Promise`\<[`CompliancePolicy`](../index.md#compliancepolicy)[]\>
-
-#### Deprecated
-
-Workspace policies are deprecated (sunset 2026-12-01): their tool
-pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
-rules and the `interventionMode` workspace setting for refusal wording; see
-https://docs.intutic.ai/guide/policies#policy-deprecation.
-
-***
-
 ### listPolicyDocuments()
 
 ```ts
@@ -2166,34 +2091,6 @@ DELETE /api/v1/gateways/:id
 #### Returns
 
 `Promise`\<`void`\>
-
-***
-
-### ~~rollbackPolicy()~~
-
-```ts
-rollbackPolicy(policyId, version): Promise<PolicyChangeResult>;
-```
-
-POST /api/v1/policies/:policyId/rollback
-
-#### Parameters
-
-| Parameter | Type |
-| ------ | ------ |
-| `policyId` | `string` |
-| `version` | `number` |
-
-#### Returns
-
-`Promise`\<[`PolicyChangeResult`](../index.md#policychangeresult)\>
-
-#### Deprecated
-
-Workspace policies are deprecated (sunset 2026-12-01): their tool
-pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
-rules and the `interventionMode` workspace setting for refusal wording; see
-https://docs.intutic.ai/guide/policies#policy-deprecation.
 
 ***
 

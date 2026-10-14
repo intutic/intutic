@@ -1,0 +1,21 @@
+{
+  "$comment": "A GET /api/v1/workspace/sops-policy answer: an org SOP, a workspace SOP and a guardrail entry. packages/shared-types holds it to SopsPolicyResponse (src/__tests__/responseFixtures.test.ts), the control plane's e2e suite holds the route to the same schema, and the Rust proxy deserializes it with the struct it fetches the route with (packages/proxy/src/sops.rs tests).",
+  "workspaceId": "ws_fixture",
+  "sops": [
+    {
+      "title": "Never push to main",
+      "markdownContent": "---\ndeny_tools: git_push_main\n---\nNever push to main.",
+      "scope": "org"
+    },
+    {
+      "title": "Reviewed plan before terraform apply",
+      "markdownContent": "---\ndeny_tools: terraform_destroy\n---\nPlan before you apply; never destroy.",
+      "scope": "workspace"
+    },
+    {
+      "title": "GUARDRAIL:pgr_fixture No recursive deletes",
+      "markdownContent": "---\nmode: shadow\ndeny_tools: rm_rf\nsource: policy guardrail\n---\nNo recursive deletes.",
+      "scope": "workspace"
+    }
+  ]
+}

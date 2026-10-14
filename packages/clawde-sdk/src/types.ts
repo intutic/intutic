@@ -1010,8 +1010,8 @@ export interface GuardrailReadiness {
 
 export interface GuardrailTransitionResult {
   ok: boolean
-  /** The guardrail as the transition left it. A promotion reads it back after the write: null only if it is gone by then. */
-  guardrail: GuardrailDetail | null
+  /** The guardrail as the transition left it. */
+  guardrail: GuardrailDetail
   readiness?: GuardrailReadiness
 }
 
@@ -1036,8 +1036,8 @@ export interface AuthoredGuardrailUpdate {
 
 export interface AuthoredGuardrailWriteResult {
   ok: true
-  /** The guardrail read back after the write; null only if it is gone by then. */
-  guardrail: GuardrailDetail | null
+  /** The guardrail read back after the write. */
+  guardrail: GuardrailDetail
   /** The IR changed: a new version, PROPOSED with no evidence, replaced the old one, which is now RETIRED. */
   forked: boolean
   supersedes: string | null
@@ -1382,29 +1382,7 @@ export interface ConfigChain {
   intact: boolean
 }
 
-// Compliance policies and WASM rules
-
-export interface CompliancePolicy {
-  policyId: string
-  workspaceId: string
-  name: string
-  description: string | null
-  riskCategory: string | null
-  targetToolPattern: string
-  enforcementAction: string
-  interventionMode: string | null
-  priority: number | null
-  conditions: unknown
-  isActive: boolean | null
-  currentVersion: number
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PolicyChangeResult {
-  ok: boolean
-  currentVersion?: number
-}
+// WASM rules
 
 export interface RuleCandidateSource {
   candidateId: string

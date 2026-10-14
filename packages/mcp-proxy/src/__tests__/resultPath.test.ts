@@ -11,7 +11,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { processServerLine, type PendingRequest } from '../proxy.js'
-import { redactText, setDynamicPatterns, scanToolInput } from '../dlp.js'
+import { redactText } from '../dlp.js'
 
 /** Runtime-assembled per the repo convention: no contiguous credential-shaped literals. */
 const fangedKey = () => `${'AKIA'}${'B2C3D4E5F6G7H2J3'}`
@@ -36,23 +36,6 @@ describe('redactText', () => {
     const { redacted, findings } = redactText('migration: DROP TABLE users;')
     expect(redacted).toBe('migration: DROP TABLE users;')
     expect(findings).toEqual([])
-  })
-})
-
-describe('setDynamicPatterns', () => {
-  it('workspace patterns reach both directions of the scanner', () => {
-    setDynamicPatterns(['INTERNAL-[0-9]{6}'])
-    try {
-      expect(scanToolInput({ note: 'ref INTERNAL-123456' }).hasFinding).toBe(true)
-      expect(redactText('ref INTERNAL-123456').redacted).toContain('[REDACTED_SECRET]')
-    } finally {
-      setDynamicPatterns([])
-    }
-  })
-
-  it('drops invalid regexes by count instead of taking the scanner down', () => {
-    expect(setDynamicPatterns(['[unclosed', 'ok-[0-9]+'])).toBe(1)
-    setDynamicPatterns([])
   })
 })
 

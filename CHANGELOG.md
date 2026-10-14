@@ -7,6 +7,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Response schemas for the routes the machine clients call.** Nine more
+  control-plane operations publish their response body in `openapi.json`,
+  171 in all: `GET /api/v1/policy/resolve`, `GET /api/v1/auth/key-context`,
+  `GET /api/v1/decisions/:entryId`, `POST /api/v1/judge/chunk`,
+  `GET /api/v1/sync/report`, `GET /api/v1/workspace/egress-policy`,
+  `GET /api/v1/workspace/decisions-digest`,
+  `POST /api/v1/mcp/servers/observe` and
+  `POST /api/v1/integrations/agentcore/gateway-check`. The clients that read
+  them are pinned to the schemas: the MCP proxy and the sync daemon read
+  their answers as `WireFields<…>` (new in `@intutic/shared-types`: every
+  field the schema declares, each `unknown` until checked), `@intutic/gate`,
+  the AgentCore interceptor and the VS Code extension check their own types
+  against the schemas at compile time, and the LLM proxy's tests read
+  captured key-context and workspace-policy answers
+  (`packages/shared-types/fixtures/responses/`) that are held to their
+  schemas.
+- **Unsubscribe from the onboarding emails.** Every email the control plane
+  sends is now classified as transactional or promotional in one table. The
+  promotional ones (the day-3 and day-7 onboarding emails) carry a one-click
+  unsubscribe link and the `List-Unsubscribe` / `List-Unsubscribe-Post`
+  headers (RFC 8058), are skipped for a recipient who unsubscribed, and print
+  the sender's postal address from the new `COMPANY_POSTAL_ADDRESS` setting
+  (Self-host: `.env` or the chart's `companyPostalAddress`). Unset, they still
+  send and the control plane logs the gap at start-up. Sign-in, billing and
+  alert emails are unaffected.
+- **Notification event types for failed payments.** `billing.dunning.downgraded`
+  (the third failed payment moved the account to the free plan) and
+  `billing.dunning.restored` (the plan is back); notification rules and the
+  Terraform provider's `intutic_notification_rule` accept both.
+
+### Security
+
+- **The sync daemon's config no longer carries the workspace's storage
+  credentials.** `POST /api/v1/sync/config`, and the config the sync
+  WebSocket pushes, went to every member's machine with the workspace's own
+  trace bucket settings in full: the access key id and the stored (encrypted)
+  secret access key or service-account credentials, which
+  `GET /api/v1/workspace/settings` shows as `__redacted__`. The daemon reads
+  none of them, so they are no longer sent; the rest of `byocStorage`
+  (provider, bucket, prefix, project, region, mode) is unchanged.
+- **The VS Code extension's panels escape what they render.** The SOP,
+  incident and WASM rule panels put titles, names and other API values into
+  the webview's HTML as they were, so a SOP titled
+  `<img src=x onerror=…>` became markup. Every value is now escaped, badge
+  classes come from a fixed list, and each panel carries a strict
+  Content-Security-Policy (`default-src 'none'`, styles by nonce, no scripts).
+- **chromadb advisories under the `crewai` extra, re-checked.** `crewai`
+  requires `chromadb`, and every chromadb release up to 1.5.9, the latest,
+  is affected by CVE-2026-45829, CVE-2026-45830, CVE-2026-45831 and
+  CVE-2026-45833; none has a fixed release, so the lockfile stays at
+  chromadb 1.1.1 (moving to 1.5.9 would fix none of them). All four need a
+  running ChromaDB server; the CrewAI integration only uses the embedded
+  `PersistentClient`, and the two code-injection paths also need
+  `sentence-transformers`, which no extra installs. The CrewAI integration
+  page now covers current crewai releases (chromadb 1.5.x) and warns against
+  exposing the `chroma run` server chromadb installs.
+
+### Fixed
+
+- **`GET /api/v1/auth/me` answers 404 for a member that no longer exists.** A
+  valid token for a member removed since it was issued answered 500
+  `Internal server error`; it now answers 404 with
+  `{ "error": "Member not found", "code": "E_NOT_FOUND" }`.
+- **A guardrail write never answers success without the guardrail.** Create,
+  update and promote read the guardrail back after the write and answered
+  `{ "ok": true, "guardrail": null }` when the read found nothing, which a
+  client such as the Terraform provider stored as an empty resource. Such a
+  write now answers 500 `GUARDRAIL_READ_BACK_FAILED` with the `guardrailId`,
+  and `guardrail` is no longer nullable in the response schemas or the SDK
+  types.
+- **`intutic sops pull` writes no `risk_tier:` for a SOP without a tier.** It
+  wrote `risk_tier: null`; the key is now left out, and a pull over a file
+  whose SOP lost its tier removes the line. `sops status` and `sops push`
+  read such a file as untiered and send no tier.
+- **Terraform: a SOP's null columns read as null.** `intutic_sop` decoded
+  `riskTier`, `complexityTier`, `versionCounter` and `contentHash` into plain
+  strings and integers, so a SOP written without tiers imported with
+  `risk_tier = ""`, and one without a version counter was updated with
+  `version_counter = 0`, which the API refuses. They now read as null, and an
+  update sends no counter when there is none.
+- **The VS Code incidents panel shows incidents.** It read `items`, while
+  `GET /api/v1/incidents` sends its rows under `data` (TOON-encoded from 20
+  rows, which the panel's request of 20 always got), and named fields the
+  route never sends. It now asks for 19 and shows each incident's type,
+  status, severity and date; the SOP panel shows the risk tier in place of a
+  score the route never sent.
+- **A plan downgraded for a failed payment comes back once it is paid.** The
+  third failed payment moved the account to the free plan, and nothing moved
+  it back: a customer who fixed the card kept paying for the subscription
+  while on free. Paying the overdue invoice while the subscription is still
+  open now restores the plan its price sells. Events delivered out of order
+  are judged by when they happened: a failure older than the payment that
+  cured it does not downgrade, an update older than the downgrade does not
+  undo it, and a cancelled subscription is never restored. An invoice that
+  bills no subscription no longer changes the plan.
+- **The proxy no longer writes the Valkey password to its log.** A
+  `VALKEY_URL` with credentials (`redis://user:password@host:6379`) was
+  printed whole in the startup lines that name the Valkey it connected to, or
+  failed to reach. The password is now shown as `***`.
+
+### Removed
+
+- **Workspace DLP patterns in the MCP proxy.** The proxy read `dlpPatterns`
+  from `GET /api/v1/sop/rules`, which never sent it, and from
+  `GET /api/v1/policy/resolve`, which always sent `[]`: no workspace setting
+  holds custom DLP patterns, so the field and the scanner path it fed carried
+  nothing. Both routes and the proxy drop it. Custom DLP patterns stay a
+  setting of the LLM proxy's own configuration (`dlp.patterns`).
+- **Enforcement policies, ahead of their December 1 sunset.** Nothing ever
+  enforced a policy's tool pattern, action or conditions, and no one depends
+  on them yet, so they go now rather than after a deprecation window. Gone:
+  the policies API (`/api/v1/policies`: list, create, update, delete,
+  versions, enable, disable, rollback) and
+  `POST /api/v1/policies/:policyId/convert-to-guardrail`, which now answer
+  `404`, along with their `Deprecation` and `Sunset` headers; the dashboard's
+  **Policies › Enforcement Policies** page; `intutic policy
+  enable|disable|rollback|export|convert` (the rule and snapshot commands,
+  `intutic policy snapshot|test|compile|install|list-local|replay`, stay);
+  `listPolicies`, `enablePolicy`, `disablePolicy`, `rollbackPolicy`,
+  `CompliancePolicy` and `PolicyChangeResult` from `@intutic/clawde`, and
+  `list_policies`, `enable_policy`, `disable_policy`, `rollback_policy` and
+  `PolicyChangeResult` from `intutic-clawde`; the `Policy*Response` schemas in
+  `@intutic/shared-types`; Terraform's `intutic_policy` (provider 0.4.0); and
+  the `pcas_policies` and `pcas_policy_versions` tables with
+  `policy_guardrails.converted_from_policy_id` (migration 239, which refuses
+  to run while either table holds a row, so it never deletes a policy).
+  **Instead:** write a per-tool rule as a `hook_rule`
+  [policy guardrail](https://docs.intutic.ai/guide/policy-guardrails)
+  (`intutic guardrails`, `intutic_guardrail`), which the gates enforce once it
+  is promoted, and set what a refused agent is told with the
+  `interventionMode` workspace setting.
+- **The intervention-mode fallback to a policy.** The `interventionMode`
+  workspace setting is the only source of the mode; a workspace that has not
+  set it, or holds a value that is not a mode, is `TRANSPARENT`. The mode is
+  no longer read from the lowest-priority active policy, and the
+  once-per-workspace warning about it is gone. **Instead:** set
+  `interventionMode` (Settings › Security › Intervention mode, `intutic
+  settings set interventionMode OPAQUE`, `intutic_workspace_settings`).
+- **Full access for API keys with unrecognised scopes.** A key whose stored
+  scopes are all outside the scope registry (free-form strings such as
+  `["read"]`, written before scopes were enforced) no longer works as `*`: it
+  grants nothing, and every request with it is refused with `403
+  INSUFFICIENT_SCOPE`, like any key lacking a scope. The `apikey_legacy_scopes`
+  log line, the `legacyScopes` field on `GET /api/v1/keys` and the dashboard's
+  **Legacy scopes** badge are gone. **Instead:** give the key registry scopes
+  with **Edit scopes** or `PATCH /api/v1/keys/:keyId`, or replace it.
+
 ## [2.5.1] - 2026-10-14
 
 ### Added

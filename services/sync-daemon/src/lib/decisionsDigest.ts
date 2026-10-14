@@ -60,6 +60,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createLogger } from '@intutic/logger'
 import { HarnessType, decisionsTargetOf, rulesFileOf } from '@intutic/shared-types'
+import type { DecisionsDigestResponse as DecisionsDigestWire, WireFields } from '@intutic/shared-types'
 import { atomicWrite } from '../configWriter.js'
 import { DECISIONS_MARKERS, removeRulesSection, retireRulesFile, writeRulesSection } from '../harness/rulesSection.js'
 import { claudeCodeReadsAgentsMd } from '../harness/claudeAgentsMd.js'
@@ -112,7 +113,7 @@ function trimTrailingSlashes(s: string): string {
 
 function isDigestEntry(value: unknown): value is DecisionsDigestEntry {
   if (typeof value !== 'object' || value === null) return false
-  const e = value as Record<string, unknown>
+  const e = value as WireFields<DecisionsDigestWire['entries'][number]>
   return (
     typeof e.id === 'string' &&
     typeof e.kind === 'string' &&
@@ -146,7 +147,7 @@ export async function fetchDecisionsDigest(
     }
     const body = (await res.json()) as unknown
     if (typeof body !== 'object' || body === null) return null
-    const rec = body as Record<string, unknown>
+    const rec = body as WireFields<DecisionsDigestWire>
     const workspaceId = typeof rec.workspaceId === 'string' ? rec.workspaceId : opts.workspaceId
     const entries = Array.isArray(rec.entries) ? rec.entries.filter(isDigestEntry) : []
     return { workspaceId, entries }
