@@ -54,7 +54,9 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "typecheck": "tsc -p ./ --noEmit",
+    "test": "tsc -p ./ && node --test test/*.test.mjs"
   },
   "dependencies": {},
   "devDependencies": {
