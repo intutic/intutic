@@ -230,7 +230,7 @@ async fn no_control_plane_means_standalone_whether_or_not_valkey_is_up() {
         "the same answer with and without Valkey"
     );
     assert!(
-        !valkey_body.contains("invalid, expired, or revoked"),
+        !valkey_body.contains("Virtual API key is invalid"),
         "{valkey_body}"
     );
 
@@ -270,5 +270,5 @@ async fn no_control_plane_means_standalone_whether_or_not_valkey_is_up() {
     .await;
     let (status, body) = send(connected, Call::AnthropicXApiKey).await;
     assert_eq!(status, 401, "connected mode is unchanged: {body}");
-    assert!(body.contains("invalid, expired, or revoked"), "{body}");
+    assert!(body.contains("Virtual API key is invalid"), "{body}");
 }
