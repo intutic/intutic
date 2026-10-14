@@ -8,6 +8,32 @@
 use serde::Serialize;
 use std::sync::Arc;
 
+/// A Valkey URL fit for a log line: the password replaced with `***`.
+///
+/// `VALKEY_URL` carries the server's password when it requires one
+/// (`redis://user:password@host:6379`), and the proxy names the URL it
+/// connected to, or failed to, at startup. A URL without credentials comes
+/// back unchanged; userinfo with no `:` is masked whole, because Redis URLs
+/// accept a bare password there.
+pub fn redact_url(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let authority_start = scheme_end + 3;
+    let authority_end = url[authority_start..]
+        .find(['/', '?', '#'])
+        .map_or(url.len(), |i| authority_start + i);
+    let Some(at) = url[authority_start..authority_end].rfind('@') else {
+        return url.to_string();
+    };
+    let at = authority_start + at;
+    let masked = match url[authority_start..at].split_once(':') {
+        Some((user, _)) => format!("{user}:***"),
+        None => "***".to_string(),
+    };
+    format!("{}{masked}{}", &url[..authority_start], &url[at..])
+}
+
 /// Connect to Valkey (Redis-compatible)
 pub async fn connect_valkey(url: &str) -> anyhow::Result<Arc<redis::aio::ConnectionManager>> {
     let client = redis::Client::open(url)?;
@@ -1168,6 +1194,39 @@ mod tests {
             v.as_object().unwrap().get("findings").is_none(),
             "a clean request must not gain a field",
         );
+    }
+
+    #[test]
+    fn redact_url_masks_the_password_and_nothing_else() {
+        let pw = ["s3cr", "et-value"].concat();
+        let cases = [
+            (
+                format!("redis://intutic:{pw}@valkey:6379"),
+                "redis://intutic:***@valkey:6379".to_string(),
+            ),
+            (
+                format!("rediss://:{pw}@cache.example:6380/0"),
+                "rediss://:***@cache.example:6380/0".to_string(),
+            ),
+            (
+                format!("redis://{pw}@valkey:6379"),
+                "redis://***@valkey:6379".to_string(),
+            ),
+            (
+                "redis://127.0.0.1:6379".to_string(),
+                "redis://127.0.0.1:6379".to_string(),
+            ),
+            (
+                "redis://valkey:6379/0?x=a@b".to_string(),
+                "redis://valkey:6379/0?x=a@b".to_string(),
+            ),
+            ("not a url".to_string(), "not a url".to_string()),
+        ];
+        for (input, want) in cases {
+            let got = redact_url(&input);
+            assert_eq!(got, want, "for {input}");
+            assert!(!got.contains(&pw), "password leaked: {got}");
+        }
     }
 
     // `reasoning_tokens` rides the trace to the control plane only when the

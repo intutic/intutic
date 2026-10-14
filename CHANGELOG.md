@@ -104,6 +104,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cured it does not downgrade, an update older than the downgrade does not
   undo it, and a cancelled subscription is never restored. An invoice that
   bills no subscription no longer changes the plan.
+- **The proxy no longer writes the Valkey password to its log.** A
+  `VALKEY_URL` with credentials (`redis://user:password@host:6379`) was
+  printed whole in the startup lines that name the Valkey it connected to, or
+  failed to reach. The password is now shown as `***`.
 
 ### Removed
 
