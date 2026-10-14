@@ -70,6 +70,10 @@ DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATE
 
 Every transition needs the OWNER or ADMIN role, as creating and editing a SOP do. Moving from `PENDING_REVIEW` to `GENERATED` also needs the SOP's Gödel score to pass its threshold.
 
+### Editing a SOP past draft
+
+A draft is edited in place. Editing a SOP in any later state, or approving an amendment against it, creates the next version as a new `DRAFT` with a new id, which goes through the same lifecycle. The version you edited keeps its state meanwhile: a `VALIDATED` SOP keeps enforcing while the new version is reviewed and tested, and is retired only when the new version is promoted to `VALIDATED`. A workspace is never left without the enforcing version of a guideline because an edit is in review.
+
 ### The compiled graph gate
 
 Enforcement reads the SOP's compiled SSL graph, not its markdown. A SOP whose

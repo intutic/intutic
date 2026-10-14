@@ -66,7 +66,7 @@ Lists all mutations awaiting review. **Proposal source** filters them: All, LLM-
 - **Proposed title and score** — With a badge for its source.
 - **Why, and how it scored** — Plain-text explanation of why the rule mutation was recommended, and for an optimizer proposal its change classification and why it was not applied automatically. Incident-mined and health-scan proposals also show their incident count and threat score.
 - **Clause Diff** — A side-by-side comparison of the **Original** clause text vs. the **Optimized** clause text.
-- **Actions** — **Approve & Apply** (promotes the mutated clause directly to your active SOP) or **Reject** (dismisses the proposal). Only Owners and Admins can approve or reject.
+- **Actions** — **Approve & Apply** (applies the proposal to the SOP: a draft is edited in place; a SOP past draft gets the change as its next version, a new draft that goes through review while the current version keeps enforcing — see [Editing a SOP past draft](/guide/sops#editing-a-sop-past-draft)) or **Reject** (dismisses the proposal). Only Owners and Admins can approve or reject.
 
 ---
 

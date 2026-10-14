@@ -47,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `system:metaclaw`. A `WEAKEN` edit needs an Owner whoever makes it: no caller
   is exempt for not declaring a role. Incident-mining drafts marked
   auto-approved were never written into a guideline; the docs now say so.
+- **Behaviour change: editing a guideline past draft keeps it enforcing.**
+  Editing a SOP that is not a draft, or approving an amendment against it,
+  retired the version you edited at once and put the edit in a new draft, so
+  a validated guideline stopped enforcing until the draft was carried through
+  review and shadow. The edited version now keeps its state until the new
+  version is promoted to validated, which is when it is retired.
 
 ### Fixed
 

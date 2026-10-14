@@ -66,7 +66,8 @@ func (r *sopResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 		Description: "A workspace SOP (rule set), managed through `/api/v1/sops`. A new SOP starts in `DRAFT`. " +
 			"Promotion through review, shadow and `VALIDATED` stays in the SOP review workflow, because each step " +
 			"is gated on evidence (the Gödel score, shadow results). Editing a SOP that is not a draft forks a new " +
-			"`DRAFT` version with a new id and retires the old one, exactly as an edit in the dashboard does; the " +
+			"`DRAFT` version with a new id, exactly as an edit in the dashboard does; the old version keeps " +
+			"enforcing until the new one is promoted to `VALIDATED`, and this resource tracks the new one. The " +
 			"plan shows `lifecycle_state` returning to `DRAFT` when that will happen. Needs an OWNER or ADMIN key.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -195,8 +196,9 @@ func (r *sopResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return
 	}
 	// A deleted SOP is soft-deleted (isActive false), and so is the prior
-	// version an edit forked away from: either way this id is no longer the
-	// live SOP, and Terraform should plan to create it.
+	// version an edit forked away from once the edit is promoted to VALIDATED:
+	// either way this id is no longer the live SOP, and Terraform should plan
+	// to create it.
 	if sop == nil || !sop.IsActive {
 		resp.State.RemoveResource(ctx)
 		return
