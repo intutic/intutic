@@ -8,7 +8,7 @@ Every key a workspace's settings accept, with the values each one takes and what
 GET /api/v1/workspace/settings
 ```
 
-Any member of the workspace can read them. The response is `{ "workspaceId": ..., "settings": { ... } }`: the stored settings with a default filled in for each key that has one and is not set. A key with no default and no stored value is left out. Storage credentials in `byocStorage` come back as `__redacted__`.
+Any member of the workspace can read them. The response is `{ "workspaceId": ..., "settings": { ... } }`: the stored settings with a default filled in for each key that has one and is not set. A key with no default and no stored value is left out. Storage credentials in `byocStorage` come back as `__redacted__`. The copy the sync daemon receives (`POST /api/v1/sync/config` and its WebSocket push, which reach every member's machine) leaves them out altogether: its `byocStorage` carries the provider, bucket, prefix, project, region and mode, never `accessKeyId`, `secretAccessKey` or `credentials`.
 
 The response can also carry keys that are not on this page and cannot be written with `PUT`:
 
