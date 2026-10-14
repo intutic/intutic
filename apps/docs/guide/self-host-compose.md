@@ -128,6 +128,12 @@ Set `SMTP_URL` in `.env` (`smtp://host:25`, or `smtps://user:password@host:465`)
 and optionally `EMAIL_FROM` (default `noreply@<hostname>`), then
 `docker compose up -d`.
 
+The onboarding emails are promotional: each carries a one-click unsubscribe
+link, and a recipient who uses it gets no more of them (sign-in, billing and
+alert emails still arrive). Set `COMPANY_POSTAL_ADDRESS` to your postal
+address for their footer, which anti-spam law requires; unset, they go out
+without it and the control plane logs the gap at start-up.
+
 Alerts and approvals go out through the notification hub, which is on with
 every channel: email through `SMTP_URL`, webhooks, Slack and PagerDuty, as your
 notification rules name them. To turn a channel off, set its flag to `false` in

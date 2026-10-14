@@ -25,6 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   captured key-context and workspace-policy answers
   (`packages/shared-types/fixtures/responses/`) that are held to their
   schemas.
+- **Unsubscribe from the onboarding emails.** Every email the control plane
+  sends is now classified as transactional or promotional in one table. The
+  promotional ones (the day-3 and day-7 onboarding emails) carry a one-click
+  unsubscribe link and the `List-Unsubscribe` / `List-Unsubscribe-Post`
+  headers (RFC 8058), are skipped for a recipient who unsubscribed, and print
+  the sender's postal address from the new `COMPANY_POSTAL_ADDRESS` setting
+  (Self-host: `.env` or the chart's `companyPostalAddress`). Unset, they still
+  send and the control plane logs the gap at start-up. Sign-in, billing and
+  alert emails are unaffected.
+- **Notification event types for failed payments.** `billing.dunning.downgraded`
+  (the third failed payment moved the account to the free plan) and
+  `billing.dunning.restored` (the plan is back); notification rules and the
+  Terraform provider's `intutic_notification_rule` accept both.
 
 ### Security
 
@@ -72,6 +85,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   route never sends. It now asks for 19 and shows each incident's type,
   status, severity and date; the SOP panel shows the risk tier in place of a
   score the route never sent.
+- **A plan downgraded for a failed payment comes back once it is paid.** The
+  third failed payment moved the account to the free plan, and nothing moved
+  it back: a customer who fixed the card kept paying for the subscription
+  while on free. Paying the overdue invoice while the subscription is still
+  open now restores the plan its price sells. Events delivered out of order
+  are judged by when they happened: a failure older than the payment that
+  cured it does not downgrade, an update older than the downgrade does not
+  undo it, and a cancelled subscription is never restored. An invoice that
+  bills no subscription no longer changes the plan.
 
 ### Removed
 

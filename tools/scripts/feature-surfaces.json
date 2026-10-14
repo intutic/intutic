@@ -14,7 +14,13 @@
       "GET /intutic/spend": "loopback diagnostics of the local proxy",
       "GET /intutic/instance": "loopback diagnostics of the local proxy",
       "GET /intutic/probes": "loopback diagnostics of the local proxy",
-      "POST /intutic/attest-sandbox": "loopback endpoint the sandbox entrypoint calls; part of sandboxed execution, which predates this manifest"
+      "POST /intutic/attest-sandbox": "loopback endpoint the sandbox entrypoint calls; part of sandboxed execution, which predates this manifest",
+      "GET /api/v1/email/unsubscribe": "the unsubscribe link in promotional email, a legal requirement of sending it rather than a product feature; documented in the API reference",
+      "POST /api/v1/email/unsubscribe": "the unsubscribe link's confirmation and RFC 8058 one-click target, a legal requirement of sending promotional email rather than a product feature"
+    },
+    "eventTypes": {
+      "billing.dunning.downgraded": "billing lifecycle notice (a failed payment moved the account to Free); billing is no governance feature this manifest lists, and its sibling billing.subscription.past_due is in the baseline; documented in guide/plans.md#failed-payments",
+      "billing.dunning.restored": "billing lifecycle notice (payment brought the plan back); same reason as billing.dunning.downgraded"
     },
     "docsPages": {
       "reference/workspace-settings.md": "the reference for every workspace settings key, which many features share; services/control-plane/__tests__/unit/settingsKeyParity.test.ts holds it to the settings schema",

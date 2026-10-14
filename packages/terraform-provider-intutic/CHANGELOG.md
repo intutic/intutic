@@ -11,6 +11,7 @@ BREAKING CHANGES:
 * resource/intutic_workspace_settings: `featureFlags.ff_metaclaw_auto_apply` is no longer accepted; the plan fails validation naming it, and the API refuses it. The control plane removed the flag and carried each workspace's value over to the SOP Optimizer's Approval mode, which is now the only switch for its auto-apply. Remove the flag from your configuration before upgrading.
 ENHANCEMENTS:
 
+* resource/intutic_notification_rule: accepts the event types `billing.dunning.downgraded` (the third failed payment moved the account to the free plan) and `billing.dunning.restored` (the overdue payment was made and the plan is back).
 * resource/intutic_virtual_key: `scopes` is validated against the control plane's scope registry (`*`, `gateway:use`, and `<area>:read` / `<area>:write` for each REST area) at plan time, and its description says what each kind grants. The control plane now enforces scopes: a request with a key needs both its owner's role and a scope covering the route, and LLM traffic through the proxy needs `gateway:use`. A key with the default `["*"]` is unaffected. A configuration naming a scope outside the registry, which the API used to store and ignore, now fails at plan time.
 
 DEPRECATIONS:

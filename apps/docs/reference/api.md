@@ -628,7 +628,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 413 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 415 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -814,6 +814,13 @@ Every route the control plane serves: 413 routes, grouped by the source file tha
 | GET | `/api/v1/dream-cycle/settings` | Authenticated | `sops:read` |  |
 | PUT | `/api/v1/dream-cycle/settings` | OWNER/ADMIN | `sops:write` |  |
 | POST | `/api/v1/dream-cycle/trigger` | OWNER/ADMIN | `sops:write` |  |
+
+### `emailUnsubscribe.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Key scope | Description |
+|--------|------|------|-----------|-------------|
+| GET | `/api/v1/email/unsubscribe` | Signed unsubscribe token (`token` query) | — | The confirmation page behind the unsubscribe link in promotional email; records nothing |
+| POST | `/api/v1/email/unsubscribe` | Signed unsubscribe token (`token` query) | — | Records the opt-out from promotional email: the confirmation page, or a mail client's one-click request (RFC 8058) |
 
 ### `enterpriseTrial.ts` <Badge type="tip" text="Cloud" />
 

@@ -225,6 +225,18 @@ export const NOTIFICATION_EVENT_TYPES = [
    * support/ops look, not yet the incident a full cancellation is.
    */
   'billing.subscription.past_due',
+  /**
+   * Stripe's final retry of an invoice failed (`invoice.payment_failed`,
+   * attempt 3 or later) and the account moved to the Free plan. Carries
+   * `from_tier`. HIGH: budgets and paid features are gone until it is paid.
+   */
+  'billing.dunning.downgraded',
+  /**
+   * The subscription an account was downgraded for is paid up again
+   * (`invoice.paid`, or `customer.subscription.updated` back to `active`) and
+   * its plan, the one the subscription's price sells, is back. Carries `tier`.
+   */
+  'billing.dunning.restored',
   // ── Skill-bundled-script malware detection (Phase S4, opt-in VirusTotal hash lookup) ──
   /**
    * An opt-in `GET /api/v3/files/{sha256}` VirusTotal lookup on a
