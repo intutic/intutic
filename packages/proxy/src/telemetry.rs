@@ -280,8 +280,8 @@ pub struct ExecutionTrace {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub response_injection_findings: Vec<crate::injection::ResponseInjectionEcho>,
 
-    /// A sampled copy of this request's full `RequestContext`, for the
-    /// replay corpus.
+    /// A sampled copy of this request's `RequestContext`, for the replay
+    /// corpus.
     ///
     /// `None` on the overwhelming majority of traces — see
     /// `AppState::context_snapshot_rate` (`WASM_CONTEXT_SNAPSHOT_RATE`,
@@ -293,6 +293,10 @@ pub struct ExecutionTrace {
     /// (tool sequences, DLP findings, SOP declarations) onto every single
     /// row in the busiest table in the system for a corpus that only needs
     /// to clear `MIN_REPLAY_CONTEXTS` (50).
+    ///
+    /// Built by `RequestContext::stored_snapshot`: tool calls carry argument
+    /// keys and sizes, not values, unless the workspace set
+    /// `storeToolArguments`, and every string is DLP-redacted for storage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_snapshot: Option<serde_json::Value>,
 

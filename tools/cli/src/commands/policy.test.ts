@@ -445,6 +445,28 @@ describe('runPolicyReplay end to end', () => {
     await replay('wasm_abc')
     expect(exitCode).toBeNull()
   })
+
+  it('prints the note when contexts carried argument keys and sizes, not values', async () => {
+    const note = '58 of 60 contexts carry their tool calls\' argument keys and sizes ... `storeToolArguments: true` ...'
+    postWithStatusMock.mockResolvedValue({
+      status: 200,
+      body: {
+        ruleId: 'wasm_abc',
+        since: null,
+        contextCount: 60,
+        wouldActCount: 0,
+        wouldActRate: 0,
+        verdictCounts: { '0': 60 },
+        sampleMatches: [],
+        argumentsWithheld: 58,
+        argumentsNote: note,
+      },
+    })
+    await replay('wasm_abc')
+    expect(exitCode).toBeNull()
+    const printed = vi.mocked(console.log).mock.calls.map((c) => String(c[0])).join('\n')
+    expect(printed).toContain('storeToolArguments: true')
+  })
 })
 
 /**

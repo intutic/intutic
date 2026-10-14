@@ -596,8 +596,80 @@ pub fn scan(text: &str) -> Vec<DlpFinding> {
 /// [`scan`] with a workspace's PII detector actions in place of this
 /// machine's (`workspace_pii_policy`). `None` is exactly `scan`.
 pub fn scan_with(text: &str, pii: Option<&PiiPolicy>) -> Vec<DlpFinding> {
+    scan_patterns(text, all_patterns(pii))
+}
+
+/// Every PII detector whose `stored_action` is `redact`, at `redact`: what
+/// [`scan_for_storage`] adds to the secret patterns. Built from the shipped
+/// definition alone, never from a workspace's or machine's live actions.
+static STORED_PII: Lazy<Vec<DlpPattern>> = Lazy::new(|| {
+    pii::detectors()
+        .iter()
+        .filter(|d| d.stored_action == "redact")
+        .map(|d| DlpPattern {
+            name: d.id.clone(),
+            category: d.category.clone(),
+            regex: d.regex.clone(),
+            action: "redact".into(),
+            pii: Some(d),
+        })
+        .collect()
+});
+
+/// [`scan`] for text Intutic is about to keep rather than forward: every
+/// secret pattern, this machine's operator patterns, and each PII detector at
+/// its `stored_action`.
+///
+/// Separate from the live actions on purpose. Email and phone are off on
+/// live traffic by default, because a coding agent edits real addresses and
+/// numbers — a `package.json` author, a git config, a test fixture — and a
+/// model shown `[REDACTED_PII]` writes the placeholder back into the file.
+/// None of that applies to a copy in a trace or a replay context: nobody
+/// edits code from it, so the stored copy loses nothing by not carrying them.
+/// A workspace or machine setting a detector `off` changes what reaches the
+/// model, never what Intutic keeps.
+pub fn scan_for_storage(text: &str) -> Vec<DlpFinding> {
+    let custom = CUSTOM.get().map(Vec::as_slice).unwrap_or(&[]);
+    scan_patterns(
+        text,
+        PATTERNS
+            .iter()
+            .chain(STORED_PII.iter())
+            .chain(custom.iter()),
+    )
+}
+
+/// `text` with every [`scan_for_storage`] match replaced by
+/// `[REDACTED_{CATEGORY}]`; `None` when nothing matched, so a clean string
+/// costs no allocation.
+pub fn redact_for_storage(text: &str) -> Option<String> {
+    let findings = scan_for_storage(text);
+    (!findings.is_empty()).then(|| redact(text, &findings))
+}
+
+/// [`redact_for_storage`] over every string in a JSON value, object keys
+/// left alone (they name fields, not data). Returns how many strings changed.
+pub fn redact_json_for_storage(value: &mut serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::String(s) => match redact_for_storage(s) {
+            Some(clean) => {
+                *s = clean;
+                1
+            }
+            None => 0,
+        },
+        serde_json::Value::Array(items) => items.iter_mut().map(redact_json_for_storage).sum(),
+        serde_json::Value::Object(map) => map.values_mut().map(redact_json_for_storage).sum(),
+        _ => 0,
+    }
+}
+
+fn scan_patterns<'a>(
+    text: &str,
+    patterns: impl Iterator<Item = &'a DlpPattern>,
+) -> Vec<DlpFinding> {
     let mut findings = Vec::new();
-    for pattern in all_patterns(pii) {
+    for pattern in patterns {
         if let Some(det) = pattern.pii {
             for (start, end) in pii::find(det, text) {
                 findings.push(DlpFinding {
@@ -1312,6 +1384,57 @@ mod tests {
         assert_eq!(findings[0].pattern_name, "pii.ssn");
         assert_eq!(findings[0].category, "pii");
         assert_eq!(redact(&text, &findings), "SSN: [REDACTED_PII]");
+    }
+
+    /// Email and phone stay off on live traffic, so an agent editing a
+    /// `package.json` author keeps the address; a copy Intutic keeps loses
+    /// both, alongside the secrets.
+    #[test]
+    fn stored_copies_redact_email_and_phone_that_live_traffic_keeps() {
+        let text = format!(
+            "git config user.email {}@{} && call {} 555-0100 key AKIA{}",
+            "jane.doe", "example.com", "(415)", "IOSFODNN7EXAMPLE"
+        );
+        let live: Vec<String> = scan(&text).into_iter().map(|f| f.pattern_name).collect();
+        assert_eq!(
+            live,
+            vec!["aws_access_key".to_string()],
+            "live defaults: secrets only"
+        );
+
+        let stored = redact_for_storage(&text).expect("the stored copy has matches");
+        assert_eq!(
+            stored,
+            "git config user.email [REDACTED_PII] && call [REDACTED_PII] key [REDACTED_SECRET]"
+        );
+        assert_eq!(
+            redact_for_storage("cargo test --package intutic-proxy"),
+            None
+        );
+    }
+
+    #[test]
+    fn every_detector_redacts_what_is_stored() {
+        for d in pii::detectors() {
+            assert_eq!(
+                d.stored_action, "redact",
+                "{} must redact stored copies",
+                d.id
+            );
+        }
+    }
+
+    #[test]
+    fn json_storage_redaction_rewrites_values_never_keys() {
+        let mut v = serde_json::json!({
+            "author": format!("Jane <{}@{}>", "jane", "example.com"),
+            "nested": [{"phone": format!("{} 555-0100", "(415)")}, 3, true],
+            "clean": "src/main.rs",
+        });
+        assert_eq!(redact_json_for_storage(&mut v), 2);
+        assert_eq!(v["author"], "Jane <[REDACTED_PII]>");
+        assert_eq!(v["nested"][0]["phone"], "[REDACTED_PII]");
+        assert_eq!(v["clean"], "src/main.rs");
     }
 
     #[test]

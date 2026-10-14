@@ -21835,6 +21835,14 @@
                     "content": {
                       "type": "string",
                       "maxLength": 65536
+                    },
+                    "fullSha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "fullLength": {
+                      "type": "integer",
+                      "minimum": 0
                     }
                   },
                   "required": [
@@ -22951,9 +22959,6 @@
               "ff_shadow_enforcement": {
                 "type": "boolean"
               },
-              "ff_metaclaw_auto_apply": {
-                "type": "boolean"
-              },
               "ff_skillopt_auto_apply": {
                 "type": "boolean"
               },
@@ -23368,6 +23373,9 @@
                 "type": "null"
               }
             ]
+          },
+          "storeToolArguments": {
+            "type": "boolean"
           },
           "upstreamRetry": {
             "anyOf": [

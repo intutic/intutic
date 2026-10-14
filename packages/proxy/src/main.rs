@@ -596,7 +596,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Sampled `context_snapshot` capture rate for the replay corpus. Default
     // 5%: enough to reach `MIN_REPLAY_CONTEXTS` (50) within a day of modest
-    // traffic without writing a full RequestContext onto every trace.
+    // traffic without writing a RequestContext onto every trace. What a
+    // snapshot keeps is `RequestContext::stored_snapshot`'s decision: tool
+    // names and argument keys, values only when the workspace opted in.
     let context_snapshot_rate = std::env::var("WASM_CONTEXT_SNAPSHOT_RATE")
         .ok()
         .and_then(|v| v.parse::<f64>().ok())

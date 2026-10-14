@@ -3,8 +3,9 @@
 //! Workspace policy reaches the proxy on that route, which it already calls
 //! to validate a virtual key: the SSO group policy for the response gate
 //! (`sso_groups`), the workspace's PII detector actions (`dlp::workspace`),
-//! its intervention mode ([`intervention_mode`]) and whether its plan includes
-//! LLM judging ([`llm_judge_enabled`]). All read the same
+//! its intervention mode ([`intervention_mode`]), whether its plan includes
+//! LLM judging ([`llm_judge_enabled`]) and whether it stores tool-call
+//! arguments in replay contexts ([`store_tool_arguments`]). All read the same
 //! answer, fetched once per key and cached here for [`CACHE_TTL`], so adding
 //! a field to the route never adds a request.
 //!
@@ -131,6 +132,15 @@ pub fn llm_judge_enabled(body: &Value) -> bool {
     body.get("llmJudgeEnabled").and_then(Value::as_bool) != Some(false)
 }
 
+/// Whether the workspace keeps tool-call argument values in its sampled
+/// replay contexts, from a key-context body (`storeToolArguments`). Only an
+/// explicit `true` stores them: absent (a control plane older than the
+/// field) or null (unreadable) keeps argument keys and sizes only, the
+/// default since the setting existed.
+pub fn store_tool_arguments(body: &Value) -> bool {
+    body.get("storeToolArguments").and_then(Value::as_bool) == Some(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +216,16 @@ mod tests {
         assert!(judge(serde_json::json!({"workspaceId": "ws_old"})));
         assert!(judge(serde_json::json!({"llmJudgeEnabled": null})));
         assert!(judge(serde_json::json!({"llmJudgeEnabled": "false"})));
+    }
+
+    #[test]
+    fn only_an_explicit_true_stores_tool_arguments() {
+        let stored = |v: Value| store_tool_arguments(&v);
+        assert!(stored(serde_json::json!({"storeToolArguments": true})));
+        assert!(!stored(serde_json::json!({"storeToolArguments": false})));
+        assert!(!stored(serde_json::json!({"workspaceId": "ws_old"})));
+        assert!(!stored(serde_json::json!({"storeToolArguments": null})));
+        assert!(!stored(serde_json::json!({"storeToolArguments": "true"})));
     }
 
     #[tokio::test]

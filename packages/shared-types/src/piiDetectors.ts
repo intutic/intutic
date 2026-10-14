@@ -113,7 +113,10 @@ export interface PiiDetectorDefinition {
   /** `numeric` adds the decimal/serial rule on top of the word boundary. */
   boundary: 'word' | 'numeric'
   validator: 'card_luhn' | 'iban_mod97' | 'ssn_ranges' | 'email_shape' | 'phone_digits'
+  /** The action on live traffic when neither the workspace nor the machine sets one. */
   default_action: PiiAction
+  /** What happens to a match in a copy Intutic keeps (replay contexts, cached responses), whatever the live action. */
+  stored_action: Exclude<PiiAction, 'block'>
 }
 
 export interface PiiDefinition {

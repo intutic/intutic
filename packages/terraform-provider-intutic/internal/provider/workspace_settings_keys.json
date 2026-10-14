@@ -39,6 +39,7 @@
     "semanticSkillAnalysisEnabled",
     "ssoKeyMaxIdleDays",
     "sso_group_policy",
+    "storeToolArguments",
     "trajectory_monitor_mode",
     "upstreamRetry",
     "virusTotalSkillLookupEnabled",

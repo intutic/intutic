@@ -44,7 +44,7 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
 1. Every LLM request from an AI agent is routed through the **local Intutic proxy** on port 4000
 2. The proxy evaluates tool calls against the SOPs' [front matter](/reference/sop-front-matter) and against **WASM rules** (sandboxed, with an enforced instruction budget and a wasmtime deadline)
 3. Verdicts and telemetry stay **on the local machine**. Bandit routing state is written to your own Valkey, or to `~/.intutic/bandit-state.json` when there is none; nothing is transmitted to Intutic or anyone else
-4. The proxy **never stores prompts or completions** — only structured telemetry (tool names, verdicts, token counts, timing)
+4. Traces carry **no prompts or completions** — only structured telemetry (tool names, verdicts, token counts, timing). Two things the proxy keeps go further, and both are limited by default; see [What the proxy keeps](#what-the-proxy-keeps)
 
 This is what you get by default. Open core ships no control plane, and with `policy.control_plane_url` unset the policy pre-check is skipped entirely.
 
@@ -101,6 +101,15 @@ All network communication is encrypted with TLS 1.2+:
 | Bandit learning (no Valkey) | `~/.intutic/bandit-state.json` | None — a plain JSON file with your default file permissions |
 | Local config & credentials | `~/.intutic/credentials.json` | File permissions (`0600`) + system keychain |
 | Provider credentials in flight | Process memory only | Never written to disk |
+
+### What the proxy keeps
+
+Beyond the trace fields above, the proxy keeps two things that come from request content:
+
+- **Replay contexts.** A sampled 5% of requests (`WASM_CONTEXT_SNAPSHOT_RATE`) attach their rule-evaluation context to the trace, so a new rule can be replayed against real traffic. Each tool call in it carries its name and its arguments' top-level keys and size, not the argument values. A connected workspace can opt in to keeping the values with [`storeToolArguments`](/reference/workspace-settings); they are then kept with every secret and PII match redacted.
+- **The response cache**, when a workspace or config turns it on (off by default; every [cost posture](/guide/settings#postures) turns exact matching on). An entry holds the prompt text and the answer for 24 hours. An exchange in which DLP finds a secret or personal data is never written to it.
+
+Whatever the live PII detector actions, everything the proxy keeps is redacted for every [PII detector](/guide/policies#pii-detectors), email and phone included, and for every secret pattern: replay contexts and the targets in a trace's change manifest (the commands, paths and URLs tool calls named). Live redaction of email and phone stays off by default because an agent editing a real address would write the placeholder back into the file.
 
 ---
 

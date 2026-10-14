@@ -649,8 +649,26 @@ pub async fn write_cache(
         return Ok(());
     }
 
+    // What the entry would keep for 24 hours is the prompt text and the
+    // answer. If either carries anything the storage DLP pass matches — a
+    // secret, a card, an email address, a phone number, whatever the live
+    // actions are — the response is served and not cached. Not redacted
+    // instead: a hit replays `response` verbatim, so a redacted copy would
+    // later answer the next caller with placeholders the first one never saw.
+    let prompt = extract_prompt_text(body_json);
+    if !crate::dlp::scan_for_storage(&prompt).is_empty()
+        || !crate::dlp::scan_for_storage(completion_text).is_empty()
+    {
+        tracing::debug!(
+            workspace_id = %workspace_id,
+            model = %model_name,
+            "Not caching a response whose prompt or answer has a DLP match"
+        );
+        return Ok(());
+    }
+
     let cached_resp = CachedResponse {
-        prompt: extract_prompt_text(body_json),
+        prompt,
         response: completion_text.to_string(),
         model: model_name.to_string(),
         prompt_tokens,
@@ -993,6 +1011,56 @@ mod tests {
     fn keys(body: &Value) -> CacheKeys {
         cache_keys("ws_alpha", "claude-sonnet-4-5", &Protocol::Anthropic, body)
             .expect("cacheable request")
+    }
+
+    async fn write(body: &Value, answer: &str) -> Option<CachedResponse> {
+        let store: Arc<dyn LocalStore> = Arc::new(crate::store::memory::MemoryStore::new());
+        let k = keys(body);
+        write_cache(
+            ResponseProvenance::Served,
+            &store,
+            &reqwest::Client::new(),
+            "ws_alpha",
+            &k,
+            body,
+            answer,
+            "claude-sonnet-4-5",
+            10,
+            5,
+            false,
+        )
+        .await
+        .unwrap();
+        store.cached_response(&k.exact).await
+    }
+
+    /// An entry lives 24 hours, so a prompt or answer the storage DLP pass
+    /// matches is not written at all — email and phone included, which live
+    /// traffic leaves off by default.
+    #[tokio::test]
+    async fn a_dlp_match_on_either_side_is_not_cached() {
+        let clean = anthropic(json!([{ "role": "user", "content": "explain borrowck" }]));
+        assert!(
+            write(&clean, "lifetimes, mostly").await.is_some(),
+            "a clean exchange is cached"
+        );
+
+        let email = format!("{}@{}", "jane", "example.com");
+        let asked = anthropic(json!([{ "role": "user", "content": format!("who is {email}") }]));
+        assert!(
+            write(&asked, "a colleague").await.is_none(),
+            "an address in the prompt"
+        );
+        let answered = anthropic(json!([{ "role": "user", "content": "who owns the repo" }]));
+        assert!(
+            write(&answered, &format!("ask {email}")).await.is_none(),
+            "an address in the answer"
+        );
+        let secret = format!("key AKIA{}", "IOSFODNN7EXAMPLE");
+        assert!(
+            write(&clean, &secret).await.is_none(),
+            "a secret in the answer"
+        );
     }
 
     /// Two tenants sending a byte-identical request must land on two
