@@ -62,8 +62,8 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 |------|--------------|
 | **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. On a plan without SSO the card says which plans include it, and SCIM, which needs the Enterprise or Self-host plan, does the same on Biz Org. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
 | **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. Needs a plan with SSO. See [below](#group-policy-for-high-risk-tools). |
-| **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy. See [below](#virtual-api-keys). |
-| **Attenuated API Keys** | Child keys minted from a parent key with fewer capabilities by `intutic attenuate`; open a chain to see each step. |
+| **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy and API, each within its scopes. See [below](#virtual-api-keys). |
+| **Attenuated API Keys** | Child keys minted from one of your keys with narrower scopes by `intutic attenuate`; open a chain to see each step. |
 | **On-Behalf-Of Tokens** | A short-lived token that names you and only the tools you pick, for a service to check. See [below](#on-behalf-of-obo-tokens). |
 | **Provider Keys** | This workspace's own provider credentials. See [below](#provider-keys). |
 | **Gateways** | Register a [self-hosted gateway](/external/self-hosted-gateway) to run the proxy in your own infrastructure. |
@@ -99,11 +99,15 @@ shown read-only, marked **Not enforced on this plan**; Owners and Admins can rem
 
 ### Virtual API Keys
 
-Create keys (`vk_` prefix) for developers and their agents to reach the Intutic proxy:
+Create keys (`vk_` prefix) for developers and their agents to reach the Intutic proxy and API:
 - Give each key a **Label / Description** and, optionally, **Expires In (Days)**
+- Choose its **Access**: **Full access** (`*`, everything your role allows, the default), **Agent traffic only** (`gateway:use`: LLM calls through the proxy, hook gates, SDKs and the sync daemon, and nothing else), or **Custom**, a read or write level per area of the API. A key needs both its owner's role and a scope for each request; anything outside its scopes gets `403 INSUFFICIENT_SCOPE`. The scopes and what each covers are listed in the [API reference](/reference/api#api-key-scopes)
 - Optionally limit a key to **Allowed models (optional)**, one model id per line
-- Mark a CI or service key **This key is for automation (CI, scripts, a service)**, so the SSO-recency window does not expire it (see [Security & Identity](/guide/security#automation-keys))
+- Mark a CI or service key **This key is for automation (CI, scripts, a service)**, so the SSO-recency window does not expire it (see [Security & Identity](/guide/security#automation-keys)). Ticking it also switches the key to **Agent traffic only**, the least-privilege choice for a pipeline; widen it if the pipeline calls the API too
+- The **Scopes** column lists each key's scopes. An OWNER or ADMIN can change them with **Edit scopes**; the change applies from the key's next request
 - **Revoke** a compromised key immediately
+
+A key marked **Legacy scopes** holds scope strings from before scopes were enforced. It keeps working with full access until 2.6.0, when it stops; set its scopes before then.
 
 There is no in-place rotation: create a new key, move clients to it, then revoke the old one.
 Creating and revoking a key is recorded with who did it on the

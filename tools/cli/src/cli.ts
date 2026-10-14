@@ -1546,9 +1546,9 @@ credentialsCmd
 // commands/attenuate.ts's module doc.
 const attenuateCmd = program
   .command('attenuate')
-  .description('Attenuate an API key to a narrower child key (capability subset + optional TTL)')
+  .description('Attenuate one of your API keys to a child key with narrower scopes (and an optional TTL)')
   .option('--parent-key <keyId>', 'Parent API key ID to attenuate')
-  .option('--caps <caps>', 'Comma-separated capability subset to grant the child key')
+  .option('--caps <scopes>', 'Comma-separated API key scopes for the child key (e.g. gateway:use,traces:read); each must be granted by the parent key')
   .option('--ttl <seconds>', 'Child key TTL in whole seconds, 60 to 86400 (default 14400)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {

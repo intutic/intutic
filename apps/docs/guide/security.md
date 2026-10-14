@@ -140,7 +140,7 @@ The API enforces these tiers on every route that changes state, so a script or t
 | What the sync daemon, gates, proxies and SDKs report with a member's key | Developer and above |
 | The member's own account: password, profile, API keys, Slack link | Every role |
 
-Viewers change nothing in the workspace. An API key acts with the role of the member who owns it, so give the key that the sync daemon or a CI job uses to a Developer or above, and the key for Terraform to an Owner or Admin.
+Viewers change nothing in the workspace. An API key acts with the role of the member who owns it, so give the key that the sync daemon or a CI job uses to a Developer or above, and the key for Terraform to an Owner or Admin. A key is also limited by its [scopes](/reference/api#api-key-scopes): a request needs both the owner's role and a scope that covers it. A key that only runs agents, the sync daemon or a CI job needs only `gateway:use`; Terraform needs `*` or the write scopes of the areas it manages.
 
 Adjudicating a `response_injection:*` finding also needs Owner or Admin, because it reveals the stored response snippet.
 
@@ -270,6 +270,10 @@ it is exempt from the recency policy only, not from offboarding.
 
 Set this on your CI keys before enabling a window, or those pipelines will start
 failing when it elapses.
+
+Marking a key as automation also switches its scopes to **Agent traffic only**
+(`gateway:use`) in the dashboard, so a leaked pipeline key cannot read or change the
+workspace through the API. Widen the scopes if the pipeline calls the API as well.
 
 ### Undoing a deactivation
 

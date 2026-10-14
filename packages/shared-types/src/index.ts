@@ -277,6 +277,7 @@ export {
   E_SCIM_DUPLICATE,
   E_SCIM_AUTH_FAILED,
   E_FORBIDDEN,
+  E_INSUFFICIENT_SCOPE,
   E_BUDGET_EXCEEDED,
   E_RATE_LIMITED,
   E_APPEND_ONLY_VIOLATION,
@@ -323,6 +324,7 @@ export {
   UpdateRoleInputSchema,
   CreateApiKeyInputSchema,
   UpdateApiKeyInputSchema,
+  ApiKeyScopeListSchema,
   SignupInputSchema,
   OrgSignupInputSchema,
   VerifyEmailInputSchema,
@@ -330,6 +332,24 @@ export {
   MagicLinkRequestInputSchema,
   MagicLinkLoginInputSchema,
 } from './auth.js'
+
+export {
+  API_KEY_SCOPE_AREAS,
+  API_KEY_SCOPES,
+  API_KEY_SCOPE_NAMES,
+  ALL_SCOPES,
+  GATEWAY_USE_SCOPE,
+  AUTOMATION_KEY_SCOPES,
+  isApiKeyScope,
+  unknownApiKeyScopes,
+  scopeGrants,
+  scopesGrantAny,
+  effectiveApiKeyScopes,
+  compactScopes,
+  intersectScopes,
+  unknownScopesMessage,
+} from './apiKeyScopes.js'
+export type { ApiKeyScope, ApiKeyScopeArea, ApiKeyScopeEntry } from './apiKeyScopes.js'
 
 export type {
   AuthContext,

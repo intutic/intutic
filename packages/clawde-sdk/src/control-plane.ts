@@ -1058,9 +1058,10 @@ export class ControlPlaneClient {
   // ─── Key attenuation, cost prediction, routing ───
 
   /**
-   * POST /api/v1/attenuate — a child key narrowed to a subset of the parent
-   * key's capabilities. The child key is in the response once and never
-   * stored.
+   * POST /api/v1/attenuate — a child of one of your keys with narrower
+   * scopes: each of `requestedCaps` is an API key scope (`gateway:use`,
+   * `traces:read`, …) the parent grants. The child key is in the response
+   * once and never stored.
    */
   public async attenuateKey(parentKeyId: string, requestedCaps: string[], options: AttenuateOptions = {}): Promise<AttenuationResult> {
     return this.request('POST', '/api/v1/attenuate', defined({ parentKeyId, requestedCaps, ttlSeconds: options.ttlSeconds }))

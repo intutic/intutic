@@ -378,7 +378,9 @@ async fn attest_sandbox(
         crate::proxy::KeyCheck::Invalid => {
             return (
                 StatusCode::UNAUTHORIZED,
-                axum::Json(json!({"error": "Virtual API key is invalid, expired, or revoked."})),
+                axum::Json(
+                    json!({"error": "Virtual API key is invalid, expired, revoked, or lacks the gateway:use scope."}),
+                ),
             );
         }
         crate::proxy::KeyCheck::Unverifiable => {
