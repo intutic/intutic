@@ -27,6 +27,12 @@ export const E_SCIM_DUPLICATE = 'SCIM_DUPLICATE' as const
 /** Authenticated but insufficient permissions. */
 export const E_FORBIDDEN = 'E_FORBIDDEN' as const
 
+/**
+ * The `vk_` key's scopes do not cover the route (403). The body's `requiredScopes`
+ * lists the scopes that would, any one of them; the role check is separate.
+ */
+export const E_INSUFFICIENT_SCOPE = 'INSUFFICIENT_SCOPE' as const
+
 /** Budget limit exceeded — HLD §3.6 FinOps guardrail. */
 export const E_BUDGET_EXCEEDED = 'E_BUDGET_EXCEEDED' as const
 
@@ -175,6 +181,7 @@ export type IntuticErrorCode =
   | typeof E_SCIM_AUTH_FAILED
   | typeof E_SCIM_DUPLICATE
   | typeof E_FORBIDDEN
+  | typeof E_INSUFFICIENT_SCOPE
   | typeof E_BUDGET_EXCEEDED
   | typeof E_RATE_LIMITED
   | typeof E_APPEND_ONLY_VIOLATION

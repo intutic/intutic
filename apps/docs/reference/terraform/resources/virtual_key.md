@@ -16,6 +16,9 @@ resource "intutic_virtual_key" "ci" {
   allowed_models     = ["claude-haiku-4-5"]
   expires_in_days    = 90
   is_service_account = true
+  # Agent traffic only (the proxy, hook gates, SDKs): the least-privilege scope
+  # for a pipeline. Omit for "*", everything the owner's role allows.
+  scopes = ["gateway:use"]
 
   # Spend budgets and rate limits change in place; an OWNER or ADMIN sets them.
   daily_budget_usd           = 25
@@ -46,7 +49,7 @@ resource "intutic_virtual_key" "ci" {
 - `monthly_budget_usd` (Number) Spend the key may run up per UTC month, in USD (above 0, at most 1,000,000). Omit for no month budget.
 - `rate_limit_rpm` (Number) Requests per minute this key may send (1–100,000), counted per UTC minute by every proxy sharing a Valkey; over it the proxy answers `429 RATE_LIMITED` with `Retry-After`. Omit for no limit.
 - `rate_limit_tpm` (Number) Tokens per minute (1–100,000,000), input plus output, counted as each call completes; once the minute's tokens reach it, the next request is refused. Omit for no limit.
-- `scopes` (List of String) Scopes recorded on the key; defaults to `["*"]`. Attenuated child keys can only narrow them.
+- `scopes` (List of String) What the key may do on top of its owner's role; defaults to `["*"]` (everything the role allows). `gateway:use` covers agent traffic (LLM calls through the proxy, hook gates, SDKs, the sync daemon) and is the least-privilege choice for a key that only runs agents or CI; `<area>:read` and `<area>:write` cover an area of the REST API, and `write` includes `read`. Requests outside the scopes get 403 `INSUFFICIENT_SCOPE`. The valid scopes are listed under [API key scopes](https://docs.intutic.ai/reference/api#api-key-scopes). Changing them replaces the key.
 
 ### Read-Only
 

@@ -3820,7 +3820,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             return json_error(
                                 StatusCode::UNAUTHORIZED,
                                 "unauthorized",
-                                "Virtual API key is invalid, expired, or revoked.",
+                                "Virtual API key is invalid, expired, revoked, or lacks the gateway:use scope.",
                             );
                         }
                         // Could not reach the control plane to confirm. Fail
@@ -3847,7 +3847,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     return json_error(
                         StatusCode::UNAUTHORIZED,
                         "unauthorized",
-                        "Virtual API key is invalid, expired, or revoked.",
+                        "Virtual API key is invalid, expired, revoked, or lacks the gateway:use scope.",
                     );
                 }
             }

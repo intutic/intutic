@@ -69,6 +69,19 @@ pub fn sha256_hex(raw: &str) -> String {
     hex::encode(h.finalize())
 }
 
+/// Whether a cached auth entry's key may send LLM traffic: its `scopes` (the
+/// control plane's resolved API key scopes) include `*` or `gateway:use`. An
+/// entry without the field was written by a control plane that predates scopes,
+/// which never narrowed a key, so it is not narrowed here either.
+pub(crate) fn scopes_allow_traffic(entry: &serde_json::Value) -> bool {
+    match entry.get("scopes").and_then(|v| v.as_array()) {
+        None => true,
+        Some(scopes) => scopes
+            .iter()
+            .any(|s| matches!(s.as_str(), Some("*") | Some("gateway:use"))),
+    }
+}
+
 /// Compares two byte strings without an early return.
 ///
 /// Both operands here are hex digests of the same fixed length, so the length
@@ -1477,6 +1490,15 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             return ControlPlaneAuth::Rejected;
         }
 
+        // API key scopes. LLM traffic needs `gateway:use` (or `*`); a key minted
+        // for reporting (`traces:read`, say) must not spend tokens. `Rejected`,
+        // not a refusal of its own: the caller falls through to
+        // `/auth/key-context`, which answers 403 INSUFFICIENT_SCOPE for such a
+        // key, and that is reported as a rejected key.
+        if !scopes_allow_traffic(&auth_json) {
+            return ControlPlaneAuth::Rejected;
+        }
+
         let Some(workspace_id) = auth_json.get("workspaceId").and_then(|v| v.as_str()) else {
             return ControlPlaneAuth::Unavailable;
         };
@@ -1871,7 +1893,7 @@ mod token_verifier {
     //! at warn level. Admitting on the key alone made log-read access equal to
     //! proxy access for the lifetime of a warm entry.
 
-    use super::{constant_time_eq, sha256_hex};
+    use super::{constant_time_eq, scopes_allow_traffic, sha256_hex};
 
     /// Must match the control plane's `hashKeySha256`, which is plain lowercase
     /// hex SHA-256 of the token. A different encoding on either side turns every
@@ -1918,6 +1940,19 @@ mod token_verifier {
         assert!(!constant_time_eq(b"baaaaaaa", b"aaaaaaaa"));
         assert!(!constant_time_eq(b"short", b"longer_value"));
         assert!(constant_time_eq(b"identical", b"identical"));
+    }
+
+    #[test]
+    fn llm_traffic_needs_the_gateway_scope() {
+        use serde_json::json;
+        assert!(scopes_allow_traffic(&json!({ "scopes": ["*"] })));
+        assert!(scopes_allow_traffic(
+            &json!({ "scopes": ["traces:read", "gateway:use"] })
+        ));
+        assert!(!scopes_allow_traffic(&json!({ "scopes": ["traces:read"] })));
+        assert!(!scopes_allow_traffic(&json!({ "scopes": [] })));
+        // A control plane older than scopes never narrowed a key.
+        assert!(scopes_allow_traffic(&json!({ "workspaceId": "ws_1" })));
     }
 
     /// An entry written before `tokenVerifier` existed must not be usable.

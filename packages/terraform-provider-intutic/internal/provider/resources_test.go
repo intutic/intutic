@@ -470,3 +470,25 @@ func TestVirtualKeyLimitsReplaceTheKeysBudgetsAndClearAnUnsetLimit(t *testing.T)
 		t.Fatal("a key with nothing set is created in one call")
 	}
 }
+
+func TestVirtualKeyScopesMustBeInTheRegistry(t *testing.T) {
+	var resp resource.SchemaResponse
+	(&virtualKeyResource{}).Schema(context.Background(), resource.SchemaRequest{}, &resp)
+	attribute := resp.Schema.Attributes["scopes"].(schema.ListAttribute)
+	accepts := func(v ...string) bool {
+		var out validator.ListResponse
+		for _, check := range attribute.Validators {
+			check.ValidateList(context.Background(), validator.ListRequest{Path: path.Root("scopes"), ConfigValue: stringList(v)}, &out)
+		}
+		return !out.Diagnostics.HasError()
+	}
+	if !accepts("*") || !accepts("gateway:use") || !accepts("traces:read", "settings:write") {
+		t.Fatal("a scope in the registry must be accepted")
+	}
+	if accepts("read") || accepts("traces:admin") || accepts([]string{}...) {
+		t.Fatal("an unknown scope, or none at all, must fail at plan time")
+	}
+	if len(validKeyScopes) < 20 {
+		t.Fatalf("api_key_scopes.json holds %d scopes; expected the whole registry", len(validKeyScopes))
+	}
+}

@@ -2681,10 +2681,10 @@ intutic credentials models anthropic
 
 ## `intutic attenuate` <Badge type="warning" text="Biz Org+" />
 
-Mint a child API key that carries a subset of a parent key's capabilities and expires sooner.
+Mint a child API key from one of your keys, with narrower scopes and a shorter life.
 
 ```bash
-intutic attenuate --parent-key <keyId> --caps <cap,cap,...> [--ttl <seconds>] [options]
+intutic attenuate --parent-key <keyId> --caps <scope,scope,...> [--ttl <seconds>] [options]
 ```
 
 **Options:**
@@ -2692,22 +2692,22 @@ intutic attenuate --parent-key <keyId> --caps <cap,cap,...> [--ttl <seconds>] [o
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--parent-key <keyId>` | ID of the parent API key to narrow (required) | — |
-| `--caps <caps>` | Comma-separated capabilities to grant the child key; each must be one the parent key has (required) | — |
+| `--caps <scopes>` | Comma-separated [API key scopes](/reference/api#api-key-scopes) for the child key; each must be granted by the parent key (required) | — |
 | `--ttl <seconds>` | Child key lifetime in whole seconds, from 60 to 86400 | `14400` (4 hours) |
 | `--dev` | Use local control plane (`http://localhost:3001`) | — |
 
 **What it does:**
-Asks the control plane to mint the child key, then prints the child key itself (`vk_…`), its key ID, the attenuation chain ID, the granted capabilities and the expiry time. The child key is shown **once** and never stored, so save it when it is printed. A child never outlives its parent: it expires after `--ttl` or when the first key it descends from expires, whichever comes sooner, and the printed expiry is that time.
+Asks the control plane to mint the child key, then prints the child key itself (`vk_…`), its key ID, the attenuation chain ID, the granted scopes and the expiry time. The child key is shown **once** and never stored, so save it when it is printed. A child never outlives its parent: it expires after `--ttl` or when the first key it descends from expires, whichever comes sooner, and the printed expiry is that time.
 
-Capabilities are the parent key's scopes, matched exactly as written. `*` is not expanded, so a key created with the default `*` scope can only grant `*`.
+A child can only narrow. Each requested scope must be granted by the parent: `*` grants every scope and `<area>:write` grants `<area>:read`. Called with a key rather than a dashboard session, each must also be granted by that key. The child acts with the parent owner's role, so the parent must be one of your own keys, and it is held to its parent's scopes on every request: narrowing the parent narrows the child.
 
-The request is refused when the parent key is revoked or expired, or descends from an expired key, when a requested capability is not one of the parent's (the error names which), or when the chain is already four attenuations deep. A missing `--parent-key`, an empty `--caps` or a `--ttl` outside 60–86400 whole seconds exits `1` before anything is sent.
+The request is refused when the parent key is not yours, is revoked or expired, or descends from an expired key, when a requested scope is not granted (the error names which), or when the chain is already four attenuations deep. A missing `--parent-key`, an empty `--caps`, a scope that is not in the registry, or a `--ttl` outside 60–86400 whole seconds exits `1` before anything is sent.
 
 **Example:**
 
 ```bash
-# <scope-a>,<scope-b>: scopes the parent key was created with
-intutic attenuate --parent-key key_abc123 --caps <scope-a>,<scope-b> --ttl 3600
+# A one-hour key for a sub-agent: agent traffic and reading traces only
+intutic attenuate --parent-key key_abc123 --caps gateway:use,traces:read --ttl 3600
 ```
 
 ---
@@ -2733,7 +2733,7 @@ intutic attenuate chain <chainId> [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Prints each link in the chain: parent key, child key, granted capabilities, expiry and when it was minted. Needs the OWNER or ADMIN role. The same chains are shown on the dashboard's **Attenuated API Keys** card.
+Prints each link in the chain: parent key, child key, granted scopes, expiry and when it was minted. Needs the OWNER or ADMIN role. The same chains are shown on the dashboard's **Attenuated API Keys** card.
 
 ---
 

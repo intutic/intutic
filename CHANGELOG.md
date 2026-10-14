@@ -70,6 +70,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the report without one), and a DLP refusal it reports is still filed as a
   second incident, as before. Upgrade both SDKs for one record and one
   incident per decision.
+- **Behaviour change: API key scopes are enforced.** A key's `scopes` were
+  stored and never read, so every key could do everything its owner's role
+  allowed, and an attenuated child key that "narrowed" its parent kept the
+  full role. A request made with a key now needs both the owner's role and a
+  scope covering the route, or it gets `403` with code `INSUFFICIENT_SCOPE` and
+  `requiredScopes`. The scopes form one fixed registry
+  (`API_KEY_SCOPES` in `@intutic/shared-types`): `*` (everything, the default
+  and what existing keys hold), `gateway:use` (agent traffic: LLM calls
+  through the proxy, hook gates, hook events, trace sync-back, holds, the SOP
+  rules and policy snapshot) and `<area>:read` / `<area>:write` for thirteen
+  areas of the REST API, `write` covering `read`. Creating or editing a key
+  with an unknown scope is refused with `400` naming the valid ones; a key
+  cannot grant a scope it does not hold. The proxy refuses LLM traffic from a
+  key without `gateway:use`. Child keys (`intutic attenuate --caps`) take
+  registry scopes, must descend from the caller's own key, and are held to
+  every ancestor's scopes on each request. The Terraform provider validates
+  `scopes` at plan time. **Compatibility:** a key whose stored scopes are all
+  outside the registry (free-form strings such as `["read"]`) keeps working as
+  `*` until **2.6.0**, when it is refused; the control plane logs
+  `apikey_legacy_scopes` on each use and the dashboard marks the key. See
+  [API key scopes](https://docs.intutic.ai/reference/api#api-key-scopes).
+
 - **Behaviour change: `withIntuticProxy()` points providers at the proxy's
   `/v1` routes.** `@intutic/gate/vercel` (and its `@intutic/gate/eve`
   re-export) passed the bare proxy URL as `baseURL`, and `@ai-sdk/openai` and
