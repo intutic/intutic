@@ -417,12 +417,6 @@ export interface ApiKeyInfo {
   label: string
   /** The scopes as stored on the key. */
   scopes: string[]
-  /**
-   * The stored scopes are all outside the registry (free-form strings written
-   * before scopes were enforced), so the key works as `*` until 2.6.0, when it
-   * is refused. Re-create it, or set its scopes, before then.
-   */
-  legacyScopes: boolean
   /** Per-key model allowlist; `null` when the key inherits the workspace list. */
   allowedModels: string[] | null
   expiresAt: string | null

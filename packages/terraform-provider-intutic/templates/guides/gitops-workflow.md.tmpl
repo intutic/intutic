@@ -38,7 +38,6 @@ A merged change interacts with that lifecycle:
 - **SOPs.** A new SOP starts in `DRAFT`. Editing a draft changes it in place. Editing a SOP that has left `DRAFT` creates a new `DRAFT` version with a new id, which the plan shows as an `id` known after apply; the approved version keeps enforcing until the new one is reviewed and promoted to `VALIDATED`, which retires it.
 - **Guardrails.** A new guardrail starts `PROPOSED`. Changing `name` or `description` edits it in place and keeps its evidence. Changing the rule itself creates the next version under a new id, `PROPOSED` with no evidence, and retires the current one; the plan shows the new `version` and `status`. The plan also asks the API to validate the rule, so a guardrail the API would refuse fails the pull request's plan, not the apply.
 - **Settings.** Only the keys in `settings` are managed. A key changed in the dashboard that the configuration does not name is left alone.
-- **Enforcement policies.** `intutic_policy` is deprecated, and the policies API sunsets on 2026-12-01. A policy's per-tool fields are enforced nowhere, so manage per-tool rules as `intutic_guardrail` with `kind = "hook_rule"`, which go through the guardrail lifecycle above, and set the intervention mode with the `interventionMode` key in `settings`. Until a workspace sets `interventionMode`, the active policy with the lowest `priority` still sets it for the whole workspace, through control-plane 2.5.x, so a priority change there can still change how every refusal is worded.
 
 
 ## Run it from CI

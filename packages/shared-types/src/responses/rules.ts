@@ -1,5 +1,5 @@
 /**
- * Responses of the control plane routes in policies.ts, wasmRules.ts, sops.ts, decisions.ts, judge.ts and hookEvents.ts.
+ * Responses of the control plane routes in wasmRules.ts, sops.ts, decisions.ts, judge.ts and hookEvents.ts.
  *
  * @module
  */
@@ -9,88 +9,6 @@ import { PII_ACTIONS, PII_DETECTOR_IDS } from '../piiDetectors.js'
 import { DeletedResponse, IsoTimestamp, listEnvelope } from './common.js'
 
 const InterventionMode = z.enum(['TRANSPARENT', 'OPAQUE', 'SILENT_LOG'])
-
-// ─── Enforcement policies (routes/policies.ts, deprecated) ────────────
-
-/** A `pcas_policies` row as the routes select it. */
-export const PolicyResponse = z.object({
-  policyId: z.string(),
-  workspaceId: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
-  riskCategory: z.enum(['NONE', 'DESTRUCTIVE', 'CREDENTIAL_ACCESS']).nullable(),
-  targetToolPattern: z.string(),
-  /** `OBSERVED` is never written by these routes, but a row may carry it. */
-  enforcementAction: z.enum(['BYPASS', 'ENHANCE', 'HIJACK', 'REASK', 'KILL', 'OBSERVED']),
-  interventionMode: InterventionMode.nullable(),
-  priority: z.number().int().nullable(),
-  conditions: z.unknown().describe('The policy conditions: a JSON object, or null.'),
-  isActive: z.boolean().nullable(),
-  currentVersion: z.number().int(),
-  createdAt: IsoTimestamp,
-  updatedAt: IsoTimestamp,
-  deletedAt: IsoTimestamp.nullable(),
-})
-export type PolicyResponse = z.infer<typeof PolicyResponse>
-
-/** `GET /api/v1/policies`: the live policies, newest first, and where the workspace's intervention mode comes from. */
-export const PolicyListResponse = z.object({
-  ok: z.literal(true),
-  policies: z.array(PolicyResponse),
-  interventionMode: z.object({
-    mode: InterventionMode,
-    source: z.enum(['setting', 'policy', 'default']).describe('The `interventionMode` setting, the lowest-priority active policy (deprecated fallback), or the default.'),
-    policyId: z.string().nullable().describe('The policy whose mode applies, when `source` is `policy`.'),
-  }),
-})
-export type PolicyListResponse = z.infer<typeof PolicyListResponse>
-
-/** `POST /api/v1/policies`: the created policy. */
-export const PolicyCreatedResponse = z.object({ ok: z.literal(true), policy: PolicyResponse })
-export type PolicyCreatedResponse = z.infer<typeof PolicyCreatedResponse>
-
-/** `PUT /api/v1/policies/:policyId`: the policy as updated, and its new version. */
-export const PolicyUpdatedResponse = z.object({ ok: z.literal(true), policy: PolicyResponse, currentVersion: z.number().int() })
-export type PolicyUpdatedResponse = z.infer<typeof PolicyUpdatedResponse>
-
-/** `DELETE /api/v1/policies/:policyId`: soft-deleted. */
-export const PolicyDeletedResponse = z.object({ ok: z.literal(true) })
-export type PolicyDeletedResponse = z.infer<typeof PolicyDeletedResponse>
-
-/** Enable, disable or roll back a policy: the version the change recorded. */
-export const PolicyVersionResponse = z.object({ ok: z.literal(true), currentVersion: z.number().int() })
-export type PolicyVersionResponse = z.infer<typeof PolicyVersionResponse>
-
-/** The hook rule a converted policy became (`lib/policyConversion.ts`). */
-const ConvertedHookRule = z.object({
-  kind: z.literal('hook_rule'),
-  title: z.string(),
-  tools: z.array(z.string()),
-  argContains: z.array(z.string()).optional(),
-  argNotContains: z.array(z.string()).optional(),
-})
-
-/**
- * `POST /api/v1/policies/:policyId/convert-to-guardrail`: the guardrail made
- * from the policy (201, or 200 when a concurrent conversion made it first),
- * or the one an earlier conversion made (200, without `ir`).
- */
-export const PolicyGuardrailConversionResponse = z.union([
-  z.object({
-    ok: z.literal(true),
-    created: z.boolean(),
-    guardrailId: z.string(),
-    status: z.literal('SHADOW'),
-    ir: ConvertedHookRule,
-  }),
-  z.object({
-    ok: z.literal(true),
-    created: z.literal(false),
-    guardrailId: z.string(),
-    status: z.string().describe('The existing guardrail\'s status.'),
-  }),
-])
-export type PolicyGuardrailConversionResponse = z.infer<typeof PolicyGuardrailConversionResponse>
 
 // ─── WASM rules (routes/wasmRules.ts) ─────────────────────────────────
 

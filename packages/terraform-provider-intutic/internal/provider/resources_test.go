@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/defaults"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -491,60 +490,5 @@ func TestVirtualKeyScopesMustBeInTheRegistry(t *testing.T) {
 	}
 	if len(validKeyScopes) < 20 {
 		t.Fatalf("api_key_scopes.json holds %d scopes; expected the whole registry", len(validKeyScopes))
-	}
-}
-
-// intutic_policy is deprecated: its per-tool fields are enforced nowhere and
-// its only effect, the workspace's intervention mode, moved to the
-// interventionMode setting. Plans must say so on the resource and on every
-// field that pretends otherwise, and the two fields the API needs but nothing
-// reads must not be required.
-func TestPolicyResourceIsDeprecatedAndItsDeadFieldsAreOptional(t *testing.T) {
-	var resp resource.SchemaResponse
-	newPolicyResource().Schema(context.Background(), resource.SchemaRequest{}, &resp)
-	s := resp.Schema
-	for _, want := range []string{"2026-12-01", "intutic_guardrail", "hook_rule", "interventionMode", "intutic_workspace_settings"} {
-		if !strings.Contains(s.DeprecationMessage, want) {
-			t.Errorf("resource DeprecationMessage %q does not mention %s", s.DeprecationMessage, want)
-		}
-	}
-	for _, claim := range []string{"what the proxy does", "matching tool"} {
-		if strings.Contains(s.Description, claim) {
-			t.Errorf("resource Description still claims per-tool enforcement (%q)", claim)
-		}
-	}
-	for name, want := range map[string]string{
-		"target_tool_pattern": "intutic_guardrail",
-		"enforcement_action":  "intutic_guardrail",
-		"conditions":          "intutic_guardrail",
-		"risk_category":       "intutic_guardrail",
-		"priority":            "interventionMode",
-		"intervention_mode":   "interventionMode",
-	} {
-		a, ok := s.Attributes[name]
-		if !ok {
-			t.Fatalf("intutic_policy has no %s", name)
-		}
-		if msg := a.GetDeprecationMessage(); !strings.Contains(msg, want) {
-			t.Errorf("%s DeprecationMessage %q does not point to %s", name, msg, want)
-		}
-		if !strings.HasPrefix(a.GetDescription(), "Deprecated") {
-			t.Errorf("%s Description does not start with Deprecated: %q", name, a.GetDescription())
-		}
-	}
-	for name, def := range map[string]string{"target_tool_pattern": "*", "enforcement_action": "BYPASS"} {
-		a := s.Attributes[name].(schema.StringAttribute)
-		if a.IsRequired() || !a.IsOptional() || !a.IsComputed() {
-			t.Errorf("%s must be Optional+Computed, not Required", name)
-		}
-		if a.Default == nil {
-			t.Errorf("%s has no default", name)
-			continue
-		}
-		var out defaults.StringResponse
-		a.Default.DefaultString(context.Background(), defaults.StringRequest{}, &out)
-		if out.PlanValue.ValueString() != def {
-			t.Errorf("%s defaults to %q, want %q", name, out.PlanValue.ValueString(), def)
-		}
 	}
 }

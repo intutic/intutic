@@ -1,12 +1,12 @@
 ---
 page_title: "Intutic Provider"
 description: |-
-  Manage an Intutic workspace's SOPs, enforcement policies, policy guardrails, settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters, upstream provider credentials and MCP server decisions as code.
+  Manage an Intutic workspace's SOPs, policy guardrails, settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters, upstream provider credentials and MCP server decisions as code.
 ---
 
 # Intutic Provider
 
-The Intutic provider manages one Intutic workspace through the control plane's REST API: SOPs, enforcement policies, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters (WASM and Rego rules), upstream provider credentials (bring your own key) and MCP server decisions.
+The Intutic provider manages one Intutic workspace through the control plane's REST API: SOPs, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters (WASM and Rego rules), upstream provider credentials (bring your own key) and MCP server decisions.
 
 ## Authentication
 

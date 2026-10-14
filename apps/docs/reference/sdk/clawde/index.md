@@ -318,29 +318,6 @@ Options for a [ClawdeClient](classes/ClawdeClient.md).
 
 ***
 
-### CompliancePolicy
-
-#### Properties
-
-| Property | Type |
-| ------ | ------ |
-| <a id="property-conditions"></a> `conditions` | `unknown` |
-| <a id="property-createdat-1"></a> `createdAt` | `string` |
-| <a id="property-currentversion"></a> `currentVersion` | `number` |
-| <a id="property-description-2"></a> `description` | `string` \| `null` |
-| <a id="property-enforcementaction"></a> `enforcementAction` | `string` |
-| <a id="property-interventionmode"></a> `interventionMode` | `string` \| `null` |
-| <a id="property-isactive"></a> `isActive` | `boolean` \| `null` |
-| <a id="property-name-3"></a> `name` | `string` |
-| <a id="property-policyid"></a> `policyId` | `string` |
-| <a id="property-priority"></a> `priority` | `number` \| `null` |
-| <a id="property-riskcategory"></a> `riskCategory` | `string` \| `null` |
-| <a id="property-targettoolpattern"></a> `targetToolPattern` | `string` |
-| <a id="property-updatedat"></a> `updatedAt` | `string` |
-| <a id="property-workspaceid-1"></a> `workspaceId` | `string` |
-
-***
-
 ### ConfigChain
 
 #### Properties
@@ -356,7 +333,7 @@ Options for a [ClawdeClient](classes/ClawdeClient.md).
 | <a id="property-snapshotswalked"></a> `snapshotsWalked` | `number` | - |
 | <a id="property-snapshotswithoutcontent"></a> `snapshotsWithoutContent?` | `number` | - |
 | <a id="property-unchainedsnapshotids"></a> `unchainedSnapshotIds` | `string`[] | - |
-| <a id="property-workspaceid-2"></a> `workspaceId` | `string` | - |
+| <a id="property-workspaceid-1"></a> `workspaceId` | `string` | - |
 
 ***
 
@@ -407,12 +384,12 @@ Options for a [ControlPlaneClient](classes/ControlPlaneClient.md).
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-name-4"></a> `name` | `string` |
+| <a id="property-name-3"></a> `name` | `string` |
 | <a id="property-orgid"></a> `orgId` | `string` |
 | <a id="property-plantier"></a> `planTier` | `string` |
 | <a id="property-region-1"></a> `region?` | `string` |
 | <a id="property-teamid"></a> `teamId` | `string` |
-| <a id="property-workspaceid-3"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-2"></a> `workspaceId` | `string` |
 
 ***
 
@@ -434,7 +411,7 @@ Options for a [ControlPlaneClient](classes/ControlPlaneClient.md).
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-2"></a> `createdAt` | `string` |
+| <a id="property-createdat-1"></a> `createdAt` | `string` |
 | <a id="property-disconnectid"></a> `disconnectId` | `string` |
 | <a id="property-fingerprint"></a> `fingerprint` | `string` |
 | <a id="property-harnesses"></a> `harnesses` | `string`[] |
@@ -657,7 +634,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | <a id="property-frameworkid"></a> `frameworkId` | `string` |
 | <a id="property-generatedat"></a> `generatedAt` | `string` |
 | <a id="property-mappingversion"></a> `mappingVersion` | `string` |
-| <a id="property-name-5"></a> `name` | `string` |
+| <a id="property-name-4"></a> `name` | `string` |
 | <a id="property-summary"></a> `summary` | `object` |
 | `summary.controls` | `number` |
 | `summary.full` | `number` |
@@ -684,12 +661,12 @@ An evidence archive: the parts verification reads. Everything else is covered by
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-3"></a> `createdAt` | `string` |
+| <a id="property-createdat-2"></a> `createdAt` | `string` |
 | <a id="property-deploymenttarget"></a> `deploymentTarget` | `string` |
 | <a id="property-gatewayid"></a> `gatewayId` | `string` |
 | <a id="property-keyprefix"></a> `keyPrefix` | `string` |
 | <a id="property-lastheartbeatat"></a> `lastHeartbeatAt` | `string` \| `null` |
-| <a id="property-name-6"></a> `name` | `string` |
+| <a id="property-name-5"></a> `name` | `string` |
 | <a id="property-proxyversion"></a> `proxyVersion` | `string` \| `null` |
 | <a id="property-revokedat"></a> `revokedAt` | `string` \| `null` |
 | <a id="property-status-2"></a> `status` | `string` |
@@ -725,7 +702,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | Property | Type |
 | ------ | ------ |
 | <a id="property-deploymenttarget-1"></a> `deploymentTarget` | `"docker"` \| `"kubernetes"` \| `"bare_metal"` |
-| <a id="property-name-7"></a> `name` | `string` |
+| <a id="property-name-6"></a> `name` | `string` |
 
 ***
 
@@ -738,7 +715,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | <a id="property-deploymenttarget-2"></a> `deploymentTarget` | `string` | - |
 | <a id="property-gatewayid-1"></a> `gatewayId` | `string` | - |
 | <a id="property-instructions"></a> `instructions` | `string` | - |
-| <a id="property-name-8"></a> `name` | `string` | - |
+| <a id="property-name-7"></a> `name` | `string` | - |
 | <a id="property-status-3"></a> `status` | `string` | - |
 | <a id="property-token"></a> `token` | `string` | Shown once — not retrievable again after this response. |
 
@@ -794,7 +771,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | Property | Type |
 | ------ | ------ |
 | <a id="property-configured"></a> `configured` | `boolean` |
-| <a id="property-createdat-4"></a> `createdAt` | `string` \| `null` |
+| <a id="property-createdat-3"></a> `createdAt` | `string` \| `null` |
 | <a id="property-lastdeliveryat"></a> `lastDeliveryAt` | `string` \| `null` |
 | <a id="property-secretrotatedat"></a> `secretRotatedAt` | `string` \| `null` |
 | <a id="property-url"></a> `url` | `string` \| `null` |
@@ -852,13 +829,13 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | Property | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ |
 | <a id="property-clause"></a> `clause` | `Record`\<`string`, `unknown`\> \| `null` | - | [`GuardrailSummary`](#guardrailsummary).[`clause`](#property-clause-1) |
-| <a id="property-description-3"></a> `description` | `string` \| `null` | - | [`GuardrailSummary`](#guardrailsummary).[`description`](#property-description-4) |
+| <a id="property-description-2"></a> `description` | `string` \| `null` | - | [`GuardrailSummary`](#guardrailsummary).[`description`](#property-description-3) |
 | <a id="property-document"></a> `document` | \| \{ `docId`: `string`; `provider`: `string`; `sourceUrl`: `string` \| `null`; `title`: `string`; \} \| `null` | - | [`GuardrailSummary`](#guardrailsummary).[`document`](#property-document-1) |
 | <a id="property-enforcingfires"></a> `enforcingFires` | `number` | - | [`GuardrailSummary`](#guardrailsummary).[`enforcingFires`](#property-enforcingfires-1) |
 | <a id="property-events"></a> `events` | `object`[] | - | - |
 | <a id="property-guardrailid"></a> `guardrailId` | `string` | - | [`GuardrailSummary`](#guardrailsummary).[`guardrailId`](#property-guardrailid-1) |
 | <a id="property-ir-2"></a> `ir` | `Record`\<`string`, `unknown`\> | The guardrail IR: `kind` and the keys that kind takes. | [`GuardrailSummary`](#guardrailsummary).[`ir`](#property-ir-3) |
-| <a id="property-name-9"></a> `name` | `string` \| `null` | - | [`GuardrailSummary`](#guardrailsummary).[`name`](#property-name-10) |
+| <a id="property-name-8"></a> `name` | `string` \| `null` | - | [`GuardrailSummary`](#guardrailsummary).[`name`](#property-name-9) |
 | <a id="property-passage"></a> `passage` | `Record`\<`string`, `unknown`\> \| `null` | - | - |
 | <a id="property-promotedat"></a> `promotedAt` | `string` \| `null` | - | [`GuardrailSummary`](#guardrailsummary).[`promotedAt`](#property-promotedat-1) |
 | <a id="property-proposedat"></a> `proposedAt` | `string` | - | [`GuardrailSummary`](#guardrailsummary).[`proposedAt`](#property-proposedat-1) |
@@ -959,12 +936,12 @@ Name exactly one: the document or the passage whose change to follow.
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-clause-1"></a> `clause` | `Record`\<`string`, `unknown`\> \| `null` | - |
-| <a id="property-description-4"></a> `description` | `string` \| `null` | - |
+| <a id="property-description-3"></a> `description` | `string` \| `null` | - |
 | <a id="property-document-1"></a> `document` | \| \{ `docId`: `string`; `provider`: `string`; `sourceUrl`: `string` \| `null`; `title`: `string`; \} \| `null` | - |
 | <a id="property-enforcingfires-1"></a> `enforcingFires` | `number` | - |
 | <a id="property-guardrailid-1"></a> `guardrailId` | `string` | - |
 | <a id="property-ir-3"></a> `ir` | `Record`\<`string`, `unknown`\> | The guardrail IR: `kind` and the keys that kind takes. |
-| <a id="property-name-10"></a> `name` | `string` \| `null` | - |
+| <a id="property-name-9"></a> `name` | `string` \| `null` | - |
 | <a id="property-promotedat-1"></a> `promotedAt` | `string` \| `null` | - |
 | <a id="property-proposedat-1"></a> `proposedAt` | `string` | - |
 | <a id="property-provenance-2"></a> `provenance` | [`GuardrailProvenance`](#guardrailprovenance) | - |
@@ -1006,7 +983,7 @@ One governance incident, with the route's snake_case keys.
 | ------ | ------ | ------ |
 | <a id="property-anomaly_type"></a> `anomaly_type` | `string` | The incident type: an anomaly category or a system incident type. |
 | <a id="property-created_at-1"></a> `created_at` | `string` \| `null` | - |
-| <a id="property-description-5"></a> `description` | `string` | - |
+| <a id="property-description-4"></a> `description` | `string` | - |
 | <a id="property-escalation_chain"></a> `escalation_chain` | `Record`\<`string`, `unknown`\> \| `null` | - |
 | <a id="property-incident_id"></a> `incident_id` | `string` | - |
 | <a id="property-resolution_status"></a> `resolution_status` | `string` \| `null` | - |
@@ -1075,7 +1052,7 @@ The walk is the answer whether or not it found a break (the control plane answer
 | <a id="property-rootsnotwalked"></a> `rootsNotWalked` | `number` |
 | <a id="property-rootswalked"></a> `rootsWalked` | `number` |
 | <a id="property-unchainedrootids"></a> `unchainedRootIds` | `string`[] |
-| <a id="property-workspaceid-4"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-3"></a> `workspaceId` | `string` |
 
 ***
 
@@ -1238,7 +1215,7 @@ The walk is the answer whether or not it found a break (the control plane answer
 | <a id="property-hostname-4"></a> `hostname` | `string` | `InventoryItem.hostname` |
 | <a id="property-itemid-2"></a> `itemId` | `string` | `InventoryItem.itemId` |
 | <a id="property-lastseenat-3"></a> `lastSeenAt` | `string` | `InventoryItem.lastSeenAt` |
-| <a id="property-name-11"></a> `name` | `string` | - |
+| <a id="property-name-10"></a> `name` | `string` | - |
 | <a id="property-scanned"></a> `scanned` | `boolean` | - |
 | <a id="property-scriptcount"></a> `scriptCount` | `number` | - |
 | <a id="property-sha256"></a> `sha256` | `string` \| `null` | - |
@@ -1340,7 +1317,7 @@ The walk is the answer whether or not it found a break (the control plane answer
 | ------ | ------ |
 | <a id="property-budgetlimitusd"></a> `budgetLimitUsd` | `string` |
 | <a id="property-looprunid"></a> `loopRunId` | `string` |
-| <a id="property-name-12"></a> `name` | `string` |
+| <a id="property-name-11"></a> `name` | `string` |
 | <a id="property-status-12"></a> `status` | [`LoopRunStatus`](#looprunstatus) |
 | <a id="property-totaltokencostusd"></a> `totalTokenCostUsd` | `string` |
 
@@ -1532,7 +1509,7 @@ The body of a create. Channel config and filters are each stored whole.
 | Property | Type |
 | ------ | ------ |
 | <a id="property-email-1"></a> `email` | `string` |
-| <a id="property-name-13"></a> `name` | `string` |
+| <a id="property-name-12"></a> `name` | `string` |
 | <a id="property-orgname-1"></a> `orgName` | `string` |
 | <a id="property-password"></a> `password` | `string` |
 
@@ -1578,7 +1555,7 @@ The body of a create. Channel config and filters are each stored whole.
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-5"></a> `createdAt` | `string` |
+| <a id="property-createdat-4"></a> `createdAt` | `string` |
 | <a id="property-orgid-1"></a> `orgId?` | `string` |
 | <a id="property-orgsopid"></a> `orgSopId` | `string` |
 | <a id="property-risktier"></a> `riskTier` | `string` |
@@ -1606,17 +1583,6 @@ The body of a create. Channel config and filters are each stored whole.
 | ------ | ------ |
 | <a id="property-passages-1"></a> `passages` | `object`[] |
 | <a id="property-query"></a> `query` | `string` |
-
-***
-
-### PolicyChangeResult
-
-#### Properties
-
-| Property | Type |
-| ------ | ------ |
-| <a id="property-currentversion-1"></a> `currentVersion?` | `number` |
-| <a id="property-ok-11"></a> `ok` | `boolean` |
 
 ***
 
@@ -1687,7 +1653,7 @@ The body of a create. Channel config and filters are each stored whole.
 | <a id="property-last_attempt_at"></a> `last_attempt_at?` | `string` \| `null` |
 | <a id="property-last_sync_error"></a> `last_sync_error?` | `string` \| `null` |
 | <a id="property-last_synced_at"></a> `last_synced_at` | `string` \| `null` |
-| <a id="property-name-14"></a> `name` | `string` |
+| <a id="property-name-13"></a> `name` | `string` |
 | <a id="property-provider-3"></a> `provider` | [`PolicySourceProvider`](#policysourceprovider) |
 
 ***
@@ -1699,7 +1665,7 @@ The body of a create. Channel config and filters are each stored whole.
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-config-2"></a> `config?` | `Record`\<`string`, `unknown`\> | - |
-| <a id="property-name-15"></a> `name` | `string` | - |
+| <a id="property-name-14"></a> `name` | `string` | - |
 | <a id="property-provider-4"></a> `provider` | [`PolicySourceProvider`](#policysourceprovider) | - |
 | <a id="property-token-3"></a> `token` | `string` | The provider credential (a Google service-account key is the key file's JSON). |
 
@@ -1727,7 +1693,7 @@ The body of a create. Channel config and filters are each stored whole.
 | <a id="property-inputtext"></a> `inputText?` | `string` | - |
 | <a id="property-inputtokencount"></a> `inputTokenCount?` | `number` | - |
 | <a id="property-model-2"></a> `model` | `string` | - |
-| <a id="property-workspaceid-5"></a> `workspaceId` | `string` | Must be the key's own workspace. |
+| <a id="property-workspaceid-4"></a> `workspaceId` | `string` | Must be the key's own workspace. |
 
 ***
 
@@ -1751,7 +1717,7 @@ The body of a create. Channel config and filters are each stored whole.
 | <a id="property-provider-5"></a> `provider` | `string` |
 | <a id="property-provisioned"></a> `provisioned` | `boolean` |
 | <a id="property-routinglive"></a> `routingLive` | `boolean` |
-| <a id="property-updatedat-1"></a> `updatedAt` | `string` \| `null` |
+| <a id="property-updatedat"></a> `updatedAt` | `string` \| `null` |
 
 ***
 
@@ -1870,7 +1836,7 @@ list, such as Azure OpenAI, whose list names base models, not deployments).
 | <a id="property-pagerdutyincident"></a> `pagerdutyIncident?` | `string` |
 | <a id="property-sessionid"></a> `sessionId?` | `string` |
 | <a id="property-workingdirectory"></a> `workingDirectory?` | `string` |
-| <a id="property-workspaceid-6"></a> `workspaceId?` | `string` |
+| <a id="property-workspaceid-5"></a> `workspaceId?` | `string` |
 
 ***
 
@@ -1954,10 +1920,10 @@ list, such as Azure OpenAI, whose list names base models, not deployments).
 | <a id="property-config-3"></a> `config?` | `Record`\<`string`, `unknown`\> | The adapter settings, with credentials masked. |
 | <a id="property-destinationid"></a> `destinationId` | `string` | - |
 | <a id="property-flushintervalms"></a> `flushIntervalMs` | `number` | - |
-| <a id="property-isactive-1"></a> `isActive` | `boolean` | - |
+| <a id="property-isactive"></a> `isActive` | `boolean` | - |
 | <a id="property-lasterror-1"></a> `lastError?` | `string` \| `null` | Absent on the create response, which reports no health yet. |
 | <a id="property-lastheartbeatat-1"></a> `lastHeartbeatAt?` | `string` \| `null` | Absent on the create response, which reports no health yet. |
-| <a id="property-name-16"></a> `name` | `string` | - |
+| <a id="property-name-15"></a> `name` | `string` | - |
 | <a id="property-signingsecret-2"></a> `signingSecret?` | `string` | A webhook destination's signing secret, only in the response that made it. |
 | <a id="property-sourcetables"></a> `sourceTables` | `string`[] | Empty means the default set: every source except the opt-in ones. |
 
@@ -1973,7 +1939,7 @@ list, such as Azure OpenAI, whose list names base models, not deployments).
 | <a id="property-batchsize-1"></a> `batchSize?` | `number` | - |
 | <a id="property-config-4"></a> `config` | `Record`\<`string`, `unknown`\> | Adapter settings, credentials included; the control plane encrypts them and masks them on every read. |
 | <a id="property-flushintervalms-1"></a> `flushIntervalMs?` | `number` | - |
-| <a id="property-name-17"></a> `name` | `string` | - |
+| <a id="property-name-16"></a> `name` | `string` | - |
 | <a id="property-sourcetables-1"></a> `sourceTables?` | `string`[] | - |
 
 ***
@@ -1998,8 +1964,8 @@ list, such as Azure OpenAI, whose list names base models, not deployments).
 | <a id="property-batchsize-2"></a> `batchSize?` | `number` | - |
 | <a id="property-config-5"></a> `config?` | `Record`\<`string`, `unknown`\> | - |
 | <a id="property-flushintervalms-2"></a> `flushIntervalMs?` | `number` | - |
-| <a id="property-isactive-2"></a> `isActive?` | `boolean` | `true` turns a deleted (deactivated) destination back on. |
-| <a id="property-name-18"></a> `name?` | `string` | - |
+| <a id="property-isactive-1"></a> `isActive?` | `boolean` | `true` turns a deleted (deactivated) destination back on. |
+| <a id="property-name-17"></a> `name?` | `string` | - |
 | <a id="property-sourcetables-2"></a> `sourceTables?` | `string`[] | - |
 
 ***
@@ -2088,14 +2054,14 @@ The created SOP: `POST /api/v1/sops` answers with the SOP itself (it sends no `o
 | Property | Type |
 | ------ | ------ |
 | <a id="property-complexitytier"></a> `complexityTier` | `string` |
-| <a id="property-isactive-3"></a> `isActive` | `boolean` |
+| <a id="property-isactive-2"></a> `isActive` | `boolean` |
 | <a id="property-lifecyclestate"></a> `lifecycleState` | `string` |
 | <a id="property-markdowncontent"></a> `markdownContent` | `string` |
 | <a id="property-risktier-1"></a> `riskTier` | `string` |
 | <a id="property-sopid-2"></a> `sopId` | `string` |
 | <a id="property-title-5"></a> `title` | `string` |
 | <a id="property-version-3"></a> `version` | `string` |
-| <a id="property-workspaceid-7"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-6"></a> `workspaceId` | `string` |
 
 ***
 
@@ -2185,8 +2151,8 @@ The body `intutic sops push` sends, in the route's snake_case.
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-6"></a> `createdAt` | `string` |
-| <a id="property-name-19"></a> `name` | `string` |
+| <a id="property-createdat-5"></a> `createdAt` | `string` |
+| <a id="property-name-18"></a> `name` | `string` |
 | <a id="property-orgid-2"></a> `orgId` | `string` |
 | <a id="property-slug"></a> `slug` | `string` |
 | <a id="property-teamid-1"></a> `teamId` | `string` |
@@ -2252,7 +2218,7 @@ The body `intutic sops push` sends, in the route's snake_case.
 | ------ | ------ |
 | <a id="property-actualcostusd"></a> `actualCostUsd` | `number` |
 | <a id="property-actualmodelrouted"></a> `actualModelRouted` | `string` |
-| <a id="property-enforcementaction-1"></a> `enforcementAction` | `string` |
+| <a id="property-enforcementaction"></a> `enforcementAction` | `string` |
 | <a id="property-requestedmodel"></a> `requestedModel` | `string` |
 | <a id="property-requestid"></a> `requestId` | `string` |
 | <a id="property-sessionid-1"></a> `sessionId` | `string` |
@@ -2308,7 +2274,7 @@ The body `intutic sops push` sends, in the route's snake_case.
 | <a id="property-breakglass"></a> `breakGlass?` | `boolean` |
 | <a id="property-breakglassrequestid"></a> `breakGlassRequestId?` | `string` \| `null` |
 | <a id="property-compliancescore"></a> `complianceScore` | `number` |
-| <a id="property-enforcementaction-2"></a> `enforcementAction` | `string` |
+| <a id="property-enforcementaction-1"></a> `enforcementAction` | `string` |
 | <a id="property-requestedmodel-1"></a> `requestedModel` | `string` |
 | <a id="property-timestamp-1"></a> `timestamp` | `string` |
 | <a id="property-traceid-1"></a> `traceId` | `string` |
@@ -2396,7 +2362,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | <a id="property-email-2"></a> `email` | `string` |
 | <a id="property-memberid-2"></a> `memberId` | `string` |
 | <a id="property-role-1"></a> `role` | `string` |
-| <a id="property-workspaceid-8"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-7"></a> `workspaceId` | `string` |
 
 ***
 
@@ -2406,11 +2372,11 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-7"></a> `createdAt` | `string` |
-| <a id="property-name-20"></a> `name` | `string` |
+| <a id="property-createdat-6"></a> `createdAt` | `string` |
+| <a id="property-name-19"></a> `name` | `string` |
 | <a id="property-plantier-1"></a> `planTier` | `string` |
 | <a id="property-slug-1"></a> `slug` | `string` |
-| <a id="property-workspaceid-9"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-8"></a> `workspaceId` | `string` |
 
 ***
 
@@ -2425,7 +2391,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-settings"></a> `settings` | `Record`\<`string`, `unknown`\> | Every setting, resolved with its default. |
-| <a id="property-workspaceid-10"></a> `workspaceId` | `string` | - |
+| <a id="property-workspaceid-9"></a> `workspaceId` | `string` | - |
 
 ***
 
@@ -2441,7 +2407,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | ------ | ------ | ------ | ------ |
 | <a id="property-settings-1"></a> `settings` | `Record`\<`string`, `unknown`\> | Every setting, resolved with its default. | [`WorkspaceSettings`](#workspacesettings).[`settings`](#property-settings) |
 | <a id="property-updated"></a> `updated` | `true` | - | - |
-| <a id="property-workspaceid-11"></a> `workspaceId` | `string` | - | [`WorkspaceSettings`](#workspacesettings).[`workspaceId`](#property-workspaceid-10) |
+| <a id="property-workspaceid-10"></a> `workspaceId` | `string` | - | [`WorkspaceSettings`](#workspacesettings).[`workspaceId`](#property-workspaceid-9) |
 
 ## Type Aliases
 

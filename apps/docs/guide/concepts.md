@@ -66,7 +66,7 @@ Only SOPs in the `VALIDATED` state are actively enforced. Learn more in [Standar
 
 ## Enforcement Actions (PCAS)
 
-The **Policy Compliance and Action System** evaluates every LLM request against your active SOPs and applies one of five actions. The rules that choose an action are SOPs, policy guardrails, custom filters and the detectors; an enforcement policy's action is not read by anything, and enforcement policies are [deprecated](/guide/policies#policy-deprecation).
+The **Policy Compliance and Action System** evaluates every LLM request against your active SOPs and applies one of five actions. The rules that choose an action are SOPs, policy guardrails, custom filters and the detectors.
 
 | Action | Effect | Example scenario |
 |--------|--------|-----------------|

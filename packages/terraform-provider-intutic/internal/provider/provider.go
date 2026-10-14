@@ -44,7 +44,7 @@ func (p *intuticProvider) Metadata(_ context.Context, _ provider.MetadataRequest
 
 func (p *intuticProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manage an Intutic workspace's SOPs, enforcement policies, policy guardrails, settings, " +
+		Description: "Manage an Intutic workspace's SOPs, policy guardrails, settings, " +
 			"virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters, " +
 			"upstream provider credentials and MCP server decisions as code.",
 		Attributes: map[string]schema.Attribute{
@@ -89,7 +89,6 @@ func (p *intuticProvider) Configure(ctx context.Context, req provider.ConfigureR
 func (p *intuticProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		newSopResource,
-		newPolicyResource,
 		newGuardrailResource,
 		newWorkspaceSettingsResource,
 		newVirtualKeyResource,

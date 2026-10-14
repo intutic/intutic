@@ -204,65 +204,6 @@ resource "intutic_sop" "deploys" {
 	)
 }
 
-func TestAccPolicy(t *testing.T) {
-	cfg := func(action string) string {
-		return fmt.Sprintf(`
-resource "intutic_policy" "no_force_push" {
-  name                = "tf-acc no force push"
-  description         = "Block git push --force from agents"
-  target_tool_pattern = "Bash"
-  enforcement_action  = %q
-  risk_category       = "DESTRUCTIVE"
-  conditions          = jsonencode({ argContains = ["push --force"] })
-}`, action)
-	}
-	accTest(t,
-		resource.TestStep{
-			Config: cfg("KILL"),
-			Check: resource.ComposeAggregateTestCheckFunc(
-				resource.TestMatchResourceAttr("intutic_policy.no_force_push", "id", regexp.MustCompile(`^pol_`)),
-				resource.TestCheckResourceAttr("intutic_policy.no_force_push", "priority", "100"),
-				resource.TestCheckResourceAttr("intutic_policy.no_force_push", "intervention_mode", "TRANSPARENT"),
-				resource.TestCheckResourceAttr("intutic_policy.no_force_push", "current_version", "1"),
-			),
-		},
-		clean(cfg("KILL")),
-		imported("intutic_policy.no_force_push"),
-		resource.TestStep{
-			Config: cfg("REASK"),
-			Check:  resource.TestCheckResourceAttr("intutic_policy.no_force_push", "current_version", "2"),
-		},
-		clean(cfg("REASK")),
-		resource.TestStep{
-			Config: cfg("REASK"),
-			PreConfig: func() {
-				// Find the id through the list, as the provider does.
-				api(t, "POST", "/api/v1/policies/"+policyID(t)+"/disable", nil)
-			},
-			PlanOnly:           true,
-			ExpectNonEmptyPlan: true,
-		},
-	)
-}
-
-func policyID(t *testing.T) string {
-	t.Helper()
-	c := client.New(os.Getenv("INTUTIC_CONTROL_PLANE_URL"), os.Getenv("INTUTIC_API_KEY"), "acceptance-test")
-	var out struct {
-		Policies []apiPolicy `json:"policies"`
-	}
-	if err := c.Get(context.Background(), "/api/v1/policies", &out); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range out.Policies {
-		if p.Name == "tf-acc no force push" {
-			return p.PolicyID
-		}
-	}
-	t.Fatal("policy not found")
-	return ""
-}
-
 func TestAccWorkspaceSettings(t *testing.T) {
 	cfg := func(mode string) string {
 		return fmt.Sprintf(`

@@ -14,7 +14,6 @@ Every resource in the Intutic provider can be imported, so a workspace configure
 | Resource | Import ID | Notes |
 |----------|-----------|-------|
 | `intutic_sop` | SOP id, `sp_…` | Import the live version. A version an edit has replaced, or a deleted SOP, cannot be imported. |
-| `intutic_policy` | Policy id, `pol_…` | Deprecated; the policies API sunsets on 2026-12-01. Write a policy's per-tool rule as an `intutic_guardrail` (`kind = "hook_rule"`) and its intervention mode as the `interventionMode` setting. |
 | `intutic_guardrail` | Guardrail id, `pgr_…` | Authored guardrails only. A guardrail extracted from a policy document is refused, and so is a retired one. |
 | `intutic_workspace_settings` | Workspace id, `ws_…` | Must be the API key's workspace. Imports with no keys managed: the first plan shows each key in your configuration as a change. |
 | `intutic_workspace_budget` | Workspace id, `ws_…` | One per workspace. |

@@ -462,22 +462,6 @@ def disable_mcp_tool(server_id: str, tool: str) -> McpServerDecision
 POST /api/v1/mcp/servers/:serverId/tools -- switch one tool off (OWNER, ADMIN).
 
 
-##### ControlPlaneClient.disable_policy()
-
-```python
-def disable_policy(policy_id: str) -> PolicyChangeResult
-```
-
-POST /api/v1/policies/:policyId/disable
-
-.. deprecated:: 2.5.1
-   Workspace policies are deprecated (sunset 2026-12-01): their tool
-   pattern, action and conditions are enforced nowhere. Use guardrails
-   for per-tool rules and the `interventionMode` workspace setting for
-   refusal wording; see
-   https://docs.intutic.ai/guide/policies#policy-deprecation.
-
-
 ##### ControlPlaneClient.download_evidence()
 
 ```python
@@ -535,22 +519,6 @@ def enable_mcp_tool(server_id: str, tool: str) -> McpServerDecision
 ```
 
 POST /api/v1/mcp/servers/:serverId/tools -- switch one tool on (OWNER, ADMIN).
-
-
-##### ControlPlaneClient.enable_policy()
-
-```python
-def enable_policy(policy_id: str) -> PolicyChangeResult
-```
-
-POST /api/v1/policies/:policyId/enable
-
-.. deprecated:: 2.5.1
-   Workspace policies are deprecated (sunset 2026-12-01): their tool
-   pattern, action and conditions are enforced nowhere. Use guardrails
-   for per-tool rules and the `interventionMode` workspace setting for
-   refusal wording; see
-   https://docs.intutic.ai/guide/policies#policy-deprecation.
 
 
 ##### ControlPlaneClient.extract_policy_document()
@@ -1061,22 +1029,6 @@ def list_org_sops() -> List[Dict[str, Any]]
 GET /api/v1/workspace/org-sops -- the org-wide SOP floors of the key's org.
 
 
-##### ControlPlaneClient.list_policies()
-
-```python
-def list_policies() -> List[Dict[str, Any]]
-```
-
-GET /api/v1/policies
-
-.. deprecated:: 2.5.1
-   Workspace policies are deprecated (sunset 2026-12-01): their tool
-   pattern, action and conditions are enforced nowhere. Use guardrails
-   for per-tool rules and the `interventionMode` workspace setting for
-   refusal wording; see
-   https://docs.intutic.ai/guide/policies#policy-deprecation.
-
-
 ##### ControlPlaneClient.list_policy_documents()
 
 ```python
@@ -1331,22 +1283,6 @@ def revoke_gateway(gateway_id: str, reason: Optional[str] = None) -> None
 ```
 
 DELETE /api/v1/gateways/:id
-
-
-##### ControlPlaneClient.rollback_policy()
-
-```python
-def rollback_policy(policy_id: str, version: int) -> PolicyChangeResult
-```
-
-POST /api/v1/policies/:policyId/rollback
-
-.. deprecated:: 2.5.1
-   Workspace policies are deprecated (sunset 2026-12-01): their tool
-   pattern, action and conditions are enforced nowhere. Use guardrails
-   for per-tool rules and the `interventionMode` workspace setting for
-   refusal wording; see
-   https://docs.intutic.ai/guide/policies#policy-deprecation.
 
 
 ##### ControlPlaneClient.rotate_gateway_token()

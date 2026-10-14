@@ -478,11 +478,6 @@ class ConfigChain(TypedDict, total=False):
     intact: bool
 
 
-class PolicyChangeResult(TypedDict, total=False):
-    ok: bool
-    currentVersion: int
-
-
 class RuleCandidateSource(TypedDict):
     candidateId: str
     guardrailId: Optional[str]

@@ -31,7 +31,7 @@ func TestProviderSchemasAreValid(t *testing.T) {
 		t.Errorf("%s: %s", d.Summary, d.Detail)
 	}
 	for _, name := range []string{
-		"intutic_sop", "intutic_policy", "intutic_guardrail", "intutic_workspace_settings", "intutic_virtual_key",
+		"intutic_sop", "intutic_guardrail", "intutic_workspace_settings", "intutic_virtual_key",
 		"intutic_gateway", "intutic_notification_rule", "intutic_mcp_server_decision", "intutic_siem_destination",
 		"intutic_wasm_rule", "intutic_provider_credential",
 	} {
@@ -115,23 +115,10 @@ resource "intutic_notification_rule" "r" {
   email_recipients = ["a@example.com"]
   cooldown_minutes = 0
 }`, `between 1 and 1440`},
-		{"shell metacharacters in a tool pattern", `
-resource "intutic_policy" "p" {
-  name                = "x"
-  target_tool_pattern = "Bash; rm"
-  enforcement_action  = "KILL"
-}`, `tool name or glob`},
-		{"creatable actions exclude OBSERVED", `
-resource "intutic_policy" "p" {
-  name                = "x"
-  target_tool_pattern = "Bash"
-  enforcement_action  = "OBSERVED"
-}`, `value must be one of`},
-		{"untrimmed policy name", `
-resource "intutic_policy" "p" {
-  name                = " padded "
-  target_tool_pattern = "Bash"
-  enforcement_action  = "KILL"
+		{"untrimmed gateway name", `
+resource "intutic_gateway" "g" {
+  name              = " padded "
+  deployment_target = "docker"
 }`, `whitespace`},
 		{"managed cells are not user-registrable", `
 resource "intutic_gateway" "g" {

@@ -86,7 +86,6 @@ from .types import (
     NotificationRule,
     NotificationRuleInput,
     NotificationSecretRotation,
-    PolicyChangeResult,
     PolicySourceInput,
     PolicySourceSyncResult,
     PredictCostParams,
@@ -920,57 +919,7 @@ class ControlPlaneClient:
         """GET /api/v1/integrity/config-chain -- the harness config snapshot chain walk."""
         return cast(ConfigChain, self._request("GET", "/api/v1/integrity/config-chain", answers=(409,)))
 
-    # ─── Compliance policies and WASM rules (intutic policy) ───
-
-    def list_policies(self) -> List[Dict[str, Any]]:
-        """GET /api/v1/policies
-
-        .. deprecated:: 2.5.1
-           Workspace policies are deprecated (sunset 2026-12-01): their tool
-           pattern, action and conditions are enforced nowhere. Use guardrails
-           for per-tool rules and the ``interventionMode`` workspace setting for
-           refusal wording; see
-           https://docs.intutic.ai/guide/policies#policy-deprecation.
-        """
-        return self._list("/api/v1/policies", "policies")
-
-    def enable_policy(self, policy_id: str) -> PolicyChangeResult:
-        """POST /api/v1/policies/:policyId/enable
-
-        .. deprecated:: 2.5.1
-           Workspace policies are deprecated (sunset 2026-12-01): their tool
-           pattern, action and conditions are enforced nowhere. Use guardrails
-           for per-tool rules and the ``interventionMode`` workspace setting for
-           refusal wording; see
-           https://docs.intutic.ai/guide/policies#policy-deprecation.
-        """
-        return cast(PolicyChangeResult, self._request("POST", f"/api/v1/policies/{_quote(policy_id)}/enable"))
-
-    def disable_policy(self, policy_id: str) -> PolicyChangeResult:
-        """POST /api/v1/policies/:policyId/disable
-
-        .. deprecated:: 2.5.1
-           Workspace policies are deprecated (sunset 2026-12-01): their tool
-           pattern, action and conditions are enforced nowhere. Use guardrails
-           for per-tool rules and the ``interventionMode`` workspace setting for
-           refusal wording; see
-           https://docs.intutic.ai/guide/policies#policy-deprecation.
-        """
-        return cast(PolicyChangeResult, self._request("POST", f"/api/v1/policies/{_quote(policy_id)}/disable"))
-
-    def rollback_policy(self, policy_id: str, version: int) -> PolicyChangeResult:
-        """POST /api/v1/policies/:policyId/rollback
-
-        .. deprecated:: 2.5.1
-           Workspace policies are deprecated (sunset 2026-12-01): their tool
-           pattern, action and conditions are enforced nowhere. Use guardrails
-           for per-tool rules and the ``interventionMode`` workspace setting for
-           refusal wording; see
-           https://docs.intutic.ai/guide/policies#policy-deprecation.
-        """
-        return cast(PolicyChangeResult, self._request(
-            "POST", f"/api/v1/policies/{_quote(policy_id)}/rollback", {"version": version}
-        ))
+    # ─── WASM rules (intutic policy) ───
 
     def get_rule_candidate_source(self, candidate_id: str) -> RuleCandidateSource:
         """GET /api/v1/rule-candidates/:candidateId/source -- the source of

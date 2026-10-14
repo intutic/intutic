@@ -1,4 +1,13 @@
-## 0.3.1 (Unreleased)
+## 0.4.0 (Unreleased)
+
+BREAKING CHANGES:
+
+* resource/intutic_policy: removed, along with the control plane's policies API (`/api/v1/policies`). No gate or proxy ever enforced a policy's per-tool fields. Write per-tool rules as `intutic_guardrail` with `kind = "hook_rule"` (`tools`, `arg_contains`, `arg_not_contains`), which the harness gates enforce once the guardrail is promoted through review, and set the intervention mode with the `interventionMode` key of `intutic_workspace_settings`. Before upgrading, delete every `intutic_policy` block from your configuration and run `terraform state rm` on each one: this version no longer knows the resource type, so a configuration or state that still holds one fails to plan.
+
+ENHANCEMENTS:
+
+* resource/intutic_notification_rule: accepts the event types `billing.dunning.downgraded` (the third failed payment moved the account to the free plan) and `billing.dunning.restored` (the overdue payment was made and the plan is back).
+* resource/intutic_workspace_settings: the `interventionMode` key is the only source of the workspace's intervention mode; a workspace that has not set it uses `TRANSPARENT`. Before, a workspace without the setting took the mode of its lowest-priority active policy.
 
 BUG FIXES:
 
@@ -11,7 +20,6 @@ BREAKING CHANGES:
 * resource/intutic_workspace_settings: `featureFlags.ff_metaclaw_auto_apply` is no longer accepted; the plan fails validation naming it, and the API refuses it. The control plane removed the flag and carried each workspace's value over to the SOP Optimizer's Approval mode, which is now the only switch for its auto-apply. Remove the flag from your configuration before upgrading.
 ENHANCEMENTS:
 
-* resource/intutic_notification_rule: accepts the event types `billing.dunning.downgraded` (the third failed payment moved the account to the free plan) and `billing.dunning.restored` (the overdue payment was made and the plan is back).
 * resource/intutic_virtual_key: `scopes` is validated against the control plane's scope registry (`*`, `gateway:use`, and `<area>:read` / `<area>:write` for each REST area) at plan time, and its description says what each kind grants. The control plane now enforces scopes: a request with a key needs both its owner's role and a scope covering the route, and LLM traffic through the proxy needs `gateway:use`. A key with the default `["*"]` is unaffected. A configuration naming a scope outside the registry, which the API used to store and ignore, now fails at plan time.
 
 DEPRECATIONS:
