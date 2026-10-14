@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer, type AddressInfo } from 'node:net'
-import { describePolicySnapshot, checkCiscoScanner, checkControlPlane, checkValkey } from './doctor.js'
+import { describePolicySnapshot, checkCiscoScanner, checkControlPlane, checkValkey, linuxCaTrustInstalled } from './doctor.js'
 import { loadCredentials } from '../config/store.js'
 
 vi.mock('../config/store.js', async (importOriginal) => ({
@@ -199,5 +199,26 @@ describe('checkControlPlane', () => {
     const result = await checkControlPlane()
     expect(result.passed).toBe(false)
     expect(result.remediation).toContain('intutic login')
+  })
+})
+
+describe('linuxCaTrustInstalled', () => {
+  const readerFor = (present: string) => (path: string) => {
+    if (path === present) return '-----BEGIN CERTIFICATE-----'
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+  }
+
+  it("finds `intutic connect`'s copy, not only enterprise install's", () => {
+    expect(linuxCaTrustInstalled(readerFor('/usr/local/share/ca-certificates/intutic-connect-ca.crt'))).toBe(true)
+    expect(linuxCaTrustInstalled(readerFor('/etc/pki/ca-trust/source/anchors/intutic-connect-ca.crt'))).toBe(true)
+  })
+
+  it("finds enterprise install's copy and a manual Arch anchor", () => {
+    expect(linuxCaTrustInstalled(readerFor('/usr/local/share/ca-certificates/intutic-ca.crt'))).toBe(true)
+    expect(linuxCaTrustInstalled(readerFor('/etc/ca-certificates/trust-source/anchors/intutic-ca.crt'))).toBe(true)
+  })
+
+  it('is false when no copy is installed', () => {
+    expect(linuxCaTrustInstalled(readerFor('/nowhere/intutic-ca.crt'))).toBe(false)
   })
 })

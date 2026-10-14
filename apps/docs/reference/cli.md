@@ -1545,9 +1545,33 @@ intutic decision reject hold_abc123 --reason "Not during the freeze"
 
 ---
 
+## `intutic policy convert <policy_id>` <Badge type="tip" text="Cloud" />
+
+Turn an enforcement policy into the guardrail that does what it described. Enforcement policies are [deprecated](/guide/policies#policy-deprecation): no gate or proxy reads a policy's tool pattern, action or conditions.
+
+```bash
+intutic policy convert <policy_id> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+An active `KILL` or `REASK` policy on one tool becomes a `hook_rule` guardrail on that tool, with the policy's `conditions.argContains` and `argNotContains` as its argument substrings. The guardrail starts in shadow: it reports what it would block and blocks nothing until you promote it (`intutic guardrails promote`). Converting the same policy again names the guardrail it already became. A policy with another action, a disabled policy, a glob pattern such as `*`, or other conditions has no guardrail form; the command exits `1` and says why. The policy itself is left as it is.
+
+**Example:**
+
+```bash
+intutic policy convert pol_abc123
+```
+
+---
+
 ## `intutic policy enable <policy_id>` <Badge type="tip" text="Cloud" />
 
-Enable a compliance policy.
+Enable a compliance policy. Deprecated, like every command on enforcement policies (`enable`, `disable`, `rollback`, `export`): each prints a notice to stderr first, and the policies API is removed after 2026-12-01. See [Enforcement policies are deprecated](/guide/policies#policy-deprecation).
 
 ```bash
 intutic policy enable <policy_id> [options]
@@ -1563,7 +1587,7 @@ intutic policy enable <policy_id> [options]
 
 ## `intutic policy disable <policy_id>` <Badge type="tip" text="Cloud" />
 
-Disable a compliance policy.
+Disable a compliance policy (deprecated).
 
 ```bash
 intutic policy disable <policy_id> [options]
@@ -1579,7 +1603,7 @@ intutic policy disable <policy_id> [options]
 
 ## `intutic policy rollback <policy_id>` <Badge type="tip" text="Cloud" />
 
-Rollback a compliance policy to a specific version.
+Rollback a compliance policy to a specific version (deprecated).
 
 ```bash
 intutic policy rollback <policy_id> --version <version> [options]
@@ -1605,7 +1629,7 @@ intutic policy rollback pol_abc123 --version 2
 
 ## `intutic policy export` <Badge type="tip" text="Cloud" />
 
-Export workspace compliance policies to stdout as a JSON array.
+Export workspace compliance policies to stdout as a JSON array (deprecated; the notice goes to stderr, so the output stays JSON).
 
 ```bash
 intutic policy export [--all] [options]
@@ -1678,6 +1702,8 @@ intutic policy replay <ruleId> [options]
 
 **What it does:**
 Evaluates the rule against request contexts the proxy has sampled from this workspace's traffic (5% of requests by default), then prints how many contexts were replayed, how many the rule would have acted on (count and rate), the count for each verdict (`allow`, `block`, `reask`), and the first contexts it would not have allowed, as JSON.
+
+Sampled contexts carry each tool call's name and its arguments' keys and size, not the values, unless the workspace sets [`storeToolArguments`](/reference/workspace-settings). A rule that reads `tool_calls[].arguments` sees an empty string on those contexts, so the command then prints how many contexts withheld arguments and how to change that; contexts sampled after the setting is turned on carry the values, redacted.
 
 A rate needs enough traffic behind it: below 50 sampled contexts the command reports how many it found and how many it needs, and exits `1`. More contexts come from more traffic over time, not from a higher `--limit`. An unknown rule id or a rule that fails to evaluate also exits `1`.
 
@@ -1841,7 +1867,7 @@ intutic guardrails sources list
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs), with auto-sync state and last sync; `--json` also carries `last_sync_error` and `last_attempt_at`. Memory providers are not policy sources and are not listed.
+Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs), with auto-sync state, last sync and the error of a failed scheduled sync; `--json` also carries `last_attempt_at`. Memory providers are not policy sources and are not listed.
 
 ---
 
@@ -1970,7 +1996,7 @@ intutic guardrails docs extract <docId>
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-One model call per chunk of passages, under the workspace's daily cap (exit 1 with the cap on 429). A proposal is a verbatim quote plus a clause in the closed grammar; anything else is rejected by name. A valid clause becomes a proposed guardrail that enforces nothing until approved for shadow.
+One model call per chunk of passages, under the workspace's daily cap (exit 1 with the cap on 429, and exit 1 without a model call when the cap store is unreachable). A proposal is a verbatim quote plus a clause in the closed grammar; anything else is rejected by name. A valid clause becomes a proposed guardrail that enforces nothing until approved for shadow.
 
 ---
 
@@ -2441,8 +2467,9 @@ Fetches the workspace SOP policy and writes one flat file per served guardrail, 
 
 ## `intutic sops push <name>` <Badge type="tip" text="Cloud" />
 
-Push a local offline SOP folder to the central workspace — one control-plane
-SOP per file, each carrying its own declared front matter.
+Push a local SOP folder, or a single SOP file, to the central workspace — one
+control-plane SOP per file, each carrying its own declared front matter. A file
+that records its SOP (`intutic_id:`) updates that SOP; any other file creates one.
 
 ```bash
 intutic sops push <name> [options]
@@ -2452,17 +2479,24 @@ intutic sops push <name> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `name` | Folder name under `.intutic/sops/` in the workspace root |
+| `name` | A folder under `.intutic/sops/` in the workspace root, or a file there named with or without `.md` (the layout `sops pull` writes) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
 | `--dev` | Use local control plane (`http://localhost:3001`) |
-| `--org` | Push as an org-wide floor instead of a workspace SOP |
+| `--force` | Overwrite a SOP that changed on the control plane since the file was pulled, and fork a DRAFT even when one already exists |
+| `--create` | For a file whose recorded SOP no longer exists, create a new SOP instead of refusing |
+| `--org` | Push as an org-wide floor instead of a workspace SOP (always creates) |
 
 **What it does:**
-For every `.md` file in `.intutic/sops/<name>/`, parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier) and creates one workspace SOP per file, front matter stripped from the uploaded body. Fails if the folder is missing or contains no markdown. Creating workspace SOPs needs the OWNER or ADMIN role; `--org` needs that role on a workspace in the org. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
+For every `.md` file in `.intutic/sops/<name>/` — or, when there is no such folder, for the one file `.intutic/sops/<name>.md` — parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier on a new SOP), front matter stripped from the uploaded body, and then, per file:
+
+- **The file records a SOP** (`intutic_id:`, written by `sops pull` or an earlier push): if the file matches the SOP, nothing is sent (`up to date`). Otherwise the SOP is edited through the same path as the dashboard (`PUT /api/v1/sops/:id`): a DRAFT is edited in place; an approved SOP gets a new DRAFT version, and the approved one keeps enforcing until the draft is promoted. The file's `intutic_revision:` is sent as the precondition, so a SOP edited on the control plane since the pull is refused ("changed on the server since you pulled it") instead of overwritten; run `intutic sops pull`, or push with `--force` to overwrite. A push that would fork a second DRAFT of the same approved SOP is refused the same way. An edit that loosens the guideline needs an Owner, and the control plane's refusal is printed. A recorded SOP that no longer exists is refused unless `--create` is passed.
+- **The file records no SOP:** a new workspace SOP is created.
+
+After a successful create or update, the file's front matter records the SOP's id and revision (the new DRAFT's id when the edit forked one), with every other line of the file kept. Each file's result is printed; the command exits `1` if any file failed. Fails if neither the folder nor the file exists, or the folder contains no markdown. Creating and editing workspace SOPs needs the OWNER or ADMIN role; `--org` needs that role on a workspace in the org. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
 
 ---
 
@@ -2482,13 +2516,13 @@ intutic sops pull [options]
 | `--force` | Overwrite locally-modified files instead of refusing them |
 
 **What it does:**
-Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed and a `content_hash:` marker recording the body's hash. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
+Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed, a `content_hash:` marker recording the body's hash, and the sync record `sops push` reads: `intutic_id:` (the SOP) and `intutic_revision:` (its edit counter). A SOP goes into the local file that already records its id — flat or in a `<name>/` folder, keeping that file's other front-matter keys — and otherwise into `.intutic/sops/<slug>.md`. An approved version is skipped when a local file tracks its DRAFT successor. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
 
 ---
 
 ## `intutic sops status` <Badge type="tip" text="Cloud" />
 
-Show drift between `.intutic/sops/*.md` and the control plane. Writes no local file.
+Show drift between the local SOP files (`.intutic/sops/*.md` and `.intutic/sops/<name>/*.md`) and the control plane. Writes no local file.
 
 ```bash
 intutic sops status [options]
@@ -2501,7 +2535,7 @@ intutic sops status [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-For each local file, matched by title against the workspace's control-plane SOPs, reports `in-sync`, `local-ahead` (edited locally, not yet pushed), `remote-ahead` (control plane moved on, safe to pull), `diverged` (no recorded pull hash and no match either — can't tell "never pulled" from "edited long ago"), or `push-only` (no matching title on the control plane yet). Files named `guardrail-*.md` (written by `intutic guardrails pull`) are skipped. Every matched result is also reported to the control plane, which the `sop_git_drift` compliance probe reads; a failed report does not fail the command. See [GitOps for SOPs](/guide/gitops-sops).
+For each local file, matched to its SOP by the recorded `intutic_id:` (by title for a file without one), reports `in-sync`, `local-ahead` (edited locally, not yet pushed), `remote-ahead` (control plane moved on, safe to pull), `diverged` (edited on both sides, or no recorded pull hash and no match either — can't tell "never pulled" from "edited long ago"), or `push-only` (no matching SOP on the control plane yet, or the recorded one is gone). Files named `guardrail-*.md` (written by `intutic guardrails pull`) are skipped. Every matched result is also reported to the control plane, which the `sop_git_drift` compliance probe reads; a failed report does not fail the command. See [GitOps for SOPs](/guide/gitops-sops).
 
 ---
 
@@ -2681,10 +2715,10 @@ intutic credentials models anthropic
 
 ## `intutic attenuate` <Badge type="warning" text="Biz Org+" />
 
-Mint a child API key that carries a subset of a parent key's capabilities and expires sooner.
+Mint a child API key from one of your keys, with narrower scopes and a shorter life.
 
 ```bash
-intutic attenuate --parent-key <keyId> --caps <cap,cap,...> [--ttl <seconds>] [options]
+intutic attenuate --parent-key <keyId> --caps <scope,scope,...> [--ttl <seconds>] [options]
 ```
 
 **Options:**
@@ -2692,22 +2726,22 @@ intutic attenuate --parent-key <keyId> --caps <cap,cap,...> [--ttl <seconds>] [o
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--parent-key <keyId>` | ID of the parent API key to narrow (required) | — |
-| `--caps <caps>` | Comma-separated capabilities to grant the child key; each must be one the parent key has (required) | — |
+| `--caps <scopes>` | Comma-separated [API key scopes](/reference/api#api-key-scopes) for the child key; each must be granted by the parent key (required) | — |
 | `--ttl <seconds>` | Child key lifetime in whole seconds, from 60 to 86400 | `14400` (4 hours) |
 | `--dev` | Use local control plane (`http://localhost:3001`) | — |
 
 **What it does:**
-Asks the control plane to mint the child key, then prints the child key itself (`vk_…`), its key ID, the attenuation chain ID, the granted capabilities and the expiry time. The child key is shown **once** and never stored, so save it when it is printed. A child never outlives its parent: it expires after `--ttl` or when the first key it descends from expires, whichever comes sooner, and the printed expiry is that time.
+Asks the control plane to mint the child key, then prints the child key itself (`vk_…`), its key ID, the attenuation chain ID, the granted scopes and the expiry time. The child key is shown **once** and never stored, so save it when it is printed. A child never outlives its parent: it expires after `--ttl` or when the first key it descends from expires, whichever comes sooner, and the printed expiry is that time.
 
-Capabilities are the parent key's scopes, matched exactly as written. `*` is not expanded, so a key created with the default `*` scope can only grant `*`.
+A child can only narrow. Each requested scope must be granted by the parent: `*` grants every scope and `<area>:write` grants `<area>:read`. Called with a key rather than a dashboard session, each must also be granted by that key. The child acts with the parent owner's role, so the parent must be one of your own keys, and it is held to its parent's scopes on every request: narrowing the parent narrows the child.
 
-The request is refused when the parent key is revoked or expired, or descends from an expired key, when a requested capability is not one of the parent's (the error names which), or when the chain is already four attenuations deep. A missing `--parent-key`, an empty `--caps` or a `--ttl` outside 60–86400 whole seconds exits `1` before anything is sent.
+The request is refused when the parent key is not yours, is revoked or expired, or descends from an expired key, when a requested scope is not granted (the error names which), or when the chain is already four attenuations deep. A missing `--parent-key`, an empty `--caps`, a scope that is not in the registry, or a `--ttl` outside 60–86400 whole seconds exits `1` before anything is sent.
 
 **Example:**
 
 ```bash
-# <scope-a>,<scope-b>: scopes the parent key was created with
-intutic attenuate --parent-key key_abc123 --caps <scope-a>,<scope-b> --ttl 3600
+# A one-hour key for a sub-agent: agent traffic and reading traces only
+intutic attenuate --parent-key key_abc123 --caps gateway:use,traces:read --ttl 3600
 ```
 
 ---
@@ -2733,7 +2767,7 @@ intutic attenuate chain <chainId> [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Prints each link in the chain: parent key, child key, granted capabilities, expiry and when it was minted. Needs the OWNER or ADMIN role. The same chains are shown on the dashboard's **Attenuated API Keys** card.
+Prints each link in the chain: parent key, child key, granted scopes, expiry and when it was minted. Needs the OWNER or ADMIN role. The same chains are shown on the dashboard's **Attenuated API Keys** card.
 
 ---
 
@@ -4317,7 +4351,7 @@ intutic enforce <action> [options]
 | Option | Description |
 |--------|-------------|
 | `--port <port>` | The proxy's listener port to permit. Default: the `PORT` environment variable, else `4000`; `INTUTIC_PROXY_URL` is not read. |
-| `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to the user the command runs as, which is root under `sudo`: pass `--uid "$(id -u)"` when the proxy runs as you. |
+| `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to you: the user the command runs as, or under `sudo` the user who invoked sudo (`SUDO_UID`), not root. Pass it when the proxy runs as a different account. |
 | `--allow <cidrs>` | Comma-separated extra destinations to permit (control plane, private registries, etc.), each an IP address or CIDR block. A hostname is refused before anything is applied: resolve it to its address range first. |
 | `--no-dns` | Also deny outbound DNS — only if a local resolver serves the host. |
 | `--platform <os>` | Target ruleset platform: `linux`, `macos`, or `windows`. Defaults to the current OS. |
@@ -4340,7 +4374,7 @@ active on a given machine without SSHing into it.
 intutic enforce generate
 
 # Apply, permitting an internal network and a package registry's address range too
-sudo intutic enforce apply --uid "$(id -u)" --allow 10.0.0.0/8,203.0.113.0/24
+sudo intutic enforce apply --allow 10.0.0.0/8,203.0.113.0/24
 
 # Check whether it's currently active
 intutic enforce status

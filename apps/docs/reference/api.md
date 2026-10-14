@@ -108,11 +108,11 @@ Authenticate with email and password.
 
 ### POST /api/v1/auth/refresh
 
-Refresh an access token using a refresh token.
+Refresh an access token using a refresh token, from the request body or from the `HttpOnly` refresh cookie a browser sign-in sets.
 
 **Auth:** None (public)
 
-**Request body:**
+**Request body** (API clients; omit it to use the cookie):
 
 ```json
 {
@@ -120,9 +120,11 @@ Refresh an access token using a refresh token.
 }
 ```
 
-**Response:** `200 OK` with new access token
+Refreshing from the cookie (`__Secure-intutic_refresh`, sent only to `/api/v1/auth/`) requires the `X-Intutic-CSRF` header, any value.
 
-**Error codes:** `400` validation, `401` expired or invalid token
+**Response:** `200 OK` with a new access token and new session cookies. The body also carries the new refresh token, except to a request that sent `X-Intutic-CSRF`, which gets it as the cookie only.
+
+**Error codes:** `400` validation, `401` expired, invalid or missing token, `403` cookie refresh without `X-Intutic-CSRF`
 
 ---
 
@@ -566,7 +568,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 412 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 413 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -628,7 +630,7 @@ Every route the control plane serves: 412 routes, grouped by the source file tha
 | POST | `/api/v1/auth/magic-link/login` | None (one-time link token) | Sign in with a magic-link token |
 | POST | `/api/v1/auth/magic-link/request` | None | Email a one-time sign-in link |
 | GET | `/api/v1/auth/me` | Authenticated | Get current user info |
-| POST | `/api/v1/auth/refresh` | None (refresh token) | Refresh access token |
+| POST | `/api/v1/auth/refresh` | None (refresh token in the body, or the refresh cookie with X-Intutic-CSRF) | Refresh access token |
 | POST | `/api/v1/auth/resend-verification` | None | Send the verification email again (2 per minute per address) |
 | GET | `/api/v1/auth/session` | Authenticated |  |
 | POST | `/api/v1/auth/signup` | None | Self-serve signup with workspace auto-provisioning |
@@ -1053,10 +1055,11 @@ Every route the control plane serves: 412 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/policies` | OWNER/ADMIN/EM | List live (non-deleted) policies |
+| GET | `/api/v1/policies` | OWNER/ADMIN/EM | Deprecated, like every policies route (sunset 2026-12-01). List live (non-deleted) policies, and where the intervention mode comes from |
 | POST | `/api/v1/policies` | OWNER/ADMIN | Create a policy (records version 1) |
 | DELETE | `/api/v1/policies/:policyId` | OWNER/ADMIN | Soft delete (version history is kept for audit) |
 | PUT | `/api/v1/policies/:policyId` | OWNER/ADMIN | Partial update; bumps the version and keeps a snapshot |
+| POST | `/api/v1/policies/:policyId/convert-to-guardrail` | OWNER/ADMIN | An active KILL/REASK policy becomes a hook-rule guardrail in SHADOW (201; 200 when already converted; 422 with `reason` when it has no guardrail form) |
 | POST | `/api/v1/policies/:policyId/disable` | OWNER/ADMIN |  |
 | POST | `/api/v1/policies/:policyId/enable` | OWNER/ADMIN |  |
 | POST | `/api/v1/policies/:policyId/rollback` | OWNER/ADMIN | Body `{"version": N}`: restores that version as a new one |
@@ -1348,10 +1351,10 @@ Every route the control plane serves: 412 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/wasm-rules` | Authenticated |  |
+| GET | `/api/v1/wasm-rules` | OWNER/ADMIN/EM |  |
 | POST | `/api/v1/wasm-rules` | OWNER/ADMIN |  |
 | DELETE | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN |  |
-| GET | `/api/v1/wasm-rules/:ruleId` | Authenticated |  |
+| GET | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN/EM |  |
 | PUT | `/api/v1/wasm-rules/:ruleId` | OWNER/ADMIN |  |
 | POST | `/api/v1/wasm-rules/:ruleId/replay` | OWNER/ADMIN/EM |  |
 | GET | `/api/v1/wasm-rules/binaries/:sha256` | Authenticated |  |

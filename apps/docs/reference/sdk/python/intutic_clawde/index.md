@@ -272,9 +272,10 @@ def attenuate_key(
 ) -> AttenuationResult
 ```
 
-POST /api/v1/attenuate -- a child key narrowed to a subset of the
-parent key's capabilities (`ttl_seconds` 60 to 86400). The child key
-is in the response once and never stored.
+POST /api/v1/attenuate -- a child of one of your keys with narrower
+scopes: each of `requested_caps` is an API key scope (`gateway:use`,
+`traces:read`, ...) the parent grants (`ttl_seconds` 60 to 86400).
+The child key is in the response once and never stored.
 
 
 ##### ControlPlaneClient.block_mcp_server()

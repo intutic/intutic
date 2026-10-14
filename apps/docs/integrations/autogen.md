@@ -90,7 +90,7 @@ model_client = OpenAIChatCompletionClient(
 
 ## What gets written
 
-Same shape as LangGraph's `.env.intutic` — proxy URLs plus a pointer at `intutic_clawde.gate.adapters.autogen.IntuticInterventionHandler`.
+Same shape as LangGraph's `.env.intutic` — proxy URLs plus a pointer at `intutic_clawde.gate.adapters.autogen_workbench.IntuticWorkbench`, and at `intutic_clawde.gate.adapters.autogen.IntuticInterventionHandler` for runtime-routed `FunctionCall` messages.
 
 To undo what `intutic connect` writes here, run `intutic disconnect --harness autogen`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 

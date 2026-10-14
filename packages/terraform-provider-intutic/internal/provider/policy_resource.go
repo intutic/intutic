@@ -22,8 +22,8 @@ import (
 	"github.com/intutic/terraform-provider-intutic/internal/client"
 )
 
-// Enforcement-policy routes: routes/policies.ts. Every limit below is
-// CreatePolicySchema's.
+// Enforcement-policy routes: routes/policies.ts (deprecated, see
+// policyDeprecation). Every limit below is CreatePolicySchema's.
 var (
 	policyActions       = []string{"BYPASS", "ENHANCE", "HIJACK", "REASK", "KILL"}
 	policyModes         = []string{"TRANSPARENT", "OPAQUE", "SILENT_LOG"}
@@ -70,10 +70,36 @@ func (r *policyResource) Metadata(_ context.Context, req resource.MetadataReques
 	resp.TypeName = req.ProviderTypeName + "_policy"
 }
 
+// The policies API is deprecated as of control-plane 2.5.1 and sunsets on
+// 2026-12-01. No gate or proxy reads a policy's per-tool fields; the only
+// effect a policy has is that the active one with the lowest priority sets the
+// workspace's intervention mode, and only until the workspace sets the
+// interventionMode setting (the fallback ends in control-plane 2.6.0).
+const (
+	policyDeprecation = "intutic_policy is deprecated: the policies API sunsets on 2026-12-01, and a policy's " +
+		"per-tool fields are enforced nowhere. Write per-tool rules as intutic_guardrail with kind = \"hook_rule\", " +
+		"and set the workspace's intervention mode with the interventionMode key of intutic_workspace_settings."
+	policyFieldUnenforced = " is enforced nowhere: no gate or proxy reads it. Write per-tool rules as " +
+		"intutic_guardrail with kind = \"hook_rule\"."
+	policyPriorityDeprecation = "priority only chooses which active policy's intervention_mode applies to the " +
+		"workspace (the lowest wins). The interventionMode key of intutic_workspace_settings replaces it."
+	policyModeDeprecation = "Set the workspace's intervention mode with the interventionMode key of " +
+		"intutic_workspace_settings. Once that setting is set it wins and every policy's intervention_mode is " +
+		"ignored; until then, through control-plane 2.5.x, the active policy with the lowest priority still sets it."
+)
+
 func (r *policyResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "An enforcement policy, managed through `/api/v1/policies`: what the proxy does when an agent " +
-			"calls a matching tool. Every change records a new version in the policy's audit history; destroying " +
+		DeprecationMessage: policyDeprecation,
+		Description: "Deprecated: the policies API (`/api/v1/policies`) is deprecated as of control-plane 2.5.1 and " +
+			"sunsets on 2026-12-01. Write per-tool rules as `intutic_guardrail` with `kind = \"hook_rule\"`, which " +
+			"the harness gates enforce once the guardrail is promoted, and set the intervention mode with the " +
+			"`interventionMode` key of `intutic_workspace_settings`. A policy's per-tool fields (`target_tool_pattern`, " +
+			"`enforcement_action`, `conditions`, `risk_category`) are stored but enforced nowhere: no gate or proxy " +
+			"reads them. Its one effect is that, while the workspace has not set `interventionMode`, the active policy " +
+			"with the lowest `priority` sets the workspace's intervention mode; that fallback ends in control-plane " +
+			"2.6.0. `intutic policy convert <id>` turns an active `KILL` or `REASK` policy into a `hook_rule` " +
+			"guardrail in `SHADOW`. Every change records a new version in the policy's audit history; destroying " +
 			"one soft-deletes it and keeps that history. Needs an OWNER or ADMIN key.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -95,31 +121,45 @@ func (r *policyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Validators:  []validator.String{stringvalidator.LengthAtMost(4000)},
 			},
 			"risk_category": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString("NONE"),
-				Description: "One of `NONE` (default), `DESTRUCTIVE`, `CREDENTIAL_ACCESS`.",
-				Validators:  []validator.String{stringvalidator.OneOf(policyRiskCategory...)},
+				Optional:           true,
+				Computed:           true,
+				Default:            stringdefault.StaticString("NONE"),
+				DeprecationMessage: "risk_category" + policyFieldUnenforced,
+				Description: "Deprecated, enforced nowhere: stored with the policy, read by no gate or proxy. " +
+					"One of `NONE` (default), `DESTRUCTIVE`, `CREDENTIAL_ACCESS`.",
+				Validators: []validator.String{stringvalidator.OneOf(policyRiskCategory...)},
 			},
 			"target_tool_pattern": schema.StringAttribute{
-				Required: true,
-				Description: "Tool name or glob the policy applies to; `*` matches all. Letters, digits and " +
-					"`_ - . : / *` only, for example `Bash` or `mcp__github__*`.",
+				Optional:           true,
+				Computed:           true,
+				Default:            stringdefault.StaticString("*"),
+				DeprecationMessage: "target_tool_pattern" + policyFieldUnenforced,
+				Description: "Deprecated, enforced nowhere: stored with the policy, read by no gate or proxy; " +
+					"name tools in an `intutic_guardrail`'s `tools` instead. A tool name or glob, letters, digits and " +
+					"`_ - . : / *` only. Defaults to `*`.",
 				Validators: []validator.String{
 					stringvalidator.LengthBetween(1, 256),
 					stringvalidator.RegexMatches(policyToolPattern, "must be a tool name or glob: letters, digits, _ - . : / * only"),
 				},
 			},
 			"enforcement_action": schema.StringAttribute{
-				Required:    true,
-				Description: "One of `BYPASS`, `ENHANCE`, `HIJACK`, `REASK`, `KILL`.",
-				Validators:  []validator.String{stringvalidator.OneOf(policyActions...)},
+				Optional:           true,
+				Computed:           true,
+				Default:            stringdefault.StaticString("BYPASS"),
+				DeprecationMessage: "enforcement_action" + policyFieldUnenforced,
+				Description: "Deprecated, enforced nowhere: stored with the policy, read by no gate or proxy; use a " +
+					"`hook_rule` `intutic_guardrail`, which blocks a matching call once enforcing. One of `BYPASS` " +
+					"(default), `ENHANCE`, `HIJACK`, `REASK`, `KILL`.",
+				Validators: []validator.String{stringvalidator.OneOf(policyActions...)},
 			},
 			"intervention_mode": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  stringdefault.StaticString("TRANSPARENT"),
-				Description: "What the agent is told when a call is refused; the active policy with the lowest `priority` sets it for the whole workspace. " +
+				Optional:           true,
+				Computed:           true,
+				Default:            stringdefault.StaticString("TRANSPARENT"),
+				DeprecationMessage: policyModeDeprecation,
+				Description: "Deprecated: set the `interventionMode` key of `intutic_workspace_settings` instead, which " +
+					"wins once set. Until then, through control-plane 2.5.x, the active policy with the lowest `priority` " +
+					"sets the intervention mode for the whole workspace. The mode is what the agent is told when a call is refused. " +
 					"`TRANSPARENT` (default): the refusal names the rule and its reason. " +
 					"`OPAQUE`: the same calls are refused with the same refusal codes, but the agent is told only " +
 					"\"Blocked by workspace policy. Ask a workspace admin if you need this action.\"; " +
@@ -129,23 +169,27 @@ func (r *policyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Validators: []validator.String{stringvalidator.OneOf(policyModes...)},
 			},
 			"priority": schema.Int64Attribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(100),
-				Description: "0–10000; the lowest number wins. Defaults to 100.",
-				Validators:  []validator.Int64{int64validator.Between(0, 10000)},
+				Optional:           true,
+				Computed:           true,
+				Default:            int64default.StaticInt64(100),
+				DeprecationMessage: policyPriorityDeprecation,
+				Description: "Deprecated: 0–10000, defaults to 100. It only chooses which active policy's " +
+					"`intervention_mode` applies (the lowest number wins), which the `interventionMode` workspace setting replaces.",
+				Validators: []validator.Int64{int64validator.Between(0, 10000)},
 			},
 			"conditions": schema.StringAttribute{
-				CustomType:  jsontypes.NormalizedType{},
-				Optional:    true,
-				Description: "Extra match conditions as a JSON object, for example `jsonencode({ ... })`.",
-				Validators:  []validator.String{jsonObjectValidator{}},
+				CustomType:         jsontypes.NormalizedType{},
+				Optional:           true,
+				DeprecationMessage: "conditions" + policyFieldUnenforced,
+				Description: "Deprecated, enforced nowhere: a JSON object stored with the policy, read by no gate or " +
+					"proxy; match arguments with an `intutic_guardrail`'s `arg_contains` and `arg_not_contains` instead.",
+				Validators: []validator.String{jsonObjectValidator{}},
 			},
 			"is_active": schema.BoolAttribute{
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(true),
-				Description: "Whether the policy is enforced. Defaults to true.",
+				Description: "Whether the policy is active; only an active policy's `intervention_mode` can apply. Defaults to true.",
 			},
 			"current_version": schema.Int64Attribute{
 				Computed:    true,

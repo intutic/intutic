@@ -1,5 +1,5 @@
 {
-  "$comment": "PII detectors for both DLP scanners. The Rust proxy embeds this file (packages/proxy/src/dlp/pii_detectors.json); the MCP proxy reads a byte-identical copy (packages/shared-types/src/piiDetectors.json). Edit one, copy it over the other: a test on each side fails while they differ. Regexes are the subset Rust regex and JavaScript RegExp agree on — ASCII classes, no \\b, no \\d, no lookaround — and each match is then checked by the named validator and boundary rule, implemented identically in packages/proxy/src/dlp/pii.rs and packages/mcp-proxy/src/dlpPii.ts. Conformance vectors: packages/shared-types/fixtures/pii-detector-vectors.json.",
+  "$comment": "PII detectors for both DLP scanners. The Rust proxy embeds this file (packages/proxy/src/dlp/pii_detectors.json); the MCP proxy reads a byte-identical copy (packages/shared-types/src/piiDetectors.json). Edit one, copy it over the other: a test on each side fails while they differ. Regexes are the subset Rust regex and JavaScript RegExp agree on — ASCII classes, no \\b, no \\d, no lookaround — and each match is then checked by the named validator and boundary rule, implemented identically in packages/proxy/src/dlp/pii.rs and packages/mcp-proxy/src/dlpPii.ts. Conformance vectors: packages/shared-types/fixtures/pii-detector-vectors.json. `default_action` is what a detector does to live traffic (the request sent to the model, the response returned to the client) when neither the workspace nor the machine sets an action; `stored_action` is what it does to the copies Intutic keeps, whatever the live action: matches are redacted in sampled replay contexts and change-manifest targets, and a prompt or response with a match is not written to the response cache. Email and phone stay off on live traffic because coding agents edit real addresses and numbers (package.json authors, git config, fixtures) and a redacted one gets written back as the placeholder; nothing an agent needs is lost by keeping them out of what Intutic stores.",
   "version": 1,
   "detectors": [
     {
@@ -9,7 +9,8 @@
       "regex": "[0-9]{4}[ -][0-9]{4}[ -][0-9]{4}[ -][0-9]{4}|[0-9]{4}[ -][0-9]{6}[ -][0-9]{4,5}|[0-9]{13,19}",
       "boundary": "numeric",
       "validator": "card_luhn",
-      "default_action": "redact"
+      "default_action": "redact",
+      "stored_action": "redact"
     },
     {
       "id": "pii.iban",
@@ -18,7 +19,8 @@
       "regex": "[A-Z]{2}[0-9]{2}(?: ?[A-Z0-9]){11,30}",
       "boundary": "word",
       "validator": "iban_mod97",
-      "default_action": "redact"
+      "default_action": "redact",
+      "stored_action": "redact"
     },
     {
       "id": "pii.ssn",
@@ -27,7 +29,8 @@
       "regex": "[0-9]{3}-[0-9]{2}-[0-9]{4}",
       "boundary": "numeric",
       "validator": "ssn_ranges",
-      "default_action": "redact"
+      "default_action": "redact",
+      "stored_action": "redact"
     },
     {
       "id": "pii.email",
@@ -36,7 +39,8 @@
       "regex": "[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\\.[A-Za-z0-9-]{1,63}){1,8}",
       "boundary": "word",
       "validator": "email_shape",
-      "default_action": "off"
+      "default_action": "off",
+      "stored_action": "redact"
     },
     {
       "id": "pii.phone",
@@ -45,7 +49,8 @@
       "regex": "\\+[1-9][0-9]{0,2}(?:[ .-]?\\([0-9]{1,4}\\)|[ .-]?[0-9]{1,4}){2,7}|(?:1[ .-])?(?:\\([2-9][0-9]{2}\\) ?|[2-9][0-9]{2}[ .-])[2-9][0-9]{2}[ .-][0-9]{4}",
       "boundary": "numeric",
       "validator": "phone_digits",
-      "default_action": "off"
+      "default_action": "off",
+      "stored_action": "redact"
     }
   ],
   "card_brands": [

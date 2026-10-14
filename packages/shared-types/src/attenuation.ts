@@ -11,6 +11,7 @@
  */
 
 import { z } from 'zod'
+import { unknownApiKeyScopes, unknownScopesMessage } from './apiKeyScopes.js'
 
 // ─── OBO Ephemeral Token ─────────────────────────────────────────────
 
@@ -75,7 +76,7 @@ export interface AttenuationChainLink {
   childKeyId: string
   /** Workspace scope */
   workspaceId: string
-  /** Capabilities granted to the child key */
+  /** Scopes granted to the child key */
   grantedCaps: string[]
   /** Chain expiry (ISO-8601) */
   expiresAt: string
@@ -86,7 +87,17 @@ export interface AttenuationChainLink {
 /** Request schema for token attenuation. */
 export const AttenuateTokenInputSchema = z.object({
   parentKeyId: z.string().min(1),
-  requestedCaps: z.array(z.string().min(1)).min(1, 'At least one capability must be requested'),
+  /**
+   * The child key's scopes (`API_KEY_SCOPES`), each one granted by the parent
+   * key: a child can only narrow.
+   */
+  requestedCaps: z
+    .array(z.string().min(1))
+    .min(1, 'At least one scope must be requested')
+    .superRefine((caps, ctx) => {
+      const unknown = unknownApiKeyScopes(caps)
+      if (unknown.length > 0) ctx.addIssue({ code: z.ZodIssueCode.custom, message: unknownScopesMessage(unknown) })
+    }),
   ttlSeconds: z.number().int().min(60).max(86400).optional(),
 })
 export type AttenuateTokenInput = z.infer<typeof AttenuateTokenInputSchema>

@@ -254,9 +254,10 @@ attenuateKey(
 ): Promise<AttenuationResult>;
 ```
 
-POST /api/v1/attenuate — a child key narrowed to a subset of the parent
-key's capabilities. The child key is in the response once and never
-stored.
+POST /api/v1/attenuate — a child of one of your keys with narrower
+scopes: each of `requestedCaps` is an API key scope (`gateway:use`,
+`traces:read`, …) the parent grants. The child key is in the response
+once and never stored.
 
 #### Parameters
 

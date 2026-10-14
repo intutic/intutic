@@ -140,7 +140,7 @@ The API enforces these tiers on every route that changes state, so a script or t
 | What the sync daemon, gates, proxies and SDKs report with a member's key | Developer and above |
 | The member's own account: password, profile, API keys, Slack link | Every role |
 
-Viewers change nothing in the workspace. An API key acts with the role of the member who owns it, so give the key that the sync daemon or a CI job uses to a Developer or above, and the key for Terraform to an Owner or Admin.
+Viewers change nothing in the workspace. An API key acts with the role of the member who owns it, so give the key that the sync daemon or a CI job uses to a Developer or above, and the key for Terraform to an Owner or Admin. A key is also limited by its [scopes](/reference/api#api-key-scopes): a request needs both the owner's role and a scope that covers it. A key that only runs agents, the sync daemon or a CI job needs only `gateway:use`; Terraform needs `*` or the write scopes of the areas it manages.
 
 Adjudicating a `response_injection:*` finding also needs Owner or Admin, because it reveals the stored response snippet.
 
@@ -271,6 +271,10 @@ it is exempt from the recency policy only, not from offboarding.
 Set this on your CI keys before enabling a window, or those pipelines will start
 failing when it elapses.
 
+Marking a key as automation also switches its scopes to **Agent traffic only**
+(`gateway:use`) in the dashboard, so a leaked pipeline key cannot read or change the
+workspace through the API. Widen the scopes if the pipeline calls the API as well.
+
 ### Undoing a deactivation
 
 Deactivation refuses a member's keys rather than revoking them, so reversing it
@@ -289,6 +293,10 @@ Change your account password from **Settings › General › Change Password**.
 - Passwords must be 8–128 characters
 - We recommend using a password manager
 - If SSO is enabled, you may not need a password at all
+
+## Dashboard Sessions
+
+The dashboard keeps your session in two `HttpOnly`, `Secure`, `SameSite=Strict` cookies — an access token and a refresh token — and stores no token where page script can read it. The refresh token is sent only to the sign-in endpoints, and refreshing from it needs the `X-Intutic-CSRF` header the dashboard sends. **Sign out** revokes your refresh tokens, expires both cookies and clears the profile and lists the dashboard cached in the browser. See [Dashboard Sessions & Browser Security](/security#dashboard-sessions-browser-security) for the cookies, CORS and the Content-Security-Policy.
 
 ---
 

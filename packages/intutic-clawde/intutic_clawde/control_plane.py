@@ -4,7 +4,7 @@ administration, as distinct from ClawdeClient's data-plane chat calls.
 Deliberately a separate class, not new methods on ClawdeClient:
 ClawdeClient.base_url targets the *proxy* (default http://localhost:4000);
 the control plane is a different origin entirely (default
-https://app.intutic.ai, or a self-hosted CONTROL_PLANE_URL). Bolting
+https://api.intutic.ai, or a self-hosted CONTROL_PLANE_URL). Bolting
 management calls onto ClawdeClient would silently need a second base URL
 on a class whose whole contract today is "one client, one proxy."
 
@@ -107,7 +107,9 @@ from .types import (
     WasmReplayResult,
 )
 
-DEFAULT_CONTROL_PLANE_URL = "https://app.intutic.ai"
+#: Intutic's hosted control plane: the API host, as the gate and the CLI default
+#: to. The dashboard host serves the web app, not the API.
+DEFAULT_CONTROL_PLANE_URL = "https://api.intutic.ai"
 
 #: The connector providers ``intutic guardrails sources`` lists: the ones that are policy sources.
 POLICY_SOURCE_PROVIDERS = frozenset({"notion", "confluence", "github", "gdrive"})
@@ -921,19 +923,51 @@ class ControlPlaneClient:
     # ─── Compliance policies and WASM rules (intutic policy) ───
 
     def list_policies(self) -> List[Dict[str, Any]]:
-        """GET /api/v1/policies"""
+        """GET /api/v1/policies
+
+        .. deprecated:: 2.5.1
+           Workspace policies are deprecated (sunset 2026-12-01): their tool
+           pattern, action and conditions are enforced nowhere. Use guardrails
+           for per-tool rules and the ``interventionMode`` workspace setting for
+           refusal wording; see
+           https://docs.intutic.ai/guide/policies#policy-deprecation.
+        """
         return self._list("/api/v1/policies", "policies")
 
     def enable_policy(self, policy_id: str) -> PolicyChangeResult:
-        """POST /api/v1/policies/:policyId/enable"""
+        """POST /api/v1/policies/:policyId/enable
+
+        .. deprecated:: 2.5.1
+           Workspace policies are deprecated (sunset 2026-12-01): their tool
+           pattern, action and conditions are enforced nowhere. Use guardrails
+           for per-tool rules and the ``interventionMode`` workspace setting for
+           refusal wording; see
+           https://docs.intutic.ai/guide/policies#policy-deprecation.
+        """
         return cast(PolicyChangeResult, self._request("POST", f"/api/v1/policies/{_quote(policy_id)}/enable"))
 
     def disable_policy(self, policy_id: str) -> PolicyChangeResult:
-        """POST /api/v1/policies/:policyId/disable"""
+        """POST /api/v1/policies/:policyId/disable
+
+        .. deprecated:: 2.5.1
+           Workspace policies are deprecated (sunset 2026-12-01): their tool
+           pattern, action and conditions are enforced nowhere. Use guardrails
+           for per-tool rules and the ``interventionMode`` workspace setting for
+           refusal wording; see
+           https://docs.intutic.ai/guide/policies#policy-deprecation.
+        """
         return cast(PolicyChangeResult, self._request("POST", f"/api/v1/policies/{_quote(policy_id)}/disable"))
 
     def rollback_policy(self, policy_id: str, version: int) -> PolicyChangeResult:
-        """POST /api/v1/policies/:policyId/rollback"""
+        """POST /api/v1/policies/:policyId/rollback
+
+        .. deprecated:: 2.5.1
+           Workspace policies are deprecated (sunset 2026-12-01): their tool
+           pattern, action and conditions are enforced nowhere. Use guardrails
+           for per-tool rules and the ``interventionMode`` workspace setting for
+           refusal wording; see
+           https://docs.intutic.ai/guide/policies#policy-deprecation.
+        """
         return cast(PolicyChangeResult, self._request(
             "POST", f"/api/v1/policies/{_quote(policy_id)}/rollback", {"version": version}
         ))
@@ -1008,9 +1042,10 @@ class ControlPlaneClient:
     def attenuate_key(
         self, parent_key_id: str, requested_caps: List[str], ttl_seconds: Optional[int] = None
     ) -> AttenuationResult:
-        """POST /api/v1/attenuate -- a child key narrowed to a subset of the
-        parent key's capabilities (``ttl_seconds`` 60 to 86400). The child key
-        is in the response once and never stored."""
+        """POST /api/v1/attenuate -- a child of one of your keys with narrower
+        scopes: each of ``requested_caps`` is an API key scope (``gateway:use``,
+        ``traces:read``, ...) the parent grants (``ttl_seconds`` 60 to 86400).
+        The child key is in the response once and never stored."""
         return cast(AttenuationResult, self._request(
             "POST",
             "/api/v1/attenuate",

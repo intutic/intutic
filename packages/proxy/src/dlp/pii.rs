@@ -62,6 +62,7 @@ struct DetectorDef {
     boundary: String,
     validator: String,
     default_action: String,
+    stored_action: String,
 }
 
 #[derive(Deserialize)]
@@ -89,8 +90,12 @@ pub struct Detector {
     pub category: String,
     pub description: String,
     pub regex: Regex,
-    /// `off`, `redact` or `block`.
+    /// `off`, `redact` or `block`: the action on live traffic when nothing
+    /// configures one.
     pub default_action: String,
+    /// `off` or `redact`: what happens to a match in a copy Intutic keeps
+    /// (`dlp::redact_for_storage`), whatever the live action.
+    pub stored_action: String,
     numeric: bool,
     validator: Validator,
 }
@@ -109,6 +114,13 @@ static DETECTORS: Lazy<Vec<Detector>> = Lazy::new(|| {
             regex: Regex::new(&d.regex)
                 .unwrap_or_else(|e| panic!("pii detector {} regex: {e}", d.id)),
             default_action: d.default_action.clone(),
+            stored_action: match d.stored_action.as_str() {
+                "off" | "redact" => d.stored_action.clone(),
+                other => panic!(
+                    "pii detector {} has stored_action {other}; only off and redact exist",
+                    d.id
+                ),
+            },
             numeric: match d.boundary.as_str() {
                 "numeric" => true,
                 "word" => false,

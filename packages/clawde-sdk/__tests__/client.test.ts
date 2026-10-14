@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { createServer, Server } from 'http'
 import { ClawdeClient } from '../src/client'
 import { ClawdeBlockedError, ClawdeConnectionError, ClawdeVerdictError } from '../src/errors'
@@ -291,5 +291,26 @@ describe('ClawdeClient', () => {
     expect(response.verdict).toBe('allow')
     expect(response.choices[0].message.content).toBe('Hi from Claude')
     expect(response.usage?.total_tokens).toBe(7)
+  })
+})
+
+describe('ClawdeClient control-plane default', () => {
+  it('checks the budget on the hosted API host when nothing names a control plane', async () => {
+    const original = process.env.INTUTIC_CONTROL_PLANE_URL
+    delete process.env.INTUTIC_CONTROL_PLANE_URL
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ budget_remaining_usd: 1, alert_triggered: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    try {
+      await new ClawdeClient({ apiKey: 'vk_test', autoContext: false }).checkBudget('gpt-4o', 1)
+      // The same host @intutic/gate and the CLI default to, not the dashboard's.
+      expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://api.intutic.ai/api/v1/budget')
+    } finally {
+      fetchSpy.mockRestore()
+      if (original !== undefined) process.env.INTUTIC_CONTROL_PLANE_URL = original
+    }
   })
 })

@@ -89,7 +89,7 @@ List all provisioned users in the workspace with optional filtering and paginati
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `filter` | string | `userName eq "jane@example.com"`, the one filter supported. Any other filter is ignored and the full list returned |
+| `filter` | string | `userName eq "jane@example.com"`, `externalId eq "00u1abcd"` or `emails[type eq "work"].value eq "jane@example.com"`. Any other filter is refused with `400` and `"scimType": "invalidFilter"` (RFC 7644 §3.4.2.2), never answered with the full list |
 | `startIndex` | number | 1-based pagination start index |
 | `count` | number | Maximum results per page (default 100, at most 200) |
 
@@ -293,7 +293,9 @@ is `null` for a structural group that grants nothing.
 
 ### GET /scim/v2/Groups — List Groups
 
-Returns every group in the workspace with its direct members.
+Returns every group in the workspace with its direct members. `filter` may be
+`displayName eq "Engineering"` (case-insensitive) or `externalId eq "00g1abcd"`;
+any other filter is refused with `400` and `"scimType": "invalidFilter"`.
 
 **Response:** `200 OK` with a `ListResponse` whose `Resources` are group resources.
 
@@ -332,10 +334,17 @@ Accepts a SCIM `PatchOp`. A `members` value may be an array or a single object.
 | Operation | Effect |
 |-----------|--------|
 | `add` on `members` | Adds the users or groups |
+| `remove` on `members[value eq "usr_abc123"]` | Removes that member only, whatever `value` says. Microsoft Entra ID and Okta both remove a member this way. Several ids may be joined with `or`; an id that is not a member is a no-op |
 | `remove` on `members` with values | Removes those members |
 | `remove` on `members` with no value | Removes every member |
 | `replace` on `members` | Replaces the member list with the values sent |
+| `replace` on `members[value eq "…"]` | Replaces the matching members with the values sent |
+| `add` or `replace` with no path and a `members` value | As `add` or `replace` on `members` |
 | `replace` on `displayName` (or no path) | Renames the group; an object value may also set `mappedRole` |
+
+A `members` filter other than `value eq` (or a sub-attribute path such as
+`members[value eq "…"].display`) is refused with `400` and
+`"scimType": "invalidFilter"`. Operations are applied in order, so the ones before it in the same request stay applied and the ones after it do not run.
 
 An edge that would make a group contain itself, directly or through nesting, is
 refused with a `400`.

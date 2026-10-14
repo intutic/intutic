@@ -47,6 +47,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import requests
 
+from ..control_plane import DEFAULT_CONTROL_PLANE_URL
+
 DEFAULT_TIMEOUT = 2.0
 EVENT_TIMEOUT = 2.0
 JUDGE_TIMEOUT = 120.0
@@ -148,7 +150,7 @@ class GateClient:
                  transport: Optional[Transport] = None,
                  get_transport: Optional[GetTransport] = None):
         self.base_url = (base_url or os.environ.get("INTUTIC_CONTROL_PLANE_URL")
-                         or "https://api.intutic.ai").rstrip("/")
+                         or DEFAULT_CONTROL_PLANE_URL).rstrip("/")
         self.api_key = api_key
         self.workspace_id = workspace_id
         self.session_id = session_id
@@ -426,7 +428,7 @@ class GateClient:
         workspace `intutic login` already bound, instead of duplicating the key.
         With no key in either place the client is `local_only`.
         """
-        base = os.environ.get("INTUTIC_CONTROL_PLANE_URL", "https://api.intutic.ai")
+        base = os.environ.get("INTUTIC_CONTROL_PLANE_URL", DEFAULT_CONTROL_PLANE_URL)
         key = os.environ.get("INTUTIC_API_KEY", "")
         ws = os.environ.get("INTUTIC_WORKSPACE_ID", "")
 

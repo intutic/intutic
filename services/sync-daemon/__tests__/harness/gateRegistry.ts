@@ -254,7 +254,7 @@ export const GATES: readonly GateEntry[] = [
     runner: 'node',
     contract: 'exit2',
     migrated: true,
-    mcpCalls: 'reachable',
+    mcpCalls: 'yes',
     mcpNote:
       'CONFIRMED, not a guess (2026-08-18 follow-up to M3\'s UNCONFIRMED flag): M3\'s composition ' +
       'fix targeted Cursor\'s event names/payload shape by analogy, and that assumption was wrong — ' +
@@ -997,8 +997,8 @@ export const NO_GATE: ReadonlyArray<{
       'plain HTTP without depending on that SDK package, is snake_case per the zod schemas that ' +
       'both validate the request and produce the response). There is no webhook: TrueForge never ' +
       'pushes anything to an external system, so governance requires an Intutic-operated service ' +
-      '(services/trueforge-bridge) subscribing to each session\'s turn SSE stream (or polling ' +
-      'listTurnEventsRoute as a fallback), resolving a pending call\'s source_event_id back to a ' +
+      '(services/trueforge-bridge) subscribing to each session\'s current turn SSE stream (reopened ' +
+      'after a backoff when it drops; there is no polling mode), resolving a pending call\'s source_event_id back to a ' +
       'real tool name + arguments via the referenced model.message event\'s tool_calls[].function ' +
       'field, evaluating it through the identical packages/gate-js machinery the embedded row ' +
       'above uses (soprules.ts\'s ruleMatches/firstMatch, then GateClient\'s POST /api/v1/hook-gate, ' +

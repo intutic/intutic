@@ -30,7 +30,7 @@ Who can sign in and with which role, the teams in your organization, and the gui
 
 ### Members
 
-The **Invite a teammate** form takes a display name, an email address and a role, and **Create Account** creates the account directly; no invitation email is sent. The dashboard generates a temporary password and shows it once, in the **Account Created** dialog, for you to copy and share. The new member is asked to change it at first sign-in. A **Seats used** meter shows the seats in use against the plan's limit. On an organization's plan the seats are the distinct people active across all its workspaces, so someone in two teams holds one seat. At the limit, deactivate a member or upgrade to add another.
+The **Invite a teammate** form takes a display name, an email address and a role, and **Create Account** creates the account directly; no invitation email is sent. The dashboard generates a temporary password and shows it once, in the **Account Created** dialog, for you to copy and share. Nothing forces a change at first sign-in, so ask the new member to set their own password under **Settings › General › Change Password**. A **Seats used** meter shows the seats in use against the plan's limit. On an organization's plan the seats are the distinct people active across all its workspaces, so someone in two teams holds one seat. At the limit, deactivate a member or upgrade to add another.
 
 Each member row has a role selector and **Deactivate** (or **Reactivate**). The roles:
 
@@ -62,8 +62,9 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 |------|--------------|
 | **Single Sign-On (SSO)** | **Configure SSO** connects a SAML or OIDC identity provider (Okta, Entra ID and others). Once a provider exists, the card also offers **Expire API keys without a recent SSO login** and **Directory provisioning (SCIM 2.0)**. On a plan without SSO the card says which plans include it, and SCIM, which needs the Enterprise or Self-host plan, does the same on Biz Org. See [Security & Identity](/guide/security) and [SCIM Provisioning](/guide/scim). |
 | **Group policy for high-risk tools** | Which tools only members of named identity-provider groups may run, and which tools need an on-behalf-of token. Needs a plan with SSO. See [below](#group-policy-for-high-risk-tools). |
-| **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy. See [below](#virtual-api-keys). |
-| **Attenuated API Keys** | Child keys minted from a parent key with fewer capabilities by `intutic attenuate`; open a chain to see each step. |
+| **Intervention Mode** | What an agent is told when a call is refused on workspace policy, at every gate: the rule and its reason (Transparent), one generic sentence (Opaque), or, at the local hook gates, nothing because the call runs and is reported (Silent log). See [Intervention Modes](/guide/policies#intervention-modes). |
+| **Virtual API Keys** | Keys (`vk_…`) that developers and their agents use to reach the Intutic proxy and API, each within its scopes. See [below](#virtual-api-keys). |
+| **Attenuated API Keys** | Child keys minted from one of your keys with narrower scopes by `intutic attenuate`; open a chain to see each step. |
 | **On-Behalf-Of Tokens** | A short-lived token that names you and only the tools you pick, for a service to check. See [below](#on-behalf-of-obo-tokens). |
 | **Provider Keys** | This workspace's own provider credentials. See [below](#provider-keys). |
 | **Gateways** | Register a [self-hosted gateway](/external/self-hosted-gateway) to run the proxy in your own infrastructure. |
@@ -71,7 +72,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Harness Config History** | Whether harness rules files are uploaded with their text or as hashes only. See [below](#harness-config-history). |
 | **Network Egress Control** | The egress mode and allow list every proxy in the workspace hot-reloads. |
 | **Sandboxed Execution** | Require agents to run in a sandbox; enforced by the CLI on `intutic exec`. See [Sandboxed Execution](/guide/sandboxed-execution). |
-| **PII Detectors** | The action the LLM proxy and the MCP proxy take on card numbers, IBANs, Social Security numbers, email addresses and phone numbers in this workspace's model traffic and MCP tool calls. A developer's own proxy config can only make a detector stricter. See [PII detectors](/guide/policies#setting-detector-actions-for-a-workspace). |
+| **PII Detectors** | The action the LLM proxy and the MCP proxy take on card numbers, IBANs, Social Security numbers, email addresses and phone numbers in this workspace's model traffic and MCP tool calls. A developer's own proxy config can only make a detector stricter. See [PII detectors](/guide/policies#setting-detector-actions-for-a-workspace). The same card has **Store tool-call arguments in replay contexts** (`storeToolArguments`, off by default): off, the replay contexts the proxy samples keep each tool call's name and its arguments' keys and size; on, the values too, redacted. |
 | **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
 | **Repeat-Finding Enforcement** | Act on a sustained pattern of findings in one session, not only record it. |
 | **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |
@@ -99,11 +100,15 @@ shown read-only, marked **Not enforced on this plan**; Owners and Admins can rem
 
 ### Virtual API Keys
 
-Create keys (`vk_` prefix) for developers and their agents to reach the Intutic proxy:
+Create keys (`vk_` prefix) for developers and their agents to reach the Intutic proxy and API:
 - Give each key a **Label / Description** and, optionally, **Expires In (Days)**
+- Choose its **Access**: **Full access** (`*`, everything your role allows, the default), **Agent traffic only** (`gateway:use`: LLM calls through the proxy, hook gates, SDKs and the sync daemon, and nothing else), or **Custom**, a read or write level per area of the API. A key needs both its owner's role and a scope for each request; anything outside its scopes gets `403 INSUFFICIENT_SCOPE`. The scopes and what each covers are listed in the [API reference](/reference/api#api-key-scopes)
 - Optionally limit a key to **Allowed models (optional)**, one model id per line
-- Mark a CI or service key **This key is for automation (CI, scripts, a service)**, so the SSO-recency window does not expire it (see [Security & Identity](/guide/security#automation-keys))
+- Mark a CI or service key **This key is for automation (CI, scripts, a service)**, so the SSO-recency window does not expire it (see [Security & Identity](/guide/security#automation-keys)). Ticking it also switches the key to **Agent traffic only**, the least-privilege choice for a pipeline; widen it if the pipeline calls the API too
+- The **Scopes** column lists each key's scopes. An OWNER or ADMIN can change them with **Edit scopes**; the change applies from the key's next request
 - **Revoke** a compromised key immediately
+
+A key marked **Legacy scopes** holds scope strings from before scopes were enforced. It keeps working with full access until 2.6.0, when it stops; set its scopes before then.
 
 There is no in-place rotation: create a new key, move clients to it, then revoke the old one.
 Creating and revoking a key is recorded with who did it on the
@@ -299,7 +304,7 @@ A semantic match is narrower. It applies only to a single plain-text exchange wi
 
 Some responses are never stored, because a hit replays plain text and these would lose what the client acts on: a response that called a tool or carried anything besides text (thinking, reasoning items, more than one choice), a response output DLP redacted or withheld, and a stream that ended early or was refused by policy. Two kinds of request skip the cache entirely: requests for more than one choice (`n` above 1), and Responses API requests without `"store": false`, which the provider keeps so the client can continue them with `previous_response_id` — a replayed answer would carry an id the provider never issued.
 
-Entries are per workspace and expire after 24 hours.
+Entries are per workspace and expire after 24 hours. An entry holds the prompt text and the answer, so an exchange in which DLP finds anything — a secret, or any of the five [PII detectors](/guide/policies#pii-detectors), email and phone included whatever their live actions — is served but never cached. Every cost posture turns exact matching on, and its description says so.
 
 The cache figures are **Cached answers**, **Cache hit rate** (exact and similar hits) and **Saved (USD)**.
 

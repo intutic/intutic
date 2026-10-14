@@ -17,7 +17,7 @@ npx @intutic/cli init
 The CLI detects GitHub Copilot presence (via `.git` or `.github` folders) and registers it as a harness:
 
 ```
-  ✔ github-copilot → .github/copilot-instructions.md
+  ✔ github-copilot → /path/to/project/.github/copilot-instructions.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).

@@ -56,7 +56,7 @@ SOPs follow a 7-state lifecycle:
 |-------|---------|
 | `DRAFT` | Initial authoring — not enforced yet |
 | `PENDING_REVIEW` | Submitted for team review |
-| `GENERATED` | Auto-generated from observed agent patterns |
+| `GENERATED` | Passed the Gödel score check on the way out of review |
 | `HYPOTHESIZED` | Proposed rule being tested against real traffic |
 | `REFINED` | Iteratively improved based on feedback and data |
 | `VALIDATED` | Active and enforced by the proxy |
@@ -66,7 +66,7 @@ Only SOPs in the `VALIDATED` state are actively enforced. Learn more in [Standar
 
 ## Enforcement Actions (PCAS)
 
-The **Policy Compliance and Action System** evaluates every LLM request against your active SOPs and applies one of five actions:
+The **Policy Compliance and Action System** evaluates every LLM request against your active SOPs and applies one of five actions. The rules that choose an action are SOPs, policy guardrails, custom filters and the detectors; an enforcement policy's action is not read by anything, and enforcement policies are [deprecated](/guide/policies#policy-deprecation).
 
 | Action | Effect | Example scenario |
 |--------|--------|-----------------|

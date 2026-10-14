@@ -12,8 +12,10 @@
  * shares no API with the ConversableAgent/GroupChat shape most AG2/pyautogen
  * tutorials still describe. The blocking gate ships SDK-side via
  * `intutic_clawde.gate.adapters.ag2.IntuticMiddleware`, an ag2
- * `BaseMiddleware.on_tool_execution`, matched to that current architecture
- * (see ag2.py's module doc; its exception propagation is unverified).
+ * `BaseMiddleware.on_tool_execution`, matched to that current architecture.
+ * ag2.py's module doc records what was confirmed live through AG2's real
+ * dispatcher, including that an exception escaping the middleware fails
+ * closed (the tool does not run).
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module

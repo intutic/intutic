@@ -35,7 +35,7 @@ class FakeIO implements SetupIO {
 }
 
 describe('buildLiteLLMConfigYaml', () => {
-  it('matches the shape of infra/compose/litellm_config.yaml\'s hand-written example', () => {
+  it('writes the gateway bundle\'s litellm_config.yaml shape', () => {
     const yaml = buildLiteLLMConfigYaml('anthropic/claude-haiku-4-5')
     expect(yaml).toContain('model_list:')
     expect(yaml).toContain('  - model_name: claude-haiku-4-5')
@@ -109,6 +109,16 @@ describe('runJudgeConfigure', () => {
     // an empty configMapName used to promise that and render model_list: [].
     expect(helmMsg).toContain(`--set-file litellm.config=${outPath}`)
     expect(helmMsg).not.toContain('configMapName')
+  })
+
+  // A customer has the CLI and the docs, not Intutic's source tree: the
+  // config, notes and log lines used to name infra/ files and *.ts sources.
+  it('prints no internal source paths, only docs links', async () => {
+    const io = new FakeIO(['ollama/llama3.1'])
+    await runJudgeConfigure({ out: outPath }, io)
+    const everything = [readFileSync(outPath, 'utf-8'), ...io.calls.map((c) => JSON.stringify(c.arg))].join('\n')
+    expect(everything).not.toMatch(/infra\/|services\/|\.test\.ts|\w+Service\.ts/)
+    expect(everything).toContain('https://docs.intutic.ai/external/on-prem-judge')
   })
 
   it('a custom (non-catalog) model reference is accepted with a warning, not refused', async () => {

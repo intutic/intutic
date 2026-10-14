@@ -23,9 +23,14 @@ use serde::{Deserialize, Serialize};
 pub enum Verdict {
     /// Allow the request to proceed unmodified
     Bypass,
-    /// Allow but inject additional context
+    /// Allow but inject additional context. The WASM ABI has no code for
+    /// this verdict, so no rule can return it; the registry refuses an
+    /// unrecognised verdict as "no verdict" (fail closed). It stays for the
+    /// mapping to the shared `EnforcementAction` enum.
     Enhance { context: String },
-    /// Hold the request, render a decision card for human review
+    /// Steer: rewrite or redact and proceed. As with `Enhance`, the WASM ABI
+    /// has no code for it, so a rule cannot return it; the proxy records
+    /// HIJACK from steering detector findings and DLP redactions instead.
     Hijack { reason: String, confidence: f64 },
     /// Refuse this attempt, tell the agent why, and let it try again.
     ///
@@ -397,6 +402,63 @@ pub struct RequestContext {
     pub node: NodeIdentity,
 }
 
+/// `tool_arguments` on a stored snapshot whose calls carry argument keys and
+/// sizes only.
+pub const SNAPSHOT_ARGUMENTS_KEYS_ONLY: &str = "keys_only";
+/// `tool_arguments` on a stored snapshot whose calls carry their arguments,
+/// DLP-redacted for storage.
+pub const SNAPSHOT_ARGUMENTS_REDACTED: &str = "redacted";
+
+impl RequestContext {
+    /// This context as a trace's `context_snapshot`: the copy Intutic keeps
+    /// for the replay corpus.
+    ///
+    /// Tool-call argument values stay out unless the workspace opted in
+    /// (`storeToolArguments`): each call keeps its `id` and `name`, and in
+    /// place of `arguments` carries `argument_keys` (the top-level keys of an
+    /// object argument, sorted) and `argument_bytes` (the size of the
+    /// arguments as JSON). Arguments are where an agent's file contents,
+    /// commands and pasted data live, and a sampled corpus for testing rules
+    /// has no claim to them by default. Opted in, `arguments` is kept, with
+    /// every string in it redacted by `dlp::redact_json_for_storage`.
+    ///
+    /// Either way every other string in the snapshot is redacted the same
+    /// way (`changes` targets carry commands and URLs), and `tool_arguments`
+    /// says which form the calls are in, so a replay can tell a rule that
+    /// found nothing in the arguments from one that was never shown them.
+    pub fn stored_snapshot(&self, store_arguments: bool) -> Option<serde_json::Value> {
+        let mut v = serde_json::to_value(self).ok()?;
+        let obj = v.as_object_mut()?;
+        if let Some(calls) = obj.get_mut("tool_calls").and_then(|c| c.as_array_mut()) {
+            for call in calls.iter_mut().filter_map(|c| c.as_object_mut()) {
+                let args = call.remove("arguments").unwrap_or(serde_json::Value::Null);
+                if store_arguments {
+                    call.insert("arguments".into(), args);
+                    continue;
+                }
+                let mut keys: Vec<String> = args
+                    .as_object()
+                    .map(|o| o.keys().cloned().collect())
+                    .unwrap_or_default();
+                keys.sort();
+                let bytes = serde_json::to_string(&args).map_or(0, |s| s.len());
+                call.insert("argument_keys".into(), serde_json::json!(keys));
+                call.insert("argument_bytes".into(), serde_json::json!(bytes));
+            }
+        }
+        obj.insert(
+            "tool_arguments".into(),
+            serde_json::json!(if store_arguments {
+                SNAPSHOT_ARGUMENTS_REDACTED
+            } else {
+                SNAPSHOT_ARGUMENTS_KEYS_ONLY
+            }),
+        );
+        crate::dlp::redact_json_for_storage(&mut v);
+        Some(v)
+    }
+}
+
 // A `ResponseContext` struct stood here, doc-commented as "passed to WASM
 // plugins on each response". It never was: no response-path WASM evaluation
 // exists, nothing constructed it, and its only repo-wide reference was its
@@ -458,6 +520,57 @@ mod tests {
                 graph_node_count: Some(3),
             },
         }
+    }
+
+    fn ctx_with_call() -> RequestContext {
+        let mut c = ctx();
+        c.tool_calls = vec![ToolCall {
+            id: "call_1".into(),
+            name: "Bash".into(),
+            arguments: serde_json::json!({
+                "command": format!("git commit --author 'Jane <{}@{}>'", "jane", "example.com"),
+                "timeout": 30,
+            }),
+        }];
+        c
+    }
+
+    /// By default a stored snapshot names each call and the shape of its
+    /// arguments, never their values.
+    #[test]
+    fn stored_snapshot_keeps_argument_keys_and_size_not_values() {
+        let v = ctx_with_call().stored_snapshot(false).unwrap();
+        let call = &v["tool_calls"][0];
+        assert_eq!(call["name"], "Bash");
+        assert_eq!(call["id"], "call_1");
+        assert!(
+            call.get("arguments").is_none(),
+            "no argument values by default: {call}"
+        );
+        assert_eq!(
+            call["argument_keys"],
+            serde_json::json!(["command", "timeout"])
+        );
+        let full = serde_json::to_string(&ctx_with_call().tool_calls[0].arguments).unwrap();
+        assert_eq!(call["argument_bytes"], full.len());
+        assert_eq!(v["tool_arguments"], SNAPSHOT_ARGUMENTS_KEYS_ONLY);
+        assert!(!v.to_string().contains("example.com"), "{v}");
+    }
+
+    /// Opted in, the arguments are kept with storage DLP applied to them.
+    #[test]
+    fn stored_snapshot_opted_in_keeps_redacted_arguments() {
+        let v = ctx_with_call().stored_snapshot(true).unwrap();
+        let args = &v["tool_calls"][0]["arguments"];
+        assert_eq!(
+            args["command"],
+            "git commit --author 'Jane <[REDACTED_PII]>'"
+        );
+        assert_eq!(args["timeout"], 30);
+        assert_eq!(v["tool_arguments"], SNAPSHOT_ARGUMENTS_REDACTED);
+        // The rest of the context is the same wire shape a rule reads.
+        assert_eq!(v["node_id"], "planner-1");
+        assert_eq!(v["tool_sequence"], serde_json::json!(["Glob", "View"]));
     }
 
     /// The guest contract. `#[serde(flatten)]` must put the node fields at the

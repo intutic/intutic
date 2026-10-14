@@ -44,7 +44,7 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
 1. Every LLM request from an AI agent is routed through the **local Intutic proxy** on port 4000
 2. The proxy evaluates tool calls against the SOPs' [front matter](/reference/sop-front-matter) and against **WASM rules** (sandboxed, with an enforced instruction budget and a wasmtime deadline)
 3. Verdicts and telemetry stay **on the local machine**. Bandit routing state is written to your own Valkey, or to `~/.intutic/bandit-state.json` when there is none; nothing is transmitted to Intutic or anyone else
-4. The proxy **never stores prompts or completions** — only structured telemetry (tool names, verdicts, token counts, timing)
+4. Traces carry **no prompts or completions** — only structured telemetry (tool names, verdicts, token counts, timing). Two things the proxy keeps go further, and both are limited by default; see [What the proxy keeps](#what-the-proxy-keeps)
 
 This is what you get by default. Open core ships no control plane, and with `policy.control_plane_url` unset the policy pre-check is skipped entirely.
 
@@ -102,6 +102,15 @@ All network communication is encrypted with TLS 1.2+:
 | Local config & credentials | `~/.intutic/credentials.json` | File permissions (`0600`) + system keychain |
 | Provider credentials in flight | Process memory only | Never written to disk |
 
+### What the proxy keeps
+
+Beyond the trace fields above, the proxy keeps two things that come from request content:
+
+- **Replay contexts.** A sampled 5% of requests (`WASM_CONTEXT_SNAPSHOT_RATE`) attach their rule-evaluation context to the trace, so a new rule can be replayed against real traffic. Each tool call in it carries its name and its arguments' top-level keys and size, not the argument values. A connected workspace can opt in to keeping the values with [`storeToolArguments`](/reference/workspace-settings); they are then kept with every secret and PII match redacted. Contexts a connected workspace stored before 2.5.1 are reduced to keys and sizes when its control plane upgrades.
+- **The response cache**, when a workspace or config turns it on (off by default; every [cost posture](/guide/settings#postures) turns exact matching on). An entry holds the prompt text and the answer for 24 hours. An exchange in which DLP finds a secret or personal data is never written to it.
+
+Whatever the live PII detector actions, everything the proxy keeps is redacted for every [PII detector](/guide/policies#pii-detectors), email and phone included, and for every secret pattern: replay contexts and the targets in a trace's change manifest (the commands, paths and URLs tool calls named). Live redaction of email and phone stays off by default because an agent editing a real address would write the placeholder back into the file.
+
 ---
 
 <!-- ENTERPRISE_ONLY_START -->
@@ -131,6 +140,20 @@ Intutic provides enterprise-grade identity and access management:
 **Every change is recorded.** Creating, rotating or revoking a virtual key, a gateway token or a SCIM token, and adding, replacing or removing a provider key, is recorded with who made the change and which credential it was, never its value. A change no member made names the system instead: `system:offboarding` for keys revoked when a member is offboarded, `system:gateway-rotation` for a gateway token rotated on its schedule. The records appear on the [audit timeline](/guide/audit-timeline#what-it-shows), stream to [SIEM export](/guide/siem-export#what-gets-streamed) as `credential_changes`, and send the `credential.changed` [notification](/guide/settings#rule-filters). They are append-only.
 
 The key encryption key is derived from `ENCRYPTION_KEY`, which you keep in your own secret store. Holding it in a cloud KMS (Google Cloud KMS, AWS KMS) is not available yet.
+
+**Secrets in blocked tool calls are not stored.** When a gate refuses a tool call, the control plane records the block — session, tool, verdict, reason, time — with a copy of the call's arguments in which every credential the DLP patterns detect is replaced by `[REDACTED <kind>]`, for example `[REDACTED AWS access key]`; a private key is removed header to footer. A DLP block therefore never stores the secret that caused it, and neither does any other block. Blocks recorded before this release had their arguments withheld whole (`{"withheld": "Tool arguments withheld: AWS access key detected"}`) by a one-off migration; the rest of each record is unchanged.
+
+---
+
+## Dashboard Sessions & Browser Security <Badge type="tip" text="Cloud" />
+
+**Sessions live in HttpOnly cookies.** Signing in sets two cookies, both `HttpOnly`, `Secure` and `SameSite=Strict`, so no script on the page can read either: the access token (`__Host-intutic_session`, 15 minutes by default) and the refresh token (`__Secure-intutic_refresh`, `REFRESH_TOKEN_EXPIRY_DAYS`, 30 days by default), which is sent only to `/api/v1/auth/` and nowhere else. The dashboard stores no token in `localStorage` or `sessionStorage`. Refreshing from the cookie requires the `X-Intutic-CSRF` request header, which a plain form cannot send and which only the dashboard's own origin may send cross-origin. Signing out revokes the member's refresh tokens, expires both cookies, and clears the profile and the trace and policy lists the dashboard cached for offline viewing.
+
+API clients are unchanged: the CLI and scripts still send a refresh token in the request body (`POST /api/v1/auth/refresh` with `{ "refreshToken": "..." }`) and receive one in the response. A request carrying `X-Intutic-CSRF` gets its refresh token as the cookie only. A browser that signed in before this release keeps its session: its next refresh sends the stored token once, moves the session onto the cookie, and deletes the stored copy.
+
+**Cross-origin access is an exact allow-list.** Only the dashboard's own origin (`APP_URL`) may call the API from a browser with credentials, plus any exact origins listed in `CORS_ALLOWED_ORIGINS`. Wildcard hosting domains are not allowed.
+
+**Content-Security-Policy.** The dashboard and these docs are served with a strict CSP: scripts only from their own origin (the docs also allow, by hash, the three inline scripts every page carries), no plugins, no framing (`frame-ancestors 'none'`), fonts self-hosted, and the dashboard connects only to its own origin and the API's. Both also send `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and a `Permissions-Policy` that turns off the camera, microphone, geolocation, payment and USB APIs.
 
 ---
 

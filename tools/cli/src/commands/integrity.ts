@@ -838,7 +838,10 @@ export async function runIntegrityChain(opts: IntegrityCliOpts): Promise<void> {
     if (body.rootsNotWalked > 0) {
       // An unwalked tail is not an intact one, and the endpoint says so rather
       // than letting the caller read "no breaks" as "no breaks anywhere".
-      log.field('Older, not walked', `${body.rootsNotWalked} (outside the 500-root window)`)
+      // Only whether one exists, not how many: the endpoint fetches one row
+      // past the window to tell a full window from a longer chain, so the
+      // field is at most 1 however many older roots there are.
+      log.field('Older, not walked', 'yes — roots past the 500-root window were not examined')
     }
 
     if (breaks.length === 0) {

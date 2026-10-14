@@ -64,10 +64,10 @@ This allows you to enforce a wide variety of development standards, including:
 The token cost prediction works via a multi-tiered fallback architecture:
 
 #### Tier 1: Workspace Baseline (Connected)
-In a connected workspace, the control plane records each call's output and reasoning tokens in Valkey, per model and input-size bucket (`0-1k`, `1k-5k`, `5k-20k`, `20k-50k`, `50k+` tokens). With at least 3 samples for the model and bucket, `@intutic predict` (and `intutic predict-cost`) uses their average output and reasoning tokens, with `medium` confidence (`high` from 10 samples).
+In a connected workspace, the control plane records each call's output and reasoning tokens in Valkey, per model and input-size bucket (`0-1k`, `1k-5k`, `5k-20k`, `20k-50k`, `50k+` tokens). With at least 3 samples for the model and bucket, `@intutic predict` (and `intutic predict-cost`) uses their average output and reasoning tokens, with `medium` confidence (`high` from 10 samples). The same tokens are also recorded in a baseline across every workspace on the control plane; until a workspace has 3 samples of its own, the estimate uses that shared baseline when it has more samples.
 
 #### Tier 2: Static Token Multipliers (Zero-Data Fallback)
-With fewer than 3 samples (a brand new workspace, or a standalone proxy, which has no baseline), the engine falls back to static, model-specific token ratio multipliers:
+With fewer than 3 samples in either baseline (a model or input size nobody has used yet, or a standalone proxy, which has no baseline), the engine falls back to static, model-specific token ratio multipliers:
 *   **Claude models:** Estimated output is `0.8` $\times$ input tokens.
 *   **GPT-4 models:** Estimated output is `0.6` $\times$ input tokens.
 *   **Reasoning models (o1/o3/o4):** Estimated output is `2.0` $\times$ input tokens.
@@ -206,7 +206,7 @@ Intutic supports local-first development by letting developers test custom promp
     ```bash
     intutic sops push <rule-group-name>
     ```
-    This packages the rule group's markdown files, posts them to `/api/v1/sops`, and writes them to the central the control plane’s datastore `sops` table.
+    This pushes each of the rule group's markdown files to the control plane's SOP registry: a new SOP for a file pushed the first time, an update to the same SOP afterwards (each file records the SOP it was pushed to).
 *   **Workspace-wide Distribution:** During subsequent sync cycles, the sync daemons of all other developers in the workspace automatically fetch the newly promoted rule with the workspace's sync config and write it into their respective adapter configs (like `.cursor/rules/intutic-governance.mdc` or `.claude/rules/intutic-governance.md`).
 
 ---

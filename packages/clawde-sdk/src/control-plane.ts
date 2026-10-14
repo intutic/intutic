@@ -131,6 +131,12 @@ import type {
   MirrorAdoptionReport,
 } from './types'
 
+/**
+ * Intutic's hosted control plane: the API host, as `@intutic/gate` and the CLI
+ * default to. The dashboard host serves the web app, not the API.
+ */
+export const DEFAULT_CONTROL_PLANE_URL = 'https://api.intutic.ai'
+
 /** The connector providers `intutic guardrails sources` lists: the ones that are policy sources. */
 const POLICY_SOURCE_PROVIDERS = new Set(['notion', 'confluence', 'github', 'gdrive'])
 
@@ -193,7 +199,7 @@ export class ControlPlaneClient {
     }
     this.apiKey = options.apiKey
     this.baseUrl =
-      options.baseUrl || process.env.INTUTIC_CONTROL_PLANE_URL || 'https://app.intutic.ai'
+      options.baseUrl || process.env.INTUTIC_CONTROL_PLANE_URL || DEFAULT_CONTROL_PLANE_URL
   }
 
   private async send(
@@ -964,22 +970,46 @@ export class ControlPlaneClient {
 
   // ─── Compliance policies and WASM rules (`intutic policy`) ───
 
-  /** GET /api/v1/policies */
+  /**
+   * GET /api/v1/policies
+   * @deprecated Workspace policies are deprecated (sunset 2026-12-01): their tool
+   * pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
+   * rules and the `interventionMode` workspace setting for refusal wording; see
+   * https://docs.intutic.ai/guide/policies#policy-deprecation.
+   */
   public async listPolicies(): Promise<CompliancePolicy[]> {
     return (await this.request<{ policies?: CompliancePolicy[] }>('GET', '/api/v1/policies')).policies ?? []
   }
 
-  /** POST /api/v1/policies/:policyId/enable */
+  /**
+   * POST /api/v1/policies/:policyId/enable
+   * @deprecated Workspace policies are deprecated (sunset 2026-12-01): their tool
+   * pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
+   * rules and the `interventionMode` workspace setting for refusal wording; see
+   * https://docs.intutic.ai/guide/policies#policy-deprecation.
+   */
   public async enablePolicy(policyId: string): Promise<PolicyChangeResult> {
     return this.request('POST', `/api/v1/policies/${seg(policyId)}/enable`)
   }
 
-  /** POST /api/v1/policies/:policyId/disable */
+  /**
+   * POST /api/v1/policies/:policyId/disable
+   * @deprecated Workspace policies are deprecated (sunset 2026-12-01): their tool
+   * pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
+   * rules and the `interventionMode` workspace setting for refusal wording; see
+   * https://docs.intutic.ai/guide/policies#policy-deprecation.
+   */
   public async disablePolicy(policyId: string): Promise<PolicyChangeResult> {
     return this.request('POST', `/api/v1/policies/${seg(policyId)}/disable`)
   }
 
-  /** POST /api/v1/policies/:policyId/rollback */
+  /**
+   * POST /api/v1/policies/:policyId/rollback
+   * @deprecated Workspace policies are deprecated (sunset 2026-12-01): their tool
+   * pattern, action and conditions are enforced nowhere. Use guardrails for per-tool
+   * rules and the `interventionMode` workspace setting for refusal wording; see
+   * https://docs.intutic.ai/guide/policies#policy-deprecation.
+   */
   public async rollbackPolicy(policyId: string, version: number): Promise<PolicyChangeResult> {
     return this.request('POST', `/api/v1/policies/${seg(policyId)}/rollback`, { version })
   }
@@ -1058,9 +1088,10 @@ export class ControlPlaneClient {
   // ─── Key attenuation, cost prediction, routing ───
 
   /**
-   * POST /api/v1/attenuate — a child key narrowed to a subset of the parent
-   * key's capabilities. The child key is in the response once and never
-   * stored.
+   * POST /api/v1/attenuate — a child of one of your keys with narrower
+   * scopes: each of `requestedCaps` is an API key scope (`gateway:use`,
+   * `traces:read`, …) the parent grants. The child key is in the response
+   * once and never stored.
    */
   public async attenuateKey(parentKeyId: string, requestedCaps: string[], options: AttenuateOptions = {}): Promise<AttenuationResult> {
     return this.request('POST', '/api/v1/attenuate', defined({ parentKeyId, requestedCaps, ttlSeconds: options.ttlSeconds }))

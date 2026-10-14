@@ -11,6 +11,7 @@ from .context_resolver import resolve_context
 from .git_context import resolve_git_context
 from .budget_checker import BudgetChecker
 from .circuit_breaker import CircuitBreaker
+from .control_plane import DEFAULT_CONTROL_PLANE_URL
 
 #: The harness a session this SDK registers is recorded under.
 SDK_HARNESS = "clawde_sdk"
@@ -54,7 +55,7 @@ class ClawdeClient:
         self.control_plane_url = (
             control_plane_url
             or os.environ.get("INTUTIC_CONTROL_PLANE_URL")
-            or "https://app.intutic.ai"
+            or DEFAULT_CONTROL_PLANE_URL
         )
         self.provider = provider
         self.auto_context = auto_context

@@ -346,7 +346,7 @@ pub struct CustomDlpPattern {
     /// escalation detector counts distinct names — reuse one and two findings
     /// collapse into one for threshold purposes.
     pub name: String,
-    /// Grouping used by SOP taint rules (`pii()`, `phi()`) and by the redaction
+    /// Grouping used by SOP taint rules (`pii()` matches `pii` and `phi`) and by the redaction
     /// placeholder, which is `[REDACTED_{CATEGORY}]`, uppercased.
     pub category: String,
     /// Rust `regex` crate syntax. Note: no lookaround. Use inline group flags

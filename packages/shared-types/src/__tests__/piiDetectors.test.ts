@@ -26,6 +26,9 @@ describe('PII detector settings', () => {
   it('names the detectors the definition ships, in its order', () => {
     expect([...PII_DETECTOR_IDS]).toEqual(PII_DEFINITION.detectors.map((d) => d.id))
     for (const d of PII_DEFINITION.detectors) expect(PII_ACTIONS).toContain(d.default_action)
+    // Every detector redacts the copies Intutic keeps, email and phone included,
+    // whatever its live default.
+    for (const d of PII_DEFINITION.detectors) expect(d.stored_action, d.id).toBe('redact')
   })
 
   it('accepts an action per detector, any subset of detectors', () => {

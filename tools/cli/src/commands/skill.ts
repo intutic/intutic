@@ -1218,9 +1218,13 @@ export async function runLoopStart(opts: {
       await fs.mkdir(dirname(loopEnvPath), { recursive: true }).catch(() => {})
       await fs.writeFile(loopEnvPath, `INTUTIC_LOOP_RUN_ID=${res.loop.loopRunId}\n`)
       log.dim(`Wrote run context to ~/.intutic/env/loop.env`)
+    } else {
+      log.error('The control plane did not start the loop run.')
+      process.exit(1)
     }
   } catch (err) {
     log.error(`Failed to register loop: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
   }
 }
 
@@ -1234,9 +1238,13 @@ export async function runLoopComplete(loopRunId: string, opts: { dev?: boolean }
       // Clean env
       const loopEnvPath = join(getIntuticDir(), 'env', 'loop.env')
       await fs.rm(loopEnvPath, { force: true })
+    } else {
+      log.error(`Loop run ${loopRunId} was not completed.`)
+      process.exit(1)
     }
   } catch (err) {
     log.error(`Failed to complete loop: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
   }
 }
 
@@ -1249,9 +1257,13 @@ export async function runLoopKill(loopRunId: string, opts: { dev?: boolean }): P
       log.warn(`Loop run ${loopRunId} marked as KILLED.`)
       const loopEnvPath = join(getIntuticDir(), 'env', 'loop.env')
       await fs.rm(loopEnvPath, { force: true })
+    } else {
+      log.error(`Loop run ${loopRunId} was not killed.`)
+      process.exit(1)
     }
   } catch (err) {
     log.error(`Failed to kill loop: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
   }
 }
 
@@ -1277,9 +1289,13 @@ export async function runLoopList(opts: { dev?: boolean }): Promise<void> {
                 : pc.red(loop.status)
         console.log(`  ${loop.loopRunId.padEnd(21)} | ${loop.name.padEnd(14)} | ${statusStr.padEnd(17)} | $${parseFloat(loop.totalTokenCostUsd).toFixed(4).padEnd(10)} | $${parseFloat(loop.budgetLimitUsd).toFixed(2)}`)
       }
+    } else {
+      log.error('The control plane did not return the loop runs.')
+      process.exit(1)
     }
   } catch (err) {
     log.error(`Failed to list loops: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
   }
 }
 

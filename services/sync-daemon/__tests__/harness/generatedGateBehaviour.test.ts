@@ -512,6 +512,49 @@ describe('gate registry completeness', () => {
     }
   })
 
+  it('the docs\' per-harness MCP coverage table mirrors each gate\'s mcpCalls', () => {
+    // apps/docs/guide/mcp-governance.md says this registry's `mcpCalls` column
+    // is the source of truth its table mirrors; nothing held it to that, and
+    // the table said Windsurf was "yes" while the registry said "reachable".
+    const ROWS: Record<string, string[]> = {
+      'Claude Code': ['claudeCode'],
+      Cursor: ['cursor'],
+      Windsurf: ['windsurf'],
+      Cline: ['cline'],
+      'Codex CLI, GitHub Copilot': ['codex', 'githubCopilot'],
+      'Muse Code': ['museCode'],
+      'Goose, OpenHands, Hermes, Gemini CLI (Antigravity)': ['goose', 'openhands', 'hermes', 'antigravity'],
+      'Google Antigravity': ['antigravityCli'],
+      Pi: ['pi'],
+      Openclaw: ['openclaw'],
+      'Grok Build': ['grok'],
+      OpenCode: ['opencode'],
+      dsh: ['dsh'],
+      n8n: ['n8n'],
+      'Open WebUI': ['openWebui'],
+    }
+    const page = readFileSync(join(__dirname, '../../../../apps/docs/guide/mcp-governance.md'), 'utf8')
+    const section = page.slice(page.indexOf('### Per-harness MCP coverage'))
+    const docMark = new Map<string, string>()
+    for (const m of section.matchAll(/^\| ([^|]+?) \| (✅ yes|⚠️ reachable|❌ n\/a[^|]*) \|/gm)) {
+      docMark.set(m[1]!, m[2]!.startsWith('✅') ? 'yes' : m[2]!.startsWith('⚠️') ? 'reachable' : 'no')
+    }
+    const mismatches: string[] = []
+    for (const [row, names] of Object.entries(ROWS)) {
+      if (!docMark.has(row)) mismatches.push(`no "${row}" row in the table`)
+      for (const name of names) {
+        const gate = GATES.find((g) => g.name === name)
+        if (!gate) mismatches.push(`"${row}" maps to ${name}, which is not a GATES row`)
+        else if (docMark.has(row) && gate.mcpCalls !== docMark.get(row)) {
+          mismatches.push(`${name}: registry says ${gate.mcpCalls}, the "${row}" row says ${docMark.get(row)}`)
+        }
+      }
+    }
+    const mapped = new Set(Object.values(ROWS).flat())
+    for (const g of GATES) if (!mapped.has(g.name)) mismatches.push(`${g.name} has no row mapped in this test`)
+    expect(mismatches).toEqual([])
+  })
+
   it('every gate produced its declared artifact', () => {
     for (const g of GATES) {
       const err = roots.get(g.name + ':error')

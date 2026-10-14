@@ -589,8 +589,9 @@ fn parse_cooccurrence(raw: &str) -> Result<(String, String), String> {
     let taint = lhs.trim().to_ascii_lowercase();
     if !matches!(taint.as_str(), "secrets()" | "pii()") {
         return Err(format!(
-            "{:?}: the left side must be `secrets()` or `pii()` — the only two \
-             categories the DLP scanner reports",
+            "{:?}: the left side must be `secrets()` or `pii()` — `secrets()` \
+             covers secrets and credentials, `pii()` personal data including \
+             custom `phi` patterns",
             lhs.trim()
         ));
     }
@@ -3145,6 +3146,16 @@ mod discovery_tests {
             vec![("secrets()".to_string(), "action:http_post".to_string())],
             "here the comma separates the two SIDES of one rule, not two rules"
         );
+    }
+
+    /// The taints are `secrets()` and `pii()`, which also covers custom `phi`
+    /// patterns. `phi()` is refused with the reason (logged at load) rather than loading as a
+    /// rule nothing else (guardrail IR, control-plane replay) understands.
+    #[test]
+    fn forbid_with_refuses_a_phi_taint() {
+        let err = parse_cooccurrence("phi(), action:http_post").expect_err("phi() is not a taint");
+        assert!(err.contains("`pii()`"), "{err}");
+        assert!(parse_cooccurrence("pii(), action:http_post").is_ok());
     }
 
     // ── sql_guard / sql_allow_dsns ──────────────────────────────────────

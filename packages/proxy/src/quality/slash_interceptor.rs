@@ -1,17 +1,16 @@
 //! Slash command interceptor — detects `/intutic` prefix commands
 //! and routes them to the control plane.
 //!
-//! Commands are processed by the control plane and the response is
-//! returned as a fake LLM response so the harness displays it naturally.
+//! Commands are processed by the control plane and the answer text is
+//! returned for the proxy to frame as an LLM response, so the harness
+//! displays it naturally.
 
 use tracing::{debug, warn};
-
-use super::format_as_llm_response;
 
 /// Handle a `/intutic` slash command.
 ///
 /// Parses the command and arguments, calls the control plane API,
-/// and returns the response formatted as a fake LLM response.
+/// and returns the answer text.
 ///
 /// Returns `None` if the command couldn't be processed (fail-open:
 /// the message will be forwarded to the LLM as-is).
@@ -21,9 +20,8 @@ pub async fn handle(
     session_id: &str,
     workspace_id: &str,
     message: &str,
-    protocol: &crate::protocol::Protocol,
     virtual_key: &crate::credential::VirtualKey,
-) -> Option<Vec<u8>> {
+) -> Option<String> {
     let parts: Vec<&str> = message.split_whitespace().collect();
     let command = parts.get(1).copied().unwrap_or("help");
     let args: Vec<String> = parts
@@ -62,7 +60,7 @@ pub async fn handle(
                 *Try again in a moment, or check if the control plane is running.*",
                 command
             );
-            return Some(format_as_llm_response(&error_text, protocol));
+            return Some(error_text);
         }
     };
 
@@ -75,7 +73,7 @@ pub async fn handle(
             Run `/intutic help` for available commands.",
             command, status
         );
-        return Some(format_as_llm_response(&error_text, protocol));
+        return Some(error_text);
     }
 
     let body: serde_json::Value = response.json().await.ok()?;
@@ -84,5 +82,5 @@ pub async fn handle(
         .and_then(|t| t.as_str())
         .unwrap_or("No response from command.");
 
-    Some(format_as_llm_response(response_text, protocol))
+    Some(response_text.to_string())
 }

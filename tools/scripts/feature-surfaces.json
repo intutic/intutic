@@ -889,6 +889,28 @@
       }
     },
     {
+      "id": "policy-deprecation",
+      "title": "Enforcement policies deprecated: the intervention mode setting and conversion to guardrails",
+      "plan": "Cloud",
+      "surfaces": {
+        "api": [{ "ref": "POST /api/v1/policies/:policyId/convert-to-guardrail", "auth": "OWNER/ADMIN" }],
+        "dashboard": [
+          { "file": "apps/dashboard/src/routes/PoliciesPage.tsx", "contains": "Convert to guardrail" },
+          { "file": "apps/dashboard/src/components/settings/InterventionModePanel.tsx" }
+        ],
+        "cli": ["policy convert"],
+        "gateSdk": { "none": "the gates read the resolved intervention mode as before; nothing about policies reaches them" },
+        "clawdeSdk": { "none": "conversion is an operator migration step, not an SDK call" },
+        "mcpTools": { "none": "operator migration, not an agent action" },
+        "kitkat": { "none": "operator migration, not an agent action" },
+        "terraform": ["intutic_policy", "workspace_settings.interventionMode"],
+        "docs": ["guide/policies.md#policy-deprecation"],
+        "website": { "none": "the site never described enforcement policies" },
+        "events": { "none": "a converted guardrail emits the guardrail events any guardrail does" },
+        "enforcement": { "none": "a converted guardrail starts in shadow and enforces through the guardrail lifecycle" }
+      }
+    },
+    {
       "id": "terraform-provider",
       "title": "Terraform provider",
       "plan": "Cloud",

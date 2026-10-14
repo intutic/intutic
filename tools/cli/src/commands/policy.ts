@@ -61,7 +61,79 @@ async function getClient(dev?: boolean) {
   return createApiClient(controlPlaneUrl, apiKey)
 }
 
+/**
+ * Printed first by every command on the enforcement-policy API (enable,
+ * disable, rollback, export, convert) — not by the WASM rule and snapshot
+ * commands that share `intutic policy`. To stderr, so `policy export` output
+ * stays valid JSON.
+ */
+export const POLICY_DEPRECATION_NOTICE =
+  'Enforcement policies are deprecated; the policies API is removed after 2026-12-01. ' +
+  "A policy's tool pattern, action and conditions are enforced nowhere. " +
+  'Per-tool rules are guardrails: `intutic policy convert <policyId>` turns a KILL or REASK policy into one, in shadow. ' +
+  'The intervention mode is the interventionMode workspace setting: `intutic settings set interventionMode OPAQUE`.'
+
+function warnPolicyDeprecated(): void {
+  console.error(`⚠ ${POLICY_DEPRECATION_NOTICE}`)
+}
+
+/** What `POST /api/v1/policies/:policyId/convert-to-guardrail` answers. */
+interface ConvertResponse {
+  ok?: boolean
+  created?: boolean
+  guardrailId?: string
+  status?: string
+  error?: string
+  reason?: string
+}
+
+/**
+ * `intutic policy convert <policyId>` — make the guardrail an active KILL or
+ * REASK policy described: a hook rule on its tool, created in SHADOW, so it
+ * reports what it would block and blocks nothing until it is promoted.
+ * Converting the same policy again names the guardrail it already became.
+ */
+export async function runPolicyConvert(policyId: string, opts: { dev?: boolean }): Promise<void> {
+  warnPolicyDeprecated()
+  log.header(`Intutic — Convert Policy to Guardrail: ${policyId}`)
+
+  const client = await getClient(opts.dev)
+  let res: { status: number; body: ConvertResponse }
+  try {
+    res = await client.postWithStatus<ConvertResponse>(
+      `/api/v1/policies/${encodeURIComponent(policyId)}/convert-to-guardrail`,
+    )
+  } catch (err) {
+    log.error(`Failed to convert policy: ${errMessage(err)}`)
+    process.exit(1)
+  }
+
+  const { status, body } = res
+  if ((status === 200 || status === 201) && body.guardrailId) {
+    if (body.created) {
+      log.success(`Converted policy "${policyId}" to guardrail ${body.guardrailId}, in SHADOW.`)
+    } else {
+      log.success(`Policy "${policyId}" was already converted: guardrail ${body.guardrailId} (${body.status ?? 'unknown status'}).`)
+    }
+    log.field('Guardrail', body.guardrailId)
+    log.info('In shadow it reports what it would block and blocks nothing.')
+    log.info(`Review its evidence with \`intutic guardrails show ${body.guardrailId}\`, then \`intutic guardrails promote ${body.guardrailId}\`.`)
+    return
+  }
+  if (status === 422) {
+    log.error(`Policy "${policyId}" has no guardrail form: ${body.reason ?? body.error ?? 'no reason given'}`)
+    process.exit(1)
+  }
+  if (status === 404) {
+    log.error(`Policy "${policyId}" not found.`)
+    process.exit(1)
+  }
+  log.error(`Failed to convert policy (HTTP ${status}): ${body.error ?? 'unknown error'}`)
+  process.exit(1)
+}
+
 export async function runPolicyEnable(policyId: string, opts: { dev?: boolean }): Promise<void> {
+  warnPolicyDeprecated()
   log.header(`Intutic — Enable Policy: ${policyId}`)
 
   const client = await getClient(opts.dev)
@@ -86,6 +158,7 @@ export async function runPolicyEnable(policyId: string, opts: { dev?: boolean })
 }
 
 export async function runPolicyDisable(policyId: string, opts: { dev?: boolean }): Promise<void> {
+  warnPolicyDeprecated()
   log.header(`Intutic — Disable Policy: ${policyId}`)
 
   const client = await getClient(opts.dev)
@@ -113,6 +186,7 @@ export async function runPolicyRollback(
   policyId: string,
   opts: { version: string; dev?: boolean }
 ): Promise<void> {
+  warnPolicyDeprecated()
   log.header(`Intutic — Rollback Policy: ${policyId}`)
 
   const targetVer = parseInt(opts.version, 10)
@@ -174,6 +248,7 @@ export interface CompliancePolicy {
 }
 
 export async function runPolicyExport(opts: { all?: boolean; dev?: boolean }): Promise<void> {
+  warnPolicyDeprecated()
   if (!opts.all) {
     log.warn('Export command expects `--all` flag. Exporting all policies by default.')
   }
@@ -225,6 +300,9 @@ export async function runPolicySnapshot(opts: { dev?: boolean }): Promise<void> 
   // that startup cost without ever touching a snapshot.
   const { refreshPolicySnapshot } = await import('@intutic/sync-daemon')
 
+  const rulesFile = path.join(snapshotDir, SNAPSHOT_RULES_FILE)
+  const readRules = () => fs.readFile(rulesFile, 'utf-8').catch(() => null)
+  const before = await readRules()
   const result = await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId, snapshotDir })
 
   // `refreshPolicySnapshot` never throws — policy refresh must not be able to
@@ -235,7 +313,17 @@ export async function runPolicySnapshot(opts: { dev?: boolean }): Promise<void> 
     log.error('Snapshot NOT written — GET /api/v1/policy/resolve returned nothing usable.')
     log.field('Control plane', controlPlaneUrl)
     log.field('Workspace', workspaceId)
-    log.info('Any previous snapshot is untouched and still enforced.')
+    // A failed refresh is not always a no-op: when the control plane refuses
+    // the key (401/403), the snapshot is rewritten with the member's SSO groups
+    // unknown. Say what happened on disk rather than promising it didn't.
+    if ((await readRules()) === before) {
+      log.info('Any previous snapshot is untouched and still enforced.')
+    } else {
+      log.warn(
+        "The snapshot was rewritten: the control plane refused this machine's key, so the member's SSO " +
+          'groups are now unknown and every high-risk tool they cleared is refused. Its other rules are still enforced.',
+      )
+    }
     log.info('Check the control plane is reachable and the key is still valid: `intutic whoami`.')
     process.exit(1)
   }
@@ -980,6 +1068,10 @@ interface ReplayResult {
   wouldActRate: number
   verdictCounts: Record<string, number>
   sampleMatches: Record<string, unknown>[]
+  /** Contexts whose tool calls carry argument keys and sizes, not values. Absent from an older control plane. */
+  argumentsWithheld?: number
+  /** Why that matters and how to change it; present when `argumentsWithheld` is above zero. */
+  argumentsNote?: string
 }
 
 const VERDICT_NAMES: Record<string, string> = {
@@ -1046,8 +1138,14 @@ export async function runPolicyReplay(
     }
 
     if (status === 403) {
-      const detail = (result as { detail?: string }).detail
-      log.error(`Replay refused: ${detail ?? 'your role cannot replay rules'}`)
+      // Two different refusals share the status: the plan (FEATURE_NOT_AVAILABLE)
+      // and the role (requireRole's FORBIDDEN, whose `detail` names the roles).
+      const denial = result as { error?: string; code?: string; detail?: string }
+      if (denial.code === 'FEATURE_NOT_AVAILABLE') {
+        log.error(`Replay refused: ${denial.error ?? 'your plan does not include custom WASM rules'}`)
+      } else {
+        log.error(`Replay refused: ${denial.detail ?? 'your role cannot replay rules'}`)
+      }
       process.exit(1)
     }
 
@@ -1062,6 +1160,9 @@ export async function runPolicyReplay(
     log.field('Would act (block/reask/other)', `${summary.wouldActCount} (${(summary.wouldActRate * 100).toFixed(1)}%)`)
     for (const [code, count] of Object.entries(summary.verdictCounts)) {
       log.field(`  verdict ${code} (${VERDICT_NAMES[code] ?? 'unmapped'})`, String(count))
+    }
+    if (summary.argumentsNote) {
+      log.warn(summary.argumentsNote)
     }
     if (summary.sampleMatches.length > 0) {
       log.info(`First ${summary.sampleMatches.length} non-allow context(s):`)

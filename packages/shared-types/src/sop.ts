@@ -83,6 +83,14 @@ export interface Sop {
   versionCounter?: number
 
   /**
+   * The version this one succeeds, when it is an edit or revision of an
+   * earlier one (a DRAFT forked from an approved guideline names that
+   * guideline). `null` for a first version. `intutic sops pull` uses it to
+   * skip an approved version whose DRAFT successor a local file tracks.
+   */
+  priorVersionId?: string | null
+
+  /**
    * How many times this SOP has been evaluated in shadow — non-zero only for
    * HYPOTHESIZED/REFINED SOPs, per `ENFORCEMENT_BY_STATE`. See
    * `sopShadowService.ts`'s `sopPromotionReadiness()` for what to do with it.
