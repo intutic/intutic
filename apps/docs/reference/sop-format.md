@@ -98,16 +98,19 @@ SOPs are written in markdown. The content is synced to harness config files and 
 SOPs follow a 7-state lifecycle:
 
 ```
-DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATED
-                                                                    ↓
-                                                              INVALIDATED
+DRAFT ↔ PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATED
+              ↑                           │            │        │     │
+              │                           └────────────┼────────┘     │
+              │                                        ↓              │
+              │                                   INVALIDATED         │
+              └────────────── re-review after a cascade ──────────────┘
 ```
 
 | State | Description |
 |-------|-------------|
 | `DRAFT` | Initial authoring. Not enforced. |
 | `PENDING_REVIEW` | Submitted for team review. |
-| `GENERATED` | Auto-generated from observed patterns. |
+| `GENERATED` | Passed the Gödel score check on the way out of review. |
 | `HYPOTHESIZED` | Proposed rule being tested in shadow mode. |
 | `REFINED` | Iteratively improved based on feedback. |
 | `VALIDATED` | **Active and enforced.** `HYPOTHESIZED` and `REFINED` SOPs are synced to harnesses too, as guidance no gate enforces. |

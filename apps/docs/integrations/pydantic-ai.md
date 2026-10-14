@@ -41,7 +41,7 @@ from intutic_clawde.gate.adapters.pydantic_ai import guard_agent
 install(Gate(GateConfig()))
 
 agent = Agent(model, tools=[...], toolsets=[my_toolset])
-guard_agent(agent)  # mutates in place; also returns agent
+guard_agent(agent)  # mutates in place; also returns agent. Covers toolsets=, not tools= (see below)
 ```
 
 Or wrap a single toolset explicitly:
@@ -52,19 +52,23 @@ from intutic_clawde.gate.adapters.pydantic_ai import IntuticWrapperToolset
 agent = Agent(model, toolsets=[IntuticWrapperToolset(wrapped=my_toolset)])
 ```
 
-On a deny, `call_tool` raises `ModelRetry(str(exc))` — confirmed by reading `pydantic_ai/tool_manager.py`: `ToolManager._raw_execute` calls `toolset.call_tool(...)` directly, and any `ModelRetry` it raises is caught two frames up in `ToolManager.execute` and converted into a `RetryPromptPart`. The model sees the refusal message in place of a tool result, and `super().call_tool` — the tool body — never runs.
+On a deny, `call_tool` raises `ModelRetry(str(exc))` — confirmed by reading `pydantic_ai/tool_manager.py` (`pydantic-ai-slim` 2.31.1 and 2.53.0): `ToolManager._raw_execute` calls `toolset.call_tool(...)` directly, catches any `ModelRetry` it raises, and converts it into a `RetryPromptPart`. The model sees the refusal message in place of a tool result, and `super().call_tool` — the tool body — never runs.
 
 **Why `ModelRetry` and not `ApprovalRequired`:** Pydantic AI also documents `AbstractToolset.approval_required(...)`/raising `pydantic_ai.exceptions.ApprovalRequired` as a veto-adjacent mechanism. This adapter does not use it — `ApprovalRequired` is Pydantic AI's human-in-the-loop primitive; raising it **defers** the call (surfaced via `DeferredToolRequests`, expecting a human or an external system to resume the run with a decision) rather than denying it. An unattended governed run has nobody to answer that deferral, so treating a gate block as "approval required" would either hang the run or, depending on the caller's deferred-tool handling, let the call through by default. `ModelRetry` is an immediate, non-deferred refusal — the correct match for `Gate.guard()`'s contract.
 
 ### 4. Trace attribution
 
 ```python
+from openai import AsyncOpenAI
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
 from intutic_clawde.gate import intutic_headers
 
-llm = ChatOpenAI(
+client = AsyncOpenAI(
     base_url="http://localhost:4000/v1",
     default_headers=intutic_headers(session_id=run_id, harness="pydantic-ai"),
 )
+model = OpenAIChatModel("gpt-5-mini", provider=OpenAIProvider(openai_client=client))
 ```
 
 ## What gets written
@@ -78,7 +82,7 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness py
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do) — plus Pydantic-AI-specific limits:
 
 - **`guard_agent` does not cover `@agent.tool`-registered functions.** It wraps `agent._user_toolsets` (explicit `Agent(toolsets=[...])` entries) and `agent._dynamic_toolsets`, but deliberately leaves `agent._function_toolset` — the toolset backing `@agent.tool`/`Agent(tools=[...])` — untouched. Those are plain functions under the hood; wrap them with `@guard` (from `intutic_clawde.gate.framework`) before registering, or build an explicit `FunctionToolset(tools=guard_tools([...]))` and pass it via `Agent(toolsets=[...])` so `guard_agent` covers it uniformly with everything else. Reaching into `_function_toolset` directly would break `@agent.tool`'s own registration bookkeeping if a caller adds more tools after calling `guard_agent`.
-- **`guard_agent` reaches into private attributes.** `_user_toolsets`/`_dynamic_toolsets` are private (confirmed present at `pydantic-ai-slim==2.31.1` by reading `pydantic_ai/agent/__init__.py`); `Agent.toolsets` is a read-only computed property rebuilt from those two lists on every access, so there is no public replacement point on an already-constructed `Agent`. This is an accepted, documented fragility: a future pydantic-ai release could rename these attributes and silently turn `guard_agent` into a no-op — it would not raise, which is the whole risk of a private-attribute reach-in.
+- **`guard_agent` reaches into private attributes.** `_user_toolsets`/`_dynamic_toolsets` are private (confirmed present at `pydantic-ai-slim` 2.31.1 and 2.53.0 by reading `pydantic_ai/agent/__init__.py`); `Agent.toolsets` is a read-only computed property rebuilt from those two lists on every access, so there is no public replacement point on an already-constructed `Agent`. This is an accepted, documented fragility: a future pydantic-ai release could rename these attributes and silently turn `guard_agent` into a no-op — it would not raise, which is the whole risk of a private-attribute reach-in.
 - **Already-wrapped toolsets are left alone.** Calling `guard_agent` twice does not double-wrap an already-`IntuticWrapperToolset`-wrapped entry.
 
 ## Config details

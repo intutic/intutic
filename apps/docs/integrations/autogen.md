@@ -3,7 +3,7 @@
 Integrate Intutic governance with [Microsoft AutoGen](https://microsoft.github.io/autogen/) (`autogen-core`/`autogen-agentchat`/`autogen-ext`; the `[autogen]` extra requires 0.7.5+) — Microsoft's multi-agent conversation framework.
 
 ::: warning Read this before wiring the SDK gate in — it does not see the tool calls most AutoGen code makes
-`IntuticInterventionHandler` hooks `autogen_core.InterventionHandler.on_send` — the only confirmed veto point AutoGen publishes for a `FunctionCall` message. It is real, and it was driven end to end against a real `SingleThreadedAgentRuntime` (registering the handler, sending a `FunctionCall` through `runtime.send_message`, and observing the runtime's own `MessageDroppedException` on a block). But `on_send` only fires for messages explicitly routed through `runtime.send_message`/`publish_message` — and **`AssistantAgent`, the class essentially every AutoGen application and tutorial is built on, never calls that.** Its `_execute_tool_call` dispatches directly to `workbench.call_tool_stream(...)`/`handoff_tool.run_json(...)`, entirely in-process, bypassing the `AgentRuntime` message-passing this handler intercepts.
+`IntuticInterventionHandler` hooks `autogen_core.InterventionHandler.on_send` — the only confirmed veto point AutoGen publishes for a `FunctionCall` message. It is real, and it was driven end to end against a real `SingleThreadedAgentRuntime` (registering the handler, sending a `FunctionCall` through `runtime.send_message`, and observing the runtime's own `MessageDroppedException` on a block). But `on_send` only fires for messages explicitly routed through `runtime.send_message`/`publish_message` — and **`AssistantAgent`, the class essentially every AutoGen application and tutorial is built on, never calls that.** Its `_execute_tool_call` dispatches directly to `workbench.call_tool(...)` (`call_tool_stream(...)` for a `StaticStreamWorkbench`, which is what `tools=[...]` builds)/`handoff_tool.run_json(...)`, entirely in-process, bypassing the `AgentRuntime` message-passing this handler intercepts.
 
 Practically: if your application uses plain `AssistantAgent` (or a `Swarm`/`ChatAgent` team pattern built on it) with a `Workbench` or a plain tool list — the tutorial-default usage pattern — `IntuticInterventionHandler` sees **nothing**. Every tool call that agent makes is invisible to it. See [What the adapter does NOT do](#what-the-adapter-does-not-do) below for the gap, and the mitigation this page leads with in Setup step 3.
 :::
@@ -78,9 +78,11 @@ Most real applications need **both**: `IntuticWorkbench` (or `guard_tools`) for 
 ### 4. Trace attribution
 
 ```python
+from autogen_ext.models.openai import OpenAIChatCompletionClient
 from intutic_clawde.gate import intutic_headers
 
-llm = ChatOpenAI(
+model_client = OpenAIChatCompletionClient(
+    model="gpt-5-mini",
     base_url="http://localhost:4000/v1",
     default_headers=intutic_headers(session_id=run_id, harness="autogen"),
 )
@@ -96,7 +98,7 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness au
 
 Same structural gaps as every SDK-gated framework — see [LangGraph's "What the adapter does NOT do"](/integrations/langgraph#what-the-adapter-does-not-do) — plus AutoGen-specific limits:
 
-- **`AssistantAgent`'s own tool calls never reach `IntuticInterventionHandler`.** Confirmed by reading `autogen_agentchat.agents._assistant_agent` directly, not by inference: `_execute_tool_call` dispatches to `workbench.call_tool(...)`/`handoff_tool.run_json(...)` in-process, bypassing `AgentRuntime` message-passing entirely. That is why the workbench is the veto point for them: `IntuticWorkbench` (Setup step 3) governs every call that goes through a workbench. Handoff tools bypass the workbench and are not governed; they execute no user tool.
+- **`AssistantAgent`'s own tool calls never reach `IntuticInterventionHandler`.** Confirmed by reading `autogen_agentchat.agents._assistant_agent` directly, not by inference: `_execute_tool_call` dispatches to `workbench.call_tool(...)`/`call_tool_stream(...)`/`handoff_tool.run_json(...)` in-process, bypassing `AgentRuntime` message-passing entirely. That is why the workbench is the veto point for them: `IntuticWorkbench` (Setup step 3) governs every call that goes through a workbench. Handoff tools bypass the workbench and are not governed; they execute no user tool.
 - **`ToolException` does not exist.** An earlier plan for this adapter proposed raising `autogen_core.ToolException(call_id=...)` as an alternative veto; that class was checked against a real `autogen-core==0.7.5` install and does not exist at this version (`autogen_core.exceptions` exports only `CantHandleException`, `MessageDroppedException`, `NotAccessibleError`, `UndeliverableException`). `DropMessage` is the only confirmed veto point.
 - **Microsoft Agent Framework is not covered by this adapter.** Agent Framework, the AutoGen + Semantic Kernel successor (`agent-framework` on PyPI), is a separate framework with its own API, so it has its own adapter and page. See [Microsoft Agent Framework](/integrations/microsoft-agent-framework).
 
