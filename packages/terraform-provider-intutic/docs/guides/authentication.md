@@ -37,12 +37,12 @@ Two things narrow this:
 - **Virtual keys are per member.** `intutic_virtual_key` creates keys for the member who owns the provider's key, and the API shows a member only their own keys. A plan run with another member's key sees none of them and proposes to create them all again. If the configuration manages virtual keys, plan and apply with keys of the same member.
 - **Some resources depend on the workspace's Intutic plan.** Member budgets, SIEM destinations, custom filters and self-hosted gateways are refused on a plan without them, whatever the role; the reference page of each names the plans.
 
-A key whose role is too low gets `HTTP 403: Forbidden` from the API, for example:
+A key whose role is too low gets `HTTP 403` from the API, with the roles that may make the call, for example:
 
 ```text
 Error: Reading guardrail failed
 
-GET /api/v1/policy-guardrails/guardrails/pgr_…: HTTP 403: Forbidden
+GET /api/v1/policy-guardrails/guardrails/pgr_…: HTTP 403: Forbidden: Requires the OWNER, ADMIN or EM role
 ```
 
 The configuration below reports the role at every plan, and warns before an apply that would be refused.

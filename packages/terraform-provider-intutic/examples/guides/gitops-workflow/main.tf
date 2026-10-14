@@ -48,14 +48,9 @@ resource "intutic_workspace_settings" "this" {
   })
 }
 
-# The daily cap, alert threshold and enforcement modes are stored in the same
-# record as the workspace settings. Write them after the settings, never at the
-# same time, or one write can undo the other.
 resource "intutic_workspace_budget" "this" {
   daily_budget_usd   = 150
   monthly_budget_usd = 3000
-
-  depends_on = [intutic_workspace_settings.this]
 }
 
 # An MCP server a proxy has already reported, approved without one tool.

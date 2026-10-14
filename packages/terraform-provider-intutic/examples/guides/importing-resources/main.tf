@@ -32,9 +32,6 @@ import {
 resource "intutic_workspace_budget" "this" {
   daily_budget_usd   = 150
   monthly_budget_usd = 3000
-
-  # Written after the settings, never at the same time (see the GitOps guide).
-  depends_on = [intutic_workspace_settings.this]
 }
 
 # Resources the API names with an id: copy it from the dashboard or the API.

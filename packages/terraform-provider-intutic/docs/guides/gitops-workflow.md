@@ -90,14 +90,9 @@ resource "intutic_workspace_settings" "this" {
   })
 }
 
-# The daily cap, alert threshold and enforcement modes are stored in the same
-# record as the workspace settings. Write them after the settings, never at the
-# same time, or one write can undo the other.
 resource "intutic_workspace_budget" "this" {
   daily_budget_usd   = 150
   monthly_budget_usd = 3000
-
-  depends_on = [intutic_workspace_settings.this]
 }
 
 # An MCP server a proxy has already reported, approved without one tool.
@@ -116,12 +111,11 @@ Terraform manages the content: a SOP's text and tiers, a guardrail's rule, the s
 
 A merged change interacts with that lifecycle:
 
-- **SOPs.** A new SOP starts in `DRAFT`. Editing a draft changes it in place. Editing a SOP that has left `DRAFT` creates a new `DRAFT` version with a new id and retires the old one, which the plan shows as an `id` known after apply; the new version goes through the review again.
+- **SOPs.** A new SOP starts in `DRAFT`. Editing a draft changes it in place. Editing a SOP that has left `DRAFT` creates a new `DRAFT` version with a new id, which the plan shows as an `id` known after apply; the approved version keeps enforcing until the new one is reviewed and promoted to `VALIDATED`, which retires it.
 - **Guardrails.** A new guardrail starts `PROPOSED`. Changing `name` or `description` edits it in place and keeps its evidence. Changing the rule itself creates the next version under a new id, `PROPOSED` with no evidence, and retires the current one; the plan shows the new `version` and `status`. The plan also asks the API to validate the rule, so a guardrail the API would refuse fails the pull request's plan, not the apply.
 - **Settings.** Only the keys in `settings` are managed. A key changed in the dashboard that the configuration does not name is left alone.
 - **Enforcement policies.** If you manage `intutic_policy` resources this way, note that the active policy with the lowest `priority` sets the `intervention_mode` for the whole workspace, so a priority change can change how every refusal is worded.
 
-The daily cap, alert threshold and enforcement modes of `intutic_workspace_budget` are stored in the same record as the workspace settings. Terraform writes independent resources in parallel, and two writes to that record at the same time can undo one another, so the example orders the budget after the settings with `depends_on`.
 
 ## Run it from CI
 
