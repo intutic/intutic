@@ -41,7 +41,7 @@ Tool call arrives
 
 1. **DLP Scanner** — credential patterns matched against the serialised tool arguments, and destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`) matched against each argument string as the tool receives it, with the SQL keywords split by any whitespace, a block or `--` comment, or an escaped `\n`. The SQL patterns are the ones the MCP governance proxy uses. A hit blocks the call and opens an incident.
 2. **BLOCK: SOP match** — `VALIDATED` SOPs whose title begins `BLOCK:` are compiled to a pattern and tested against the tool name, and, in the `BLOCK:<tool> WHERE <args>:<reason>` form, against the serialised arguments too. The gate evaluates only `BLOCK:` titles. A title beginning `REQUIRE_APPROVAL:` is the same rule at the `hold` tier: the harness hook gates refuse the call and record it for **Findings › Review Queue › Held Changes** (approving it with `intutic decision approve <holdId>` or from Slack lets that exact call through once while the workspace's review-hold bypass is on, and otherwise records the decision); the MCP proxy and the [SDK gates](/reference/gate-sdk#holds) hold it the same way through the same decisions API (see [Approval holds](/guide/mcp-governance#approval-holds)); the proxy, which has no reviewer in the loop, treats it as a block.
-3. **SSO group policy** — decides the caller's [group clearance](/concepts/circuit-breaker#_3-sso-group-clearance) for the tool, from their SCIM groups while SCIM provisioning is on and from their last SSO sign-in otherwise. `DENIED` or `REQUIRES_OBO` blocks, and the reason names the deciding rule (`[sso_group.high_risk.<tool>]`).
+3. **SSO group policy** — decides the caller's [group clearance](/concepts/circuit-breaker#_3-sso-group-clearance) for the tool, from their SCIM groups while SCIM provisioning is on and from their last SSO sign-in otherwise. `DENIED` or `REQUIRES_OBO` blocks, and the reason names the deciding rule (`[sso_group.high_risk.<tool>]` or `[sso_group.require_obo.<tool>]`).
 4. **MCP server registry** — on an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance): a blocked or held server, a server not approved under `mcpDefaultPolicy: deny`, or a disabled tool blocks, with the MCP proxy's reason; then a server missing from a non-empty [`mcpAllowedServers`](/guide/mcp-governance#the-allowlist-mcpallowedservers) list blocks. The response names the refusal in `code` (`SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`, `SERVER_NOT_ALLOWED`) and `ruleId`, and a server refused as unapproved joins the approval queue on the MCP Servers page.
 5. **Promoted findings** — repeat anomaly findings that have been promoted to enforcement. Only a promoted `KILL` blocks; a promoted `HIJACK` allows the call and queues a corrective card for the session.
 
@@ -176,19 +176,25 @@ The request is permitted and passes through the proxy without modification. This
 **In the proxy verdict mapping:**
 
 ```typescript
-// services/control-plane/src/lib/valkeySubscriber.ts
-trace.verdict === 'allowed' → EnforcementAction.BYPASS
+// services/control-plane/src/lib/valkeySubscriber.ts — mapVerdict(trace.verdict)
+case 'allowed':
+  return 'BYPASS'
 ```
 
-**Example trace output:**
+**Example trace row** (`GET /api/v1/traces`):
 
 ```json
 {
-  "traceId": "tr_abc123",
-  "toolName": "read_file",
-  "toolArguments": { "path": "/src/utils.ts" },
+  "traceId": "8c1f0e2a-5b7d-4c3e-9a61-2f4d8b0c7e15",
+  "timestamp": "2026-10-14T09:12:44.512Z",
+  "requestedModel": "claude-sonnet-4-5",
+  "actualModelRouted": "claude-sonnet-4-5",
   "enforcementAction": "BYPASS",
-  "latencyMs": 2
+  "complianceScore": 1,
+  "actualCostUsd": 0.0042,
+  "anomalyDetected": null,
+  "breakGlass": false,
+  "breakGlassRequestId": null
 }
 ```
 
@@ -197,6 +203,8 @@ trace.verdict === 'allowed' → EnforcementAction.BYPASS
 ## ENHANCE
 
 The request passes through, but Intutic attaches governance metadata — warnings, annotations, or cost attribution tags — to the trace. The LLM request itself is not modified.
+
+ENHANCE is a policy and evaluator verdict rather than a value the proxy writes on a trace: an ENHANCE policy allows the tool as BYPASS does, and the evaluator scores a sample ENHANCE between its bypass and hijack thresholds. The proxy's own verdicts map only to BYPASS, HIJACK, REASK, KILL and OBSERVED, so no trace records ENHANCE: an annotation or a cost tag rides on a BYPASS trace, and a detector finding that steers the agent records HIJACK (below).
 
 **When it happens:**
 - A detector raises an advisory finding (recorded for review, not blocking)
@@ -218,11 +226,14 @@ The request is intercepted and modified before reaching the LLM. The most common
 - A WASM rule rewrites the request before it is forwarded
 - PCAS downgrades a model selection (e.g., routes to a cheaper model)
 
+On the trace, the proxy records `hijacked` (HIJACK) when a detector's finding steers the request — the corrective card is injected and the call proceeds. A DLP redaction, a rewrite or a model downgrade records the trace as `allowed` (BYPASS); a tool call the response-path DLP rewrote is reported separately, as a substitution (`POST /api/v1/decisions/substitutions`).
+
 **In the proxy verdict mapping:**
 
 ```typescript
-// services/control-plane/src/lib/valkeySubscriber.ts
-trace.verdict === 'hijacked' → EnforcementAction.HIJACK
+// services/control-plane/src/lib/valkeySubscriber.ts — mapVerdict(trace.verdict)
+case 'hijacked':
+  return 'HIJACK'
 ```
 
 **Example: DLP redaction in action**
@@ -258,8 +269,9 @@ measured on real traffic.
 **In the proxy verdict mapping:**
 
 ```typescript
-// services/control-plane/src/lib/valkeySubscriber.ts
-trace.verdict === 'killed' → EnforcementAction.KILL
+// services/control-plane/src/lib/valkeySubscriber.ts — mapVerdict(trace.verdict)
+case 'killed':
+  return 'KILL'
 
 // An unrecognised verdict also records as KILL, deliberately: a value this service
 // cannot interpret means the proxy is ahead of the control plane, and assuming
@@ -292,12 +304,19 @@ BLOCK:^run_command$ WHERE rm -rf /[\s"]:Recursive delete at filesystem root is p
 For anything a pair of patterns cannot express, write a [WASM rule](/guide/wasm-rules), which
 runs in the proxy with an explicit host-import allowlist.
 
-**What the agent sees:**
+**What the agent sees:** the gate answers
+
+```json
+{ "allowed": false, "reason": "Recursive delete at filesystem root is prohibited" }
+```
+
+and a [gate SDK](/reference/gate-sdk) raises it as
 
 ```
-Error: Tool call blocked by governance policy
-Reason: Recursive delete at filesystem root is prohibited
+[Intutic Governance] BLOCKED: Recursive delete at filesystem root is prohibited
 ```
+
+In a workspace whose intervention mode is opaque, the agent is given a generic refusal instead of the rule's reason; the enforcement log and incident keep the full reason.
 
 ---
 

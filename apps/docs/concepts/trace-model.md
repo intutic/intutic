@@ -36,11 +36,12 @@ interface ExecutionTrace {
   cacheHit: boolean;             // Whether semantic prompt cache was hit
   cacheSavingsUsd: number;       // Savings generated via cache hits
   cacheReadInputTokens?: number;     // Provider-reported prompt-cache read
-                                      // tokens (Anthropic `cache_read_input_tokens`
-                                      // on the wire / in the DB); see note below
+                                      // tokens (Anthropic `cache_read_input_tokens`,
+                                      // OpenAI `prompt_tokens_details.cached_tokens`,
+                                      // Gemini `cachedContentTokenCount`); see note below
   cacheCreationInputTokens?: number; // Provider-reported prompt-cache write
-                                      // tokens (Anthropic `cache_creation_input_tokens`
-                                      // on the wire / in the DB); see note below
+                                      // tokens (Anthropic `cache_creation_input_tokens`;
+                                      // no other provider reports one); see note below
   
   // Token Utility & Classification
   tokenUtility: 'USEFUL' | 'WASTED' | null; // null = not classified
@@ -73,9 +74,9 @@ interface ExecutionTrace {
 Incurred and saved costs are dynamically calculated using the prices configured in the model registry:
 
 ### Pricing Formulas
-Costs are calculated by multiplying token usage against pricing weights:
+Costs are calculated by multiplying token usage against pricing weights. Input the provider read from or wrote to its prompt cache is priced at the model's cache-read or cache-write rate, or at the full input rate when the model has none:
 
-$$\text{Cost}_{\text{in}} = \text{Input Tokens} \times \text{Price per Input Token}$$
+$$\text{Cost}_{\text{in}} = \text{Uncached Input} \times \text{Input Price} + \text{Cache Reads} \times \text{Cache-Read Price} + \text{Cache Writes} \times \text{Cache-Write Price}$$
 $$\text{Cost}_{\text{out}} = \text{Output Tokens} \times \text{Price per Output Token}$$
 $$\text{Actual Cost} = \text{Cost}_{\text{in}} + \text{Cost}_{\text{out}}$$
 
@@ -97,7 +98,7 @@ name. They describe two different caches:
 | Field | What it measures |
 |---|---|
 | `cacheHit` / `cacheSavingsUsd` | The proxy's own **semantic response cache** — an exact/near-exact-match cache the proxy maintains so a repeated query can be answered locally without calling the provider at all. |
-| `cacheReadInputTokens` / `cacheCreationInputTokens` | The **provider's own prompt cache** (e.g. Anthropic's `cache_read_input_tokens` / `cache_creation_input_tokens`, folded from OpenAI's `prompt_tokens_details.cached_tokens` and Gemini's `cachedContentTokenCount` into cost accounting) — tokens the provider itself served from or wrote to its prompt cache on a request that still went out over the wire. `cacheHit` is `false` on these requests; the call still happened, it was just cheaper.
+| `cacheReadInputTokens` / `cacheCreationInputTokens` | The **provider's own prompt cache** (Anthropic's `cache_read_input_tokens` / `cache_creation_input_tokens`; OpenAI's `prompt_tokens_details.cached_tokens` and Gemini's `cachedContentTokenCount` are cache reads, and neither reports cache writes) — tokens the provider itself served from or wrote to its prompt cache on a request that still went out over the wire. `cacheHit` is `false` on these requests; the call still happened, it was just cheaper.
 
 A trace can have `cacheHit: false` and a nonzero `cacheReadInputTokens` in the
 same row — that is the normal case for a provider-side cache read.
@@ -116,11 +117,13 @@ watching budgets or savings dashboards should expect:
   budget and spend-cap gates may trip earlier than before on workloads that
   fit comfortably under the cap yesterday; that's the cap doing its job
   against a now-accurate cost figure, not a change in the cap itself.
-- **OpenAI/Gemini cache-heavy tenants: reported savings go up.** These
+- **OpenAI/Gemini cache-heavy tenants: `actualCostUsd` goes down.** These
   providers' cache tokens were previously billed at full input-token price
-  (no cache discount was ever applied), so `rawCostUsd - actualCostUsd` was
-  understated. With the discount now applied, `savingsUsd` for these tenants
-  will increase to reflect the discount they were already entitled to.
+  (no cache discount was ever applied). They are now priced at the model's
+  cache-read rate. `rawCostUsd` follows: when the router did not change the
+  model it equals `actualCostUsd`, so `savingsUsd` stays 0; when it did, the
+  requested model is repriced with the cache-read share last observed for
+  it, or at full input price when there is none.
 
 ---
 

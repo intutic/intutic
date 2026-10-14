@@ -15,11 +15,11 @@ The Rust proxy gateway captures and buffers streaming responses from models in a
                                             |
                                  Drains pending alerts
                                             |
-                                      [GKE Valkey]
+                                        [Valkey]
 ```
 
 1. **Terminal Token Detection**: The proxy scans incoming SSE message chunks looking for the terminal stream delimiter of the target protocol:
-   * **OpenAI / Gemini**: `data: [DONE]`
+   * **OpenAI Chat Completions**: `data: [DONE]`
    * **Anthropic**: `event: message_stop`
    * **OpenAI Responses API** (Codex CLI): `response.completed` — but no alert block is written on this protocol yet; pending alerts stay queued rather than being drained.
 2. **Notification Draining**: Before forwarding the terminal delimiter, the proxy performs an atomic pipeline fetch (`LRANGE` + `DEL`) against the session, workspace and (for an agent in a multi-agent graph) graph-node notification lists in Valkey.

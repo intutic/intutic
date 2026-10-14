@@ -22,7 +22,7 @@ region). A few things distinguish a managed cell from every other gateway type:
   into the cell's Kubernetes Secret. You never see or handle a managed-cell token; there's nothing
   to install, register, or rotate manually.
 - **Registration and provisioning are separate steps.** A cell row starts `pending` (shown as
-  "Provisioning" in the dashboard) the moment an org is created. It goes live once the cell
+  "Pending" in the dashboard) the moment an org is created. It goes live once the cell
   provisioner reconciler actually deploys it and the first heartbeat arrives, flipping its status
   to `online`.
 - **Personal orgs never get one.** Only real orgs (created via `intutic org create` or the

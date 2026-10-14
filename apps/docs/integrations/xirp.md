@@ -11,7 +11,7 @@ Per Xirp's own public FAQ, it preserves each wrapped harness's **native, unmodif
 ## Why this integration is two things, not one
 
 1. **Detection.** `intutic status`/`intutic init` recognise a Xirp-managed workspace (see below), so it shows up in reporting. There is no config for Intutic to write for Xirp itself — see [the governance model](#governance-model) below.
-2. **Worktrees.** A `git worktree add`-created checkout has its own independent working tree, and project-tier governance files (`.claude/settings.json`, `.intutic/hooks/*`, rules files, …) are untracked by convention, so none of them exist in a worktree by default. `intutic connect` writes project-tier files only into the checkout it runs in. What covers a Xirp worktree session is the wrapped harness's **user-level** registration — the PreToolUse hooks in `~/.claude/settings.json` and `~/.codex/hooks.json`, which apply in every directory. See [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage).
+2. **Worktrees.** A `git worktree add`-created checkout has its own independent working tree, and project-tier governance files (`.claude/settings.json`, `.intutic/hooks/*`, rules files, …) are untracked by convention, so none of them exist in a worktree by default. `intutic connect` writes project-tier files only into the checkout it runs in. What covers a Xirp worktree session is the wrapped harness's **user-level** registration — the hooks in `~/.claude/settings.json`, `~/.codex/hooks.json` and, for Gemini CLI, `~/.gemini/settings.json`, which apply in every directory. See [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage).
 
 ## Governance model
 

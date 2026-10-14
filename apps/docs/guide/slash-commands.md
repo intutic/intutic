@@ -36,9 +36,9 @@ Provides an instant pre-flight token count and cost projection based on the curr
   |---|---|
   | **Model** | `claude-3-5-sonnet` |
   | **Input Tokens** | 24 |
-  | **Est. Output Tokens** | 14 |
+  | **Est. Output Tokens** | 19 |
   | **Est. Reasoning Tokens** | 0 |
-  | **Est. Session Cost** | **$0.000264** |
+  | **Est. Session Cost** | **$0.000357** |
   | **Confidence** | low |
 
   *Prediction generated pre-flight from historical baseline distribution.*
@@ -118,7 +118,7 @@ Checks a prompt for tools your workspace's policy refuses, before you send it.
 
 ### 6. `/intutic review <prompt>`
 Runs a quick heuristic check on a prompt and returns a letter grade with suggestions.
-* **Mechanism**: Scores four fixed rules: prompt length, whether it uses action verbs (check, enforce, verify…), and whether it names an SOP, policy or rule. No model is involved, so treat the grade as a nudge, not an assessment of the prompt's quality.
+* **Mechanism**: Scores four dimensions (clarity, specificity, actionability and context completeness) from three fixed signals: the prompt's length, whether it uses action verbs (check, enforce, verify…), and whether it names an SOP, policy or rule. No model is involved, so treat the grade as a nudge, not an assessment of the prompt's quality.
 
 ### 7. `/intutic judge <prompt>`
 Runs the user prompt upstream to the LLM and evaluates the output response stream in parallel using LLM-as-a-judge compliance checks.
@@ -144,10 +144,11 @@ Lists the commands.
 
 ## 🛠️ Protocol Compatibility
 
-To prevent client-side parser crashes in IDEs that expect strict model schemas, the proxy formats the response to match the exact protocol expected by the client:
-* **OpenAI API**: Returns a standard `chat.completion` or `chat.completion.chunk` JSON object.
-* **Anthropic Messages API**: Returns a standard `message` JSON structure or a series of SSE events (`message_start` -> `content_block_delta` -> `message_stop`).
-* **Gemini API**: Returns canonical Google parts and candidates JSON response objects.
+To prevent client-side parser crashes in IDEs that expect strict model schemas, the proxy formats the response to match the protocol the client called:
+* **OpenAI Chat Completions**: a standard `chat.completion` JSON object. `/intutic predict` on a streaming request answers with a `chat.completion.chunk` event followed by `[DONE]`.
+* **Anthropic Messages API**: a standard `message` JSON structure. `/intutic predict` on a streaming request answers with SSE events (`message_start` -> `content_block_delta` -> `message_stop`).
+
+The other commands answer with a single JSON object even when the request asked to stream. Commands are read from a request's `messages`, so they are answered on these two APIs only: an OpenAI Responses API request is forwarded to the model unchanged, and the proxy refuses requests on Gemini's `/v1beta/` wire.
 
 ---
 

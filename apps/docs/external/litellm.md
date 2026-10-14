@@ -15,7 +15,7 @@ In the open-source local developer sandbox, routing is designed to be stateless,
  (Cursor, Claude Code, Aider)  │  (intutic-proxy)               │
                                └──────────────┬─────────────────┘
                                               │
-                                              │ (Direct SSL Stream)
+                                              │ (Direct TLS stream)
                                               ▼
                                  🌐 Upstream API Providers
                                  (Anthropic, OpenAI, Gemini)
@@ -80,9 +80,11 @@ Developers and administrators can customize these trigger words in the dashboard
 
 #### Background LLM-as-a-Judge Refinement
 To maintain optimal task classification without hot path overhead:
-1. **Asynchronous Analysis**: A daily background cron job processes a sample of execution trace prompts, using high-performance LLM-as-a-judge completion calls to review and refine their classifications.
+1. **Asynchronous Analysis**: The daily reward cron takes up to 50 of each workspace's traces from the last day and sends the ones the keyword matcher left as `coding` (its fallback, not a real classification) to an LLM-as-a-judge completion call to refine the category. A trace that already matched `testing`, `deployment`, `review` or `debugging` is not re-judged.
 2. **In-Memory Statistics Redirection**: To comply with audit guidelines that require `execution_traces` to be strictly write-once / append-only, classification adjustments are performed in-memory during reward aggregation. Reward feedback is shifted directly to the refined arm (e.g. from `coding` to `testing`) without mutating historical records.
 3. **Keyword Expansion**: Newly identified keywords are automatically added to the workspace's custom settings lists, enhancing local matching accuracy on future runs.
+
+The judge needs the prompt text, and only a trace that stored its request payload carries it; traces from live proxy traffic do not. On those, refinement and keyword expansion do not run, the cron logs `bandit_judge_refinement_dead` once, and rewards come from the deterministic score alone.
 
 #### Single-Writer Ownership
 Arm learning has exactly one writer per workspace, tracked in Valkey under `bandit:reward_mode:{workspaceId}`. A standalone open-core proxy claims the marker as `local` and runs the deterministic reward loop itself. When a control plane takes the workspace over, it sets the marker to `cloud`; the local writer sees the change on its next ownership refresh and stands down within **~60s**, leaving the cloud reward cron as the sole writer. This prevents the local loop and the cron from double-counting rewards against the same arms.
