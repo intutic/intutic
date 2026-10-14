@@ -250,6 +250,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Security: SCIM deprovisioning from Microsoft Entra ID now offboards the
+  member.** Entra writes the PATCH `op` capitalised and booleans as strings
+  (`{"op": "Replace", "path": "active", "value": "False"}`, or the path-less
+  `{"op": "Replace", "value": {"active": "False"}}`); the user PATCH matched
+  `replace` and `false` exactly, so the member stayed active with every API
+  key and session while Entra recorded the user as deprovisioned. `op` and
+  attribute names are now matched in any case (RFC 7644 §3.5.2), a SCIM
+  boolean may be `"true"`/`"false"` in any case, and each form runs the
+  offboarding cascade, as a PUT with `"active": "False"` does. An emails
+  replace takes the address whose `primary` is `"True"`. Members an Entra
+  sync should have deprovisioned before this release are still active and
+  need deprovisioning again.
 - **A refusal now wins over an earlier flag-only rule.** `@intutic/gate`,
   `intutic-clawde` and the MCP proxy took the first SOP rule matching a call,
   so a `warn` rule (a shadow guardrail, or the high-risk reminder) listed
@@ -390,6 +402,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`_internal` from `@intutic/gate/harness`.** A test hook exported from the
   public subpath. The tests now read the hook script through
   `intuticSandboxBootstrap()`.
+- **`CreateScimTokenSchema` and `CreateScimTokenInput` (`@intutic/shared-types`).**
+  Nothing used them, and they disagreed with the API (a 255-character label,
+  365 days): the control plane validates a new SCIM token with its own schema
+  (label 1–128 characters, required; 1–3650 days), which the OpenAPI document
+  describes.
 
 ## [2.5.0] - 2026-10-13
 

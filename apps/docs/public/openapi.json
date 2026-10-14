@@ -13024,7 +13024,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IssueScimTokenSchema"
+                "$ref": "#/components/schemas/CreateScimTokenSchema"
               }
             }
           }
@@ -20761,6 +20761,32 @@
         ],
         "additionalProperties": false
       },
+      "CreateScimTokenSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expiresInDays": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 3650
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false
+      },
       "CreateSessionSchema": {
         "type": "object",
         "properties": {
@@ -21841,32 +21867,6 @@
         ],
         "additionalProperties": false
       },
-      "IssueScimTokenSchema": {
-        "type": "object",
-        "properties": {
-          "label": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "expiresInDays": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 1,
-                "maximum": 3650
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "label"
-        ],
-        "additionalProperties": false
-      },
       "labelSchema": {
         "type": "object",
         "properties": {
@@ -22821,9 +22821,21 @@
             }
           },
           "active": {
-            "type": [
-              "boolean",
-              "null"
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?:true|false)$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "userName": {

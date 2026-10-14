@@ -405,7 +405,6 @@ export type {
 export {
   CreateSsoProviderSchema,
   UpdateUserProfileSchema,
-  CreateScimTokenSchema,
 } from './identity.js'
 
 export type {
@@ -420,7 +419,6 @@ export type {
   ScimListResponse,
   ScimPatchOp,
   ScimTokenInfo,
-  CreateScimTokenInput,
   OffboardingStepResult,
   OffboardingResult,
 } from './identity.js'

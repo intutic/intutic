@@ -57,10 +57,12 @@ A request that is not the resource its endpoint takes is refused with `400`
 and `"scimType": "invalidSyntax"`, `detail` naming each attribute: a new user
 without `userName`, a user PATCH without `Operations`, a group whose `members`
 is not a list, or an attribute Intutic reads with the wrong JSON type
-(`active: "false"` rather than `false`). A `startIndex` or `count` that is not
-an integer is refused with `"scimType": "invalidValue"`. Attributes Intutic
-does not model, and extension schemas such as Entra ID's enterprise user, are
-accepted and ignored.
+(`active: "no"`). A boolean may be a JSON boolean or the string `"true"` or
+`"false"` in any case, as Microsoft Entra ID sends it (`"active": "False"`),
+and a PATCH `op` is matched in any case (`"Replace"`, RFC 7644 §3.5.2). A
+`startIndex` or `count` that is not an integer is refused with
+`"scimType": "invalidValue"`. Attributes Intutic does not model, and extension
+schemas such as Entra ID's enterprise user, are accepted and ignored.
 
 ---
 
@@ -152,7 +154,9 @@ Partial update of user attributes. Commonly used by IdPs to deactivate users (`a
 **Response:** `200 OK` with updated SCIM User resource
 
 ::: info
-Setting `active: false` via PATCH triggers the full offboarding cascade (see below).
+Setting `active: false` via PATCH triggers the full offboarding cascade (see below),
+in each form an IdP sends it: `{"op": "Replace", "path": "active", "value": "False"}`
+as Entra ID does, or the path-less `{"op": "Replace", "value": {"active": false}}`.
 :::
 
 ---
