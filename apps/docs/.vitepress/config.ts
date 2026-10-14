@@ -86,6 +86,23 @@ function terraformPages(kind: 'resources' | 'data-sources'): string[] {
     .sort()
 }
 
+/**
+ * The generated SDK reference's sidebar for one package, as
+ * tools/scripts/gen-sdk-reference.mjs wrote it next to the pages
+ * (reference/sdk/<slug>/).
+ */
+function sdkReferenceSidebar(slug: 'gate' | 'clawde' | 'python') {
+  const file = path.resolve(
+    __dirname,
+    '..',
+    'reference',
+    'sdk',
+    slug,
+    slug === 'python' ? 'sidebar.json' : 'typedoc-sidebar.json',
+  )
+  return JSON.parse(fs.readFileSync(file, 'utf8'))
+}
+
 const navItems = [
   { text: 'Guide', link: '/guide/getting-started' },
   { text: 'Integrations', link: '/integrations/' },
@@ -258,6 +275,7 @@ const sidebarReference = [
       ] : []),
       { text: 'clawde SDK (Open-Core)', link: '/reference/clawde-sdk' },
       { text: 'Tool Gate SDK (Open-Core)', link: '/reference/gate-sdk' },
+      { text: 'SDK API Reference (Open-Core)', link: '/reference/sdk/' },
       { text: 'Model Catalog (Open-Core)', link: '/reference/model-catalog' },
       { text: 'Configuration (Open-Core)', link: '/reference/configuration' },
       { text: 'Harness Matrix (Open-Core)', link: '/reference/harness-security-matrix' },
@@ -488,6 +506,25 @@ export default defineConfig({
       ],
       '/external/': sidebarExternal,
       '/reference/': sidebarReference,
+      // Its own sidebar rather than the Reference one, which every reference
+      // page renders in full.
+      '/reference/sdk/': [
+        {
+          text: 'SDK API Reference',
+          items: [
+            { text: 'Reference', link: '/reference/cli' },
+            { text: 'Overview', link: '/reference/sdk/' },
+            { text: '@intutic/gate', link: '/reference/sdk/gate/', collapsed: true, items: sdkReferenceSidebar('gate') },
+            { text: '@intutic/clawde', link: '/reference/sdk/clawde/', collapsed: true, items: sdkReferenceSidebar('clawde') },
+            {
+              text: 'intutic-clawde (Python)',
+              link: '/reference/sdk/python/',
+              collapsed: true,
+              items: sdkReferenceSidebar('python'),
+            },
+          ],
+        },
+      ],
       '/compare/': [
         {
           text: 'Compare',

@@ -1,0 +1,105 @@
+[
+  {
+    "text": "@intutic/gate",
+    "link": "/reference/sdk/gate/core/",
+    "collapsed": true,
+    "items": [
+      {
+        "text": "Classes",
+        "collapsed": true,
+        "items": [
+          {
+            "text": "Gate",
+            "link": "/reference/sdk/gate/core/classes/Gate.md"
+          },
+          {
+            "text": "GateClient",
+            "link": "/reference/sdk/gate/core/classes/GateClient.md"
+          },
+          {
+            "text": "GateConnectionError",
+            "link": "/reference/sdk/gate/core/classes/GateConnectionError.md"
+          },
+          {
+            "text": "GateError",
+            "link": "/reference/sdk/gate/core/classes/GateError.md"
+          },
+          {
+            "text": "IntuticGateHold",
+            "link": "/reference/sdk/gate/core/classes/IntuticGateHold.md"
+          },
+          {
+            "text": "IntuticGateRefusal",
+            "link": "/reference/sdk/gate/core/classes/IntuticGateRefusal.md"
+          },
+          {
+            "text": "Snapshot",
+            "link": "/reference/sdk/gate/core/classes/Snapshot.md"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "text": "@intutic/gate/mastra",
+    "link": "/reference/sdk/gate/mastra/"
+  },
+  {
+    "text": "@intutic/gate/vercel",
+    "link": "/reference/sdk/gate/vercel/"
+  },
+  {
+    "text": "@intutic/gate/dsh",
+    "link": "/reference/sdk/gate/dsh/"
+  },
+  {
+    "text": "@intutic/gate/openai",
+    "link": "/reference/sdk/gate/openai/"
+  },
+  {
+    "text": "@intutic/gate/eve",
+    "link": "/reference/sdk/gate/eve/"
+  },
+  {
+    "text": "@intutic/gate/harness",
+    "link": "/reference/sdk/gate/harness/"
+  },
+  {
+    "text": "@intutic/gate/workflow",
+    "link": "/reference/sdk/gate/workflow/",
+    "collapsed": true,
+    "items": [
+      {
+        "text": "Classes",
+        "collapsed": true,
+        "items": [
+          {
+            "text": "IntuticWorkflowRefusal",
+            "link": "/reference/sdk/gate/workflow/classes/IntuticWorkflowRefusal.md"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "text": "@intutic/gate/managed-agents",
+    "link": "/reference/sdk/gate/managed-agents/",
+    "collapsed": true,
+    "items": [
+      {
+        "text": "Classes",
+        "collapsed": true,
+        "items": [
+          {
+            "text": "IntuticSessionConfirmer",
+            "link": "/reference/sdk/gate/managed-agents/classes/IntuticSessionConfirmer.md"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "text": "@intutic/gate/trueforge",
+    "link": "/reference/sdk/gate/trueforge/"
+  }
+]

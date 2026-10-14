@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the route source with the route catalog in `reference/api.md`, and CI
   fails while either is stale. Like the REST API page, the open-source docs
   build leaves the page and the file out.
+- **SDK API reference on the docs site, generated from the source.**
+  `/reference/sdk/` documents every export of `@intutic/gate` (each subpath in
+  its `exports`), `@intutic/clawde` and the Python `intutic-clawde` package
+  (each public module's `__all__`), built by `pnpm gen:sdk-reference` with
+  TypeDoc and a griffe-based Markdown renderer. CI fails when the committed
+  pages are stale: the TypeScript half in `lint:claims`, the Python half in
+  the Python SDK job. The clawde and Tool Gate SDK pages stay as guides and
+  link to it; their hand-kept option tables and `ControlPlaneClient` method
+  table are gone. The options of `GateConfig`, `GateClientOptions`,
+  `ClawdeClientOptions` and `ControlPlaneClientOptions` now carry their
+  defaults in their doc comments, and every framework adapter module in
+  `intutic_clawde.gate.adapters` declares `__all__`.
 
 ### Changed
 

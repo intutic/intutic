@@ -46,6 +46,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_LANGCHAIN branches
     AgentMiddleware = object  # type: ignore[assignment,misc]
     _HAS_LANGCHAIN = False
 
+__all__ = ["IntuticMiddleware"]
+
 
 def _tool_call_of(request: Any) -> Dict[str, Any]:
     tc = getattr(request, "tool_call", None)

@@ -79,6 +79,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_AGENT_FRAMEWORK bra
     MiddlewareFailure = None  # type: ignore[assignment,misc]
     _HAS_AGENT_FRAMEWORK = False
 
+__all__ = ["IntuticFunctionMiddleware", "install"]
+
 
 def _require_agent_framework(what: str) -> None:
     if not _HAS_AGENT_FRAMEWORK:

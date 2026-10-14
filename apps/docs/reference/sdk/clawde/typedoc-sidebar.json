@@ -1,0 +1,32 @@
+[
+  {
+    "text": "Classes",
+    "collapsed": true,
+    "items": [
+      {
+        "text": "ClawdeBlockedError",
+        "link": "/reference/sdk/clawde/classes/ClawdeBlockedError.md"
+      },
+      {
+        "text": "ClawdeClient",
+        "link": "/reference/sdk/clawde/classes/ClawdeClient.md"
+      },
+      {
+        "text": "ClawdeConnectionError",
+        "link": "/reference/sdk/clawde/classes/ClawdeConnectionError.md"
+      },
+      {
+        "text": "ClawdeError",
+        "link": "/reference/sdk/clawde/classes/ClawdeError.md"
+      },
+      {
+        "text": "ClawdeVerdictError",
+        "link": "/reference/sdk/clawde/classes/ClawdeVerdictError.md"
+      },
+      {
+        "text": "ControlPlaneClient",
+        "link": "/reference/sdk/clawde/classes/ControlPlaneClient.md"
+      }
+    ]
+  }
+]

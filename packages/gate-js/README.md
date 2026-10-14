@@ -98,7 +98,7 @@ dropped, the SSO group policy still refuses, and every MCP call is refused with
 `POLICY_SNAPSHOT_UNVERIFIED`. A hand-written snapshot for a test needs the line
 too.
 
-Full reference: [Gate SDK](https://docs.intutic.ai/reference/gate-sdk).
+Full reference: [Gate SDK](https://docs.intutic.ai/reference/gate-sdk). Every export, with its signature and defaults: [API reference](https://docs.intutic.ai/reference/sdk/gate/).
 
 ### A note for sibling adapter phases
 

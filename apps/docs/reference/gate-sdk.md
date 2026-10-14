@@ -7,7 +7,7 @@ A pre-execution gate for agent tools, for frameworks that have no Intutic hook f
 | TypeScript | `@intutic/gate` (`npm install @intutic/gate`) | `@intutic/gate`, plus framework adapters under `@intutic/gate/<framework>` |
 | Python | `intutic-clawde` (`pip install intutic-clawde`) | `intutic_clawde.gate`, plus framework adapters under `intutic_clawde.gate.adapters` |
 
-The framework integration pages (LangGraph, Mastra, the Vercel AI SDK, Strands and the rest) show the adapter for each framework. This page documents the core every adapter is built on.
+The framework integration pages (LangGraph, Mastra, the Vercel AI SDK, Strands and the rest) show the adapter for each framework. This page documents the core every adapter is built on. Every export, with its signature, options and defaults, is in the API reference generated from the source: [`@intutic/gate`](/reference/sdk/gate/) and [`intutic_clawde.gate`](/reference/sdk/python/intutic_clawde/gate/).
 
 ## Quick start
 
@@ -123,30 +123,9 @@ Without the plan nothing changes, and `enforce: false` (`enforce=False`) skips t
 
 ## Configuration
 
-### `Gate`
-
-| TypeScript | Python (`GateConfig`) | Default | Meaning |
-|---|---|---|---|
-| `repoRoot` | `repo_root` | `.` | Where relative manifest and allowlist paths resolve from |
-| `workspaceId` | `workspace_id` | `''` | Compared with the workspace the policy snapshot was compiled for, and scopes the SOP-rule fetch |
-| `allowlistPath` | `allowlist_path` | `.intutic/image-allowlist.json` | The image allowlist, relative to `repoRoot` unless absolute |
-| `enforce` | `enforce` | `true` | `false` turns `guard()` into a no-op |
-| `useHookGate` | `use_hook_gate` | `true` | Call the hook gate (needs a client) |
-| `useSopRules` | `use_sop_rules` | `true` | Fetch and apply SOP rules (needs a client) |
+`Gate` takes a config and an optional client. The options, with their defaults, are in the reference: [`GateConfig`](/reference/sdk/gate/core/#gateconfig) and [`GateClientOptions`](/reference/sdk/gate/core/#gateclientoptions) in TypeScript, [`GateConfig` and `GateClient`](/reference/sdk/python/intutic_clawde/gate/) in Python, which spells each option in snake_case (`repoRoot` is `repo_root`, `failClosed` is `fail_closed`) and takes the client's timeout in seconds (`timeout`) rather than milliseconds (`timeoutMs`). The Python client's `harness` defaults to `langgraph` rather than `generic`.
 
 The image allowlist is JSON: `require_digest` (default `true`), `registries_allowed` (repository prefixes; empty allows any registry) and `images`, keyed by repository, each with its `approved_digests`.
-
-### `GateClient`
-
-| TypeScript | Python | Default |
-|---|---|---|
-| `baseUrl` | `base_url` | `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane |
-| `apiKey` | `api_key` | `''` |
-| `workspaceId` | `workspace_id` | `''` |
-| `sessionId` | `session_id` | `''` |
-| `harness` | `harness` | `generic` in TypeScript, `langgraph` in Python; sent as `harnessType` to attribute incidents |
-| `failClosed` | `fail_closed` | `true` |
-| `timeoutMs` | `timeout` | 2 seconds |
 
 `GateClient.fromEnv({ sessionId?, harness?, failClosed? })` (`GateClient.from_env(session_id=None, harness=..., fail_closed=True)`) reads `INTUTIC_CONTROL_PLANE_URL`, `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_SESSION_ID`, and falls back to the key and workspace that `intutic login` stored in `~/.intutic/credentials.json`. With no key in either place, the client is local-only (see [Without credentials](#without-credentials)).
 
@@ -182,24 +161,16 @@ A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Go
 
 ## Wrapping tools
 
-| TypeScript | Python | Use |
-|---|---|---|
-| `install(gate)`, `active()` | `install(gate)`, `active()` | Set and read the process-wide gate that wrapped tools use |
-| `wrapTool(fnOrTool, { name?, gate? })` | `@guard`, `@guard(name=..., gate=...)` | Gate one function, or (TypeScript) one `{ execute, ... }` tool object, which is copied rather than mutated |
-| `wrapTools(arrayOrRecord, gate?)` | `guard_tools(tools, gate=None)` | Gate a collection. A TypeScript record uses its keys as tool names; Python duck-types LangChain/LangGraph (`.func`, `._run`) and smolagents (`.forward`) tool objects and wraps them in place |
+`install(gate)` sets the process-wide gate that wrapped tools use, and `active()` reads it. In TypeScript, `wrapTool` gates one function or one `{ execute, ... }` tool object (copied rather than mutated), and `wrapTools` a collection, using a record's keys as tool names. In Python, `@guard` gates one function, and `guard_tools` a collection, duck-typing LangChain/LangGraph (`.func`, `._run`) and smolagents (`.forward`) tool objects and wrapping them in place.
 
 The tool input the gate sees is the call's first argument when it is an object (TypeScript), or the call's arguments bound to their parameter names (Python), so `shell("rm -rf /")` and `shell(command="rm -rf /")` are evaluated identically. Wrapping an already-wrapped tool is a no-op.
 
 ## Other exports
 
-- `intuticHeaders({ sessionId?, workspaceId?, harness? })` (`intutic_headers(session_id=None, workspace_id=None, harness="langgraph")`) returns `x-intutic-harness`, `x-session-id` and `x-workspace-id` headers for a model client pointed at the Intutic proxy. The session and workspace fall back to `INTUTIC_SESSION_ID` and `INTUTIC_WORKSPACE_ID`.
-- `checkCommand(command, repoRoot, policy)` (TypeScript) runs the image-integrity check on its own and returns `{ ok, code, detail, images }`; `checkImages` and `checkWrittenManifest` check parsed image references and manifest text.
-- `classify`, `isDeploy`, `isTest`, `touchesInfra` (`classify`, `is_deploy`, `is_test`, `touches_infra`) are the command classifier the image check uses to decide what counts as a deploy.
-- `loadSnapshot` / `load_snapshot`, `parseRules` / `parse_rules` and `firstMatch` / `first_match` expose the snapshot and SOP-rule tiers for testing your own rules. `fetchRegister` / `fetch_register` reads the workspace's SOP register (its rules and intervention mode) from the control plane, and `parseRegister` / `parse_register` reads a register answer you already have.
-- `canonicalJson`, `holdKey` and `holdMessage` (`canonical_json`, `hold_key`, `hold_message`) are the hold helpers the gate uses: JSON with keys sorted at every level, the tool name and argument hash an approved hold is matched on, and the message a held call carries (see [Holds](#holds)).
-- `GATE_DEADLINE_MS` (TypeScript only, 9000) is how long the hook script `intuticSandboxBootstrap()` writes may evaluate, from process start, before it refuses with `GATE_DEADLINE`: one second under that hook entry's 10-second timeout (`HOOK_TIMEOUT_SECONDS`), so a slow rule is refused rather than left to the harness, which would run the call. See [Hook timeouts](/reference/harness-security-matrix#hook-timeouts).
+The packages also export the pieces the gate is built from, for testing your own rules and for headers on a model client pointed at the Intutic proxy (`intuticHeaders`, `intutic_headers`): the command classifier, the image-integrity check, the snapshot and SOP-rule readers and the hold helpers. Each is listed, with its signature, in the [API reference](/reference/sdk/). `GATE_DEADLINE_MS` (TypeScript only, 9000) is how long the hook script `intuticSandboxBootstrap()` writes may evaluate, from process start, before it refuses with `GATE_DEADLINE`: one second under that hook entry's 10-second timeout (`HOOK_TIMEOUT_SECONDS`), so a slow rule is refused rather than left to the harness, which would run the call. See [Hook timeouts](/reference/harness-security-matrix#hook-timeouts).
 
 ## Related
 
 - [clawde SDK](/reference/clawde-sdk) — the client for the proxy's chat route and the control plane
+- [SDK API reference](/reference/sdk/) — every export of both SDKs, generated from their source
 - [Harness Security Matrix](/reference/harness-security-matrix) — where each harness is gated

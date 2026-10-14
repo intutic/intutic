@@ -92,6 +92,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_AUTOGEN branches
     FunctionCall = None  # type: ignore[assignment,misc]
     _HAS_AUTOGEN = False
 
+__all__ = ["IntuticInterventionHandler"]
+
 
 def _tool_input_of(arguments: Optional[str]) -> Dict[str, Any]:
     """Parses `FunctionCall.arguments` (a raw JSON string) into a dict.

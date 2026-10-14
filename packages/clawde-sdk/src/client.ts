@@ -23,6 +23,14 @@ import { deriveIdentity, identityHeaders, type GraphIdentity } from './graph-ide
 /** The harness a session this SDK registers is recorded under. */
 export const SDK_HARNESS = 'clawde_sdk'
 
+/**
+ * The data-plane client: `chat()` sends an OpenAI-format request through the
+ * Intutic proxy, which governs it and forwards it to the provider, and throws
+ * {@link ClawdeBlockedError} when the proxy refuses it. `checkBudget()` and
+ * `circuitBreaker()` add a workspace budget check, and `on()` registers
+ * callbacks for refusal verdicts. For the operator APIs, use
+ * {@link ControlPlaneClient}.
+ */
 export class ClawdeClient {
   private apiKey: string
   private baseUrl: string

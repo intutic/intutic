@@ -173,6 +173,7 @@ function allow(): Decision {
   return { severity: null, reason: '', ruleId: '' }
 }
 
+/** Where the policy snapshot is read from: `INTUTIC_SNAPSHOT_RULES`, else `~/.intutic/hooks/policy-snapshot.rules`. */
 export function snapshotPath(): string {
   return (
     process.env.INTUTIC_SNAPSHOT_RULES ||
@@ -190,6 +191,13 @@ function normalise(value: unknown): string {
   return ' ' + s.replace(/\s+/g, ' ').trim() + ' '
 }
 
+/**
+ * Read the policy snapshot the sync daemon compiled: from `path`, else
+ * {@link snapshotPath}. A missing file gives an empty snapshot whose `state`
+ * is `'absent'`. A snapshot whose digest does not match its rules, or that
+ * was compiled for a workspace other than a non-empty `workspaceId`, is
+ * `'invalid'`: its rules and MCP records are dropped.
+ */
 export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
   const p = path ?? snapshotPath()
   const snap = new Snapshot()

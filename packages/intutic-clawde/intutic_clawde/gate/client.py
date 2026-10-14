@@ -129,9 +129,16 @@ class GateResponse:
 class GateClient:
     """Control-plane client for the pre-execution gate.
 
-    `harness` defaults to "langgraph" and is sent as `harnessType` on every
-    gate call and event, so incidents attribute to the right adapter. Override
-    it when wrapping a different framework.
+    `base_url` is the control plane's address: `INTUTIC_CONTROL_PLANE_URL`,
+    then Intutic's hosted control plane. Without an `api_key` the client is
+    `local_only`. `harness` defaults to "langgraph" and is sent as
+    `harnessType` on every gate call and event, so incidents attribute to the
+    right adapter. Override it when wrapping a different framework.
+    `fail_closed` blocks a call when the hook gate gives no verdict (the
+    control plane cannot be reached, answers without one, or answers
+    `GOVERNANCE_UNAVAILABLE`); False lets such a call go ahead. `timeout` is
+    how long one control-plane request may take, in seconds. `transport` and
+    `get_transport` replace the HTTP POST and GET calls, for tests.
     """
 
     def __init__(self, base_url: Optional[str] = None, api_key: str = "",

@@ -2,6 +2,8 @@
 
 Programmatic TypeScript and Python client SDKs for intercepting, wrapping, and enforcing governance policies on AI coding scripts.
 
+Every export, with its signature, options and defaults, is in the API reference generated from the source: [`@intutic/clawde`](/reference/sdk/clawde/) and [`intutic_clawde`](/reference/sdk/python/intutic_clawde/).
+
 ## Installation
 
 ### TypeScript SDK
@@ -247,137 +249,7 @@ In Python both signature checks need the `cryptography` package: `pip install 'i
 
 ### What's covered
 
-| Area | TypeScript | Python | Route | CLI |
-|---|---|---|---|---|
-| Identity and org setup | `whoami` | `whoami` | `GET /api/v1/auth/me` | `intutic whoami` |
-|  | `signupOrg` | `signup_org` | `POST /api/v1/auth/signup/org` | — |
-|  | `startDomainVerification` | `start_domain_verification` | `POST /api/v1/domain-verification/start` | `intutic org create` |
-|  | `checkDomainVerification` | `check_domain_verification` | `GET /api/v1/domain-verification/:verificationId` | `intutic org create` |
-|  | `createOrg` | `create_org` | `POST /api/v1/orgs` | `intutic org create` |
-|  | `listTeams` | `list_teams` | `GET /api/v1/orgs/:orgId/teams` | `intutic team list` |
-|  | `createTeam` | `create_team` | `POST /api/v1/orgs/:orgId/teams` | `intutic team create` |
-|  | `listTeamWorkspaces` | `list_team_workspaces` | `GET /api/v1/teams/:teamId/workspaces` | `intutic team workspaces` |
-|  | `createWorkspace` | `create_workspace` | `POST /api/v1/teams/:teamId/workspaces` | `intutic team create-workspace` |
-| Gateways | `registerGateway` | `register_gateway` | `POST /api/v1/gateways` | `intutic gateway register` |
-|  | `listGateways` | `list_gateways` | `GET /api/v1/gateways` | `intutic gateway list` |
-|  | `getGatewayStatus` | `get_gateway_status` | `GET /api/v1/gateways/:gatewayId/status` | `intutic gateway status` |
-|  | `rotateGatewayToken` | `rotate_gateway_token` | `POST /api/v1/gateways/:gatewayId/rotate` | `intutic gateway rotate` |
-|  | `revokeGateway` | `revoke_gateway` | `DELETE /api/v1/gateways/:gatewayId` | `intutic gateway revoke` |
-|  | `getGatewayConfig` | `get_gateway_config` | `GET /api/v1/gateways/:gatewayId/config` | `intutic gateway config get` |
-|  | `setGatewayConfig` | `set_gateway_config` | `PATCH /api/v1/gateways/:gatewayId/config` | `intutic gateway config set` |
-|  | `assignWorkspaceGateway` | `assign_workspace_gateway` | `PATCH /api/v1/workspace/gateway` | `intutic gateway assign` |
-|  | `assignOrgGateway` | `assign_org_gateway` | `PATCH /api/v1/orgs/:orgId/gateway` | `intutic gateway assign` |
-|  | `resolveGateway` | `resolve_gateway` | `GET /api/v1/workspace/gateway-resolution` | `intutic gateway resolve` |
-| Settings and provider credentials | `getWorkspaceSettings` | `get_workspace_settings` | `GET /api/v1/workspace/settings` | `intutic settings get` |
-|  | `updateWorkspaceSettings` | `update_workspace_settings` | `PUT /api/v1/workspace/settings` | `intutic settings set` |
-|  | `listProviderCredentials` | `list_provider_credentials` | `GET /api/v1/workspace/provider-credentials` | `intutic credentials list` |
-|  | `setProviderCredential` | `set_provider_credential` | `PUT /api/v1/workspace/provider-credentials/:provider` | `intutic credentials set` |
-|  | `unsetProviderCredential` | `unset_provider_credential` | `DELETE /api/v1/workspace/provider-credentials/:provider` | `intutic credentials unset` |
-|  | `listProviderModels` | `list_provider_models` | `GET /api/v1/workspace/provider-credentials/:provider/models` | `intutic credentials models` |
-| MCP server registry | `listMcpServers` | `list_mcp_servers` | `GET /api/v1/mcp/servers` | `intutic mcp list` |
-|  | `approveMcpServer` | `approve_mcp_server` | `POST /api/v1/mcp/servers/:serverId/status` | `intutic mcp approve` |
-|  | `blockMcpServer` | `block_mcp_server` | `POST /api/v1/mcp/servers/:serverId/status` | `intutic mcp block` |
-|  | `resetMcpServer` | `reset_mcp_server` | `POST /api/v1/mcp/servers/:serverId/status` | `intutic mcp reset` |
-|  | `enableMcpTool` | `enable_mcp_tool` | `POST /api/v1/mcp/servers/:serverId/tools` | `intutic mcp enable-tool` |
-|  | `disableMcpTool` | `disable_mcp_tool` | `POST /api/v1/mcp/servers/:serverId/tools` | `intutic mcp disable-tool` |
-| Notifications | `listNotificationRules` | `list_notification_rules` | `GET /api/v1/notifications/rules` | `intutic notifications list` |
-|  | `createNotificationRule` | `create_notification_rule` | `POST /api/v1/notifications/rules` | `intutic notifications create` |
-|  | `updateNotificationRule` | `update_notification_rule` | `PUT /api/v1/notifications/rules/:ruleId` | `intutic notifications update` |
-|  | `deleteNotificationRule` | `delete_notification_rule` | `DELETE /api/v1/notifications/rules/:ruleId` | `intutic notifications delete` |
-|  | `rotateNotificationRuleSecret` | `rotate_notification_rule_secret` | `POST /api/v1/notifications/rules/:ruleId/signing-secret` | `intutic notifications rotate-secret` |
-| SIEM export | `listSiemDestinations` | `list_siem_destinations` | `GET /api/v1/siem/destinations` | `intutic siem list` |
-|  | `getSiemDestination` | `get_siem_destination` | `GET /api/v1/siem/destinations/:destinationId` | `intutic siem show` |
-|  | `listSiemSources` | `list_siem_sources` | `GET /api/v1/siem/destinations` | `intutic siem sources` |
-|  | `createSiemDestination` | `create_siem_destination` | `POST /api/v1/siem/destinations` | `intutic siem create` |
-|  | `updateSiemDestination` | `update_siem_destination` | `PUT /api/v1/siem/destinations/:destinationId` | `intutic siem update` |
-|  | `deleteSiemDestination` | `delete_siem_destination` | `DELETE /api/v1/siem/destinations/:destinationId` | `intutic siem delete` |
-|  | `rotateSiemDestinationSecret` | `rotate_siem_destination_secret` | `POST /api/v1/siem/destinations/:destinationId/signing-secret` | `intutic siem rotate-secret` |
-| Usage | `getMemberUsage` | `get_member_usage` | `GET /api/v1/usage/members` | `intutic usage members` |
-|  | `getTeamUsage` | `get_team_usage` | `GET /api/v1/usage/teams` | `intutic usage teams` |
-|  | `getBranchUsage` | `get_branch_usage` | `GET /api/v1/usage/branches` | `intutic usage branches` |
-|  | `getCommitUsage` | `get_commit_usage` | `GET /api/v1/usage/commits` | `intutic usage commits` |
-|  | `getPullRequestUsage` | `get_pull_request_usage` | `GET /api/v1/usage/pull-requests` | `intutic usage pull-requests` |
-|  | `refreshPullRequestUsage` | `refresh_pull_request_usage` | `POST /api/v1/usage/pull-requests/refresh` | `intutic usage pull-requests --refresh` |
-| AI inventory | `getInventorySummary` | `get_inventory_summary` | `GET /api/v1/inventory/summary` | `intutic inventory summary` |
-|  | `listInventoryDevices` | `list_inventory_devices` | `GET /api/v1/inventory/devices` | `intutic inventory devices` |
-|  | `listInventoryHarnesses` | `list_inventory_harnesses` | `GET /api/v1/inventory/harnesses` | `intutic inventory harnesses` |
-|  | `listInventoryMcpServers` | `list_inventory_mcp_servers` | `GET /api/v1/inventory/mcp-servers` | `intutic inventory mcp-servers` |
-|  | `listInventorySkills` | `list_inventory_skills` | `GET /api/v1/inventory/skills` | `intutic inventory skills --device --search` |
-|  | `listInventoryDisconnects` | `list_inventory_disconnects` | `GET /api/v1/inventory/disconnects` | `intutic inventory disconnects` |
-|  | `downloadInventoryHarnessesCsv` | `download_inventory_harnesses_csv` | `GET /api/v1/inventory/harnesses` | `intutic inventory harnesses --csv` |
-|  | `downloadInventoryMcpServersCsv` | `download_inventory_mcp_servers_csv` | `GET /api/v1/inventory/mcp-servers` | `intutic inventory mcp-servers --csv` |
-| Compliance | `getFrameworkCoverage` | `get_framework_coverage` | `GET /api/v1/compliance/frameworks/:frameworkId/coverage` | `intutic compliance coverage` |
-|  | `downloadFrameworkCoverage` | `download_framework_coverage` | `GET /api/v1/compliance/frameworks/:frameworkId/coverage` | `intutic compliance coverage --format` |
-|  | `collectEvidence` | `collect_evidence` | `POST /api/v1/compliance/soc2-collect` | `intutic compliance collect --from --to` |
-|  | `downloadEvidence` | `download_evidence` | `GET /api/v1/compliance/soc2-export/:runId` | `intutic compliance download` |
-|  | `getSigningKeys` | `get_signing_keys` | `GET /.well-known/intutic-trace-signing.json` | `intutic compliance verify` |
-|  | `verifyEvidenceArchive` | `verify_evidence_archive` | none, offline | `intutic compliance verify` |
-| Gate liveness, GitHub webhook | `getGateLiveness` | `get_gate_liveness` | `GET /api/v1/governance/gate-liveness` | `intutic gate-liveness` |
-|  | `getGithubWebhook` | `get_github_webhook` | `GET /api/v1/integrations/github/webhook` | `intutic github webhook show` |
-|  | `rotateGithubWebhookSecret` | `rotate_github_webhook_secret` | `POST /api/v1/integrations/github/webhook/secret` | `intutic github webhook rotate-secret` |
-| Policy guardrails | `listPolicySources` | `list_policy_sources` | `GET /api/v1/connectors` | `intutic guardrails sources list` |
-|  | `addPolicySource` | `add_policy_source` | `POST /api/v1/connectors` | `intutic guardrails sources add` |
-|  | `syncPolicySource` | `sync_policy_source` | `POST /api/v1/connectors/:connectorId/sync` | `intutic guardrails sources sync` |
-|  | `listPolicyDocuments` | `list_policy_documents` | `GET /api/v1/policy-guardrails/documents` | `intutic guardrails docs list` |
-|  | `getPolicyDocument` | `get_policy_document` | `GET /api/v1/policy-guardrails/documents/:docId` | `intutic guardrails docs show` |
-|  | `extractPolicyDocument` | `extract_policy_document` | `POST /api/v1/policy-guardrails/documents/:docId/extract` | `intutic guardrails docs extract` |
-|  | `getGuardrailCoverage` | `get_guardrail_coverage` | `GET /api/v1/policy-guardrails/coverage` | `intutic guardrails search` |
-|  | `searchPolicyPassages` | `search_policy_passages` | `GET /api/v1/policy-guardrails/search` | `intutic guardrails search --text` |
-|  | `getGuardrailImpact` | `get_guardrail_impact` | `GET /api/v1/policy-guardrails/impact` | `intutic guardrails impact` |
-|  | `listGuardrailDuplicates` | `list_guardrail_duplicates` | `GET /api/v1/policy-guardrails/duplicates` | `intutic guardrails duplicates` |
-|  | `listGuardrails` | `list_guardrails` | `GET /api/v1/policy-guardrails/guardrails` | `intutic guardrails list` |
-|  | `getGuardrail` | `get_guardrail` | `GET /api/v1/policy-guardrails/guardrails/:guardrailId` | `intutic guardrails show` |
-|  | `getGuardrailReadiness` | `get_guardrail_readiness` | `GET /api/v1/policy-guardrails/guardrails/:guardrailId/readiness` | `intutic guardrails show` |
-|  | `approveGuardrailShadow` | `approve_guardrail_shadow` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/approve-shadow` | `intutic guardrails approve-shadow` |
-|  | `promoteGuardrail` | `promote_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/promote` | `intutic guardrails promote` |
-|  | `rejectGuardrail` | `reject_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/reject` | `intutic guardrails reject` |
-|  | `retireGuardrail` | `retire_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/retire` | `intutic guardrails retire` |
-|  | `reconfirmGuardrail` | `reconfirm_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/reconfirm` | `intutic guardrails reconfirm` |
-|  | `createGuardrail` | `create_guardrail` | `POST /api/v1/policy-guardrails/guardrails` | `intutic guardrails create` |
-|  | `updateGuardrail` | `update_guardrail` | `PUT /api/v1/policy-guardrails/guardrails/:guardrailId` | `intutic guardrails update` |
-|  | `deleteGuardrail` | `delete_guardrail` | `DELETE /api/v1/policy-guardrails/guardrails/:guardrailId` | `intutic guardrails delete` |
-|  | `replayGuardrail` | `replay_guardrail` | `POST /api/v1/policy-guardrails/guardrails/:guardrailId/replay` | `intutic guardrails replay` |
-|  | `listGuardrailConflicts` | `list_guardrail_conflicts` | `GET /api/v1/policy-guardrails/conflicts` | `intutic guardrails conflicts` |
-| Held decisions and loop runs | `approveDecision` | `approve_decision` | `POST /api/v1/decisions/:holdId/review` | `intutic decision approve --reason` |
-|  | `rejectDecision` | `reject_decision` | `POST /api/v1/decisions/:holdId/review` | `intutic decision reject` |
-|  | `startLoopRun` | `start_loop_run` | `POST /api/v1/loops/start` | `intutic loop start` |
-|  | `getLoopRun` | `get_loop_run` | `GET /api/v1/loops/:loopRunId` | `intutic loop exec` |
-|  | `listLoopRuns` | `list_loop_runs` | `GET /api/v1/loops` | `intutic loop list` |
-|  | `completeLoopRun` | `complete_loop_run` | `POST /api/v1/loops/:loopRunId/complete` | `intutic loop complete` |
-|  | `killLoopRun` | `kill_loop_run` | `POST /api/v1/loops/:loopRunId/kill` | `intutic loop kill` |
-|  | `approveLoopRun` | `approve_loop_run` | `POST /api/v1/loops/:loopRunId/review` | `intutic loop review --approve` |
-|  | `rejectLoopRun` | `reject_loop_run` | `POST /api/v1/loops/:loopRunId/review` | `intutic loop review --reject` |
-| Incidents | `listIncidents` | `list_incidents` | `GET /api/v1/incidents` | `intutic incidents list` |
-|  | `getIncident` | `get_incident` | `GET /api/v1/incidents/:incidentId` | `intutic incidents show` |
-| Findings and traces | `listFindings` | `list_findings` | `GET /api/v1/findings` | `intutic findings list` |
-|  | `adjudicateFinding` | `adjudicate_finding` | `POST /api/v1/findings/:findingId/adjudicate` | `intutic findings adjudicate` |
-|  | `getFindingStats` | `get_finding_stats` | `GET /api/v1/findings/stats` | `intutic findings stats` |
-|  | `getResponseEchoReport` | `get_response_echo_report` | `GET /api/v1/findings/response-echo/report` | `intutic findings echo-report` |
-|  | `listTraces` | `list_traces` | `GET /api/v1/traces` | `intutic traces list` |
-|  | `getTrace` | `get_trace` | `GET /api/v1/traces/:traceId` | `intutic traces inspect` |
-| Trace integrity | `listIntegrityRoots` | `list_integrity_roots` | `GET /api/v1/integrity/roots` | `intutic integrity roots` |
-|  | `getIntegrityRoot` | `get_integrity_root` | `GET /api/v1/integrity/roots/:rootId` | `intutic integrity verify` |
-|  | `recomputeIntegrityRoot` | `recompute_integrity_root` | `POST /api/v1/integrity/roots/:rootId/recompute` | `intutic integrity verify` |
-|  | `getIntegrityChain` | `get_integrity_chain` | `GET /api/v1/integrity/chain` | `intutic integrity chain` |
-|  | `getIntegrityConfigChain` | `get_integrity_config_chain` | `GET /api/v1/integrity/config-chain` | `intutic integrity config-chain` |
-|  | `verifyIntegrityRoot` | `verify_integrity_root` | none, offline | `intutic integrity verify` |
-| Compliance policies, WASM rules | `listPolicies` | `list_policies` | `GET /api/v1/policies` | `intutic policy export` |
-|  | `enablePolicy` | `enable_policy` | `POST /api/v1/policies/:policyId/enable` | `intutic policy enable` |
-|  | `disablePolicy` | `disable_policy` | `POST /api/v1/policies/:policyId/disable` | `intutic policy disable` |
-|  | `rollbackPolicy` | `rollback_policy` | `POST /api/v1/policies/:policyId/rollback` | `intutic policy rollback` |
-|  | `getRuleCandidateSource` | `get_rule_candidate_source` | `GET /api/v1/rule-candidates/:candidateId/source` | `intutic policy compile --candidate` |
-|  | `uploadRuleCandidateBundle` | `upload_rule_candidate_bundle` | `POST /api/v1/rule-candidates/:candidateId/bundle` | `intutic policy compile --candidate --upload` |
-|  | `replayWasmRule` | `replay_wasm_rule` | `POST /api/v1/wasm-rules/:ruleId/replay` | `intutic policy replay` |
-| SOPs | `listSops` | `list_sops` | `GET /api/v1/sops` | `intutic sops pull` |
-|  | `getSop` | `get_sop` | `GET /api/v1/sops/:sopId` | `intutic sops pull` |
-|  | `createSop` | `create_sop` | `POST /api/v1/sops` | `intutic sops push` |
-|  | `listOrgSops` | `list_org_sops` | `GET /api/v1/workspace/org-sops` | `intutic sops org-list` |
-|  | `createOrgSop` | `create_org_sop` | `POST /api/v1/workspace/org-sops` | `intutic sops push --org` |
-|  | `deleteOrgSop` | `delete_org_sop` | `DELETE /api/v1/workspace/org-sops/:orgSopId` | `intutic sops org-rm` |
-| Keys, cost, routing | `attenuateKey` | `attenuate_key` | `POST /api/v1/attenuate` | `intutic attenuate` |
-|  | `getAttenuationChain` | `get_attenuation_chain` | `GET /api/v1/attenuate/chain/:chainId` | `intutic attenuate chain` |
-|  | `predictCost` | `predict_cost` | `POST /api/v1/predict-cost` | `intutic predict-cost` |
-|  | `getMirrorAdoptionReport` | `get_mirror_adoption_report` | `GET /api/v1/routing/mirror-adoption-report` | `intutic routing adoption-report` |
+Every method, with the route it calls, is in the API reference generated from the source: [`ControlPlaneClient`](/reference/sdk/clawde/classes/ControlPlaneClient) in TypeScript and [`ControlPlaneClient`](/reference/sdk/python/intutic_clawde/#controlplaneclient) in Python. The areas are identity and org setup, gateways, settings and provider credentials, the MCP server registry, notifications, SIEM export, usage, the AI inventory, compliance, gate liveness and the GitHub webhook, policy guardrails, held decisions and loop runs, incidents, findings and traces, trace integrity, compliance policies and WASM rules, SOPs, and keys, cost and routing. The CLI command for each operation is in the [CLI reference](/reference/cli).
 
 Cloud providers take several fields. AWS Bedrock takes `awsRegion` with either `awsAccessKeyId` and `awsSecretAccessKey` or a Bedrock `apiKey`; Google Vertex AI takes `projectId`, `serviceAccountJson` and an optional `location`; Azure OpenAI takes `endpoint` and `apiKey`:
 

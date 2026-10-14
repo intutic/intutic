@@ -61,6 +61,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_CREWAI branches
     register_before_tool_call_hook = None  # type: ignore[assignment]
     _HAS_CREWAI = False
 
+__all__ = ["install"]
+
 
 def _make_hook(gate: Optional[Gate]):
     def gate_hook(context: Any) -> Optional[bool]:

@@ -208,13 +208,21 @@ function docsBadge(md, anchor) {
   return found
 }
 
-/** Every docs page, as a path under apps/docs ("guide/x.md"). */
+/**
+ * Every docs page, as a path under apps/docs ("guide/x.md"). The SDK API
+ * reference under reference/sdk/ is left out: its hundreds of pages are
+ * generated from the SDKs' exports (tools/scripts/gen-sdk-reference.mjs,
+ * whose --check holds them to the code), so a feature's SDK surface is its
+ * code, not a page someone chose to write.
+ */
 function docsPages() {
   const docs = join(ROOT, 'apps/docs')
+  const generated = join(docs, 'reference', 'sdk')
   const walk = (dir) =>
     readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
       if (['.vitepress', 'node_modules', 'public', 'dist', 'data'].includes(e.name)) return []
       const full = join(dir, e.name)
+      if (full === generated) return []
       if (e.isDirectory()) return walk(full)
       return e.name.endsWith('.md') ? [relative(docs, full).split(sep).join('/')] : []
     })

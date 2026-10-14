@@ -41,6 +41,7 @@ export interface ExecutableTool {
   [key: string]: unknown
 }
 
+/** Options for {@link wrapTool}. */
 export interface WrapToolOptions {
   /** Tool name reported to the gate. Defaults to the function's own `.name`
    *  (or the tool object's `.name`), then falls back to `"tool"`. */

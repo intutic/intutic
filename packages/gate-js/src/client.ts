@@ -108,17 +108,39 @@ class HttpStatusError extends Error {
   }
 }
 
+/** Options for a {@link GateClient}. Every field is optional. */
 export interface GateClientOptions {
+  /**
+   * The control plane's address.
+   * @defaultValue `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane
+   */
   baseUrl?: string
+  /**
+   * The API key. Without one the client is {@link GateClient.localOnly | local-only}.
+   * @defaultValue `''`
+   */
   apiKey?: string
+  /** @defaultValue `''` */
   workspaceId?: string
+  /** @defaultValue `''` */
   sessionId?: string
   /**
    * Attributes incidents to the right adapter. Sent as `harnessType` on every
    * gate call and event.
+   * @defaultValue `'generic'`
    */
   harness?: string
+  /**
+   * Block a call when the hook gate gives no verdict: the control plane
+   * cannot be reached, answers without one, or answers
+   * `GOVERNANCE_UNAVAILABLE`. `false` lets such a call go ahead.
+   * @defaultValue `true`
+   */
   failClosed?: boolean
+  /**
+   * How long one control-plane request may take.
+   * @defaultValue `2000`
+   */
   timeoutMs?: number
 }
 

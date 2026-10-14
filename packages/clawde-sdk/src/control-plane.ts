@@ -143,8 +143,8 @@ const COVERAGE_FORMATS: Record<CoverageFormat, string> = { json: 'json', md: 'ma
  *
  * Deliberately a separate class, not new methods on `ClawdeClient`:
  * `ClawdeClient.baseUrl` targets the *proxy* (default `http://localhost:4000`);
- * the control plane is a different origin entirely (default
- * `https://app.intutic.ai`, or a self-hosted `CONTROL_PLANE_URL`). Bolting
+ * the control plane is a different origin entirely (default Intutic's
+ * hosted control plane, or a self-hosted `CONTROL_PLANE_URL`). Bolting
  * management calls onto `ClawdeClient` would silently need a second base URL
  * on a class whose whole contract today is "one client, one proxy."
  *

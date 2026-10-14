@@ -98,6 +98,14 @@ pytest = "^9.0.3"
 # since the 1.x bump (`Requires-Python: >=3.10`, inside this package's `^3.10`;
 # switches its HTTP client from httpx to httpx2 — dev group only).
 anthropic = ">=0.122.0"
+# Dev-only, for the generated API reference on the docs site
+# (tools/scripts/gen-sdk-reference-python.py, `pnpm gen:sdk-reference`). Reads
+# the package's source statically, so the reference does not depend on which
+# optional framework extras happen to be installed. griffelib is griffe's
+# library half, with no dependencies of its own; pinned exactly so a new
+# release cannot change the committed pages under CI's staleness check (the
+# version the openai-agents and pydantic-ai extras already resolve).
+griffelib = "2.2.0"
 
 [build-system]
 requires = ["poetry-core"]

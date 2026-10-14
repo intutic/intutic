@@ -115,6 +115,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_SMOLAGENTS branches
     ActionStep = None  # type: ignore[assignment,misc]
     _HAS_SMOLAGENTS = False
 
+__all__ = ["CODE_EXEC_TOOL_NAME", "IntuticPythonExecutor", "intutic_step_callback"]
+
 _log = logging.getLogger(__name__)
 
 #: The tool name reported to Gate.guard() / hook-events for a CodeAgent step.

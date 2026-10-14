@@ -20,6 +20,8 @@ npm install @intutic/clawde
 - **Git context (`autoContext`, on by default):** with an Intutic virtual key, in a git repository, the first `chat()` registers a session with the control plane carrying the repository (the `origin` remote as `host/path`, credentials removed), the branch and the HEAD commit, so the calls count in cost per branch, commit and pull request. Pass `autoContext: false` to send none of it. See [Git context and cost attribution](https://docs.intutic.ai/reference/clawde-sdk#_1a-git-context-and-cost-attribution).
 - **Control-Plane Management (`ControlPlaneClient`):** The operator APIs the CLI exposes, callable programmatically: org and workspace setup, gateways, settings and provider credentials, the MCP registry, notification rules, SIEM destinations, usage, the AI inventory, compliance evidence (with `verifyEvidenceArchive()` to check an archive offline), policy guardrails, held decisions and loop runs, findings, traces, trace integrity (with `verifyIntegrityRoot()` to check a sealed root's signature offline), policies and SOPs. The Python SDK has the same methods in snake_case. See the [SDK reference](https://docs.intutic.ai/reference/clawde-sdk#control-plane-management-controlplaneclient).
 
+Every export, with its signature and defaults: [API reference](https://docs.intutic.ai/reference/sdk/clawde/).
+
 ## License
 
 MIT

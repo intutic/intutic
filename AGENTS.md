@@ -25,6 +25,7 @@ This file is the **machine-readable** entry point for AI coding agents working i
 | [`services/sync-daemon/`](services/sync-daemon/) | Bidirectional config sync daemon (SOPs → harness) |
 | [`tools/cli/`](tools/cli/) | Developer CLI tool (`@intutic/cli`) |
 | [`apps/docs/`](apps/docs/) | Developer Portal — VitePress docs site (docs.intutic.ai) |
+| [`apps/docs/reference/sdk/`](apps/docs/reference/sdk/) | SDK API reference, generated from the SDKs' source by `pnpm gen:sdk-reference`; never edit by hand |
 
 ## Commands cheat sheet
 
@@ -47,6 +48,11 @@ cargo test --package intutic-proxy
 # Quality checks
 pnpm run lint
 pnpm run typecheck
+
+# Regenerate the SDK API reference (apps/docs/reference/sdk/) after changing an
+# SDK export or its doc comment; the Python half needs packages/intutic-clawde's
+# Poetry environment (poetry install --with dev)
+pnpm gen:sdk-reference
 
 # Serve the docs site locally
 pnpm --filter @intutic/docs dev
