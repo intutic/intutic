@@ -116,10 +116,14 @@ Hook gates report in batches, and each batch goes to a destination as one delive
 
 ### Syslog (CEF) classes
 
-Each source has its own CEF event class, so a SIEM rule can match on it:
+Each source has its own CEF event class, so a SIEM rule can match on it. The header reads `CEF:0|Intutic|GovernanceStream|2.0|<class>|<name>|<severity>|`; `2.0` is the version of these classes, not of the control plane, and changes only when a class changes.
 
 | Source | Event class | Severity |
 |---|---|---|
+| `execution_traces` | `AGENT_MODEL_REQUEST`: one model request an agent's session made through the proxy | 1 |
+| `detector_findings` | `DETECTOR_FINDING` | 10, 7, 4 or 1 for a CRITICAL, HIGH, MEDIUM, or LOW or INFORMATIONAL finding |
+| `stored_plans` | `PLAN_GOVERNANCE_UPDATE` | 4 |
+| `enforcement_devices` | `DEVICE_ENFORCEMENT_DISABLED_UPDATE` for a device whose firewall enforcement was switched off, `DEVICE_ENFORCEMENT_STALE` for a device that stopped reporting its posture | 7 and 4 |
 | `governance_incidents` | `GOVERNANCE_VIOLATION` for a HIGH or CRITICAL incident, `GOVERNANCE_NOTICE` otherwise; `WASM_RULE_REFUSED` for a [custom filter a proxy refused to load](/guide/wasm-rules#when-a-rule-cannot-load) and `SYSTEM_ANOMALY` for a dependency a proxy could not reach (see [incident types](/guide/concepts#incident-types); one filed before 2.4.0 is a `GOVERNANCE_VIOLATION`) | 10, 7, 4 or 1 for CRITICAL, HIGH, MEDIUM or LOW; both system types are filed HIGH, 7 |
 | `gate_decisions` | `GATE_<VERDICT>`, for example `GATE_BLOCK` | 7 for a block or a tamper, 6 for an approved bypass, 5 for a hold or would-block, 4 for a flag, 1 for an allow |
 | `login_events` | `AUTH_LOGIN`, or `AUTH_LOGIN_FAILURE` for a refused sign-in | 3, and 5 for a refusal |
@@ -135,7 +139,21 @@ Each source has its own CEF event class, so a SIEM rule can match on it:
 | `credential_changes` | `CREDENTIAL_CHANGE` | 5 |
 | `budget_alerts` | `BUDGET_THRESHOLD` or `BUDGET_EXCEEDED` | 4; an exceeded budget 7 when it is hard, 5 when soft |
 
-Every class carries the member as `suid` (member id) and `suser` (email) when the event has an [actor](#the-actor).
+A class ends in `_UPDATE` (and its name in "(Updated)") when the event is a change to an existing record, as plan decisions, guideline transitions and a disabled firewall are; the mutation type is also in `cs3`. Every class carries the member as `suid` (member id) and `suser` (email) when the event has an [actor](#the-actor).
+
+#### Changed in 2.5.1
+
+Traces, detector findings and device events had no class of their own: all of them went out as `AGENT_TOOL_CALL` at severity 5, under header version `1.0`. If a Sentinel, Splunk or ArcSight rule matches on any of these, update it:
+
+| Event | Before 2.5.1 | From 2.5.1 |
+|---|---|---|
+| Header device version | `1.0` | `2.0` |
+| `execution_traces` | `AGENT_TOOL_CALL`, severity 5 | `AGENT_MODEL_REQUEST`, severity 1 |
+| `detector_findings` | `AGENT_TOOL_CALL`, severity 5 | `DETECTOR_FINDING`, severity from the finding |
+| `enforcement_devices`, firewall enforcement disabled | `AGENT_TOOL_CALL_UPDATE`, severity 5 | `DEVICE_ENFORCEMENT_DISABLED_UPDATE`, severity 7 |
+| `enforcement_devices`, device stopped reporting | `AGENT_TOOL_CALL_UPDATE`, severity 5 | `DEVICE_ENFORCEMENT_STALE`, severity 4 |
+
+The stopped-reporting alert changes no record, so its `mutationType` is now `INSERT` (it was `UPDATE`) at every destination, webhook, Splunk, Datadog and bucket included; one already waiting in the dead-letter queue is retried as an `INSERT` too. Nothing else changed for JSON destinations: they carry the event, not a CEF class. Every other source keeps its class.
 
 An incident's `msg` is its description.
 
