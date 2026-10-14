@@ -217,7 +217,8 @@ intutic judge configure [options]
 2. Writes a LiteLLM `litellm_config.yaml` to `--out`, with one `model_list` entry for that model
 3. Prints the env block (`INTUTIC_GATEWAY_LOCAL_JUDGE`, `LITELLM_LOCAL_URL`,
    `LITELLM_LOCAL_API_KEY`, `LITELLM_LOCAL_JUDGE_MODEL`) for Docker/bare-metal deployments
-4. Prints the Helm values (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`) for the
+4. Prints the Helm values (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`, and
+   `litellm.secretName: litellm-env` for the Secret holding `LITELLM_MASTER_KEY`) for the
    `intutic-gateway` chart, which is published at `oci://ghcr.io/intutic/charts/intutic-gateway`.
    The chart renders LiteLLM's config from the file this command wrote, passed with `--set-file`
 
@@ -260,7 +261,7 @@ intutic login [options]
 | `--control-plane-url <url>` | The control plane to log in to, such as a self-hosted one. Must be an `http(s)` URL. |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
-Without `--api-key` it prompts for your email and password (the password is not echoed). The
+Without `--api-key` it prompts for your email and password (the password is masked as you type). The
 credentials are saved to `~/.intutic/credentials.json`, with the token in the OS keychain when one
 is available, together with the control plane they were issued by. Every later command uses that
 control plane unless a flag or `INTUTIC_CONTROL_PLANE_URL` names another; see
@@ -860,7 +861,7 @@ Prints the incident's type, severity, status, when it was filed and resolved and
 
 ## `intutic integrity roots` <Badge type="tip" text="Cloud" />
 
-List the sealed Merkle roots for the workspace, newest first. Roots are sealed by the control
+List the 50 most recent sealed Merkle roots for the workspace, newest first. Roots are sealed by the control
 plane — see [Trace Integrity](/concepts/trace-integrity).
 
 ```bash
@@ -912,7 +913,7 @@ deliberate about which findings are failures:
 | `missing_traces`, past retention | `0` | The root is older than 3 years and the 3-year trace retention deleted its traces. Reported, not failed. |
 | Signature `valid` | `0` | Verified against the key the root names. |
 | Signature `invalid` | `1` | A key we hold **rejected** it. |
-| Signature `unverifiable` | `0` | The root names a key the JWKS does not publish — a key-retention gap, not evidence of forgery. |
+| Signature `unverifiable` | `0` | The root names a key the JWKS does not publish (a key-retention gap, not evidence of forgery), or it was signed under a preimage version or algorithm this CLI cannot rebuild (upgrade the CLI). |
 | Signature `unsigned` | `0` | The deployment seals roots without signing them, which is supported. |
 | `keys_unavailable` | `0` | The JWKS could not be fetched. No verdict was reached, so none is reported. |
 | `--against` copy matches | `0` | The copy in your bucket agrees with what the control plane serves. |
@@ -955,6 +956,9 @@ A **break** — a root whose named predecessor is not the root that actually pre
 all, exits `0`: nothing was claimed, so nothing is contradicted. Roots written before the
 chain existed are unchained, which is what a rolling deploy produces, and failing on them
 would make every deploy red.
+
+Only the most recent 500 roots are walked. When older ones exist the report says so: an intact
+window is not an intact history.
 
 ---
 
@@ -1035,6 +1039,8 @@ With `--watch`, it prints one line per tick in this shape:
 ```
 [10:42:05] machine-local: $0.4210 / $10.00  |  workspace: $3.1200 / $50.00
 ```
+
+The time is printed in your locale's format.
 
 - `machine-local` is today's spend and cap as reported by the local proxy at `http://127.0.0.1:4000` (or the port of `INTUTIC_PROXY_URL`). `(enforcement off)` is appended when the proxy is not enforcing the cap; `— (local proxy not running)` is shown when it cannot be reached.
 - `workspace` is the workspace's daily spend and daily budget, refreshed on the first tick and every 6th tick after that (every 30 seconds at the default interval). It shows `— (not connected)` when you are not logged in or the request fails.
@@ -1190,7 +1196,7 @@ Exactly one of `--tokens` and `--file` is required. Passing both, or neither, ex
 Requires `intutic login`; the estimate is computed by the control plane, not locally.
 
 1. Takes the input size from `--tokens`, or sends the file's contents to the control plane, which counts roughly four characters per token.
-2. Estimates the output (and any reasoning) tokens from the workspace's baseline: past usage recorded for this model at a similar input size, falling back to usage across all workspaces. With no baseline, it uses a fixed output ratio for the model family.
+2. Estimates the output (and any reasoning) tokens from past usage recorded for this model at a similar input size: the workspace's own, or usage across all workspaces when the workspace has none. With fewer than 3 recorded samples, it uses a fixed output ratio for the model family.
 3. Prices input, output and reasoning tokens with the same rate table as every other cost figure the control plane reports. Reasoning tokens are billed at the output rate.
 
 The report shows input tokens, estimated output and reasoning tokens, the estimated cost in USD, a confidence (`high`, `medium` or `low`), and what the estimate was based on. An estimate from the fixed ratio is always `low`.
@@ -1227,7 +1233,7 @@ Reads the verdicts recorded for a candidate model that the proxy has been mirror
 - **Average cost delta**, in USD per request.
 - **Average latency delta**, in milliseconds.
 
-A delta with no data behind it is printed as "not measured", never as zero. Below 20 recorded verdicts, the command prints an insufficient-data block with the count so far instead of a report. Verdicts are aggregated across every workspace mirroring the same candidate, not only yours.
+A delta with no data behind it is printed as "not enough scored pairs" (fault rate) or "not measured" (cost, latency), never as zero. Below 20 recorded verdicts, the command prints an insufficient-data block with the count so far instead of a report. Verdicts are aggregated across every workspace mirroring the same candidate, not only yours.
 
 The report is a signal for a person to read before adopting a model. Nothing it prints changes routing.
 
@@ -1272,7 +1278,7 @@ intutic skill audit [--sarif] [--engine <native|cisco>] [--exit-zero]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--sarif` | Print the findings as a single SARIF 2.1.0 JSON document on stdout (for GitHub Code Scanning and other CI tools) instead of the readable report | — |
+| `--sarif` | Print the skill-file and bundled-script findings as a single SARIF 2.1.0 JSON document on stdout (for GitHub Code Scanning and other CI tools) instead of the readable report. Findings in root rule files are not in the document but still set the exit status | — |
 | `--engine <engine>` | `native` runs the built-in scanner. `cisco` also runs Cisco's `skill-scanner` on each skill directory; the `skill-scanner` binary must be on `PATH` (`pipx install cisco-ai-skill-scanner`). | `native` |
 | `--exit-zero` | Exit `0` even when the audit has findings or could not scan everything | — |
 
@@ -1288,7 +1294,7 @@ When you are logged in, three workspace settings change the run:
 
 | Setting | Effect |
 |---------|--------|
-| `enableLocalSkillAuditDelete` | Deletes each flagged line from the file it was found in |
+| `enableLocalSkillAuditDelete` | Deletes each flagged line from the rule file or `SKILL.md` it was found in (bundled scripts are not changed) |
 | `ciscoSkillScannerEnabled` | Runs the Cisco engine without `--engine cisco` if `skill-scanner` is on `PATH`; if it is not, the run continues with the built-in scanner only |
 | `semanticSkillAnalysisEnabled` | Includes each `SKILL.md`'s content in the report it uploads |
 
@@ -1342,8 +1348,8 @@ intutic loop start [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--name <name>` | Unique name identifier for the loop run | _(required)_ |
-| `--budget <limit>` | Maximum token spend budget in USD (e.g. `5.00`) | _(none)_ |
+| `--name <name>` | Name for the loop run (need not be unique; the run is addressed by its `lr_…` id) | _(required)_ |
+| `--budget <limit>` | Maximum token spend budget in USD (e.g. `5.00`) | `10.00` (set by the control plane) |
 | `--sops <sops>` | Comma-separated local SOP folder names or option indices | — |
 | `--auto-judge` | Enable automatic E2E judging for the loop | — |
 | `--dev` | Use local control plane | — |
@@ -1362,11 +1368,17 @@ intutic loop exec [options] -- <command> [args...]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--name <name>` | Unique name identifier for the loop run | _(generated)_ |
-| `--budget <limit>` | Maximum token spend budget in USD (e.g. `5.00`) | _(none)_ |
+| `--name <name>` | Name for the loop run (need not be unique; the run is addressed by its `lr_…` id) | `exec-<command>` (e.g. `exec-npm`) |
+| `--budget <limit>` | Maximum token spend budget in USD (e.g. `5.00`) | `10.00` (set by the control plane) |
 | `--sops <sops>` | Comma-separated local SOP folder names or option indices | — |
 | `--auto-judge` | Enable automatic E2E judging for the loop | — |
 | `--dev` | Use local control plane | — |
+
+**What it does:** Starts a loop run, then runs the command with `INTUTIC_LOOP_RUN_ID` set to the
+run id. When the command exits, the run is marked `COMPLETED` (exit `0`) or `FAILED` (non-zero),
+and `loop exec` exits with the command's code. A run held for review (`PENDING_REVIEW`) is left
+open, and the command prints the `intutic loop review` line to run. Exits `1` if the run cannot be
+started.
 
 **Example:**
 ```bash
@@ -1570,14 +1582,14 @@ intutic policy disable <policy_id> [options]
 Rollback a compliance policy to a specific version.
 
 ```bash
-intutic policy rollback <policy_id> --version <v> [options]
+intutic policy rollback <policy_id> --version <version> [options]
 ```
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--version <v>` | Target version number (required) |
+| `--version <version>` | Target version number (required) |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 Restores that version as a new version of the policy. `--version` here is the policy's version,
@@ -1596,14 +1608,14 @@ intutic policy rollback pol_abc123 --version 2
 Export workspace compliance policies to stdout as a JSON array.
 
 ```bash
-intutic policy export --all [options]
+intutic policy export [--all] [options]
 ```
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--all` | Export all policies |
+| `--all` | Export all policies (the default; without it the command warns and exports all anyway) |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 ---
@@ -1629,7 +1641,7 @@ intutic policy snapshot [options]
 
 `intutic connect` writes the same file, as one step of starting the full sync daemon. This command does only this one thing, so you can arm the gates without running the daemon.
 
-If the fetch returns nothing usable, the command says the snapshot was **not** written and exits `1`. Any previous snapshot is left untouched and stays enforced. Without any snapshot, the gates still enforce the floor compiled into them.
+If the fetch returns nothing usable, the command says the snapshot was **not** written and exits `1`. Any previous snapshot stays enforced. The exception is when the control plane refuses the key (revoked, deactivated, or past the SSO idle window): the previous snapshot is then rewritten with the member's SSO groups treated as unknown, which refuses every high-risk tool. Without any snapshot, the gates still enforce the floor compiled into them.
 
 The gates look for the snapshot at `INTUTIC_SNAPSHOT_RULES` when that variable is set, and at `~/.intutic/hooks/policy-snapshot.rules` otherwise. This command follows the same variable: it writes into the directory that `INTUTIC_SNAPSHOT_RULES` names. The file name is always `policy-snapshot.rules`, so if the variable names a different file the command warns that the gates will read a file it does not write.
 
@@ -1654,14 +1666,14 @@ intutic policy replay <ruleId> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `ruleId` | A WASM rule uploaded to this workspace (`wasm_…`), installed or not yet active |
+| `ruleId` | A native WASM rule uploaded to this workspace (`wasm_…`), installed or not yet active. A Rego rule is refused; test it with [`intutic rules test`](#intutic-rules-test) |
 
 **Options:**
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--limit <n>` | Maximum number of sampled request contexts to replay against (capped at 5000) | `500` |
-| `--since <duration>` | Only contexts at or after this time: relative (`24h`, `7d`) or an ISO 8601 date | _(all sampled history)_ |
+| `--since <duration>` | Only contexts at or after this time: relative (`24h`, `7d`) or an ISO 8601 date. An unparseable value is ignored | _(all sampled history)_ |
 | `--dev` | Use local control plane (`http://localhost:3001`) | — |
 
 **What it does:**
@@ -1742,7 +1754,7 @@ intutic policy install --wasm <path> [options]
 | `--priority <NN>` | Evaluation priority — lower runs first | `100` |
 
 **What it does:**
-1. Instantiates the rule and evaluates it against a built-in allow-mock context — a rule that fails to instantiate or evaluate is **not** installed. A [Rego rule](/guide/rego-policies) is loaded and evaluated through the Rego host instead, and refused if a proxy could not run it
+1. Instantiates the rule and evaluates it against a built-in allow-mock context — a rule that fails to instantiate or evaluate, or returns a code other than 0, 1, 2 or 3, is **not** installed (2 installs with a deprecation warning: the proxy treats it as a block). A [Rego rule](/guide/rego-policies) is loaded and evaluated through the Rego host instead, and refused if a proxy could not run it
 2. Writes it as `{priority}_{name}.wasm` into the local rules dir — `INTUTIC_WASM_DIR` if set, otherwise `~/.intutic/wasm`
 3. Prints the destination path, priority, and SHA-256 of the installed binary
 
@@ -1803,13 +1815,13 @@ intutic rules test <module> --input <file...>
 |--------|-------------|
 | `--input <file...>` | JSON file(s), each holding one [input document](/guide/rego-policies#the-input-document) or an array of `{"name", "input", "expect"}` cases (required) |
 
-Prints each case's decision (`ALLOW`, `DENY`, `HOLD` or `REASK`), reason and risk tier. `expect` is optional; the command exits 1 when a case gets a decision other than the one it expects, or when evaluation fails. The rule runs under the proxies' instruction budget, so a rule that would run out of it in the proxy fails here too. A native rule is refused, with a pointer to [`intutic policy test`](#intutic-policy-test).
+Prints each case's decision (`ALLOW`, `DENY`, `HOLD` or `REASK`), reason and risk tier. `expect` is optional, and one of `allow`, `deny`, `hold` or `reask` in lowercase; the command exits 1 when a case gets a decision other than the one it expects, or when evaluation fails. The rule runs under the proxies' instruction budget, so a rule that would run out of it in the proxy fails here too. A native rule is refused, with a pointer to [`intutic policy test`](#intutic-policy-test).
 
 ---
 
 ## `intutic guardrails` <Badge type="tip" text="Cloud" />
 
-The Policy Clause Ledger from the terminal: sources, documents, the review queue, the three decisions that move a cited guardrail, guardrails you author directly, and the file plane. A client of `/api/v1/policy-guardrails/*` and `/api/v1/connectors`; nothing here decides anything the server would not, and the acting identity is never a flag — the server records the authenticated member. Only `docs extract` needs a paid plan, because it is the one step that spends model budget. Not `intutic policy` (the WASM rule loop) and not `intutic sops` (your own SOP files). See [Policy Guardrails](/guide/policy-guardrails).
+The Policy Clause Ledger from the terminal: sources, documents, the review queue, the three decisions that move a cited guardrail, guardrails you author directly, and the file plane. A client of `/api/v1/policy-guardrails/*` and `/api/v1/connectors`; nothing here decides anything the server would not, and the acting identity is never a flag — the server records the authenticated member. Only `docs extract` needs a paid plan, because it is the one step that spends model budget. Not `intutic policy` (the WASM rule loop) and not `intutic sops` (your own SOP files). Reading needs an OWNER, ADMIN or EM key; `docs extract`, the transitions (`approve-shadow`, `promote`, `reject`, `retire`, `reconfirm`), `create`, `update` and `delete` need OWNER or ADMIN. See [Policy Guardrails](/guide/policy-guardrails).
 
 ---
 
@@ -1829,7 +1841,7 @@ intutic guardrails sources list
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs), with auto-sync state, last sync and last error. Memory providers are not policy sources and are not listed.
+Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs), with auto-sync state and last sync; `--json` also carries `last_sync_error` and `last_attempt_at`. Memory providers are not policy sources and are not listed.
 
 ---
 
@@ -1885,7 +1897,7 @@ intutic guardrails sources sync <connectorId>
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Runs one sync: changed documents are re-split into passages, citations that no longer hold are marked stale, and changed documents are queued for extraction when the plan carries the budget. A cloud-only provider (Notion, Google Drive) answers 503 in offline mode.
+Runs one sync: changed documents are re-split into passages, and citations that no longer hold are re-bound or marked stale. Prints the documents processed, SOPs written and any upstream successor drafts. A manual sync does not queue extraction; run `intutic guardrails docs extract <docId>` for a changed document (the scheduled sync queues it when the plan carries the budget). Notion and Google Drive are cloud-only and answer 503 in a self-hosted deployment.
 
 ---
 
@@ -1931,7 +1943,7 @@ intutic guardrails docs show <docId>
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Prints the document's provenance, every live passage with its hash, and every clause with its check results.
+Prints the document's provenance (source, content hash, upstream version), the number of live passages, every clause with its status, its guardrail and the checks that refused it, and each extraction run. `--json` includes every live passage with its hash.
 
 ---
 
@@ -1986,7 +1998,7 @@ intutic guardrails search --text "<words>"
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Coverage for one token: the passages whose token index carries it and the guardrails whose rule names it, so "do we have a rule about X" has an answer with citations.
+Coverage for one token: the live passages whose token index carries it (case-insensitive) and the guardrails cited from those passages, so "do we have a rule about X" has an answer with citations.
 
 With `--text`, the argument is read as words rather than a token: every live passage is searched (stemmed English, so `deploys` finds `deploy`) and up to 50 passages are listed, best match first. You can quote a phrase, use `or`, and exclude a word with a leading `-`; the query is limited to 200 characters. This answers "which passages talk about production deploys" where the token search answers "which passages name `Bash`". It lists passages only, not guardrails.
 
@@ -2015,7 +2027,7 @@ intutic guardrails list
 | `--target <target>` | `hook_rule`, `sop_front_matter`, `wasm_rule` or `workspace_setting` |
 | `--provenance <provenance>` | `extracted` (compiled from a document) or `authored` (written directly) |
 | `--doc <docId>` | Only guardrails cited from this document |
-| `--limit <n>` | Max rows (default 50, capped at 200) |
+| `--limit <n>` | Max rows (default 200, capped at 1000) |
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
@@ -2065,7 +2077,7 @@ intutic guardrails create --name "Reviewed terraform apply" --kind hook_rule \
 | Option | Description |
 |--------|-------------|
 | `--file <path>` | YAML or JSON: a bare IR (an object with `kind`), or `{ name, description, ir }` |
-| `--name <name>` | One-line label, at most 80 characters, no surrounding whitespace |
+| `--name <name>` | One-line label, at most 80 characters, no surrounding whitespace (required here or in the file) |
 | `--description <text>` | What the rule is for, at most 480 characters; shown where an extracted guardrail shows its quote, including in a hook rule's block message |
 | `--kind <kind>` | The IR kind: `hook_rule`, `deny_tools`, `review_before`, `requires_before`, `forbid_after`, `max_calls`, `forbid_with`, `wasm_predicate`, `allowed_models` or `egress_allow` |
 | `--title <title>` | `hook_rule`, `wasm_predicate`: the title in the block message |
@@ -2078,7 +2090,7 @@ intutic guardrails create --name "Reviewed terraform apply" --kind hook_rule \
 | `--token <token>` | `max_calls`, `forbid_with`: the token |
 | `--limit <n>` | `max_calls`: the most calls allowed |
 | `--taint <taint>` | `forbid_with`: `secrets()` or `pii()` |
-| `--roles <list>` | Comma-separated roles the rule applies to; without it, everyone |
+| `--roles <list>` | Every kind but `allowed_models` and `egress_allow`: comma-separated lower-case roles the rule applies to; without it, everyone |
 | `--models <list>` | `allowed_models`: comma-separated model ids |
 | `--hosts <list>` | `egress_allow`: comma-separated hosts, suffixes or IPv4 CIDRs |
 | `--rationale <text>` | `wasm_predicate`: why it re-asks |
@@ -2087,7 +2099,7 @@ intutic guardrails create --name "Reviewed terraform apply" --kind hook_rule \
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Sends the guardrail to `POST /api/v1/policy-guardrails/guardrails`. The flags and the file field names are the IR's own (`argContains` in a file, `--arg-contains` as a flag), and a `--name` or `--description` flag overrides the file's. The server runs the validator an extracted guardrail passes, without the checks that compare a model's output against a cited passage; a refusal exits 1 and prints every check with the one that refused. The guardrail is created PROPOSED: it enforces and measures nothing until `intutic guardrails approve-shadow`, and promotion then waits on shadow evidence like any other. Needs an OWNER or ADMIN key. See [Authoring guardrails directly](/guide/policy-guardrails#authoring-guardrails-directly).
+Sends the guardrail to `POST /api/v1/policy-guardrails/guardrails`. The flags and the file field names are the IR's own (`argContains` in a file, `--arg-contains` as a flag), and a `--name` or `--description` flag overrides the file's. The server runs the validator an extracted guardrail passes, without the checks that compare a model's output against a cited passage; a refusal exits 1 and prints the checks that ran, ending with the one that refused. The guardrail is created PROPOSED: it enforces and measures nothing until `intutic guardrails approve-shadow`, and promotion then waits on shadow evidence like any other. Needs an OWNER or ADMIN key. See [Authoring guardrails directly](/guide/policy-guardrails#authoring-guardrails-directly).
 
 ```yaml
 # guardrail.yaml
@@ -2119,7 +2131,7 @@ intutic guardrails update <guardrailId> --file guardrail.yaml
 
 **Options:**
 
-Every option of `intutic guardrails create`, plus:
+Every option of `intutic guardrails create`; `--clear-description` is the one only `update` has:
 
 | Option | Description |
 |--------|-------------|
@@ -2127,7 +2139,7 @@ Every option of `intutic guardrails create`, plus:
 | `--name <name>` | A new label |
 | `--description <text>` | A new description |
 | `--clear-description` | Remove the description |
-| `--kind <kind>` | A new IR, given with flags (`--title`, `--tools`, `--tokens`, `--arg-contains`, `--arg-not-contains`, `--first`, `--then`, `--token`, `--limit`, `--taint`, `--roles`, `--models`, `--hosts`, `--rationale`, `--predicate`) |
+| `--kind <kind>` | A new IR, given with flags (`--title`, `--tools`, `--tokens`, `--arg-contains`, `--arg-not-contains`, `--first`, `--then`, `--token`, `--limit`, `--taint`, `--roles`, `--models`, `--hosts`, `--rationale`, `--predicate`). The flags need `--kind` and replace the whole IR; nothing is merged with the current one. Not with an IR in `--file` |
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
@@ -2220,7 +2232,7 @@ SHADOW → ENFORCING under the [promotion rule](/concepts/enforcement-actions#th
 Reject a guardrail; the reason is recorded on its authority chain.
 
 ```bash
-intutic guardrails reject <guardrailId>
+intutic guardrails reject <guardrailId> --reason "<reason>"
 ```
 
 **Arguments:**
@@ -2264,7 +2276,7 @@ intutic guardrails retire <guardrailId>
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-SHADOW or ENFORCING → RETIRED. The rule leaves both rule endpoints and the SOP policy on the next poll; a pulled file on disk stays until `intutic guardrails pull --prune` removes it.
+SHADOW or ENFORCING → RETIRED. The rule leaves both rule endpoints and the SOP policy on the next poll; a pulled file on disk stays until `intutic guardrails pull --prune` removes it. Retiring an enforcing allowed-models or egress guardrail undoes the setting it wrote.
 
 ---
 
@@ -2316,7 +2328,7 @@ intutic guardrails replay <guardrailId>
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-A preview before anything ships: a hook rule over the enforcement log's captured calls, a front-matter rule over stored context snapshots (`review_before` holds rather than acts and is reported as not replayable), a WASM predicate over the same snapshots.
+A preview before anything ships: a hook rule over the enforcement log's captured calls, a front-matter rule over stored context snapshots (`review_before` holds rather than acts and is reported as not replayable), a WASM predicate over the same snapshots. An allowed-models list replays over the last 30 days of proxied requests, by model; an egress allow list has no observation source and is reported as not replayable.
 
 ---
 
@@ -2476,7 +2488,7 @@ Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reco
 
 ## `intutic sops status` <Badge type="tip" text="Cloud" />
 
-Show drift between `.intutic/sops/*.md` and the control plane. Read-only.
+Show drift between `.intutic/sops/*.md` and the control plane. Writes no local file.
 
 ```bash
 intutic sops status [options]
@@ -2489,7 +2501,7 @@ intutic sops status [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-For each local file, matched by title against the workspace's control-plane SOPs, reports `in-sync`, `local-ahead` (edited locally, not yet pushed), `remote-ahead` (control plane moved on, safe to pull), `diverged` (no recorded pull hash and no match either — can't tell "never pulled" from "edited long ago"), or `push-only` (no matching title on the control plane yet). See [GitOps for SOPs](/guide/gitops-sops).
+For each local file, matched by title against the workspace's control-plane SOPs, reports `in-sync`, `local-ahead` (edited locally, not yet pushed), `remote-ahead` (control plane moved on, safe to pull), `diverged` (no recorded pull hash and no match either — can't tell "never pulled" from "edited long ago"), or `push-only` (no matching title on the control plane yet). Files named `guardrail-*.md` (written by `intutic guardrails pull`) are skipped. Every matched result is also reported to the control plane, which the `sop_git_drift` compliance probe reads; a failed report does not fail the command. See [GitOps for SOPs](/guide/gitops-sops).
 
 ---
 
@@ -2539,7 +2551,7 @@ intutic sops org-rm <orgSopId> [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Deactivates the floor, so it stops applying to every workspace in the org. The row is kept (a soft delete), not erased. You need the OWNER or ADMIN role on at least one active workspace in the org. A floor that does not exist and a caller without that role get the same "not found" answer, so the command cannot tell you which one it was.
+Deactivates the floor, so it stops applying to every workspace in the org. The row is kept (a soft delete), not erased. You need the OWNER or ADMIN role on at least one active workspace in the org. Without that role the answer is "Org not found or you lack admin access" whether or not the floor exists; with it, a floor that does not exist (or was already removed) answers "Org SOP not found".
 
 **Example:**
 
@@ -2588,7 +2600,7 @@ intutic credentials set <provider> --field key=value [--field key=value ...] [--
 | `--json` | Output as JSON instead of a report |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
-The fields are checked before anything is sent: a field the provider does not take, a missing required field, a Bedrock credential with neither an access key pair nor an API key, an Azure endpoint that is not an Azure resource over `https`, or a Vertex AI key that is not a service-account file is refused.
+The fields are checked before anything is sent: a field the provider does not take, a missing required field, a Bedrock credential with neither an access key pair nor an API key, an Azure endpoint that is not an Azure resource over `https`, or a Vertex AI key that is not a `service_account` (or `authorized_user`) credential file is refused.
 
 **Examples:**
 
@@ -2695,7 +2707,7 @@ The request is refused when the parent key is revoked or expired, or descends fr
 
 ```bash
 # <scope-a>,<scope-b>: scopes the parent key was created with
-intutic attenuate --parent-key vk_abc123 --caps <scope-a>,<scope-b> --ttl 3600
+intutic attenuate --parent-key key_abc123 --caps <scope-a>,<scope-b> --ttl 3600
 ```
 
 ---
@@ -2783,8 +2795,9 @@ intutic gateway status <gateway_id> [options]
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
-Reports `online`, `degraded`, `unreachable`, or `pending`. A gateway with no heartbeat inside
-the TTL window (~90s) shows `unreachable` — a valid, self-healing status rather than an error.
+Reports `online`, `degraded` or `unreachable`. A gateway with no heartbeat inside the TTL window
+(90s) shows `unreachable`, including a newly registered one that `gateway list` still shows as
+`pending` — a valid, self-healing status rather than an error.
 `Config version` is the config the gateway reported running in its last heartbeat, against the
 latest one [`gateway config set`](#intutic-gateway-config-set) produced.
 
@@ -3189,7 +3202,7 @@ intutic mcp list [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Prints the registry's default policy, what a high-risk tool change does, how many servers await a decision, and each server with its status (`candidate`, `approved` or `blocked`), its tools and the ones switched off. With `--json` it also includes the MCP call budgets and each server's latest scored tool change. Any member can list the registry. See [The registry](/guide/mcp-governance#the-registry).
+Prints the registry's default policy, what a high-risk tool change does, how many servers await a decision, and each server with its id, name, status (`candidate`, `approved` or `blocked`, marked when a high-risk tool change holds it), how many tools it has and which are switched off, and when it was last seen. With `--json` it also includes the MCP call budgets and each server's latest scored tool change. Any member can list the registry. See [The registry](/guide/mcp-governance#the-registry).
 
 ---
 
@@ -3326,7 +3339,7 @@ Adds the tool to the server's disabled list: MCP proxies refuse calls to it whil
 **Example:**
 
 ```bash
-intutic mcp disable-tool mcps_abc123 delete_repository
+intutic mcp disable-tool mcpsrv_abc123 delete_repository
 ```
 
 ---
@@ -3378,7 +3391,7 @@ intutic notifications create --event <type> --channel <channel> <target option> 
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Creates the rule and prints it. Each channel needs its own target option; the server refuses a rule without one. A webhook URL must be HTTPS and must not point at an internal address. A webhook rule is always signed: the server generates its signing secret and returns it once, in this response, so copy it then. `intutic notifications rotate-secret` replaces it.
+Creates the rule and prints it. Each channel needs its own target option; the server refuses a rule without one. A webhook URL must be HTTPS and must not point at an internal address. A webhook rule is always signed: the server generates its signing secret and returns it once, in this response, so copy it then. `intutic notifications rotate-secret` replaces it. You need the OWNER or ADMIN role.
 
 **Example:**
 
@@ -3423,7 +3436,7 @@ intutic notifications update <rule_id> [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Changes only what you pass. The channel target options replace the rule's whole target, and the filter options its whole filter set. A rule switched to the `webhook` channel gets a signing secret, printed once; a webhook rule that stays one keeps its secret.
+Changes only what you pass. The channel target options replace the rule's whole target, and the filter options its whole filter set. A rule switched to the `webhook` channel gets a signing secret, printed once; a webhook rule that stays one keeps its secret. You need the OWNER or ADMIN role.
 
 **Example:**
 
@@ -3454,6 +3467,9 @@ intutic notifications delete <rule_id> [options]
 | `--json` | Output as JSON |
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
+**What it does:**
+Deletes the rule. You need the OWNER or ADMIN role.
+
 ---
 
 ## `intutic notifications rotate-secret <rule_id>` <Badge type="tip" text="Cloud" />
@@ -3478,7 +3494,7 @@ intutic notifications rotate-secret <rule_id> [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Generates a new signing secret and prints it once. Deliveries are signed with the new secret from then on, so update the receiver's copy straight away. Only webhook rules are signed; any other rule is refused.
+Generates a new signing secret and prints it once. Deliveries are signed with the new secret from then on, so update the receiver's copy straight away. Only webhook rules are signed; any other rule is refused. You need the OWNER or ADMIN role.
 
 ---
 
@@ -3571,7 +3587,7 @@ intutic siem create --name <name> --type <adapter> --config <path> [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Creates the destination. The config is read from a file so credentials stay out of your shell history; each type needs its own keys, e.g. `host` and `port` for `syslog_cef`, `webhookUrl` for `webhook_https`, `hecUrl` and `token` for `splunk_hec`, `apiKey` for `datadog_logs`, `bucketName` for `gcs` and `s3`. The server encrypts the config, refuses one that points at an internal address, and refuses an unknown source name. A `webhook_https` destination gets a signing secret, printed once. You need the OWNER or ADMIN role.
+Creates the destination. The config is read from a file so credentials stay out of your shell history; each type needs its own keys, e.g. `host` and `port` for `syslog_cef`, `webhookUrl` for `webhook_https`, `hecUrl` and `token` for `splunk_hec`, `apiKey` for `datadog_logs`, `bucketName` and `credentials` (a base64-encoded service-account key) for `gcs`, `bucketName`, `accessKeyId` and `secretAccessKey` for `s3`. The server encrypts the config, refuses one that points at an internal address, and refuses an unknown source name. A `webhook_https` destination gets a signing secret, printed once. You need the OWNER or ADMIN role.
 
 **Example:**
 
@@ -3719,7 +3735,7 @@ intutic compliance collect [--from <date>] [--to <date>] [--out <path>] [options
 
 | Option | Description |
 |--------|-------------|
-| `--from <date>` | Start of the evidence period, ISO 8601 (default: 90 days before `--to`) |
+| `--from <date>` | Start of the evidence period, ISO 8601 (default: 90 days before `--to`). It must be before `--to` and within the probe history kept, 400 days by default |
 | `--to <date>` | End of the evidence period, ISO 8601 (default: now) |
 | `--out <path>` | Also write the archive to this file |
 | `--json` | Output as JSON |
@@ -4140,9 +4156,13 @@ Injects the proxy environment into the child process, then spawns it with inheri
 | `OPENAI_HOST` | Goose (host only, no `/v1`) |
 | `ANTHROPIC_BASE_URL` | Claude Code, Anthropic SDK (host only) |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `INTUTIC_API_KEY` | The workspace API key, when you are logged in |
+| `INTUTIC_GRAPH_ID` / `INTUTIC_NODE_ID` / `INTUTIC_PARENT_ID` / `INTUTIC_DEPTH` | A nested `intutic exec` and the [Clawde SDK](/reference/clawde-sdk): the [agent graph](/guide/graph-guardrails) this agent belongs to |
+| `ANTHROPIC_CUSTOM_HEADERS` | Claude Code: the same identity as `X-Intutic-*` headers, after any headers already set |
 
 The base-URL variables point at the local proxy, `http://localhost:4000`, or at
 `INTUTIC_PROXY_URL` when it is set; inside `--sandbox` they point at the host the proxy runs on.
+Each carries the agent-graph identity as a path prefix (`/_i/<graph>/<node>/<parent>/<depth>`),
+which the proxy strips before routing; the `OPENAI_*` URLs other than `OPENAI_HOST` end in `/v1`.
 
 **Without a login** (open core, with [`intutic start`](#intutic-start) running) only the base URLs
 change: the agent keeps the provider keys already in its environment, and the standalone proxy
@@ -4184,7 +4204,7 @@ intutic chaos run <file> [--sandbox-image <image>] [--out <report.json>] [--keep
 | `--out <report.json>` | Where to write the JSON report. Default: `intutic-chaos/report-<name>-<timestamp>.json` under the OS temp directory. The path is printed. |
 | `--keep` | Keep each repetition's git worktree instead of removing it. |
 
-Refuses to start without a clean git working tree (each repetition is a fresh worktree of `HEAD`) or without an available sandbox backend; it never runs the agent on the host. Runs `repeat` baseline repetitions, then `repeat` faulted ones, each behind a dedicated proxy on a free port. Each worktree gets the project's generated gates, its Claude Code, Codex and Cursor project hook settings and the policy snapshot, with the project's path rewritten to `/work`; the output names what was carried in and warns when the project has no gates ([Bring your agent](/guide/chaos-engineering#bring-your-agent)). Exits 0 when the run is scored, 1 when it was aborted, 2 when it is invalid (the baseline failed `verify`).
+Refuses to start without a clean git working tree (each repetition is a fresh worktree of `HEAD`) or without an available sandbox backend; it never runs the agent on the host. Runs `repeat` baseline repetitions, then `repeat` faulted ones, each behind a dedicated proxy on a free port. Each worktree gets the project's generated gates, its Claude Code, Codex and Cursor project hook settings and the policy snapshot, with the project's path rewritten to `/work`; the output names what was carried in and warns when the project has no gates ([Bring your agent](/guide/chaos-engineering#bring-your-agent)). Exits 0 when the run is scored, 1 when it was aborted or refused to start (or the file is invalid), 2 when the run is invalid (the baseline failed `verify`).
 
 ---
 
@@ -4296,8 +4316,8 @@ intutic enforce <action> [options]
 
 | Option | Description |
 |--------|-------------|
-| `--port <port>` | The proxy's listener port to permit. Default: `4000`. |
-| `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to the current user. |
+| `--port <port>` | The proxy's listener port to permit. Default: the `PORT` environment variable, else `4000`; `INTUTIC_PROXY_URL` is not read. |
+| `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to the user the command runs as, which is root under `sudo`: pass `--uid "$(id -u)"` when the proxy runs as you. |
 | `--allow <cidrs>` | Comma-separated extra destinations to permit (control plane, private registries, etc.), each an IP address or CIDR block. A hostname is refused before anything is applied: resolve it to its address range first. |
 | `--no-dns` | Also deny outbound DNS — only if a local resolver serves the host. |
 | `--platform <os>` | Target ruleset platform: `linux`, `macos`, or `windows`. Defaults to the current OS. |
@@ -4320,7 +4340,7 @@ active on a given machine without SSHing into it.
 intutic enforce generate
 
 # Apply, permitting an internal network and a package registry's address range too
-sudo intutic enforce apply --allow 10.0.0.0/8,203.0.113.0/24
+sudo intutic enforce apply --uid "$(id -u)" --allow 10.0.0.0/8,203.0.113.0/24
 
 # Check whether it's currently active
 intutic enforce status
@@ -4564,12 +4584,13 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 |----------|---------|--------|
 | `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of a workspace initialized with `intutic init --dev` and the one saved by `intutic login`, and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
 | `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`, unless `INTUTIC_CONTROL_PLANE_URL` is set. Any other value is ignored. |
-| `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read. |
+| `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read, except by `intutic enforce`, whose `--port` defaults to it. |
 | `VALKEY_URL` | `intutic start`, `intutic connect` | Valkey/Redis the proxy uses. `start` passes it through only when a Valkey is reachable on `--valkey-port`; otherwise it uses `redis://127.0.0.1:<valkey-port>`. `connect` defaults to `redis://127.0.0.1:6379`. |
 | `CONTROL_PLANE_URL` | `intutic start` | When set and no Valkey is available, `start` does not force standalone mode; the proxy treats the run as a managed deployment and requires Valkey. The CLI does not use it to choose a control plane. |
 | `INTUTIC_SNAPSHOT_RULES` | Hook gates, `intutic policy snapshot`, `intutic doctor` | Path of the policy snapshot file the gates enforce. Default `~/.intutic/hooks/policy-snapshot.rules`. `policy snapshot` writes into this path's directory and always names the file `policy-snapshot.rules` (it warns if your path uses another name); `doctor` checks this path. |
 | `INTUTIC_GUARD_DISABLE` | Hook gates | `1` makes the gates skip the snapshot's destructive-command rules. The built-in protections (protected paths, bypass guards) and your workspace's own SOP block rules still apply. Every gated tool call while it is set is recorded as a `guards_disabled` event; once `intutic connect` uploads those events, the control plane opens a HIGH-severity incident for each affected session. |
 | `INTUTIC_SKIP_GLOBAL_HOOKS` | `intutic connect` (Claude Code hooks) | Any non-empty value stops the sync daemon from writing Intutic's hooks and deny rules into `~/.claude/settings.json`. The project's `.claude/settings.json` is still written. |
+| `INTUTIC_OPA_BIN` | `intutic rules build` | The OPA binary used to compile Rego. Default `opa` on the `PATH`. |
 | `INTUTIC_WASM_DIR` | `intutic policy install`, `intutic policy list-local`, the proxy | Directory for local WASM rules. Default `~/.intutic/wasm`; a leading `~/` is expanded. Set it the same way for the CLI and the proxy. |
 | `INTUTIC_FC_KERNEL` | `intutic exec --sandbox firecracker` | Path to the guest kernel image. Required; no default. |
 | `INTUTIC_FC_ROOTFS` | `intutic exec --sandbox firecracker` | Path to the guest root filesystem image containing your agent. Required; no default. |
