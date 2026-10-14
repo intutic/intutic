@@ -1,16 +1,40 @@
+/** Options for a {@link ClawdeClient}. */
 export interface ClawdeClientOptions {
-  apiKey: string                    // Virtual key (vk_xxx)
-  baseUrl?: string                  // Proxy base URL. Default: http://localhost:4000
+  /** The key the proxy authenticates: an Intutic virtual key (`vk_…`) or a provider key. */
+  apiKey: string
   /**
-   * Control-plane base URL used by checkBudget() (a different origin from
-   * `baseUrl` — see control-plane.ts's doc comment). Default:
-   * INTUTIC_CONTROL_PLANE_URL env or https://app.intutic.ai.
+   * The proxy's address.
+   * @defaultValue `INTUTIC_BASE_URL`, then `http://localhost:4000`
+   */
+  baseUrl?: string
+  /**
+   * Control-plane base URL used by checkBudget() and session registration (a
+   * different origin from `baseUrl` — see {@link ControlPlaneClient}).
+   * @defaultValue `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane
    */
   controlPlaneUrl?: string
-  provider?: 'openai' | 'anthropic' | 'google'  // Schema enforcement
-  autoContext?: boolean             // Default: true — resolveContext() reads the sync daemon's config
-  timeout?: number                  // Default: 30000ms
-  retries?: number                  // Default: 2
+  /**
+   * `'anthropic'` sends `chat()` to the proxy's `/v1/messages` route,
+   * converting the request and the answer between the OpenAI and Anthropic
+   * shapes. Otherwise the request goes to `/v1/chat/completions` as it is.
+   */
+  provider?: 'openai' | 'anthropic' | 'google'
+  /**
+   * Resolve context (`resolveContext()`) and register a session carrying the
+   * repository, branch and commit on the first `chat()`. `false` does neither.
+   * @defaultValue `true`
+   */
+  autoContext?: boolean
+  /**
+   * How long one attempt may take, in milliseconds.
+   * @defaultValue `30000`
+   */
+  timeout?: number
+  /**
+   * How many times a transport failure, a timeout or a 5xx answer is retried.
+   * @defaultValue `2`
+   */
+  retries?: number
   /**
    * This client's position in the agent graph. Omit and it is inherited from the
    * environment, so a spawned agent is automatically a child of its spawner.
@@ -148,9 +172,15 @@ export type EventCallback = (data: {
 
 // ─── Control-plane management types ───
 
+/** Options for a {@link ControlPlaneClient}. */
 export interface ControlPlaneClientOptions {
-  apiKey: string                    // vk_xxx or a JWT — see control-plane.ts's doc comment
-  baseUrl?: string                  // Default: INTUTIC_CONTROL_PLANE_URL env or https://app.intutic.ai
+  /** An Intutic virtual key (`vk_…`) or a login JWT. */
+  apiKey: string
+  /**
+   * The control plane's address.
+   * @defaultValue `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane
+   */
+  baseUrl?: string
 }
 
 export interface WhoamiResult {

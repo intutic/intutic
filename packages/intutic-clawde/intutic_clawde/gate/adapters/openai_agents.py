@@ -39,6 +39,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_OPENAI_AGENTS branc
     tool_input_guardrail = None  # type: ignore[assignment]
     _HAS_OPENAI_AGENTS = False
 
+__all__ = ["intutic_tool_guardrail", "make_intutic_tool_guardrail"]
+
 
 def _tool_input_of(tool_arguments: Optional[str]) -> Dict[str, Any]:
     """Parses the raw JSON arguments string into the dict `Gate.guard` wants.

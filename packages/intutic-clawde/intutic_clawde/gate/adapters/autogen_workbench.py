@@ -55,6 +55,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_AUTOGEN branches
     TextResultContent = None  # type: ignore[assignment,misc]
     _HAS_AUTOGEN = False
 
+__all__ = ["IntuticWorkbench", "guard_assistant_agent"]
+
 
 def _require_autogen() -> None:
     if not _HAS_AUTOGEN:

@@ -119,6 +119,16 @@ _GUARDRAILS = "/api/v1/policy-guardrails"
 
 
 class ControlPlaneClient:
+    """The control-plane management client: the operator APIs the `intutic`
+    CLI exposes, as methods with the same names as the TypeScript SDK's in
+    snake_case. Each method's docstring names the route it calls.
+
+    `api_key` is an Intutic virtual key (`vk_...`) or a login JWT. `base_url`
+    is the control plane's address: `INTUTIC_CONTROL_PLANE_URL`, then Intutic's
+    hosted control plane. A call that fails raises `ClawdeConnectionError`
+    with the method, path, status and the control plane's answer.
+    """
+
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         if not api_key:
             raise ValueError("API key is required to initialize ControlPlaneClient.")

@@ -157,12 +157,21 @@ class IntuticGateHold(IntuticGateRefusal):
 
 @dataclass
 class GateConfig:
+    """How a `Gate` evaluates calls. Every field has a default."""
+
     repo_root: str = "."
+    """Where relative manifest and allowlist paths resolve from."""
     workspace_id: str = ""
+    """Compared with the workspace the policy snapshot was compiled for, and
+    scopes the SOP-rule fetch."""
     allowlist_path: str = ".intutic/image-allowlist.json"
+    """The image allowlist, relative to `repo_root` unless absolute."""
     enforce: bool = True
+    """False turns `Gate.guard()` into a no-op."""
     use_hook_gate: bool = True
+    """Call the control plane's hook gate (needs a client)."""
     use_sop_rules: bool = True
+    """Fetch and apply the workspace's SOP rules (needs a client)."""
 
     def allowlist_abs(self) -> str:
         p = self.allowlist_path
@@ -170,6 +179,13 @@ class GateConfig:
 
 
 class Gate:
+    """The pre-execution gate. `guard()` evaluates one tool call against the
+    local tiers (SSO group policy, policy snapshot, MCP servers, image
+    integrity) and, with a `GateClient`, the control-plane tiers (SOP rules,
+    hook gate), and raises `IntuticGateRefusal` to refuse it. Without a
+    client only the local tiers run.
+    """
+
     def __init__(self, cfg: GateConfig, client: Optional[GateClient] = None):
         self.cfg = cfg
         self.client = client
@@ -561,9 +577,11 @@ _ACTIVE: Optional[Gate] = None
 
 
 def install(gate: Gate) -> None:
+    """Set the process-wide gate that `@guard` and `guard_tools` use."""
     global _ACTIVE
     _ACTIVE = gate
 
 
 def active() -> Optional[Gate]:
+    """The process-wide gate `install` set, or None."""
     return _ACTIVE

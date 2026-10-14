@@ -153,6 +153,8 @@ from typing import Any, Dict, Iterator, List, Optional, Set
 
 from ..gate import Gate, IntuticGateRefusal, active
 
+__all__ = ["MANAGED_AGENTS_BETA", "IntuticSessionConfirmer", "confirmation_for_event"]
+
 #: The beta header every Sessions-API request needs. The real SDK
 #: (`anthropic/resources/beta/sessions/events.py`) sets this on every
 #: `.list()`/`.send()`/`.stream()` call automatically — this constant exists

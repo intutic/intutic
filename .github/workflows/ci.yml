@@ -445,6 +445,16 @@ jobs:
         working-directory: packages/intutic-clawde
         run: poetry run pytest -q
 
+      # The Python half of the SDK API reference on the docs site
+      # (apps/docs/reference/sdk/python/), generated from this package's
+      # source with the griffe its dev dependencies pin. Here rather than in
+      # `lint:claims`, which checks the TypeScript half: this job has the
+      # Poetry environment. Fails when a docstring or an `__all__` changed
+      # and `pnpm gen:sdk-reference` was not run.
+      - name: Check the generated Python SDK reference is current
+        working-directory: packages/intutic-clawde
+        run: poetry run python ../../tools/scripts/gen-sdk-reference-python.py --check
+
   build:
     name: Build (TS Workspaces) - Bundle TS apps and packages
     runs-on: ubuntu-latest

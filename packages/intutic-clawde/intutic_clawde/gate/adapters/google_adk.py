@@ -41,6 +41,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_ADK branches
     BasePlugin = object  # type: ignore[assignment,misc]
     _HAS_ADK = False
 
+__all__ = ["IntuticPlugin", "intutic_before_tool_callback"]
+
 
 def _refusal_result(exc: IntuticGateRefusal) -> Dict[str, Any]:
     """A synthetic tool-error result: any JSON-serializable dict is a valid

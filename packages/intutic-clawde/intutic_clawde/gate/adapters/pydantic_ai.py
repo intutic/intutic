@@ -83,6 +83,8 @@ except ImportError:  # pragma: no cover - exercised via _HAS_PYDANTIC_AI branche
     ModelRetry = None  # type: ignore[assignment]
     _HAS_PYDANTIC_AI = False
 
+__all__ = ["IntuticWrapperToolset", "guard_agent"]
+
 
 def _require_pydantic_ai() -> None:
     if not _HAS_PYDANTIC_AI:
