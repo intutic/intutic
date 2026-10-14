@@ -227,8 +227,9 @@ The request is intercepted and modified before reaching the LLM. The most common
 
 **When it happens:**
 - DLP scanner detects API keys, passwords, or PII in the prompt → redacts before forwarding
-- A WASM rule rewrites the request before it is forwarded
 - PCAS downgrades a model selection (e.g., routes to a cheaper model)
+
+A [custom WASM or Rego rule](/guide/wasm-rules) cannot return HIJACK or ENHANCE. Its verdicts are allow, block and reask, plus hold for a Rego rule: a rule never receives the request body, so it has nothing to rewrite, and no way to supply guidance to inject. A rule result the proxy cannot enforce refuses the call as [a rule that reached no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict), never allows it.
 
 On the trace, the proxy records `hijacked` (HIJACK) when a detector's finding steers the request — the corrective card is injected and the call proceeds. A DLP redaction, a rewrite or a model downgrade records the trace as `allowed` (BYPASS); a tool call the response-path DLP rewrote is reported separately, as a substitution (`POST /api/v1/decisions/substitutions`).
 

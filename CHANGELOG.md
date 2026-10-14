@@ -136,6 +136,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration: with no control plane, a provider key passes through as it
   does standalone, and a virtual key gets a `401` saying virtual keys need a
   control plane. A managed proxy is unchanged.
+- **Slash-command and `/intutic predict` answers stream when the client
+  streams.** An `/intutic` command's answer came back as one JSON body even on
+  a `"stream": true` request, which a streaming client (Claude Code, Cursor)
+  reads as nothing. The proxy's own answers now use the route's SSE format on
+  a streaming request (Anthropic Messages, OpenAI chat completions and the
+  Responses API) and name the request's model: the streamed cost prediction
+  always said `claude-3-5-sonnet`.
+- **A custom rule cannot allow a call by returning HIJACK or ENHANCE.** The
+  proxy's merge of WASM and Rego verdicts ignored both, which would have let
+  the call through. No runner produces them, and a rule has no way to supply
+  a rewrite or guidance, so a rule that ever returned one is now refused as
+  one that reached no verdict (`GOVERNANCE_UNAVAILABLE`). The docs no longer
+  say a WASM rule can rewrite a request, and the SDK guide says what to
+  return instead.
+- **`phi()` is not a taint.** The taint detector matched a `phi()` that the
+  SOP parser, the guardrail IR and the control plane's replay all refuse;
+  the dead branch is gone. `pii()` covers custom `phi` patterns, and the
+  parser's error now says so.
 - **A skill's semantic verdict covers the whole file.** With
   `semanticSkillAnalysisEnabled`, `intutic skill audit` sends the first 65,536
   characters of each `SKILL.md`, and the verdict was keyed by the hash of that

@@ -304,6 +304,7 @@ impl PluginRegistry {
                     Err(failure) => (Verdict::Bypass, Some(failure)),
                 }
             };
+            let failure = failure.or_else(|| Self::unenforceable(&verdict));
             let verdict = match failure {
                 Some(failure) => Self::no_verdict(&m, verdict, failure),
                 None => verdict,
@@ -395,7 +396,12 @@ impl PluginRegistry {
                         policy_id: policy_id.or_else(|| Some(m.rule_id.clone())),
                     });
                 }
-                _ => {}
+                // An earlier rule's verdict on the same rung already holds the
+                // slot; the first one in priority order is the one reported.
+                Verdict::Unavailable { .. } | Verdict::Hold { .. } | Verdict::Reask { .. } => {}
+                // `Hijack` and `Enhance` never get here: `unenforceable` turned
+                // them into a rule that reached no verdict above.
+                Verdict::Bypass | Verdict::Hijack { .. } | Verdict::Enhance { .. } => {}
             }
         }
 
@@ -403,6 +409,31 @@ impl PluginRegistry {
             .or(pending_hold)
             .or(pending_reask)
             .unwrap_or(Verdict::Bypass)
+    }
+
+    /// A verdict a custom rule cannot have reached, as a rule that reached none.
+    ///
+    /// `Hijack` and `Enhance` are rungs of the native plugin ladder. Neither
+    /// runner produces them — a native rule returns `0`, `1`, `2` or `3`, and
+    /// a Rego rule allow, deny, hold or reask — and neither carries what the
+    /// request path would need to act on one: a guest never sees the request
+    /// body to rewrite, and there is no guidance to inject. Merged as they
+    /// stood, they fell through to the ignore arm and allowed the call, the
+    /// same silent allow a non-verdict code would be. So they are refused like
+    /// one, named, and the request path never sees them.
+    fn unenforceable(verdict: &Verdict) -> Option<Failure> {
+        let name = match verdict {
+            Verdict::Hijack { .. } => "HIJACK",
+            Verdict::Enhance { .. } => "ENHANCE",
+            Verdict::Bypass
+            | Verdict::Kill { .. }
+            | Verdict::Reask { .. }
+            | Verdict::Hold { .. }
+            | Verdict::Unavailable { .. } => return None,
+        };
+        Some(Failure::result(format!(
+            "it returned {name}, which a custom rule cannot express (0 allow, 1 block, 3 reask)"
+        )))
     }
 
     /// What a rule that reached no verdict means for the request: a refusal,
@@ -814,6 +845,39 @@ impl Refusal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Hijack` and `Enhance` from a custom rule are a rule that reached no
+    /// verdict, not an allow; every verdict a rule can express passes through.
+    #[test]
+    fn hijack_and_enhance_are_not_verdicts_a_rule_can_reach() {
+        for v in [
+            Verdict::Hijack {
+                reason: "steer".into(),
+                confidence: 0.9,
+            },
+            Verdict::Enhance {
+                context: "guidance".into(),
+            },
+        ] {
+            let failure = PluginRegistry::unenforceable(&v)
+                .unwrap_or_else(|| panic!("{v:?} must not merge as an allow"));
+            assert_eq!(failure.stop.as_str(), "result", "{v:?}");
+        }
+        for v in [
+            Verdict::Bypass,
+            Verdict::Kill {
+                reason: "x".into(),
+                policy_id: None,
+            },
+            Verdict::Reask {
+                reason: "x".into(),
+                attempts_remaining: 0,
+                policy_id: None,
+            },
+        ] {
+            assert!(PluginRegistry::unenforceable(&v).is_none(), "{v:?}");
+        }
+    }
 
     /// A descriptor written before `mode` existed must keep enforcing.
     ///
