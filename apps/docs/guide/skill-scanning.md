@@ -388,37 +388,58 @@ the exact wording.
 
 **Content transits the control plane, transiently, then is stripped.**
 Stated plainly rather than buried: when this setting is on, `intutic skill
-audit` attaches the content of a `SKILL.md` file (its first 65,536 characters) to
+audit` attaches the content of a `SKILL.md` file (its first 65,536 characters),
+with the SHA-256 and length of the whole file, to
 its `/skills/report` entry — never bundled scripts, which stay S2/S3/S4's
 domain. The control plane hands that content to the judge and then strips it
 before anything is persisted — the stored report never contains `content`,
 regardless of whether judging ran, succeeded, or was skipped. Only the
-verdict (`'clean' | 'suspicious' | 'malicious' | 'unjudged'`), a short,
-bounded `reason` string, the file path and when it was judged are stored, keyed by the sha256 of the content as sent (the first 65,536 characters), under
+verdict (`'clean' | 'suspicious' | 'malicious' | 'partially_scanned'`), a short,
+bounded `reason` string, the file path, how much of the file the judge read and when it was judged are stored, keyed by the SHA-256 of the **whole file**, under
 `skills:semantic:{workspaceId}` in Valkey — never the judged text itself. The
-sync daemon hashes the same first 65,536 characters of each `SKILL.md` to find
-that verdict, so a file longer than the cap still gets its verdict on the
-Agents page; the verdict describes the part the judge read.
+sync daemon hashes each whole `SKILL.md` the same way to find that verdict.
+Keying by the whole file matters: keyed by the text sent, a skill judged clean
+could gain any tail past the cap and keep its clean verdict. Any change
+anywhere in the file is a new key, and the file is judged again.
+
+**The judge reads everything it is sent.** A `SKILL.md` of up to 16,384
+characters is judged in one call. A longer one is judged in up to four
+overlapping windows (neighbouring windows share 1,024 characters, so an
+instruction across a boundary is read whole by one of them); a window grows
+past 16,384 characters only as far as four windows need to cover the file —
+at most 17,152 characters, for a file of the full 65,536. A flag in any window
+flags the skill: the verdict keeps the highest severity and names the part it
+came from.
+
+**A file longer than 65,536 characters is never `clean`.** The judge cannot
+read past the cap, so when it finds nothing in what it read the verdict is
+`'partially_scanned'`: the skill needs review, and the agent's posture says why
+("Only the first 64K (65,536) characters were checked"). A flag in the part it
+did read still flags the skill. The deterministic pattern scan above is not
+capped: it reads the whole file, and a pattern past 65,536 characters is found.
 
 **Caps.** Two independent bounds, both enforced server-side regardless of
 what a client sends:
 
 - **65,536 characters per file** — the content-transport cap on `SkillFileReportSchema`'s
-  `content` field. The judge itself reads the first 16 KiB of it.
+  `content` field, judged in at most four calls.
 - **A per-workspace daily judge-call cap** (`SEMANTIC_SKILL_JUDGE_DAILY_CAP`,
-  env-overridable, default 200/day) — on top of a zero-cost, no-LLM-call
-  skip for content that has not changed since it was last judged (a 30-day
-  Valkey marker keyed by the content's sha256, so a workspace's daily cap is
+  env-overridable, default 200/day), counted per call, so a long skill spends
+  up to four — on top of a zero-cost, no-LLM-call
+  skip for a file that has not changed since it was last judged (a 30-day
+  Valkey marker keyed by the whole file's SHA-256, so a workspace's daily cap is
   spent on skills that actually changed, not re-spent every audit/sync cycle
   on the same unchanged file).
 
 **Fail-secure semantics.** `'unjudged'` is not `'clean'` — it means no
 determination was made: a timeout, a malformed judge response, or the daily
-cap being spent when this content was reported. None of these is stored, and
+cap being spent before every window of this content was judged. None of these is stored, and
 none writes the 30-day marker, so the next report of the same content is
-judged again. It leaves the posture score where the deterministic scan put it, and it is never
-treated as evidence of safety. Only a confirmed `'malicious'` or
-`'suspicious'` verdict changes anything — the posture score (a `'malicious'`
+judged again. (A flag found before the cap ran out is kept: more windows
+cannot unflag a skill.) It leaves the posture score where the deterministic scan put it, and it is never
+treated as evidence of safety. `'partially_scanned'` caps the skill's score at
+the same "cannot vouch for it" band an unscanned skill gets. A confirmed `'malicious'` or
+`'suspicious'` verdict changes more — the posture score (a `'malicious'`
 verdict overrides the skill's score to 0 outright, the same severity tier as
 a confirmed deterministic finding or a flagged bundled script; `'suspicious'`
 degrades it to a fixed intermediate value, worse than "unknown" but short of
