@@ -20,14 +20,144 @@ use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info};
 
 use crate::ca_manager::{ensure_ca_exists, sign_cert_for_host};
+use crate::credential::{RequestCredential, VirtualKey};
 use crate::egress_policy::{global_policy, record_denied, record_would_deny, EgressDecision};
+use crate::listen::{is_loopback_peer, listener_open};
+use crate::proxy::{authenticate_virtual_key, AppState, KeyCheck};
+
+/// Whether a `CONNECT` may open a tunnel, before its key (if any) is checked.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConnectAdmission {
+    /// From this machine.
+    Allow,
+    /// From another machine, on a listener opened to it, carrying this key:
+    /// admitted once the key authenticates.
+    Authenticate(VirtualKey),
+    /// Refused with this status and message.
+    Refuse(StatusCode, &'static str),
+}
+
+/// Who may open a `CONNECT` tunnel. With the egress policy off (the default)
+/// a tunnel reaches any host, so an unauthenticated tunnel for any peer that
+/// can reach the port is an open proxy.
+///
+/// - `peer` unknown: refused, since nothing says it is this machine.
+/// - This machine: allowed, as before.
+/// - Another machine: refused unless the listener was opened beyond loopback
+///   (`INTUTIC_PROXY_BIND`, or a gateway) AND the request carries an Intutic
+///   key in `Proxy-Authorization` (`Bearer vk_…`, or Basic with the key as
+///   user name or password), which the caller then authenticates as a gateway
+///   request is.
+pub fn connect_admission(
+    peer: Option<std::net::IpAddr>,
+    listener_open: bool,
+    proxy_authorization: Option<&str>,
+) -> ConnectAdmission {
+    let Some(peer) = peer else {
+        return ConnectAdmission::Refuse(StatusCode::FORBIDDEN, "peer address unknown");
+    };
+    if is_loopback_peer(peer) {
+        return ConnectAdmission::Allow;
+    }
+    if !listener_open {
+        return ConnectAdmission::Refuse(
+            StatusCode::FORBIDDEN,
+            "CONNECT is accepted only from this machine",
+        );
+    }
+    match proxy_authorization.and_then(proxy_virtual_key) {
+        Some(key) => ConnectAdmission::Authenticate(key),
+        None => ConnectAdmission::Refuse(
+            StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+            "CONNECT from another machine needs an Intutic key in Proxy-Authorization",
+        ),
+    }
+}
+
+/// The virtual key in a `Proxy-Authorization` value: `Bearer vk_…`, or `Basic`
+/// credentials whose user name or password is the key (what a client builds
+/// from a proxy URL such as `http://vk_…@host:4000`).
+fn proxy_virtual_key(header: &str) -> Option<VirtualKey> {
+    use base64::Engine;
+    let (scheme, value) = header.trim().split_once(' ')?;
+    let value = value.trim();
+    let candidates: Vec<String> = if scheme.eq_ignore_ascii_case("bearer") {
+        vec![value.to_string()]
+    } else if scheme.eq_ignore_ascii_case("basic") {
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .ok()?;
+        let text = String::from_utf8(decoded).ok()?;
+        let (user, pass) = text.split_once(':').unwrap_or((text.as_str(), ""));
+        vec![user.to_string(), pass.to_string()]
+    } else {
+        return None;
+    };
+    candidates
+        .iter()
+        .find_map(|c| RequestCredential::classify(c).virtual_key().cloned())
+}
+
+/// Apply [`connect_admission`] to a `CONNECT`, authenticating its key when it
+/// carries one. `None` admits it; `Some` is the refusal to send.
+pub fn admit_connect<'a>(
+    state: &'a AppState,
+    req: &Request<Body>,
+) -> impl std::future::Future<Output = Option<Response<Body>>> + Send + 'a {
+    // Read out before the future: the request body is not `Sync`, so the
+    // future must not hold the request.
+    let peer = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|info| info.0.ip());
+    let auth = req
+        .headers()
+        .get("proxy-authorization")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    async move { admit(state, peer, auth.as_deref()).await }
+}
+
+async fn admit(
+    state: &AppState,
+    peer: Option<std::net::IpAddr>,
+    auth: Option<&str>,
+) -> Option<Response<Body>> {
+    let refuse = |status: StatusCode, msg: &str| {
+        tracing::warn!(peer = ?peer, %status, "CONNECT refused: {msg}");
+        let mut response = Response::builder().status(status);
+        if status == StatusCode::PROXY_AUTHENTICATION_REQUIRED {
+            response = response.header("proxy-authenticate", "Basic realm=\"intutic\"");
+        }
+        Some(
+            response
+                .body(Body::from(format!("{status}: {msg}")))
+                .unwrap(),
+        )
+    };
+    match connect_admission(peer, listener_open(), auth) {
+        ConnectAdmission::Allow => None,
+        ConnectAdmission::Refuse(status, msg) => refuse(status, msg),
+        ConnectAdmission::Authenticate(key) => match authenticate_virtual_key(state, &key).await {
+            KeyCheck::Valid => None,
+            KeyCheck::Invalid => refuse(
+                StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+                "the Intutic key in Proxy-Authorization is invalid, expired or revoked",
+            ),
+            KeyCheck::Unverifiable => refuse(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "the Intutic key could not be checked against the control plane; retry shortly",
+            ),
+        },
+    }
+}
 
 /// Handle an HTTP CONNECT request.
 ///
 /// Upgrades the connection to a raw TCP tunnel. If the target hostname
 /// is an AI provider, performs TLS MITM to inspect the request.
 /// Otherwise, acts as a transparent passthrough.
-pub async fn handle_connect(req: Request<Body>) -> Response<Body> {
+pub async fn handle_connect(mut req: Request<Body>) -> Response<Body> {
     let (host, port) = match req.uri().authority() {
         Some(a) => {
             let host = a.host().to_string();
@@ -86,21 +216,29 @@ pub async fn handle_connect(req: Request<Body>) -> Response<Body> {
         }
     }
 
-    let has_upgrade = req
-        .extensions()
-        .get::<hyper::upgrade::OnUpgrade>()
-        .is_some();
-    info!(host = %host, has_upgrade = %has_upgrade, "CONNECT upgrade extension check");
+    // Take the upgrade before answering: hyper hands the connection over once
+    // the 200 below is written, to whoever holds this.
+    let on_upgrade = hyper::upgrade::on(&mut req);
+    drop(req);
 
-    // Send 200 Connection Established to the client
+    // Send 200 Connection Established to the client.
+    //
+    // Not `Body::empty()`. axum's router adds `content-length` to every
+    // response whose body has an exact size, `0` for an empty one, and hyper
+    // refuses a 2xx answer to CONNECT that carries one (RFC 9110 §9.3.6): it
+    // drops the connection without writing anything, and the upgrade above is
+    // cancelled. A body of unknown size gets no `content-length`; it ends at
+    // once, so nothing follows the status line.
     let response = Response::builder()
         .status(StatusCode::OK)
-        .body(Body::empty())
+        .body(Body::from_stream(futures_util::stream::empty::<
+            Result<axum::body::Bytes, std::io::Error>,
+        >()))
         .unwrap();
 
     // Spawn the tunnel in the background using hyper's upgrade mechanism
     tokio::spawn(async move {
-        match hyper::upgrade::on(req).await {
+        match on_upgrade.await {
             Ok(upgraded) => {
                 let client_io = TokioIo::new(upgraded);
                 if should_mitm {
@@ -228,7 +366,86 @@ fn forbidden(host: &str) -> Response<Body> {
 
 #[cfg(test)]
 mod tests {
+    use super::{connect_admission, ConnectAdmission};
     use crate::hostname_filter::is_ai_provider_host;
+    use axum::http::StatusCode;
+    use base64::Engine;
+
+    fn ip(s: &str) -> Option<std::net::IpAddr> {
+        Some(s.parse().unwrap())
+    }
+
+    fn vk() -> String {
+        ["vk_", "0123456789abcdef0123456789abcdef"].concat()
+    }
+
+    fn refused_with(a: ConnectAdmission) -> StatusCode {
+        match a {
+            ConnectAdmission::Refuse(status, _) => status,
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn connect_from_this_machine_is_allowed() {
+        for peer in ["127.0.0.1", "::1", "::ffff:127.0.0.1"] {
+            assert_eq!(
+                connect_admission(ip(peer), false, None),
+                ConnectAdmission::Allow
+            );
+            assert_eq!(
+                connect_admission(ip(peer), true, None),
+                ConnectAdmission::Allow
+            );
+        }
+    }
+
+    #[test]
+    fn connect_from_the_network_is_refused_on_a_listener_not_opened() {
+        let bearer = format!("Bearer {}", vk());
+        let status = refused_with(connect_admission(ip("192.168.1.42"), false, Some(&bearer)));
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn connect_from_the_network_without_a_key_is_refused_on_an_opened_listener() {
+        assert_eq!(
+            refused_with(connect_admission(ip("10.0.0.5"), true, None)),
+            StatusCode::PROXY_AUTHENTICATION_REQUIRED
+        );
+        let provider = ["Bearer sk-ant-", "api03-", "fixture"].concat();
+        assert_eq!(
+            refused_with(connect_admission(ip("10.0.0.5"), true, Some(&provider))),
+            StatusCode::PROXY_AUTHENTICATION_REQUIRED
+        );
+    }
+
+    #[test]
+    fn connect_from_the_network_with_a_key_on_an_opened_listener_is_authenticated() {
+        let bearer = format!("Bearer {}", vk());
+        let basic_user = format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD.encode(format!("{}:", vk()))
+        );
+        let basic_pass = format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD.encode(format!("me:{}", vk()))
+        );
+        for header in [bearer, basic_user, basic_pass] {
+            match connect_admission(ip("10.0.0.5"), true, Some(&header)) {
+                ConnectAdmission::Authenticate(key) => assert_eq!(key.as_str(), vk()),
+                other => panic!("{header}: expected Authenticate, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn connect_with_no_known_peer_is_refused() {
+        assert_eq!(
+            refused_with(connect_admission(None, true, None)),
+            StatusCode::FORBIDDEN
+        );
+    }
 
     #[test]
     fn test_ai_host_gets_mitm() {

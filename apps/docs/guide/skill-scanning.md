@@ -61,7 +61,7 @@ for every consumer, immediately.
 
 | Surface | What it does |
 |---|---|
-| `intutic skill audit` | Reads the `SKILL.md` of each skill directory directly under `.agents/skills/` and `.claude/skills/` (one level deep; a symlinked skill directory is skipped), scans each, prints findings, and reports them to the control plane. It exits 1 when there is any finding, unless `--exit-zero` is passed. Auto-pruning a flagged line is opt-in via the `enableLocalSkillAuditDelete` workspace setting — the same gate that already covers the legacy rule-file audit (`CLAUDE.md`, `.cursorrules`, etc). Also enumerates and scans each skill's **bundled scripts** — see below. |
+| `intutic skill audit` | Reads the `SKILL.md` of each skill directory directly under `.agents/skills/` and `.claude/skills/` (one level deep; a symlinked skill directory is skipped), scans each, prints findings, and reports them to the control plane. It exits 1 when there is any finding, when a file other than a data file (`.md`, `.json`, `.yaml`, images and the like) could not be scanned (unreadable, over the size cap, or an unrecognised file type) or when a Cisco engine run failed, unless `--exit-zero` is passed. Auto-pruning a flagged line is opt-in via the `enableLocalSkillAuditDelete` workspace setting — the same gate that already covers the legacy rule-file audit (`CLAUDE.md`, `.cursorrules`, etc). Also enumerates and scans each skill's **bundled scripts** — see below. |
 | Sync daemon | Scans `.agents/skills/<name>/SKILL.md` on every sync cycle and attaches the verdict to the agent's reported `skills` facet — no separate command needed. Also computes a `scripts: {total, scanned, flagged}` facet per skill from the same bounded bundled-file enumeration. |
 | Agent posture score | The `skills` scoring dimension is content-aware: a skill scanned clean scores full marks, a skill with a confirmed finding scores zero, and a skill this report cannot vouch for either way (never scanned, or reported by an older daemon build) scores in between — see [What this cannot catch](#what-this-cannot-catch) for why "in between" and not "clean." A flagged bundled script pulls the whole skill to zero regardless of how `SKILL.md` itself scored; an unscanned (refused, over-cap, or unrecognized-language) bundled script pulls the skill down to the same "in between" band an unscanned `SKILL.md` gets. |
 
@@ -394,8 +394,11 @@ domain. The control plane hands that content to the judge and then strips it
 before anything is persisted — the stored report never contains `content`,
 regardless of whether judging ran, succeeded, or was skipped. Only the
 verdict (`'clean' | 'suspicious' | 'malicious' | 'unjudged'`), a short,
-bounded `reason` string, the file path and when it was judged are stored, keyed by the content's own sha256, under
-`skills:semantic:{workspaceId}` in Valkey — never the judged text itself.
+bounded `reason` string, the file path and when it was judged are stored, keyed by the sha256 of the content as sent (the first 65,536 characters), under
+`skills:semantic:{workspaceId}` in Valkey — never the judged text itself. The
+sync daemon hashes the same first 65,536 characters of each `SKILL.md` to find
+that verdict, so a file longer than the cap still gets its verdict on the
+Agents page; the verdict describes the part the judge read.
 
 **Caps.** Two independent bounds, both enforced server-side regardless of
 what a client sends:
@@ -411,7 +414,9 @@ what a client sends:
 
 **Fail-secure semantics.** `'unjudged'` is not `'clean'` — it means no
 determination was made: a timeout, a malformed judge response, or the daily
-cap being spent when this content was reported. It leaves the posture score where the deterministic scan put it, and it is never
+cap being spent when this content was reported. None of these is stored, and
+none writes the 30-day marker, so the next report of the same content is
+judged again. It leaves the posture score where the deterministic scan put it, and it is never
 treated as evidence of safety. Only a confirmed `'malicious'` or
 `'suspicious'` verdict changes anything — the posture score (a `'malicious'`
 verdict overrides the skill's score to 0 outright, the same severity tier as

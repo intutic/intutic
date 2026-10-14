@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto'
 import { newIso } from '@intutic/id'
 import {
   scanSkillContent,
+  skillContentForTransport,
   scanScriptContent,
   detectScriptLanguage,
   MAX_SKILL_DIR_DEPTH,
@@ -108,7 +109,8 @@ interface AgentFacets {
      */
     scripts?: SkillScriptsFacet
     /**
-     * sha256 of the `SKILL.md` content this row describes (Phase S5) —
+     * sha256 of the `SKILL.md` content this row describes, as the judge
+     * receives it (`skillContentForTransport`: the first 65536 characters) (Phase S5) —
      * lets `services/control-plane/src/routes/agents.ts` look up
      * a previously-judged semantic verdict
      * (`services/semanticSkillAnalysisService.ts`'s `skills:semantic:*`
@@ -409,7 +411,10 @@ export async function collectSkillsIn(dir: string, source: string): Promise<Agen
     try {
       const content = await readFile(skillMdPath, 'utf8')
       const result = scanSkillContent(content)
-      const sha256 = createHash('sha256').update(content, 'utf8').digest('hex')
+      // The verdict lookup key: the same (possibly truncated) text the CLI sends
+      // the judge and the control plane hashes, or a SKILL.md over the cap never
+      // finds its verdict.
+      const sha256 = createHash('sha256').update(skillContentForTransport(content), 'utf8').digest('hex')
       out.push({
         name: e.name,
         source,

@@ -24,17 +24,17 @@ locals {
 ### Read-Only
 
 - `id` (String) The workspace id.
-- `members` (Attributes List) (see [below for nested schema](#nestedatt--members))
+- `members` (Attributes List) The workspace's members. (see [below for nested schema](#nestedatt--members))
 
 <a id="nestedatt--members"></a>
 ### Nested Schema for `members`
 
 Read-Only:
 
-- `created_at` (String)
-- `display_name` (String)
-- `email` (String)
-- `is_active` (Boolean)
+- `created_at` (String) When the member joined (RFC 3339).
+- `display_name` (String) The member's display name.
+- `email` (String) The member's email address.
+- `is_active` (Boolean) False once the member is deactivated.
 - `last_login_at` (String) RFC 3339, or null.
-- `member_id` (String)
-- `role` (String)
+- `member_id` (String) The member id.
+- `role` (String) One of `OWNER`, `ADMIN`, `EM`, `DEVELOPER`, `VIEWER`.

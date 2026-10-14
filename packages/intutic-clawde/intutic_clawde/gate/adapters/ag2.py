@@ -112,10 +112,13 @@ def _make_on_tool_execution(gate: Optional[Gate]):
             # CrewAI fail-open finding, which WAS confirmed) — but fail closed
             # on principle rather than let a Gate.guard() bug or a missing
             # install() propagate out of a framework hook of unverified
-            # exception-handling behaviour. See this module's doc.
-            print(f"[Intutic Governance] BLOCKED: gate error, failing closed: {exc}",
-                  file=sys.stderr)
-            return ToolErrorEvent.from_call(event, exc)
+            # exception-handling behaviour. See this module's doc. The model
+            # gets the same `[Intutic Governance] BLOCKED:` message the other
+            # adapters give, not the raw exception (whose traceback AG2 would
+            # otherwise render to the model). The cause stays on stderr.
+            message = f"[Intutic Governance] BLOCKED: gate error, failing closed: {exc}"
+            print(message, file=sys.stderr)
+            return ToolErrorEvent.from_call(event, RuntimeError(message))
         return await call_next(event, context)
 
     return on_tool_execution

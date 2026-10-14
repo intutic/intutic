@@ -162,7 +162,7 @@ While pair-programming inside the agent chat window (like Cursor or Claude Code)
 ```markdown
 @intutic budget
 ```
-This returns a markdown card with the number of traces the workspace recorded today and the session id. For spend against your caps and budgets, use `intutic budget` or **Settings › Billing**.
+This returns a markdown card with today's and this month's spend against the workspace's caps and, on plans with member budgets, your own member budgets: spent, limit, share used, and whether the budget refuses requests or only alerts. The spend is read from the same counters the proxy's budget gate reads. Per-key budgets are on **Settings › Billing** and `intutic budget keys`.
 
 ---
 
@@ -268,7 +268,7 @@ this page claimed:
 To keep the global developer installation lightweight, the local Rust proxy binary is **not** bundled inside the `@intutic/cli` npm package. Instead:
 *   **Pipeline Compilation:** When a version tag (`v<version>`) is pushed, the Github Actions publish workflow (`.github/workflows/publish.yml`) compiles the Rust proxy code (`packages/proxy`) for five target combinations: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, and `x86_64-pc-windows-msvc` — that is, macOS arm64/x64, Linux x64/arm64, and Windows x64.
 *   **GitHub Release Hosting:** The `github-release` job collects every compiled artifact together with the `npm pack` tarballs and attaches them to a GitHub Release for the tag (`gh release create <tag> release-assets/*`); the standalone `pkg`-built CLI executables ride along in the same release. In parallel, `packages/proxy` is published to npm as `@intutic/proxy` — the npm package ships the `bin/proxy.js` launcher only, not a compiled binary, so the tarball stays small on every platform.
-*   **Dynamic Download:** `intutic connect` only fetches a binary in non-dev mode, and only after it fails to find one at `packages/proxy/target/release/intutic-proxy`, then `target/debug/intutic-proxy`, then the global cache `~/.intutic/bin/`. It then detects the local OS/architecture and downloads the matching asset from the GitHub Release for the pinned CLI version — `https://github.com/intutic/intutic/releases/download/v<version>/<asset-name>` (e.g. `intutic-proxy-darwin-arm64`) — checks it against the release's `checksums.json` (refusing a binary that does not match), marks it executable, and saves it in `~/.intutic/bin/` as `intutic-proxy-<version>` to run as a local managed process. Because the URL is derived from the release tag, the download can never drift from the published assets. If the download fails, the CLI falls back to `cargo run`.
+*   **Dynamic Download:** `intutic connect` only fetches a binary in non-dev mode, and only after it fails to find a workspace build at `target/release/intutic-proxy`, then `target/debug/intutic-proxy` (both at the repository root, where the Cargo workspace builds), then the global cache `~/.intutic/bin/`. It then detects the local OS/architecture and downloads the matching asset from the GitHub Release for the pinned CLI version — `https://github.com/intutic/intutic/releases/download/v<version>/<asset-name>` (e.g. `intutic-proxy-darwin-arm64`) — checks it against the release's `checksums.json` (refusing a binary that does not match), marks it executable, and saves it in `~/.intutic/bin/` as `intutic-proxy-<version>` to run as a local managed process. Because the URL is derived from the release tag, the download can never drift from the published assets. If the download fails, the CLI falls back to `cargo run`.
 
 ---
 
@@ -341,7 +341,7 @@ Although both protect the same compliance boundaries, their engines and executio
 - **`/intutic verify <prompt>` (or `/intutic check`)**:
   - **Type**: Pre-flight prompt linter.
   - **Latency**: Very low — it runs in the control plane with no model call and no upstream network hop.
-  - **Mechanism**: Runs a fixed set of regex pattern matchers in the control plane on the prompt input (hardcoded color values, direct `Date` and UUID calls, database references outside `packages/db`); it does not read the workspace's SOPs. It checks for these violations *before* any request is forwarded to the LLM; the command itself is never sent upstream.
+  - **Mechanism**: Reads the `deny_tools` rules of the workspace's VALIDATED SOPs and enforcing guardrails in the control plane and reports each denied tool the prompt names, *before* any request is forwarded to the LLM; the command itself is never sent upstream. Rules about the order, count or data of calls are enforced by the proxy at call time, not by this check.
 - **`/intutic judge <prompt>`**:
   - **Type**: Parallel E2E response evaluator (LLM-as-a-judge).
   - **Latency**: Sub-second (hidden behind stream chunking).

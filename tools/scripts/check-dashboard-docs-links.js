@@ -20,6 +20,12 @@
  * apps/docs/Dockerfile and the INTUTIC_REQUIRE_FULL guard in
  * apps/docs/.vitepress/config.ts).
  *
+ * And every page the navigation lists (AREAS in
+ * apps/dashboard/src/components/layout/areas.tsx) must carry a help link: its
+ * route module (the `import('./routes/…')` main.tsx registers for the path)
+ * must contain one, unless NO_HELP_LINK names the page with a reason. Eleven
+ * pages shipped with no way to the docs, and two of them had no docs to link.
+ *
  * Usage: node tools/scripts/check-dashboard-docs-links.js [repo-root]
  *
  * Mirrored to the public repo, which has no dashboard: there it skips.
@@ -29,8 +35,67 @@ import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const DASHBOARD_SRC = 'apps/dashboard/src'
+const AREAS_FILE = 'apps/dashboard/src/components/layout/areas.tsx'
+const ROUTER_FILE = 'apps/dashboard/src/main.tsx'
 const DOCS = 'apps/docs'
 const LINK = /https:\/\/docs\.intutic\.ai(\/[A-Za-z0-9/_.-]*)?(?:#([A-Za-z0-9_-]+))?/g
+
+/**
+ * Navigation pages that need no help link of their own, each with the reason.
+ * An entry for a page that has a link, or that the navigation no longer
+ * lists, fails, so the list cannot outlive its reasons.
+ */
+export const NO_HELP_LINK = new Map([])
+
+/** The page paths AREAS lists, in order. */
+export function areaPaths(areasSrc) {
+  const start = areasSrc.indexOf('export const AREAS')
+  if (start === -1) return []
+  const end = areasSrc.indexOf('\n]\n', start)
+  const body = areasSrc.slice(start, end === -1 ? undefined : end)
+  return [...body.matchAll(/\{\s*path:\s*'([^']+)'/g)].map((m) => m[1])
+}
+
+/** Each route path main.tsx registers, mapped to the `./routes/…` module that renders it. */
+export function routeModules(mainSrc) {
+  const out = new Map()
+  const paths = [...mainSrc.matchAll(/\bpath:\s*'([^']+)'/g)]
+  paths.forEach((m, i) => {
+    const block = mainSrc.slice(m.index, paths[i + 1]?.index)
+    const mod = block.match(/import\(\s*'(\.\/routes\/[^']+)'\s*\)/)
+    if (mod) out.set(m[1], mod[1])
+  })
+  return out
+}
+
+/** Navigation pages whose route module has no docs link and no NO_HELP_LINK entry. */
+export function helpLinkProblems(root, exempt = NO_HELP_LINK) {
+  const areas = join(root, AREAS_FILE)
+  const router = join(root, ROUTER_FILE)
+  if (!existsSync(areas) || !existsSync(router)) return [`${AREAS_FILE} or ${ROUTER_FILE} is missing; no page was checked for a help link`]
+  const pages = areaPaths(readFileSync(areas, 'utf8'))
+  if (pages.length === 0) return [`no page paths found in ${AREAS_FILE}'s AREAS; the parsing broke`]
+  const modules = routeModules(readFileSync(router, 'utf8'))
+  const problems = []
+  for (const path of pages) {
+    const mod = modules.get(path)
+    const file = mod && ['.tsx', '.ts'].map((ext) => join(root, DASHBOARD_SRC, mod.slice(2) + ext)).find(existsSync)
+    if (!file) {
+      problems.push(`${path}: ${ROUTER_FILE} registers no ./routes/ module for it`)
+      continue
+    }
+    const linked = new RegExp(LINK.source).test(readFileSync(file, 'utf8'))
+    if (exempt.has(path)) {
+      if (linked) problems.push(`${path}: has a help link now; remove its NO_HELP_LINK entry`)
+    } else if (!linked) {
+      problems.push(`${path} (${file.slice(root.length + 1)}): no https://docs.intutic.ai/ help link; add one, or a reasoned NO_HELP_LINK entry`)
+    }
+  }
+  for (const path of exempt.keys()) {
+    if (!pages.includes(path)) problems.push(`NO_HELP_LINK lists ${path}, which AREAS does not; remove the entry`)
+  }
+  return problems
+}
 
 /** VitePress's default heading slug (@mdit-vue/shared `slugify`). */
 export function slugify(text) {
@@ -138,6 +203,7 @@ export function check(root) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = resolve(process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), '../..'))
   const { skipped, links, problems } = check(root)
+  if (!skipped) problems.push(...helpLinkProblems(root))
   if (skipped) {
     console.log(`- no ${DASHBOARD_SRC} here: dashboard docs links skipped`)
   } else if (problems.length) {
@@ -145,6 +211,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     for (const p of problems) console.error(`  ${p}`)
     process.exit(1)
   } else {
-    console.log(`✓ all ${links} dashboard docs link(s) open a page${links ? ' (and heading)' : ''} that exists in ${DOCS}`)
+    console.log(
+      `✓ all ${links} dashboard docs link(s) open a page${links ? ' (and heading)' : ''} that exists in ${DOCS}, ` +
+        'and every navigation page has a help link',
+    )
   }
 }

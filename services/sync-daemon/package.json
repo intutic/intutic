@@ -68,34 +68,37 @@
   "typesVersions": {
     "*": {
       "harness/clineHooks": [
-        "src/harness/clineHooks.ts"
+        "dist/harness/clineHooks.d.ts"
       ],
       "harness/cursorHooks": [
-        "src/harness/cursorHooks.ts"
+        "dist/harness/cursorHooks.d.ts"
       ],
       "harness/openhandsHooks": [
-        "src/harness/openhandsHooks.ts"
+        "dist/harness/openhandsHooks.d.ts"
       ],
       "harness/gooseHooks": [
-        "src/harness/gooseHooks.ts"
+        "dist/harness/gooseHooks.d.ts"
       ],
       "harness/windsurfHooks": [
-        "src/harness/windsurfHooks.ts"
+        "dist/harness/windsurfHooks.d.ts"
       ],
       "harness/aiderConfigMerger": [
-        "src/harness/aiderConfigMerger.ts"
+        "dist/harness/aiderConfigMerger.d.ts"
       ],
       "harness/museHooks": [
-        "src/harness/museHooks.ts"
+        "dist/harness/museHooks.d.ts"
       ],
       "harness/openCodeHooks": [
-        "src/harness/openCodeHooks.ts"
+        "dist/harness/openCodeHooks.d.ts"
       ],
       "harness/grokHooks": [
-        "src/harness/grokHooks.ts"
+        "dist/harness/grokHooks.d.ts"
       ],
       "harness/dshHooks": [
-        "src/harness/dshHooks.ts"
+        "dist/harness/dshHooks.d.ts"
+      ],
+      "lib/atomicWrite": [
+        "dist/lib/atomicWrite.d.ts"
       ]
     }
   },

@@ -24,6 +24,14 @@
  *     is wrong, not the control plane that is down, and allowing would hide it.
  *   * `emit` NEVER throws. Telemetry that can break a run is worse than no
  *     telemetry.
+ *
+ * A client with no API key is LOCAL-ONLY ({@link GateClient.localOnly}): it
+ * cannot authenticate, so it makes no request at all. Its hook gate answers
+ * allow with code `LOCAL_ONLY` and says why, its events and holds are not
+ * sent, and the `Gate` skips the SOP register. The local tiers (policy
+ * snapshot, SSO groups from the snapshot, MCP registry, image integrity) are
+ * unaffected. A client WITH a key that the control plane refuses (401) is not
+ * local-only: that is an authentication fault, and fails closed as above.
  */
 
 import { randomBytes } from 'node:crypto'
@@ -68,6 +76,17 @@ export interface GateResponse {
 
 /** The hook gate's code for a call whose checks could not run. */
 const GOVERNANCE_UNAVAILABLE = 'GOVERNANCE_UNAVAILABLE'
+
+/** The code on a local-only client's hook-gate answer: no key, so no call was made. */
+const LOCAL_ONLY = 'LOCAL_ONLY'
+
+/** Thrown before any request a local-only client would otherwise send. */
+class LocalOnlyError extends Error {
+  constructor(path: string) {
+    super(`no API key: ${path} not called (local-only client)`)
+    this.name = 'LocalOnlyError'
+  }
+}
 
 /** A non-2xx answer, with its status and whatever JSON body it carried. */
 class HttpStatusError extends Error {
@@ -125,6 +144,15 @@ export class GateClient {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   }
 
+  /**
+   * True when there is no API key. Such a client cannot authenticate, so it
+   * sends nothing: the control-plane tiers (SOP register, hook gate) are
+   * skipped, events and holds are not reported, and the local tiers decide.
+   */
+  get localOnly(): boolean {
+    return this.apiKey === ''
+  }
+
   private async post(path: string, body: unknown, timeoutMs: number): Promise<Record<string, unknown>> {
     return this.request('POST', path, body, timeoutMs)
   }
@@ -135,6 +163,7 @@ export class GateClient {
     body: unknown,
     timeoutMs: number,
   ): Promise<Record<string, unknown>> {
+    if (this.localOnly) throw new LocalOnlyError(path)
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
@@ -178,8 +207,23 @@ export class GateClient {
    * because a client with no verdict has nothing to defer to; false reports
    * allow. A 400 `INVALID_REQUEST` is a BLOCK whatever `failClosed` says. A
    * shadow-mode workspace's `{allowed: true, degraded: true}` is an allow.
+   *
+   * A {@link localOnly} client makes no call and answers allow with code
+   * `LOCAL_ONLY`, whatever `failClosed` says: with no key there is no
+   * control-plane tier to fail, only local ones, which have already run.
    */
   async hookGate(toolName: string, toolInput: unknown): Promise<GateResponse> {
+    if (this.localOnly) {
+      return {
+        allowed: true,
+        reason:
+          'hook-gate skipped — no API key, so this client is local-only: the control-plane ' +
+          'tiers (SOP register, hook gate) did not run; the policy snapshot, SSO-group and ' +
+          'image tiers did',
+        code: LOCAL_ONLY,
+        reached: false,
+      }
+    }
     let d: Record<string, unknown>
     try {
       d = await this.post(
@@ -304,6 +348,7 @@ export class GateClient {
    *
    * Reading `~/.intutic/credentials.json` means the gate works with whatever
    * workspace `intutic login` already bound, instead of duplicating the key.
+   * With no key in either place the client is {@link localOnly}.
    */
   static fromEnv(opts: { sessionId?: string; harness?: string; failClosed?: boolean } = {}): GateClient {
     const base = process.env.INTUTIC_CONTROL_PLANE_URL || 'https://api.intutic.ai'

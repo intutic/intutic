@@ -7,8 +7,8 @@
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
 use intutic_proxy::{
-    chaos, config, dlp, egress_policy, firewall, gateway, heartbeat, proxy, router, routing, sops,
-    store, telemetry, wasm,
+    chaos, config, dlp, egress_policy, firewall, gateway, heartbeat, listen, proxy, router,
+    routing, sops, store, telemetry, wasm,
 };
 
 use std::net::SocketAddr;
@@ -685,20 +685,43 @@ async fn main() -> anyhow::Result<()> {
     let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| "4000".to_string())
         .parse()?;
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("Listening on {}", addr);
+    // Loopback unless INTUTIC_PROXY_BIND (or the gateway front door) opens it:
+    // see listen.rs. Read after `init_gateway_config`, so a gateway booted with
+    // INTUTIC_GATEWAY_REQUIRE_VK keeps listening on every interface.
+    let bind = std::env::var("INTUTIC_PROXY_BIND").ok();
+    let ips = listen::resolve_bind(bind.as_deref(), gateway::requires_vk_only())
+        .map_err(|e| anyhow::anyhow!(e))?;
+    listen::set_listener_open(listen::is_open(&ips));
+    if listen::is_open(&ips) {
+        tracing::info!(
+            "Listener open beyond loopback: CONNECT from another machine needs an Intutic key \
+             in Proxy-Authorization"
+        );
+    }
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
     // `into_make_service_with_connect_info` rather than the plain
-    // `into_make_service()`/bare-`app` form: `/intutic/spend` needs the real
-    // peer address (via `ConnectInfo<SocketAddr>`) to enforce its
-    // loopback-only guard, since this listener binds `0.0.0.0` and would
-    // otherwise leak daily spend to anyone on the local network.
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await?;
+    // `into_make_service()`/bare-`app` form: the loopback-only routes
+    // (`/intutic/spend`, …), CONNECT admission and sandbox attestation need the
+    // real peer address (via `ConnectInfo<SocketAddr>`).
+    let mut servers = tokio::task::JoinSet::new();
+    for ip in ips {
+        let addr = SocketAddr::new(ip, port);
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        tracing::info!("Listening on {}", addr);
+        let app = app.clone();
+        servers.spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+        });
+    }
+    // The first listener to fail stops the proxy, rather than leaving it up on
+    // fewer addresses than it was told to serve.
+    while let Some(served) = servers.join_next().await {
+        served??;
+    }
 
     // Shutdown OpenTelemetry, flushing any spans still in the batch queue.
     if let Some(provider) = tracer_provider {

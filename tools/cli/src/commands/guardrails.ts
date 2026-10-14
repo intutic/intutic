@@ -72,9 +72,7 @@ async function getClient(dev?: boolean) {
     log.error(NOT_AUTHENTICATED)
     process.exit(1)
   }
-  const config = loadConfig()
-  const devMode = dev || config?.devMode || process.env.INTUTIC_DEV === '1'
-  return createApiClient(resolveControlPlaneUrl(devMode), creds.apiKey)
+  return createApiClient(resolveControlPlaneUrl(dev), creds.apiKey)
 }
 
 function emitJson(value: unknown): void {

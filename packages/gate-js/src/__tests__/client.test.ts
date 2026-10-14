@@ -56,7 +56,7 @@ describe('GateClient.hookGate', () => {
 
   it('reports the server verdict on a 2xx response', async () => {
     respond = () => ({ status: 200, body: { allowed: false, reason: 'blocked by DLP', incidentId: 'inc_1' } })
-    const client = new GateClient({ baseUrl, workspaceId: 'ws_1', sessionId: 's_1' })
+    const client = new GateClient({ baseUrl, apiKey: 'k', workspaceId: 'ws_1', sessionId: 's_1' })
     const resp = await client.hookGate('shell', { command: 'rm -rf /' })
     expect(resp.allowed).toBe(false)
     expect(resp.reason).toBe('blocked by DLP')
@@ -66,7 +66,7 @@ describe('GateClient.hookGate', () => {
   })
 
   it('fails closed by default when the endpoint is unreachable', async () => {
-    const client = new GateClient({ baseUrl: 'http://127.0.0.1:1', workspaceId: 'ws_1', timeoutMs: 200 })
+    const client = new GateClient({ baseUrl: 'http://127.0.0.1:1', apiKey: 'k', workspaceId: 'ws_1', timeoutMs: 200 })
     const resp = await client.hookGate('shell', {})
     expect(resp.allowed).toBe(false)
     expect(resp.reached).toBe(false)
@@ -96,6 +96,7 @@ describe('GateClient.hookGate', () => {
       }
       const client = new GateClient({
         baseUrl: v.response ? baseUrl : 'http://127.0.0.1:1',
+        apiKey: 'k',
         workspaceId: 'ws_1',
         failClosed: v.failClosed,
         timeoutMs: 500,
@@ -108,13 +109,13 @@ describe('GateClient.hookGate', () => {
   })
 
   it('emit never throws, even against an unreachable endpoint', async () => {
-    const client = new GateClient({ baseUrl: 'http://127.0.0.1:1', workspaceId: 'ws_1', timeoutMs: 200 })
+    const client = new GateClient({ baseUrl: 'http://127.0.0.1:1', apiKey: 'k', workspaceId: 'ws_1', timeoutMs: 200 })
     await expect(client.emit('tool_blocked', 'shell', 'x')).resolves.toBe(false)
   })
 
   it('emit stamps each event with an id of its own, the key the control plane processes it once by', async () => {
     respond = () => ({ status: 200, body: { ok: true } })
-    const client = new GateClient({ baseUrl, workspaceId: 'ws_1', sessionId: 's_1' })
+    const client = new GateClient({ baseUrl, apiKey: 'k', workspaceId: 'ws_1', sessionId: 's_1' })
     const ids: unknown[] = []
     for (const event of ['tool_allowed', 'tool_allowed']) {
       await expect(client.emit(event, 'shell')).resolves.toBe(true)
@@ -126,13 +127,13 @@ describe('GateClient.hookGate', () => {
 
   it('emit marks each event as an SDK gate\'s, which is how the control plane watches it for silence', async () => {
     respond = () => ({ status: 200, body: { ok: true } })
-    const client = new GateClient({ baseUrl, workspaceId: 'ws_1', sessionId: 's_1', harness: 'mastra' })
+    const client = new GateClient({ baseUrl, apiKey: 'k', workspaceId: 'ws_1', sessionId: 's_1', harness: 'mastra' })
     await client.emit('tool_allowed', 'shell')
     expect((lastBody!['events'] as Array<Record<string, unknown>>)[0]).toMatchObject({ harnessType: 'mastra', gateSource: 'sdk' })
   })
 
   it('emit rejects an event name outside the documented schema', async () => {
-    const client = new GateClient({ baseUrl, workspaceId: 'ws_1' })
+    const client = new GateClient({ baseUrl, apiKey: 'k', workspaceId: 'ws_1' })
     await expect(client.emit('not_a_real_event', 'shell')).resolves.toBe(false)
   })
 })

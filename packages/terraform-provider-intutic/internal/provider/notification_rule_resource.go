@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -43,6 +44,12 @@ var notificationEventTypes = func() []string {
 	}
 	return f.EventTypes
 }()
+
+// The severities a rule can filter on: shared-types' NotificationSeverity,
+// which routes/notifications.ts validates against. The API accepts any case
+// and stores uppercase; events carry uppercase. Lowercase used to be stored
+// as sent and matched nothing, so a rule on ["critical"] never fired.
+var notificationSeverities = []string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
 
 const rulesPath = "/api/v1/notifications/rules"
 
@@ -150,7 +157,16 @@ func (r *notificationRuleResource) Schema(_ context.Context, _ resource.SchemaRe
 				Sensitive:   true,
 				Description: "For `pagerduty`: the integration's routing key. The API only ever returns it masked.",
 			},
-			"filter_severity":     filter("severity"),
+			"filter_severity": schema.ListAttribute{
+				ElementType: types.StringType,
+				Optional:    true,
+				Description: "Only notify for events whose severity is one of these: `CRITICAL`, `HIGH`, `MEDIUM`, " +
+					"`LOW`, `INFO`. Any case is accepted; the API stores them uppercase.",
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
+					listvalidator.ValueStringsAre(stringvalidator.OneOfCaseInsensitive(notificationSeverities...)),
+				},
+			},
 			"filter_harness_type": filter("harness type"),
 			"filter_user_id":      filter("user id"),
 			"cooldown_minutes": schema.Int64Attribute{
@@ -161,9 +177,10 @@ func (r *notificationRuleResource) Schema(_ context.Context, _ resource.SchemaRe
 				Validators:  []validator.Int64{int64validator.Between(1, 1440)},
 			},
 			"enabled": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  booldefault.StaticBool(true),
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(true),
+				Description: "Whether the rule sends notifications. Defaults to true.",
 			},
 			"signing_secret": schema.StringAttribute{
 				Computed:  true,
@@ -318,7 +335,13 @@ func (a *apiRule) applyTo(m *notificationRuleModel) {
 	case m.PagerdutyKey.IsNull() || maskedRoutingKey(m.PagerdutyKey.ValueString()) != *masked:
 		m.PagerdutyKey = types.StringValue(*masked)
 	}
-	m.Severity = stringList(a.Filters.Severity)
+	// The API stores severities uppercase. A configured list that differs only
+	// in case is the same filter, so it is kept rather than shown as a change
+	// (and rather than tripping Terraform's check that apply returns what was
+	// planned).
+	if !sameStringsFoldCase(knownStrings(m.Severity), a.Filters.Severity) {
+		m.Severity = stringList(a.Filters.Severity)
+	}
 	m.HarnessType = stringList(a.Filters.HarnessType)
 	m.UserID = stringList(a.Filters.UserID)
 	m.CooldownMinutes = types.Int64Value(a.CooldownMinutes)
@@ -328,6 +351,36 @@ func (a *apiRule) applyTo(m *notificationRuleModel) {
 	} else if a.Channel != "webhook" || m.SigningSecret.IsUnknown() {
 		m.SigningSecret = types.StringNull()
 	}
+}
+
+// knownStrings reads a known string list's elements; nil for a null or unknown list.
+func knownStrings(l types.List) []string {
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	out := make([]string, 0, len(l.Elements()))
+	for _, e := range l.Elements() {
+		s, ok := e.(types.String)
+		if !ok || s.IsNull() || s.IsUnknown() {
+			return nil
+		}
+		out = append(out, s.ValueString())
+	}
+	return out
+}
+
+// sameStringsFoldCase reports whether a and b hold the same strings in the
+// same order, ignoring case. Two nil lists are the same; nil and empty are not.
+func sameStringsFoldCase(a, b []string) bool {
+	if (a == nil) != (b == nil) || len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !strings.EqualFold(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *notificationRuleResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

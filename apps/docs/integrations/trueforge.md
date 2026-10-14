@@ -211,7 +211,7 @@ This is the step embedded mode does not need an operator to think about (an embe
 
 ### What gets written
 
-Nothing, on the TrueForge side — `TRUEFORGE_SERVER` writes no config file and has no instructions file (see [How it works](#how-it-works-1)). What "gets written" instead is the bridge's own decision log: every allow/deny verdict is logged structurally (`@intutic/logger`). A call the control plane's `POST /api/v1/hook-gate` refuses is filed as an incident like any other harness's hook-gate refusal, so it shows up on the dashboard. A call the bridge refuses before that call — on a SOP `BLOCK:` or approval rule, or because it could not resolve the pending call — is recorded only in the bridge's log; the bridge sends no hook events of its own.
+Nothing, on the TrueForge side — `TRUEFORGE_SERVER` writes no config file and has no instructions file (see [How it works](#how-it-works-1)). What "gets written" instead is the bridge's own decision log: every allow/deny verdict is logged structurally (`@intutic/logger`). Every refusal is reported by the bridge as a `tool_blocked` hook event, so it is filed as an incident and shows up on the dashboard: one on a SOP `BLOCK:` or approval rule, one the bridge cannot resolve to a real call, one the control plane's `POST /api/v1/hook-gate` gives, and one made because the hook gate could not be reached. The exception is a hook-gate refusal that names an incident (its DLP check), which the control plane has already filed; reporting it again would file it twice. The report is best-effort: it never delays or changes the decision.
 
 ### What the adapter does NOT do
 

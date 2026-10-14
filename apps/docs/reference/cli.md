@@ -43,11 +43,13 @@ plan or higher. Every command ships in the open-core CLI; the badge says what it
 Every command that talks to a control plane picks it the same way; the first that is set wins:
 
 1. A flag: `--control-plane-url <url>` (on `login`, `connect` and `daemon install`), or `--dev`
-   for the local one at `http://localhost:3001`. A workspace initialized with `intutic init --dev`
-   counts as `--dev`.
+   for the local one at `http://localhost:3001`.
 2. The environment: `INTUTIC_CONTROL_PLANE_URL`, or `INTUTIC_DEV=1` for the local one.
-3. The control plane `intutic login` saved with your credentials.
-4. Intutic's hosted control plane.
+3. A workspace initialized with `intutic init --dev`, which uses the local one.
+4. The control plane `intutic login` saved with your credentials.
+5. Intutic's hosted control plane.
+
+`intutic status` shows the control plane this order picks.
 
 For a self-hosted control plane, log in once with its URL and every later command uses it:
 
@@ -304,7 +306,7 @@ intutic status
 ```
 
 No options. Displays:
-- Current authentication state: email, workspace and control plane
+- Current authentication state: email, workspace, and the control plane commands use (see [Choosing a control plane](#control-plane-url))
 - The workspace root, dev mode and config version recorded by `intutic init`
 - The harnesses recorded by `intutic init`, by name
 - Sync state: last sync timestamp and the number of tracked files, and whether the sync daemon is running
@@ -377,7 +379,15 @@ that login.
 
 **What it does:**
 1. Starts Valkey if none is running (connected mode needs it), and spawns a managed proxy if
-   nothing is listening on the proxy port (the port of `INTUTIC_PROXY_URL`, else `4000`).
+   nothing is listening on the proxy port (the port of `INTUTIC_PROXY_URL`, else `4000`). It then
+   trusts the proxy's CA certificate (`~/.intutic/ca.crt`): in the login keychain on macOS and
+   the Root store on Windows. On Linux the system trust store needs root, so connect installs the
+   certificate there only when it runs as root; otherwise it prints the two commands to run, for
+   example
+   `sudo cp ~/.intutic/ca.crt /usr/local/share/ca-certificates/intutic-connect-ca.crt` and
+   `sudo update-ca-certificates` (Debian/Ubuntu), or the `update-ca-trust extract` equivalent
+   on RHEL/Fedora. The file is named `intutic-connect-ca.crt`, beside the `intutic-ca.crt` that
+   `intutic enterprise install` writes, so `intutic disconnect` removes only connect's copy.
 2. Seeds the policy snapshot (`~/.intutic/hooks/policy-snapshot.rules`) so the harness gates
    enforce workspace policy from the first tool call, and writes the
    [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) agent skills into
@@ -508,12 +518,12 @@ intutic disconnect [options]
 - **Rules sections** in files you also write (`AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.goosehints`, and the `AGENTS.md` of OpenClaw's agent workspace): the section between the `INTUTIC:RULES` markers is taken out, and the file comes back byte for byte when you did not edit it, or is deleted if connect created it. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
 - **Rules files earlier versions wrote whole** (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `.roorules`, `AGENTS.md`): the file you had before comes back, or the file is deleted if connect created it.
 - **Hook registrations** in each harness's settings (`.claude/settings.json`, Cursor's and Windsurf's `hooks.json`, and the rest): only the entries that run an Intutic gate are removed. The gate scripts are deleted.
-- **Proxy routing**: base URLs and proxy settings connect pointed at the proxy (Codex `openai_base_url`, Continue `apiBase`, Goose `provider.host`, Grok `base_url`, Pi and OpenHands base URLs, Aider `openai-api-base`, Windsurf `http.proxy`, the JetBrains IDE proxy for the Windsurf plugin, dsh's `llm-deepseek` route) go back to the values they had.
+- **Proxy routing**: base URLs and proxy settings connect pointed at the proxy (Codex `openai_base_url`, Continue `apiBase`, Goose `OPENAI_HOST`/`ANTHROPIC_HOST`, Grok `base_url`, Pi and OpenHands base URLs, Aider `openai-api-base`, Windsurf `http.proxy`, the JetBrains IDE proxy for the Windsurf plugin, dsh's `llm-deepseek` route) go back to the values they had.
 - **MCP servers**: each server connect wrapped gets its original entry back, every key included; the `intutic` server connect added is removed; and the copies of approved `.mcp.json` servers connect added to `~/.claude.json` are removed.
 - **What connect replaced or removed** comes back: the Claude Code `permissions.deny` rules connect replaced, and Aider's `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint`.
 - **Agent skills** (without `--harness`): the [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) skills connect wrote into `.agents/skills/`, unless you have edited them. A copy that was there before connect, or that an earlier version of connect wrote, stays.
 
-Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted in the macOS login keychain, the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
+Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted (in the macOS login keychain, or connect's `intutic-connect-ca.crt` in the Linux system trust store, which needs root: run as a user, disconnect prints the `sudo rm` and bundle-rebuild commands instead), the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
 
 **How it knows what you had:** before connect first writes a file, it keeps a copy of it, in `.intutic/originals/` for files in the workspace and `~/.intutic/originals/` for the rest (owner-only, and ignored by git). A file you have not changed since is restored byte for byte. In one you have changed, only Intutic's entries are taken out and your edits stay. A file connect writes whole that you edited is left as it is, and listed.
 
@@ -1264,7 +1274,7 @@ intutic skill audit [--sarif] [--engine <native|cisco>] [--exit-zero]
 |--------|-------------|---------|
 | `--sarif` | Print the findings as a single SARIF 2.1.0 JSON document on stdout (for GitHub Code Scanning and other CI tools) instead of the readable report | — |
 | `--engine <engine>` | `native` runs the built-in scanner. `cisco` also runs Cisco's `skill-scanner` on each skill directory; the `skill-scanner` binary must be on `PATH` (`pipx install cisco-ai-skill-scanner`). | `native` |
-| `--exit-zero` | Exit `0` even when the audit has findings | — |
+| `--exit-zero` | Exit `0` even when the audit has findings or could not scan everything | — |
 
 **What it does:**
 
@@ -1272,7 +1282,7 @@ It scans the workspace recorded by `intutic init`, or the current directory when
 
 1. **Rule files** at the workspace root (`.cursorrules`, `CLAUDE.md`, `.windsurfrules`, `.clauderules`) are checked for hardcoded Intutic virtual keys, hardcoded `sk-live-` secrets, recursive-delete wildcards such as `rm -rf *`, and `curl`/`wget` commands.
 2. **Skill files** (`.agents/skills/<name>/SKILL.md`, `.claude/skills/<name>/SKILL.md`) are content-scanned for prompt-injection, data-exfiltration, and malicious-code patterns. See [Skill Scanning](/guide/skill-scanning).
-3. **Bundled files** next to each `SKILL.md` (up to 3 directories deep and 40 files per skill; symlinks are skipped) are hashed (SHA-256). Shell, Python, JavaScript, TypeScript, Ruby, PowerShell, and Perl scripts up to 256 KiB are also content-scanned. Larger files, unreadable files, and unrecognised file types are reported as unscanned, never as clean.
+3. **Bundled files** next to each `SKILL.md` (up to 3 directories deep and 40 files per skill; symlinks are skipped) are hashed (SHA-256). Shell, Python, JavaScript, TypeScript, Ruby, PowerShell, and Perl scripts up to 256 KiB are also content-scanned. Data files — `.md`, `.markdown`, `.txt`, `.rst`, `.json`, `.jsonl`, `.yaml`, `.yml`, `.csv`, `.tsv` and images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.bmp`) — are not scripts: they are listed as not applicable and do not affect the result, unless a shebang makes one a script, which is then scanned. Any other file that is larger than the cap, unreadable, or not a recognised script is reported as unscanned, never as clean: the report names each one, and the audit does not pass.
 
 When you are logged in, three workspace settings change the run:
 
@@ -1282,9 +1292,9 @@ When you are logged in, three workspace settings change the run:
 | `ciscoSkillScannerEnabled` | Runs the Cisco engine without `--engine cisco` if `skill-scanner` is on `PATH`; if it is not, the run continues with the built-in scanner only |
 | `semanticSkillAnalysisEnabled` | Includes each `SKILL.md`'s content in the report it uploads |
 
-When you are logged in, the results are also reported to the control plane; a failed report is ignored. With `--sarif`, nothing but the JSON document is printed. Cisco's results, when that engine ran, are added as a second run in the same document.
+When you are logged in, the results are also reported to the control plane; a failed report is ignored. With `--sarif`, nothing but the JSON document is printed. Cisco's results, when that engine ran, are added as a second run in the same document. The run's `invocations` entry lists each unscanned file as a warning notification, each data file as a note, and each failed Cisco run as an error notification, with `executionSuccessful: false` when an engine run failed.
 
-**Exit status:** `1` when the audit has findings, so a CI step fails on them; `0` when it is clean, or with `--exit-zero`. Also `1` for an unknown `--engine` value, or for `--engine cisco` when `skill-scanner` is not on `PATH`. The report, the SARIF document and the control-plane report are all complete before the command exits.
+**Exit status:** `1` when the audit has findings, when a file other than a data file could not be scanned, or when a Cisco engine run failed, so a CI step fails on them; `0` when everything was scanned and nothing was found, or with `--exit-zero`. Also `1` for an unknown `--engine` value, or for `--engine cisco` when `skill-scanner` is not on `PATH`. The report, the SARIF document and the control-plane report are all complete before the command exits.
 
 **Examples:**
 
@@ -3359,7 +3369,7 @@ intutic notifications create --event <type> --channel <channel> <target option> 
 | `--email <addresses>` | Comma-separated recipients, up to 20, for the `email` channel |
 | `--webhook-url <url>` | HTTPS URL, for the `webhook` channel |
 | `--pagerduty-key <key>` | Routing key, for the `pagerduty` channel |
-| `--severity <list>` | Only events of these comma-separated severities |
+| `--severity <list>` | Only events of these comma-separated severities: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`, in any case. Another value is refused |
 | `--harness <list>` | Only events from these comma-separated harnesses |
 | `--user <ids>` | Only events from these comma-separated user ids |
 | `--cooldown <minutes>` | Minimum minutes between two notifications from this rule, 1 to 1440 (default 15) |
@@ -3403,7 +3413,7 @@ intutic notifications update <rule_id> [options]
 | `--email <addresses>` | Comma-separated recipients, up to 20 |
 | `--webhook-url <url>` | HTTPS URL |
 | `--pagerduty-key <key>` | Routing key |
-| `--severity <list>` | Only events of these comma-separated severities |
+| `--severity <list>` | Only events of these comma-separated severities: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`, in any case. Another value is refused |
 | `--harness <list>` | Only events from these comma-separated harnesses |
 | `--user <ids>` | Only events from these comma-separated user ids |
 | `--cooldown <minutes>` | Minimum minutes between two notifications, 1 to 1440 |
@@ -4353,7 +4363,7 @@ intutic enterprise install [options]
 
    With `--generate-mdm-only` the command stops here.
 3. Checks for admin/root privilege. If the shell is not elevated it prints a warning and still attempts the remaining steps.
-4. Unless `--skip-hooks`: writes the Cursor hook script to `<workspace>/.intutic/hooks/cursor-check.js` and a `hooks.json` pointing at it in `<workspace>/.cursor/`, `~/.cursor/`, and the system location (`/Library/Application Support/Cursor/` on macOS, `/etc/cursor/` elsewhere). The workspace is the one recorded by `intutic init`, or the current directory. If you are logged in, your workspace ID is embedded in the hook's event payloads; without a login it is left empty.
+4. Unless `--skip-hooks`: writes the Cursor hook script to `<workspace>/.intutic/hooks/cursor-check.js` and a `hooks.json` pointing at it in `<workspace>/.cursor/`, `~/.cursor/`, and the system location (`/Library/Application Support/Cursor/` on macOS, `/etc/cursor/` on Linux, `%ProgramData%\Cursor\` on Windows). The workspace is the one recorded by `intutic init`, or the current directory. If you are logged in, your workspace ID is embedded in the hook's event payloads; without a login it is left empty.
 5. Unless `--skip-ca`: trusts `~/.intutic/ca.crt` system-wide — the System keychain via `security add-trusted-cert` on macOS; `update-ca-certificates` (Debian/Ubuntu) or `update-ca-trust` (RHEL/Fedora) on Linux; the Root store via `certutil` on Windows.
 6. Records the outcome in a machine-wide state file (`/Library/Application Support/Intutic/enforcement-state.json` on macOS, `/var/lib/intutic/enforcement-state.json` on Linux, `%ProgramData%\Intutic\enforcement-state.json` on Windows). If you are logged in, it also reports that state to the control plane; this is best-effort and never fails the command.
 7. Prints the next step. This command never changes the host firewall — use [`intutic enforce apply`](#intutic-enforce) for that.
@@ -4394,7 +4404,7 @@ Also available as the top-level shortcut `intutic install-daemon`, with the same
 |--------|-------------|---------|
 | `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required unless `--proxy`) | — |
 | `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required unless `--proxy`) | — |
-| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL`, then the URL saved by `intutic login`, then Intutic's hosted control plane |
+| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL` (or `INTUTIC_DEV=1`), then a workspace initialized with `intutic init --dev`, then the URL saved by `intutic login`, then Intutic's hosted control plane |
 | `--binary-path <path>` | Path to the `intutic` CLI binary; with `--proxy`, an absolute path to `intutic-proxy` | _(current process; with `--proxy`, the launcher's pinned binary, then `intutic-proxy` on PATH)_ |
 | `--dry-run` | Print what would be done without writing files | — |
 | `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |
@@ -4552,7 +4562,7 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 
 | Variable | Read by | Effect |
 |----------|---------|--------|
-| `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of the one saved by `intutic login` and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
+| `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of a workspace initialized with `intutic init --dev` and the one saved by `intutic login`, and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
 | `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`, unless `INTUTIC_CONTROL_PLANE_URL` is set. Any other value is ignored. |
 | `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read. |
 | `VALKEY_URL` | `intutic start`, `intutic connect` | Valkey/Redis the proxy uses. `start` passes it through only when a Valkey is reachable on `--valkey-port`; otherwise it uses `redis://127.0.0.1:<valkey-port>`. `connect` defaults to `redis://127.0.0.1:6379`. |
@@ -4563,7 +4573,7 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 | `INTUTIC_WASM_DIR` | `intutic policy install`, `intutic policy list-local`, the proxy | Directory for local WASM rules. Default `~/.intutic/wasm`; a leading `~/` is expanded. Set it the same way for the CLI and the proxy. |
 | `INTUTIC_FC_KERNEL` | `intutic exec --sandbox firecracker` | Path to the guest kernel image. Required; no default. |
 | `INTUTIC_FC_ROOTFS` | `intutic exec --sandbox firecracker` | Path to the guest root filesystem image containing your agent. Required; no default. |
-| `INTUTIC_FC_GUEST_KEY` | `intutic exec --sandbox firecracker` | Path to the SSH private key for the guest, which needs an sshd-enabled root filesystem. The agent runs in the guest over SSH; without this key the microVM boots but the agent is not run. No default. |
+| `INTUTIC_FC_GUEST_KEY` | `intutic exec --sandbox firecracker` | Path to the private ssh key the rootfs's sshd accepts for `root`; the agent runs in the guest over ssh. Required: without it, or if the file cannot be read, the run fails with exit `2` before the microVM is set up. |
 | `INTUTIC_FC_TAP` | `intutic exec --sandbox firecracker` | Host tap device name. Default `tap-intutic`. |
 | `INTUTIC_FC_GUEST_IP` | `intutic exec --sandbox firecracker` | Guest IP on the tap link. Default `172.16.0.2`. |
 | `INTUTIC_FC_HOST_IP` | `intutic exec --sandbox firecracker` | Host IP on the tap link; the guest reaches the proxy here. Default `172.16.0.1`. |

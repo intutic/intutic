@@ -616,6 +616,29 @@ impl LocalStore for ValkeyStore {
         Ok(())
     }
 
+    async fn record_session_cache_unreported(
+        &self,
+        scope: &str,
+        model: &str,
+    ) -> anyhow::Result<()> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
+        let mut conn = self.conn();
+        let key = session_key(scope);
+        // HSETNX: an existing observation, measured or not, is kept.
+        let written: bool = conn.hset_nx(&key, "cacheWarmModel", model).await?;
+        if written {
+            let _: () = conn
+                .hset(
+                    &key,
+                    "cacheObservedAt",
+                    chrono::Utc::now().timestamp().to_string(),
+                )
+                .await?;
+        }
+        let _: Result<(), _> = conn.expire(&key, TOOL_SEQUENCE_TTL_SECS).await;
+        Ok(())
+    }
+
     async fn record_tool_sequence(
         &self,
         session_id: &str,
@@ -1731,8 +1754,8 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
         read_baseline_hash(&mut conn, &global_key).await
     }
 
-    /// `GET session:sandbox_attested:{id}` under the same gated-timeout
-    /// pattern as `feature_flags`. Written by the control plane's
+    /// `GET session:sandbox_attested:{workspace}:{session}` under the same
+    /// gated-timeout pattern as `feature_flags`. Written by the control plane's
     /// attest-sandbox handler with a 24h TTL — memory hygiene only, since
     /// attestation is idempotent and never goes stale in the correctness
     /// sense (a session attested once stays attested). Trade-off: a
@@ -1740,10 +1763,13 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
     /// to refresh the key could see this read as `false` after 24h — fails
     /// in the safe direction (false negative on a security gate), not
     /// treated as a permanent design.
-    async fn is_sandbox_attested(&self, session_id: &str) -> bool {
-        self.get_gated(format!("session:sandbox_attested:{}", session_id))
-            .await
-            .is_some()
+    async fn is_sandbox_attested(&self, workspace_id: &str, session_id: &str) -> bool {
+        self.get_gated(format!(
+            "session:sandbox_attested:{}:{}",
+            workspace_id, session_id
+        ))
+        .await
+        .is_some()
     }
 
     async fn drain_notifications(&self, scope: NotifyScope, id: &str) -> Vec<String> {

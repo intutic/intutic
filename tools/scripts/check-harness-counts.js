@@ -23,6 +23,13 @@
  * to run) and independently recomputes both numbers, then checks every
  * targeted doc claim and the matrix's row count against them.
  *
+ * A right count can still hide a missing harness: a page for one harness and
+ * a stray row for another add up. So every `HarnessType` value must also have
+ * its own `apps/docs/integrations/<slug>.md` page (PAGE_SLUGS where the slug
+ * differs from the value), and its own named row in the matrix: the bolded
+ * name in the row's second cell must be the page's title (ROW_NAMES where it
+ * is not).
+ *
  * Exit 1 on any mismatch or on any file it cannot read.
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
@@ -82,6 +89,23 @@ if (!headlineMatch) {
 const exclusionCount = headlineMatch[1].split(',').filter((s) => s.trim().length > 0).length
 const headlineCount = realCount - exclusionCount
 
+/** HarnessType values whose integration page has another slug. */
+const PAGE_SLUGS = {
+  'agent-framework': 'microsoft-agent-framework',
+  'agentcore-runtime': 'agentcore',
+  'trueforge-server': 'trueforge',
+}
+
+/** HarnessType values whose matrix row is not named by their page's title. */
+const ROW_NAMES = {
+  codex: 'Codex CLI',
+  antigravity: 'Antigravity',
+  strands: 'Strands Agents',
+  'trueforge-server': 'TrueForge Server',
+}
+
+const memberValues = memberLines.map((l) => l.match(/'([^']+)'/)[1])
+
 // ── Matrix row count ────────────────────────────────────────────────────
 if (!existsSync(MATRIX)) fail(`${MATRIX} is missing.`)
 const matrixText = readFileSync(MATRIX, 'utf8')
@@ -104,6 +128,36 @@ if (enumBackedRows !== realCount) {
       `or a genuinely-undocumented no-HarnessType row needs the same "no ` +
       "\`HarnessType\`\" Notes-column phrasing the Anthropic Managed Agents row uses.",
   )
+}
+
+// ── One page and one named row per harness ──────────────────────────────
+// Letters and digits only, lower-cased: "Open-WebUI" is the "Open WebUI" page.
+const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+const rowNames = new Set(
+  rowLines.map((l) => (l.split('|')[2] ?? '').match(/\*\*([^*]+)\*\*/)?.[1]).filter(Boolean).map(norm),
+)
+// The front matter's title, else the first heading.
+const pageTitle = (text) => {
+  const frontMatter = text.startsWith('---\n') ? text.slice(4, text.indexOf('\n---', 4)) : ''
+  return (frontMatter.match(/^title:\s*(.+)$/m)?.[1] ?? text.match(/^#\s+(.+)$/m)?.[1] ?? '').replace(/<Badge[^>]*\/>/g, '').trim()
+}
+const coverageFailures = []
+for (const value of memberValues) {
+  const slug = PAGE_SLUGS[value] ?? value
+  const page = join(ROOT, 'apps/docs/integrations', `${slug}.md`)
+  if (!existsSync(page)) {
+    coverageFailures.push(`HarnessType '${value}' has no apps/docs/integrations/${slug}.md` + (PAGE_SLUGS[value] ? '' : ' (add it, or map the value in PAGE_SLUGS)'))
+    continue
+  }
+  const name = ROW_NAMES[value] ?? pageTitle(readFileSync(page, 'utf8'))
+  if (!name) coverageFailures.push(`apps/docs/integrations/${slug}.md has no title to name '${value}'s matrix row by`)
+  else if (!rowNames.has(norm(name))) {
+    coverageFailures.push(`HarnessType '${value}' has no "**${name}**" row in ${MATRIX} (or name it in ROW_NAMES)`)
+  }
+}
+if (coverageFailures.length) {
+  for (const f of coverageFailures) console.error(`[FAIL] ${f}`)
+  process.exit(1)
 }
 
 // ── Gate-kind counts ─────────────────────────────────────────────────────
@@ -286,5 +340,5 @@ console.log(
   `[PASS] harness counts: HARNESS_COUNT=${realCount}, HARNESS_HEADLINE_COUNT=${headlineCount}, ` +
     `${hookGated} hook-gated and ${sdkGated} SDK-gated, ` +
     `matrix has ${dataRows.length} row(s) (${documentedExceptions} documented no-HarnessType ` +
-    `exception(s)), ${checked} doc claim(s) checked.`,
+    `exception(s)), every harness has a page and a named row, ${checked} doc claim(s) checked.`,
 )

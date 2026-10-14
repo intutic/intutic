@@ -82,15 +82,17 @@ func (r *policyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"name": schema.StringAttribute{
-				Required: true,
+				Required:    true,
+				Description: "The policy's name (1–256 characters).",
 				Validators: []validator.String{
 					stringvalidator.LengthBetween(1, 256),
 					stringvalidator.RegexMatches(noSurroundingSpaces, "must not start or end with whitespace (the API trims it)"),
 				},
 			},
 			"description": schema.StringAttribute{
-				Optional:   true,
-				Validators: []validator.String{stringvalidator.LengthAtMost(4000)},
+				Optional:    true,
+				Description: "What the policy is for (at most 4,000 characters).",
+				Validators:  []validator.String{stringvalidator.LengthAtMost(4000)},
 			},
 			"risk_category": schema.StringAttribute{
 				Optional:    true,

@@ -83,13 +83,15 @@ func (r *wasmRuleResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"name": schema.StringAttribute{
-				Required:   true,
-				Validators: []validator.String{stringvalidator.LengthAtLeast(1)},
+				Required:    true,
+				Description: "The rule's name.",
+				Validators:  []validator.String{stringvalidator.LengthAtLeast(1)},
 			},
 			"description": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  stringdefault.StaticString(""),
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
+				Description: "What the rule does. Defaults to empty.",
 			},
 			"source": schema.StringAttribute{
 				Required: true,

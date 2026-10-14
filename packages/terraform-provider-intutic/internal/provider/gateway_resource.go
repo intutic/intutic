@@ -73,7 +73,8 @@ func (r *gatewayResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				PlanModifiers: keep,
 			},
 			"name": schema.StringAttribute{
-				Required: true,
+				Required:    true,
+				Description: "The gateway's name (1–128 characters). Changing it replaces the gateway.",
 				Validators: []validator.String{
 					stringvalidator.LengthBetween(1, 128),
 					stringvalidator.RegexMatches(noSurroundingSpaces, "must not start or end with whitespace (the API trims it)"),
@@ -104,6 +105,7 @@ func (r *gatewayResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			},
 			"key_prefix": schema.StringAttribute{
 				Computed:      true,
+				Description:   "The token's first 12 characters, as the dashboard shows them.",
 				PlanModifiers: keep,
 			},
 			"status": schema.StringAttribute{
@@ -112,6 +114,7 @@ func (r *gatewayResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			},
 			"created_at": schema.StringAttribute{
 				Computed:      true,
+				Description:   "When the gateway was registered (RFC 3339).",
 				PlanModifiers: keep,
 			},
 		},

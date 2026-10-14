@@ -40,7 +40,7 @@ def snapshot_file(tmp_path, body: list[str], digest_of: list[str] | None = None)
 
 class RecordingClient(GateClient):
     def __init__(self, verdict: GateResponse | None = None):
-        super().__init__(base_url="http://127.0.0.1:9", workspace_id="ws_test", session_id="sess_opaque")
+        super().__init__(base_url="http://127.0.0.1:9", api_key="k", workspace_id="ws_test", session_id="sess_opaque")
         self.events: list[tuple[str, str, str]] = []
         self.verdict = verdict or GateResponse(allowed=True)
 

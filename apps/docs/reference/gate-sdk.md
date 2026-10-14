@@ -66,9 +66,9 @@ except IntuticGateRefusal as e:
 | SSO group policy | The workspace's SSO group policy, decided for the member the policy snapshot was issued to | No | Refuses a high-risk tool when the member's groups are unknown |
 | Policy snapshot | The rules in `~/.intutic/hooks/policy-snapshot.rules`, which the sync daemon compiles for the workspace | No | A snapshot that fails its digest or workspace check is not trusted: its rules are dropped, the SSO group policy still refuses (now for a member whose groups are unknown), and every MCP call is refused (next row) |
 | MCP servers | On an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance) and `mcpAllowedServers` list, from the same snapshot, with the codes, rule ids and reasons the hook gates and the MCP proxy use | No | A snapshot that fails its digest or workspace check admits no MCP server: every MCP call is refused with `POLICY_SNAPSHOT_UNVERIFIED` |
-| SOP rules | Rules authored in the SOP register, including their `WHERE` argument clauses, fetched once per process | Yes | Fails open; the image check below covers the same case |
+| SOP rules | Rules authored in the SOP register, including their `WHERE` argument clauses, fetched once per process | Yes, with an API key | Fails open; the image check below covers the same case |
 | Image integrity | On a deploy command, every container image it names (inline or in a referenced manifest) must be pinned to a digest approved in `.intutic/image-allowlist.json` | No | Fails closed, including when the allowlist is missing or unreadable |
-| Hook gate | `POST /api/v1/hook-gate` on the control plane: DLP patterns over the arguments, plus workspace policy, the MCP server registry and `mcpAllowedServers` | Yes | Set by the client's `failClosed` (default: block), for an unreachable control plane and for a `GOVERNANCE_UNAVAILABLE` answer alike; a request it cannot read always blocks |
+| Hook gate | `POST /api/v1/hook-gate` on the control plane: DLP patterns over the arguments, plus workspace policy, the MCP server registry and `mcpAllowedServers` | Yes, with an API key | Set by the client's `failClosed` (default: block), for an unreachable control plane and for a `GOVERNANCE_UNAVAILABLE` answer alike; a request it cannot read always blocks |
 
 Read-only tools (`read_file`, `list_files`, `read`, `cat`, `view`, exported as `READ_ONLY_TOOLS`) skip the SOP-rule and hook-gate tiers, and their allows are not reported. Every decision is reported to `POST /api/v1/hook-events` (`tool_blocked`, `tool_held`, `hold_approved_bypass_used`, `tool_flagged`, `tool_would_block`, `tool_allowed`, plus one snapshot-health event per process). Setting `INTUTIC_GUARD_DISABLE=1` skips the snapshot's destructive-command rules and reports `guards_disabled`.
 
@@ -87,11 +87,17 @@ A hold rule asks a person before the call runs: a `REQUIRE_APPROVAL:` SOP, which
 
 A `review_before:` entry can name a tool (`Write`) or an action (`action:deploy`, `action:publish`, `action:release`, `action:db_write`). For an action, the gate classifies the call's `command` with the same phrases as the hook gates and the proxy, whatever separates their words: `git push` with a tab or a line continuation between the words, `kubectl --context prod apply` and `DROP/**/TABLE users` are held like their plain spellings.
 
-A hold needs the control plane, to look for an approval and to record the request. Without a client, or when the control plane cannot be reached, the call stays held whatever `failClosed` says, and `holdId` is unset because there is nothing to approve yet.
+A hold needs the control plane, to look for an approval and to record the request. Without a client, with a client that has no API key, or when the control plane cannot be reached, the call stays held whatever `failClosed` says, and `holdId` is unset because there is nothing to approve yet.
 
 ### Without a client
 
 `new Gate(config)` with no `GateClient` (`Gate(GateConfig())` in Python) runs the local tiers, the ones the table above marks as needing no client, and nothing else: there is no SOP-rule fetch, no hook-gate call, and no events are sent. Use this for local, offline enforcement against the snapshot the daemon already wrote.
+
+### Without credentials
+
+A `GateClient` with no API key, which is what `GateClient.fromEnv()` (`from_env()`) builds when neither `INTUTIC_API_KEY` nor `~/.intutic/credentials.json` supplies one, is local-only: `client.localOnly` (`client.local_only`) is `true`. It sends nothing, because the control plane would refuse every request. The gate behaves as it does without a client, with one difference you can read: `client.hookGate()` (`hook_gate()`) answers allow with `reached` false, `code` `LOCAL_ONLY`, and a reason saying the control-plane tiers did not run. The SSO group, policy snapshot, MCP server and image tiers still decide every call.
+
+A client that has a key the control plane refuses (HTTP 401) is not local-only. That is an authentication fault, and it is decided by `failClosed` like any other hook gate answer that carries no verdict: blocked by default.
 
 ### Chaos runs
 
@@ -111,6 +117,7 @@ Without the plan nothing changes, and `enforce: false` (`enforce=False`) skips t
 - A deploy command with no readable image allowlist is refused rather than approved against an empty policy.
 - A wrapped tool called with no gate installed and none passed throws (`RuntimeError` in Python) instead of running unguarded.
 - `GateClient.fromEnv()` (`from_env()`) throws when no session id is set, because the proxy would record every run under the session `unknown`.
+- A client with no API key skips the control-plane tiers rather than failing closed on them, since there is nothing to authenticate with (see [Without credentials](#without-credentials)). A key the control plane refuses still blocks.
 
 ## Configuration
 
@@ -139,7 +146,7 @@ The image allowlist is JSON: `require_digest` (default `true`), `registries_allo
 | `failClosed` | `fail_closed` | `true` |
 | `timeoutMs` | `timeout` | 2 seconds |
 
-`GateClient.fromEnv({ sessionId?, harness?, failClosed? })` (`GateClient.from_env(session_id=None, harness=..., fail_closed=True)`) reads `INTUTIC_CONTROL_PLANE_URL`, `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_SESSION_ID`, and falls back to the key and workspace that `intutic login` stored in `~/.intutic/credentials.json`.
+`GateClient.fromEnv({ sessionId?, harness?, failClosed? })` (`GateClient.from_env(session_id=None, harness=..., fail_closed=True)`) reads `INTUTIC_CONTROL_PLANE_URL`, `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_SESSION_ID`, and falls back to the key and workspace that `intutic login` stored in `~/.intutic/credentials.json`. With no key in either place, the client is local-only (see [Without credentials](#without-credentials)).
 
 ## Refusals
 
@@ -186,7 +193,7 @@ The tool input the gate sees is the call's first argument when it is an object (
 - `intuticHeaders({ sessionId?, workspaceId?, harness? })` (`intutic_headers(session_id=None, workspace_id=None, harness="langgraph")`) returns `x-intutic-harness`, `x-session-id` and `x-workspace-id` headers for a model client pointed at the Intutic proxy. The session and workspace fall back to `INTUTIC_SESSION_ID` and `INTUTIC_WORKSPACE_ID`.
 - `checkCommand(command, repoRoot, policy)` (TypeScript) runs the image-integrity check on its own and returns `{ ok, code, detail, images }`; `checkImages` and `checkWrittenManifest` check parsed image references and manifest text.
 - `classify`, `isDeploy`, `isTest`, `touchesInfra` (`classify`, `is_deploy`, `is_test`, `touches_infra`) are the command classifier the image check uses to decide what counts as a deploy.
-- `loadSnapshot` / `load_snapshot`, `parseRules` / `parse_rules` and `firstMatch` / `first_match` expose the snapshot and SOP-rule tiers for testing your own rules.
+- `loadSnapshot` / `load_snapshot`, `parseRules` / `parse_rules` and `firstMatch` / `first_match` expose the snapshot and SOP-rule tiers for testing your own rules. `fetchRegister` / `fetch_register` reads the workspace's SOP register (its rules and intervention mode) from the control plane, and `parseRegister` / `parse_register` reads a register answer you already have.
 - `canonicalJson`, `holdKey` and `holdMessage` (`canonical_json`, `hold_key`, `hold_message`) are the hold helpers the gate uses: JSON with keys sorted at every level, the tool name and argument hash an approved hold is matched on, and the message a held call carries (see [Holds](#holds)).
 - `GATE_DEADLINE_MS` (TypeScript only, 9000) is how long the hook script `intuticSandboxBootstrap()` writes may evaluate, from process start, before it refuses with `GATE_DEADLINE`: one second under that hook entry's 10-second timeout (`HOOK_TIMEOUT_SECONDS`), so a slow rule is refused rather than left to the harness, which would run the call. See [Hook timeouts](/reference/harness-security-matrix#hook-timeouts).
 

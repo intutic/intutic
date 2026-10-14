@@ -287,6 +287,8 @@ const GATE_LOADER_FILES = [
   '/w/.pi/extensions/other.ts',
   '/etc/cursor/hooks.json',
   '/Library/Application Support/Cursor/hooks.json',
+  'C:\\ProgramData\\Cursor\\hooks.json',
+  'C:/ProgramData/Cursor/hooks.json',
 ]
 
 /** Environment a gate runs under, isolated to its own root. */

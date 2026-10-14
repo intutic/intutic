@@ -329,10 +329,15 @@ export async function runCiscoScan(skillDirs: readonly string[]): Promise<CiscoD
  * invocations are an artifact of this integration's own per-directory
  * invocation strategy, not something the SARIF consumer should see.
  *
- * Only the CONTAINER is merged: rule catalogs are de-duplicated by `id`,
- * results are concatenated. Every individual rule/result object is passed
- * through unmodified — never rewritten — preserving the "append verbatim"
- * contract this integration promises for `--sarif` output.
+ * Rule catalogs are de-duplicated by `id` and results are concatenated, each
+ * passed through as the tool wrote it, with one exception. Every run carries
+ * `originalUriBaseIds`, which says where its relative `artifactLocation.uri`s
+ * are rooted — and each run roots `%SRCROOT%` at its OWN scanned directory.
+ * Dropping them (as this did) left every location unresolvable. They are
+ * merged: a base id that two runs define differently is renamed for the later
+ * run (`%SRCROOT%_2`), and that run's results are copied with their
+ * `uriBaseId` references renamed to match, so each location still resolves to
+ * the directory it was found in.
  *
  * Returns `null` when given no runs (nothing to append).
  */
@@ -342,15 +347,33 @@ export function combineCiscoSarifRuns(runs: readonly unknown[]): unknown | null 
   const base = runs[0] as { tool?: { driver?: { name?: unknown; informationUri?: unknown } } }
   const rulesById = new Map<string, unknown>()
   const results: unknown[] = []
+  const baseIds: Record<string, unknown> = {}
 
-  for (const run of runs) {
-    const r = run as { tool?: { driver?: { rules?: unknown[] } }; results?: unknown[] }
+  runs.forEach((run, index) => {
+    const r = run as { tool?: { driver?: { rules?: unknown[] } }; results?: unknown[]; originalUriBaseIds?: unknown }
     for (const rule of r.tool?.driver?.rules ?? []) {
       const id = (rule as { id?: unknown })?.id
       if (typeof id === 'string') rulesById.set(id, rule)
     }
-    if (Array.isArray(r.results)) results.push(...r.results)
-  }
+
+    const renamed = new Map<string, string>()
+    const own = r.originalUriBaseIds
+    if (own && typeof own === 'object' && !Array.isArray(own)) {
+      for (const [id, location] of Object.entries(own as Record<string, unknown>)) {
+        let key = id
+        if (key in baseIds && JSON.stringify(baseIds[key]) !== JSON.stringify(location)) {
+          key = `${id}_${index + 1}`
+          while (key in baseIds) key = `${key}_`
+          renamed.set(id, key)
+        }
+        baseIds[key] = location
+      }
+    }
+
+    if (Array.isArray(r.results)) {
+      results.push(...(renamed.size === 0 ? r.results : r.results.map((res) => renameUriBaseIds(res, renamed))))
+    }
+  })
 
   return {
     tool: {
@@ -359,6 +382,18 @@ export function combineCiscoSarifRuns(runs: readonly unknown[]): unknown | null 
         rules: [...rulesById.values()],
       },
     },
+    ...(Object.keys(baseIds).length > 0 ? { originalUriBaseIds: baseIds } : {}),
     results,
   }
+}
+
+/** A copy of `value` with every `uriBaseId` string found in `renamed` replaced. */
+function renameUriBaseIds(value: unknown, renamed: ReadonlyMap<string, string>): unknown {
+  if (Array.isArray(value)) return value.map((v) => renameUriBaseIds(v, renamed))
+  if (!value || typeof value !== 'object') return value
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = k === 'uriBaseId' && typeof v === 'string' && renamed.has(v) ? renamed.get(v) : renameUriBaseIds(v, renamed)
+  }
+  return out
 }

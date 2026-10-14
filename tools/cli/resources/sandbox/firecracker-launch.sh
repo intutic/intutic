@@ -45,6 +45,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$KERNEL" ] && [ -n "$ROOTFS" ] || { echo "firecracker-launch: --kernel and --rootfs are required" >&2; exit 2; }
+# The agent runs in the guest over ssh, so without the guest key nothing would
+# run. Refuse before touching the host, rather than boot the VM and exit 0.
+if [ -z "$GUEST_KEY" ]; then
+  echo "firecracker-launch: INTUTIC_FC_GUEST_KEY is not set. It must be the path to the private ssh key the rootfs's sshd accepts for root; the agent runs in the guest over ssh." >&2
+  exit 2
+fi
+[ -r "$GUEST_KEY" ] || { echo "firecracker-launch: INTUTIC_FC_GUEST_KEY ($GUEST_KEY) is not a readable file" >&2; exit 2; }
 
 NFT="$(command -v nft || echo /usr/sbin/nft)"
 SOCK="$(mktemp -u /tmp/intutic-fc-XXXX.sock)"
@@ -104,13 +111,7 @@ api "machine-config" "{\"vcpu_count\":${VCPUS},\"mem_size_mib\":${MEM}}"
 api "actions" '{"action_type":"InstanceStart"}'
 
 # Wait for the guest to reach sshd, then run the agent command inside it. This
-# requires an sshd-enabled rootfs and INTUTIC_FC_GUEST_KEY (the guest ssh key).
-if [ -z "$GUEST_KEY" ]; then
-  echo "firecracker-launch: microVM booted. Set INTUTIC_FC_GUEST_KEY to run the agent in-guest over ssh." >&2
-  echo "  guest console: $CONSOLE" >&2
-  sleep 3
-  exit 0
-fi
+# requires an sshd-enabled rootfs and INTUTIC_FC_GUEST_KEY (checked above).
 SSH="ssh -i ${GUEST_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8"
 for _ in $(seq 1 20); do
   if $SSH "root@${GUEST_IP}" true 2>/dev/null; then break; fi

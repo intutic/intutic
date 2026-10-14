@@ -81,6 +81,12 @@ A scoped token narrows a bypass; it never widens one. Scopes written before vali
 
 ---
 
+## Revocation
+
+When the member who requested an override is offboarded through [SCIM](/guide/scim#offboarding-cascade), their requests in that workspace are revoked: a pending request can no longer be approved (`POST /api/v1/break-glass/approve` answers `400`), and an approved token's cache entry is deleted, so the proxy stops honouring it on the next request rather than when it expires. The request shows as `REVOKED` in **Override requests**, with the time and the reason (`offboarding`) recorded on it.
+
+---
+
 ## Security and Compliance Auditing
 
 All break-glass activities are logged persistently:

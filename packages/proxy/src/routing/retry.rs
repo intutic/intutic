@@ -19,7 +19,8 @@
 //!
 //! Only inference calls (`is_retry_safe_endpoint`): a Messages, Chat
 //! Completions, Responses or Gemini `generateContent` POST creates nothing the
-//! caller can address later, so a duplicate costs tokens and changes no state.
+//! caller can address later (the Gemini route itself is refused today; see
+//! `is_retry_safe_endpoint`), so a duplicate costs tokens and changes no state.
 //! That is the same judgement the official Anthropic and OpenAI SDKs make when
 //! they retry these calls by default. Everything else the proxy passes through
 //! — batches, files, Gemini cached contents — creates a resource, and is sent
@@ -312,8 +313,11 @@ pub struct UpstreamFallback {
     pub to_provider: String,
     /// True when the session's prompt cache was warm on `from_model` and the
     /// fallback is a different model family, so this turn paid full price for
-    /// a prefix the primary had cached. The session lock is never moved, so
-    /// the next turn goes back to the primary and its cache.
+    /// a prefix the primary had cached. The session lock never moves to the
+    /// fallback, but `from_model` failed its retries, so its lock is released
+    /// (`proxy::release_routing_lock`) and the next turn re-selects, preferring
+    /// `from_model`'s family among near-ties — it does not necessarily return
+    /// to the primary and its cache.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub cache_affinity_broken: bool,
 }
@@ -340,6 +344,12 @@ impl Retryable {
 
 /// Whether a call to `path` can be sent twice without creating anything twice.
 /// See the module docs for the rule.
+///
+/// The Gemini paths are listed for the rule's sake, not because they reach a
+/// retry today: a request on the `/v1beta` route names its model in the URL,
+/// which the proxy does not read, so it is refused as an unsupported route
+/// before any upstream call (`proxy::delta_shape`'s `Unparsed` arm has the
+/// detail).
 pub fn is_retry_safe_endpoint(method: &str, path: &str) -> bool {
     if method != "POST" {
         return false;

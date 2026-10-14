@@ -55,7 +55,13 @@ const HOOK_EVENTS: ReadonlyArray<{ event: string; matcher?: string }> = [
  * `hookScriptPath` note below).
  */
 export function systemHooksDirFor(platform: NodeJS.Platform): string {
-  return platform === 'darwin' ? '/Library/Application Support/Cursor' : '/etc/cursor'
+  // Cursor's enterprise hooks locations (cursor.com/docs/agent/hooks):
+  // /Library/Application Support/Cursor on macOS, /etc/cursor on Linux and
+  // WSL, C:\ProgramData\Cursor on Windows — not /etc/cursor, which this
+  // returned for Windows too.
+  if (platform === 'darwin') return '/Library/Application Support/Cursor'
+  if (platform === 'win32') return path.win32.join(process.env.ProgramData || 'C:\\ProgramData', 'Cursor')
+  return '/etc/cursor'
 }
 
 /**

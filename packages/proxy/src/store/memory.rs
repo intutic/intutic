@@ -687,6 +687,24 @@ impl LocalStore for MemoryStore {
         Ok(())
     }
 
+    async fn record_session_cache_unreported(
+        &self,
+        scope: &str,
+        model: &str,
+    ) -> anyhow::Result<()> {
+        debug_assert!(scope.contains(':'), "session routing scope must be tool_history_scope's {{workspace}}:{{agent}} output, not a bare session id: {scope:?}");
+        {
+            let mut sessions = lock(&self.sessions, "session")?;
+            let sess = sessions.entry(scope.to_string()).or_default();
+            if sess.cache_warm_model.is_none() {
+                sess.cache_warm_model = Some(model.to_string());
+                sess.cache_observed_at = Some(chrono::Utc::now().timestamp());
+            }
+        }
+        self.touch_scope(scope);
+        Ok(())
+    }
+
     async fn record_tool_sequence(
         &self,
         session_id: &str,
@@ -1268,7 +1286,7 @@ impl ControlPlaneCache for NullControlPlaneCache {
     /// Always `false`. No control plane means nothing ever attests a
     /// sandbox — returning anything else would make every open-core session
     /// look sandboxed regardless of reality.
-    async fn is_sandbox_attested(&self, _session_id: &str) -> bool {
+    async fn is_sandbox_attested(&self, _workspace_id: &str, _session_id: &str) -> bool {
         false
     }
 }
@@ -1285,7 +1303,7 @@ mod null_control_plane_cache_tests {
     #[tokio::test]
     async fn standalone_never_attests_a_sandbox() {
         let cp = NullControlPlaneCache;
-        assert!(!cp.is_sandbox_attested("ses_1").await);
+        assert!(!cp.is_sandbox_attested("ws_1", "ses_1").await);
     }
 
     /// Standalone proxies have no control plane to have configured a

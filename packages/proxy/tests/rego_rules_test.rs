@@ -190,7 +190,7 @@ impl ControlPlaneCache for CloudRules {
     ) -> Vec<String> {
         Vec::new()
     }
-    async fn is_sandbox_attested(&self, _sid: &str) -> bool {
+    async fn is_sandbox_attested(&self, _w: &str, _sid: &str) -> bool {
         false
     }
 }

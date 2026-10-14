@@ -1141,6 +1141,3 @@ export function intuticSandboxBootstrap(opts: IntuticSandboxBootstrapOptions = {
     },
   }
 }
-
-// Exposed for the behavioural-parity tests — not part of the public surface.
-export const _internal = { renderSandboxGateScript, renderSandboxClaudeSettings, sandboxJoin }

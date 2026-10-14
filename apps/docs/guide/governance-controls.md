@@ -22,14 +22,15 @@ gloss. Where coverage is partial, it says so, and says why.
 | **Permissions scoped to the task, not the role on paper** | Strong | `deny_tools` blocks a tool outright; `scope_paths` bounds *where* a task may touch; `plan_steps` bounds *what* it consists of — genuinely task-scoped, not just role-scoped. See [SOP Front Matter](/reference/sop-front-matter). |
 | **A hard stop, and clean rollback, when an agent exceeds its authority** | Strong | `KILL` refuses the request outright; `loop kill` and `review_before` holds stop a run from proceeding. Separately, `intutic rollback` reverts a flagged-but-allowed tool call's file changes from a local pre-image cache — opt-in, captured by the Claude Code hook only, and scoped to the `warn` enforcement tier today (a `KILL`ed call never executes, so there's nothing to revert; a `require`-tier violation is refused before it runs). See [`intutic rollback`](/reference/cli#intutic-rollback). |
 | **Live monitoring for behavioural drift before it compounds** | Strong | Trajectory analysis, behavioral drift events, and anomaly promotion (a repeated finding escalates from "recorded" to "acted on" — see [Graph Guardrails](/guide/graph-guardrails)) all run continuously, not as a point-in-time audit. |
-| **Continuous sweeps for unauthorized agents already inside your stack** | Partial-to-strong | Active network probes, run by `intutic connect` at startup and on every sync, raise a `CRITICAL` incident when a direct HTTPS connection to a provider host (`api.anthropic.com`, `api2.cursor.sh`) succeeds without going through the proxy — nothing would stop an agent bypassing it. Harness config drift detection catches manual edits to governance files. The gap: the containment the probe checks for needs to be *enabled* — `intutic enforce` is opt-in, not the default. |
+| **Continuous sweeps for unauthorized agents already inside your stack** | Partial-to-strong | Active network probes, run by `intutic connect` at startup and on every sync on a machine where containment is expected (the workspace enforces egress, or the machine applied `intutic enforce`), raise a `CRITICAL` incident, one per machine, host and day, when a direct HTTPS connection to a provider host (`api.anthropic.com`, `api2.cursor.sh`) succeeds with a certificate the Intutic CA did not issue — containment that should be there is not. Harness config drift detection catches manual edits to governance files. The gap: the containment the probe checks for needs to be *enabled* — `intutic enforce` is opt-in, not the default. |
 
 <!-- ENTERPRISE_ONLY_START -->
 ::: tip Cloud / Enterprise — agent-scoped credentials
-On-behalf-of ephemeral tokens are a distinct credential type an agent
-receives for a bounded task and time window — not the developer's own
-shared key. See [Policies & Enforcement](/guide/policies) for the full
-mechanism. Enterprise device visibility also reports whether host-level
+On-behalf-of ephemeral tokens are a distinct credential type for a bounded
+task and time window — not the developer's own shared key, and not a
+session: they name the tools they cover, and a service checks one against a
+tool with `POST /api/v1/auth/obo-token/verify`. The tool-call gates do not
+accept them yet. See [On-Behalf-Of (OBO) Tokens](/guide/security#on-behalf-of-obo-tokens). Enterprise device visibility also reports whether host-level
 enforcement (`intutic enforce`) is actually active on a given machine, not
 just configured to be — strengthening the "sweeps for unauthorized agents"
 row above.

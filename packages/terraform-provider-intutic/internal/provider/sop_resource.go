@@ -74,8 +74,9 @@ func (r *sopResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Description: "The SOP id (`sp_…`). Changes when an edit forks a new version.",
 			},
 			"title": schema.StringAttribute{
-				Required:   true,
-				Validators: []validator.String{stringvalidator.LengthBetween(1, 256)},
+				Required:    true,
+				Description: "The SOP's title (1–256 characters).",
+				Validators:  []validator.String{stringvalidator.LengthBetween(1, 256)},
 			},
 			"markdown_content": schema.StringAttribute{
 				Required:    true,

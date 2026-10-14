@@ -426,8 +426,10 @@ impl Provider {
 ///
 /// - a first-party Gemini model asked for on `/v1/messages`,
 ///   `/v1/chat/completions` or `/v1/responses` goes through the Gemini
-///   translation (`Cloud(GoogleAi)`); on its own `/v1beta` route it is
-///   passed through untouched;
+///   translation (`Cloud(GoogleAi)`). A request on the `/v1beta` route is
+///   not passed through: it is refused as an unsupported route, because its
+///   model is named in the URL, which the proxy does not read (see
+///   `delta_shape`'s `Unparsed` arm);
 /// - an Azure deployment takes Foundry's Messages API when the request is in
 ///   Anthropic's format or the deployment is a Claude one.
 fn route_for_inbound(target: Provider, inbound: &Provider, model: &str) -> Provider {
@@ -487,8 +489,8 @@ fn wire_route(inbound: &Provider, protocol: &Protocol, target: &Provider) -> Opt
         .then_some(WireRoute::OpenAIToAnthropic)
 }
 
-/// A first-party Gemini key for a request translated to the Gemini API: the
-/// same key, under the same rules, a request on the `/v1beta` route gets — a
+/// A first-party Gemini key for a request translated to the Gemini API, by
+/// the rules `fetch_provider_credential` applies to `Provider::Gemini` — a
 /// `vk_` request's workspace key (or, unless BYO-key is enforced, the
 /// operator's `GEMINI_API_KEY`); a raw caller's own `x-goog-api-key` first.
 async fn google_ai_config(
@@ -645,6 +647,47 @@ async fn validate_key_via_control_plane(
     }
 
     parse_key_context(resp, key.as_str()).await
+}
+
+/// What authenticating a virtual key outside the LLM request path found.
+pub(crate) enum KeyCheck {
+    /// The control plane (or its cache) recognises the key.
+    Valid,
+    /// It does not, or there is nothing that could vouch for it.
+    Invalid,
+    /// The cache or the control plane could not be reached. Callers refuse
+    /// with a retryable status rather than admit an unchecked key.
+    Unverifiable,
+}
+
+/// Authenticate `key` as `handle_proxy` does a gateway request (Step 2.5): the
+/// control plane's auth cache, then the control plane itself on a miss. Used
+/// where the proxy acts for a key without serving an LLM call: a `CONNECT`
+/// from another machine, and a sandbox attestation.
+///
+/// Standalone (no auth cache) still asks a configured control plane. With no
+/// control plane at all nothing can vouch for a key, so it is `Invalid`.
+pub(crate) async fn authenticate_virtual_key(state: &AppState, key: &VirtualKey) -> KeyCheck {
+    match state.control_plane.auth_context(key.as_str()).await {
+        ControlPlaneAuth::Known(_) => KeyCheck::Valid,
+        ControlPlaneAuth::Unavailable => KeyCheck::Unverifiable,
+        ControlPlaneAuth::Rejected | ControlPlaneAuth::Unmanaged => {
+            let Some(url) = state
+                .config
+                .intutic_settings
+                .policy
+                .control_plane_url
+                .as_deref()
+            else {
+                return KeyCheck::Invalid;
+            };
+            match validate_key_via_control_plane(&state.http_client, url, key).await {
+                Ok(Some(_)) => KeyCheck::Valid,
+                Ok(None) => KeyCheck::Invalid,
+                Err(()) => KeyCheck::Unverifiable,
+            }
+        }
+    }
 }
 
 /// Turn a 200 from `/auth/key-context` into an identity-only key record.
@@ -1641,6 +1684,7 @@ fn request_costs(
             cache_read_input: Some(cache_read),
             cache_write_input: None,
             output: Some(output),
+            reasoning_output: None,
         };
         pricing::estimate_cost_cached(requested_model, &counterfactual_usage)
     } else {
@@ -1670,6 +1714,30 @@ fn cache_read_bp(usage: &TokenUsage) -> Option<u32> {
     }
     let ratio = usage.cache_read_input.unwrap_or(0) as f64 / total_input as f64;
     Some((ratio.clamp(0.0, 1.0) * 10_000.0).round() as u32)
+}
+
+/// Whether a response reported real input usage and no cache field at all —
+/// a provider that does not report cache activity, as opposed to an empty or
+/// missing usage block. Recorded as an observation without a ratio
+/// (`record_session_cache_unreported`), so the cache guard's cold-start
+/// heuristic fires once for the scope instead of on every turn.
+fn cache_fields_unreported(usage: &TokenUsage) -> bool {
+    usage.cache_read_input.is_none() && usage.cache_write_input.is_none() && usage.total_input() > 0
+}
+
+/// Post-response, fire-and-forget: what this response says about the scope's
+/// prompt cache — a measured ratio, or that the provider reports none.
+async fn record_cache_observation(
+    store: &Arc<dyn LocalStore>,
+    scope: &str,
+    model: &str,
+    usage: &TokenUsage,
+) {
+    if let Some(bp) = cache_read_bp(usage) {
+        let _ = store.record_session_cache(scope, model, bp).await;
+    } else if cache_fields_unreported(usage) {
+        let _ = store.record_session_cache_unreported(scope, model).await;
+    }
 }
 
 /// Resolves the upstream provider credential for a workspace's request.
@@ -4613,7 +4681,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // doc comment. Resolved here, once, like the other control-plane reads
     // above, so every detector and WASM rule reading it stays a pure function
     // of this struct.
-    let sandbox_attested = state.control_plane.is_sandbox_attested(&session_id).await;
+    let sandbox_attested = state
+        .control_plane
+        .is_sandbox_attested(&workspace_id, &session_id)
+        .await;
 
     // (pattern names, contributing sources) — see injection.rs::scan_body's
     // doc comment for why these stay two separately-deduplicated lists
@@ -4971,6 +5042,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // Blocked before any upstream call — no provider usage exists.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms: start.elapsed().as_millis() as u32,
                 verdict: match worst.disposition {
                     // `Ask` reports as "killed" rather than gaining a sixth
@@ -5635,8 +5707,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let ff_response_cache_semantic = feature_flags.is_some_and(|f| f.response_cache_semantic);
 
     // Standalone open-core mode: with no control-plane flags, routing may be
-    // enabled via config.yaml. A present flag payload is always authoritative.
-    // `mode: off` means off, wherever the decision to route came from.
+    // enabled via config.yaml — `enabled: true`, or `mode: shadow` alone
+    // (`RoutingConfig::standalone_active`). A present flag payload is always
+    // authoritative. `mode: off` means off, wherever the decision to route
+    // came from.
     //
     // The enum documented three values and only `Shadow` was ever read: a
     // workspace could set `mode: off` and, because `bandit_active` was derived
@@ -5652,12 +5726,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let bandit_active = !routing_off
         && match feature_flags {
             Some(f) => f.bandit_routing || f.shadow_routing,
-            None => state
-                .config
-                .intutic_settings
-                .routing
-                .enabled
-                .unwrap_or(false),
+            None => state.config.intutic_settings.routing.standalone_active(),
         };
 
     // Shadow is decided the same way routing is: the managed flag wins where one
@@ -5737,6 +5806,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // call happened, so there is no provider cache to report.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms,
                 verdict: "allowed".to_string(),
                 harness_type: harness_type.clone(),
@@ -6704,6 +6774,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // No response was ever received — no provider usage to report.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms,
                 verdict: "upstream_error".to_string(),
                 harness_type: harness_type.clone(),
@@ -6989,6 +7060,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // Error or short-circuit — no complete response, no provider usage.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms,
                 verdict: verdict.to_string(),
                 harness_type: harness_type.clone(),
@@ -7669,7 +7741,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     skip_forward = true;
                                 } else if is_done {
                                     {
-                                        let harness = session_id_clone.as_str();
+                                        // The resolved harness, which picks
+                                        // the Markdown or plain-text block.
+                                        let harness = harness_type_clone.as_str();
                                         // Keyed on the protocol, not the
                                         // provider: the block has to be
                                         // written in the shape the CLIENT
@@ -7793,7 +7867,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         }
                                         // Phase 7: Inject governance notifications before [DONE]
                                         {
-                                            let harness = session_id.as_str();
+                                            let harness = harness_type_clone.as_str();
                                             // Cross-provider: the client is
                                             // reading translated OpenAI chunks
                                             // whatever the upstream was, so the
@@ -7998,6 +8072,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             // off this same accumulator rather than zeroing.
                             cache_read_input_tokens: usage_acc.cache_read_input,
                             cache_creation_input_tokens: usage_acc.cache_write_input,
+                            reasoning_tokens: usage_acc.reasoning_output,
                             latency_ms: start.elapsed().as_millis() as u32,
                             verdict: "upstream_error".to_string(),
                             harness_type: harness_type_clone.clone(),
@@ -8459,12 +8534,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // Not after a fallback: the observation would be the fallback's,
             // and recording it would replace the routed model's warm-cache
             // evidence, which the next turn returns to.
-            if let Some(bp) =
-                cache_read_bp(&usage_acc).filter(|_| upstream_fallback_clone.is_none())
-            {
-                let _ = reward_store_clone
-                    .record_session_cache(&tool_scope_id_clone, &actual_model_clone, bp)
-                    .await;
+            if upstream_fallback_clone.is_none() {
+                record_cache_observation(
+                    &reward_store_clone,
+                    &tool_scope_id_clone,
+                    &actual_model_clone,
+                    &usage_acc,
+                )
+                .await;
             }
 
             if reward_eligible {
@@ -8550,6 +8627,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 cache_hit: false,
                 cache_read_input_tokens: usage_acc.cache_read_input,
                 cache_creation_input_tokens: usage_acc.cache_write_input,
+                reasoning_tokens: usage_acc.reasoning_output,
                 latency_ms: start.elapsed().as_millis() as u32,
                 // Same string the request-side kill uses, so an audit of
                 // blocked tool calls does not have to know which half of the
@@ -8707,6 +8785,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // usage block to report.
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                reasoning_tokens: None,
                 latency_ms,
                 verdict: "upstream_error".to_string(),
                 harness_type: harness_type.clone(),
@@ -9275,11 +9354,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // falls back to cache-blind.
     //
     // Not after a fallback, for the reason the streaming path gives.
-    if let Some(bp) = cache_read_bp(&usage_final).filter(|_| upstream_fallback.is_none()) {
-        let _ = state
-            .store
-            .record_session_cache(&tool_scope_id, &actual_model, bp)
-            .await;
+    if upstream_fallback.is_none() {
+        record_cache_observation(&state.store, &tool_scope_id, &actual_model, &usage_final).await;
     }
 
     // Mirror the configured/shadow candidate, if this request was sampled.
@@ -9572,6 +9648,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         cache_hit: false,
         cache_read_input_tokens: usage_final.cache_read_input,
         cache_creation_input_tokens: usage_final.cache_write_input,
+        reasoning_tokens: usage_final.reasoning_output,
         latency_ms,
         // Same string the request-side kill uses, so an audit of blocked tool
         // calls does not have to know which half of the turn caught it.
@@ -10751,6 +10828,7 @@ mod tests {
                 cache_read_input: Some(800),
                 cache_write_input: None,
                 output: Some(100),
+                reasoning_output: None,
             }
         }
 
@@ -10856,6 +10934,39 @@ mod tests {
                 None,
                 "a provider that never reports cache activity must read as unmeasured, not cold"
             );
+        }
+
+        #[test]
+        fn a_provider_reporting_no_cache_fields_is_recorded_as_unreported() {
+            let no_cache_fields = TokenUsage {
+                uncached_input: Some(500),
+                output: Some(50),
+                ..Default::default()
+            };
+            assert!(cache_fields_unreported(&no_cache_fields));
+            // No usage at all is not evidence about the provider.
+            assert!(!cache_fields_unreported(&TokenUsage::default()));
+            // A cache field, even zero, is a measurement, not "unreported".
+            let measured = TokenUsage {
+                uncached_input: Some(500),
+                cache_read_input: Some(0),
+                ..Default::default()
+            };
+            assert!(!cache_fields_unreported(&measured));
+        }
+
+        #[tokio::test]
+        async fn record_cache_observation_writes_an_unreported_observation_without_a_ratio() {
+            let store: Arc<dyn LocalStore> = Arc::new(crate::store::MemoryStore::new());
+            let usage = TokenUsage {
+                uncached_input: Some(500),
+                output: Some(50),
+                ..Default::default()
+            };
+            record_cache_observation(&store, "ws_1:agent_1", "gpt-4o", &usage).await;
+            let session = store.session_routing("ws_1:agent_1").await.unwrap();
+            assert_eq!(session.cache_warm_model.as_deref(), Some("gpt-4o"));
+            assert_eq!(session.cache_read_bp, None);
         }
 
         #[test]
@@ -13665,7 +13776,7 @@ mod tests {
             ) -> Vec<String> {
                 Vec::new()
             }
-            async fn is_sandbox_attested(&self, _sid: &str) -> bool {
+            async fn is_sandbox_attested(&self, _w: &str, _sid: &str) -> bool {
                 false
             }
         }

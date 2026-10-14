@@ -60,6 +60,15 @@ describe('resolveControlPlaneUrl', () => {
     expect(resolveControlPlaneUrl()).toBe('http://localhost:3001')
   })
 
+  it('puts a workspace set up with init --dev behind the environment and ahead of the saved URL', () => {
+    storeLogin('https://cp.stored.example')
+    writeFileSync(join(home, '.intutic', 'config.json'), JSON.stringify({ harnesses: [], configVersion: 0, devMode: true }))
+    expect(resolveControlPlaneUrl()).toBe('http://localhost:3001')
+    process.env.INTUTIC_CONTROL_PLANE_URL = 'https://cp.env.example'
+    expect(resolveControlPlaneUrl()).toBe('https://cp.env.example')
+    expect(resolveControlPlaneUrl(false, { flagUrl: 'https://cp.flag.example' })).toBe('https://cp.flag.example')
+  })
+
   it('skips the saved URL when asked to', () => {
     storeLogin('https://cp.stored.example')
     expect(resolveControlPlaneUrl(false, { useStored: false })).toBe('https://api.intutic.ai')

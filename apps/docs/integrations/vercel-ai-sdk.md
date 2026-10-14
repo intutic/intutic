@@ -51,7 +51,7 @@ const openai = withIntuticProxy(createOpenAI)({ apiKey: process.env.OPENAI_API_K
 const model = openai('gpt-5-mini')
 ```
 
-`withIntuticProxy()` resolves the proxy URL the same way every other harness's env-writer does (`INTUTIC_PROXY_URL`, falling back to `http://localhost:4000`) and passes it as `baseURL` to whatever provider factory you give it — `createOpenAI`, `createGateway`, or any compatible `@ai-sdk/*` `create*` export.
+`withIntuticProxy()` resolves the proxy URL the same way every other harness's env-writer does (`INTUTIC_PROXY_URL`, falling back to `http://localhost:4000`), appends `/v1`, and passes the result as `baseURL` to the provider factory you give it — `createOpenAI`, `createAnthropic`, or a compatible `@ai-sdk/*` `create*` export. Those providers append their endpoint path to `baseURL`, so requests reach the proxy's `/v1/chat/completions`, `/v1/responses` and `/v1/messages`. A URL that already ends in `/v1` (or `/v1beta`) is passed unchanged, so `/v1` is never doubled; `intuticProxyBaseUrl()` returns the same value if you construct a provider yourself. `createGateway` is not a target: the Vercel AI Gateway's protocol is not one the proxy parses.
 
 ### 3. Gate local tool execution (SDK)
 

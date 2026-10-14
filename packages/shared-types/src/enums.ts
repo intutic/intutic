@@ -87,9 +87,14 @@ export const TokenUtility = {
 export type TokenUtility = typeof TokenUtility[keyof typeof TokenUtility]
 
 // ─── Budget Tier ─────────────────────────────────────────────────────
-// HLD §3.3, LLD §3.1 — budget_tier_type enum
+// The `budget_tier_type` enum on `agent_sessions.budget_tier`.
 
-/** Budget authority level assigned to a user or agent session. */
+/**
+ * A label recorded on an agent session (default JUNIOR, and the only value the
+ * control plane writes for proxy-derived sessions). Nothing enforces a budget
+ * from it: spend is gated by the workspace caps and the key and member budgets
+ * (`spendBudgets.ts`).
+ */
 export const BudgetTier = {
   JUNIOR: 'JUNIOR',
   SENIOR: 'SENIOR',
@@ -599,38 +604,6 @@ export const SopLifecycleState = {
 
 /** Union of all SOP lifecycle state values. */
 export type SopLifecycleState = typeof SopLifecycleState[keyof typeof SopLifecycleState]
-
-// ─── SOP Type ────────────────────────────────────────────────────────
-// SOP classification for hook pipeline
-
-/** SOP type: standard markdown or executable V8 hook. */
-export const SopType = {
-  /** Standard SOP — markdown content enforced via SSL. */
-  STANDARD: 'standard',
-  /** Hook SOP — V8-executable script that fires at a pipeline phase. */
-  HOOK: 'hook',
-} as const
-
-/** Union of all SOP type values. */
-export type SopType = typeof SopType[keyof typeof SopType]
-
-// ─── Hook Phase ──────────────────────────────────────────────────────
-// Pipeline phase for hook-type SOPs
-
-/** Pipeline phase where a hook-type SOP fires. */
-export const HookPhase = {
-  /** Before tool call evaluation. */
-  PRE_TOOL: 'PRE_TOOL',
-  /** After tool call evaluation. */
-  POST_TOOL: 'POST_TOOL',
-  /** Before forwarding to LLM provider. */
-  PRE_RESPONSE: 'PRE_RESPONSE',
-  /** After LLM response received. */
-  POST_RESPONSE: 'POST_RESPONSE',
-} as const
-
-/** Union of all hook phase values. */
-export type HookPhase = typeof HookPhase[keyof typeof HookPhase]
 
 // ─── Routing Tier ────────────────────────────────────────────────────
 // HLD §3.6, LLD §3.1 — Model routing tier classification

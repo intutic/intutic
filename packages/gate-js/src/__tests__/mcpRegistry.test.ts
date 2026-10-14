@@ -15,11 +15,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { GateClient, type GateResponse } from '../client.js'
 import { IntuticGateRefusal } from '../errors.js'
 import { Gate } from '../gate.js'
-import { _internal } from '../harness.js'
+import { sandboxGateScript } from './fixtures/sandboxGateScript.js'
 import {
   decodeMcpRegistryRecord,
   encodeMcpAllowlistRecord,
@@ -199,7 +199,7 @@ describe('the shared unverified-snapshot vectors through Gate.guard', () => {
 describe('the sandbox hook script intuticSandboxBootstrap writes', () => {
   const script = join(dir, 'sandbox-check.js')
   const rules = join(dir, 'policy-snapshot.rules')
-  writeFileSync(script, _internal.renderSandboxGateScript('policy-snapshot.rules', 'ws_test'))
+  beforeAll(async () => writeFileSync(script, await sandboxGateScript('ws_test')))
 
   /** Runs the script on one call against `snapshot`, copied to where it reads its rules. */
   function run(snapshot: string, tool: string): Promise<{ status: number | null; stderr: string }> {

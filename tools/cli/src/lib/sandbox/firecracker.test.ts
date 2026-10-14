@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, rmSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { buildFirecrackerConfig, prefixToNetmask, FirecrackerBackend } from './firecracker.js'
 import type { FirecrackerOptions } from './firecracker.js'
 
@@ -53,5 +56,46 @@ describe('FirecrackerBackend.health', () => {
       expect(h.available).toBe(false)
       expect(h.detail).toMatch(/kvm|kernel|rootfs|firecracker/i)
     }
+  })
+})
+
+describe('firecracker-launch.sh', () => {
+  const script = resolve(__dirname, '../../../resources/sandbox/firecracker-launch.sh')
+
+  /** Runs the script with a `sudo` that records its calls instead of running them. */
+  // Async spawn, not spawnSync: a blocking child starves Vitest's worker RPC.
+  async function launch(env: Record<string, string>): Promise<{ status: number | null; stderr: string; sudoCalls: string }> {
+    const dir = mkdtempSync(join(tmpdir(), 'intutic-fc-launch-'))
+    try {
+      const log = join(dir, 'sudo.log')
+      writeFileSync(log, '')
+      writeFileSync(join(dir, 'sudo'), `#!/bin/sh\necho "$*" >> "${log}"\n`)
+      chmodSync(join(dir, 'sudo'), 0o755)
+      const child = spawn('bash', [script, '--kernel', '/img/vmlinux', '--rootfs', '/img/rootfs.ext4', '--', 'true'], {
+        env: { PATH: `${dir}:${process.env.PATH}`, ...env },
+      })
+      let stderr = ''
+      child.stderr.on('data', (d) => (stderr += String(d)))
+      const timer = setTimeout(() => child.kill('SIGKILL'), 10_000)
+      const status = await new Promise<number | null>((done) => child.on('close', (code) => done(code)))
+      clearTimeout(timer)
+      return { status, stderr, sudoCalls: readFileSync(log, 'utf-8') }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('fails, before touching the host, when INTUTIC_FC_GUEST_KEY is unset', async () => {
+    const res = await launch({})
+    expect(res.status).not.toBe(0)
+    expect(res.stderr).toContain('INTUTIC_FC_GUEST_KEY is not set')
+    expect(res.sudoCalls).toBe('')
+  })
+
+  it('fails when INTUTIC_FC_GUEST_KEY names no readable file', async () => {
+    const res = await launch({ INTUTIC_FC_GUEST_KEY: '/nonexistent/guest-key' })
+    expect(res.status).not.toBe(0)
+    expect(res.stderr).toContain('not a readable file')
+    expect(res.sudoCalls).toBe('')
   })
 })

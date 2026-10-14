@@ -188,31 +188,50 @@ exit 0
 }
 
 /**
- * Set Intutic's two keys in goose's `config.yaml` text: `provider.host` (the
+ * Set Intutic's keys in goose's `config.yaml` text: the provider hosts (the
  * proxy) and `hooks.pre_tool_use` (the gate script). Edited through the
  * `yaml` document model, so every other key, comment and list is kept. A text
  * replace of the first `host:` line used to rewrite whichever key of that name
  * came first, such as an extension's or an MCP server's.
  *
- * An empty `proxyUrl` leaves `provider.host` alone: the settings guard
- * re-runs this writer to restore the plugin without a URL to hand.
+ * The hosts are goose's own top-level keys, which its providers read through
+ * `Config::get_param` (environment first, then this file): `ANTHROPIC_HOST`
+ * (the Anthropic provider posts to `{host}/v1/messages`) and `OPENAI_HOST`
+ * (the OpenAI provider appends `OPENAI_BASE_PATH`, by default
+ * `v1/chat/completions`) — goose's `anthropic_def.rs` and `openai_def.rs`. An
+ * `OPENAI_BASE_URL` in the file outranks `OPENAI_HOST` there, so one that is
+ * present is pointed at the proxy too. Earlier versions wrote `provider.host`,
+ * which goose never reads; that key is removed when it still holds the proxy.
+ *
+ * An empty `proxyUrl` leaves the hosts alone: the settings guard re-runs this
+ * writer to restore the plugin without a URL to hand.
  *
  * Returns `null`, to leave the file untouched, when the text is not YAML, is
- * not a mapping, or holds `provider` or `hooks` as something other than a
- * mapping.
+ * not a mapping, or holds `hooks` as something other than a mapping.
  */
 export function mergeGooseConfigYaml(raw: string, proxyUrl: string, hookScript: string): string | null {
   const doc = parseDocument(raw)
   if (doc.errors.length > 0) return null
   if (doc.contents !== null && !isMap(doc.contents)) return null
-  for (const key of ['provider', 'hooks']) {
-    const node = doc.get(key, true)
-    if (node === undefined || isMap(node)) continue
-    // `provider:` with no value: replaced by the mapping below.
-    if (isScalar(node) && node.value === null) doc.delete(key)
+  const hooks = doc.get('hooks', true)
+  if (hooks !== undefined && !isMap(hooks)) {
+    // `hooks:` with no value: replaced by the mapping below.
+    if (isScalar(hooks) && hooks.value === null) doc.delete('hooks')
     else return null
   }
-  if (proxyUrl) doc.setIn(['provider', 'host'], proxyUrl)
+  if (proxyUrl) {
+    // A loop, not `/\/+$/`: CodeQL flags that regex as polynomial on a long run of slashes.
+    let host = proxyUrl
+    while (host.endsWith('/')) host = host.slice(0, -1)
+    doc.set('ANTHROPIC_HOST', host)
+    doc.set('OPENAI_HOST', host)
+    if (doc.has('OPENAI_BASE_URL')) doc.set('OPENAI_BASE_URL', `${host}/v1`)
+    const provider = doc.get('provider', true)
+    if (isMap(provider) && provider.get('host') === proxyUrl) {
+      provider.delete('host')
+      if (provider.items.length === 0) doc.delete('provider')
+    }
+  }
   doc.setIn(['hooks', 'pre_tool_use'], hookScript)
   return doc.toString()
 }
@@ -247,5 +266,5 @@ async function mergeGooseConfig(proxyUrl: string): Promise<void> {
   await fs.mkdir(path.dirname(GOOSE_CONFIG), { recursive: true })
   await writeFileAtomic(GOOSE_CONFIG, existing)
 
-  log.info({ action: 'goose_config_written', path: GOOSE_CONFIG }, 'Goose config.yaml updated with proxy host')
+  log.info({ action: 'goose_config_written', path: GOOSE_CONFIG }, 'Goose config.yaml updated with the proxy hosts')
 }

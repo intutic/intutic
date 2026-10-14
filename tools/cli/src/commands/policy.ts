@@ -16,7 +16,7 @@ import {
   type RegoRule,
 } from '@intutic/shared-types'
 import { decideCase, loadMeteredRegoRule } from './rules.js'
-import { loadCredentials, loadConfig } from '../config/store.js'
+import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient, type ApiClient } from '../lib/api.js'
 import { writeFileAtomic } from '@intutic/sync-daemon/lib/atomicWrite'
@@ -49,10 +49,8 @@ async function resolveTarget(
     log.error(NOT_AUTHENTICATED)
     process.exit(1)
   }
-  const config = loadConfig()
-  const devMode = dev || config?.devMode || process.env.INTUTIC_DEV === '1'
   return {
-    controlPlaneUrl: resolveControlPlaneUrl(devMode),
+    controlPlaneUrl: resolveControlPlaneUrl(dev),
     apiKey: creds.apiKey,
     workspaceId: creds.workspaceId,
   }

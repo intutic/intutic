@@ -3688,6 +3688,156 @@
       ]
     },
     {
+      "id": "path.ProgramData_backslash_Cursor_backslash_hooks_json",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.ProgramData_backslash_Cursor_backslash_hooks_json\tblock\t-\tany\tShell command references the governance-protected path ProgramData\\Cursor\\hooks.json\tProgramData\\\\Cursor\\\\hooks\\.json",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ProgramData\\Cursor\\hooks.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > ProgramData\\Cursor\\hooks.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv ProgramData\\Cursor\\hooks.json /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " ProgramData\\Cursor\\hooks.jso",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " ProgramData\\Cursor\\hooks.json",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.ProgramData_Cursor_hooks_json",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.ProgramData_Cursor_hooks_json\tblock\t-\tany\tShell command references the governance-protected path ProgramData/Cursor/hooks.json\tProgramData/Cursor/hooks\\.json",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf ProgramData/Cursor/hooks.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > ProgramData/Cursor/hooks.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv ProgramData/Cursor/hooks.json /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " ProgramData/Cursor/hooks.jso",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " ProgramData/Cursor/hooks.json",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
       "id": "path.clinerules_hooks",
       "subject": "any",
       "flags": "-",

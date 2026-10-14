@@ -15,7 +15,8 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `CONFIG_PATH` | `config.yaml` in the working directory | The [`config.yaml`](#_4-proxy-config-yaml-intutic-settings) to load. The container image sets `/etc/intutic/proxy-config.yaml` |
-| `PORT` | `4000` | The port the proxy listens on, on every interface |
+| `PORT` | `4000` | The port the proxy listens on |
+| `INTUTIC_PROXY_BIND` | `127.0.0.1`; `0.0.0.0` with `INTUTIC_GATEWAY_REQUIRE_VK` and in the container image | The addresses the proxy listens on: one IP address, or several separated by commas. The default answers only this machine. Open it for clients elsewhere: `0.0.0.0` for every interface, or a list such as `127.0.0.1,172.17.0.1` to add the Docker bridge for an `intutic exec --sandbox` on Linux (Docker Desktop reaches loopback already). Keep a loopback address in the list when Windsurf or Cursor traffic is intercepted. A `CONNECT` from another machine is refused unless the listener is open and the request carries an Intutic key in `Proxy-Authorization` (`Bearer vk_…`, or the key as the proxy URL's user name) that the control plane accepts. A value that is not an IP address stops the proxy at startup |
 | `RUST_LOG` | `intutic_proxy=info,tower_http=info` | Log filter, in `tracing` syntax (`intutic_proxy=debug`, `warn`, …) |
 | `CONTROL_PLANE_URL` | unset | Unset, the proxy runs **standalone**: no control plane, and rules, budgets and allowlists come from local files. Set to a control plane's address, it runs **managed**: Valkey becomes required (startup fails if it cannot connect, rather than accepting requests unauthenticated), and every request is checked against the workspace's policy first, failing closed (`403 policy_denied`) when the check fails or times out unless `intutic_settings.policy.fail_closed` is `false` |
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Valkey for the auth and budget cache, bandit state and the response cache. Standalone, the proxy tries it for 1.5 seconds and runs without it if it does not answer |
@@ -121,10 +122,10 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `CONTROL_PLANE_URL` | unset | Set when `intutic start` runs, the proxy it starts is managed (see above) |
-| `INTUTIC_CONTROL_PLANE_URL` | the URL `intutic login` saved, else the hosted control plane | The control plane every command talks to. A `--control-plane-url` or `--dev` flag takes precedence |
+| `INTUTIC_CONTROL_PLANE_URL` | a workspace's `init --dev` setting, else the URL `intutic login` saved, else the hosted control plane | The control plane every command talks to. A `--control-plane-url` or `--dev` flag takes precedence |
 | `INTUTIC_DEV` | unset | `1`: talk to a local control plane at `http://localhost:3001` instead of the saved or hosted one. `INTUTIC_CONTROL_PLANE_URL` takes precedence |
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Passed to the proxy the CLI starts |
-| `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at. Its port is the one `intutic connect` and `intutic start` (without `--port`) run the proxy on, and the one `intutic budget` and `intutic doctor` probe. `PORT` is not read for this |
+| `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at. Its port is the one `intutic connect` and `intutic start` (without `--port`) run the proxy on, the one `intutic budget` and `intutic doctor` probe, and the one Windsurf's proxy setting points at. `PORT` is not read for this |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | Where the CLI writes the policy snapshot the hook gate reads |
 | `INTUTIC_APPROVED_BYPASSES` | `~/.intutic/hooks/approved-bypasses.jsonl` | The approved-bypass list the hook gates read, which `intutic chaos run` copies into each repetition with the snapshot |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | Where `intutic policy install` puts WASM rules |
@@ -139,6 +140,9 @@ Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-host
 | `INTUTIC_FC_PREFIX` | `30` | The network's prefix length |
 | `INTUTIC_FC_VCPUS` | `1` | Guest vCPUs |
 | `INTUTIC_FC_MEM` | `512` | Guest memory, in MiB |
+| `INTUTIC_GRAPH_ID` | unset (a new graph) | Set by `intutic exec` on the agent it starts, and read by a nested `intutic exec`: the [agent graph](/guide/graph-guardrails) the agent belongs to |
+| `INTUTIC_NODE_ID` | unset | Likewise: the agent that ran the nested `intutic exec`, which becomes its parent |
+| `INTUTIC_DEPTH` | `0` | Likewise: how deep in the graph that agent is |
 
 `intutic connect` also passes `ANTHROPIC_API_KEY` from its own environment to the proxy it starts.
 
@@ -156,13 +160,79 @@ Read by `@intutic/gate`. The MCP daemon and the Python `intutic-clawde` gate rea
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | The local policy snapshot |
 | `INTUTIC_GUARD_DISABLE` | unset | `1` turns the local snapshot guard off |
 
-### MCP daemon
+### Sync daemon
+
+Read by the sync daemon `intutic connect` runs.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `MCP_DAEMON_SOCKET` | `~/.intutic/mcp-proxy.sock` | The MCP daemon's Unix socket |
+| `CONFIG_CAPTURE_INTERVAL` | `5` | Capture the harness rules files for the config history every this many polls (a poll is 30 seconds by default) |
+| `INTUTIC_SKIP_GLOBAL_HOOKS` | unset | Any value: do not write Intutic's hooks and deny rules into `~/.claude/settings.json`; the project's `.claude/settings.json` is still written |
 
-The MCP proxy's other settings are on [MCP Proxy](/integrations/mcp-proxy).
+The hook gates it writes read `INTUTIC_SNAPSHOT_RULES`, `INTUTIC_APPROVED_BYPASSES`, `INTUTIC_GUARD_DISABLE` and, under `intutic chaos run`, `INTUTIC_CHAOS_PLAN` and `INTUTIC_CHAOS_EVENTS`, as the CLI and the gate SDK do.
+
+### MCP proxy / MCP daemon
+
+Read by the MCP proxy (`intutic-mcp-proxy`) and the MCP daemon (`intutic-mcp-daemon`). The proxy reads most of its settings from the environment first, then from `~/.intutic/env/runtime.env`; [MCP governance](/guide/mcp-governance#configuration-reference) has the full rules.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `INTUTIC_EVENTS_FILE` | `~/.intutic/events/hook-events.jsonl` | The local file every MCP event is also appended to |
+| `INTUTIC_MCP_FAIL_OPEN` | `true` | `false`: a check that cannot complete refuses the call. The workspace's `mcpProxyFailBehavior` wins once the proxy has loaded it |
+| `INTUTIC_MCP_INJECTION_ACTION` | `warn` | `block`: refuse a call, or withhold a result, that matches a prompt-injection pattern |
+| `INTUTIC_MCP_ANOMALY_MODE` | `enforce` | `warn` reports anomaly findings without blocking; `off` skips detection |
+| `INTUTIC_MCP_ANOMALY_OVERRIDES` | none | A JSON object of anomaly detector id → `steer`, `reask`, `kill` or `off`, capped at each detector's ceiling |
+| `INTUTIC_MCP_DLP_DETECTORS` | none | A JSON object of PII detector id → `off`, `redact` or `block`; it may only make the workspace's setting stricter |
+| `INTUTIC_MCP_SESSION_SCOPE` | derived | The session scope sibling proxies share their anomaly window under |
+| `INTUTIC_VALKEY_URL` | none (`VALKEY_URL` is also read) | The Valkey sibling proxies share their anomaly window and call-budget counters through |
+| `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | The local WASM rule directory, ahead of runtime.env's `INTUTIC_WASM_LOCAL_DIR` |
+| `INTUTIC_WASM_MANIFEST_ROOT` | unset (off) | The directory WASM rules may read files from, as for the proxy |
+| `INTUTIC_DISABLE_REGO_RULES` | unset | `1`: refuse Rego rules at load |
+| `INTUTIC_CHAOS_PLAN` | unset | Set by `intutic chaos run`: the fault plan the proxy injects |
+| `INTUTIC_CHAOS_EVENTS` | unset | Set with it: the file each injected fault is recorded in |
+| `MCP_DAEMON_SOCKET` | `~/.intutic/mcp-proxy.sock` | The MCP daemon's Unix socket, for the daemon and the proxies that call it |
+| `MCP_DAEMON_POLICY_TTL_MS` | `300000` | How long the daemon serves a cached policy before refetching it |
+| `MCP_DAEMON_MAX_CACHE_ENTRIES` | `500` | Workspaces kept in the daemon's policy cache |
+| `MCP_DAEMON_STATUS_REPORT_MS` | `60000` | How often the daemon reports its status and the MCP servers it found |
+| `MCP_DAEMON_TELEMETRY_FLUSH_MS` | `1000` | How often the daemon flushes the events it batched to the control plane |
+| `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/verified/policy-snapshot.json` | The verified policy snapshot the daemon seeds its cache from at start |
+| `REDIS_URL` | `redis://localhost:6379` | The daemon's Valkey when `VALKEY_URL` is unset |
+
+Both also read `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_CONTROL_PLANE_URL` (the daemon: `CONTROL_PLANE_URL`), and the daemon exports traces to `OTEL_EXPORTER_OTLP_ENDPOINT`. The remote-bridge headers (`INTUTIC_REMOTE_HEADERS`) are on [MCP governance](/guide/mcp-governance#configuration-reference).
+
+### Clawde SDK
+
+Read by the TypeScript `@intutic/clawde-sdk` and the Python `intutic-clawde` client.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `INTUTIC_BASE_URL` | `http://localhost:4000` | The proxy the client sends model calls to, when `baseUrl` (`base_url`) is not passed |
+| `INTUTIC_DEBUG` | unset | `true`: log retries and circuit-breaker trips to the console |
+| `GIT_BRANCH` | unset | The branch reported with each call when the sync daemon is not running |
+| `PD_INCIDENT_ID` | unset | A PagerDuty incident reported with each call, likewise |
+
+They also read `INTUTIC_CONTROL_PLANE_URL`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_SESSION_ID`; the Python gate reads the Gate SDK's variables above, and the TypeScript client the agent-graph variables `intutic exec` sets (`INTUTIC_GRAPH_ID`, `INTUTIC_NODE_ID`, `INTUTIC_DEPTH`). Without the sync daemon, the CI run id comes from the variable GitHub Actions, Buildkite or CircleCI sets. See [Clawde SDK](/reference/clawde-sdk).
+
+### AgentCore interceptor
+
+Read by the [AgentCore Gateway interceptor Lambda](/integrations/agentcore), besides `INTUTIC_CONTROL_PLANE_URL` and `INTUTIC_API_KEY`, which it requires.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `INTUTIC_TIMEOUT_MS` | `3000` | The control-plane call timeout |
+| `INTUTIC_FAIL_OPEN` | `false` | `true`: allow tool calls when the control-plane check itself fails |
+| `AGENTCORE_GATEWAY_ID` | unset | Attached to requests for log correlation; never affects the verdict |
+
+### TrueForge bridge
+
+Read by the [TrueForge server bridge](/integrations/trueforge#server-mode-standalone-hosted), besides `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_CONTROL_PLANE_URL`.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `TRUEFORGE_BASE_URL` | none (required) | The TrueForge server |
+| `TRUEFORGE_API_KEY` | unset | Its bearer token, when the server has OIDC configured |
+| `TRUEFORGE_SESSION_IDS` | unset (discover) | Comma-separated session ids to watch |
+| `TRUEFORGE_RECONNECT_DELAY_MS` | `2000` | The wait before re-subscribing to a dropped turn stream |
 
 <!-- ENTERPRISE_ONLY_START -->
 ### Control plane
@@ -394,20 +464,20 @@ Shrinks long tool output in non-streamed JSON responses after the DLP scan, and 
 
 ### Model Routing (`intutic_settings.routing`)
 
-Contextual bandit routing picks a model per request via Thompson sampling over a candidate pool. It is experimental and opt-in: nothing is routed until `enabled` (standalone) or the workspace's `ff_bandit_routing` flag turns it on. See [Intelligent Model Routing](/guide/intelligent-routing#which-models-a-request-can-be-routed-to) for which candidates a request can reach.
+Contextual bandit routing picks a model per request via Thompson sampling over a candidate pool. It is experimental and opt-in: nothing is routed until `enabled` or `mode: shadow` (standalone) or the workspace's `ff_bandit_routing` flag turns it on. See [Intelligent Model Routing](/guide/intelligent-routing#which-models-a-request-can-be-routed-to) for which candidates a request can reach.
 
 | Setting | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `enabled` | boolean | — | Enables bandit routing in standalone mode. Unset defers entirely to the control plane |
+| `enabled` | boolean | — | Enables bandit routing in standalone mode. Unset defers to the control plane; standalone, unset routes only under `mode: shadow` |
 | `candidate_models` | string[] | `claude-sonnet-5-5`, `gpt-4.1`, `gemini-3.8-flash` | Candidate model pool for Thompson sampling. A request is routed only when its model is a candidate or a dated snapshot or `-latest` alias of one; others bypass the bandit entirely. A workspace's `routingCandidates` setting replaces this list for that workspace. Each request only chooses among the candidates it can reach: one its format can be translated to, that the allowlists admit, within budget, with a credential, and listed by the workspace's key when that key's models are known. With a non-empty `model_list`, names it does not list are dropped at startup |
-| `mode` | string | `enforce` | `enforce` serves the routed model; `shadow` records what it would have picked and serves the requested one; `off` does not route |
+| `mode` | string | `enforce` | `enforce` serves the routed model; `shadow` records what it would have picked and serves the requested one, and standalone turns routing on by itself unless `enabled` is `false` (which logs a warning at startup); `off` does not route |
 | `mirror_sample_rate` | number | `0` | Fraction of eligible non-streamed requests (at most `0.05`) also sent to the routed or mirror candidate, scored off the critical path. The copy goes to the candidate's own provider with that provider's credential; a candidate the request cannot reach as written, or has no credential for, is skipped and counted in `routing_targets_skipped`. Each mirrored request is paid for twice |
 | `mirror_candidate_model` | string | — | A model to mirror-test against live traffic, whether or not it is a candidate |
 | `anthropic_model_override` | string | — | When set, any Anthropic-bound model is rewritten to this ID after routing. Unset leaves the routed model untouched |
 | `sop_pin_max_age_secs` | number | `600` | How long a session's injected SOP text stays fixed, so the prompt prefix stays cacheable. `0` re-renders it on every request |
 | `cache_guard_max_age_secs` | number | `300` | How recent a prompt-cache observation must be for routing to keep a warm session on its model. `0` turns the guard off |
 | `cache_guard_min_read_bp` | number | `5000` | The cache-read share (basis points) that counts as warm |
-| `cache_guard_cold_start_prompt_bytes` | number | `20000` | On a session's first turn, a prompt larger than this stays on the requested model. `0` turns this off |
+| `cache_guard_cold_start_prompt_bytes` | number | `20000` | On a session's first turn, a prompt larger than this stays on the requested model. A provider that reports no cache fields still ends the first turn, so later turns route. `0` turns this off |
 
 **Precedence:** when a control plane manages the workspace, the Valkey `ff_bandit_routing` feature flag is authoritative, and `ff_shadow_routing` decides shadow mode in place of `mode: shadow`. `routing.enabled` applies only to standalone deployments where no control plane manages the workspace.
 

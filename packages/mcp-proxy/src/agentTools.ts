@@ -28,6 +28,50 @@ export const LIST_INCIDENTS_ARGS = {
     .describe('Only incidents of this type: an anomaly type such as SCOPE_VIOLATION, or WASM_RULE_REFUSED or SYSTEM_ANOMALY'),
 }
 
+/**
+ * The control-plane path `intutic_list_sops` reads: the workspace's VALIDATED
+ * SOPs, the ones in force. Without the filter the list held drafts,
+ * hypotheses and invalidated SOPs too, under a tool that says "active".
+ */
+export function sopListPath(workspaceId: string, limit: number): string {
+  return `/api/v1/sops?${new URLSearchParams({ workspaceId, limit: String(limit), lifecycle_state: 'VALIDATED' })}`
+}
+
+/**
+ * `intutic_governance_status`'s answer. Asks `GET /api/v1/auth/key-context`,
+ * which only answers a valid workspace API key: the public `/healthz` it used
+ * to ask never looked at the key, so a rejected key read as connected.
+ */
+export async function governanceStatus(
+  controlPlaneUrl: string,
+  apiKey: string,
+  workspaceId: string,
+): Promise<Record<string, unknown>> {
+  const res = await readControlPlane(controlPlaneUrl, apiKey, workspaceId, '/api/v1/auth/key-context')
+  if (!res.ok) {
+    return {
+      connected: false,
+      controlPlane: controlPlaneUrl,
+      workspaceId,
+      error:
+        res.reason === 'unauthorized' || res.reason === 'forbidden'
+          ? 'Control plane rejected this API key'
+          : res.reason === 'not_found'
+            ? 'Control plane has no key-context route'
+            : 'Control plane unreachable',
+    }
+  }
+  const key = (res.data ?? {}) as { workspaceId?: unknown; role?: unknown }
+  return {
+    connected: true,
+    controlPlane: controlPlaneUrl,
+    workspaceId,
+    apiKeyValid: true,
+    ...(typeof key.workspaceId === 'string' ? { keyWorkspaceId: key.workspaceId } : {}),
+    ...(typeof key.role === 'string' ? { role: key.role } : {}),
+  }
+}
+
 /** The control-plane path `intutic_list_incidents` reads. */
 export function incidentListPath(workspaceId: string, args: { limit: number; type?: string }): string {
   const q = new URLSearchParams({ workspaceId, limit: String(args.limit) })
@@ -36,9 +80,11 @@ export function incidentListPath(workspaceId: string, args: { limit: number; typ
 }
 
 /** One control-plane read, never thrown: a failure degrades a tool's answer, it does not crash the server. */
+export type ControlPlaneFailure = 'unauthorized' | 'forbidden' | 'not_found' | 'unreachable'
+
 export type ControlPlaneResult =
   | { ok: true; data: unknown }
-  | { ok: false; reason: 'forbidden' | 'not_found' | 'unreachable' }
+  | { ok: false; reason: ControlPlaneFailure }
 
 export async function readControlPlane(
   controlPlaneUrl: string,
@@ -51,8 +97,9 @@ export async function readControlPlane(
       headers: { Authorization: `Bearer ${apiKey}`, 'x-workspace-id': workspaceId },
       signal: AbortSignal.timeout(5000),
     })
-    // 403 and 404 are answers, not outages. Collapsing them into
+    // 401, 403 and 404 are answers, not outages. Collapsing them into
     // "unreachable" sends someone debugging their network for an hour.
+    if (res.status === 401) return { ok: false, reason: 'unauthorized' }
     if (res.status === 403) return { ok: false, reason: 'forbidden' }
     if (res.status === 404) return { ok: false, reason: 'not_found' }
     if (!res.ok) return { ok: false, reason: 'unreachable' }
@@ -63,7 +110,10 @@ export async function readControlPlane(
 }
 
 /** Renders a failed read as text for the agent, naming the actual cause. */
-export function describeFailure(result: { reason: 'forbidden' | 'not_found' | 'unreachable' }, what: string): string {
+export function describeFailure(result: { reason: ControlPlaneFailure }, what: string): string {
+  if (result.reason === 'unauthorized') {
+    return `The Intutic control plane rejected this API key when asked to ${what}. Check INTUTIC_API_KEY.`
+  }
   if (result.reason === 'forbidden') {
     return `Your Intutic role is not permitted to ${what}. This needs the OWNER, ADMIN or EM role.`
   }

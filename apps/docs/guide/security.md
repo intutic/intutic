@@ -89,14 +89,19 @@ All keys use the `vk_` prefix for easy identification.
 
 ## On-Behalf-Of (OBO) Tokens <Badge type="warning" text="Self-serve+" />
 
-`POST /api/v1/auth/obo-token` issues a short-lived token on behalf of the calling
-member (Developer and above). The request names the tools the token is for
-(`scopedTools`, at least one) and, optionally, the agent session (`sessionId`);
-the response carries the token, its `grantId` and `expiresAt`. Tokens expire after
-15 minutes, and each grant is recorded against the member.
+An OBO token is a short-lived credential that names one member and the tools they allow, for handing to something that acts for them.
 
-Nothing in Intutic consumes OBO tokens yet: the proxy, the gates and the SDKs
-authenticate with virtual API keys, and the tool list is not enforced anywhere.
+### How OBO Works
+
+1. A member signed in to Intutic (Developer or above) asks for a token with `POST /api/v1/auth/obo-token`, listing the tools it may cover (`scopedTools`). The plan needs OBO tokens enabled.
+2. Intutic records a grant and returns the token. It expires after 15 minutes.
+3. A service holding the token checks it with `POST /api/v1/auth/obo-token/verify`, authenticating as itself (a member's session or `vk_` key in the same workspace) and sending `{ "token": "...", "tool": "..." }`. The answer is `200` with the member and the scoped tools when the token is live and covers the tool, `403` when the tool is outside its scope, and `401` for anything else: forged, expired, revoked, another workspace's, or a member who has been deactivated.
+
+An OBO token is not a session. It is signed with its own key and type, and every other API call refuses it with `401`, so it cannot be used to act as the member in the dashboard or the API. The tool-call gates do not accept one yet, which is why a tool on an SSO group policy's [on-behalf-of list](/concepts/circuit-breaker#_3-sso-group-clearance) is always refused.
+
+### Revocation
+
+Offboarding a member through [SCIM](/guide/scim#offboarding-cascade) revokes their outstanding OBO grants, so their tokens stop verifying at once rather than when they expire.
 
 ---
 
@@ -203,8 +208,10 @@ Adjust a member's role at any time. Changes take effect immediately.
 The reliable path is **SCIM 2.0 provisioning** — see the
 [SCIM guide](/guide/scim). With it configured, removing a user in your identity
 provider sends `active: false`, which runs the deprovisioning cascade here: their API
-keys are revoked, the cached auth contexts the proxy reads are purged, and their
-sessions are killed. Nothing waits on a human.
+keys are revoked, the cached auth contexts the proxy reads are purged, their
+sessions are killed, and their OBO grants and emergency overrides are revoked. Their
+access tokens that have not expired yet are refused. Nothing waits on a human. A person
+who belongs to other workspaces keeps those memberships.
 
 ::: warning Without SCIM, IdP removal does not stop agents on its own
 API keys authenticate independently of SSO — Intutic checks the key hash and whether
@@ -224,7 +231,8 @@ DELETE /api/v1/members/:memberId
 
 or **Settings › Team Members › Deactivate**. This takes effect
 immediately — every key the member holds stops authenticating at the control plane
-and at the proxy on the next request, not after a cache expiry. The member also
+and at the proxy on the next request, not after a cache expiry, and so does a dashboard
+or API session they already have. The member also
 cannot sign in again by any method: password, magic link, GitHub, Google, OIDC or
 SAML. Each refused attempt is recorded as a failed sign-in.
 

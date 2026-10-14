@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Behaviour change: `withIntuticProxy()` points providers at the proxy's
+  `/v1` routes.** `@intutic/gate/vercel` (and its `@intutic/gate/eve`
+  re-export) passed the bare proxy URL as `baseURL`, and `@ai-sdk/openai` and
+  `@ai-sdk/anthropic` append `/chat/completions`, `/responses` or `/messages`
+  to it, so every request missed the proxy's `/v1/*` routes. It now passes the
+  proxy URL plus `/v1`, leaving a URL that already ends in `/v1` (or
+  `/v1beta`) unchanged. The new `intuticProxyBaseUrl()` returns the same value.
+  Tests drive the real provider SDKs and assert the path each one requests.
+- **Behaviour change: a gate SDK client with no API key is local-only.**
+  `GateClient.fromEnv()` (`from_env()`) with no key in the environment or
+  `~/.intutic/credentials.json` built a client whose hook-gate call got a 401,
+  which failing closed turned into a refusal of every tool call that is not
+  read-only. Such a client now sends nothing: the SOP register and hook gate
+  are skipped, the hook gate's answer is an allow with code `LOCAL_ONLY` that
+  says so, and events and holds are not sent, while the SSO group, policy
+  snapshot, MCP server and image tiers still decide, as the integration pages
+  already said. A configured key the control plane refuses still fails closed.
+  `GateClient.localOnly` (`local_only`) reports it. Both SDKs run the shared
+  `gate-client-credentials-vectors.json`.
+- **`resolveContext()` (`resolve_context()`) reads the environment once
+  `intutic init` has run.** It read every field from `~/.intutic/config.json`
+  as soon as that file existed, and the file `intutic init` writes has none of
+  them, so the workspace, session, branch, CI pipeline and incident came back
+  empty. Each field now comes from the file when it carries it and from its
+  environment variable otherwise, in `@intutic/clawde` and `intutic-clawde`.
+
+### Fixed
+
+- **Subpath types for `moduleResolution: node`.** `@intutic/gate` and
+  `@intutic/sync-daemon` pointed `typesVersions` at `src/*.ts`, which their
+  tarballs do not contain, so a consumer on `moduleResolution: node` got no
+  types for `@intutic/gate/vercel` and the other subpaths. They now point at
+  the published `dist/*.d.ts`, and `@intutic/sync-daemon` gains the missing
+  `lib/atomicWrite` entry. `tools/scripts/check-package-entrypoints.js`, run
+  in CI after the build and before packing a release, fails when any `main`,
+  `types`, `bin`, `exports` or `typesVersions` path of a published package is
+  not in its `npm pack` tarball.
+- **`intutic_clawde.gate` exports what `@intutic/gate` does.** `fetch_register`,
+  `parse_register`, `SopRegister` and `READ_ONLY_TOOLS` (which the docs already
+  listed as exported) are importable from `intutic_clawde.gate` and in its
+  `__all__`.
+
+### Removed
+
+- **`ClawdeBudgetExceededError` (`@intutic/clawde`).** Nothing threw it: a
+  budget refusal (`BUDGET_EXCEEDED`, `OVERAGE_HARD_CAP_EXCEEDED`) has always
+  been a `ClawdeBlockedError` carrying that `code`, which is what to catch.
+  Code that imports the class must drop the import.
+- **`_internal` from `@intutic/gate/harness`.** A test hook exported from the
+  public subpath. The tests now read the hook script through
+  `intuticSandboxBootstrap()`.
+
 ## [2.5.0] - 2026-10-13
 
 Everything that reached `main` since 2.4.0. Check these behaviour changes

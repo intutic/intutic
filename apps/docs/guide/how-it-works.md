@@ -114,7 +114,7 @@ SOPs include:
 - **Dependencies** — other SOPs this one depends on
 - **Markdown content** — the actual policy rules
 
-Changes to SOPs are classified as `STRENGTHEN`, `CLARIFY`, `NARROW`, or `WEAKEN` for audit trail.
+Changes to SOPs are classified as `STRENGTHEN`, `CLARIFY`, `NARROW`, or `WEAKEN`; a `WEAKEN` edit made by a person needs an Owner.
 
 ## Anomaly Detection (ARE)
 
@@ -263,8 +263,10 @@ Both are off by default, so an existing install is unchanged.
 
 ## Active Network Probes
 
-To detect if a developer has bypassed the proxy gateway (when host enforcement
-is not enabled):
-1. On every sync, the `sync-daemon` sends an HTTPS `HEAD` request directly to `https://api.anthropic.com/` and `https://api2.cursor.sh/`, bypassing localhost routing.
-2. If this direct connection succeeds with a certificate not issued by the Intutic CA, it indicates that the network is uncontained.
-3. The daemon records a `network_bypass` event, which the control plane files as a `CRITICAL` `DATA_EXFILTRATION` incident, shown to administrators under **Findings › Incidents**.
+To detect a machine whose containment has stopped working, where containment is
+expected: the workspace's egress mode is **Enforce**, or the machine applied
+`intutic enforce`. On any other machine a direct connection to a provider is
+the normal state, so no probe runs.
+1. On every sync, `intutic connect` sends an HTTPS `HEAD` request directly to `https://api.anthropic.com/` and `https://api2.cursor.sh/`, bypassing localhost routing.
+2. If this direct connection succeeds with a certificate the machine's Intutic CA (`~/.intutic/ca.crt`) did not issue, checked by the CA's fingerprint and signature rather than by name, the network is uncontained.
+3. The daemon records a `network_bypass` event, which the control plane files as a `CRITICAL` `DATA_EXFILTRATION` incident, shown to administrators under **Findings › Incidents**. One incident is filed per machine, host and UTC day; later detections that day add to its `occurrences` count.

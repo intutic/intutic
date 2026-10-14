@@ -37,7 +37,9 @@ A1 and A2 are load-bearing and local. Tier B contributes the DLP regexes and
 workspace policy from the control plane; whether an unreachable control plane,
 or one whose checks could not run (GOVERNANCE_UNAVAILABLE), blocks is the
 client's `fail_closed` setting (default True — see client.py; the demo that
-fathered this code ran it advisory/fail-open).
+fathered this code ran it advisory/fail-open). A client with no API key is
+local-only (`GateClient.local_only`): A3 and B are skipped and the hook-gate
+answer says so (code LOCAL_ONLY), while A0, A1, M and A2 run.
 
 Tier A3 applies rules written in the SOP register rather than in code —
 possible since intutic-enterprise#14 taught SOP titles a ` WHERE ` clause, so
@@ -223,6 +225,9 @@ class Gate:
         set that changes mid-run makes a verdict depend on when the fetch
         landed. Construct a new Gate (or clear `_sop_rules`) to refresh.
         """
+        if self._sop_rules is None and self.client is not None and self.client.local_only:
+            # No key: the register cannot be read, and saying so is not news.
+            self._sop_rules = []
         if self._sop_rules is None:
             fetched = None
             if self.client is not None:
@@ -478,7 +483,11 @@ class Gate:
         if self.cfg.use_hook_gate and self.client is not None and tool_name not in READ_ONLY_TOOLS:
             resp = self.client.hook_gate(tool_name, tool_input)
             if not resp.allowed:
-                self._emit("tool_blocked", tool_name, resp.reason, tool_input, resp.incident_id)
+                # A refusal that names an incident was filed by the hook gate
+                # itself (its DLP check); reporting it again filed a second
+                # incident. Every other refusal is filed only by this event.
+                if not resp.incident_id:
+                    self._emit("tool_blocked", tool_name, resp.reason, tool_input)
                 # The hook gate names the MCP registry's own code when the
                 # registry refused; anything else it refuses is HOOK_GATE.
                 code = resp.code if resp.code in MCP_CODES else "HOOK_GATE"

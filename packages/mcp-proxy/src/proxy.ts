@@ -39,6 +39,8 @@ import {
   LIST_INCIDENTS_ARGS,
   budgetRemaining,
   describeFailure,
+  governanceStatus,
+  sopListPath,
   holdStatus,
   incidentListPath,
   readControlPlane,
@@ -54,7 +56,7 @@ import { GuardedValkey } from './guardedValkey.js'
 import { McpBudgetEnforcer, ValkeyBudgetStore } from './budget.js'
 import { WasmRunner } from './wasm/runner.js'
 import { CloudRuleSet, fetchRuleBinaryFrom, refusalDetail } from './wasm/cloudRules.js'
-import { checkTofu, decideTofuAction } from './tofu.js'
+import { checkTofu, decideTofuAction, tofuReport, type ToolDefinition } from './tofu.js'
 import { RegistryObserver } from './registryObserver.js'
 import { ApprovalHolds } from './approvalHold.js'
 import { callerIdentity, type CallerIdentity } from './identity.js'
@@ -211,6 +213,13 @@ export interface ServerLineOutcome {
    * `toolsListTools`; the registry gets these.
    */
   toolsListUpstream?: McpToolDefinition[]
+  /**
+   * The upstream server's own `{name, description, inputSchema}` per tool,
+   * untruncated, before curation hid any or an override rewrote a
+   * description — what TOFU pins (tofu.ts), so an owner's own curation change
+   * never reads as the server's. Set alongside `toolsListTools`.
+   */
+  toolsListPinned?: ToolDefinition[]
   /** The JSON-RPC id of the `tools/list` response, needed to build a block
    *  frame in the caller if TOFU refuses it. Set alongside `toolsListTools`. */
   toolsListMsgId?: string | number | null
@@ -399,6 +408,11 @@ export function processServerLine(
     let hidden = 0
     let overridden = 0
     // Copied before the overrides below rewrite descriptions in place.
+    const pinned: ToolDefinition[] = tools.map((t: Record<string, unknown>) => ({
+      name: t?.['name'],
+      description: t?.['description'],
+      inputSchema: t?.['inputSchema'],
+    }))
     const upstream = tools
       .map(normalizeToolDefinition)
       .filter((t): t is McpToolDefinition => t !== null)
@@ -451,14 +465,15 @@ export function processServerLine(
     )
 
     // toolsListTools/toolsListMsgId are set on EVERY tools/list response,
-    // curated or not — TOFU pinning (tofu.ts) needs the full post-curation
-    // tool set regardless of whether allowlist filtering or description
-    // overrides touched it this time.
+    // curated or not — the session cache and TOFU pinning (tofu.ts, over
+    // `toolsListPinned`) need them whether or not allowlist filtering or
+    // description overrides touched the list this time.
     if (hidden === 0 && overridden === 0) {
       return {
         line: raw,
         toolsListTools: kept,
         toolsListUpstream: upstream,
+        toolsListPinned: pinned,
         toolsListMsgId: msg.id,
         injectionFindings,
         toolPoisoning: toolPoisoningFinding ?? undefined,
@@ -470,6 +485,7 @@ export function processServerLine(
       curated: { hidden, overridden },
       toolsListTools: kept,
       toolsListUpstream: upstream,
+      toolsListPinned: pinned,
       toolsListMsgId: msg.id,
       injectionFindings,
       toolPoisoning: toolPoisoningFinding ?? undefined,
@@ -799,21 +815,10 @@ export class McpGovernanceProxy {
     // Tool: intutic_governance_status
     server.tool(
       'intutic_governance_status',
-      'Returns the current governance status and health of the Intutic control plane for this workspace.',
+      'Returns whether the Intutic control plane is reachable and accepts this API key, for this workspace.',
       {},
       async () => {
-        const health = await callControlPlane('/healthz')
-        const status = health.ok
-          ? { connected: true, controlPlane: cpUrl, workspaceId, ...(health.data as Record<string, unknown>) }
-          : {
-              connected: false,
-              controlPlane: cpUrl,
-              workspaceId,
-              error:
-                health.reason === 'forbidden'
-                  ? 'Control plane rejected this API key'
-                  : 'Control plane unreachable',
-            }
+        const status = await governanceStatus(cpUrl, apiKey, workspaceId)
 
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(status, null, 2) }],
@@ -824,12 +829,10 @@ export class McpGovernanceProxy {
     // Tool: intutic_list_sops
     server.tool(
       'intutic_list_sops',
-      'Lists Standard Operating Procedures (SOPs) active in this workspace.',
+      'Lists the Standard Operating Procedures (SOPs) in force in this workspace: the VALIDATED ones.',
       { limit: z.number().int().min(1).max(50).default(10).describe('Number of SOPs to return (1–50)') },
       async ({ limit }) => {
-        const result = await callControlPlane(
-          `/api/v1/sops?workspaceId=${workspaceId}&limit=${limit}`
-        )
+        const result = await callControlPlane(sopListPath(workspaceId, limit))
         const text = result.ok
           ? JSON.stringify(result.data, null, 2)
           : describeFailure(result, 'list SOPs')
@@ -1103,7 +1106,14 @@ export class McpGovernanceProxy {
       const serverName = this.config.serverName
       let tofu: Awaited<ReturnType<typeof checkTofu>>
       try {
-        tofu = await checkTofu(this.config.workspaceId, serverName, outcome.toolsListTools)
+        // Pinned over the server's own definitions; the curated list is read
+        // only to migrate a pin taken over it by an earlier version.
+        tofu = await checkTofu(
+          this.config.workspaceId,
+          serverName,
+          outcome.toolsListPinned ?? outcome.toolsListTools,
+          outcome.toolsListTools,
+        )
       } catch (err) {
         // Pin storage I/O failed (disk full, permissions, ~/.intutic
         // unwritable). This is a governance-check failure like any other in
@@ -1132,7 +1142,7 @@ export class McpGovernanceProxy {
       // the mismatch even in fail-open mode, where `action.block` is false.
       // 'skipped' (no tools declared) deliberately leaves the session's
       // cached flag untouched; see SessionState.setToolContractChanged's doc.
-      if (tofu.status === 'first_contact' || tofu.status === 'match') {
+      if (tofu.status === 'first_contact' || tofu.status === 'match' || tofu.status === 'repinned') {
         this.session.setToolContractChanged(false)
       } else if (tofu.status === 'mismatch') {
         this.session.setToolContractChanged(true)
@@ -1143,6 +1153,27 @@ export class McpGovernanceProxy {
           { action: 'tofu_first_contact', serverName, fingerprint: tofu.fingerprint },
           'MCP server tool definitions pinned on first contact',
         )
+      } else if (tofu.status === 'repinned') {
+        const fields = {
+          action: 'tofu_repinned',
+          serverName,
+          previousFingerprint: tofu.previousFingerprint,
+          fingerprint: tofu.fingerprint,
+          verified: tofu.verified,
+        }
+        if (tofu.verified) {
+          log.info(fields, 'MCP server pin moved to the upstream definitions; the old pin still matched')
+        } else {
+          log.warn(
+            fields,
+            'MCP server pin moved to the upstream definitions; the old pin, taken over the curated list, no longer ' +
+              'matched it, and cannot tell a curation change from a server change',
+          )
+        }
+        // Visible, never blocking: a LOW finding with both fingerprints when
+        // the old pin did not match; nothing when it did.
+        const report = tofuReport(tofu, serverName, false)
+        if (report) this.emitter.emit('mcp_server_definition_changed', serverName, undefined, report.reason, report.finding)
       } else if (tofu.status === 'mismatch') {
         const action = decideTofuAction(tofu, serverName, this.interceptor.failOpen)
         const reason = action.reason ?? 'MCP server tool definitions changed since first pinned.'
@@ -1156,7 +1187,8 @@ export class McpGovernanceProxy {
           },
           reason,
         )
-        this.emitter.emit('mcp_server_definition_changed', serverName, undefined, reason)
+        const report = tofuReport(tofu, serverName, action.block, reason)
+        this.emitter.emit('mcp_server_definition_changed', serverName, undefined, reason, report?.finding)
 
         if (action.block) {
           writeFrame(

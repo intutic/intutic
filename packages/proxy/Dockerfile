@@ -1,5 +1,6 @@
 # ─── Stage 1: Builder ──────────────────────────────────────────────────────────
-FROM rust:1.89-slim-bookworm AS builder
+# The toolchain CI pins (the rust job in .github/workflows/ci.yml); bump both together.
+FROM rust:1.98.0-slim-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -49,6 +50,10 @@ COPY --from=builder /build/target/release/intutic-proxy /usr/local/bin/intutic-p
 # Default config (overridden by ConfigMap mount at /etc/intutic/proxy-config.yaml)
 ENV CONFIG_PATH=/etc/intutic/proxy-config.yaml
 ENV PORT=4000
+# A container is reached through its own network interface, never its
+# loopback, so the image listens on every interface. Run outside a container,
+# the proxy listens on loopback unless INTUTIC_PROXY_BIND says otherwise.
+ENV INTUTIC_PROXY_BIND=0.0.0.0
 ENV RUST_LOG=intutic_proxy=info,tower_http=info
 
 EXPOSE 4000

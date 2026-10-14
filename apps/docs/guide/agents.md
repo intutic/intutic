@@ -56,8 +56,12 @@ on Self-serve, Biz Org, Enterprise and Self-host, and in the 14-day trials; on F
 ## Reopening a session
 
 Select an agent to see its live sessions and copy-paste commands to reopen each
-one on your own machine — a harness-native resume (`claude --resume …`,
-`cursor .`, `aider --restore-chat-history`, …) plus the proxy-attach.
+one on your own machine — a harness-native resume (`claude --resume`,
+`codex resume`, `cursor .`, `aider --restore-chat-history`, …) plus
+`intutic connect`, which routes the harness through the proxy. The resume
+command carries the session's id only when the id is the harness's own, which
+is when the session came from the harness's hook (Claude Code and Codex);
+otherwise it opens the harness's list of recent sessions to pick from.
 
 ## Related
 

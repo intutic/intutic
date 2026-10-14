@@ -20,6 +20,7 @@ import * as node_fs from 'node:fs/promises'
 import { log } from '../lib/logger.js'
 import { ensureValkey, valkeyRemediation, isValkeyRunning } from '../lib/ensureValkey.js'
 import { createShutdownHandler, terminateChild } from '../lib/gracefulShutdown.js'
+import { sandboxBindEnv } from '../lib/proxyBinary.js'
 import {
   loadCredentials,
   loadConfig,
@@ -32,7 +33,8 @@ import { createApiClient } from '../lib/api.js'
 import { getActiveAgentProcesses } from '../lib/process.js'
 import { getAdapter } from '../harness/detector.js'
 import { printOnboardingGuide } from '../lib/onboarding.js'
-import { writeEnforcementState } from '../lib/enforcementState.js'
+import { writeEnforcementState, readEnforcementState, computeFingerprint, containmentExpected } from '../lib/enforcementState.js'
+import { ensureLinuxCaTrust, verifyCaTrust } from '../lib/caTrust.js'
 import { reportDeviceState } from '../lib/deviceReport.js'
 import { reportMachineInventory, shouldReportInventoryThisIteration } from '../lib/inventory.js'
 import { parseChecksums, verifyChecksum } from '../lib/binaryChecksum.js'
@@ -192,6 +194,29 @@ export function resolveProxyAssetName(
   return null
 }
 
+/**
+ * A proxy built in the workspace: `target/release`, then `target/debug`, at
+ * the repository root. The root `Cargo.toml` is a workspace with
+ * `packages/proxy` as a member, so cargo builds there — never into
+ * `packages/proxy/target`, which is where this used to look.
+ */
+export async function findWorkspaceProxyBuild(
+  workspaceRoot: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string | null> {
+  const exe = platform === 'win32' ? 'intutic-proxy.exe' : 'intutic-proxy'
+  for (const profile of ['release', 'debug']) {
+    const candidate = node_path.join(workspaceRoot, 'target', profile, exe)
+    try {
+      await node_fs.access(candidate)
+      return candidate
+    } catch {
+      // not built with this profile
+    }
+  }
+  return null
+}
+
 async function downloadProxyBinary(destPath: string): Promise<string> {
   const platform = process.platform
   const arch = process.arch
@@ -325,8 +350,9 @@ export async function runConnect(opts: {
 
   const devMode = opts.dev || process.env.INTUTIC_DEV === '1' || safeConfig.devMode
   // Credentials given as flags were never saved, so the URL saved with some
-  // other login does not apply to them.
-  const controlPlaneUrl = resolveControlPlaneUrl(Boolean(devMode), {
+  // other login does not apply to them. Only the flag goes in: the resolver
+  // reads the workspace's dev setting itself, behind the environment.
+  const controlPlaneUrl = resolveControlPlaneUrl(opts.dev, {
     flagUrl: opts.controlPlaneUrl,
     useStored: !credsFromFlags,
   })
@@ -451,37 +477,28 @@ export async function runConnect(opts: {
       
       if (!devMode) {
         // In production, try to resolve precompiled binary path
-        const releasePath = node_path.join(safeConfig.workspaceRoot, 'packages', 'proxy', 'target', 'release', 'intutic-proxy')
-        const debugPath = node_path.join(safeConfig.workspaceRoot, 'packages', 'proxy', 'target', 'debug', 'intutic-proxy')
-        
-        try {
-          await node_fs.access(releasePath)
-          exeCmd = releasePath
+        const workspaceBuild = await findWorkspaceProxyBuild(safeConfig.workspaceRoot)
+        if (workspaceBuild) {
+          exeCmd = workspaceBuild
           exeArgs = []
-        } catch {
+        } else {
+          // Fallback to globally cached binary in ~/.intutic/bin/
+          // Version-specific: an unversioned cache entry was never revalidated,
+          // so upgrading the CLI left the old binary in place indefinitely.
+          const globalBinPath = node_path.join(getIntuticDir(), 'bin', `intutic-proxy-${cliPkgVersion}${process.platform === 'win32' ? '.exe' : ''}`)
           try {
-            await node_fs.access(debugPath)
-            exeCmd = debugPath
+            await node_fs.access(globalBinPath)
+            exeCmd = globalBinPath
             exeArgs = []
           } catch {
-            // Fallback to globally cached binary in ~/.intutic/bin/
-            // Version-specific: an unversioned cache entry was never revalidated,
-            // so upgrading the CLI left the old binary in place indefinitely.
-            const globalBinPath = node_path.join(getIntuticDir(), 'bin', `intutic-proxy-${cliPkgVersion}${process.platform === 'win32' ? '.exe' : ''}`)
+            log.info('Precompiled proxy binary not found in workspace or cache.')
             try {
-              await node_fs.access(globalBinPath)
-              exeCmd = globalBinPath
+              const downloadedPath = await downloadProxyBinary(globalBinPath)
+              exeCmd = downloadedPath
               exeArgs = []
-            } catch {
-              log.info('Precompiled proxy binary not found in workspace or cache.')
-              try {
-                const downloadedPath = await downloadProxyBinary(globalBinPath)
-                exeCmd = downloadedPath
-                exeArgs = []
-              } catch (downloadErr) {
-                log.warn(`Auto-download failed: ${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`)
-                log.dim('Falling back to cargo run...')
-              }
+            } catch (downloadErr) {
+              log.warn(`Auto-download failed: ${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`)
+              log.dim('Falling back to cargo run...')
             }
           }
         }
@@ -489,6 +506,7 @@ export async function runConnect(opts: {
       
       proxyEnv = {
         ...process.env,
+        ...sandboxBindEnv(),
         // Explicit, so a PORT in the operator's shell cannot move the proxy
         // away from the port everything else probes.
         PORT: String(proxyPort),
@@ -557,6 +575,19 @@ export async function runConnect(opts: {
               log.success('Successfully trusted SSL CA certificate.')
             } catch (err) {
               log.warn(`Failed to auto-trust SSL certificate on Windows: ${err instanceof Error ? err.message : String(err)}`)
+            }
+          } else if (process.platform === 'linux') {
+            // The system trust store is the only one Linux TLS clients share,
+            // and it needs root: installed when connect runs as root,
+            // otherwise the exact commands are printed.
+            const trust = await ensureLinuxCaTrust(caCertPath)
+            if (trust.state === 'installed') {
+              log.success(`Successfully trusted SSL CA certificate. ${trust.detail}`)
+            } else if (trust.state === 'needs-root') {
+              log.warn('The Intutic CA certificate is not trusted on this machine. Trusting it on Linux needs root; run:')
+              for (const line of trust.commands ?? []) log.info(`  ${line}`)
+            } else if (trust.state !== 'trusted') {
+              log.warn(`Could not trust the Intutic CA certificate: ${trust.detail}`)
             }
           }
         } catch (err) {
@@ -940,8 +971,10 @@ export async function runConnect(opts: {
       await node_fs.access(caCertPath)
       if (process.platform === 'darwin') {
         execSync(`security verify-cert -c "${caCertPath}" 2>/dev/null`, { timeout: 3000 })
+      } else if (process.platform === 'linux') {
+        sslTrustStatus = (await verifyCaTrust(caCertPath)) ? 'trusted' : 'untrusted'
       } else {
-        // Windows/Linux simple checks fallback
+        // Windows simple checks fallback
         sslTrustStatus = 'trusted'
       }
     } catch {
@@ -992,7 +1025,7 @@ export async function runConnect(opts: {
         },
         cliPkgVersion,
       )
-      const deviceReport = await reportDeviceState({ dev: devMode })
+      const deviceReport = await reportDeviceState({ dev: opts.dev })
       if (!deviceReport.reported) {
         log.dim(`[sync] Device report not sent: ${deviceReport.reason}`)
       }
@@ -1025,12 +1058,26 @@ export async function runConnect(opts: {
   }
 
   // Helper to run compliance probes (Phase 6)
+  //
+  // Only where containment is expected: the workspace enforces egress, or this
+  // machine applied `intutic enforce`. Anywhere else a direct connection to a
+  // provider is the normal state, and reporting it filed a CRITICAL
+  // DATA_EXFILTRATION incident on every sync of every such machine.
   const runProbes = async () => {
     try {
+      const enforcement = await readEnforcementState()
+      if (!containmentExpected(safeConfig.settings?.egressMode, enforcement)) {
+        log.dim('[sync] Network containment probe skipped: egress is not enforced for this workspace or machine.')
+        return
+      }
+
       const hookEventsLog = node_path.join(safeConfig.workspaceRoot, '.intutic', 'events', 'hook-events.jsonl')
       await node_fs.mkdir(node_path.dirname(hookEventsLog), { recursive: true })
 
-      const probeResults = await runComplianceProbes(safeCreds.workspaceId)
+      // The CA this machine's proxy signs with; a certificate it did not issue is a bypass.
+      const caCertPem = await node_fs.readFile(node_path.join(getIntuticDir(), 'ca.crt'), 'utf-8').catch(() => undefined)
+      const machineId = enforcement?.fingerprint ?? (await computeFingerprint())
+      const probeResults = await runComplianceProbes(safeCreds.workspaceId, 443, { caCertPem, machineId })
       let hasBypass = false
       for (const res of probeResults) {
         if (!res.contained && res.incident) {

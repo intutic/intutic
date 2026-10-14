@@ -33,12 +33,12 @@ resource "intutic_wasm_rule" "deep_graphs" {
 
 ### Required
 
-- `name` (String)
+- `name` (String) The rule's name.
 - `source` (String) Path to the compiled `.wasm` file, at most 1 MB. It is read at plan time. Moving the file without changing it changes nothing in the workspace.
 
 ### Optional
 
-- `description` (String)
+- `description` (String) What the rule does. Defaults to empty.
 - `enabled` (Boolean) Whether the proxies run the rule. Defaults to true. The API enables a rule as it is uploaded, so with `false` it runs until the provider switches it off straight after.
 - `sha256` (String) The SHA-256 the file must have, as 64 hex characters: a pin, so the plan fails if `source` is not the build you reviewed.
 
