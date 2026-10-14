@@ -29,7 +29,7 @@ intutic init
 The CLI detects `CLAUDE.md` and registers Claude Code as a harness:
 
 ```
-  ✔ claude-code → .claude/rules/intutic-governance.md
+  ✔ claude-code → /path/to/project/.claude/rules/intutic-governance.md
 ```
 
 `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).

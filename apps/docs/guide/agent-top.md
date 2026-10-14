@@ -19,9 +19,9 @@ A strip at the top summarizes the sync daemon: **Sync daemon** (with when it con
 The files found by local runs of `intutic skill list` and `intutic skill audit`:
 - **Instruction file** — the file path (e.g. `.cursorrules`, `CLAUDE.md`)
 - **Lines** — the instruction line count
-- **Security check** — unsafe segments detected (Intutic virtual keys and `sk-live-` secrets, `rm -rf *` / `rm -rf /`, `curl` / `wget` network commands)
+- **Security check** — unsafe segments detected (Intutic virtual keys and `sk-live-` secrets, `rm -rf *` / `rm -rf /`, `curl` / `wget` network commands). A skill's `SKILL.md` under `.agents/skills` or `.claude/skills` is checked by the skill-content scan instead ([Skill Scanning](/guide/skill-scanning)).
 
-If the workspace setting `enableLocalSkillAuditDelete` is active, `intutic skill audit` removes every flagged line (leaked keys, unsafe recursive deletes, `curl` / `wget` commands) from the instruction file it scans.
+If the workspace setting `enableLocalSkillAuditDelete` is active, `intutic skill audit` removes every flagged line (leaked keys, unsafe recursive deletes, `curl` / `wget` commands, or a line the skill-content scan flags) from the file it scans.
 
 ### Guideline Sync
 Sync status by agent platform: each platform the daemon found, its guidelines, and when they last synced.
@@ -34,8 +34,8 @@ The agent sessions running on this host now, from the daemon's process scan.
 
 ### Local Services Health
 The sync daemon monitors and auto-heals essential local dependencies on the workstation:
-- **Proxy gateway**: The Intutic Rust proxy gateway (port 4000) redirecting LLM API requests and normalising protocols. If it exits or crashes, the daemon immediately re-spawns it.
-- **Valkey cache**: Caches local requests and telemetry (port 6379). The daemon auto-provisions and recovers Valkey using Docker, native binaries, or static fallback binaries.
+- **Proxy gateway**: The Intutic Rust proxy gateway (port 4000) redirecting LLM API requests and normalising protocols. If a proxy the daemon started exits or crashes, the daemon re-spawns it at its next check (every poll, 30 seconds by default).
+- **Valkey cache**: Caches local requests and telemetry (port 6379). When Valkey is down, the daemon restarts it: the `intutic-valkey` Docker container, else a native `valkey-server` / `redis-server`, else the static binary under `~/.intutic/bin`.
 - **SSL certificate trust**: Verifies whether the local CA certificate (`ca.crt`) is trusted by the macOS keychain, or, on Linux, is the certificate in the system trust store; on Windows it only checks that the certificate exists.
 
 ---

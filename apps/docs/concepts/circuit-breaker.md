@@ -299,7 +299,7 @@ In production, always use `fail_closed: true`. Fail-open mode should only be use
 
 ## Additional evaluation layers
 
-Beyond the three hot-path gates, the circuit breaker can invoke additional evaluation layers **asynchronously** (they don't block the request):
+Beyond the three hot-path gates, these layers also evaluate traffic. SSL enforcement only records. The proxy-side layers run inline: DLP and tool-poisoning redaction rewrite the request before it is forwarded, and DLP can refuse it outright (see [Data flow between nodes](/guide/graph-guardrails#_5-data-flow-between-nodes)); SnipCompactor rewrites a non-streamed response:
 
 | Layer | What it does | Runs on |
 |---|---|---|
@@ -307,7 +307,7 @@ Beyond the three hot-path gates, the circuit breaker can invoke additional evalu
 | **SSL compliance reporting** | Reports which SSL graph steps a session followed | On demand, `POST /api/v1/sessions/:id/ssl-audit` |
 | **DLP Scanner** | Regex-based secret detection, plus validated PII detectors for payment cards, IBANs and US Social Security numbers (email and phone opt-in) | Every request (proxy-side, pre-forwarding), and responses |
 | **Tool-poisoning redaction** | Strips hidden/adversarial instructions from third-party MCP tool descriptions before the agent ever sees them (`[REDACTED_TOOL_POISON]`) — the same call still makes sense to the agent, it just loses the injected instruction | Every request, unconditionally (proxy-side, pre-forwarding) |
-| **SnipCompactor** | Token compression — collapse repetitions, truncate JSON | Every request (proxy-side, pre-forwarding) |
+| **SnipCompactor** | Token compression of tool-result text — collapse repetitions, truncate JSON | Non-streamed responses (proxy-side, after the output DLP scan), so the saving lands in the next turn's prompt |
 
 The DLP scanner, tool-poisoning redaction, and SnipCompactor run **in the proxy** (Rust, on the developer's machine) — they never hit the control plane. SSL enforcement runs in the control plane, at the hook gate.
 

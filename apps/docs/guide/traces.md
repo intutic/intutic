@@ -68,7 +68,7 @@ With no connected control plane, `list` reads `~/.intutic/logs/` directly — no
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--limit <n>` | Number of traces (1–100) | `20` |
+| `--limit <n>` | Number of traces (1–100 in connected mode; the local reader applies no maximum) | `20` |
 | `--since <duration>` | Time window: `30m`, `24h`, `7d` | `24h` |
 | `--action <type>` | Filter: `BYPASS`, `ENHANCE`, `HIJACK`, `KILL` — connected mode only | _(all)_ |
 | `--verdict <type>` | Filter: `allowed`, `killed`, `upstream_error`, `reasked`, `hijacked` — local mode only | _(all)_ |
