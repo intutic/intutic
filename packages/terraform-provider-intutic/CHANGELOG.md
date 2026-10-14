@@ -1,3 +1,9 @@
+## 0.3.1 (Unreleased)
+
+BUG FIXES:
+
+* resource/intutic_sop: `risk_tier`, `complexity_tier`, `version_counter` and `content_hash` read as null when the API sends none. A SOP written without tiers (the SOP health check writes none) imported with `risk_tier = ""` and `complexity_tier = ""`, and a SOP without a version counter was updated with `version_counter = 0`, which the API refuses; an update now sends no counter when there is none.
+
 ## 0.3.0 (October 14, 2026)
 
 BREAKING CHANGES:
