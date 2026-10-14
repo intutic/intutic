@@ -15,17 +15,36 @@ use std::net::SocketAddr;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+/// The uid `enforce` exempts when `--uid` is not given: the account that runs
+/// `intutic start`. That is the current user, except under `sudo`, where the
+/// process runs as root but the proxy runs as the invoking user, whose uid
+/// sudo exports as `SUDO_UID`. Exempting root there would leave the user's
+/// proxy denied egress.
+#[cfg(any(unix, test))]
+fn default_proxy_uid(current_uid: u32, sudo_uid: Option<&str>) -> u32 {
+    if current_uid == 0 {
+        if let Some(uid) = sudo_uid.and_then(|s| s.trim().parse::<u32>().ok()) {
+            return uid;
+        }
+    }
+    current_uid
+}
+
 /// Build an `EgressEnforceConfig` from `enforce` subcommand flags. Defaults the
-/// proxy uid to the current user on unix — the common single-user case where
-/// the same account runs `intutic start` and `intutic enforce apply`; override
-/// with `--uid` when the proxy runs as a different account.
+/// proxy uid on unix to [`default_proxy_uid`] — the user who runs both
+/// `intutic start` and `sudo intutic enforce apply`; override with `--uid`
+/// when the proxy runs as a different account.
 fn egress_enforce_config_from_flags(
     flags: &[String],
 ) -> anyhow::Result<firewall::EgressEnforceConfig> {
     let mut cfg = firewall::EgressEnforceConfig::default();
     #[cfg(unix)]
     if cfg.proxy_uid.is_none() {
-        cfg.proxy_uid = Some(unsafe { libc::getuid() });
+        let sudo_uid = std::env::var("SUDO_UID").ok();
+        cfg.proxy_uid = Some(default_proxy_uid(
+            unsafe { libc::getuid() },
+            sudo_uid.as_deref(),
+        ));
     }
     let mut i = 0;
     while i < flags.len() {
@@ -91,7 +110,7 @@ fn handle_enforce(args: &[String]) -> anyhow::Result<()> {
             // The generated ruleset is what the operator asked to see, on
             // stdout, to review before `apply`. The "uid" in it is the
             // numeric OS user the proxy runs as (`--uid`, default the current
-            // user) — an exemption in a firewall rule, not a credential.
+            // user, or the invoking user under sudo) — an exemption in a firewall rule, not a credential.
             print!("{}", firewall::generate_egress_enforcement(&cfg)); // codeql[rust/cleartext-logging]
             Ok(())
         }
@@ -737,4 +756,24 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_proxy_uid;
+
+    #[test]
+    fn default_proxy_uid_is_the_invoking_user_under_sudo() {
+        assert_eq!(default_proxy_uid(0, Some("501")), 501);
+    }
+
+    #[test]
+    fn default_proxy_uid_is_the_current_user_without_sudo() {
+        assert_eq!(default_proxy_uid(1000, None), 1000);
+        // SUDO_UID only matters when running as root.
+        assert_eq!(default_proxy_uid(1000, Some("501")), 1000);
+        // A root shell with no sudo, or a garbled SUDO_UID, stays root.
+        assert_eq!(default_proxy_uid(0, None), 0);
+        assert_eq!(default_proxy_uid(0, Some("nope")), 0);
+    }
 }

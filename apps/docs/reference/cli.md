@@ -1841,7 +1841,7 @@ intutic guardrails sources list
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs), with auto-sync state and last sync; `--json` also carries `last_sync_error` and `last_attempt_at`. Memory providers are not policy sources and are not listed.
+Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs), with auto-sync state, last sync and the error of a failed scheduled sync; `--json` also carries `last_attempt_at`. Memory providers are not policy sources and are not listed.
 
 ---
 
@@ -1970,7 +1970,7 @@ intutic guardrails docs extract <docId>
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-One model call per chunk of passages, under the workspace's daily cap (exit 1 with the cap on 429). A proposal is a verbatim quote plus a clause in the closed grammar; anything else is rejected by name. A valid clause becomes a proposed guardrail that enforces nothing until approved for shadow.
+One model call per chunk of passages, under the workspace's daily cap (exit 1 with the cap on 429, and exit 1 without a model call when the cap store is unreachable). A proposal is a verbatim quote plus a clause in the closed grammar; anything else is rejected by name. A valid clause becomes a proposed guardrail that enforces nothing until approved for shadow.
 
 ---
 
@@ -2441,8 +2441,9 @@ Fetches the workspace SOP policy and writes one flat file per served guardrail, 
 
 ## `intutic sops push <name>` <Badge type="tip" text="Cloud" />
 
-Push a local offline SOP folder to the central workspace — one control-plane
-SOP per file, each carrying its own declared front matter.
+Push a local SOP folder, or a single SOP file, to the central workspace — one
+control-plane SOP per file, each carrying its own declared front matter. A file
+that records its SOP (`intutic_id:`) updates that SOP; any other file creates one.
 
 ```bash
 intutic sops push <name> [options]
@@ -2452,17 +2453,24 @@ intutic sops push <name> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `name` | Folder name under `.intutic/sops/` in the workspace root |
+| `name` | A folder under `.intutic/sops/` in the workspace root, or a file there named with or without `.md` (the layout `sops pull` writes) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
 | `--dev` | Use local control plane (`http://localhost:3001`) |
-| `--org` | Push as an org-wide floor instead of a workspace SOP |
+| `--force` | Overwrite a SOP that changed on the control plane since the file was pulled, and fork a DRAFT even when one already exists |
+| `--create` | For a file whose recorded SOP no longer exists, create a new SOP instead of refusing |
+| `--org` | Push as an org-wide floor instead of a workspace SOP (always creates) |
 
 **What it does:**
-For every `.md` file in `.intutic/sops/<name>/`, parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier) and creates one workspace SOP per file, front matter stripped from the uploaded body. Fails if the folder is missing or contains no markdown. Creating workspace SOPs needs the OWNER or ADMIN role; `--org` needs that role on a workspace in the org. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
+For every `.md` file in `.intutic/sops/<name>/` — or, when there is no such folder, for the one file `.intutic/sops/<name>.md` — parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier on a new SOP), front matter stripped from the uploaded body, and then, per file:
+
+- **The file records a SOP** (`intutic_id:`, written by `sops pull` or an earlier push): if the file matches the SOP, nothing is sent (`up to date`). Otherwise the SOP is edited through the same path as the dashboard (`PUT /api/v1/sops/:id`): a DRAFT is edited in place; an approved SOP gets a new DRAFT version, and the approved one keeps enforcing until the draft is promoted. The file's `intutic_revision:` is sent as the precondition, so a SOP edited on the control plane since the pull is refused ("changed on the server since you pulled it") instead of overwritten; run `intutic sops pull`, or push with `--force` to overwrite. A push that would fork a second DRAFT of the same approved SOP is refused the same way. An edit that loosens the guideline needs an Owner, and the control plane's refusal is printed. A recorded SOP that no longer exists is refused unless `--create` is passed.
+- **The file records no SOP:** a new workspace SOP is created.
+
+After a successful create or update, the file's front matter records the SOP's id and revision (the new DRAFT's id when the edit forked one), with every other line of the file kept. Each file's result is printed; the command exits `1` if any file failed. Fails if neither the folder nor the file exists, or the folder contains no markdown. Creating and editing workspace SOPs needs the OWNER or ADMIN role; `--org` needs that role on a workspace in the org. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
 
 ---
 
@@ -2482,13 +2490,13 @@ intutic sops pull [options]
 | `--force` | Overwrite locally-modified files instead of refusing them |
 
 **What it does:**
-Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed and a `content_hash:` marker recording the body's hash. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
+Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed, a `content_hash:` marker recording the body's hash, and the sync record `sops push` reads: `intutic_id:` (the SOP) and `intutic_revision:` (its edit counter). A SOP goes into the local file that already records its id — flat or in a `<name>/` folder, keeping that file's other front-matter keys — and otherwise into `.intutic/sops/<slug>.md`. An approved version is skipped when a local file tracks its DRAFT successor. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
 
 ---
 
 ## `intutic sops status` <Badge type="tip" text="Cloud" />
 
-Show drift between `.intutic/sops/*.md` and the control plane. Writes no local file.
+Show drift between the local SOP files (`.intutic/sops/*.md` and `.intutic/sops/<name>/*.md`) and the control plane. Writes no local file.
 
 ```bash
 intutic sops status [options]
@@ -2501,7 +2509,7 @@ intutic sops status [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-For each local file, matched by title against the workspace's control-plane SOPs, reports `in-sync`, `local-ahead` (edited locally, not yet pushed), `remote-ahead` (control plane moved on, safe to pull), `diverged` (no recorded pull hash and no match either — can't tell "never pulled" from "edited long ago"), or `push-only` (no matching title on the control plane yet). Files named `guardrail-*.md` (written by `intutic guardrails pull`) are skipped. Every matched result is also reported to the control plane, which the `sop_git_drift` compliance probe reads; a failed report does not fail the command. See [GitOps for SOPs](/guide/gitops-sops).
+For each local file, matched to its SOP by the recorded `intutic_id:` (by title for a file without one), reports `in-sync`, `local-ahead` (edited locally, not yet pushed), `remote-ahead` (control plane moved on, safe to pull), `diverged` (edited on both sides, or no recorded pull hash and no match either — can't tell "never pulled" from "edited long ago"), or `push-only` (no matching SOP on the control plane yet, or the recorded one is gone). Files named `guardrail-*.md` (written by `intutic guardrails pull`) are skipped. Every matched result is also reported to the control plane, which the `sop_git_drift` compliance probe reads; a failed report does not fail the command. See [GitOps for SOPs](/guide/gitops-sops).
 
 ---
 
@@ -4317,7 +4325,7 @@ intutic enforce <action> [options]
 | Option | Description |
 |--------|-------------|
 | `--port <port>` | The proxy's listener port to permit. Default: the `PORT` environment variable, else `4000`; `INTUTIC_PROXY_URL` is not read. |
-| `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to the user the command runs as, which is root under `sudo`: pass `--uid "$(id -u)"` when the proxy runs as you. |
+| `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to you: the user the command runs as, or under `sudo` the user who invoked sudo (`SUDO_UID`), not root. Pass it when the proxy runs as a different account. |
 | `--allow <cidrs>` | Comma-separated extra destinations to permit (control plane, private registries, etc.), each an IP address or CIDR block. A hostname is refused before anything is applied: resolve it to its address range first. |
 | `--no-dns` | Also deny outbound DNS — only if a local resolver serves the host. |
 | `--platform <os>` | Target ruleset platform: `linux`, `macos`, or `windows`. Defaults to the current OS. |
@@ -4340,7 +4348,7 @@ active on a given machine without SSHing into it.
 intutic enforce generate
 
 # Apply, permitting an internal network and a package registry's address range too
-sudo intutic enforce apply --uid "$(id -u)" --allow 10.0.0.0/8,203.0.113.0/24
+sudo intutic enforce apply --allow 10.0.0.0/8,203.0.113.0/24
 
 # Check whether it's currently active
 intutic enforce status

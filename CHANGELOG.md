@@ -210,6 +210,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the other phrasings it missed. The MCP coverage table now matches the
   gate registry, which had Windsurf as unconfirmed.
 
+- **`sudo intutic enforce apply` exempts you, not root.** Under `sudo` the
+  firewall's default `--uid` was root's, so the proxy you run with
+  `intutic start` was denied egress. The CLI and `intutic-proxy enforce` now
+  default to the invoking user (`SUDO_UID`) when running as root under sudo.
+  The Jamf and Intune firewall manifests run as root with no sudo, so their
+  script now passes the console user's uid (`stat -f %u /dev/console` on
+  macOS, seat0's active session on Linux).
+- **`intutic doctor` finds the CA `intutic connect` trusted on Linux.** It
+  looked only for `intutic-ca.crt`; connect installs `intutic-connect-ca.crt`.
+- **`intutic loop start`, `complete`, `kill` and `list` exit 1** when the
+  control-plane call fails or is refused, instead of printing the error and
+  exiting 0.
+- **`intutic policy snapshot`** no longer says the previous snapshot is
+  untouched when a refused key rewrote it, and `intutic policy replay` names
+  the plan rather than your role when the plan refused it.
+- **`intutic guardrails`:** `list --limit` help states the server's default
+  200 and cap 1000; `sources list` shows a source's last failed sync; `docs
+  extract` reports an unreachable cap store (503) as such and exits 1.
+- **`intutic integrity chain`** says older roots were not walked rather than
+  printing the endpoint's one-row probe as a count.
+- **`intutic judge configure`** prints docs links instead of paths into
+  Intutic's own source tree.
+- **`intutic sops push` updates the SOP a file came from instead of creating
+  a duplicate.** `sops pull` now records each file's SOP in its front matter
+  (`intutic_id:`, `intutic_revision:`), and push edits that SOP through the
+  dashboard's edit path: a DRAFT in place, an approved SOP as a new DRAFT
+  version while the approved one keeps enforcing. The recorded revision is
+  the precondition, so a SOP edited on the control plane since the pull is
+  refused (`--force` overwrites); an unchanged file is a no-op; a deleted SOP
+  needs `--create`; a WEAKEN edit's Owner refusal is printed. A file with no
+  record is created and then recorded. Push also takes a single file, the
+  layout pull writes, as well as a folder; pull and status read both layouts,
+  match files by the recorded id, and pull keeps a file's other front-matter
+  keys. The SOP listing and detail now carry `priorVersionId`.
+- **The AutoGen `.env.intutic` comment leads with `IntuticWorkbench`**, which
+  governs `AssistantAgent`'s own tool calls, as the integration page does.
+
 ### Removed
 
 - **`ClawdeBudgetExceededError` (`@intutic/clawde`).** Nothing threw it: a

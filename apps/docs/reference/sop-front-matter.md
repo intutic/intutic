@@ -53,14 +53,16 @@ own detectors are concerned, it is.
 
 The parser reads keys by line prefix and ignores every key it does not know,
 so a SOP may carry annotations the proxy never acts on. Intutic's own tooling
-writes three: the first two come from generating front matter from a cited
-policy passage:
+writes five: the first two come from generating front matter from a cited
+policy passage, the last two are `intutic sops pull`/`push`'s sync record:
 
 | Key | Shape | What it is |
 | :--- | :--- | :--- |
 | `source:` | a URL | Where the rule's text came from — the upstream page. |
 | `cite:` | a hex digest | The hash of the exact passage the rule was derived from. |
 | `content_hash:` | a hex digest | `intutic sops pull` and `intutic guardrails pull`'s marker: the hash of the body when the file was written, so a later pull can tell an upstream change from a local edit. |
+| `intutic_id:` | a SOP id (`sp_…`) | The control-plane SOP this file was last pulled from or pushed to; `intutic sops push` updates it instead of creating a new one. |
+| `intutic_revision:` | an integer | That SOP's edit counter at the last sync, sent as the push's precondition so an edit made on the control plane since is refused, not overwritten. Not the `version:` semver. |
 
 None of them blocks, steers or holds anything. They exist so a rule on disk still
 says which sentence it stands on; the enforcing keys above are the only ones

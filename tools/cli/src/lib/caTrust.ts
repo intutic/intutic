@@ -60,6 +60,17 @@ const ENTERPRISE_DESTS: LinuxDests = { debian: LINUX_DEBIAN_DEST, rhel: LINUX_RH
 const CONNECT_DESTS: LinuxDests = { debian: LINUX_CONNECT_DEBIAN_DEST, rhel: LINUX_CONNECT_RHEL_DEST }
 
 /**
+ * Every path this module installs the CA to on Linux — `enterprise install`'s
+ * copy and `intutic connect`'s — so `doctor` checks the same files it writes.
+ */
+export const LINUX_CA_TRUST_PATHS: readonly string[] = [
+  LINUX_DEBIAN_DEST,
+  LINUX_RHEL_DEST,
+  LINUX_CONNECT_DEBIAN_DEST,
+  LINUX_CONNECT_RHEL_DEST,
+]
+
+/**
  * The command(s) that trust `caCertPath` at the given scope, for the given
  * platform. Pure — no I/O — so it doubles as the source of truth for
  * `doctor.ts`'s remediation text.

@@ -292,6 +292,18 @@ describe('intutic guardrails sources / docs / search', () => {
     expect(printed()).toContain('1 policy source(s)')
   })
 
+  it("sources list shows a source's last failed sync attempt", async () => {
+    fetchMock.mockResolvedValue(ok({ items: [{ connector_id: 'cc_1', provider: 'notion', name: 'runbooks', config: {}, last_synced_at: null, last_sync_error: 'Notion answered 401' }] }))
+    await runGuardrailsSourcesList({})
+    expect(printed() + errors()).toContain('last sync attempt failed: Notion answered 401')
+  })
+
+  it('docs extract names an unreachable cap store (503) rather than a generic failure', async () => {
+    fetchMock.mockResolvedValueOnce(ok({ error: 'Extraction cap store unavailable; not spending a model call', result: { skipped: 'cap_unavailable' } }, 503))
+    await expect(runGuardrailsDocsExtract('psd_1', {})).rejects.toThrow('process.exit(1)')
+    expect(printed() + errors()).toContain('cap store was unreachable')
+  })
+
   it('sources add validates the provider and posts the connector', async () => {
     await swallowExit(runGuardrailsSourcesAdd('dropbox', { name: 'x', token: 't' }))
     expect(fetchMock).not.toHaveBeenCalled()

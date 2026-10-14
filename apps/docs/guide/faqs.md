@@ -206,7 +206,7 @@ Intutic supports local-first development by letting developers test custom promp
     ```bash
     intutic sops push <rule-group-name>
     ```
-    This packages the rule group's markdown files, posts them to `/api/v1/sops`, and writes them to the central the control plane’s datastore `sops` table.
+    This pushes each of the rule group's markdown files to the control plane's SOP registry: a new SOP for a file pushed the first time, an update to the same SOP afterwards (each file records the SOP it was pushed to).
 *   **Workspace-wide Distribution:** During subsequent sync cycles, the sync daemons of all other developers in the workspace automatically fetch the newly promoted rule with the workspace's sync config and write it into their respective adapter configs (like `.cursor/rules/intutic-governance.mdc` or `.claude/rules/intutic-governance.md`).
 
 ---

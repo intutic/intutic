@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { enforceFlagArgs, invalidAllowEntries } from './enforce.js'
+import { enforceFlagArgs, invalidAllowEntries, sudoInvokerUid } from './enforce.js'
 
 describe('enforceFlagArgs', () => {
   it('passes through port, uid, allow and platform', () => {
@@ -17,12 +17,36 @@ describe('enforceFlagArgs', () => {
     expect(enforceFlagArgs({})).toEqual([])
   })
 
+  it('under sudo, exempts the invoking user (SUDO_UID) rather than root', () => {
+    expect(enforceFlagArgs({ port: '4000' }, { uid: 0, env: { SUDO_UID: '501' } })).toEqual([
+      '--port', '4000',
+      '--uid', '501',
+    ])
+  })
+
+  it('an explicit --uid wins over SUDO_UID', () => {
+    expect(enforceFlagArgs({ uid: '0' }, { uid: 0, env: { SUDO_UID: '501' } })).toEqual(['--uid', '0'])
+  })
+
   it('only emits --no-dns when dns is explicitly false (commander --no-dns)', () => {
     // default (dns omitted / true) → DNS stays allowed, no flag
     expect(enforceFlagArgs({ dns: true })).toEqual([])
     expect(enforceFlagArgs({})).toEqual([])
     // --no-dns passed → dns === false → deny DNS
     expect(enforceFlagArgs({ dns: false })).toEqual(['--no-dns'])
+  })
+})
+
+describe('sudoInvokerUid', () => {
+  it('is the SUDO_UID only when running as root', () => {
+    expect(sudoInvokerUid({ uid: 0, env: { SUDO_UID: '501' } })).toBe('501')
+    expect(sudoInvokerUid({ uid: 1000, env: { SUDO_UID: '501' } })).toBeUndefined()
+    expect(sudoInvokerUid({ uid: undefined, env: { SUDO_UID: '501' } })).toBeUndefined()
+  })
+
+  it('leaves a plain root shell, or a garbled SUDO_UID, to the binary default', () => {
+    expect(sudoInvokerUid({ uid: 0, env: {} })).toBeUndefined()
+    expect(sudoInvokerUid({ uid: 0, env: { SUDO_UID: '501; rm' } })).toBeUndefined()
   })
 })
 

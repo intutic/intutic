@@ -231,8 +231,10 @@ const sopsCmd = program
 
 sopsCmd
   .command('push <name>')
-  .description('Push a local offline SOP folder to the central workspace')
+  .description("Push a local SOP folder, or one SOP file (the layout `sops pull` writes), to the central workspace: updates the SOP a file records, creates one for a file without a record")
   .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .option('--force', 'Overwrite a SOP that changed on the server since the file was pulled')
+  .option('--create', 'Create a new SOP for a file whose recorded SOP no longer exists')
   .option('--org', "Push as an org-wide floor instead of a workspace SOP -- applies to every workspace under the caller's org, in addition to that workspace's own SOPs")
   .action(async (name, opts) => {
     const { runSopsPush } = await import('./commands/sops.js')
@@ -526,7 +528,7 @@ guardrailsCmd
   .option('--target <target>', 'hook_rule | sop_front_matter | wasm_rule | workspace_setting')
   .option('--provenance <provenance>', 'extracted | authored')
   .option('--doc <docId>', 'Only guardrails cited from this document')
-  .option('--limit <n>', 'Max rows (default 50, capped at 200)')
+  .option('--limit <n>', 'Max rows (default 200, capped at 1000)')
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
@@ -741,7 +743,7 @@ for (const [action, desc] of [
     .command(action)
     .description(desc)
     .option('--port <port>', "The proxy's listener port to permit", '4000')
-    .option('--uid <uid>', 'uid the proxy runs as, exempted from the deny (defaults to current user)')
+    .option('--uid <uid>', 'uid the proxy runs as, exempted from the deny (defaults to you: the invoking user under sudo)')
     .option('--allow <cidrs>', 'Comma-separated extra destination CIDRs to permit (control plane, registries, …)')
     .option('--no-dns', 'Also deny outbound DNS (only if a local resolver serves the host)')
     .option('--platform <os>', 'Target ruleset platform: linux | macos | windows (defaults to current OS)')

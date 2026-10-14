@@ -402,6 +402,28 @@ describe('runPolicyReplay end to end', () => {
     expect(postWithStatusMock).toHaveBeenCalledWith('/api/v1/wasm-rules/wasm_abc/replay', {})
   })
 
+  it('names the plan, not the role, when the plan refused the replay', async () => {
+    postWithStatusMock.mockResolvedValue({
+      status: 403,
+      body: { error: 'Upgrade required — custom WASM rules need a higher plan', code: 'FEATURE_NOT_AVAILABLE' },
+    })
+    await replay('wasm_abc')
+    expect(exitCode).toBe(1)
+    const printed = vi.mocked(console.error).mock.calls.flat().join('\n')
+    expect(printed).toContain('Upgrade required')
+    expect(printed).not.toContain('your role')
+  })
+
+  it("names the roles when the caller's role is refused", async () => {
+    postWithStatusMock.mockResolvedValue({
+      status: 403,
+      body: { error: 'Forbidden', code: 'FORBIDDEN', detail: 'Requires the OWNER, ADMIN or EM role' },
+    })
+    await replay('wasm_abc')
+    expect(exitCode).toBe(1)
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain('Requires the OWNER, ADMIN or EM role')
+  })
+
   it('rejects a non-positive --limit before making a network call', async () => {
     await replay('wasm_abc', { limit: '0' })
     expect(exitCode).toBe(1)
