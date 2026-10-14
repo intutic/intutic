@@ -71,6 +71,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them, so the workspace, session, branch, CI pipeline and incident came back
   empty. Each field now comes from the file when it carries it and from its
   environment variable otherwise, in `@intutic/clawde` and `intutic-clawde`.
+- **Behaviour change: the SOP Optimizer applies a change without review only
+  when it strengthens the guideline.** With `ff_metaclaw_auto_apply` on, a
+  manually started run applied any proposal that cleared the auto-approve
+  threshold, a weakening rewrite included, and did it by retiring the reviewed
+  guideline and putting an unreviewed draft in force. Now a proposal is applied
+  only when the change classification is `STRENGTHEN` (it adds a safety rule,
+  removes none, and is not more than a fifth shorter). Every other proposal,
+  and any the classifier could not classify, waits for review with its
+  classification and the reason. An applied change becomes the next version of
+  the guideline in the same lifecycle state, with an audit row naming
+  `system:metaclaw`. A `WEAKEN` edit needs an Owner whoever makes it: no caller
+  is exempt for not declaring a role.
+- **Behaviour change: the SOP Optimizer's Approval mode is its only switch,
+  and the optimizer now runs.** It looked for guidelines in a lifecycle state
+  that does not exist, so it never proposed anything; it now works on enforced
+  guidelines (validated and active), at most 5 a cycle, one proposal each, and
+  none for a guideline with a pending proposal or one proposed in the last 24
+  hours. `featureFlags.ff_metaclaw_auto_apply` is removed (a settings `PUT`
+  that sends it is refused, and the Terraform provider rejects it): Approval
+  mode **manual** applies nothing, **auto** lets a run an Owner or Admin
+  starts apply a strengthening proposal, and the hourly sweep only proposes.
+  Each workspace keeps what it had without loosening: the flag on becomes
+  auto, and auto without the flag becomes manual. Incident mining is
+  proposal-only in both modes; auto no longer marks its drafts auto-approved.
+- **Behaviour change: editing a guideline past draft keeps it enforcing.**
+  Editing a SOP that is not a draft, or approving an amendment against it,
+  retired the version you edited at once and put the edit in a new draft, so
+  a validated guideline stopped enforcing until the draft was carried through
+  review and shadow. The edited version now keeps its state until the new
+  version is promoted to validated, which is when it is retired.
 
 ### Fixed
 

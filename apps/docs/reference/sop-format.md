@@ -135,7 +135,7 @@ When an SOP is updated, the change is classified:
 | `NARROW` | Reduces the scope of the rule |
 | `WEAKEN` | Makes the rule less restrictive |
 
-The classification is returned with the edit (`antiGaming`). A `WEAKEN` edit made by a person needs the OWNER role; see [SOPs](/guide/sops#change-classification).
+The classification is returned with the edit (`antiGaming`). A `WEAKEN` edit needs the OWNER role, and the SOP Optimizer applies a change without review only when it is `STRENGTHEN`; see [SOPs](/guide/sops#change-classification).
 
 ## Dependencies
 

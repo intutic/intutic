@@ -70,6 +70,10 @@ DRAFT → PENDING_REVIEW → GENERATED → HYPOTHESIZED → REFINED → VALIDATE
 
 Every transition needs the OWNER or ADMIN role, as creating and editing a SOP do. Moving from `PENDING_REVIEW` to `GENERATED` also needs the SOP's Gödel score to pass its threshold.
 
+### Editing a SOP past draft
+
+A draft is edited in place. Editing a SOP in any later state, or approving an amendment against it, creates the next version as a new `DRAFT` with a new id, which goes through the same lifecycle. The version you edited keeps its state meanwhile: a `VALIDATED` SOP keeps enforcing while the new version is reviewed and tested, and is retired only when the new version is promoted to `VALIDATED`. A workspace is never left without the enforcing version of a guideline because an edit is in review.
+
 ### The compiled graph gate
 
 Enforcement reads the SOP's compiled SSL graph, not its markdown. A SOP whose
@@ -283,12 +287,12 @@ When you update a validated SOP, Intutic classifies the change for the audit tra
 
 | Classification | Meaning |
 |----------------|---------|
-| **STRENGTHEN** | Making the rule stricter (e.g., blocking more actions) |
+| **STRENGTHEN** | Making the rule stricter: it adds a safety rule (a keyword such as `must not`, `prohibited`, `require approval`, `deny`), removes none, and is not more than a fifth shorter |
 | **CLARIFY** | Improving wording without changing scope |
 | **NARROW** | Reducing the scope of what the rule covers |
 | **WEAKEN** | Making the rule more permissive |
 
-Every edit needs the OWNER or ADMIN role, and an edit classified `WEAKEN` needs an OWNER: an Admin's is refused with 403 `WEAKEN_REQUIRES_OWNER` and nothing is saved. Approving a Dream Cycle amendment that weakens a guideline needs an OWNER too; a MetaClaw amendment applied by auto-approval is not gated. The classification is returned with every edit, as `antiGaming`.
+Every edit needs the OWNER or ADMIN role, and an edit classified `WEAKEN` needs an OWNER: an Admin's is refused with 403 `WEAKEN_REQUIRES_OWNER` and nothing is saved. Approving a Dream Cycle amendment that weakens a guideline needs an OWNER too. No automated writer gets that exemption: the SOP Optimizer applies a change without review only when it is classified `STRENGTHEN`, and everything else waits for a person (see [What auto-apply applies](/guide/metaclaw#what-auto-apply-applies)). The classification is returned with every edit, as `antiGaming`.
 
 ## Best practices
 

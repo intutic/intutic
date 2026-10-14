@@ -200,16 +200,6 @@ export interface WorkspaceSettings {
      */
     ff_shadow_enforcement?: boolean
     /**
-     * Let a MetaClaw evolution proposal auto-apply instead of waiting for
-     * human review. Read directly off raw settings JSON by
-     * `promptEvolutionService.runEvolutionCycle` — no Valkey mirror, since
-     * nothing else needs a hot-path read of it.
-     *
-     * Also declared here without being settable until now — same "declared,
-     * never added to the PUT schema" bug as `ff_shadow_enforcement` above.
-     */
-    ff_metaclaw_auto_apply?: boolean
-    /**
      * Let a high-confidence SkillOpt config-edit suggestion auto-apply
      * instead of waiting for human review. Mirrored into Valkey
      * (`ff:{workspaceId}:skillopt_auto_apply`) by `persistAndSyncSettings`,
@@ -733,7 +723,6 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
     // Off by default, and the proxy resolves an absent flag to false as well —
     // an unreachable flag service must never silently disable enforcement.
     ff_shadow_enforcement: false,
-    ff_metaclaw_auto_apply: false,
     ff_skillopt_auto_apply: false,
     // Off by default — see the field doc. The `strict` security posture
     // preset turns it on; nothing else does.

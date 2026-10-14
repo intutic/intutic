@@ -1,8 +1,16 @@
 ## 0.2.1 (Unreleased)
 
+BREAKING CHANGES:
+
+* resource/intutic_workspace_settings: `featureFlags.ff_metaclaw_auto_apply` is no longer accepted; the plan fails validation naming it, and the API refuses it. The control plane removed the flag and carried each workspace's value over to the SOP Optimizer's Approval mode, which is now the only switch for its auto-apply. Remove the flag from your configuration before upgrading.
+
 BUG FIXES:
 
 * resource/intutic_notification_rule: `filter_severity` is validated against the severities events carry (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`), in any case. Lowercase values, as the example used to show, were stored as written and matched no event, so the rule never fired; the control plane now stores them uppercase and has uppercased existing rules. A configured list that differs from the stored one only in case plans no change. A value that is not a severity now fails at plan time.
+
+NOTES:
+
+* resource/intutic_sop: editing a SOP past `DRAFT` no longer retires the version you edited. The API keeps that version enforcing until the new `DRAFT` version is promoted to `VALIDATED`; the resource tracks the new version as before. The schema is unchanged.
 
 ## 0.2.0 (October 13, 2026)
 
