@@ -41,8 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace that replays rules reading `tool_calls[].arguments` can opt in
   with the new `storeToolArguments` setting (off by default); the values are
   then kept as `tool_arguments: "redacted"`. Snapshots from older proxies are
-  reduced to keys and sizes when they are ingested, and `intutic policy
-  replay` says how many contexts withheld arguments.
+  reduced to keys and sizes when they are ingested, the ones a control plane
+  already stored are reduced when it upgrades, and `intutic policy replay`
+  says how many contexts withheld arguments.
 - **What the proxy keeps is redacted for every PII detector, email and phone
   included.** Live defaults are unchanged (card, IBAN and SSN redact; email and
   phone off, because an agent shown a redacted address writes the placeholder
