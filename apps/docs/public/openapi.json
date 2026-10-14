@@ -3,7 +3,7 @@
   "info": {
     "title": "Intutic Control Plane API",
     "version": "v1",
-    "description": "Generated from the control plane's route source. 413 operations; 98 validate their JSON body and 36 their query string with a schema, shown here. 33 read a body no schema validates. No route declares a response schema, so responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
+    "description": "Generated from the control plane's route source. 413 operations; 131 validate their JSON body and 68 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. No route declares a response schema, so responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
   },
   "servers": [
     {
@@ -549,19 +549,19 @@
           {
             "name": "code",
             "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             }
           },
           {
             "name": "state",
             "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             }
           }
         ],
@@ -569,13 +569,16 @@
           "302": {
             "description": "Found"
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "default": {
             "description": "The handler answers through a helper; its statuses are not read from the route source."
           }
         },
         "x-intutic-auth": "None (OAuth state)",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -2098,16 +2101,24 @@
             "name": "code",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
             }
           },
           {
             "name": "error",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -2116,16 +2127,6 @@
             "name": "error_description",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "state",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -2147,7 +2148,7 @@
         },
         "x-intutic-auth": "None (OIDC state and code)",
         "x-intutic-plan": "Biz Org+",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -2425,9 +2426,10 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "Clamped to 1–100.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 12
             }
           }
         ],
@@ -2450,7 +2452,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -2588,18 +2590,11 @@
         "description": "**Auth:** Google-signed OIDC token\n\n**Plan:** Cloud",
         "security": [],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/GcpWebhookInputSchema"
               }
             }
           }
@@ -2607,6 +2602,9 @@
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -2617,7 +2615,7 @@
         },
         "x-intutic-auth": "Google-signed OIDC token",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -3405,9 +3403,15 @@
             "name": "format",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "json",
+                "markdown",
+                "csv",
+                "pdf"
+              ],
+              "default": "json"
             }
           }
         ],
@@ -3427,7 +3431,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -3610,18 +3614,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/RunProbesBodySchema"
               }
             }
           }
@@ -3629,6 +3626,9 @@
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -3639,7 +3639,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -4570,7 +4570,6 @@
             "name": "since",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -4579,6 +4578,9 @@
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -4589,7 +4591,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -4845,18 +4847,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/DeviceReportSchema"
               }
             }
           }
@@ -4877,7 +4872,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM/DEVELOPER",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -4941,18 +4936,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/StartDomainVerificationSchema"
               }
             }
           }
@@ -4973,7 +4961,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -5284,18 +5272,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/StartTrialSchema"
               }
             }
           }
@@ -5319,7 +5300,7 @@
         },
         "x-intutic-auth": "OWNER",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -5413,9 +5394,10 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "Clamped to 1–90.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 30
             }
           }
         ],
@@ -5432,7 +5414,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -5681,25 +5663,6 @@
             "name": "detector_id",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "order",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -5708,15 +5671,43 @@
             "name": "unadjudicated",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "recent",
+                "uncertainty"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Clamped to 1–500.",
+            "schema": {
+              "type": "integer",
+              "default": 100
             }
           }
         ],
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -5727,7 +5718,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -5929,7 +5920,6 @@
             "name": "since",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -5938,7 +5928,6 @@
             "name": "until",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -5960,7 +5949,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -6091,18 +6080,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/RegisterGatewaySchema"
               }
             }
           }
@@ -6126,7 +6108,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -6157,18 +6139,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/RevokeGatewaySchema"
               }
             }
           }
@@ -6176,6 +6151,9 @@
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -6189,7 +6167,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -6251,18 +6229,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/GatewayConfigPatchSchema"
               }
             }
           }
@@ -6286,7 +6257,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -6644,7 +6615,17 @@
             "name": "filter",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unlabeled"
+              ]
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -6653,24 +6634,19 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "Clamped to 1–500.",
             "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 100
             }
           }
         ],
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -6681,7 +6657,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -6847,21 +6823,27 @@
         ],
         "parameters": [
           {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "status",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "VIOLATION",
+                "CLEAN"
+              ],
+              "default": "PENDING"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Clamped to 1–200.",
+            "schema": {
+              "type": "integer",
+              "default": 50
             }
           }
         ],
@@ -6884,7 +6866,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -7052,18 +7034,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/HookGateRequestSchema"
               }
             }
           }
@@ -7084,7 +7059,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM/DEVELOPER",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -7552,13 +7527,15 @@
             "name": "harnessType",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
           }
         ],
         "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -7568,7 +7545,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -7593,7 +7570,6 @@
             "name": "loopRunId",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -7603,13 +7579,16 @@
           "200": {
             "description": "OK. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -7850,15 +7829,19 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "Clamped to 1–500.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 100
             }
           }
         ],
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -7869,7 +7852,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM; DEVELOPER (own machines)",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -7891,18 +7874,56 @@
         ],
         "parameters": [
           {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "harness",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "format",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ]
             }
           }
         ],
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -7913,7 +7934,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM; DEVELOPER (own machines)",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -7935,18 +7956,56 @@
         ],
         "parameters": [
           {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "harness",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "format",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ]
             }
           }
         ],
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -7957,7 +8016,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM; DEVELOPER (own machines)",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -7977,9 +8036,30 @@
             "sessionCookie": []
           }
         ],
+        "parameters": [
+          {
+            "name": "device",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -7990,7 +8070,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM; DEVELOPER (own machines)",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -8482,18 +8562,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/CompleteLoopSchema"
               }
             }
           }
@@ -8517,7 +8590,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM; DEVELOPER (own run)",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -8640,18 +8713,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ReviewLoopSchema"
               }
             }
           }
@@ -8675,7 +8741,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -8706,18 +8772,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/VerifyLoopSchema"
               }
             }
           }
@@ -8744,7 +8803,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM; DEVELOPER (own run)",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -8798,18 +8857,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/StartLoopSchema"
               }
             }
           }
@@ -8830,7 +8882,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM/DEVELOPER",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -9484,18 +9536,20 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "Clamped to 1–100.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 10
             }
           },
           {
             "name": "offset",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "At least 0; a smaller value is raised to it.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 0
             }
           }
         ],
@@ -9515,7 +9569,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -9634,18 +9688,20 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "At least 1; a smaller value is raised to it.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 50
             }
           },
           {
             "name": "offset",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "At least 0; a smaller value is raised to it.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 0
             }
           }
         ],
@@ -9653,13 +9709,16 @@
           "200": {
             "description": "OK. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -9906,18 +9965,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/CreateOrgSchema"
               }
             }
           }
@@ -9938,7 +9990,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -10028,18 +10080,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/GatewayAssignmentSchema"
               }
             }
           }
@@ -10060,7 +10105,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -10132,18 +10177,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/NameBodySchema"
               }
             }
           }
@@ -10170,7 +10208,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -11108,10 +11146,10 @@
           {
             "name": "token",
             "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             }
           }
         ],
@@ -11131,7 +11169,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -11241,18 +11279,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ExtractBodySchema"
               }
             }
           }
@@ -11260,6 +11291,9 @@
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -11279,7 +11313,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Self-serve+",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -11340,9 +11374,10 @@
             "name": "minJaccard",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
             }
           }
         ],
@@ -11362,7 +11397,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -11387,87 +11422,6 @@
             "name": "docId",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK. No response schema in the route source."
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
-          }
-        },
-        "x-intutic-auth": "OWNER/ADMIN/EM",
-        "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
-      }
-    },
-    "/api/v1/policy-guardrails/guardrails": {
-      "get": {
-        "operationId": "getApiV1PolicyGuardrailsGuardrails",
-        "tags": [
-          "policyGuardrails.ts"
-        ],
-        "summary": "Guardrails, filterable by `status`, `target`, `provenance` (`extracted` or `authored`) and `docId`",
-        "description": "**Auth:** OWNER/ADMIN/EM\n\n**Plan:** Cloud",
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "docId",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "provenance",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "target",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -11489,7 +11443,103 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "none"
+      }
+    },
+    "/api/v1/policy-guardrails/guardrails": {
+      "get": {
+        "operationId": "getApiV1PolicyGuardrailsGuardrails",
+        "tags": [
+          "policyGuardrails.ts"
+        ],
+        "summary": "Guardrails, filterable by `status`, `target`, `provenance` (`extracted` or `authored`) and `docId`",
+        "description": "**Auth:** OWNER/ADMIN/EM\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PROPOSED",
+                "SHADOW",
+                "ENFORCING",
+                "REJECTED",
+                "RETIRED"
+              ]
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hook_rule",
+                "sop_front_matter",
+                "wasm_rule",
+                "workspace_setting"
+              ]
+            }
+          },
+          {
+            "name": "provenance",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "extracted",
+                "authored"
+              ]
+            }
+          },
+          {
+            "name": "docId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "x-intutic-auth": "OWNER/ADMIN/EM",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       },
       "post": {
@@ -11748,18 +11798,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/PromoteBodySchema"
               }
             }
           }
@@ -11767,6 +11810,9 @@
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -11777,7 +11823,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -11897,18 +11943,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/RejectBodySchema"
               }
             }
           }
@@ -11929,7 +11968,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -12089,7 +12128,6 @@
             "name": "docId",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -12098,7 +12136,6 @@
             "name": "passageId",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -12123,7 +12160,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -12147,10 +12184,11 @@
           {
             "name": "q",
             "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
             }
           }
         ],
@@ -12170,7 +12208,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -12662,10 +12700,10 @@
           {
             "name": "candidateModel",
             "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             }
           }
         ],
@@ -12682,7 +12720,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -12982,18 +13020,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/CreateScimTokenSchema"
               }
             }
           }
@@ -13014,7 +13045,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -13698,18 +13729,20 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "Clamped to 1–100.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 50
             }
           },
           {
             "name": "offset",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "At least 0; a smaller value is raised to it.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 0
             }
           }
         ],
@@ -13717,13 +13750,16 @@
           "200": {
             "description": "OK. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -14753,15 +14789,17 @@
             "name": "version",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "integer"
             }
           }
         ],
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -14775,7 +14813,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       },
       "post": {
@@ -15238,14 +15276,17 @@
           {
             "name": "token",
             "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             }
           }
         ],
         "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -15255,7 +15296,7 @@
         },
         "x-intutic-auth": "API key (`?token=vk_…`)",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -15499,18 +15540,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/NameBodySchema"
               }
             }
           }
@@ -15537,7 +15571,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -15862,25 +15896,26 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "Clamped to 1–100.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 50
             }
           },
           {
             "name": "offset",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
+            "description": "At least 0; a smaller value is raised to it.",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 0
             }
           },
           {
             "name": "severity",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -15889,6 +15924,9 @@
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -15899,7 +15937,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -17034,18 +17072,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/UpdateWasmRuleSchema"
               }
             }
           }
@@ -17053,6 +17084,9 @@
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -17069,7 +17103,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -17100,18 +17134,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ReplayWasmRuleSchema"
               }
             }
           }
@@ -17119,6 +17146,9 @@
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -17138,7 +17168,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -17250,18 +17280,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ByocTestSchema"
               }
             }
           }
@@ -17288,7 +17311,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -17411,18 +17434,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/GatewayAssignmentSchema"
               }
             }
           }
@@ -17449,7 +17465,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -17759,18 +17775,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ApplyPostureSchema"
               }
             }
           }
@@ -17794,7 +17803,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -17899,18 +17908,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ProviderCredentialFieldsSchema"
               }
             }
           }
@@ -17931,7 +17933,7 @@
         },
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -18501,15 +18503,18 @@
             "name": "status",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 32
             }
           }
         ],
         "responses": {
           "200": {
             "description": "OK. No response schema in the route source."
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"
@@ -18520,7 +18525,7 @@
         },
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -18927,7 +18932,6 @@
             "name": "filter",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -18937,13 +18941,16 @@
           "200": {
             "description": "OK. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "SCIM token",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       },
       "post": {
@@ -18959,18 +18966,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ScimGroupSchema"
               }
             }
           }
@@ -18979,13 +18979,16 @@
           "201": {
             "description": "Created. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "SCIM token",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -19083,18 +19086,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ScimGroupPatchOpSchema"
               }
             }
           }
@@ -19103,13 +19099,16 @@
           "200": {
             "description": "OK. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "SCIM token",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       },
       "put": {
@@ -19135,18 +19134,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ScimGroupSchema"
               }
             }
           }
@@ -19155,13 +19147,16 @@
           "200": {
             "description": "OK. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "SCIM token",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -19180,19 +19175,9 @@
         ],
         "parameters": [
           {
-            "name": "count",
-            "in": "query",
-            "required": false,
-            "description": "Read by the handler; no schema validates it.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "filter",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
               "type": "string"
             }
@@ -19201,9 +19186,16 @@
             "name": "startIndex",
             "in": "query",
             "required": false,
-            "description": "Read by the handler; no schema validates it.",
             "schema": {
-              "type": "string"
+              "type": "integer"
+            }
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -19211,13 +19203,16 @@
           "200": {
             "description": "OK. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "SCIM token",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       },
       "post": {
@@ -19233,18 +19228,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ScimUserCreateSchema"
               }
             }
           }
@@ -19253,13 +19241,16 @@
           "201": {
             "description": "Created. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "SCIM token",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     },
@@ -19363,18 +19354,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ScimPatchOpSchema"
               }
             }
           }
@@ -19383,13 +19367,16 @@
           "200": {
             "description": "OK. No response schema in the route source."
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           }
         },
         "x-intutic-auth": "SCIM token",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       },
       "put": {
@@ -19415,18 +19402,11 @@
           }
         ],
         "requestBody": {
-          "description": "The handler reads a JSON body that no schema in the route source validates.",
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "$ref": "#/components/schemas/ScimUserReplaceSchema"
               }
             }
           }
@@ -19444,7 +19424,7 @@
         },
         "x-intutic-auth": "SCIM token",
         "x-intutic-plan": "Enterprise",
-        "x-intutic-request-schema": "none",
+        "x-intutic-request-schema": "zod",
         "x-intutic-response-schema": "none"
       }
     }
@@ -19540,6 +19520,27 @@
         },
         "required": [
           "token"
+        ],
+        "additionalProperties": false
+      },
+      "ApplyPostureSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "security",
+              "cost"
+            ]
+          },
+          "posture": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "kind",
+          "posture"
         ],
         "additionalProperties": false
       },
@@ -19835,6 +19836,72 @@
         ],
         "additionalProperties": false
       },
+      "ByocTestSchema": {
+        "type": "object",
+        "properties": {
+          "byocStorage": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "gcs",
+                      "s3",
+                      "disabled"
+                    ]
+                  },
+                  "bucketName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "prefix": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "region": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "accessKeyId": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "secretAccessKey": {
+                    "type": "string",
+                    "maxLength": 1024
+                  },
+                  "credentials": {
+                    "type": "string",
+                    "maxLength": 8192
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "mirror",
+                      "primary"
+                    ]
+                  }
+                },
+                "required": [
+                  "provider"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "CapturePlanSchema": {
         "type": "object",
         "properties": {
@@ -20016,6 +20083,19 @@
         "required": [
           "outcome"
         ],
+        "additionalProperties": false
+      },
+      "CompleteLoopSchema": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "SUCCEEDED",
+              "FAILED"
+            ]
+          }
+        },
         "additionalProperties": false
       },
       "compliance.CollectBodySchema": {
@@ -20330,6 +20410,36 @@
           "name",
           "adapterType",
           "config"
+        ],
+        "additionalProperties": false
+      },
+      "CreateOrgSchema": {
+        "type": "object",
+        "properties": {
+          "orgName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "domain": {
+            "type": "string",
+            "minLength": 1
+          },
+          "verificationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "orgName",
+          "domain",
+          "verificationId"
         ],
         "additionalProperties": false
       },
@@ -20648,6 +20758,32 @@
         },
         "required": [
           "datasetId"
+        ],
+        "additionalProperties": false
+      },
+      "CreateScimTokenSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expiresInDays": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 3650
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "label"
         ],
         "additionalProperties": false
       },
@@ -21009,6 +21145,75 @@
         ],
         "additionalProperties": false
       },
+      "DeviceReportSchema": {
+        "type": "object",
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "hostname": {
+            "type": "string",
+            "minLength": 1
+          },
+          "platform": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cliVersion": {
+            "type": "string"
+          },
+          "firewall": {
+            "type": "object",
+            "properties": {
+              "active": {
+                "type": "boolean"
+              },
+              "backend": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "caTrust": {
+            "type": "object",
+            "properties": {
+              "installed": {
+                "type": "boolean"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "system"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "systemHooks": {
+            "type": "object",
+            "properties": {
+              "installed": {
+                "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "fingerprint",
+          "hostname",
+          "platform"
+        ],
+        "additionalProperties": false
+      },
       "DisconnectSchema": {
         "type": "object",
         "properties": {
@@ -21065,6 +21270,18 @@
         ],
         "additionalProperties": false
       },
+      "ExtractBodySchema": {
+        "type": "object",
+        "properties": {
+          "llm": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "FinalizeJudgeRequestSchema": {
         "type": "object",
         "properties": {
@@ -21112,6 +21329,33 @@
         ],
         "additionalProperties": false
       },
+      "GatewayAssignmentSchema": {
+        "type": "object",
+        "properties": {
+          "gatewayId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "gatewayId"
+        ],
+        "additionalProperties": false
+      },
+      "GatewayConfigPatchSchema": {
+        "type": "object",
+        "properties": {
+          "requireVk": {
+            "type": "boolean"
+          },
+          "requireProvisionedKey": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "GcpRegisterInputSchema": {
         "type": "object",
         "properties": {
@@ -21124,6 +21368,27 @@
           "token"
         ],
         "additionalProperties": false
+      },
+      "GcpWebhookInputSchema": {
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "type": "string"
+          },
+          "subscriptionName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "entitlementId": {
+            "type": "string"
+          },
+          "entitlement": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
       },
       "harnessConfig.DismissSchema": {
         "type": "object",
@@ -21194,6 +21459,83 @@
           "holds"
         ],
         "additionalProperties": false
+      },
+      "HookGateRequestSchema": {
+        "type": "object",
+        "properties": {
+          "toolName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tool": {},
+          "toolInput": {},
+          "tool_input": {},
+          "input": {},
+          "arguments": {},
+          "workspaceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workspace_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harnessType": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "harness_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "harness": {},
+          "sessionId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "additionalProperties": true,
+        "description": "One tool call to decide. A tool name is required under one of its spellings (toolName, tool_name, tool), at most 128 characters."
       },
       "intelligence.DismissSchema": {
         "type": "object",
@@ -21636,6 +21978,20 @@
         ],
         "additionalProperties": false
       },
+      "NameBodySchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
       "ObserveSchema": {
         "type": "object",
         "properties": {
@@ -21797,6 +22153,18 @@
         ],
         "additionalProperties": false
       },
+      "PromoteBodySchema": {
+        "type": "object",
+        "properties": {
+          "acknowledgeNoTraffic": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "ProofTreeSchema": {
         "type": "object",
         "properties": {
@@ -21809,6 +22177,12 @@
           "tree_json"
         ],
         "additionalProperties": false
+      },
+      "ProviderCredentialFieldsSchema": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
       },
       "providerIncidents.CollectBodySchema": {
         "type": "object",
@@ -21865,6 +22239,41 @@
         ],
         "additionalProperties": false
       },
+      "RegisterGatewaySchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "deploymentTarget": {
+            "type": "string",
+            "enum": [
+              "docker",
+              "kubernetes",
+              "bare_metal"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "deploymentTarget"
+        ],
+        "additionalProperties": false
+      },
+      "RejectBodySchema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "additionalProperties": false
+      },
       "RejectPlanSchema": {
         "type": "object",
         "properties": {
@@ -21877,6 +22286,18 @@
         "required": [
           "rationale"
         ],
+        "additionalProperties": false
+      },
+      "ReplayWasmRuleSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number"
+          },
+          "since": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
       "reportSchema": {
@@ -22140,6 +22561,38 @@
         ],
         "additionalProperties": false
       },
+      "ReviewLoopSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "RevokeGatewaySchema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "RollbackSchema": {
         "type": "object",
         "properties": {
@@ -22152,6 +22605,259 @@
           "version"
         ],
         "additionalProperties": false
+      },
+      "RunProbesBodySchema": {
+        "type": "object",
+        "properties": {
+          "probes": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScimGroupPatchOpSchema": {
+        "type": "object",
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "Operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "value": {}
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "ScimGroupSchema": {
+        "type": "object",
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "externalId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "members": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "urn:ietf:params:scim:schemas:extension:intutic:2.0:Group": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "mappedRole": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
+      },
+      "ScimPatchOpSchema": {
+        "type": "object",
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "Operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "value": {}
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "Operations"
+        ],
+        "additionalProperties": true
+      },
+      "ScimUserCreateSchema": {
+        "type": "object",
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "userName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "externalId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "formatted": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "givenName": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "userName"
+        ],
+        "additionalProperties": true
+      },
+      "ScimUserReplaceSchema": {
+        "type": "object",
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "active": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?:true|false)$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "userName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
       },
       "SignupInputSchema": {
         "type": "object",
@@ -22510,6 +23216,87 @@
           "harnessType",
           "files",
           "reportedAt"
+        ],
+        "additionalProperties": false
+      },
+      "StartDomainVerificationSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false
+      },
+      "StartLoopSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "budgetLimitUsd": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sops": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "autoJudge": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "StartTrialSchema": {
+        "type": "object",
+        "properties": {
+          "adminEmail": {
+            "type": "string",
+            "minLength": 1
+          },
+          "companyName": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "adminEmail",
+          "companyName"
         ],
         "additionalProperties": false
       },
@@ -23209,6 +23996,22 @@
             "type": "string",
             "format": "uri",
             "maxLength": 512
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateWasmRuleSchema": {
+        "type": "object",
+        "properties": {
+          "isActive": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "description": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -23965,6 +24768,24 @@
         },
         "required": [
           "token"
+        ],
+        "additionalProperties": false
+      },
+      "VerifyLoopSchema": {
+        "type": "object",
+        "properties": {
+          "diff": {
+            "type": "string",
+            "minLength": 1
+          },
+          "taskDescription": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "diff",
+          "taskDescription"
         ],
         "additionalProperties": false
       },

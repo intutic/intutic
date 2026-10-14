@@ -161,9 +161,3 @@ export interface ScimTokenInfo {
   expiresAt: string | null
   createdAt: string
 }
-
-export const CreateScimTokenSchema = z.object({
-  label: z.string().min(1).max(255).optional(),
-  expiresInDays: z.number().int().min(1).max(365).optional(),
-})
-export type CreateScimTokenInput = z.infer<typeof CreateScimTokenSchema>
