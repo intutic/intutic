@@ -272,9 +272,10 @@ def attenuate_key(
 ) -> AttenuationResult
 ```
 
-POST /api/v1/attenuate -- a child key narrowed to a subset of the
-parent key's capabilities (`ttl_seconds` 60 to 86400). The child key
-is in the response once and never stored.
+POST /api/v1/attenuate -- a child of one of your keys with narrower
+scopes: each of `requested_caps` is an API key scope (`gateway:use`,
+`traces:read`, ...) the parent grants (`ttl_seconds` 60 to 86400).
+The child key is in the response once and never stored.
 
 
 ##### ControlPlaneClient.block_mcp_server()
@@ -1664,10 +1665,15 @@ def emit(
     tool_input: Optional[dict] = None,
     incident_id: Optional[str] = None,
     file_path: Optional[str] = None,
+    gate_decision_id: Optional[str] = None,
 ) -> bool
 ```
 
 Fire-and-forget telemetry. Never raises.
+
+`gate_decision_id` is the hook gate's `decisionId` for the call this
+event reports: the control plane then files the decision's incident
+once and does not export it to SIEM a second time.
 
 A `tool_blocked` event creates a governance_incidents row whose
 description embeds our reason verbatim:
@@ -1830,6 +1836,7 @@ class GateResponse(
     incident_id: Optional[str] = None,
     reached: bool = True,
     code: Optional[str] = None,
+    decision_id: Optional[str] = None,
 )
 ```
 
@@ -1839,6 +1846,7 @@ class GateResponse(
 |---|---|---|---|
 | `allowed` | `bool` | — |  |
 | `code` | `Optional[str]` | `None` |  |
+| `decision_id` | `Optional[str]` | `None` |  |
 | `incident_id` | `Optional[str]` | `None` |  |
 | `reached` | `bool` | `True` |  |
 | `reason` | `str` | `''` |  |

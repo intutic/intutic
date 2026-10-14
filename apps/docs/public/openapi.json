@@ -8084,6 +8084,9 @@
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "Forbidden"
+          },
           "500": {
             "description": "Internal Server Error"
           }
@@ -8141,7 +8144,7 @@
         "tags": [
           "keys.ts"
         ],
-        "summary": "Set a key's spend budgets and rate limit",
+        "summary": "Set a key's spend budgets, rate limit and scopes",
         "description": "**Auth:** OWNER/ADMIN\n\n**Plan:** Cloud",
         "security": [
           {
@@ -19606,8 +19609,12 @@
           "scopes": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
+            "minItems": 1,
+            "maxItems": 64,
             "default": [
               "*"
             ]
@@ -21835,6 +21842,14 @@
                     "content": {
                       "type": "string",
                       "maxLength": 65536
+                    },
+                    "fullSha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "fullLength": {
+                      "type": "integer",
+                      "minimum": 0
                     }
                   },
                   "required": [
@@ -22315,6 +22330,16 @@
               }
             },
             "additionalProperties": false
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "minItems": 1,
+            "maxItems": 64
           }
         },
         "additionalProperties": false
@@ -22949,9 +22974,6 @@
                 "type": "boolean"
               },
               "ff_shadow_enforcement": {
-                "type": "boolean"
-              },
-              "ff_metaclaw_auto_apply": {
                 "type": "boolean"
               },
               "ff_skillopt_auto_apply": {
