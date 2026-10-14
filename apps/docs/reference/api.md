@@ -566,7 +566,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 412 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 413 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -1053,10 +1053,11 @@ Every route the control plane serves: 412 routes, grouped by the source file tha
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/v1/policies` | OWNER/ADMIN/EM | List live (non-deleted) policies |
+| GET | `/api/v1/policies` | OWNER/ADMIN/EM | Deprecated, like every policies route (sunset 2026-12-01). List live (non-deleted) policies, and where the intervention mode comes from |
 | POST | `/api/v1/policies` | OWNER/ADMIN | Create a policy (records version 1) |
 | DELETE | `/api/v1/policies/:policyId` | OWNER/ADMIN | Soft delete (version history is kept for audit) |
 | PUT | `/api/v1/policies/:policyId` | OWNER/ADMIN | Partial update; bumps the version and keeps a snapshot |
+| POST | `/api/v1/policies/:policyId/convert-to-guardrail` | OWNER/ADMIN | An active KILL/REASK policy becomes a hook-rule guardrail in SHADOW (201; 200 when already converted; 422 with `reason` when it has no guardrail form) |
 | POST | `/api/v1/policies/:policyId/disable` | OWNER/ADMIN |  |
 | POST | `/api/v1/policies/:policyId/enable` | OWNER/ADMIN |  |
 | POST | `/api/v1/policies/:policyId/rollback` | OWNER/ADMIN | Body `{"version": N}`: restores that version as a new one |

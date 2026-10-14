@@ -126,6 +126,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   review and shadow. The edited version now keeps its state until the new
   version is promoted to validated, which is when it is retired.
 
+### Deprecated
+
+- **Enforcement policies, sunset December 1, 2026.** No gate or proxy ever
+  read a policy's tool pattern, enforcement action, conditions or risk
+  category, so a policy never refused or changed a tool call; the docs,
+  dashboard and Terraform provider said otherwise and now say what is true.
+  A policy's one effect, the workspace's intervention mode, is now the
+  `interventionMode` workspace setting (dashboard Settings › Security, `intutic
+  settings set interventionMode`, `intutic_workspace_settings`). Every gate
+  reads the setting first; until 2.6.0 a workspace that has not set it still
+  takes the mode of its lowest-priority active policy, and the upgrade copies
+  that mode into the setting for every workspace with an active policy, so
+  nothing changes. `intutic policy convert <id>`, the dashboard's **Convert
+  to guardrail** and `POST /api/v1/policies/:policyId/convert-to-guardrail`
+  turn an active `KILL` or `REASK` policy on one tool into a `hook_rule`
+  guardrail in shadow (its `argContains` / `argNotContains` conditions carry
+  over), never enforcing, since the policy never blocked anything; converting
+  twice returns the same guardrail. The policies API answers with
+  `Deprecation`, `Sunset` and `Link` headers, `intutic policy
+  enable|disable|rollback|export` print a notice on stderr, and the Terraform
+  provider (0.3.0) deprecates `intutic_policy` and its fields, makes
+  `target_tool_pattern` and `enforcement_action` optional, and accepts
+  `interventionMode` in `intutic_workspace_settings`. The "no force push"
+  examples are `intutic_guardrail` hook rules now.
+
 ### Fixed
 
 - **A skill's semantic verdict covers the whole file.** With

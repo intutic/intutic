@@ -184,7 +184,7 @@ and available to WASM rules as `dlp_findings`.
 
 ## Enforcement Actions (PCAS)
 
-PCAS (Policy-Controlled Agent Sandbox) evaluates every tool use request against your safety guidelines:
+Every gate and proxy records what it did with a request or tool call as one of the enforcement actions below, and classifies the call by risk. The rules that decide are your SOPs, policy guardrails, custom filters, the detectors and the built-in protections. An enforcement policy (`/api/v1/policies`, `intutic_policy`) is not one of them: see [Enforcement policies are deprecated](#policy-deprecation).
 
 ### Risk Categories
 
@@ -211,8 +211,16 @@ See [Enforcement Actions](/concepts/enforcement-actions) for how each one is dec
 ### Intervention Modes
 
 What the agent is told when a call is refused. The workspace's mode is the
-mode of its active policy with the lowest priority number, whatever that
-policy's tool pattern; with no active policy it is Transparent.
+`interventionMode` [workspace setting](/reference/workspace-settings#detection-and-enforcement),
+which you set in **Settings › Security › Intervention mode**, with
+`intutic settings set interventionMode OPAQUE`, or with Terraform's
+`intutic_workspace_settings`. Without it the mode is Transparent.
+
+Until 2.6.0, a workspace that has not set it still gets the deprecated rule:
+the mode of its active enforcement policy with the lowest priority number,
+whatever that policy's tool pattern. Upgrading to 2.5.1 copied that mode into
+the setting for every workspace that had an active policy, so nothing changed;
+once the setting is stored, a policy's mode no longer counts.
 
 | Mode | Behavior |
 |------|----------|
@@ -253,6 +261,43 @@ MCP proxies on their next poll, within a minute.
 policy guardrail becomes a shadowed finding and counts toward the guardrail's
 would-act rate; every other would-block is kept as rule evidence and exported
 to SIEM as `WOULD_BLOCK`.
+
+### Enforcement policies are deprecated {#policy-deprecation}
+
+Enforcement policies (`/api/v1/policies`, the dashboard's **Policies ›
+Enforcement Policies**, `intutic policy enable|disable|rollback|export` and
+Terraform's `intutic_policy`) are deprecated as of 2.5.1. No gate or proxy
+reads a policy's tool pattern, enforcement action, conditions or risk
+category, so a policy has never refused or changed a tool call. Its one effect
+was the workspace's intervention mode, which is now a setting (above).
+
+The policies API answers with `Deprecation` and `Sunset` headers and a `Link`
+to this section. It is removed in the first release after **December 1,
+2026**; the fallback that lets a policy set the intervention mode is removed in
+2.6.0.
+
+What to use instead:
+
+| You used a policy for | Use |
+|-----------------------|-----|
+| Refusing a tool call (`KILL`, `REASK`) | A `hook_rule` [policy guardrail](/guide/policy-guardrails) on the tool, with literal argument substrings. The harness gates enforce it once promoted |
+| Allowing, annotating or steering a call (`BYPASS`, `ENHANCE`, `HIJACK`) | Nothing: the policy had no per-tool effect to replace. Delete it when you no longer need its version history |
+| The workspace's intervention mode | The `interventionMode` setting |
+
+To convert a policy, use **Convert to guardrail** on its row, `intutic policy
+convert <policy_id>`, or `POST /api/v1/policies/:policyId/convert-to-guardrail`.
+An active `KILL` or `REASK` policy whose tool pattern is one tool name becomes a
+guardrail on that tool. Its `conditions` carry over when they hold only
+`argContains` and `argNotContains`, each a string or a list of strings. The
+guardrail is created in **shadow**: it reports what it would block and blocks
+nothing, because the policy never blocked anything. Promote it on that
+evidence like any other guardrail. Converting a policy twice returns the same
+guardrail, which records the policy it came from. The policy itself is left as
+it is.
+
+A policy with a glob pattern (`*`, `mcp__github__*`) or with other conditions
+has no guardrail form: the conversion says why, and you author the guardrail
+that lists the tools it should cover.
 
 ---
 

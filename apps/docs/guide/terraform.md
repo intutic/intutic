@@ -10,7 +10,7 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | Resource | Manages | API |
 |---|---|---|
 | [`intutic_sop`](/reference/terraform/resources/sop) | SOPs (rule sets) | `/api/v1/sops` |
-| [`intutic_policy`](/reference/terraform/resources/policy) | Enforcement policies: what the proxy does when an agent calls a matching tool | `/api/v1/policies` |
+| [`intutic_policy`](/reference/terraform/resources/policy) | Deprecated enforcement policies. No gate or proxy reads their tool pattern, action or conditions; use `intutic_guardrail` for a per-tool rule and the `interventionMode` setting for the intervention mode. The API sunsets 2026-12-01 | `/api/v1/policies` |
 | [`intutic_guardrail`](/reference/terraform/resources/guardrail) | Policy guardrails you author: a rule in the Guardrail IR, held to the same checks as one extracted from a policy document | `/api/v1/policy-guardrails/guardrails` |
 | [`intutic_workspace_settings`](/reference/terraform/resources/workspace_settings) | Workspace settings, only the keys you set | `/api/v1/workspace/settings` |
 | [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`), with their spend budgets and rate limits | `/api/v1/keys` |
@@ -83,16 +83,18 @@ resource "intutic_workspace_settings" "this" {
     egressMode       = "enforce"
     egressAllow      = ["api.github.com", "registry.npmjs.org"]
     mcpDefaultPolicy = "deny"
+    interventionMode = "OPAQUE"
     featureFlags     = { ff_shadow_enforcement = true }
   })
 }
 
-resource "intutic_policy" "no_force_push" {
-  name                = "No force push"
-  target_tool_pattern = "Bash"
-  enforcement_action  = "KILL"
-  risk_category       = "DESTRUCTIVE"
-  conditions          = jsonencode({ argContains = ["push --force"] })
+resource "intutic_guardrail" "no_force_push" {
+  name         = "No force push"
+  description  = "Agents may not rewrite shared history."
+  kind         = "hook_rule"
+  title        = "No force push"
+  tools        = ["Bash"]
+  arg_contains = ["push --force"]
 }
 
 resource "intutic_guardrail" "reviewed_apply" {

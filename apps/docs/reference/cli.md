@@ -1545,9 +1545,33 @@ intutic decision reject hold_abc123 --reason "Not during the freeze"
 
 ---
 
+## `intutic policy convert <policy_id>` <Badge type="tip" text="Cloud" />
+
+Turn an enforcement policy into the guardrail that does what it described. Enforcement policies are [deprecated](/guide/policies#policy-deprecation): no gate or proxy reads a policy's tool pattern, action or conditions.
+
+```bash
+intutic policy convert <policy_id> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+An active `KILL` or `REASK` policy on one tool becomes a `hook_rule` guardrail on that tool, with the policy's `conditions.argContains` and `argNotContains` as its argument substrings. The guardrail starts in shadow: it reports what it would block and blocks nothing until you promote it (`intutic guardrails promote`). Converting the same policy again names the guardrail it already became. A policy with another action, a disabled policy, a glob pattern such as `*`, or other conditions has no guardrail form; the command exits `1` and says why. The policy itself is left as it is.
+
+**Example:**
+
+```bash
+intutic policy convert pol_abc123
+```
+
+---
+
 ## `intutic policy enable <policy_id>` <Badge type="tip" text="Cloud" />
 
-Enable a compliance policy.
+Enable a compliance policy. Deprecated, like every command on enforcement policies (`enable`, `disable`, `rollback`, `export`): each prints a notice to stderr first, and the policies API is removed after 2026-12-01. See [Enforcement policies are deprecated](/guide/policies#policy-deprecation).
 
 ```bash
 intutic policy enable <policy_id> [options]
@@ -1563,7 +1587,7 @@ intutic policy enable <policy_id> [options]
 
 ## `intutic policy disable <policy_id>` <Badge type="tip" text="Cloud" />
 
-Disable a compliance policy.
+Disable a compliance policy (deprecated).
 
 ```bash
 intutic policy disable <policy_id> [options]
@@ -1579,7 +1603,7 @@ intutic policy disable <policy_id> [options]
 
 ## `intutic policy rollback <policy_id>` <Badge type="tip" text="Cloud" />
 
-Rollback a compliance policy to a specific version.
+Rollback a compliance policy to a specific version (deprecated).
 
 ```bash
 intutic policy rollback <policy_id> --version <version> [options]
@@ -1605,7 +1629,7 @@ intutic policy rollback pol_abc123 --version 2
 
 ## `intutic policy export` <Badge type="tip" text="Cloud" />
 
-Export workspace compliance policies to stdout as a JSON array.
+Export workspace compliance policies to stdout as a JSON array (deprecated; the notice goes to stderr, so the output stays JSON).
 
 ```bash
 intutic policy export [--all] [options]
