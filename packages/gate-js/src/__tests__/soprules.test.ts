@@ -86,9 +86,26 @@ describe('matching', () => {
     expect(firstMatch(rules(DIGEST_RULE), 'read_file', APPLY)).toBeNull()
   })
 
-  it('the first rule wins in control-plane order', () => {
+  it('the most severe matching rule decides, wherever it sits in the list', () => {
     const warn = { ...DIGEST_RULE, id: 'sp_first', action: 'warn' }
-    expect(firstMatch(rules(warn, DIGEST_RULE), 'shell', APPLY)!.id).toBe('sp_first')
+    const hold = { ...DIGEST_RULE, id: 'sp_hold', action: 'require_approval' }
+    expect(firstMatch(rules(warn, DIGEST_RULE), 'shell', APPLY)!.id).toBe('sp_pin')
+    expect(firstMatch(rules(warn, hold), 'shell', APPLY)!.id).toBe('sp_hold')
+    expect(firstMatch(rules(warn, hold, DIGEST_RULE), 'shell', APPLY)!.id).toBe('sp_pin')
+    expect(firstMatch(rules(hold, warn), 'shell', APPLY)!.id).toBe('sp_hold')
+  })
+
+  it('among rules of the deciding severity, the first in control-plane order wins', () => {
+    const warn2 = { ...DIGEST_RULE, id: 'sp_warn2', action: 'warn' }
+    const warn1 = { ...DIGEST_RULE, id: 'sp_warn1', action: 'warn' }
+    expect(firstMatch(rules(warn1, warn2), 'shell', APPLY)!.id).toBe('sp_warn1')
+    expect(firstMatch(rules(DIGEST_RULE, { ...DIGEST_RULE, id: 'sp_pin2' }), 'shell', APPLY)!.id).toBe('sp_pin')
+  })
+
+  it('a broken block rule does not hide a matching warn rule', () => {
+    const broken = { ...DIGEST_RULE, id: 'sp_old', toolPattern: '([unclosed' }
+    const warn = { ...DIGEST_RULE, id: 'sp_warn', action: 'warn' }
+    expect(firstMatch(rules(warn, broken), 'shell', APPLY)!.id).toBe('sp_warn')
   })
 
   it('an uncompilable rule is skipped, not thrown', () => {

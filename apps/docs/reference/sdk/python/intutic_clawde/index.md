@@ -1664,10 +1664,15 @@ def emit(
     tool_input: Optional[dict] = None,
     incident_id: Optional[str] = None,
     file_path: Optional[str] = None,
+    gate_decision_id: Optional[str] = None,
 ) -> bool
 ```
 
 Fire-and-forget telemetry. Never raises.
+
+`gate_decision_id` is the hook gate's `decisionId` for the call this
+event reports: the control plane then files the decision's incident
+once and does not export it to SIEM a second time.
 
 A `tool_blocked` event creates a governance_incidents row whose
 description embeds our reason verbatim:
@@ -1830,6 +1835,7 @@ class GateResponse(
     incident_id: Optional[str] = None,
     reached: bool = True,
     code: Optional[str] = None,
+    decision_id: Optional[str] = None,
 )
 ```
 
@@ -1839,6 +1845,7 @@ class GateResponse(
 |---|---|---|---|
 | `allowed` | `bool` | — |  |
 | `code` | `Optional[str]` | `None` |  |
+| `decision_id` | `Optional[str]` | `None` |  |
 | `incident_id` | `Optional[str]` | `None` |  |
 | `reached` | `bool` | `True` |  |
 | `reason` | `str` | `''` |  |

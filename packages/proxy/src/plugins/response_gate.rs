@@ -108,6 +108,7 @@ use serde_json::Value;
 use crate::commands::WireProvider;
 use crate::config::ResponseGateConfig;
 use crate::plugins::anomaly::AnomalyKind;
+use crate::plugins::hook_rules::{CallInput, HookRuleDecision, HookRuleHit, HookRuleSet};
 use crate::plugins::sql_guard::{self, SqlGuardPolicy, SqlViolation};
 use crate::refusal::{tool_rule_id, Code, InterventionMode, Refusal};
 use crate::sso_groups::{Clearance, SsoGroupDecision, SsoGroupGate};
@@ -126,6 +127,9 @@ pub enum DenialReason {
     /// A shell call that would run destructive SQL against a database the
     /// role's `sql_allow_dsns:` does not admit (`plugins::sql_guard`).
     DestructiveSql(SqlViolation),
+    /// A call an enforcing hook-rule guardrail refuses (`plugins::hook_rules`)
+    /// — or one it could not show is allowed, which it refuses the same way.
+    HookRule(HookRuleHit),
     /// The body did not parse, so the gate could not show it carried no denied
     /// call. Only ever produced when `fail_closed` is set.
     Unparseable,
@@ -178,6 +182,9 @@ impl Denial {
             DenialReason::DestructiveSql(_) => {
                 Refusal::new(Code::SqlGuard, "sql_guard.sql_allow_dsns")
             }
+            // The deny_tools code: to an SDK this is a tool the policy
+            // forbids, and the rule id is the one every other layer names.
+            DenialReason::HookRule(hit) => Refusal::new(Code::ToolDenied, hit.rule_id.clone()),
             DenialReason::Unparseable => {
                 Refusal::new(Code::ResponseUnparseable, "response_gate.fail_closed")
             }
@@ -233,6 +240,13 @@ impl Denial {
                 AnomalyKind::ToolAbuse.as_str(),
                 v.log_message()
             ),
+            DenialReason::HookRule(hit) => format!(
+                "Response blocked by anomaly policy [{}]: forbidden tool call: {} — hook rule {}: {}",
+                AnomalyKind::UnauthorizedTool.as_str(),
+                hit.tool,
+                hit.rule_id,
+                hit.reason
+            ),
             DenialReason::Unparseable => format!(
                 "Response blocked by anomaly policy [{}]: response body did not parse, and a tool deny list, SSO group policy or SQL guard is in force — cannot show it carries no forbidden call",
                 AnomalyKind::UnauthorizedTool.as_str()
@@ -260,6 +274,12 @@ impl Denial {
                 decision.refusal_reason()
             ),
             DenialReason::DestructiveSql(v) => v.agent_message(),
+            DenialReason::HookRule(hit) => format!(
+                "[Intutic] Blocked tool call: {}. {} [{}] \
+                 The call was withheld by the proxy and never reached the client, so it did not run. \
+                 Do not retry it — continue without that call, or ask an operator to change the policy.",
+                hit.tool, hit.reason, hit.rule_id
+            ),
             DenialReason::Unparseable => {
                 "[Intutic] The model's response could not be parsed, and a tool deny list, SSO group policy or SQL guard is in force \
                  for this agent role, so the proxy could not show the response carried no forbidden \
@@ -452,6 +472,69 @@ pub fn gate_stream_line(
         reason: DenialReason::Tools(vec![event.tool_name]),
         block_index: event.block_index,
     })
+}
+
+/// Evaluate a complete, parsed response body against the hook-rule guardrails
+/// in force (`plugins::hook_rules`).
+///
+/// Returns the refusal, if an enforcing rule fires on any call, and every
+/// shadow rule that fired, for the trace. `fired_on_a_call` in the second
+/// element says whether the response carried any tool call at all — a shadow
+/// rule is reported (evaluated, would-act or not) only when there was one.
+///
+/// Inert when the gate is off or no hook rule is in force. A body that will
+/// not parse is refused under `fail_closed` while an enforcing rule is in
+/// force, like the deny list.
+pub fn gate_response_hook_rules(
+    cfg: &ResponseGateConfig,
+    body: Option<&Value>,
+    rules: &HookRuleSet,
+) -> (Option<Denial>, HookRuleDecision, bool) {
+    if !cfg.enabled || rules.is_empty() {
+        return (None, HookRuleDecision::default(), false);
+    }
+    let Some(body) = body else {
+        let denial = (cfg.fail_closed && rules.has_enforcing()).then_some(Denial {
+            reason: DenialReason::Unparseable,
+            block_index: 0,
+        });
+        return (denial, HookRuleDecision::default(), false);
+    };
+    let calls = crate::routing::integrity::response_tool_calls(body);
+    let decision = rules.decide_all(calls.iter().map(|(name, args, raw)| {
+        (
+            name.as_str(),
+            CallInput::from_extracted(args.as_ref(), raw.as_deref()),
+        )
+    }));
+    let denial = decision.refuse.clone().map(|hit| Denial {
+        reason: DenialReason::HookRule(hit),
+        block_index: 0,
+    });
+    (denial, decision, !calls.is_empty())
+}
+
+/// The name half of the hook-rule check on one SSE line: a refusal for an
+/// enforcing rule that decides on the tool name alone (or could not be read),
+/// and the shadow rules that fire on the name. Rules that constrain arguments
+/// are decided when the block is complete — see
+/// [`crate::plugins::sql_guard::StreamHold`], which holds those blocks.
+/// `None` for any line that is not a readable tool-call start.
+pub fn gate_stream_line_hook_rules(
+    cfg: &ResponseGateConfig,
+    line: &str,
+    rules: &HookRuleSet,
+) -> Option<(Option<Denial>, Vec<HookRuleHit>)> {
+    if !cfg.enabled || rules.is_empty() {
+        return None;
+    }
+    let event = crate::protocol::tool_use_parser::parse_sse_chunk(line)?;
+    let step = rules.decide_name(&event.tool_name);
+    let denial = step.refuse.map(|hit| Denial {
+        reason: DenialReason::HookRule(hit),
+        block_index: event.block_index,
+    });
+    Some((denial, step.shadow))
 }
 
 /// The body to send instead, on the non-streaming path.
@@ -1407,7 +1490,7 @@ mod tests {
 
         // The record keeps the reason whole.
         assert!(d.log_message().contains(rule), "{}", d.log_message());
-        let finding = crate::telemetry::FindingWire::from_sso_group_denial(&d).expect("a finding");
+        let finding = crate::telemetry::FindingWire::from_rule_denial(&d).expect("a finding");
         assert_eq!(finding.rule_id.as_deref(), Some(rule));
 
         for mode in [InterventionMode::Transparent, InterventionMode::SilentLog] {

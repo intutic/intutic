@@ -9,7 +9,7 @@ looks and what `INTUTIC_SOPS_DIR` is for.
 
 ## The keys
 
-Ten keys can block, steer or hold a run. Everything else in a SOP is prose,
+Eleven keys can block, steer or hold a run. Everything else in a SOP is prose,
 injected into the agent's context and advisory by construction — the model may
 ignore it.
 
@@ -25,6 +25,7 @@ ignore it.
 | `max_calls:` | `A <= N` | Refuses the N+1th call of A. |
 | `forbid_with:` | `taint(), token` | Refuses the two together in one request. |
 | `sql_guard:` | `refuse` or `warn`, with `sql_allow_dsns:` | Refuses (or logs) destructive SQL in a shell call aimed at a database not on the allowlist. See [Destructive SQL](#destructive-sql). |
+| `hook_rule:` | one JSON object per line | Refuses a tool call by tool name and argument literals. See [Hook rules](#hook-rules). |
 
 ::: warning Two shapes that look right and match nothing
 
@@ -255,6 +256,31 @@ from a program (`python -c …`), and migration tools (`prisma migrate reset`,
 `rails db:drop`) — none of these are SQL-client invocations, and a migration
 command passes untouched. The response gate must be on
 (`intutic_settings.response_gate.enabled`, the default); with it off, so is this.
+
+## Hook rules
+
+A hook-rule [policy guardrail](/guide/policy-guardrails) reaches the proxy as
+one `hook_rule:` line, in the SOP the control plane serves for it (and the file
+`intutic guardrails pull` writes). The value is one JSON object on one line:
+
+```yaml
+---
+hook_rule: {"id":"guardrail.pgr_x","tools":["Bash"],"argContains":["kubectl apply"],"argNotContains":["--dry-run"],"reason":"kubectl apply must be a dry run"}
+---
+```
+
+The rule fires on a call to one of `tools` — the exact name, case included —
+whose arguments, serialised as compact JSON, contain every `argContains`
+literal and none of the `argNotContains` ones. The response gate withholds the
+call before the client sees it and answers with a `TOOL_DENIED` refusal naming
+`id`; `mode: shadow` in the same block reports instead. The proxy also refuses a
+request whose latest turn reports a call the rule refuses.
+
+A `hook_rule:` line the proxy cannot read — not JSON, no `tools`, an empty
+literal, or a key it does not know — is not ignored: it refuses every tool call
+while it is in force, and the load names it. A call whose arguments are not
+JSON is refused by a rule that constrains arguments, since whether a literal is
+in them cannot be shown. A rule that names only tools decides on the name.
 
 ## The `action:` vocabulary
 

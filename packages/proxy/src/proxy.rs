@@ -105,8 +105,14 @@ fn evaluate_sop_shadows(
     base_ctx: &crate::wasm::context::RequestContext,
     registry: &crate::plugins::anomaly::DetectorRegistry,
 ) -> Vec<crate::sops::SopShadowReport> {
-    let applicable: Vec<&crate::sops::Sop> =
-        shadow_sops.iter().filter(|s| s.applies_to(role)).collect();
+    // A shadow SOP that declares nothing but hook rules is evaluated on the
+    // response, where the calls are (`with_hook_rule_shadow_reports`): no
+    // detector reads a hook rule, so a request-side report for it would be a
+    // would-act of `false` on every request, credited as an evaluation.
+    let applicable: Vec<&crate::sops::Sop> = shadow_sops
+        .iter()
+        .filter(|s| s.applies_to(role) && !s.only_hook_rules())
+        .collect();
     if applicable.is_empty() {
         return Vec::new();
     }
@@ -160,6 +166,101 @@ fn evaluate_sop_shadows(
                     .collect(),
             }
         })
+        .collect()
+}
+
+/// The request's SOP shadow reports, plus one per shadow SOP carrying hook
+/// rules, decided on the response's tool calls.
+///
+/// A hook rule is evaluated where the calls are — the response — so its
+/// shadow SOP is reported only when the response carried a tool call: one
+/// evaluation per response that gave the rule something to decide, would-act
+/// when it fired on any call. A SOP already reported request-side (one that
+/// also declares other keys) has its report widened, never duplicated.
+fn with_hook_rule_shadow_reports(
+    mut reports: Vec<crate::sops::SopShadowReport>,
+    rules: &crate::plugins::hook_rules::HookRuleSet,
+    carried_a_call: bool,
+    hits: &[crate::plugins::hook_rules::HookRuleHit],
+) -> Vec<crate::sops::SopShadowReport> {
+    if !carried_a_call {
+        return reports;
+    }
+    let kind = crate::plugins::anomaly::AnomalyKind::UnauthorizedTool
+        .as_str()
+        .to_string();
+    for (title, scope) in rules.shadow_sops() {
+        let would_act = hits.iter().any(|h| h.sop_title == title);
+        match reports.iter_mut().find(|r| r.title == title) {
+            Some(r) => {
+                if would_act {
+                    r.would_act = true;
+                    if !r.findings.contains(&kind) {
+                        r.findings.push(kind.clone());
+                    }
+                }
+            }
+            None => reports.push(crate::sops::SopShadowReport {
+                title,
+                scope,
+                would_act,
+                findings: if would_act {
+                    vec![kind.clone()]
+                } else {
+                    Vec::new()
+                },
+            }),
+        }
+    }
+    reports
+}
+
+/// The calls in the turn this request reports on that an enforcing hook rule
+/// refuses, as kill findings — the request-side half of the hook-rule gate.
+///
+/// The response gate withholds such a call before the client sees it, so a
+/// refused call reaching here means the harness ran it anyway (the response
+/// gate off, or the rule promoted after the model asked). Same finding the
+/// `deny_tools` detector raises (`UNAUTHORIZED_TOOL`, kill), but only over the
+/// latest turn's calls — the ones whose results this request carries — so a
+/// rule promoted mid-session does not refuse every later request over a call
+/// made before it existed.
+fn hook_rule_turn_findings(
+    rules: &crate::plugins::hook_rules::HookRuleSet,
+    turn_calls: &[crate::wasm::context::ToolCall],
+) -> Vec<crate::plugins::anomaly::AnomalyFinding> {
+    if rules.is_empty() {
+        return Vec::new();
+    }
+    let decision = rules.decide_all(turn_calls.iter().map(|tc| {
+        (
+            tc.name.as_str(),
+            match &tc.arguments {
+                // OpenAI arguments that did not parse arrive as the raw string.
+                serde_json::Value::String(raw) if !raw.trim().is_empty() => {
+                    crate::plugins::hook_rules::CallInput::Unreadable
+                }
+                serde_json::Value::String(_) => {
+                    crate::plugins::hook_rules::CallInput::Parsed(&serde_json::Value::Null)
+                }
+                v => crate::plugins::hook_rules::CallInput::Parsed(v),
+            },
+        )
+    }));
+    decision
+        .refuse
+        .map(|hit| {
+            let mut f = crate::plugins::anomaly::AnomalyFinding::kill(
+                crate::plugins::anomaly::AnomalyKind::UnauthorizedTool,
+                format!(
+                    "Forbidden tool call: {} — hook rule {}: {}",
+                    hit.tool, hit.rule_id, hit.reason
+                ),
+            );
+            f.detector_id = "hook_rule";
+            f
+        })
+        .into_iter()
         .collect()
 }
 
@@ -4661,6 +4762,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // would-act evaluation happens separately, once the anomaly registry exists.
     let (enforcing_sops, shadow_mode_sops) = crate::sops::split_by_mode(&resolved_sops);
     let gov = crate::sops::governance_fields_from(&enforcing_sops, &node.agent_role);
+    // Hook-rule guardrails, enforcing and shadow together: each rule carries
+    // its SOP's mode. Enforced on the response's tool calls below, and on the
+    // calls of the turn this request reports on.
+    let hook_rule_set =
+        crate::plugins::hook_rules::HookRuleSet::from_sops(&resolved_sops, &node.agent_role);
     // The destructive-SQL rule, enforced on the response side below.
     // The shadow set is resolved apart from the enforcing one, so a shadow
     // SOP's allowlist can never widen an enforcing SOP's. Empty — the default
@@ -4803,10 +4909,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let findings = if bypass_everything {
         Vec::new()
     } else {
-        retain_findings_outside_break_glass_scope(
-            anomaly_registry.evaluate_all(&wasm_ctx),
-            break_glass_scope.as_ref(),
-        )
+        let mut all = anomaly_registry.evaluate_all(&wasm_ctx);
+        all.extend(hook_rule_turn_findings(
+            &hook_rule_set,
+            &wasm_ctx.turn_tool_calls,
+        ));
+        crate::plugins::anomaly::sort_by_severity(&mut all);
+        retain_findings_outside_break_glass_scope(all, break_glass_scope.as_ref())
     };
     wasm_ctx.corroborating_detectors =
         crate::plugins::anomaly::DetectorRegistry::corroborating_detector_ids(&findings).len()
@@ -7209,6 +7318,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let denied_tools_clone = wasm_ctx.denied_tools.clone();
         let sso_group_gate_clone = sso_group_gate.clone();
         let sql_guard_policies_clone = sql_guard_policies.clone();
+        let hook_rule_set_clone = hook_rule_set.clone();
         // Same reason as response_gate_cfg above: the stream task outlives
         // this scope, and the snippet-capture config has to travel with it.
         let response_injection_snippet_cfg = state
@@ -7291,10 +7401,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // exactly the code they ran before. Released lines are queued in
             // `sql_replay` and re-enter the loop below, past the DLP scrub and
             // both gates they already went through.
-            let mut sql_hold = (response_gate_cfg.enabled && !sql_guard_policies_clone.is_empty())
-                .then(|| {
-                    crate::plugins::sql_guard::StreamHold::new(sql_guard_policies_clone.clone())
-                });
+            //
+            // The same hold carries the hook-rule guardrails: a block whose
+            // tool an argument-constraining hook rule names is held and decided
+            // whole. `None` when neither is in force.
+            let mut sql_hold = (response_gate_cfg.enabled
+                && (!sql_guard_policies_clone.is_empty() || !hook_rule_set_clone.is_empty()))
+            .then(|| {
+                crate::plugins::sql_guard::StreamHold::new(sql_guard_policies_clone.clone())
+                    .with_hook_rules(hook_rule_set_clone.clone())
+            });
+            // Hook-rule shadow hits on this stream, and whether it carried a
+            // tool call at all — what the trace's shadow reports are built from.
+            let mut hook_shadow_hits: Vec<crate::plugins::hook_rules::HookRuleHit> = Vec::new();
+            let mut hook_saw_call = false;
             let mut sql_replay: std::collections::VecDeque<String> =
                 std::collections::VecDeque::new();
 
@@ -7471,6 +7591,27 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                         sso_group_gate_clone.as_ref(),
                                     )
                                 })
+                                .or_else(|| {
+                                    // Hook rules decided on the tool name: a
+                                    // name-only enforcing rule refuses here;
+                                    // an argument rule's block is held below.
+                                    let (denial, shadow) =
+                                        crate::plugins::response_gate::gate_stream_line_hook_rules(
+                                            &response_gate_cfg,
+                                            &line,
+                                            &hook_rule_set_clone,
+                                        )?;
+                                    hook_saw_call = true;
+                                    for hit in shadow {
+                                        if !hook_shadow_hits
+                                            .iter()
+                                            .any(|h| h.sop_title == hit.sop_title)
+                                        {
+                                            hook_shadow_hits.push(hit);
+                                        }
+                                    }
+                                    denial
+                                })
                             };
                             // ── Destructive-SQL hold ────────────────────────
                             // After the name gate, so a denied tool is refused
@@ -7487,12 +7628,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             v.log_message()
                                         );
                                     }
-                                    match step.refuse {
-                                        Some((v, idx)) => Some(crate::plugins::response_gate::Denial {
+                                    for hit in step.hook_shadow {
+                                        if !hook_shadow_hits
+                                            .iter()
+                                            .any(|h| h.sop_title == hit.sop_title)
+                                        {
+                                            hook_shadow_hits.push(hit);
+                                        }
+                                    }
+                                    match (step.refuse, step.refuse_hook) {
+                                        (Some((v, idx)), _) => Some(crate::plugins::response_gate::Denial {
                                             reason: crate::plugins::response_gate::DenialReason::DestructiveSql(v),
                                             block_index: idx,
                                         }),
-                                        None => {
+                                        (None, Some((hit, idx))) => Some(crate::plugins::response_gate::Denial {
+                                            reason: crate::plugins::response_gate::DenialReason::HookRule(hit),
+                                            block_index: idx,
+                                        }),
+                                        (None, None) => {
                                             sql_replay.extend(step.emit);
                                             continue;
                                         }
@@ -7508,7 +7661,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     denial.log_message()
                                 );
                                 gate_finding =
-                                    crate::telemetry::FindingWire::from_sso_group_denial(&denial);
+                                    crate::telemetry::FindingWire::from_rule_denial(&denial);
                                 // Cross-provider streams reach the client as
                                 // OpenAI chunks whatever the upstream was, and
                                 // the withheld event's index means something
@@ -8041,6 +8194,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         } else {
                             (accumulated_content.len() as f64 / 4.0).max(1.0) as u32
                         };
+                        let sop_shadow_reports = with_hook_rule_shadow_reports(
+                            sop_shadow_reports.clone(),
+                            &hook_rule_set_clone,
+                            hook_saw_call,
+                            &hook_shadow_hits,
+                        );
                         let trace = ExecutionTrace {
                             response_integrity: None,
                             quality_fault: None,
@@ -8127,7 +8286,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     workspace_id = %workspace_id_clone,
                     session_id = %session_id_clone,
                     tool = %tool,
-                    "SQL guard: upstream ended inside a held shell-tool block; the incomplete call was withheld"
+                    "Response gate: upstream ended inside a held tool block (SQL guard or hook rule); the incomplete call was withheld"
                 );
             }
 
@@ -8588,6 +8747,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 )
             };
 
+            let sop_shadow_reports = with_hook_rule_shadow_reports(
+                sop_shadow_reports.clone(),
+                &hook_rule_set_clone,
+                hook_saw_call,
+                &hook_shadow_hits,
+            );
             let trace = ExecutionTrace {
                 response_integrity: integrity.measured.then_some(integrity.score),
                 quality_fault: integrity.fault.map(|f| f.as_str().to_string()),
@@ -9270,6 +9435,25 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
         denial
     });
+    // Hook-rule guardrails: evaluated whatever the gates above decided, so
+    // their shadow rules are reported on every response that carried a call;
+    // their refusal applies only when nothing above refused already.
+    let (hook_denial, hook_decision, hook_saw_call) =
+        crate::plugins::response_gate::gate_response_hook_rules(
+            &state.config.intutic_settings.response_gate,
+            parsed_response.as_ref(),
+            &hook_rule_set,
+        );
+    for hit in &hook_decision.shadow {
+        tracing::info!(
+            workspace_id = %workspace_id,
+            session_id = %session_id,
+            rule_id = %hit.rule_id,
+            tool = %hit.tool,
+            "Shadow hook rule would have refused a tool call"
+        );
+    }
+    let response_denial = response_denial.or(hook_denial);
     let final_body = match &response_denial {
         Some(denial) => {
             tracing::warn!(
@@ -9627,6 +9811,12 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     }
 
     // ── Step 8: Publish execution trace (fire-and-forget) ─────────────
+    let sop_shadow_reports = with_hook_rule_shadow_reports(
+        sop_shadow_reports.clone(),
+        &hook_rule_set,
+        hook_saw_call,
+        &hook_decision.shadow,
+    );
     let trace = ExecutionTrace {
         response_integrity: integrity.measured.then_some(integrity.score),
         quality_fault: integrity.fault.map(|f| f.as_str().to_string()),
@@ -9680,7 +9870,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .chain(
                 response_denial
                     .as_ref()
-                    .and_then(crate::telemetry::FindingWire::from_sso_group_denial),
+                    .and_then(crate::telemetry::FindingWire::from_rule_denial),
             )
             .collect(),
         // Advisory echo scan of the model's own output, plus a bounded
@@ -12995,6 +13185,116 @@ mod tests {
             "kubectl was called and is denied — this must be would_act: true"
         );
         assert!(!reports[0].findings.is_empty());
+    }
+
+    fn hook_sop(title: &str, mode: crate::sops::SopMode, line: &str) -> crate::sops::Sop {
+        crate::sops::Sop {
+            title: title.into(),
+            mode,
+            hook_rules: vec![crate::plugins::hook_rules::parse_line(line)],
+            ..crate::sops::Sop::default()
+        }
+    }
+
+    const TF_RULE: &str = r#"{"id":"guardrail.pgr_tf","tools":["Bash"],"argContains":["terraform apply"],"reason":"Plan first"}"#;
+
+    /// A shadow SOP that carries only hook rules is not reported request-side
+    /// (no detector reads a hook rule, so it would be a would-act of `false`
+    /// on every request); the response reports it, once per response that
+    /// carried a tool call, would-act when it fired.
+    #[test]
+    fn hook_rule_shadow_sops_are_reported_on_the_response_not_the_request() {
+        use crate::plugins::anomaly::detectors::test_support::base_ctx;
+        let shadow = hook_sop(
+            "GUARDRAIL:pgr_tf hook_rule: Bash",
+            crate::sops::SopMode::Shadow,
+            TF_RULE,
+        );
+        let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+        let request_side =
+            evaluate_sop_shadows(std::slice::from_ref(&shadow), "", &base_ctx(), &registry);
+        assert!(request_side.is_empty(), "{request_side:?}");
+
+        let set =
+            crate::plugins::hook_rules::HookRuleSet::from_sops(std::slice::from_ref(&shadow), "");
+        // No tool call in the response: nothing was evaluated.
+        assert!(with_hook_rule_shadow_reports(Vec::new(), &set, false, &[]).is_empty());
+        let input = serde_json::json!({"command": "terraform plan"});
+        let quiet = set.decide(
+            "Bash",
+            crate::plugins::hook_rules::CallInput::Parsed(&input),
+        );
+        let reports = with_hook_rule_shadow_reports(Vec::new(), &set, true, &quiet.shadow);
+        assert_eq!(reports.len(), 1);
+        assert!(!reports[0].would_act);
+        let input = serde_json::json!({"command": "terraform apply"});
+        let fired = set.decide(
+            "Bash",
+            crate::plugins::hook_rules::CallInput::Parsed(&input),
+        );
+        let reports = with_hook_rule_shadow_reports(Vec::new(), &set, true, &fired.shadow);
+        assert_eq!(reports.len(), 1);
+        assert!(reports[0].would_act);
+        assert_eq!(reports[0].findings, vec!["UNAUTHORIZED_TOOL".to_string()]);
+        // A SOP already reported request-side is widened, not duplicated.
+        let earlier = vec![crate::sops::SopShadowReport {
+            title: "GUARDRAIL:pgr_tf hook_rule: Bash".into(),
+            scope: crate::sops::SopScope::Workspace,
+            would_act: false,
+            findings: Vec::new(),
+        }];
+        let reports = with_hook_rule_shadow_reports(earlier, &set, true, &fired.shadow);
+        assert_eq!(reports.len(), 1);
+        assert!(reports[0].would_act);
+    }
+
+    /// The request-side half: a call in the turn this request reports on that
+    /// an enforcing hook rule refuses is a kill finding, attributed to the
+    /// rule; a shadow rule raises nothing here; unparseable arguments under an
+    /// argument rule refuse.
+    #[test]
+    fn hook_rule_turn_findings_kill_on_an_enforcing_match_only() {
+        use crate::wasm::context::ToolCall;
+        let call = |args: serde_json::Value| ToolCall {
+            id: "call_1".into(),
+            name: "Bash".into(),
+            arguments: args,
+        };
+        let enforcing = crate::plugins::hook_rules::HookRuleSet::from_sops(
+            &[hook_sop("s", crate::sops::SopMode::Enforce, TF_RULE)],
+            "",
+        );
+        let f = hook_rule_turn_findings(
+            &enforcing,
+            &[call(serde_json::json!({"command": "terraform apply"}))],
+        );
+        assert_eq!(f.len(), 1);
+        assert_eq!(
+            f[0].kind,
+            crate::plugins::anomaly::AnomalyKind::UnauthorizedTool
+        );
+        assert_eq!(f[0].disposition, crate::plugins::anomaly::Disposition::Kill);
+        assert_eq!(f[0].detector_id, "hook_rule");
+        assert!(f[0].reason.contains("guardrail.pgr_tf"), "{}", f[0].reason);
+        assert!(hook_rule_turn_findings(
+            &enforcing,
+            &[call(serde_json::json!({"command": "terraform plan"}))]
+        )
+        .is_empty());
+        assert_eq!(
+            hook_rule_turn_findings(&enforcing, &[call(serde_json::json!("{\"command\":"))]).len(),
+            1,
+            "unreadable arguments cannot be shown free of the literal"
+        );
+        let shadow = crate::plugins::hook_rules::HookRuleSet::from_sops(
+            &[hook_sop("s", crate::sops::SopMode::Shadow, TF_RULE)],
+            "",
+        );
+        assert!(hook_rule_turn_findings(
+            &shadow,
+            &[call(serde_json::json!({"command": "terraform apply"}))]
+        )
+        .is_empty());
     }
 
     /// A shadow-mode SOP whose declarations do not match anything on the

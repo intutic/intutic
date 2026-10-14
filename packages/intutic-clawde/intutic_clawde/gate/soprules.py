@@ -27,7 +27,11 @@ line-for-line mirror of `PolicyClient.matchRule` in
 `packages/mcp-proxy/src/policy.ts:107-124`), deliberately:
 
   * rules are tried in the order the control plane returned them
-  * first match wins
+  * the most severe matching rule decides (block, then require_approval,
+    then warn); among rules of that severity, the first in list order. A
+    warn rule listed before a block rule (a shadow guardrail, or the control
+    plane's catch-all reminder) must not let the call through with a flag
+    when a later rule refuses it
   * `toolPattern` is tested against the tool name, `argPattern` against the
     serialised tool input
   * the serialisation is the `JSON.stringify(tool_input ?? {})` shape both
@@ -207,11 +211,23 @@ def _compiles(pattern: str) -> bool:
         return False
 
 
+# Higher decides: a refusal wins over a hold, a hold over a flag.
+_SEVERITY = {ACTION_BLOCK: 3, ACTION_APPROVAL: 2, ACTION_WARN: 1}
+
+
 def first_match(rules: list[SopRule], tool_name: str,
                 tool_input: dict) -> SopRule | None:
-    """First rule matching this call, in control-plane order."""
+    """The rule that decides this call: the most severe one matching it
+    (block, then require_approval, then warn), the first of that severity in
+    control-plane order. ``None`` when none matches."""
     payload = serialise_tool_input(tool_input)
+    decided: SopRule | None = None
     for rule in rules:
-        if rule.matches(tool_name, payload):
-            return rule
-    return None
+        if decided is not None and _SEVERITY.get(rule.action, 0) <= _SEVERITY.get(decided.action, 0):
+            continue
+        if not rule.matches(tool_name, payload):
+            continue
+        decided = rule
+        if rule.action == ACTION_BLOCK:
+            break
+    return decided
