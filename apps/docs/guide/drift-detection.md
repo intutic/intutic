@@ -37,17 +37,18 @@ the SOP's text changed, and not that an embedding moved — a sustained change i
 observed behaviour.
 
 Each trace scores its own compliance from what the platform actually did to the
-request: a clean pass scores 1.0, a redacted-and-forwarded call 0.6, a blocked
-one 0.0, less a penalty for the severity of anything the classifier found. Those
-scores roll into a per-SOP rolling average, and drift is the gap between that
+request: a clean pass scores 1.0, an enhanced call 0.9, a redacted-and-forwarded
+call 0.6, a blocked one 0.0, less a penalty for the severity of anything the
+classifier found (and a small one when several detectors agree). Those scores
+roll into a per-SOP rolling average, and drift is the gap between that
 average and a stored baseline:
 
 1. **Baseline** — the first observation of an SOP *is* its baseline. The first
    thing you ever measure cannot be a change.
 2. **Eligibility** — an SOP needs at least 20 matches in 30 days before it is
    judged at all. A handful of samples cannot establish that behaviour moved.
-3. **Detection** — a gap of 0.15 or more raises a drift event recording the
-   score, the direction, and both sides of the comparison.
+3. **Detection** — a gap of 0.15 or more records a drift event (the score and
+   the direction); its notification carries both sides of the comparison.
 4. **Re-baseline** — the baseline is immediately recaptured, so a given drift is
    reported once rather than every hour forever.
 5. **Refinement** — a *degrading* SOP is queued for rewriting, ahead of stale
@@ -73,6 +74,7 @@ describes the work being done. The hourly sweep flags any active SOP whose last
 match is older than the staleness window, and enqueues it for review:
 
 1. **Detection** — `last_match_at` is null, or older than the configured window
+   (30 days by default, `SOP_STALENESS_DAYS`)
 2. **Enqueue** — a review signal is queued for the workspace
 3. **Refinement** — if the dream cycle is enabled (`DREAM_CYCLE_ENABLED=true`),
    the SOP is rewritten against its real usage evidence: days idle, matches in the
@@ -88,7 +90,9 @@ not to infer findings the evidence does not state.
 Every agent session is linked to the specific SOP version that was active when it started. This creates a complete lineage chain:
 
 ```
-Session → Active SOP Version → Execution Traces → Compliance Scores
+Session ──→ Active SOP Version
+   │
+   └──→ Execution Traces → Compliance Scores
 ```
 
 This lineage allows Intutic to:
@@ -129,16 +133,16 @@ upward until nothing ever looked anomalous again.
 To intercept anomalous behaviors (such as infinite tool execution loops, abnormal command bursts, or forbidden transition paths) before they generate high costs or damage systems, the Rust Proxy evaluates a **sequence classifier** in-process, with no model call:
 
 1. **Valkey Queue Tracking** — The proxy keeps the last 60 tool calls of a session in Valkey (in memory on a standalone proxy), expiring 24 hours after the last one; transitions are scored over the last 20.
-2. **Repetition Filtering** — If a single tool name is repeated consecutively 5 or more times, the proxy refuses the attempt and hands the reason back to the agent (`REASK`); the third time the same agent trips it, the request is blocked.
-3. **Markov Transition Probabilities** — The proxy evaluates the probability matrix of transitions between consecutive tool invocations (e.g., `view_file` -> `run_command` is highly probable, while `run_command` -> `run_command` is anomalous).
-4. **Enforcement Actions** — If the transition probability drops below `0.35`, the request is flagged with an advisory `Verdict::Hijack` (steer) — low
+2. **Repetition Filtering** — If a single tool name is repeated consecutively 5 or more times, the proxy refuses the attempt and hands the reason back to the agent (`REASK`); the third time the same session trips it within an hour, the request is blocked.
+3. **Markov Transition Probabilities** — The proxy scores each transition between consecutive tool invocations against a model fitted from your workspace's successful runs, or a built-in table when there is none (e.g., `view_file` -> `replace_file_content` is highly probable, while `run_command` -> `run_command` is anomalous).
+4. **Enforcement Actions** — If the average transition probability over those last 20 calls drops below `0.35`, the request is flagged with an advisory `Verdict::Hijack` (steer) — low
 transition plausibility never blocks on its own.
 
 ---
 
 ## Responding
 
-1. **Review the anomaly** under **Findings › Incidents**, on the **Anomalies** or **Drift Alerts** tab
+1. **Review the anomaly** under **Findings › Incidents**, on the **Anomalies** tab; a drifted SOP shows its **Drift events** count in the SOP's drawer
 2. **Examine recent traces** to see what changed
 3. **Update the SOP** if agents have outgrown its scope — a stale SOP is a scope
    problem more often than a compliance problem

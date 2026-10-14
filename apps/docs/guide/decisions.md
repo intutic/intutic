@@ -26,6 +26,7 @@ The table lists each entry's **Alert** id, what was **Requested by the agent**, 
 
 | Field | Description |
 |-------|-------------|
+| **Requested by** | Who made the call (member, OS user, key prefix or MCP server), shown only when the entry records it |
 | **Session** | The agent session the action came from |
 | **Time** | When the guardrail acted |
 | **Requested action (agent)** | The tool call the agent asked for |
@@ -64,7 +65,7 @@ See [Session Safety & Budgets](/guide/loops).
 
 Agent responses the governance judge could not decide on its own. The judge's interim verdict has already answered the agent; your ruling decides whether an incident stands. Each card shows the SOP it is most likely about, the judge's score, the interim verdict (flagged or passed) and the response excerpt.
 
-- **Violation** opens an incident.
+- **Violation** opens an incident, unless the interim verdict already opened one.
 - **Clean** closes the incident the interim verdict opened.
 
 **How to rule** sets out the rule reviewers apply: rule on what the response itself did, not on what the agent might do next. Above the queue, **Reviews by SOP** counts the reviews waiting and ruled for each SOP, and marks an SOP whose reviews are mostly ruled clean as one to consider rewording.
