@@ -84,14 +84,18 @@ emit(
    reason?, 
    toolInput?, 
    incidentId?, 
-   filePath?
+   filePath?, 
+   gateDecisionId?
 ): Promise<boolean>;
 ```
 
 Fire-and-forget telemetry. Never throws.
 
 A `tool_blocked` event creates a `governance_incidents` row whose
-description embeds the reason verbatim.
+description embeds the reason verbatim. `gateDecisionId` is the hook
+gate's `decisionId` for the call this event reports: the control plane
+then files the decision's incident once and does not export it to SIEM a
+second time.
 
 #### Parameters
 
@@ -103,6 +107,7 @@ description embeds the reason verbatim.
 | `toolInput?` | `unknown` | `undefined` |
 | `incidentId?` | `string` | `undefined` |
 | `filePath?` | `string` | `undefined` |
+| `gateDecisionId?` | `string` | `undefined` |
 
 #### Returns
 

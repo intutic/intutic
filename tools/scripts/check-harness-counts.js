@@ -180,6 +180,12 @@ const otherKinds = new Set(
 )
 const hookGated = realCount - otherKinds.size
 const ungated = realCount - hookGated - sdkGated
+// A gate of its own: a hook, an SDK or a bridge gate — everything but the
+// no-gate and delegated sets. "36 of the 43" is this number.
+const ownGate = realCount - new Set(['NO_GATE_HARNESSES', 'DELEGATED_GATE_HARNESSES'].flatMap((n) => [...gateSet(n)])).size
+// What the sync daemon writes for: every harness but the bridge-gated ones,
+// which `intutic init` cannot detect (TrueForge run as its own server).
+const daemonSupported = realCount - gateSet('BRIDGE_GATED_HARNESSES').size
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
 const asNumber = (s) => (/^\d+$/.test(s) ? Number(s) : NUMBER_WORDS.indexOf(s.toLowerCase()))
 // Each pattern only matches a phrasing that states the count of one kind.
@@ -192,6 +198,11 @@ const GATE_KIND_PATTERNS = [
   [/\b(\d+) SDK-gated frameworks\b/gi, sdkGated, 'SDK-gated'],
   [/\bthe other (\w+) are governed through\b/gi, ungated, 'neither hook- nor SDK-gated'],
   [/\bharness for the other (\w+)\b/gi, ungated, 'neither hook- nor SDK-gated'],
+  // "In 36 of the 43 supported harnesses, each tool call passes through a
+  // policy gate", "gates inside 36 of its 43": the harnesses with a gate of
+  // their own. Not after "hook gates"/"hooks", which state the hook count.
+  [/(?<!hook gates\s)(?<!hooks\s)\b(?:[Ii]n|inside)\s+\*{0,2}(\d+)\*{0,2}\s+of\s+(?:the|its)\s+\*{0,2}\d+\*{0,2}\s+supported\s+harnesses\b/g, ownGate, 'gated by a hook, SDK or bridge gate of their own'],
+  [/\bdaemon supports\s+\*{0,2}(\d+)\*{0,2}\s+of\b/gi, daemonSupported, 'written for by the sync daemon (all but the bridge-gated)'],
 ]
 
 // ── Doc claims ───────────────────────────────────────────────────────────
@@ -230,6 +241,14 @@ const CLAIM_PATTERNS = [
   /\*{0,2}(\d+)\*{0,2}\s+coding-agent\s+harnesses\b/gi,
   /\*{0,2}(\d+)\*{0,2}\s+out-of-the-box\b/gi,
   /supports\s+\[\*{0,2}(\d+)\*{0,2}\s+harnesses\]/gi,
+  // Phrasings the 2026-10-14 audit found unwatched: "43 supported agent
+  // tools", "covers 43 harnesses", the matrix's "43 harnesses + 1 …", and the
+  // total in "36 of the 43 supported harnesses" / "42 of Intutic's 43 harness
+  // adapters" (the subset is checked by GATE_KIND_PATTERNS).
+  /\*{0,2}(\d+)\*{0,2}\s+supported\s+agent\s+tools\b/gi,
+  /\bcovers\s+\*{0,2}(\d+)\*{0,2}\s+(?:supported\s+)?harnesses\b/gi,
+  /\b(\d+)\s+harnesses\s+\+/g,
+  /\b\d+\*{0,2}\s+of\s+(?:the\s+|its\s+|Intutic's\s+)\*{0,2}(\d+)\*{0,2}\s+(?:supported\s+)?harness(?:es|\s+adapters)\b/gi,
 ]
 const OTHER_PATTERN = /other\s+\*{0,2}(\d+)\*{0,2}\s+harnesses\b/gi
 

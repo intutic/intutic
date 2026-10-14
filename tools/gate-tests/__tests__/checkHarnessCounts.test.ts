@@ -107,6 +107,42 @@ describe('gate-kind counts', () => {
   })
 })
 
+describe('phrasings the 2026-10-14 audit found unwatched', () => {
+  // The fixture's 40 harnesses: 37 with a gate of their own (all but the two
+  // no-gate and one delegated), 39 the daemon writes for (all but the bridge).
+  it('passes them when they are right', async () => {
+    await page(
+      'In 37 of the 40 supported harnesses each tool call passes a gate; gates inside 37 of its 40 supported harnesses. ' +
+        "The daemon supports 39 of Intutic's 40 harness adapters. Guides for 40 supported agent tools. " +
+        'Intutic covers 40 harnesses. **Coverage:** 40 harnesses + 1 platform.',
+    )
+    const r = await runGate(root)
+    expect(r.status, r.out).toBe(0)
+  })
+
+  it.each([
+    ['In 36 of the 40 supported harnesses each tool call passes a gate.', 'says 36 harnesses are gated by a hook, SDK or bridge gate'],
+    ['gates inside 38 of its 40 supported harnesses', 'says 38 harnesses are gated by a hook, SDK or bridge gate'],
+    ["The daemon supports 40 of Intutic's 40 harness adapters.", 'says 40 harnesses are written for by the sync daemon'],
+    ['In 37 of the 41 supported harnesses each tool call passes a gate.', 'claims 41 harnesses'],
+    ["The daemon supports 39 of Intutic's 41 harness adapters.", 'claims 41 harnesses'],
+    ['Setup guides for 41 supported agent tools.', 'claims 41 harnesses'],
+    ['Intutic covers 39 harnesses.', 'claims 39 harnesses'],
+    ['**Coverage:** 38 harnesses + 1 platform.', 'claims 38 harnesses'],
+  ])('fails "%s"', async (claim, says) => {
+    await page(claim)
+    const r = await runGate(root)
+    expect(r.status, r.out).toBe(1)
+    expect(r.out).toContain(says)
+  })
+
+  it('leaves the hook count in "native hook gates in 30 of the 40 supported harnesses" to the hook check', async () => {
+    await page('Native hook gates in 30 of the 40 supported harnesses.')
+    const r = await runGate(root)
+    expect(r.status, r.out).toBe(0)
+  })
+})
+
 describe('one page and one named row per harness', () => {
   it('passes when every harness has its page, under an aliased slug too, and its row', async () => {
     const r = await runGate(root)

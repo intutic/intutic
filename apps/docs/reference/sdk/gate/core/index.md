@@ -91,6 +91,7 @@ How a [Gate](classes/Gate.md) evaluates calls. Every field is optional.
 | ------ | ------ | ------ |
 | <a id="property-allowed"></a> `allowed` | `boolean` | - |
 | <a id="property-code"></a> `code?` | `string` | The code the hook gate names, when it names one: the MCP registry's on its refusals, `GOVERNANCE_UNAVAILABLE` when its checks could not run, and `INVALID_REQUEST` when it could not read the request. |
+| <a id="property-decisionid"></a> `decisionId?` | `string` | The hook gate's id for this decision, when this answer is its own verdict: every verdict it gives names one, and a `GOVERNANCE_UNAVAILABLE` refusal keeps it only while `failClosed` refuses too. The gate reports the call with it (`gateDecisionId`), so the control plane exports the decision to SIEM once and files its incident once. |
 | <a id="property-incidentid"></a> `incidentId?` | `string` | - |
 | <a id="property-reached"></a> `reached` | `boolean` | False when the hook gate gave no verdict and `failClosed` decided it. |
 | <a id="property-reason-1"></a> `reason` | `string` | - |
