@@ -2590,7 +2590,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -3601,7 +3612,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -4825,7 +4847,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -4910,7 +4943,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -5242,7 +5286,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -6038,7 +6093,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -6093,7 +6159,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -6176,7 +6253,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -6966,7 +7054,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -8385,7 +8484,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -8532,7 +8642,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -8587,7 +8708,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -8668,7 +8800,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -9765,7 +9908,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -9876,7 +10030,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -9969,7 +10134,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -11067,7 +11243,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -11563,7 +11750,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -11701,7 +11899,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -12775,7 +12984,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -15281,7 +15501,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -16805,7 +17036,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -16860,7 +17102,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -16999,7 +17252,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -17149,7 +17413,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -17486,7 +17761,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -17615,7 +17901,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -18664,7 +18961,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -18777,7 +19085,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -18818,7 +19137,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -18905,7 +19235,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -19024,7 +19365,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
@@ -19065,7 +19417,18 @@
         "requestBody": {
           "description": "The handler reads a JSON body that no schema in the route source validates.",
           "content": {
-            "application/json": {}
+            "application/json": {
+              "schema": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
           }
         },
         "responses": {
