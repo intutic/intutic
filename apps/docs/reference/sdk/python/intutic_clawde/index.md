@@ -470,6 +470,13 @@ def disable_policy(policy_id: str) -> PolicyChangeResult
 
 POST /api/v1/policies/:policyId/disable
 
+.. deprecated:: 2.5.1
+   Workspace policies are deprecated (sunset 2026-12-01): their tool
+   pattern, action and conditions are enforced nowhere. Use guardrails
+   for per-tool rules and the `interventionMode` workspace setting for
+   refusal wording; see
+   https://docs.intutic.ai/guide/policies#policy-deprecation.
+
 
 ##### ControlPlaneClient.download_evidence()
 
@@ -537,6 +544,13 @@ def enable_policy(policy_id: str) -> PolicyChangeResult
 ```
 
 POST /api/v1/policies/:policyId/enable
+
+.. deprecated:: 2.5.1
+   Workspace policies are deprecated (sunset 2026-12-01): their tool
+   pattern, action and conditions are enforced nowhere. Use guardrails
+   for per-tool rules and the `interventionMode` workspace setting for
+   refusal wording; see
+   https://docs.intutic.ai/guide/policies#policy-deprecation.
 
 
 ##### ControlPlaneClient.extract_policy_document()
@@ -1055,6 +1069,13 @@ def list_policies() -> List[Dict[str, Any]]
 
 GET /api/v1/policies
 
+.. deprecated:: 2.5.1
+   Workspace policies are deprecated (sunset 2026-12-01): their tool
+   pattern, action and conditions are enforced nowhere. Use guardrails
+   for per-tool rules and the `interventionMode` workspace setting for
+   refusal wording; see
+   https://docs.intutic.ai/guide/policies#policy-deprecation.
+
 
 ##### ControlPlaneClient.list_policy_documents()
 
@@ -1319,6 +1340,13 @@ def rollback_policy(policy_id: str, version: int) -> PolicyChangeResult
 ```
 
 POST /api/v1/policies/:policyId/rollback
+
+.. deprecated:: 2.5.1
+   Workspace policies are deprecated (sunset 2026-12-01): their tool
+   pattern, action and conditions are enforced nowhere. Use guardrails
+   for per-tool rules and the `interventionMode` workspace setting for
+   refusal wording; see
+   https://docs.intutic.ai/guide/policies#policy-deprecation.
 
 
 ##### ControlPlaneClient.rotate_gateway_token()
