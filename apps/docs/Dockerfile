@@ -45,6 +45,9 @@ RUN pnpm --filter=@intutic/docs run build
 # and the dashboard links to it more than any other.
 RUN test -f apps/docs/.vitepress/dist/guide/settings.html \
  || { echo 'docs image is missing the paid-tier pages (guide/settings.html); the dashboard help links would 404' >&2; exit 1; }
+# The Content-Security-Policy allows the pages' inline scripts by hash, and one
+# of them changes with every build, so the hashes come from this build's pages.
+RUN node apps/docs/scripts/csp-script-hashes.mjs apps/docs/.vitepress/dist > /app/csp-script-hashes.txt
 
 # ── Stage 2: nginx ──────────────────────────────────────────
 FROM nginx:1.27-alpine
@@ -54,6 +57,11 @@ RUN rm /etc/nginx/conf.d/default.conf
 
 # Copy docs nginx config
 COPY infra/nginx/docs.conf /etc/nginx/conf.d/default.conf
+COPY infra/nginx/docs-security-headers.conf /etc/nginx/snippets/docs-security-headers.conf
+COPY --from=builder /app/csp-script-hashes.txt /tmp/csp-script-hashes.txt
+RUN sed -i "s#__SCRIPT_HASHES__#$(cat /tmp/csp-script-hashes.txt)#" /etc/nginx/snippets/docs-security-headers.conf \
+ && ! grep -q __SCRIPT_HASHES__ /etc/nginx/snippets/docs-security-headers.conf \
+ && rm /tmp/csp-script-hashes.txt
 
 # Copy built static site, at the path it was built for: `/docs/` in the
 # Self-host image, so the deployment's front door (nginx or a Kubernetes

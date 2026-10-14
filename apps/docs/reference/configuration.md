@@ -245,7 +245,8 @@ These configure the control plane in hosted and Self-host deployments.
 | `JWT_SECRET` | ✅ | — | Secret for signing session tokens. At least 32 characters: `openssl rand -hex 32` |
 | `ENCRYPTION_KEY` | ✅ | — | Key for encrypting stored credentials and tokens: `openssl rand -hex 32`. The proxy needs the same value to open stored provider keys. See [Stored credentials](/security#stored-credentials) |
 | `ENCRYPTION_KEY_PREVIOUS` | ❌ | — | Only while rotating `ENCRYPTION_KEY`: the key it replaces (several separated by commas). Stored credentials sealed under it still open, and the control plane re-encrypts provider keys under `ENCRYPTION_KEY` when it starts. See [Rotate the encryption key](/guide/self-host#rotate-the-encryption-key) |
-| `APP_URL` | Self-host | — | The dashboard's address; links in emails and invitations point here |
+| `APP_URL` | Self-host | — | The dashboard's address; links in emails and invitations point here. Its origin is the one browser origin allowed to call the API with credentials (CORS) |
+| `CORS_ALLOWED_ORIGINS` | ❌ | — | Further exact browser origins allowed to call the API with credentials, separated by commas (`https://admin.example.com`). No wildcards |
 | `API_BASE_URL` | Self-host | `http://localhost:3001` | The API's public address. Identity providers send users back here, so it builds the OIDC redirect URI (`/api/v1/auth/sso/callback`), the SAML ACS URL (`/api/v1/auth/saml/acs`) and the SCIM base URL |
 | `OIDC_CALLBACK_URL` | ❌ | built from `API_BASE_URL` | The full OIDC redirect URI, when users reach the API at a different address |
 | `SAML_ACS_URL` | ❌ | built from `API_BASE_URL` | The full SAML ACS URL, likewise |
