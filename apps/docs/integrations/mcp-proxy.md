@@ -22,7 +22,8 @@ Modern AI coding agents (Claude Code, Cursor, Windsurf, Claude Desktop) interact
                ▼
    [ @intutic/mcp-governance-proxy ]  ◄── registry → allowlists → SSO groups →
                │                          DLP → SOP rules → injection scan →
-               │                          anomaly detectors → WASM rules
+               │                          anomaly detectors → WASM rules →
+               │                          call budgets
       ┌────────┼─────────────────┐
       ▼        ▼                 ▼
   [ allow ] [ block ]        [ hold ]

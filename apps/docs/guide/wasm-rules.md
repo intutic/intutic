@@ -206,7 +206,7 @@ only inside that repository.
 
 `assembly/index.ts` parses the request context into a `RequestContext` object.
 
-Every field below is delivered on every request. The excerpt this page used to
+Every field below is on the parsed `RequestContext` of every request. The host leaves empty lists, `false` flags and unknown values out of the JSON it sends, and the parser fills in the empty value or the `-1` sentinel described below. The excerpt this page used to
 show carried ten of them and pointed at the SDK for "the rest" — which is how a
 rule author ends up not knowing that `forbid_after`, `changes` or
 `injection_findings` are already in their hand.
@@ -221,7 +221,7 @@ rule author ends up not knowing that `forbid_after`, `changes` or
 | `model` | `string` | Model the agent asked for. |
 | `harness` | `string` | The agent that sent it — `claude-code`, `cursor`, … |
 | `estimated_input_tokens` | `i32` | Prompt size for this turn. |
-| `sandbox_attested` | `bool` | Whether this session's sandbox proved the proxy is its only egress path. Session-scoped, not per-call — once true, every subsequent request in the session reads `true`. `false` (never absent) until attestation happens or if the session isn't sandboxed at all. See [Sandbox attestation](/guide/graph-guardrails#sandbox-attestation) for how it's set and what it does and doesn't prove. |
+| `sandbox_attested` | `bool` | Whether this session's sandbox proved the proxy is its only egress path. Session-scoped, not per-call — once true, every subsequent request in the session reads `true`. `false` until attestation happens or if the session isn't sandboxed at all; the host leaves the key out of the JSON then, and the SDK parser reads it as `false`. See [Sandbox attestation](/guide/graph-guardrails#sandbox-attestation) for how it's set and what it does and doesn't prove. |
 
 ### Tools
 

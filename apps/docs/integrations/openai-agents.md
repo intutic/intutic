@@ -60,12 +60,14 @@ my_guardrail = make_intutic_tool_guardrail(gate=my_gate)
 ### 4. Trace attribution
 
 ```python
+from agents import set_default_openai_client
+from openai import AsyncOpenAI
 from intutic_clawde.gate import intutic_headers
 
-llm = ChatOpenAI(
+set_default_openai_client(AsyncOpenAI(
     base_url="http://localhost:4000/v1",
     default_headers=intutic_headers(session_id=run_id, harness="openai-agents"),
-)
+))
 ```
 
 ## TypeScript SDK (@openai/agents)
@@ -125,6 +127,7 @@ npm install @intutic/gate
 
 ```ts
 import { Agent, run, tool } from '@openai/agents'
+import { z } from 'zod'
 import { installOpenAiGate, wrapAgent, intuticToolGuardrail } from '@intutic/gate/openai'
 
 installOpenAiGate({ workspaceId: process.env.INTUTIC_WORKSPACE_ID })

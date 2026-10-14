@@ -16,7 +16,7 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
        LangGraph)               (Rust — :4000)          (Python — :4001)        Bedrock, Vertex, Ollama)
                                        │                        │
                                        ▼                        ▼
-                                Governance & PCAS        Model Translation &
+                                DLP & SOP rules          Model Translation &
                                 WASM Policy Engine         Unified API Gateway
 
 
@@ -26,7 +26,7 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   (Claude Code, Cursor,  ──────► (Rust — :4000) ─────────────────────────────►   (api.anthropic.com,
        LangGraph)                      │                                          api.openai.com)
                                        ▼
-                                Governance & PCAS
+                                DLP & SOP rules
                                 WASM Policy Engine
 
 
@@ -36,12 +36,12 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   (Node.js / Terminal)   ──────► (Native Rust Gateway) ────────────────────►    (api.anthropic.com,
                                        │                                          api.openai.com)
                                        ▼
-                                Governance & PCAS
+                                DLP & SOP rules
                                 WASM Policy Engine
 ```
 
 ### Option A: Dual Self-Hosted Proxy (Intutic + LiteLLM Gateway)
-* **How it works:** Intutic Proxy (Rust `:4000`) sits in front of LiteLLM (`:4001`). Intutic enforces security SOPs, WASM policies, and PCAS primitives in-process, then forwards clean requests to LiteLLM to translate and route across 100+ model providers (Bedrock, Azure, Vertex, Ollama).
+* **How it works:** Intutic Proxy (Rust `:4000`) sits in front of LiteLLM (`:4001`). Intutic enforces DLP, security SOPs and WASM policies in-process, then forwards clean requests to LiteLLM to translate and route across 100+ model providers (Bedrock, Azure, Vertex, Ollama).
 * **Docker Compose Snippet:**
   ```yaml
   services:

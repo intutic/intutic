@@ -89,7 +89,7 @@ List all provisioned users in the workspace with optional filtering and paginati
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `filter` | string | SCIM filter expression (e.g., `userName eq "jane@example.com"`) |
+| `filter` | string | `userName eq "jane@example.com"`, the one filter supported. Any other filter is ignored and the full list returned |
 | `startIndex` | number | 1-based pagination start index |
 | `count` | number | Maximum results per page (default 100, at most 200) |
 
@@ -141,6 +141,33 @@ Partial update of user attributes. Commonly used by IdPs to deactivate users (`a
 ::: info
 Setting `active: false` via PATCH triggers the full offboarding cascade (see below).
 :::
+
+---
+
+### PUT /scim/v2/Users/:id — Replace User
+
+Some providers are configured to replace rather than patch (RFC 7644 §3.5.1). A
+replace carrying `"active": false` deprovisions exactly as the equivalent PATCH
+does — it runs the same cascade. Only `userName`, `name` and `active` are modelled;
+other attributes in the payload are ignored rather than stored.
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+  "userName": "jane@corp.com",
+  "active": false
+}
+```
+
+---
+
+### DELETE /scim/v2/Users/:id — Deprovision User
+
+Deactivate the user's membership in the workspace, triggering the offboarding cascade.
+
+**Response:** `204 No Content`
+
+**Error codes:** `404` user not found, `409` offboarding already in progress, `503` cache unavailable
 
 ---
 
@@ -232,29 +259,6 @@ keys, and their machine's gates then refuse every high-risk tool.
 
 Name a user in a group's `members` by the `id` that `/scim/v2/Users` returned
 for them, as identity providers do. Group resources list users by that id.
-
-### PUT /scim/v2/Users/:id — Replace User
-
-Some providers are configured to replace rather than patch (RFC 7644 §3.5.1). A
-replace carrying `"active": false` deprovisions exactly as the equivalent PATCH
-does — it runs the same cascade. Only `userName`, `name` and `active` are modelled;
-other attributes in the payload are ignored rather than stored.
-
-```json
-{
-  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
-  "userName": "jane@corp.com",
-  "active": false
-}
-```
-
-### DELETE /scim/v2/Users/:id — Deprovision User
-
-Deactivate the user's membership in the workspace, triggering the offboarding cascade.
-
-**Response:** `204 No Content`
-
-**Error codes:** `404` user not found, `409` offboarding already in progress, `503` cache unavailable
 
 ---
 
