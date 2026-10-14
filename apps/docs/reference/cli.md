@@ -1703,6 +1703,8 @@ intutic policy replay <ruleId> [options]
 **What it does:**
 Evaluates the rule against request contexts the proxy has sampled from this workspace's traffic (5% of requests by default), then prints how many contexts were replayed, how many the rule would have acted on (count and rate), the count for each verdict (`allow`, `block`, `reask`), and the first contexts it would not have allowed, as JSON.
 
+Sampled contexts carry each tool call's name and its arguments' keys and size, not the values, unless the workspace sets [`storeToolArguments`](/reference/workspace-settings). A rule that reads `tool_calls[].arguments` sees an empty string on those contexts, so the command then prints how many contexts withheld arguments and how to change that; contexts sampled after the setting is turned on carry the values, redacted.
+
 A rate needs enough traffic behind it: below 50 sampled contexts the command reports how many it found and how many it needs, and exits `1`. More contexts come from more traffic over time, not from a higher `--limit`. An unknown rule id or a rule that fails to evaluate also exits `1`.
 
 **Example:**

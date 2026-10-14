@@ -114,6 +114,18 @@ export interface WorkspaceSettings {
   piiDetectors?: PiiDetectorSettings | null
 
   /**
+   * Keep tool-call argument values in the sampled replay contexts the LLM
+   * proxy attaches to traces (`context_snapshot`, `WASM_CONTEXT_SNAPSHOT_RATE`).
+   * Absent or `false`, the default: each call keeps its name and its
+   * arguments' top-level keys and size, never their values. `true`: the
+   * values are kept, with secrets, card numbers, IBANs, SSNs, email addresses
+   * and phone numbers redacted, so `POST /api/v1/wasm-rules/:id/replay` can
+   * replay a rule that reads `tool_calls[].arguments`. The proxy reads it from
+   * `/api/v1/auth/key-context`.
+   */
+  storeToolArguments?: boolean
+
+  /**
    * How the LLM proxy retries a provider call that failed before any response
    * reached the client, and the ordered fallback targets it tries when those
    * retries run out (`UpstreamRetrySettingsSchema`). Each field overrides the

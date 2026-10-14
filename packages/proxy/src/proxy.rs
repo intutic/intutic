@@ -284,8 +284,9 @@ pub struct AppState {
     pub store: Arc<dyn LocalStore>,
     /// Control-plane-written keys; all `None` when standalone.
     pub control_plane: Arc<dyn ControlPlaneCache>,
-    /// Fraction of requests whose full `RequestContext` is captured onto the
-    /// trace as `context_snapshot`, for `WASM_CONTEXT_SNAPSHOT_RATE`.
+    /// Fraction of requests whose `RequestContext` is captured onto the
+    /// trace as `context_snapshot` (`RequestContext::stored_snapshot`), for
+    /// `WASM_CONTEXT_SNAPSHOT_RATE`.
     ///
     /// This is the corpus a rule candidate is replayed against before it is
     /// ever installed — the "prove before enforce on real history" story.
@@ -1090,6 +1091,40 @@ async fn llm_judge_allowed(
     {
         Ok(crate::key_context::Answer::Body(body)) => crate::key_context::llm_judge_enabled(&body),
         _ => true,
+    }
+}
+
+/// Whether the workspace stores tool-call argument values in sampled replay
+/// contexts (`storeToolArguments` on `/auth/key-context`, the same cached
+/// answer the intervention mode reads). Read only for a sampled request.
+///
+/// `false` — argument keys and sizes only — whenever the answer does not say
+/// `true`: no control plane or virtual key to ask (a standalone proxy's local
+/// traces are uploaded to the workspace the sync daemon connects to), a
+/// control plane that could not answer, or one older than the field.
+async fn tool_arguments_stored(
+    state: &AppState,
+    virtual_key: Option<&crate::credential::VirtualKey>,
+    workspace_id: &str,
+) -> bool {
+    let policy = &state.config.intutic_settings.policy;
+    let Some((cp_url, virtual_key)) = policy.control_plane_url.as_deref().zip(virtual_key) else {
+        return false;
+    };
+    let version = state.control_plane.policy_version(workspace_id).await;
+    match crate::key_context::fetch(
+        &state.http_client,
+        cp_url,
+        virtual_key,
+        std::time::Duration::from_millis(policy.timeout_ms),
+        version,
+    )
+    .await
+    {
+        Ok(crate::key_context::Answer::Body(body)) => {
+            crate::key_context::store_tool_arguments(&body)
+        }
+        _ => false,
     }
 }
 
@@ -4882,6 +4917,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         node,
     };
 
+    // From here on `change_manifest` is only written onto traces: the
+    // detectors read their own copy in `wasm_ctx.changes`. A target is a
+    // command, path or URL the agent named, so the stored copy gets the
+    // storage DLP pass (`dlp::redact_for_storage`) — an address in a
+    // `git config` command or a token in a curl header stays out of the trace.
+    let change_manifest = crate::manifest::redacted_for_storage(change_manifest);
+
     // Evaluate the anomaly detector registry.
     //
     // This replaces the older single-purpose sequence-anomaly plugin, which
@@ -4928,9 +4970,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // Sampled once here, not per trace site, so every code path this request
     // can take (blocked, cached, errored, streamed) reports the same
     // decision rather than each rolling its own dice.
+    // Argument values only when the workspace opted in; see
+    // `RequestContext::stored_snapshot`.
     let context_snapshot_for_trace: Option<serde_json::Value> =
         if should_capture_context_snapshot(state.context_snapshot_rate, rand::random::<f64>()) {
-            serde_json::to_value(&wasm_ctx).ok()
+            let store_arguments =
+                tool_arguments_stored(&state, credential.virtual_key(), &workspace_id).await;
+            wasm_ctx.stored_snapshot(store_arguments)
         } else {
             None
         };

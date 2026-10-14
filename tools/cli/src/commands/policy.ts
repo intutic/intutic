@@ -1068,6 +1068,10 @@ interface ReplayResult {
   wouldActRate: number
   verdictCounts: Record<string, number>
   sampleMatches: Record<string, unknown>[]
+  /** Contexts whose tool calls carry argument keys and sizes, not values. Absent from an older control plane. */
+  argumentsWithheld?: number
+  /** Why that matters and how to change it; present when `argumentsWithheld` is above zero. */
+  argumentsNote?: string
 }
 
 const VERDICT_NAMES: Record<string, string> = {
@@ -1156,6 +1160,9 @@ export async function runPolicyReplay(
     log.field('Would act (block/reask/other)', `${summary.wouldActCount} (${(summary.wouldActRate * 100).toFixed(1)}%)`)
     for (const [code, count] of Object.entries(summary.verdictCounts)) {
       log.field(`  verdict ${code} (${VERDICT_NAMES[code] ?? 'unmapped'})`, String(count))
+    }
+    if (summary.argumentsNote) {
+      log.warn(summary.argumentsNote)
     }
     if (summary.sampleMatches.length > 0) {
       log.info(`First ${summary.sampleMatches.length} non-allow context(s):`)

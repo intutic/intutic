@@ -23468,6 +23468,9 @@
               }
             ]
           },
+          "storeToolArguments": {
+            "type": "boolean"
+          },
           "upstreamRetry": {
             "anyOf": [
               {

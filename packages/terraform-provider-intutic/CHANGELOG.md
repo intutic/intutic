@@ -18,6 +18,10 @@ ENHANCEMENTS:
 * resource/intutic_policy: `target_tool_pattern` and `enforcement_action` are optional, defaulting to `*` and `BYPASS` (the API still requires both; neither has any effect). Removing either from a configuration plans an update to the default; convert a `KILL` or `REASK` policy first, since conversion reads them.
 * resource/intutic_workspace_settings: accepts the `interventionMode` key (`TRANSPARENT`, `OPAQUE` or `SILENT_LOG`), the workspace's intervention mode.
 
+ENHANCEMENTS:
+
+* resource/intutic_workspace_settings: accepts `storeToolArguments`, the opt-in for keeping tool-call argument values (redacted) in the replay contexts the proxy samples onto traces. Off by default.
+
 BUG FIXES:
 
 * resource/intutic_notification_rule: `filter_severity` is validated against the severities events carry (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`), in any case. Lowercase values, as the example used to show, were stored as written and matched no event, so the rule never fired; the control plane now stores them uppercase and has uppercased existing rules. A configured list that differs from the stored one only in case plans no change. A value that is not a severity now fails at plan time.

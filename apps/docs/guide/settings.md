@@ -72,7 +72,7 @@ Sign-in, keys and credentials, and the network and runtime limits every agent in
 | **Harness Config History** | Whether harness rules files are uploaded with their text or as hashes only. See [below](#harness-config-history). |
 | **Network Egress Control** | The egress mode and allow list every proxy in the workspace hot-reloads. |
 | **Sandboxed Execution** | Require agents to run in a sandbox; enforced by the CLI on `intutic exec`. See [Sandboxed Execution](/guide/sandboxed-execution). |
-| **PII Detectors** | The action the LLM proxy and the MCP proxy take on card numbers, IBANs, Social Security numbers, email addresses and phone numbers in this workspace's model traffic and MCP tool calls. A developer's own proxy config can only make a detector stricter. See [PII detectors](/guide/policies#setting-detector-actions-for-a-workspace). |
+| **PII Detectors** | The action the LLM proxy and the MCP proxy take on card numbers, IBANs, Social Security numbers, email addresses and phone numbers in this workspace's model traffic and MCP tool calls. A developer's own proxy config can only make a detector stricter. See [PII detectors](/guide/policies#setting-detector-actions-for-a-workspace). The same card has **Store tool-call arguments in replay contexts** (`storeToolArguments`, off by default): off, the replay contexts the proxy samples keep each tool call's name and its arguments' keys and size; on, the values too, redacted. |
 | **Approved Models** | The workspace's model allowlist. See [below](#approved-models). |
 | **Repeat-Finding Enforcement** | Act on a sustained pattern of findings in one session, not only record it. |
 | **Trajectory Monitoring** | Server-side monitoring of running sessions. See [Trajectory Monitor](/guide/trajectory-monitor). |
@@ -304,7 +304,7 @@ A semantic match is narrower. It applies only to a single plain-text exchange wi
 
 Some responses are never stored, because a hit replays plain text and these would lose what the client acts on: a response that called a tool or carried anything besides text (thinking, reasoning items, more than one choice), a response output DLP redacted or withheld, and a stream that ended early or was refused by policy. Two kinds of request skip the cache entirely: requests for more than one choice (`n` above 1), and Responses API requests without `"store": false`, which the provider keeps so the client can continue them with `previous_response_id` — a replayed answer would carry an id the provider never issued.
 
-Entries are per workspace and expire after 24 hours.
+Entries are per workspace and expire after 24 hours. An entry holds the prompt text and the answer, so an exchange in which DLP finds anything — a secret, or any of the five [PII detectors](/guide/policies#pii-detectors), email and phone included whatever their live actions — is served but never cached. Every cost posture turns exact matching on, and its description says so.
 
 The cache figures are **Cached answers**, **Cache hit rate** (exact and similar hits) and **Saved (USD)**.
 

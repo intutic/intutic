@@ -69,6 +69,16 @@ authors, `git config user.email`, `package.json` contacts, test fixtures. On
 trajectories), the email detector matched in 215 calls — mostly test
 addresses such as `example.com` ones, git configuration and author credits in
 licence headers — and the card, IBAN and SSN detectors matched nothing.
+Redacting those on the way to the model breaks the edit: shown
+`[REDACTED_PII]` in place of a `package.json` author, an agent writes the
+placeholder back into the file.
+
+What Intutic keeps is a different matter. Whatever the live actions, every
+detector — email and phone included — and every secret pattern redacts the
+copies the proxy keeps: the [replay contexts](/reference/configuration) it
+samples onto traces and the targets in a trace's change manifest. A request
+or response with a match is not written to the response cache at all. The
+shared detector definition records this as each detector's `stored_action`.
 
 Set a detector's action under `dlp.detectors`. Detectors you leave out keep
 their defaults:

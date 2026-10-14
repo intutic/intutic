@@ -52,6 +52,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Behaviour change: replay contexts keep tool-call argument keys, not
+  values.** The context the proxy samples onto 5% of traces
+  (`WASM_CONTEXT_SNAPSHOT_RATE`) carried every tool call's full arguments.
+  Each call now keeps its name, `argument_keys` (the top-level keys) and
+  `argument_bytes`, and the context says `tool_arguments: "keys_only"`. A
+  workspace that replays rules reading `tool_calls[].arguments` can opt in
+  with the new `storeToolArguments` setting (off by default); the values are
+  then kept as `tool_arguments: "redacted"`. Snapshots from older proxies are
+  reduced to keys and sizes when they are ingested, and `intutic policy
+  replay` says how many contexts withheld arguments.
+- **What the proxy keeps is redacted for every PII detector, email and phone
+  included.** Live defaults are unchanged (card, IBAN and SSN redact; email and
+  phone off, because an agent shown a redacted address writes the placeholder
+  back into the file). The copies the proxy keeps are another matter: replay
+  contexts and change-manifest targets are redacted for every secret pattern
+  and all five detectors, whatever their live actions, recorded as each
+  detector's new `stored_action` in `pii_detectors.json`.
+- **The response cache does not store an exchange DLP matches.** An entry holds
+  the prompt text and the answer for 24 hours; a prompt or answer with a secret
+  or any PII match is now served without being cached. The cost posture
+  descriptions, which all turn exact caching on, say what the cache keeps.
+
 - **Breaking for SIEM rules: traces, detector findings and device events get
   their own CEF classes.** All of them went out over syslog as
   `AGENT_TOOL_CALL` (device events as `AGENT_TOOL_CALL_UPDATE`) at severity 5,
