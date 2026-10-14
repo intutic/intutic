@@ -19,36 +19,31 @@ Governance works through two components that run on the developer's machine:
 ## Architecture
 
 ```
-Developer's Machine                              Cloud
-┌──────────────────────────────────────┐    ┌──────────────┐
-│                                      │    │              │
-│  ┌──────────┐   LLM API calls       │    │  Control     │
-│  │ Harness  │ ──────────────────────────▶ │  Plane       │
-│  │ (Cursor, │   via localhost:4000   │    │  (:3001)     │
-│  │  Claude, │                        │    │              │
-│  │  etc.)   │                        │    │  ┌────────┐  │
-│  └────┬─────┘                        │    │  │ SOPs   │  │
-│       │ reads                        │    │  │ Traces │  │
-│       ▼                              │    │  │ Budgets│  │
-│  ┌──────────┐     ┌──────────────┐   │    │  └────────┘  │
-│  │ Config   │◀────│ Sync Daemon  │◀──────▶│              │
-│  │ Files    │     │ (sync loop + │   │    └──────────────┘
-│  │          │     │  WebSocket)  │   │       ▲
-│  └──────────┘     └──────────────┘   │       │
-│       ▲                              │       │
-│       │ watches for drift            │    Policy checks
-│       │                              │    + telemetry
-│       │           ┌──────────────┐   │       │
-│       └───────────│ Proxy (Rust) │───────────┘
-│                   │ :4000        │   │
-│                   └──────────────┘   │
-└──────────────────────────────────────┘
+Developer's Machine                                  Cloud
+┌────────────────────────────────────────────┐
+│                                            │     ┌────────────────┐
+│  ┌──────────┐  LLM API calls  ┌──────────┐ │     │  LLM provider  │
+│  │ Harness  │ ──────────────▶ │  Proxy   │ ─────▶│                │
+│  │ (Cursor, │ localhost:4000  │  (Rust)  │ │     └────────────────┘
+│  │  Claude, │                 │  :4000   │ ─────┐
+│  │  etc.)   │                 └──────────┘ │    │ policy checks
+│  └────┬─────┘                              │    │ + telemetry
+│       │ reads                              │    ▼
+│       ▼                                    │  ┌────────────────┐
+│  ┌──────────┐ writes and ┌──────────────┐  │  │ Control Plane  │
+│  │ Config   │◀────────── │ Sync Daemon  │ ◀──▶│ (:3001)        │
+│  │ files    │ watches    │ (sync loop + │  │  │                │
+│  │          │ for drift  │  WebSocket)  │  │  │ SOPs, traces,  │
+│  └──────────┘            └──────────────┘  │  │ budgets        │
+│                                            │  └────────────────┘
+└────────────────────────────────────────────┘
 ```
 
-::: tip Open-core runs the left-hand column only
-The Cloud column is optional. Open core ships no control plane, so a standalone
-install runs the harness, proxy, config files and sync daemon entirely on the
-developer's machine — steps 4 and 5 below apply only once you connect one.
+::: tip Open core runs without the control plane
+The control plane is optional, and open core ships none. A standalone install
+(`intutic start`) runs the harness and the proxy on the developer's machine. The
+sync daemon is `intutic connect`, which needs a control plane, so it and steps
+4–6 below apply only once you connect one.
 :::
 
 ### The flow
@@ -199,6 +194,6 @@ In a marked section the second line reads `# DO NOT EDIT this section — manage
 ## Related
 
 - [Integrations Hub](/integrations/) — All 43 harnesses with setup guides
-- [Enforcement Actions](/concepts/enforcement-actions) — BYPASS/ENHANCE/HIJACK/KILL verdicts
+- [Enforcement Actions](/concepts/enforcement-actions) — BYPASS/ENHANCE/HIJACK/REASK/KILL verdicts
 - [Getting Started](/guide/getting-started) — Install and connect your first harness
 - [Core Concepts](/guide/concepts) — Workspaces, SOPs, scoring

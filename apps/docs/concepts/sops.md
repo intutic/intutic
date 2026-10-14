@@ -50,6 +50,7 @@ human-in-the-loop validation or in-process local interception:
 ### 1. Standard SOPs
 Standard SOPs are authored in natural language markdown. They represent corporate policies (e.g., "Do not use deprecated cryptographic functions") and are used by:
 - **LLMProbe:** Running LLM-as-a-judge checks against prompt inputs and outputs.
+- **The harnesses and the proxy:** `intutic connect` writes them into each harness's rules file, and the proxy enforces the keys in their [front matter](/reference/sop-front-matter).
 
 ### 2. WASM Rules
 For programmatic enforcement, rules compile to WebAssembly and run in the proxy with an

@@ -24,7 +24,7 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `INTUTIC_CHAOS_PLAN` | unset | Set only by [`intutic chaos run`](/guide/chaos-engineering) on the proxy it starts for a repetition: the faults to inject, base64url-encoded JSON. A value that does not decode refuses to start the proxy |
 | `INTUTIC_CHAOS_EVENTS` | unset | Set with `INTUTIC_CHAOS_PLAN`: the file the proxy appends the run's fault, usage and plan events to. An unopenable path refuses to start the proxy |
 | `INTUTIC_WORKSPACE_ID` | unset | The workspace for requests that do not name one (no `x-workspace-id` header and no workspace in the key). Also the workspace a centrally distributed egress policy file must name to be loaded |
-| `INTUTIC_REGION` | unset | A region code (`eu`, …). Rewrites the hosted control plane's policy-check address to that region's control plane (`api.<region>.…`). Any other address is left alone |
+| `INTUTIC_REGION` | unset | A region code (`eu`, …). Rewrites the hosted control plane's policy-check address to that region's control plane (`api.<region>.…`), and the in-cluster `control-plane.intutic.svc` to `control-plane.intutic-<region>.svc`. Any other address is left alone |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Export traces and metrics over OTLP/gRPC to this collector. Unset, nothing is exported. See [OpenTelemetry](/guide/opentelemetry) |
 | `OTEL_SERVICE_NAME` | `intutic-proxy` | The service name on exported traces and metrics |
 
@@ -198,7 +198,7 @@ Read by the MCP proxy (`intutic-mcp-proxy`) and the MCP daemon (`intutic-mcp-dae
 | `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/verified/policy-snapshot.json` | The verified policy snapshot the daemon seeds its cache from at start |
 | `REDIS_URL` | `redis://localhost:6379` | The daemon's Valkey when `VALKEY_URL` is unset |
 
-Both also read `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_CONTROL_PLANE_URL` (the daemon: `CONTROL_PLANE_URL`), and the daemon exports traces to `OTEL_EXPORTER_OTLP_ENDPOINT`. The remote-bridge headers (`INTUTIC_REMOTE_HEADERS`) are on [MCP governance](/guide/mcp-governance#configuration-reference).
+Both also read `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_CONTROL_PLANE_URL` (the daemon: `CONTROL_PLANE_URL`), and the daemon exports traces to `OTEL_EXPORTER_OTLP_ENDPOINT` under the service name `OTEL_SERVICE_NAME` (default `mcp-daemon`). The remote-bridge headers (`INTUTIC_REMOTE_HEADERS`) are on [MCP governance](/guide/mcp-governance#configuration-reference).
 
 ### Clawde SDK
 
@@ -366,7 +366,9 @@ model_list:
   - model_name: claude-sonnet-4-5-20250929
     litellm_params:
       model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
-``` `litellm_params.api_key`, `litellm_params.api_base` and `general_settings` (including `master_key` and `database_url`) are ignored: the proxy does not authenticate callers with a master key.
+```
+
+`litellm_params.api_key`, `litellm_params.api_base` and `general_settings` (including `master_key` and `database_url`) are ignored: the proxy does not authenticate callers with a master key.
 
 Intutic's options live under `intutic_settings`:
 

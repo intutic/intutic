@@ -15,7 +15,7 @@ Intutic defends against three categories of threat:
 
 | Threat | Vector | Mitigation |
 |---|---|---|
-| **Agent misuse** | AI agent executes destructive tool calls (file deletion, credential exposure, unauthorized API calls) | Real-time SOP evaluation with BYPASS/ENHANCE/HIJACK/KILL verdicts via the [circuit breaker](/guide/how-it-works) |
+| **Agent misuse** | AI agent executes destructive tool calls (file deletion, credential exposure, unauthorized API calls) | Real-time SOP evaluation with BYPASS/ENHANCE/HIJACK/REASK/KILL verdicts via the [circuit breaker](/guide/how-it-works) |
 | **Credential leakage** | API keys, tokens, or secrets exfiltrated through agent output or prompt injection | DLP scanning in the proxy hot path; secrets detected and redacted before reaching the LLM |
 | **Unauthorized access** | Rogue agents or developers bypassing governance controls | Harness config drift detection with auto-revert, immutable local SOP rules, and local daily spend caps |
 | **Uncontrolled egress** | An agent (or a compromised dependency it pulls in) reaches the network by a path other than the governing proxy, so nothing above ever inspects the traffic | Proxy-level allow-list enforcement (`intutic_settings.egress.mode`), and — closing the gap where an agent simply doesn't route through the proxy at all — `intutic enforce`'s host-level default-deny firewall. See [Network Egress Control](/guide/policies#network-egress-control) |
@@ -42,8 +42,8 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
 ```
 
 1. Every LLM request from an AI agent is routed through the **local Intutic proxy** on port 4000
-2. The proxy evaluates tool calls against SOPs in the **WASM policy engine** (sandboxed, with an enforced instruction budget and a wasmtime deadline)
-3. Verdicts and telemetry stay **on the local machine**. Bandit routing state is written to your own Valkey; nothing is transmitted to Intutic or anyone else
+2. The proxy evaluates tool calls against the SOPs' [front matter](/reference/sop-front-matter) and against **WASM rules** (sandboxed, with an enforced instruction budget and a wasmtime deadline)
+3. Verdicts and telemetry stay **on the local machine**. Bandit routing state is written to your own Valkey, or to `~/.intutic/bandit-state.json` when there is none; nothing is transmitted to Intutic or anyone else
 4. The proxy **never stores prompts or completions** — only structured telemetry (tool names, verdicts, token counts, timing)
 
 This is what you get by default. Open core ships no control plane, and with `policy.control_plane_url` unset the policy pre-check is skipped entirely.
@@ -60,14 +60,14 @@ Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
                       │  Policy    │
                       │  Engine    │
                       └─────┬──────┘
-                            │  governance telemetry only
+                            │  policy checks + telemetry
                       ┌─────▼──────┐
                       │  Control   │
                       │  Plane     │
                       └────────────┘
 ```
 
-In this mode, and only in this mode, verdicts and traces are sent to the control plane. Point it at a control plane you host yourself. Prompts and completions are still never transmitted.
+In this mode, and only in this mode, verdicts and traces are sent to the control plane. Point it at a control plane you host yourself. Prompts and completions are not part of that telemetry. The exception is a judged request — `/intutic judge` in a prompt, or auto-judge turned on for a session or loop — whose response text goes to the control plane's judge.
 
 The sync daemon (`intutic connect`) also records each harness rules file in the workspace's config history: its path, a hash, its size and the time. It uploads a file's text only when the workspace turns on **Upload config file content**, and redacts credential-shaped strings in it before it leaves the machine. See [Config content upload](/reference/cli#config-content-upload).
 
@@ -79,7 +79,7 @@ The sync daemon (`intutic connect`) also records each harness rules file in the 
 
 The proxy runs **locally on the developer's machine**. LLM traffic is never rerouted anywhere — it flows directly from the proxy to the LLM provider.
 
-Nothing leaves the machine: no telemetry, no verdicts, no traces. Prompts and completions are never transmitted anywhere by the proxy.
+Standalone, nothing leaves the machine: no telemetry, no verdicts, no traces. Prompts and completions are never transmitted anywhere by the proxy.
 
 ---
 
@@ -97,8 +97,8 @@ All network communication is encrypted with TLS 1.2+:
 
 | Data | Storage | Encryption |
 |---|---|---|
-| Session state & caches | Valkey (Redis-compatible) | Ephemeral — not persisted to disk |
-| Bandit learning | `~/.intutic/bandit-state.json` | File permissions inherited from `~/.intutic` |
+| Session state & caches | Valkey (Redis-compatible) | None from Intutic. The `intutic-valkey` container `intutic start` runs keeps Valkey's default snapshots on disk, in its `/data` volume |
+| Bandit learning (no Valkey) | `~/.intutic/bandit-state.json` | None — a plain JSON file with your default file permissions |
 | Local config & credentials | `~/.intutic/credentials.json` | File permissions (`0600`) + system keychain |
 | Provider credentials in flight | Process memory only | Never written to disk |
 
@@ -158,14 +158,15 @@ Intutic helps your organization meet regulatory requirements for AI governance:
 
 ### Enforcement Coverage
 
-Connected harnesses are scored on a four-tier system:
+Connected harnesses get an enforcement tier from the governance layers found active in their config (see [Compliance Scope](/guide/policies#compliance-scope)):
 
-| Tier | Enforcement Level |
+| Tier | Active layers |
 |---|---|
-| **A** | Strict — immutable rules, credential redaction, system command blocking |
-| **B** | Moderate — prompts for suspicious tool combinations |
-| **C** | Audit — records traces without blocking |
-| **D** | Observe — alerts only, fail-open |
+| **A** | MCP proxy and a native hook gate: every tool call enforced in process |
+| **B** | MCP proxy only |
+| **C** | LLM proxy only |
+| **D** | A rules file only: guidance the agent reads, checked after the fact |
+| none | Nothing detected |
 
 ---
 
@@ -188,7 +189,7 @@ Connected harnesses are scored on a four-tier system:
 <!-- ENTERPRISE_ONLY_END -->
 ## Responsible Disclosure
 
-If you discover a security vulnerability, please report it to **support@intutic.ai**. We aim to acknowledge reports within 24 hours and provide a fix or mitigation within 7 business days.
+If you discover a security vulnerability, please report it to **support@intutic.ai**. We aim to acknowledge reports within 24 hours and to patch critical and high-severity issues within 72 hours; see [SECURITY.md](https://github.com/intutic/intutic/blob/main/SECURITY.md).
 
 ---
 
@@ -199,4 +200,4 @@ If you discover a security vulnerability, please report it to **support@intutic.
 | [Governance Controls Checklist](/guide/governance-controls) | A control-by-control mapping against a standard enterprise evaluation checklist |
 | [Custom Filters (WASM)](/external/wasm-rules) | WASM policy rules engine for custom tool-call filtering |
 | [CLI Reference](/reference/cli) | CLI commands, doctor diagnostic tool, and local configuration |
-| [Integrations Hub](/integrations/) | Harness setup guides for 42 supported agent tools |
+| [Integrations Hub](/integrations/) | Harness setup guides for 43 supported agent tools |
