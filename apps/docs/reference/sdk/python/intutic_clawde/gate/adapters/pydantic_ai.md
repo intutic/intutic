@@ -15,16 +15,19 @@ installed in a scratch venv, source read directly, then driven end to end
 through a real `Agent.run_sync()` call — not just imported and inspected):
 
   * `WrapperToolset.call_tool(name, tool_args, ctx, tool)` — the method this
-    adapter overrides. Confirmed by reading `pydantic_ai/tool_manager.py`:
-    `ToolManager._raw_execute` calls `self.toolset.call_tool(...)` directly,
-    and any `ModelRetry` it raises is caught two frames up
-    (`ToolManager.execute`, around `except (ValidationError, ModelRetry)`) and
-    converted into a `RetryPromptPart` — the model sees the refusal message in
-    place of a tool result, and the tool body (`super().call_tool`) never
-    runs. This is `ModelRetry`, not `IntuticGateRefusal` directly, because
-    `IntuticGateRefusal` is not something pydantic-ai's tool-manager
-    recognises; wrapping its message in `ModelRetry(str(exc))` is what makes
-    the refusal reach the model the way every other adapter's veto does.
+    adapter overrides. Confirmed by reading `pydantic_ai/tool_manager.py`
+    (`pydantic-ai-slim` 2.31.1 and 2.53.0, the extra's floor):
+    `ToolManager._raw_execute` calls `self.toolset.call_tool(...)` directly
+    and catches any `ModelRetry` it raises itself (`except ModelRetry`): it
+    counts against the tool's retries and is wrapped by
+    `ToolManager._wrap_error_as_retry` into a `RetryPromptPart` (raised as
+    `ToolRetryError` up through `ToolManager.execute_tool_call`) — the model
+    sees the refusal message in place of a tool result, and the tool body
+    (`super().call_tool`) never runs. This is `ModelRetry`, not
+    `IntuticGateRefusal` directly, because `IntuticGateRefusal` is not
+    something pydantic-ai's tool-manager recognises; wrapping its message in
+    `ModelRetry(str(exc))` is what makes the refusal reach the model the way
+    every other adapter's veto does.
   * `AbstractToolset.approval_required(...)` / raising
     `pydantic_ai.exceptions.ApprovalRequired` — the SDK's OTHER documented
     veto-adjacent mechanism. Investigated and NOT used here: `ApprovalRequired`
