@@ -1,4 +1,4 @@
-## 0.3.0 (Unreleased)
+## 0.3.0 (October 14, 2026)
 
 BREAKING CHANGES:
 
