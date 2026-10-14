@@ -41,7 +41,6 @@ describe('policyCache Unit Tests', () => {
             reason: 'No destructive commands allowed',
           },
         ],
-        dlpPatterns: [],
         mcpInjectionPatterns: [],
         interventionMode: 'BLOCK',
       }

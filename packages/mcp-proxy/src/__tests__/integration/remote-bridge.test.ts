@@ -12,7 +12,7 @@
  * not merely the public .d.ts — see remoteBridge.ts's own doc comments).
  *
  * A second small `node:http` server stands in for the Intutic control plane,
- * so SOP rules / curation / DLP patterns can be varied per workspace without
+ * so SOP rules and curation can be varied per workspace without
  * a real control-plane instance.
  *
  * @module
@@ -187,7 +187,6 @@ function makeHandler(opts: {
 
 interface WorkspacePolicy {
   sopRules?: Array<{ id: string; toolPattern: string; argPattern?: string; action: string; reason: string }>
-  dlpPatterns?: string[]
   allowedTools?: string[]
   allowedServers?: string[]
   toolDescriptionOverrides?: Record<string, string>
@@ -209,7 +208,6 @@ function createMockControlPlane(policies: Record<string, WorkspacePolicy>): http
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({
         rules: policy.sopRules ?? [],
-        dlpPatterns: policy.dlpPatterns ?? [],
         allowedTools: policy.allowedTools ?? [],
         allowedServers: policy.allowedServers ?? [],
         toolDescriptionOverrides: policy.toolDescriptionOverrides ?? {},
@@ -221,7 +219,6 @@ function createMockControlPlane(policies: Record<string, WorkspacePolicy>): http
       res.end(JSON.stringify({
         workspaceId,
         sopRules: policy.sopRules ?? [],
-        dlpPatterns: policy.dlpPatterns ?? [],
         allowedTools: policy.allowedTools ?? [],
         allowedServers: policy.allowedServers ?? [],
         toolDescriptionOverrides: policy.toolDescriptionOverrides ?? {},

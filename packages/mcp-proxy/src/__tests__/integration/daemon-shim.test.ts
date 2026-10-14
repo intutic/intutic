@@ -115,7 +115,6 @@ describe('Daemon-Shim Integration Tests', () => {
             sopRules: [
               { id: 'rule_xyz', toolPattern: 'Bash', action: 'block', reason: 'Blocked in test' }
             ],
-            dlpPatterns: [],
             mcpInjectionPatterns: [],
             interventionMode: 'BLOCK',
             ...curation,

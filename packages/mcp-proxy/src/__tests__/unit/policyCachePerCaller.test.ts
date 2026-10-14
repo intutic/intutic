@@ -36,7 +36,6 @@ describe('the daemon policy cache is per caller', () => {
           workspaceId: ws,
           // A developer-scoped refusal, served only to the developer's key.
           sopRules: developer && !retired ? [{ id: 'guardrail.pgr_dev', toolPattern: '^Bash$', action: 'block', reason: 'no prod-db', origin: 'guardrail', roles: ['developer'] }] : [],
-          dlpPatterns: [],
           interventionMode: 'TRANSPARENT',
           mcpRegistry: { defaultPolicy: 'allow', servers: [] },
           principal: { memberId: developer ? 'mem_dev' : 'mem_admin', email: 'x@example.test', role: developer ? 'DEVELOPER' : 'ADMIN', ssoGroups: [] },
