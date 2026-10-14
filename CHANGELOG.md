@@ -163,6 +163,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listed as exported) are importable from `intutic_clawde.gate` and in its
   `__all__`.
 
+- **`sudo intutic enforce apply` exempts you, not root.** Under `sudo` the
+  firewall's default `--uid` was root's, so the proxy you run with
+  `intutic start` was denied egress. The CLI and `intutic-proxy enforce` now
+  default to the invoking user (`SUDO_UID`) when running as root under sudo.
+  The Jamf and Intune firewall manifests run as root with no sudo, so their
+  script now passes the console user's uid (`stat -f %u /dev/console` on
+  macOS, seat0's active session on Linux).
+- **`intutic doctor` finds the CA `intutic connect` trusted on Linux.** It
+  looked only for `intutic-ca.crt`; connect installs `intutic-connect-ca.crt`.
+- **`intutic loop start`, `complete`, `kill` and `list` exit 1** when the
+  control-plane call fails or is refused, instead of printing the error and
+  exiting 0.
+- **`intutic policy snapshot`** no longer says the previous snapshot is
+  untouched when a refused key rewrote it, and `intutic policy replay` names
+  the plan rather than your role when the plan refused it.
+- **`intutic guardrails`:** `list --limit` help states the server's default
+  200 and cap 1000; `sources list` shows a source's last failed sync; `docs
+  extract` reports an unreachable cap store (503) as such and exits 1.
+- **`intutic integrity chain`** says older roots were not walked rather than
+  printing the endpoint's one-row probe as a count.
+- **`intutic judge configure`** prints docs links instead of paths into
+  Intutic's own source tree.
+- **`intutic sops push <name>` pushes a file `sops pull` wrote.** Pull writes
+  `.intutic/sops/<slug>.md`, and push read only folders; push now takes a
+  folder, or a file named with or without `.md`.
+- **The AutoGen `.env.intutic` comment leads with `IntuticWorkbench`**, which
+  governs `AssistantAgent`'s own tool calls, as the integration page does.
+
 ### Removed
 
 - **`ClawdeBudgetExceededError` (`@intutic/clawde`).** Nothing threw it: a

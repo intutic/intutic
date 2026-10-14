@@ -63,6 +63,7 @@ const INTERNAL = new Map([
   ['APPDATA', 'the operating system: the Windows data directory'],
   ['PATH', 'the operating system: where the CLI finds harness binaries'],
   ['SUDO_USER', 'the operating system: the invoking user under sudo'],
+  ['SUDO_UID', "the operating system: the invoking user's uid under sudo"],
   ['KUBERNETES_SERVICE_HOST', 'set by Kubernetes inside a pod'],
   ['KUBERNETES_SERVICE_PORT', 'set by Kubernetes inside a pod'],
   ['CODEX_HOME', "Codex's own variable, honoured where Codex keeps its config"],

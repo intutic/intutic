@@ -62,7 +62,9 @@ const CASES: Case[] = [
     adapter: autogenAdapter,
     positive: 'autogen-agentchat==0.4.0\n',
     negative: 'fastapi\nuvicorn\n',
-    importSnippet: 'intutic_clawde.gate.adapters.autogen',
+    // The workbench, which the integration page leads with: it is what governs
+    // AssistantAgent's own tool calls. The intervention handler does not.
+    importSnippet: 'from intutic_clawde.gate.adapters.autogen_workbench import IntuticWorkbench',
   },
   {
     name: 'ag2',

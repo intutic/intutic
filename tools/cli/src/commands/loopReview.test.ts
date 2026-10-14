@@ -13,7 +13,7 @@ vi.mock('../config/paths.js', () => ({
   resolveControlPlaneUrl: vi.fn(() => 'https://api.test.invalid'),
 }))
 
-import { runLoopReview } from './skill.js'
+import { runLoopReview, runLoopStart, runLoopComplete, runLoopKill, runLoopList } from './skill.js'
 
 describe('runLoopReview', () => {
   let fetchMock: ReturnType<typeof vi.fn>
@@ -48,4 +48,44 @@ describe('runLoopReview', () => {
 
     await expect(runLoopReview('lr_1', { reject: true })).rejects.toThrow('process.exit(1)')
   })
+})
+
+// start/complete/kill/list printed the failure and exited 0, so a script that
+// checked `$?` after `intutic loop start` carried on without a run.
+describe('loop start/complete/kill/list exit non-zero when the control plane call fails', () => {
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  const commands: Array<[string, () => Promise<void>]> = [
+    ['start', () => runLoopStart({ name: 'nightly' })],
+    ['complete', () => runLoopComplete('lr_1', {})],
+    ['kill', () => runLoopKill('lr_1', {})],
+    ['list', () => runLoopList({})],
+  ]
+
+  for (const [name, run] of commands) {
+    it(`${name}: exits 1 when the request fails`, async () => {
+      fetchMock.mockRejectedValue(new Error('connect ECONNREFUSED'))
+      await expect(run()).rejects.toThrow('process.exit(1)')
+    })
+
+    it(`${name}: exits 1 when the control plane answers ok: false`, async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: false }) })
+      await expect(run()).rejects.toThrow('process.exit(1)')
+    })
+  }
 })

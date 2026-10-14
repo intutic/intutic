@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { log } from '../lib/logger.js'
 import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
@@ -16,6 +16,35 @@ async function getClient(dev?: boolean) {
   }
   const controlPlaneUrl = resolveControlPlaneUrl(dev)
   return createApiClient(controlPlaneUrl, creds.apiKey)
+}
+
+/**
+ * What `sops push <name>` reads: the folder `.intutic/sops/<name>/` when
+ * there is one, else the single file `.intutic/sops/<name>.md` (or `<name>`
+ * given with its `.md`). The file form is the layout `sops pull` writes and
+ * the proxy enforces, so a pulled, edited SOP pushes back by its file name.
+ */
+export async function resolvePushTarget(
+  sopsRoot: string,
+  name: string,
+): Promise<{ dir: string; files: string[] } | { error: string }> {
+  const folder = join(sopsRoot, name)
+  const isDir = await fs.stat(folder).then((st) => st.isDirectory(), () => false)
+  if (isDir) {
+    let files: string[]
+    try {
+      files = (await fs.readdir(folder)).filter((e) => e.endsWith('.md')).sort()
+    } catch (err) {
+      return { error: `Error reading SOP files: ${err instanceof Error ? err.message : String(err)}` }
+    }
+    if (files.length === 0) return { error: `No markdown (.md) files found in local SOP folder: ${folder}` }
+    return { dir: folder, files }
+  }
+  const fileName = name.endsWith('.md') ? name : `${name}.md`
+  const file = join(sopsRoot, fileName)
+  const isFile = await fs.stat(file).then((st) => st.isFile(), () => false)
+  if (isFile) return { dir: dirname(file), files: [basename(file)] }
+  return { error: `No SOP folder ${folder}/ or file ${file} found.` }
 }
 
 /**
@@ -46,30 +75,14 @@ export async function runSopsPush(name: string, opts: { dev?: boolean; org?: boo
 
   const config = loadConfig()
   const workspaceRoot = config?.workspaceRoot ?? process.cwd()
-  const sopsDir = join(workspaceRoot, '.intutic', 'sops', name)
+  const sopsRoot = join(workspaceRoot, '.intutic', 'sops')
 
-  try {
-    const stat = await fs.stat(sopsDir)
-    if (!stat.isDirectory()) {
-      log.error(`Path is not a directory: ${sopsDir}`)
-      process.exit(1)
-    }
-  } catch {
-    log.error(`Local SOP folder not found: ${sopsDir}`)
+  const target = await resolvePushTarget(sopsRoot, name)
+  if ('error' in target) {
+    log.error(target.error)
     process.exit(1)
   }
-
-  let mdFiles: string[]
-  try {
-    mdFiles = (await fs.readdir(sopsDir)).filter((e) => e.endsWith('.md')).sort()
-    if (mdFiles.length === 0) {
-      log.error(`No markdown (.md) files found in local SOP folder: ${sopsDir}`)
-      process.exit(1)
-    }
-  } catch (err) {
-    log.error(`Error reading SOP files: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-  }
+  const { dir: sopsDir, files: mdFiles } = target
 
   const client = await getClient(opts.dev)
   let failures = 0

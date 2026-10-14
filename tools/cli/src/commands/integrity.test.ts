@@ -516,6 +516,33 @@ describe('command exit status', () => {
     expect(report).toContain('tmr_1')
   })
 
+  it('says older roots exist without printing the window probe as a count', async () => {
+    const printed: string[] = []
+    vi.mocked(console.log).mockImplementation((...args: unknown[]) => {
+      printed.push(args.map(String).join(' '))
+    })
+    vi.stubGlobal(
+      'fetch',
+      stubFetch([
+        ['/integrity/chain', 200, {
+          ok: true,
+          workspaceId: 'wk_alpha',
+          rootsWalked: 500,
+          // The endpoint reads one row past the window, so this is 1 whether
+          // one or ten thousand older roots exist.
+          rootsNotWalked: 1,
+          unchainedRootIds: [],
+          breaks: [],
+          intact: true,
+        }],
+      ]),
+    )
+    await runIntegrityChain({})
+    const line = printed.find((l) => l.includes('Older, not walked')) ?? ''
+    expect(line).toContain('500-root window were not examined')
+    expect(line).not.toMatch(/\b1\b/)
+  })
+
   it('exits 0 when roots are merely unchained', async () => {
     vi.stubGlobal(
       'fetch',

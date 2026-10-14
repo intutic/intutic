@@ -5,17 +5,16 @@
  * the `autogen-agentchat` / `autogen-core` / `autogen-ext` packages — any one
  * present is treated as "AutoGen is here".
  *
- * The blocking gate ships SDK-side via
- * `intutic_clawde.gate.adapters.autogen.IntuticInterventionHandler`, an
- * `autogen_core.InterventionHandler.on_send` — verified live against
- * autogen-core==0.7.5 by driving a real `SingleThreadedAgentRuntime` end to
- * end. IMPORTANT, documented in that module's own doc: `on_send` only sees
- * `FunctionCall` messages explicitly routed through
- * `runtime.send_message`/`publish_message` — `AssistantAgent`'s own tool
- * calls never go through the runtime at all, so for `AssistantAgent`-based
- * code the framework-agnostic `@guard`/`guard_tools` helpers (governing the
- * tool objects directly) remain the applicable coverage, same as before this
- * adapter existed.
+ * The blocking gate ships SDK-side, and the written comment leads with the
+ * same mechanism the integration page does:
+ * `intutic_clawde.gate.adapters.autogen_workbench.IntuticWorkbench`, a
+ * `Workbench.call_tool` veto that governs `AssistantAgent`'s own in-process
+ * tool calls. `intutic_clawde.gate.adapters.autogen.IntuticInterventionHandler`
+ * (an `InterventionHandler.on_send` veto, verified live against
+ * autogen-core==0.7.5) covers only `FunctionCall` messages explicitly routed
+ * through `runtime.send_message`/`publish_message` — `AssistantAgent`'s tool
+ * calls never go through the runtime — so it is named as the addition for
+ * code that dispatches those by hand.
  *
  * HLD §3.14 — Harness Onboarding Matrix
  * @module
@@ -29,10 +28,10 @@ export const autogenAdapter = makeSdkGatedAdapter({
   label: 'AutoGen',
   keywords: ['autogen-agentchat', 'autogen-core', 'autogen-ext'],
   pipInstall: 'intutic-clawde[autogen]',
-  importLine: 'from intutic_clawde.gate.adapters.autogen import IntuticInterventionHandler',
+  importLine: 'from intutic_clawde.gate.adapters.autogen_workbench import IntuticWorkbench',
   usageSummary:
-    'IntuticInterventionHandler vetoes a runtime-routed FunctionCall via on_send (' +
-    'invisible to AssistantAgent\'s own tool calls — wrap those tools with @guard/guard_tools ' +
-    'instead).',
+    'AssistantAgent(workbench=IntuticWorkbench(StaticWorkbench(tools))) vetoes each tool call via ' +
+    'call_tool; for runtime-routed FunctionCall messages add ' +
+    'intutic_clawde.gate.adapters.autogen.IntuticInterventionHandler.',
   docsSlug: 'autogen',
 })

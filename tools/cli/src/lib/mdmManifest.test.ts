@@ -172,7 +172,22 @@ describe('firewall deployment manifests (Jamf / Intune)', () => {
       it('wraps `enforce apply` as the content, using the given cliBinaryPath', () => {
         const json = generate({ cliBinaryPath })
         const parsed = JSON.parse(json)
-        expect(parsed.content).toBe(`${cliBinaryPath} enforce apply`)
+        expect(parsed.content.startsWith('#!/bin/sh\n')).toBe(true)
+        expect(parsed.content).toContain(`'${cliBinaryPath}' enforce apply`)
+      })
+
+      // The MDM agent runs the script as root with no SUDO_UID, so a bare
+      // `enforce apply` would exempt root and deny the signed-in user's proxy.
+      it("exempts the console user's uid, not root", () => {
+        const { content } = JSON.parse(generate({ cliBinaryPath }))
+        expect(content).toContain('stat -f %u /dev/console')
+        expect(content).toContain('loginctl show-seat seat0')
+        expect(content).toContain(`'${cliBinaryPath}' enforce apply --uid "$uid"`)
+      })
+
+      it('quotes the CLI path for the shell', () => {
+        const { content } = JSON.parse(generate({ cliBinaryPath: "/opt/it's/intutic" }))
+        expect(content).toContain(`'/opt/it'\\''s/intutic' enforce apply`)
       })
 
       it('documents prerequisites, including the CLI install path and privileged execution context', () => {

@@ -246,6 +246,35 @@ export interface FirewallDeploymentParams {
   workspaceName?: string
 }
 
+/** Single-quote a value for POSIX sh. */
+function shQuote(value: string): string {
+  return `'${value.split("'").join(`'\\''`)}'`
+}
+
+/**
+ * The managed script. An MDM agent runs it as root with no `SUDO_UID`, so
+ * `enforce apply`'s default uid would be root's and the signed-in user's
+ * proxy would be denied egress. It passes the console user's uid instead:
+ * `stat -f %u /dev/console` on macOS (the console device belongs to the
+ * signed-in GUI user, or to root at the login window), and the user of
+ * seat0's active session via `loginctl` on Linux.
+ */
+function firewallScript(cliBinaryPath: string): string {
+  return [
+    '#!/bin/sh',
+    'if [ "$(uname -s)" = Darwin ]; then',
+    '  uid=$(stat -f %u /dev/console)',
+    'else',
+    '  uid=$(loginctl show-session "$(loginctl show-seat seat0 -p ActiveSession --value 2>/dev/null)" -p User --value 2>/dev/null)',
+    'fi',
+    'case "$uid" in',
+    `  ''|0|*[!0-9]*) exec ${shQuote(cliBinaryPath)} enforce apply ;;`,
+    `  *) exec ${shQuote(cliBinaryPath)} enforce apply --uid "$uid" ;;`,
+    'esac',
+    '',
+  ].join('\n')
+}
+
 /**
  * Shared body for the two firewall-deployment manifests below — same
  * `content`/`schedule`/`prerequisites`/`honesty` fields, only the
@@ -255,10 +284,11 @@ function buildFirewallManifestBody(params: FirewallDeploymentParams) {
   const suffix = params.workspaceName ? ` (${params.workspaceName})` : ''
   return {
     suffix,
-    content: `${params.cliBinaryPath} enforce apply`,
+    content: firewallScript(params.cliBinaryPath),
     prerequisites: [
       `intutic CLI installed at ${params.cliBinaryPath} on the target machine`,
       'MDM agent executes the script with root (macOS/Linux) or administrator (Windows) privilege — `enforce apply` needs that to write firewall rules',
+      "The proxy runs as the user signed in at the console (`intutic start`, or the daemon `intutic daemon install --proxy` sets up). The script exempts that user's uid from the deny: the owner of /dev/console on macOS, the active seat0 session's user on Linux. With nobody signed in it exempts only root, and the next check-in after sign-in exempts the user.",
     ],
     honesty:
       'This re-asserts the firewall on the configured cadence; a user with root/administrator access can still run `intutic enforce remove` and stay unenforced until the next check-in. It is not tamper-proof, it is tamper-resistant on a schedule.',
@@ -307,7 +337,7 @@ export function generateIntuneFirewallManifest(params: FirewallDeploymentParams)
       prerequisites: body.prerequisites,
       deployment: {
         intune:
-          "Deploy via a macOS Shell script (Devices > Scripts) with 'Run script using signed-in credentials' as needed for root context, and a policy schedule; on Windows this would need an equivalent scheduled task — note this manifest's shell command is macOS/Linux-oriented since `enforce apply` is a Rust CLI subcommand available cross-platform but the recurring-execution mechanism differs by OS, and Windows Task Scheduler wiring is left to the operator.",
+          "Deploy via a macOS Shell script (Devices > Scripts) with 'Run script as signed-in user' set to No, so it runs as root, and a policy schedule; on Windows this would need an equivalent scheduled task — note this manifest's shell command is macOS/Linux-oriented since `enforce apply` is a Rust CLI subcommand available cross-platform but the recurring-execution mechanism differs by OS, and Windows Task Scheduler wiring is left to the operator.",
       },
       honesty: body.honesty,
     },

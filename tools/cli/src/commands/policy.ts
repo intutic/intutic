@@ -225,6 +225,9 @@ export async function runPolicySnapshot(opts: { dev?: boolean }): Promise<void> 
   // that startup cost without ever touching a snapshot.
   const { refreshPolicySnapshot } = await import('@intutic/sync-daemon')
 
+  const rulesFile = path.join(snapshotDir, SNAPSHOT_RULES_FILE)
+  const readRules = () => fs.readFile(rulesFile, 'utf-8').catch(() => null)
+  const before = await readRules()
   const result = await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId, snapshotDir })
 
   // `refreshPolicySnapshot` never throws — policy refresh must not be able to
@@ -235,7 +238,17 @@ export async function runPolicySnapshot(opts: { dev?: boolean }): Promise<void> 
     log.error('Snapshot NOT written — GET /api/v1/policy/resolve returned nothing usable.')
     log.field('Control plane', controlPlaneUrl)
     log.field('Workspace', workspaceId)
-    log.info('Any previous snapshot is untouched and still enforced.')
+    // A failed refresh is not always a no-op: when the control plane refuses
+    // the key (401/403), the snapshot is rewritten with the member's SSO groups
+    // unknown. Say what happened on disk rather than promising it didn't.
+    if ((await readRules()) === before) {
+      log.info('Any previous snapshot is untouched and still enforced.')
+    } else {
+      log.warn(
+        "The snapshot was rewritten: the control plane refused this machine's key, so the member's SSO " +
+          'groups are now unknown and every high-risk tool they cleared is refused. Its other rules are still enforced.',
+      )
+    }
     log.info('Check the control plane is reachable and the key is still valid: `intutic whoami`.')
     process.exit(1)
   }
@@ -1046,8 +1059,14 @@ export async function runPolicyReplay(
     }
 
     if (status === 403) {
-      const detail = (result as { detail?: string }).detail
-      log.error(`Replay refused: ${detail ?? 'your role cannot replay rules'}`)
+      // Two different refusals share the status: the plan (FEATURE_NOT_AVAILABLE)
+      // and the role (requireRole's FORBIDDEN, whose `detail` names the roles).
+      const denial = result as { error?: string; code?: string; detail?: string }
+      if (denial.code === 'FEATURE_NOT_AVAILABLE') {
+        log.error(`Replay refused: ${denial.error ?? 'your plan does not include custom WASM rules'}`)
+      } else {
+        log.error(`Replay refused: ${denial.detail ?? 'your role cannot replay rules'}`)
+      }
       process.exit(1)
     }
 

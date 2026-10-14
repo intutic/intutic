@@ -20,7 +20,10 @@ intutic sops push deploy-checklist
 
 Reads every `.md` file under `.intutic/sops/deploy-checklist/` and creates
 **one control-plane SOP per file** — each carrying that file's own declared
-front matter faithfully:
+front matter faithfully. With no such folder it pushes the single file
+`.intutic/sops/deploy-checklist.md`, the layout `sops pull` writes, so a
+pulled SOP pushes back by its file name (`.md` optional). Each push creates
+a new SOP; it does not update one that already has the title.
 
 ```yaml
 ---

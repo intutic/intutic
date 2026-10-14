@@ -1841,7 +1841,7 @@ intutic guardrails sources list
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs), with auto-sync state and last sync; `--json` also carries `last_sync_error` and `last_attempt_at`. Memory providers are not policy sources and are not listed.
+Lists the workspace's source connectors (Notion, Confluence, GitHub, Google Docs), with auto-sync state, last sync and the error of a failed scheduled sync; `--json` also carries `last_attempt_at`. Memory providers are not policy sources and are not listed.
 
 ---
 
@@ -1970,7 +1970,7 @@ intutic guardrails docs extract <docId>
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-One model call per chunk of passages, under the workspace's daily cap (exit 1 with the cap on 429). A proposal is a verbatim quote plus a clause in the closed grammar; anything else is rejected by name. A valid clause becomes a proposed guardrail that enforces nothing until approved for shadow.
+One model call per chunk of passages, under the workspace's daily cap (exit 1 with the cap on 429, and exit 1 without a model call when the cap store is unreachable). A proposal is a verbatim quote plus a clause in the closed grammar; anything else is rejected by name. A valid clause becomes a proposed guardrail that enforces nothing until approved for shadow.
 
 ---
 
@@ -2441,8 +2441,8 @@ Fetches the workspace SOP policy and writes one flat file per served guardrail, 
 
 ## `intutic sops push <name>` <Badge type="tip" text="Cloud" />
 
-Push a local offline SOP folder to the central workspace — one control-plane
-SOP per file, each carrying its own declared front matter.
+Push a local SOP folder, or a single SOP file, to the central workspace — one
+control-plane SOP per file, each carrying its own declared front matter.
 
 ```bash
 intutic sops push <name> [options]
@@ -2452,7 +2452,7 @@ intutic sops push <name> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `name` | Folder name under `.intutic/sops/` in the workspace root |
+| `name` | A folder under `.intutic/sops/` in the workspace root, or a file there named with or without `.md` (the layout `sops pull` writes) |
 
 **Options:**
 
@@ -2462,7 +2462,7 @@ intutic sops push <name> [options]
 | `--org` | Push as an org-wide floor instead of a workspace SOP |
 
 **What it does:**
-For every `.md` file in `.intutic/sops/<name>/`, parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier) and creates one workspace SOP per file, front matter stripped from the uploaded body. Fails if the folder is missing or contains no markdown. Creating workspace SOPs needs the OWNER or ADMIN role; `--org` needs that role on a workspace in the org. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
+For every `.md` file in `.intutic/sops/<name>/` — or, when there is no such folder, for the one file `.intutic/sops/<name>.md` — parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier) and creates one workspace SOP per file, front matter stripped from the uploaded body. Each push creates a new SOP; it does not update one that already has the title. Fails if neither the folder nor the file exists, or the folder contains no markdown. Creating workspace SOPs needs the OWNER or ADMIN role; `--org` needs that role on a workspace in the org. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
 
 ---
 
@@ -4317,7 +4317,7 @@ intutic enforce <action> [options]
 | Option | Description |
 |--------|-------------|
 | `--port <port>` | The proxy's listener port to permit. Default: the `PORT` environment variable, else `4000`; `INTUTIC_PROXY_URL` is not read. |
-| `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to the user the command runs as, which is root under `sudo`: pass `--uid "$(id -u)"` when the proxy runs as you. |
+| `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to you: the user the command runs as, or under `sudo` the user who invoked sudo (`SUDO_UID`), not root. Pass it when the proxy runs as a different account. |
 | `--allow <cidrs>` | Comma-separated extra destinations to permit (control plane, private registries, etc.), each an IP address or CIDR block. A hostname is refused before anything is applied: resolve it to its address range first. |
 | `--no-dns` | Also deny outbound DNS — only if a local resolver serves the host. |
 | `--platform <os>` | Target ruleset platform: `linux`, `macos`, or `windows`. Defaults to the current OS. |
@@ -4340,7 +4340,7 @@ active on a given machine without SSHing into it.
 intutic enforce generate
 
 # Apply, permitting an internal network and a package registry's address range too
-sudo intutic enforce apply --uid "$(id -u)" --allow 10.0.0.0/8,203.0.113.0/24
+sudo intutic enforce apply --allow 10.0.0.0/8,203.0.113.0/24
 
 # Check whether it's currently active
 intutic enforce status
