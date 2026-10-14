@@ -19,7 +19,7 @@ const { server, workspaceRootRef } = vi.hoisted(() => ({
     rows: new Map<string, {
       sopId: string
       title: string
-      riskTier: string
+      riskTier: string | null
       version: string
       markdownContent: string
       lifecycleState: string
@@ -111,7 +111,7 @@ vi.mock('../lib/api.js', () => {
           ...row,
           title: String(body.title ?? row.title),
           markdownContent: String(body.markdown_content ?? row.markdownContent),
-          riskTier: String(body.risk_tier ?? row.riskTier),
+          riskTier: body.risk_tier === undefined ? row.riskTier : String(body.risk_tier),
           version: String(body.version ?? row.version),
           versionCounter: row.versionCounter + 1,
         }
@@ -130,7 +130,7 @@ let sopsDir: string
 let exitCode: number | null
 let out: string[]
 
-function seed(sopId: string, over: Partial<{ title: string; markdownContent: string; lifecycleState: string; versionCounter: number }> = {}) {
+function seed(sopId: string, over: Partial<{ title: string; riskTier: string | null; markdownContent: string; lifecycleState: string; versionCounter: number }> = {}) {
   server.rows.set(sopId, {
     sopId,
     title: 'Deploy Checklist',
@@ -193,6 +193,38 @@ describe('sops pull records the SOP each file came from', () => {
     const parsed = parseSopFile(await read())
     expect(parsed.intuticId).toBe('sp_1')
     expect(parsed.revision).toBe(4)
+  })
+})
+
+// A SOP written without a tier (the SOP health check writes none) has a null
+// riskTier. Pull wrote `risk_tier: null` into the file, which is not a tier.
+describe('a SOP with no risk tier', () => {
+  it('pulls without a risk_tier key, and pull → status → edit → push keeps it untiered', async () => {
+    seed('sp_1', { riskTier: null })
+    await run(() => runSopsPull({}))
+    expect(await read()).not.toMatch(/^risk_tier:/m)
+    expect(parseSopFile(await read()).riskTier).toBeNull()
+
+    await run(() => runSopsStatus({}))
+    expect(printed()).toContain('1 in sync, 0 locally modified, 0 behind, 0 diverged')
+
+    await edit(file(), 'Run the tests before deploying.', 'Run the tests and the linters before deploying.')
+    await run(() => runSopsPush('deploy-checklist', {}))
+    expect(exitCode).toBeNull()
+    expect(server.puts[0]!.body).not.toHaveProperty('risk_tier')
+    expect(server.rows.get('sp_1')!.riskTier).toBeNull()
+    expect(await read()).not.toMatch(/^risk_tier:/m)
+  })
+
+  it('a pull over a file whose SOP lost its tier on the server removes the key', async () => {
+    seed('sp_1')
+    await run(() => runSopsPull({}))
+    expect(await read()).toMatch(/^risk_tier: HIGH$/m)
+    server.rows.set('sp_1', { ...server.rows.get('sp_1')!, riskTier: null, versionCounter: 2 })
+
+    await run(() => runSopsPull({}))
+    expect(await read()).not.toMatch(/^risk_tier:/m)
+    expect(parseSopFile(await read()).revision).toBe(2)
   })
 })
 

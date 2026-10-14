@@ -113,18 +113,25 @@ export interface SopSyncRecord {
 /**
  * Set `key: value` lines inside a file's front-matter fence, replacing a line
  * that already sets the key and keeping every other line — the enforcing keys
- * the proxy reads (`deny_tools:`, `requires_before:`, …) included. The text
+ * the proxy reads (`deny_tools:`, `requires_before:`, …) included. A `null`
+ * value removes the key's line instead (a SOP with no risk tier has no
+ * `risk_tier:`, never `risk_tier: null`). The text
  * after the fence is kept verbatim unless `body` is given. A file with no
  * fence gets one holding only these keys. Unknown keys are inert to the
  * proxy's parser, so the sync record never changes what a SOP enforces.
  */
-export function setFrontMatter(raw: string, fields: Record<string, string>, body?: string): string {
+export function setFrontMatter(raw: string, fields: Record<string, string | null>, body?: string): string {
   const trimmed = raw.trimStart()
   const set = (frontLines: string[]): string[] => {
-    const out = [...frontLines]
+    let out = [...frontLines]
     for (const [key, value] of Object.entries(fields)) {
+      const sets = (l: string) => l.trim().startsWith(`${key}:`)
+      if (value === null) {
+        out = out.filter((l) => !sets(l))
+        continue
+      }
       const line = `${key}: ${value}`
-      const at = out.findIndex((l) => l.trim().startsWith(`${key}:`))
+      const at = out.findIndex(sets)
       if (at === -1) out.push(line)
       else out[at] = line
     }
@@ -171,7 +178,8 @@ export function withSyncRecord(raw: string, record: SopSyncRecord, extra: Record
  */
 export function renderSopFile(sop: {
   title: string
-  riskTier: string
+  /** Null for a SOP with no tier: the file then has no `risk_tier:` line. */
+  riskTier: string | null
   version: string
   body: string
   record?: SopSyncRecord
@@ -180,7 +188,7 @@ export function renderSopFile(sop: {
   return [
     '---',
     `title: ${sop.title}`,
-    `risk_tier: ${sop.riskTier}`,
+    ...(sop.riskTier === null ? [] : [`risk_tier: ${sop.riskTier}`]),
     `version: ${sop.version}`,
     `content_hash: ${hash}`,
     ...(sop.record ? [`intutic_id: ${sop.record.intuticId}`, `intutic_revision: ${sop.record.revision}`] : []),

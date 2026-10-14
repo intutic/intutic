@@ -423,7 +423,8 @@ async function listAllSops(client: Awaited<ReturnType<typeof getClient>>): Promi
 interface SopDetail {
   sopId: string
   title: string
-  riskTier: string
+  /** Null for a SOP written without a tier (`SopResponse.riskTier`). */
+  riskTier: string | null
   version: string
   markdownContent: string
   versionCounter?: number

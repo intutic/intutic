@@ -97,6 +97,8 @@ The round trip the other direction: every SOP in the workspace, written to
 `.intutic/sops/<slug-of-title>.md` with front matter reconstructed from the
 row (`title:`, `risk_tier:`, `version:`, plus a `content_hash:` marker — see
 below — and the `intutic_id:`/`intutic_revision:` record `push` reads). A SOP
+with no risk tier gets no `risk_tier:` line, and a `push` of that file leaves
+the SOP untiered. A SOP
 whose id a local file already records — flat or in a `<name>/` folder — is
 written into that file, and only its synced keys and body are replaced: the
 enforcing keys the proxy reads stay. Two SOPs sharing a title get distinct
