@@ -15,7 +15,7 @@ import type { HarnessType } from '@intutic/shared-types'
 import { loadLocalSopEntries } from '../src/configWriter.js'
 import { localHoldTokensFor } from '../src/syncCycle.js'
 import { collectAgentReport } from '../src/agentReporter.js'
-import { listSopFiles } from '../src/lib/sopFiles.js'
+import { listSopFiles, listSopSets } from '../src/lib/sopFiles.js'
 
 const HARNESSES = ['claude-code'] as HarnessType[]
 
@@ -57,12 +57,47 @@ describe('local SOP layout', () => {
     expect(await localHoldTokensFor(root, [], undefined, HARNESSES)).toContain('action:deploy')
   })
 
-  it('narrows folders by the session selection and keeps flat files in every session', async () => {
+  it('narrows folders and the developer\'s own flat files by the session selection, never a workspace SOP copy', async () => {
     await fs.mkdir(join(sops, 'frontend'), { recursive: true })
     await fs.writeFile(join(sops, 'frontend', 'ui.md'), '- Use the design tokens.\n')
+    await fs.writeFile(join(sops, 'pulled.md'), '---\nintutic_id: sop_9\n---\nBody.\n')
     await fs.writeFile(join(root, '.intutic', 'session-context.json'), JSON.stringify({ activeLocalSops: ['frontend'] }))
     const entries = await loadLocalSopEntries(root, HARNESSES)
-    expect(entries.map((e) => e.sopId)).toEqual(['local:deploy.md', 'local:frontend:ui.md'])
+    expect(entries.map((e) => e.sopId)).toEqual(['local:pulled.md', 'local:frontend:ui.md'])
+    await fs.writeFile(join(root, '.intutic', 'session-context.json'), JSON.stringify({ activeLocalSops: ['deploy.md'] }))
+    expect((await loadLocalSopEntries(root, HARNESSES)).map((e) => e.sopId)).toEqual(['local:deploy.md', 'local:pulled.md'])
+  })
+
+  // The selection is made from inside the agent's own chat
+  // (`/intutic start --sops`), so it must not switch enforcement off: a
+  // deselected SOP's review_before still holds.
+  it('holds on a deselected SOP\'s review_before', async () => {
+    await fs.writeFile(join(sops, 'safety', 'rules.md'), '---\nreview_before: action:db_write\n---\n')
+    await fs.writeFile(join(root, '.intutic', 'session-context.json'), JSON.stringify({ activeLocalSops: ['frontend'] }))
+    const holds = await localHoldTokensFor(root, [], undefined, HARNESSES)
+    expect(holds).toEqual(expect.arrayContaining(['action:deploy', 'action:db_write']))
+  })
+
+  // `intutic sops pull` writes every SOP on the control plane, drafts and
+  // invalidated ones included; it marks those `intutic_enforced: false`, and
+  // a SOP the server does not enforce is not enforced here because it was pulled.
+  it('enforces nothing from a pulled SOP the control plane does not enforce', async () => {
+    await fs.writeFile(join(sops, 'draft.md'), '---\ntitle: Draft\nintutic_id: sop_d\nintutic_enforced: false\nreview_before: action:release\ndeny_tools: Write\n---\nDraft body.\n')
+    expect((await loadLocalSopEntries(root, HARNESSES)).map((e) => e.sopId)).not.toContain('local:draft.md')
+    expect(await localHoldTokensFor(root, [], undefined, HARNESSES)).not.toContain('action:release')
+    const report = await collectAgentReport({ workspaceRoot: root, harnessType: 'claude-code', configSynced: true, dlpEnabled: false, policyEnforced: false })
+    expect(report.facets.sops.find((s) => s.sop_id === 'draft')?.enforced).toBe(false)
+    // Only `false` switches a file off; a typo leaves it enforced.
+    await fs.writeFile(join(sops, 'draft.md'), '---\nintutic_id: sop_d\nintutic_enforced: flase\nreview_before: action:release\n---\n')
+    expect(await localHoldTokensFor(root, [], undefined, HARNESSES)).toContain('action:release')
+  })
+
+  it('lists folders, then the developer\'s own flat files, as the selectable rule sets', async () => {
+    await fs.writeFile(join(sops, 'guardrail-pgr_1.md'), '---\ndeny_tools: Bash\n---\n')
+    await fs.writeFile(join(sops, 'pulled.md'), '---\nintutic_id: sop_9\n---\nBody.\n')
+    await fs.writeFile(join(sops, 'a-own.md'), '- mine\n')
+    expect(await listSopSets(sops)).toEqual(['safety', 'a-own.md', 'deploy.md'])
+    expect(await listSopSets(join(root, 'nowhere'))).toEqual([])
   })
 
   it('skips guardrails pull files, which a connected machine gets from the control plane', async () => {

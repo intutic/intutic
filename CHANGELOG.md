@@ -19,8 +19,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `.` are skipped, so a Kubernetes ConfigMap mount is not read three
   times. `intutic connect` leaves out `guardrail-*.md` files and pulled copies
   of SOPs it already receives from the control plane, so the rules files do
-  not hold a SOP twice. A session's `--sops` selection still narrows the
-  folders written into the rules files; the proxy enforces every file.
+  not hold a SOP twice.
+- **A session's `--sops` selection no longer switches enforcement off.** It is
+  made from inside the agent's own chat, yet it decided which local SOPs'
+  `review_before:` holds the gates applied. It now narrows only the text
+  written into the harness rules files; every gate holds on every local SOP,
+  and the proxy enforces every file.
+- **A pulled SOP is enforced locally only when the control plane enforces
+  it.** `intutic sops pull` writes drafts and SOPs in shadow too, and the
+  proxy and `intutic connect` enforced every file it wrote. Each pulled file
+  now records `intutic_enforced: true` (an active `VALIDATED` SOP) or
+  `intutic_enforced: false` (any other state, or a SOP no longer active), the
+  key follows the server on every pull, and every local reader skips a file
+  marked `false`.
+- **Single-file SOPs are selectable rule sets.** `/intutic initialize`,
+  `/intutic start --sops` and `intutic loop start --sops` offered folders only;
+  a file directly in `.intutic/sops/` is now a rule set too, listed after the
+  folders as `.intutic/sops/<name>.md` and selected by name with or without
+  `.md`. Copies of workspace SOPs (files recording an `intutic_id:`) are not
+  listed.
 - **The README's first SOP enforces what it shows.** Its commands sat under a
   "Denied Commands" heading that no gate reads. The sample now declares them
   in front matter the proxy enforces (`hook_rule:` lines and

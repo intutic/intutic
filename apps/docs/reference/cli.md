@@ -395,7 +395,7 @@ that login.
    `.agents/skills/` when they are missing.
 3. Every `--interval`, and whenever the control plane pushes a change, fetches the workspace
    config and writes each detected harness's config file from the workspace SOPs plus the local
-   SOP folders under `.intutic/sops/`, then refreshes the policy snapshot. Every configured
+   SOPs under `.intutic/sops/`, then refreshes the policy snapshot. Every configured
    harness that has a tool-call hook gets its gate. Where the harness has a key for it, the hook
    entry carries a 10-second timeout, and each gate refuses with `GATE_DEADLINE` one second
    before its harness's timeout, at most 9 seconds (see
@@ -2417,7 +2417,7 @@ intutic sops pull [options]
 | `--force` | Overwrite locally-modified files instead of refusing them |
 
 **What it does:**
-Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed, a `content_hash:` marker recording the body's hash, and the sync record `sops push` reads: `intutic_id:` (the SOP) and `intutic_revision:` (its edit counter). A SOP goes into the local file that already records its id — flat or in a `<name>/` folder, keeping that file's other front-matter keys — and otherwise into `.intutic/sops/<slug>.md`. An approved version is skipped when a local file tracks its DRAFT successor. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
+Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed, a `content_hash:` marker recording the body's hash, and the sync record `sops push` reads: `intutic_id:` (the SOP) and `intutic_revision:` (its edit counter). Each file also records `intutic_enforced: true` for a `VALIDATED` SOP and `intutic_enforced: false` for any other state or a SOP no longer active; the proxy and the sync daemon skip a file marked `false`, so a pulled draft is not enforced locally (see [GitOps for SOPs](/guide/gitops-sops#pulled-sops-enforce-what-the-control-plane-enforces)). The key is updated on every pull, also over a locally edited file. A SOP goes into the local file that already records its id — flat or in a `<name>/` folder, keeping that file's other front-matter keys — and otherwise into `.intutic/sops/<slug>.md`. An approved version is skipped when a local file tracks its DRAFT successor. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
 
 ---
 

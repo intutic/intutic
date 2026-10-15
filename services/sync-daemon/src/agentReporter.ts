@@ -34,7 +34,7 @@ import {
   type SkillScriptsFacet,
 } from '@intutic/shared-types'
 import { discoverMcpServers } from './harness/mcpAutoWrite.js'
-import { listSopFiles } from './lib/sopFiles.js'
+import { listSopFiles, markedNotEnforced } from './lib/sopFiles.js'
 
 /** Live egress-enforcement status read from the proxy's own diagnostic endpoint. */
 export interface EgressFacet {
@@ -278,7 +278,7 @@ async function collectSops(workspaceRoot: string): Promise<AgentFacets['sops']> 
     for (const { path, folder, file } of await listSopFiles(join(workspaceRoot, '.intutic', 'sops'))) {
       const body = await readFile(path, 'utf8').catch(() => '')
       // An SOP is "enforced" if it declares deny_tools or allow_harnesses.
-      const enforced = /deny_tools|allow_harnesses/.test(body)
+      const enforced = !markedNotEnforced(body) && /deny_tools|allow_harnesses/.test(body)
       const name = folder === null ? file : `${folder}/${file}`
       out.push({ sop_id: name.replace(/\.md$/, ''), name, enforced })
     }

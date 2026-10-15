@@ -154,6 +154,15 @@ describe('connect runs the per-cycle sync work the docs promise', () => {
     expect(applyBody).not.toMatch(/readdir\(sopsDir/)
     expect(applyBody).toMatch(/skipSopIds: new Set\(syncConfig\.sops\.map\(\(s\) => s\.sopId\)\)/)
   })
+
+  // `/intutic initialize` offered folders only, so a single-file SOP could
+  // not be selected for a session. connect reports the rule sets the shared
+  // lister gives (folders, then flat files; tested in localSopLayout.test.ts).
+  it('reports folders and flat files as the local rule sets', async () => {
+    const { src } = await source()
+    const scan = src.slice(src.indexOf('async function scanLocalSops('))
+    expect(scan.slice(0, scan.indexOf('\n}\n'))).toMatch(/return listSopSets\(node_path\.join\(workspaceRoot, '\.intutic', 'sops'\)\)/)
+  })
 })
 
 // The root Cargo.toml is a workspace with packages/proxy as a member, so the

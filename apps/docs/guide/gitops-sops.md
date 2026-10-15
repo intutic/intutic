@@ -105,6 +105,27 @@ enforcing keys the proxy reads stay. Two SOPs sharing a title get distinct
 file names (the second suffixed with part of its `sopId`) rather than one
 silently overwriting the other.
 
+### Pulled SOPs enforce what the control plane enforces
+
+`pull` writes every active SOP, drafts included, so you can edit one and push
+it back. Each file records whether the control plane enforces its SOP, as
+`intutic_enforced: true` or `intutic_enforced: false`. Only a `VALIDATED` SOP
+is enforced there: `DRAFT`, `PENDING_REVIEW`, `GENERATED` and `INVALIDATED`
+reach no agent, and `HYPOTHESIZED` / `REFINED` are synced as advisory text and
+judged in shadow with no gate acting on them. The proxy and the sync daemon
+skip a file marked `intutic_enforced: false`, so a pulled draft is not in force
+on your machine until the control plane promotes it and the next `pull` records
+that.
+
+The key follows the server on every `pull`, even over a file you edited (its
+body is left alone), and a file whose SOP is no longer active — deleted, or
+replaced by a newer version — is marked `intutic_enforced: false` too. Only the
+value `false` switches a file off; a file without the key, such as one you
+wrote yourself, is enforced as written. While a file tracks the `DRAFT` that a
+`push` forked from an approved SOP, the approved version is not written to
+disk, so a proxy reading only this directory enforces neither until the draft
+is promoted.
+
 ### Refusing to clobber local edits
 
 `pull` will not overwrite a file it did not most recently write, unless you

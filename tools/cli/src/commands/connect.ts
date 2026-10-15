@@ -75,6 +75,7 @@ import { SyncWsClient,
   clearImmutable,
   setImmutable,
   loadLocalSopEntries,
+  listSopSets,
 } from '@intutic/sync-daemon'
 import { watch } from 'chokidar'
 // Named, not default: under `module: Node16` TypeScript resolves ioredis's
@@ -1509,16 +1510,12 @@ export async function runConnect(opts: {
   log.success('Sync daemon stopped.')
 }
 
+/**
+ * The local rule sets `/intutic initialize` offers: folders by name and the
+ * developer's own flat files by file name (`listSopSets`).
+ */
 async function scanLocalSops(workspaceRoot: string): Promise<string[]> {
-  const sopsDir = node_path.join(workspaceRoot, '.intutic', 'sops')
-  try {
-    const entries = await node_fs.readdir(sopsDir, { withFileTypes: true })
-    return entries
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-  } catch {
-    return []
-  }
+  return listSopSets(node_path.join(workspaceRoot, '.intutic', 'sops'))
 }
 
 

@@ -6,13 +6,14 @@ import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
-import { listSopFiles } from '@intutic/sync-daemon'
+import { listSopFiles, markedNotEnforced } from '@intutic/sync-daemon'
 import {
   parseSopFile,
   titleFromFileName,
   renderSopFile,
   slugifyTitle,
   setFrontMatter,
+  serverEnforces,
   withSyncRecord,
   type ParsedSopFile,
   type SopSyncRecord,
@@ -398,6 +399,8 @@ interface SopListItem {
   versionCounter?: number
   /** The version this one succeeds; absent from servers that predate it. */
   priorVersionId?: string | null
+  lifecycleState?: string
+  isActive?: boolean
 }
 
 /** The route's own cap on `limit`. */
@@ -429,6 +432,8 @@ interface SopDetail {
   version: string
   markdownContent: string
   versionCounter?: number
+  lifecycleState?: string
+  isActive?: boolean
 }
 
 /** A local SOP file: its path, the name to print, and what it parses to. */
@@ -494,14 +499,15 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
     process.exit(1)
   }
 
+  const local = await readLocalSops(sopsDir)
   if (items.length === 0) {
     log.info('No SOPs found in this workspace.')
-    return
+    // Files tracking a SOP still need marking as no longer enforced, below.
+    if (!local.some((f) => f.parsed.intuticId)) return
   }
 
   await fs.mkdir(sopsDir, { recursive: true })
 
-  const local = await readLocalSops(sopsDir)
   const fileById = new Map<string, LocalSopFile>()
   for (const f of local) if (f.parsed.intuticId) fileById.set(f.parsed.intuticId, f)
   // An approved version whose DRAFT successor a local file tracks.
@@ -551,6 +557,11 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
 
     const body = detail.markdownContent.trim()
     const record = { intuticId: detail.sopId, revision: detail.versionCounter ?? item.versionCounter ?? 1 }
+    const enforced = serverEnforces({
+      lifecycleState: detail.lifecycleState ?? item.lifecycleState,
+      isActive: detail.isActive ?? item.isActive,
+    })
+    const enforcedField = enforced === null ? null : String(enforced)
     const existing = await fs.readFile(filePath, 'utf-8').catch(() => null)
 
     if (existing !== null && !opts.force) {
@@ -559,6 +570,11 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
       const dirty = parsedExisting.contentHash === null || parsedExisting.contentHash !== actualLocalHash
       if (dirty) {
         log.warn(`${filePath}: locally modified (or never pulled before) — refusing to overwrite. Use --force to pull anyway.`)
+        // The body stays as edited; whether the SOP is enforced follows the
+        // server even so, or a local edit would keep a draft in force here.
+        if (enforced !== null && parsedExisting.intuticId === detail.sopId) {
+          await fs.writeFile(filePath, setFrontMatter(existing, { intutic_enforced: enforcedField }), 'utf-8')
+        }
         conflicts += 1
         continue
       }
@@ -566,7 +582,7 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
 
     const rendered =
       existing === null
-        ? renderSopFile({ title: detail.title, riskTier: detail.riskTier, version: detail.version, body, record })
+        ? renderSopFile({ title: detail.title, riskTier: detail.riskTier, version: detail.version, body, record, enforced })
         : setFrontMatter(
             existing,
             {
@@ -576,12 +592,22 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
               content_hash: createHash('sha256').update(body, 'utf8').digest('hex'),
               intutic_id: record.intuticId,
               intutic_revision: String(record.revision),
+              intutic_enforced: enforcedField,
             },
             body,
           )
     await fs.writeFile(filePath, rendered, 'utf-8')
     written += 1
-    log.info(`${filePath} ← "${detail.title}"`)
+    log.info(`${filePath} ← "${detail.title}"${enforced === false ? ` (${detail.lifecycleState ?? item.lifecycleState ?? 'inactive'}: not enforced locally)` : ''}`)
+  }
+
+  // A file tracking a SOP the list no longer carries — deleted, or replaced by
+  // a newer version — tracks one the control plane no longer enforces.
+  const listed = new Set(items.map((i) => i.sopId))
+  for (const f of local) {
+    if (!f.parsed.intuticId || listed.has(f.parsed.intuticId) || markedNotEnforced(f.raw)) continue
+    await fs.writeFile(f.path, setFrontMatter(f.raw, { intutic_enforced: 'false' }), 'utf-8')
+    log.info(`${f.path}: SOP ${f.parsed.intuticId} is no longer active on the control plane; marked intutic_enforced: false.`)
   }
 
   log.info(`Pulled ${written} file(s) into ${sopsDir}${conflicts > 0 ? `, ${conflicts} conflict(s) left untouched` : ''}.`)

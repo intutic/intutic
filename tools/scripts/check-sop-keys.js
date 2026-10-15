@@ -84,7 +84,11 @@ const doc = readFileSync(refPage, 'utf8')
 // nine keys enforce or only report — so it has nothing to add to a list of
 // enforcing fields, but omitting it from documentation would hide the one key
 // that can silently turn every other one into a no-op.
-const NOT_ENFORCING = new Set(['risk_tier', 'mode'])
+//
+// `intutic_enforced` is the sync record `intutic sops pull` writes: `false`
+// skips the whole file (a pulled copy of a SOP the control plane does not
+// enforce), so it declares no condition of its own either.
+const NOT_ENFORCING = new Set(['risk_tier', 'mode', 'intutic_enforced'])
 
 const undocumented = [...keys].filter((k) => !doc.includes(k))
 const missingFromEnforcing = [...keys].filter(

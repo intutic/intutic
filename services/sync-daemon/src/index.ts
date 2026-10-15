@@ -27,7 +27,7 @@ export { startHarnessSession, endAllOpenSessions, readGitInfo } from './sessionR
 
 export { loadLocalSopEntries, HARNESS_FILES, clearImmutable, setImmutable } from './configWriter.js'
 export type { LoadLocalSopOptions } from './configWriter.js'
-export { listSopFiles } from './lib/sopFiles.js'
+export { listSopFiles, listSopSets, markedNotEnforced } from './lib/sopFiles.js'
 export type { SopFile } from './lib/sopFiles.js'
 
 export { captureAndUpload, shouldCaptureThisIteration, redactConfigText } from './configReader.js'

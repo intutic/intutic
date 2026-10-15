@@ -15,7 +15,7 @@ import { promisify } from 'node:util'
 import { HarnessType as HarnessTypes, rulesFileOf } from '@intutic/shared-types'
 import type { HarnessType, SyncSopEntry, ConfigEdit } from '@intutic/shared-types'
 import { writeFileAtomic } from './lib/atomicWrite.js'
-import { listSopFiles, recordedSopId } from './lib/sopFiles.js'
+import { listSopFiles, markedNotEnforced, recordedSopId, selectionKeeps } from './lib/sopFiles.js'
 
 const execFile = promisify(_execFile)
 
@@ -88,18 +88,26 @@ export interface LoadLocalSopOptions {
    * before it are still returned. Unset, errors are dropped.
    */
   onError?: (err: unknown) => void
+  /**
+   * Load every local SOP whatever the session's selection. For the gate's
+   * holds: the selection is made from inside the agent's own chat, so it may
+   * narrow what is written into the rules files as prose, never what is
+   * enforced.
+   */
+  ignoreSelection?: boolean
 }
 
 /**
  * The workspace's local SOPs: `.intutic/sops/*.md` and `.intutic/sops/<set>/*.md`
  * (see `lib/sopFiles.ts`), the same files the proxy enforces. A session's
- * selection (`session-context.json`'s `activeLocalSops`, folder names) narrows
- * the folders; a flat file is in every session. `guardrail-*.md` files are
- * skipped: `intutic guardrails pull` writes them for a proxy that reads SOPs
- * from disk, and a connected machine receives those guardrails from the
- * control plane. Read by `intutic connect` for the harness rules files and by
- * the gate-cache refresh, which compiles their `review_before:` tokens into
- * hold rules. A missing directory is an empty list.
+ * selection (`session-context.json`'s `activeLocalSops`: folder names and
+ * flat file names, see `listSopSets`) narrows them unless `ignoreSelection`.
+ * Skipped: `guardrail-*.md` files, which `intutic guardrails pull` writes for
+ * a proxy that reads SOPs from disk while a connected machine receives those
+ * guardrails from the control plane, and files `intutic sops pull` marked
+ * `intutic_enforced: false`. Read by `intutic connect` for the harness rules
+ * files and by the gate-cache refresh, which compiles their `review_before:`
+ * tokens into hold rules. A missing directory is an empty list.
  */
 export async function loadLocalSopEntries(
   workspaceRoot: string,
@@ -121,8 +129,9 @@ export async function loadLocalSopEntries(
     const files = await listSopFiles(node_path.join(workspaceRoot, '.intutic', 'sops'), (_folder, err) => opts.onError?.(err))
     for (const { path, folder, file } of files) {
       if (folder === null && file.startsWith('guardrail-')) continue
-      if (folder !== null && activeLocalSops !== undefined && !activeLocalSops.includes(folder)) continue
       const content = await node_fs.readFile(path, 'utf-8')
+      if (markedNotEnforced(content)) continue
+      if (!opts.ignoreSelection && activeLocalSops !== undefined && !selectionKeeps({ path, folder, file }, content, activeLocalSops)) continue
       const recorded = recordedSopId(content)
       if (recorded !== null && opts.skipSopIds?.has(recorded)) continue
       const label = folder === null ? file : `${folder}/${file}`

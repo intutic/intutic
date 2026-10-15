@@ -124,6 +124,7 @@ vi.mock('../lib/api.js', () => {
 
 import { runSopsPull, runSopsPush, runSopsStatus } from './sops.js'
 import { parseSopFile } from '../lib/sopFrontMatter.js'
+import { markedNotEnforced } from '@intutic/sync-daemon'
 
 let root: string
 let sopsDir: string
@@ -193,6 +194,48 @@ describe('sops pull records the SOP each file came from', () => {
     const parsed = parseSopFile(await read())
     expect(parsed.intuticId).toBe('sp_1')
     expect(parsed.revision).toBe(4)
+  })
+})
+
+// Pull writes every active SOP, drafts and SOPs in shadow included. A local
+// copy must enforce exactly what the control plane enforces, so each file
+// records whether the server enforces its SOP and every local reader skips
+// one marked `intutic_enforced: false`.
+describe('sops pull records whether the control plane enforces each SOP', () => {
+  const enforcedOf = async (p = file()) => (await read(p)).match(/^intutic_enforced: (\w+)$/m)?.[1]
+
+  it('marks a VALIDATED SOP enforced and every other state not', async () => {
+    seed('sp_v', { title: 'Validated', lifecycleState: 'VALIDATED' })
+    seed('sp_d', { title: 'Draft', lifecycleState: 'DRAFT' })
+    seed('sp_h', { title: 'Shadowed', lifecycleState: 'HYPOTHESIZED' })
+    seed('sp_i', { title: 'Invalidated', lifecycleState: 'INVALIDATED' })
+    await run(() => runSopsPull({}))
+    expect(await enforcedOf(file('validated.md'))).toBe('true')
+    for (const name of ['draft.md', 'shadowed.md', 'invalidated.md']) expect(await enforcedOf(file(name)), name).toBe('false')
+    expect(markedNotEnforced(await read(file('draft.md')))).toBe(true)
+  })
+
+  it('follows a state change on the next pull, even over a local edit', async () => {
+    seed('sp_1', { lifecycleState: 'VALIDATED' })
+    await run(() => runSopsPull({}))
+    expect(await enforcedOf()).toBe('true')
+    await edit(file(), 'Run the tests before deploying.', 'Local edit.')
+    server.rows.set('sp_1', { ...server.rows.get('sp_1')!, lifecycleState: 'INVALIDATED' })
+
+    await run(() => runSopsPull({}))
+    expect(await enforcedOf()).toBe('false')
+    expect(await read()).toContain('Local edit.')
+    expect(printed()).toContain('refusing to overwrite')
+  })
+
+  it('marks a file whose SOP is no longer active, keeping its body', async () => {
+    seed('sp_1', { lifecycleState: 'VALIDATED' })
+    await run(() => runSopsPull({}))
+    server.rows.set('sp_1', { ...server.rows.get('sp_1')!, isActive: false })
+
+    await run(() => runSopsPull({}))
+    expect(await enforcedOf()).toBe('false')
+    expect(parseSopFile(await read()).body).toBe('Run the tests before deploying.')
   })
 })
 

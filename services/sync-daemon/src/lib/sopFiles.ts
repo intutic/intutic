@@ -67,20 +67,72 @@ export async function listSopFiles(
 }
 
 /**
- * The `intutic_id:` a SOP file's front matter records — the control-plane SOP
- * `intutic sops pull` / `push` synced it with — or null. Read line by line, no
- * regex over the whole file: the content is whatever an agent wrote.
+ * One `key:` scalar from a SOP file's front matter, trimmed and unquoted, or
+ * null. Read line by line, no regex over the whole file: the content is
+ * whatever an agent wrote.
  */
-export function recordedSopId(content: string): string | null {
+function frontMatterValue(content: string, key: string): string | null {
   const lines = content.trimStart().split('\n')
   if (lines[0]?.trim() !== '---') return null
   for (const line of lines.slice(1)) {
     const t = line.trim()
     if (t === '---') return null
-    if (t.startsWith('intutic_id:')) {
-      const v = t.slice('intutic_id:'.length).trim().replace(/^["']|["']$/g, '')
+    if (t.startsWith(key)) {
+      const v = t.slice(key.length).trim().replace(/^["']|["']$/g, '')
       return v || null
     }
   }
   return null
+}
+
+/**
+ * The `intutic_id:` a SOP file's front matter records — the control-plane SOP
+ * `intutic sops pull` / `push` synced it with — or null.
+ */
+export function recordedSopId(content: string): string | null {
+  return frontMatterValue(content, 'intutic_id:')
+}
+
+/**
+ * Whether `intutic sops pull` marked this file `intutic_enforced: false`: a
+ * copy of a SOP the control plane does not enforce (a draft, one under review
+ * or invalidated, one no longer active). No local reader enforces it; only
+ * that exact value switches a file off, so a typo leaves it enforced. The
+ * proxy reads the same key (`pulled_but_not_enforced` in `sops.rs`).
+ */
+export function markedNotEnforced(content: string): boolean {
+  return frontMatterValue(content, 'intutic_enforced:')?.toLowerCase() === 'false'
+}
+
+/**
+ * The local rule sets a session can select (`intutic loop start --sops`,
+ * `/intutic start --sops`): every folder, by its name (`frontend-rules`), and
+ * every file directly in `sopsDir` that is the developer's own, by its file
+ * name (`deploy.md`). A file that records an `intutic_id:` is a copy of a
+ * workspace SOP, governed on the control plane rather than selected per
+ * session, and `guardrail-*.md` files are `intutic guardrails pull`'s. Folders
+ * first, each group sorted, so a listed option number stays put when a file
+ * is added. Empty when `sopsDir` cannot be read.
+ */
+export async function listSopSets(sopsDir: string): Promise<string[]> {
+  const files = await listSopFiles(sopsDir).catch(() => [] as SopFile[])
+  const folders = [...new Set(files.filter((f) => f.folder !== null).map((f) => f.folder as string))]
+  const flat: string[] = []
+  for (const f of files) {
+    if (f.folder !== null || f.file.startsWith('guardrail-')) continue
+    const content = await node_fs.readFile(f.path, 'utf-8').catch(() => null)
+    if (content !== null && recordedSopId(content) === null) flat.push(f.file)
+  }
+  return [...folders, ...flat]
+}
+
+/**
+ * Whether a session selection keeps this file: a folder's files when the
+ * folder is selected, a selectable flat file when it is selected by name. A
+ * copy of a workspace SOP (it records an `intutic_id:`) is not a selectable
+ * set and is kept whatever the selection, as {@link listSopSets} leaves it out.
+ */
+export function selectionKeeps(file: SopFile, content: string, selection: readonly string[]): boolean {
+  if (file.folder !== null) return selection.includes(file.folder)
+  return recordedSopId(content) !== null || selection.includes(file.file)
 }

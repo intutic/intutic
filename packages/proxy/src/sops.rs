@@ -769,11 +769,39 @@ fn sop_files(dir: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
+/// Whether `intutic sops pull` marked this file `intutic_enforced: false`: a
+/// copy of a SOP the control plane does not enforce (a draft, one under review
+/// or invalidated, one no longer active). Such a file is not loaded at all, so
+/// a SOP is not enforced here because it was pulled. Only that exact value
+/// switches a file off — a typo leaves it enforced — and only on disk: a SOP
+/// the control plane serves is in force by being served. Same fence rules as
+/// [`parse_front_matter`]; the sync daemon reads the key the same way
+/// (`markedNotEnforced` in `services/sync-daemon/src/lib/sopFiles.ts`).
+fn pulled_but_not_enforced(raw: &str) -> bool {
+    let Some(rest) = raw.trim_start().strip_prefix("---") else {
+        return false;
+    };
+    let Some(end) = rest.find("\n---") else {
+        return false;
+    };
+    rest[..end]
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("intutic_enforced:"))
+        .any(|v| {
+            v.trim()
+                .trim_matches(['"', '\''])
+                .eq_ignore_ascii_case("false")
+        })
+}
+
 fn read_dir_sops(dir: &Path) -> Vec<Sop> {
     let mut sops: Vec<Sop> = sop_files(dir)
         .into_iter()
         .filter_map(|(title, path)| {
             let raw = std::fs::read_to_string(&path).ok()?;
+            if pulled_but_not_enforced(&raw) {
+                return None;
+            }
             let source = path.display().to_string();
             parse_sop_content(title, &raw, &source, SopScope::Workspace)
         })
@@ -2741,6 +2769,39 @@ mod tests {
             vec!["flat", "safety/rules"]
         );
         assert_eq!(sops[1].deny_tools, vec!["NestedTool"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `intutic sops pull` writes drafts and invalidated SOPs too, marked
+    /// `intutic_enforced: false`. Loading them would enforce, on this machine,
+    /// a SOP the control plane does not.
+    #[test]
+    fn a_pulled_sop_the_control_plane_does_not_enforce_is_not_loaded() {
+        let dir =
+            std::env::temp_dir().join(format!("intutic-sops-unenforced-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("draft.md"),
+            "---\ntitle: Draft\nintutic_id: sop_d\nintutic_enforced: false\ndeny_tools: Write\n---\nDraft.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("live.md"),
+            "---\nintutic_id: sop_v\nintutic_enforced: true\ndeny_tools: Bash\n---\nLive.\n",
+        )
+        .unwrap();
+        // Only `false` switches a file off.
+        std::fs::write(
+            dir.join("typo.md"),
+            "---\nintutic_enforced: flase\ndeny_tools: Edit\n---\n",
+        )
+        .unwrap();
+
+        let sops = read_dir_sops(&dir);
+        assert_eq!(
+            sops.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(),
+            vec!["live", "typo"]
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
