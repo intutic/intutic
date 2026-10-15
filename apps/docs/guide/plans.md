@@ -86,12 +86,17 @@ A trial that ends without a purchase moves the workspace to the free plan.
 When the card on a subscription is declined, the payment is retried. After
 the third failed attempt the workspace, or every workspace of the
 organization, moves to the free plan, and the `billing.dunning.downgraded`
-notification goes to any rule that asks for it. The plan comes back as soon
+notification goes to any rule that asks for it. While on free, the daily
+spend cap and monthly budget drop to the free plan's; a workspace outside an
+organization keeps a cap that was already lower. The plan comes back as soon
 as the overdue payment is made while the subscription is still open: update
 the payment method under **Settings › Billing › Manage billing**, then pay
 the open invoice from the invoice history there or wait for the next retry.
-`billing.dunning.restored` announces it. A subscription that has ended does
-not come back; choose a plan again on the Upgrade page.
+`billing.dunning.restored` announces it. The caps come back with the plan: a
+workspace gets back the caps it had, including one an administrator set, and
+an organization's workspaces get the plan's caps. A subscription that has
+ended does not come back, and the workspace keeps the free plan's caps;
+choose a plan again on the Upgrade page.
 
 ## Plan badges in these docs {#badges}
 
