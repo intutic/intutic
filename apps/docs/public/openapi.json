@@ -1948,9 +1948,6 @@
           "409": {
             "description": "Conflict"
           },
-          "429": {
-            "description": "Too Many Requests"
-          },
           "500": {
             "description": "Internal Server Error"
           }

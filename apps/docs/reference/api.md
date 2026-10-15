@@ -224,7 +224,7 @@ Resend the email verification link. Rate limited to 2 req/min per email.
 
 **Response:** `200 OK`
 
-**Error codes:** `404` USER_NOT_FOUND, `409` ALREADY_VERIFIED, `429` RATE_LIMITED
+**Error codes:** `404` E_NOT_FOUND (no account with that address), `409` ALREADY_VERIFIED, `429` over the rate limit (with `Retry-After`)
 
 ---
 
