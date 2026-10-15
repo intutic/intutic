@@ -88,6 +88,14 @@ export const E_TRIAL_EXPIRED = 'TRIAL_EXPIRED' as const
 /** Email already registered. */
 export const E_EMAIL_ALREADY_EXISTS = 'EMAIL_ALREADY_EXISTS' as const
 
+/**
+ * A new account was requested without the explicit acceptance of the Terms
+ * and the Privacy Policy (and the 18-or-older confirmation) that signup
+ * requires: `acceptTerms: true` in the body, or `accept_terms=true` when an
+ * OAuth signup starts.
+ */
+export const E_TERMS_NOT_ACCEPTED = 'TERMS_NOT_ACCEPTED' as const
+
 /** OAuth flow failure. */
 export const E_OAUTH_FAILED = 'OAUTH_FAILED' as const
 
@@ -198,6 +206,7 @@ export type IntuticErrorCode =
   | typeof E_SIGNATURE_INVALID
   | typeof E_TRIAL_EXPIRED
   | typeof E_EMAIL_ALREADY_EXISTS
+  | typeof E_TERMS_NOT_ACCEPTED
   | typeof E_OAUTH_FAILED
   | typeof E_TOKEN_INVALID
   | typeof E_TOKEN_EXPIRED

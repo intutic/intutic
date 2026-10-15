@@ -2239,6 +2239,9 @@ signupOrg(params): Promise<OrgSignupResult>;
 ```
 
 POST /api/v1/auth/signup/org — unauthenticated, creates the calling user.
+`acceptTerms: true` is required: the caller is 18 or older and agrees to
+the Terms and the Privacy Policy; without it the call fails with 400
+`TERMS_NOT_ACCEPTED`.
 
 Closed by default in production (`INTUTIC_PUBLIC_ORG_SIGNUP`, off unless
 a deployment has built its own anonymous domain-verification story):

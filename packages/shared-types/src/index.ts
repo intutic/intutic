@@ -292,6 +292,7 @@ export {
   E_VALIDATION_FAILED,
   E_SIGNUP_DISABLED,
   E_DOMAIN_NOT_VERIFIED,
+  E_TERMS_NOT_ACCEPTED,
   // Identity Federation
   E_SSO_DISABLED,
   E_SSO_NO_MEMBERSHIP,
@@ -334,6 +335,7 @@ export {
   ApiKeyScopeListSchema,
   SignupInputSchema,
   OrgSignupInputSchema,
+  AcceptTermsInputSchema,
   VerifyEmailInputSchema,
   ResendVerificationInputSchema,
   MagicLinkRequestInputSchema,

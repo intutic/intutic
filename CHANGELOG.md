@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Signup records acceptance of the Terms and the Privacy Policy.** The
+  signup and org-signup request schemas (`SignupInputSchema`,
+  `OrgSignupInputSchema`) require `acceptTerms: true`, the signer's
+  confirmation that they are 18 or older and agree to the Terms and the
+  Privacy Policy; a request without it is refused with 400 and the new error
+  code `TERMS_NOT_ACCEPTED`. `AcceptTermsInputSchema` is the body for accepting
+  an updated version later. The documentation describes the signup box, the
+  members an administrator adds (covered by their organization's agreement)
+  and how updated terms are announced and accepted.
+
+### Changed
+
+- **Breaking (SDKs):** `signupOrg` takes `acceptTerms: true` in its params
+  (TypeScript), and `signup_org` takes a required keyword argument
+  `accept_terms` (Python). Without it the control plane refuses the call.
+- **The corrective-card dataset is opt-in.** The workspace setting
+  `governanceCardLabelingEnabled` now defaults to `false`. When an owner or
+  admin turns it on, corrective cards and whether they were followed are kept
+  and used only to improve Intutic's own self-hosted judge models, never for
+  training without a policy update.
+
 ## [2.6.0] - 2026-10-14
 
 ### Added

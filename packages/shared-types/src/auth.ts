@@ -210,11 +210,27 @@ export const UpdateRoleInputSchema = z.object({
 
 // ─── PLG Self-Serve Signup ───────────────────────────────────
 
+/**
+ * The signer's explicit acceptance: "I am 18 or older and agree to the Terms
+ * and the Privacy Policy". Only `true` is accepted; a body without it is
+ * refused with 400 `TERMS_NOT_ACCEPTED` before anything is created, and the
+ * control plane records the time and the terms version on the new member.
+ */
+const AcceptTermsField = z
+  .literal(true)
+  .describe('Must be true: the signer is 18 or older and agrees to the Terms and the Privacy Policy')
+
+/** Accepting the current terms version from the dashboard (`POST /api/v1/auth/terms/accept`). */
+export const AcceptTermsInputSchema = z.object({
+  acceptTerms: AcceptTermsField,
+})
+
 /** PLG signup input schema. */
 export const SignupInputSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(128),
   name: z.string().min(1).max(128),
+  acceptTerms: AcceptTermsField,
   workspaceName: z.string().min(1).max(64).optional(),
   signupSource: z.string().max(32).optional(),
   marketingAttribution: z.record(z.any()).optional(),
@@ -255,6 +271,7 @@ export const OrgSignupInputSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(128),
   name: z.string().min(1).max(128),
+  acceptTerms: AcceptTermsField,
   orgName: z.string().min(1).max(128),
   /**
    * The company's own domain (e.g. "acme.com") — informational, stored in

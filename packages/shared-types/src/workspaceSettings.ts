@@ -704,22 +704,25 @@ export interface WorkspaceSettings {
 
   /**
    * Whether corrective governance cards accumulate adoption labels in
-   * `governance_card_labels` — the dataset a future judge fine-tune trains on.
+   * `governance_card_labels` — the corrective-card dataset.
    *
-   * When true (the default), every corrective card queued for this workspace
-   * writes a row (card snapshot + queued_at), the proxy's delivery marker sets
+   * OPT-IN: false unless an OWNER or ADMIN turns it on (migration 242 turned it
+   * off for every workspace that existed before). The data is used only to
+   * improve Intutic's own self-hosted judge models, and never for training
+   * without a policy update and fresh consent.
+   *
+   * When true, every corrective card queued for this workspace writes a row
+   * (card snapshot + queued_at), the proxy's delivery marker sets
    * delivered_at, and the label sweep infers ADOPTED/NOT_ADOPTED from the
    * session's subsequent traces unless a human has already ruled. Human labels
    * (`label_source='human'`) always win over auto labels and are weighted
    * higher when the dataset is used.
    *
-   * When false, row creation and the auto-watcher stop, and the human labeling
-   * route refuses — data retention stops. Card generation, queueing, and
-   * delivery are UNCHANGED either way: opting out stops the dataset, not
-   * governance itself. On by default because the rows contain only what the
-   * workspace's own traces already persist (the card text the agent was shown),
-   * no third party is involved, and the aggregate is what makes the judge
-   * improve for everyone.
+   * When false, nothing writes to the dataset: no row is created, the label
+   * sweep neither records delivery nor labels, and the human labeling route
+   * refuses. Rows collected while it was on are kept. Card generation,
+   * queueing and delivery are UNCHANGED either way: the setting governs the
+   * dataset, not governance itself.
    */
   governanceCardLabelingEnabled: boolean
 }
@@ -811,9 +814,8 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   virusTotalSkillLookupEnabled: false,
   // Off by default — see the field doc: hashes and metadata only.
   configBodyUpload: false,
-  // ON by default — see the field doc. Opting out stops label retention for
-  // the judge fine-tuning dataset, never card delivery itself.
-  governanceCardLabelingEnabled: true,
+  // Off by default — opt-in, see the field doc. Never gates card delivery itself.
+  governanceCardLabelingEnabled: false,
   // 1.0 = every trace, matching the unconditional behavior this knob
   // replaces exactly. See the field doc for what a lower value gates.
   securityProbeSampleRate: 1.0,

@@ -71,11 +71,11 @@ describe('ControlPlaneClient', () => {
       accessToken: 'tok', refreshToken: 'rtok', cliInstall: 'npm i -g @intutic/cli', isNewUser: true,
     }
     const client = new ControlPlaneClient({ apiKey: 'unused', baseUrl })
-    const res = await client.signupOrg({ email: 'a@b.com', password: 'password123', name: 'A', orgName: 'Acme' })
+    const res = await client.signupOrg({ email: 'a@b.com', password: 'password123', name: 'A', orgName: 'Acme', acceptTerms: true })
     expect(receivedMethod).toBe('POST')
     expect(receivedPath).toBe('/api/v1/auth/signup/org')
     expect(receivedHeaders['authorization']).toBeUndefined()
-    expect(receivedBody).toEqual({ email: 'a@b.com', password: 'password123', name: 'A', orgName: 'Acme' })
+    expect(receivedBody).toEqual({ email: 'a@b.com', password: 'password123', name: 'A', orgName: 'Acme', acceptTerms: true })
     expect(res.org.id).toBe('org_1')
   })
 

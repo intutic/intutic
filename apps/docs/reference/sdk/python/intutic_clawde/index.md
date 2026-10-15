@@ -1359,10 +1359,21 @@ PUT /api/v1/workspace/provider-credentials/:provider
 ##### ControlPlaneClient.signup_org()
 
 ```python
-def signup_org(email: str, password: str, name: str, org_name: str) -> Dict[str, Any]
+def signup_org(
+    email: str,
+    password: str,
+    name: str,
+    org_name: str,
+    *,
+    accept_terms: bool,
+) -> Dict[str, Any]
 ```
 
 POST /api/v1/auth/signup/org -- unauthenticated, creates the calling user.
+
+`accept_terms=True` is required: the caller is 18 or older and agrees
+to the Terms and the Privacy Policy. Without it the call fails with 400
+TERMS_NOT_ACCEPTED.
 
 Closed by default in production (INTUTIC_PUBLIC_ORG_SIGNUP, off
 unless a deployment has built its own anonymous domain-verification

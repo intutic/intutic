@@ -16,7 +16,7 @@ Open **Settings** in the sidebar. The Settings area has three pages: **Settings*
 Your workspace, its plan, and your own profile and password.
 
 - **Workspace** — the **Workspace ID** (used in API calls and CLI configuration) and the **Plan**, marked Trial or Active, with the days left in a trial. Below them, the plan limits: tokens per day and sessions per day.
-- **Workspace Policies** — **Governance card labeling**: ask for adoption labels on corrective cards, to tune the judge. Turning it off stops label collection only; cards are still created and delivered.
+- **Workspace Policies** — **Governance card labeling**: off unless an owner or admin turns it on. When on, Intutic keeps each corrective card shown to your agents and whether it was followed, and uses them only to improve its own self-hosted judge models, never for training without a policy update. Cards are created and delivered either way; turning it off stops collection and keeps what was collected.
 - **Trace Storage** — whether traces mirror to, or live only in, a bucket you own, and a check that the bucket is still reachable. The bucket is set with `PUT /api/v1/workspace/settings` (a `byocStorage` object); its credentials are encrypted at rest and never returned.
 - **Profile** — your email (read-only), display name and avatar URL.
 - **Change Password** — current password, new password and confirmation. Passwords must be 8–128 characters.

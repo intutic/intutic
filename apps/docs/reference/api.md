@@ -628,7 +628,7 @@ Classify tokens as USEFUL or WASTED.
 
 ## Route Catalog
 
-Every route the control plane serves: 406 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 408 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -695,6 +695,8 @@ Every route the control plane serves: 406 routes, grouped by the source file tha
 | GET | `/api/v1/auth/session` | Authenticated | Any |  |
 | POST | `/api/v1/auth/signup` | None | — | Self-serve signup with workspace auto-provisioning |
 | POST | `/api/v1/auth/signup/org` | None | — | Sign up and create an organization with its first workspace |
+| GET | `/api/v1/auth/terms` | Authenticated | Any | The caller's standing against the current terms |
+| POST | `/api/v1/auth/terms/accept` | Authenticated | Any | Accept the current terms version |
 | POST | `/api/v1/auth/verify-email` | None (verification token) | — | Confirm an email address with the emailed token |
 
 ### `billing.ts` <Badge type="tip" text="Cloud" />
