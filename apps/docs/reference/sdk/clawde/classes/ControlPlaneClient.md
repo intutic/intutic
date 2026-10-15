@@ -355,6 +355,29 @@ POST /api/v1/loops/:loopRunId/complete — `outcome` records how the run ended.
 
 ***
 
+### createApiKey()
+
+```ts
+createApiKey(label, options?): Promise<ApiKeyCreateResult>;
+```
+
+POST /api/v1/keys — a key for you, with `scopes` (`['*']` when omitted).
+The plaintext `key` is in the response once and never stored. Called with
+a key, each scope must be granted by that key.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `label` | `string` |
+| `options` | [`CreateApiKeyOptions`](../index.md#createapikeyoptions) |
+
+#### Returns
+
+`Promise`\<[`ApiKeyCreateResult`](../index.md#apikeycreateresult)\>
+
+***
+
 ### createGuardrail()
 
 ```ts
@@ -1135,6 +1158,20 @@ GET /api/v1/routing/mirror-adoption-report — how a mirror-tested candidate mod
 
 ***
 
+### getOptimizerSettings()
+
+```ts
+getOptimizerSettings(): Promise<OptimizerSettings>;
+```
+
+GET /api/v1/dream-cycle/settings — the SOP Optimizer's approval mode and auto-apply threshold.
+
+#### Returns
+
+`Promise`\<[`OptimizerSettings`](../index.md#optimizersettings)\>
+
+***
+
 ### getPolicyDocument()
 
 ```ts
@@ -1344,6 +1381,20 @@ POST /api/v1/loops/:loopRunId/kill
 #### Returns
 
 `Promise`\<[`LoopRunActionResult`](../index.md#looprunactionresult)\>
+
+***
+
+### listApiKeys()
+
+```ts
+listApiKeys(): Promise<ApiKey[]>;
+```
+
+GET /api/v1/keys — your own keys in the workspace, revoked ones included.
+
+#### Returns
+
+`Promise`\<[`ApiKey`](../index.md#apikey)[]\>
 
 ***
 
@@ -2073,6 +2124,26 @@ POST …/guardrails/:guardrailId/retire — gone from every rule endpoint on the
 
 ***
 
+### revokeApiKey()
+
+```ts
+revokeApiKey(keyId): Promise<void>;
+```
+
+DELETE /api/v1/keys/:keyId — revoke one of your keys; the answer is the same when you had no such live key.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `keyId` | `string` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### revokeGateway()
 
 ```ts
@@ -2351,6 +2422,29 @@ DELETE /api/v1/workspace/provider-credentials/:provider
 
 ***
 
+### updateApiKey()
+
+```ts
+updateApiKey(keyId, changes): Promise<ApiKey>;
+```
+
+PATCH /api/v1/keys/:keyId (OWNER, ADMIN) — replace a key's scopes, spend
+budgets and/or rate limit; a field left out is unchanged. New scopes apply
+from the key's next request.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `keyId` | `string` |
+| `changes` | [`ApiKeyUpdate`](../index.md#apikeyupdate) |
+
+#### Returns
+
+`Promise`\<[`ApiKey`](../index.md#apikey)\>
+
+***
+
 ### updateGuardrail()
 
 ```ts
@@ -2393,6 +2487,30 @@ A switch to the webhook channel comes back with the new `signingSecret`.
 #### Returns
 
 `Promise`\<[`NotificationRule`](../index.md#notificationrule)\>
+
+***
+
+### updateOptimizerSettings()
+
+```ts
+updateOptimizerSettings(settings): Promise<OptimizerSettings>;
+```
+
+PUT /api/v1/dream-cycle/settings (OWNER, ADMIN) — set the approval mode.
+`auto` lets a manually triggered optimizer run apply a STRENGTHEN
+proposal whose score reaches `autoThreshold` without review; `manual`
+applies nothing. The route sets an omitted `autoThreshold` to 0.85, so
+pass the current one (`getOptimizerSettings`) to keep it.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `settings` | [`OptimizerSettingsUpdate`](../index.md#optimizersettingsupdate) |
+
+#### Returns
+
+`Promise`\<[`OptimizerSettings`](../index.md#optimizersettings)\>
 
 ***
 

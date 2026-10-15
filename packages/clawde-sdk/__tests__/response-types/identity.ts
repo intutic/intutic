@@ -1,5 +1,8 @@
-/** SDK response types of the identity routes (auth, domain verification, orgs, teams, signing keys), against their schemas. */
+/** SDK response types of the identity routes (auth, domain verification, orgs, teams, signing keys, API keys), against their schemas. */
 import type {
+  ApiKeyCreateResponse,
+  ApiKeyListResponse,
+  ApiKeyResponse,
   AuthMeResponse,
   DomainVerificationResponse,
   DomainVerificationStartResponse,
@@ -14,6 +17,8 @@ import type {
 } from '@intutic/shared-types'
 import type { ControlPlaneClient } from '../../src/control-plane'
 import type {
+  ApiKey,
+  ApiKeyCreateResult,
   CheckDomainVerificationResult,
   CreateOrgResult,
   OrgSignupResult,
@@ -49,3 +54,9 @@ conforms<Resolved<'createWorkspace'>>()<TeamWorkspaceCreateResponse>()
 conforms<Resolved<'assignOrgGateway'>>()<OrgGatewayResponse>()
 // getSigningKeys: GET /.well-known/intutic-trace-signing.json
 conforms<SigningJwks>()<TraceSigningJwksResponse>()
+// listApiKeys: GET /api/v1/keys, unwrapped from `data`
+conforms<ApiKey>()<Rows<ApiKeyListResponse, 'data'>>()
+// createApiKey: POST /api/v1/keys
+conforms<ApiKeyCreateResult>()<ApiKeyCreateResponse>()
+// updateApiKey: PATCH /api/v1/keys/:id
+conforms<ApiKey>()<ApiKeyResponse>()

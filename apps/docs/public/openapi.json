@@ -3,7 +3,7 @@
   "info": {
     "title": "Intutic Control Plane API",
     "version": "v1",
-    "description": "Generated from the control plane's route source. 408 operations; 129 validate their JSON body and 70 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 163 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
+    "description": "Generated from the control plane's route source. 408 operations; 129 validate their JSON body and 70 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 165 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
   },
   "servers": [
     {
@@ -5414,7 +5414,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DreamCycleSettingsResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -5426,7 +5433,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       },
       "put": {
         "operationId": "putApiV1DreamCycleSettings",
@@ -5455,7 +5462,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DreamCycleSettingsResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -5470,7 +5484,7 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/dream-cycle/trigger": {
@@ -22828,14 +22842,10 @@
               "anomaly.detected",
               "anomaly.finding",
               "incident.created",
-              "incident.escalated",
-              "sop.status_changed",
-              "session.ended",
               "decision.pending",
               "decision.approved",
               "decision.rejected",
               "trajectory.alert",
-              "calibration.threshold_breach",
               "anomaly.drift.detected",
               "anomaly.capability_miss",
               "anomaly.trust.updated",
@@ -22863,6 +22873,8 @@
               "trial.day13_report_sent",
               "plan.captured",
               "plan.approved",
+              "plan.rejected",
+              "plan.closed",
               "plan.deviation.detected",
               "identity.offboarding.completed",
               "auth.login.failed",
@@ -23860,6 +23872,44 @@
           "txtRecordName",
           "txtRecordValue",
           "expiresAt"
+        ]
+      },
+      "DreamCycleSettingsResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "workspaceId": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "auto"
+                ],
+                "description": "`auto` lets a manually triggered optimizer run apply a STRENGTHEN proposal that reaches `autoThreshold` without review; `manual` applies nothing."
+              },
+              "autoThreshold": {
+                "type": "number",
+                "description": "The score (0 to 1) a proposal must reach to be auto-applied in `auto`."
+              }
+            },
+            "required": [
+              "workspaceId",
+              "mode",
+              "autoThreshold"
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "settings"
         ]
       },
       "EgressPolicyResponse": {
@@ -33850,14 +33900,10 @@
                     "anomaly.detected",
                     "anomaly.finding",
                     "incident.created",
-                    "incident.escalated",
-                    "sop.status_changed",
-                    "session.ended",
                     "decision.pending",
                     "decision.approved",
                     "decision.rejected",
                     "trajectory.alert",
-                    "calibration.threshold_breach",
                     "anomaly.drift.detected",
                     "anomaly.capability_miss",
                     "anomaly.trust.updated",
@@ -33885,6 +33931,8 @@
                     "trial.day13_report_sent",
                     "plan.captured",
                     "plan.approved",
+                    "plan.rejected",
+                    "plan.closed",
                     "plan.deviation.detected",
                     "identity.offboarding.completed",
                     "auth.login.failed",
@@ -34025,14 +34073,10 @@
               "anomaly.detected",
               "anomaly.finding",
               "incident.created",
-              "incident.escalated",
-              "sop.status_changed",
-              "session.ended",
               "decision.pending",
               "decision.approved",
               "decision.rejected",
               "trajectory.alert",
-              "calibration.threshold_breach",
               "anomaly.drift.detected",
               "anomaly.capability_miss",
               "anomaly.trust.updated",
@@ -34060,6 +34104,8 @@
               "trial.day13_report_sent",
               "plan.captured",
               "plan.approved",
+              "plan.rejected",
+              "plan.closed",
               "plan.deviation.detected",
               "identity.offboarding.completed",
               "auth.login.failed",
@@ -42539,14 +42585,10 @@
               "anomaly.detected",
               "anomaly.finding",
               "incident.created",
-              "incident.escalated",
-              "sop.status_changed",
-              "session.ended",
               "decision.pending",
               "decision.approved",
               "decision.rejected",
               "trajectory.alert",
-              "calibration.threshold_breach",
               "anomaly.drift.detected",
               "anomaly.capability_miss",
               "anomaly.trust.updated",
@@ -42574,6 +42616,8 @@
               "trial.day13_report_sent",
               "plan.captured",
               "plan.approved",
+              "plan.rejected",
+              "plan.closed",
               "plan.deviation.detected",
               "identity.offboarding.completed",
               "auth.login.failed",

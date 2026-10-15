@@ -130,6 +130,20 @@ resource "intutic_virtual_key" "k" {
   label           = "ci"
   expires_in_days = 400
 }`, `between 1 and 365`},
+		{"an approval mode the API does not know", `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode = "sometimes"
+}`, `value must be one of`},
+		{"an auto-apply threshold over 1", `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode           = "auto"
+  auto_threshold = 1.5
+}`, `must be between 0.000000 and 1.000000`},
+		{"an auto-apply threshold finer than the API stores", `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode           = "auto"
+  auto_threshold = 0.8555
+}`, `three decimal places`},
 		{"empty SOP title", `
 resource "intutic_sop" "s" {
   title            = ""

@@ -52,6 +52,8 @@ from urllib.parse import quote, quote_plus
 from .errors import ClawdeConnectionError
 from .toon import unwrap_toon_envelope
 from .types import (
+    ApiKey,
+    ApiKeyCreateResult,
     AttenuationResult,
     AuthoredGuardrailInput,
     AuthoredGuardrailWriteResult,
@@ -86,6 +88,7 @@ from .types import (
     NotificationRule,
     NotificationRuleInput,
     NotificationSecretRotation,
+    OptimizerSettings,
     PolicySourceInput,
     PolicySourceSyncResult,
     PredictCostParams,
@@ -989,6 +992,81 @@ class ControlPlaneClient:
         """DELETE /api/v1/workspace/org-sops/:orgSopId -- answers 404 both for
         no such SOP and for a member without admin access."""
         self._request("DELETE", f"/api/v1/workspace/org-sops/{_quote(org_sop_id)}")
+
+    # ─── API keys (intutic keys) ───
+
+    def list_api_keys(self) -> List[ApiKey]:
+        """GET /api/v1/keys -- your own keys in the workspace, revoked ones included."""
+        return cast(List[ApiKey], self._list("/api/v1/keys", "data"))
+
+    def create_api_key(
+        self,
+        label: str,
+        *,
+        scopes: Optional[List[str]] = None,
+        expires_in_days: Optional[int] = None,
+        allowed_models: Optional[List[str]] = None,
+        is_service_account: Optional[bool] = None,
+    ) -> ApiKeyCreateResult:
+        """POST /api/v1/keys -- a key for you, with ``scopes`` (``["*"]`` when
+        omitted). The plaintext ``key`` is in the response once and never
+        stored. Called with a key, each scope must be granted by that key."""
+        return cast(ApiKeyCreateResult, self._request(
+            "POST",
+            "/api/v1/keys",
+            _defined(
+                label=label,
+                scopes=scopes,
+                expiresInDays=expires_in_days,
+                allowedModels=allowed_models,
+                isServiceAccount=is_service_account,
+            ),
+        ))
+
+    def update_api_key(
+        self,
+        key_id: str,
+        *,
+        scopes: Optional[List[str]] = None,
+        budgets: Optional[List[Dict[str, Any]]] = None,
+        rate_limit: Optional[Dict[str, Optional[int]]] = None,
+    ) -> ApiKey:
+        """PATCH /api/v1/keys/:keyId (OWNER, ADMIN) -- replace a key's scopes,
+        spend budgets and/or rate limit; one left out is unchanged. Each budget
+        is ``{"period": "day"|"month", "limitUsd": ..., "enforcement":
+        "hard"|"soft"}`` (``budgets=[]`` removes every budget); ``rate_limit``
+        takes ``rpm`` and ``tpm``, None removing that limit. New scopes apply
+        from the key's next request."""
+        return cast(ApiKey, self._request(
+            "PATCH",
+            f"/api/v1/keys/{_quote(key_id)}",
+            _defined(scopes=scopes, budgets=budgets, rateLimit=rate_limit),
+        ))
+
+    def revoke_api_key(self, key_id: str) -> None:
+        """DELETE /api/v1/keys/:keyId -- revoke one of your keys; the answer is
+        the same when you had no such live key."""
+        self._request("DELETE", f"/api/v1/keys/{_quote(key_id)}")
+
+    # ─── SOP Optimizer approval mode (intutic optimizer) ───
+
+    def get_optimizer_settings(self) -> OptimizerSettings:
+        """GET /api/v1/dream-cycle/settings -- the SOP Optimizer's approval
+        mode and auto-apply threshold."""
+        return cast(OptimizerSettings, self._request("GET", "/api/v1/dream-cycle/settings")["settings"])
+
+    def update_optimizer_settings(
+        self, mode: str, *, auto_threshold: Optional[float] = None
+    ) -> OptimizerSettings:
+        """PUT /api/v1/dream-cycle/settings (OWNER, ADMIN) -- set the approval
+        mode. ``auto`` lets a manually triggered optimizer run apply a
+        STRENGTHEN proposal whose score reaches ``auto_threshold`` without
+        review; ``manual`` applies nothing. The route sets an omitted
+        ``auto_threshold`` to 0.85, so pass the current one
+        (``get_optimizer_settings``) to keep it."""
+        return cast(OptimizerSettings, self._request(
+            "PUT", "/api/v1/dream-cycle/settings", _defined(mode=mode, autoThreshold=auto_threshold)
+        )["settings"])
 
     # ─── Key attenuation, cost prediction, routing ───
 

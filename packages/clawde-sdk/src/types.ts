@@ -1477,6 +1477,96 @@ export interface OrgSop {
   [key: string]: unknown
 }
 
+// API keys
+
+/** One spend budget of a key. */
+export interface KeySpendBudget {
+  period: 'day' | 'month'
+  limitUsd: number
+  /** `hard` refuses requests the budget does not cover; `soft` only alerts. */
+  enforcement: 'hard' | 'soft'
+}
+
+/** A key's per-minute limits; `null` is no limit. */
+export interface KeyRateLimit {
+  rpm: number | null
+  tpm: number | null
+}
+
+/** An API key without its secret. */
+export interface ApiKey {
+  keyId: string
+  keyPrefix: string
+  label: string
+  /** API key scopes (`*`, `gateway:use`, `<area>:read`, `<area>:write`). */
+  scopes: string[]
+  /** The key's model allowlist; `null` inherits the workspace's. */
+  allowedModels: string[] | null
+  expiresAt: string | null
+  lastUsedAt: string | null
+  revokedAt: string | null
+  createdAt: string
+  isServiceAccount: boolean
+  budgets: KeySpendBudget[]
+  rateLimit: KeyRateLimit
+}
+
+export interface CreateApiKeyOptions {
+  /** API key scopes; `['*']` (everything the owner's role allows) when omitted. */
+  scopes?: string[]
+  /** 1 to 365; the key never expires when omitted. */
+  expiresInDays?: number
+  /** Narrows the workspace's approved models for this key; omitted inherits them. */
+  allowedModels?: string[]
+  /** An automation key: exempt from the SSO idle-key check. */
+  isServiceAccount?: boolean
+}
+
+/** A created key, with its plaintext. */
+export interface ApiKeyCreateResult {
+  keyId: string
+  /** The plaintext `vk_` key: shown once, never stored. */
+  key: string
+  keyPrefix: string
+  label: string
+  scopes: string[]
+  allowedModels: string[] | null
+  expiresAt: string | null
+  createdAt: string
+  budgets: KeySpendBudget[]
+  rateLimit: KeyRateLimit
+}
+
+/** What `updateApiKey` changes; a field left out is unchanged. */
+export interface ApiKeyUpdate {
+  /** Replaces the key's scopes. */
+  scopes?: string[]
+  /** Replaces the key's budgets; `[]` removes them. At most one per period. */
+  budgets?: Array<{ period: 'day' | 'month'; limitUsd: number; enforcement?: 'hard' | 'soft' }>
+  /** Sets a limit, or removes it with `null`. */
+  rateLimit?: { rpm?: number | null; tpm?: number | null }
+}
+
+// SOP Optimizer approval mode
+
+/** `manual` applies no optimizer proposal on its own; `auto` lets a manually triggered run apply a STRENGTHEN proposal that reaches the threshold. */
+export type OptimizerMode = 'manual' | 'auto'
+
+/** The SOP Optimizer's approval mode. */
+export interface OptimizerSettings {
+  workspaceId: string
+  mode: OptimizerMode
+  /** The score (0 to 1) a proposal must reach to be auto-applied in `auto`. */
+  autoThreshold: number
+}
+
+/** What `updateOptimizerSettings` sends. */
+export interface OptimizerSettingsUpdate {
+  mode: OptimizerMode
+  /** 0 to 1. Left out, the control plane sets 0.85: pass the current value to keep it. */
+  autoThreshold?: number
+}
+
 // Key attenuation, cost prediction, routing
 
 export interface AttenuateOptions {

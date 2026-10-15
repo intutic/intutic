@@ -73,7 +73,7 @@ The REQUEST interceptor runs before the gateway calls the real tool target — t
 3. On `{ allowed: true }`, returns the original request unchanged (`transformedGatewayRequest`).
 4. On `{ allowed: false, reason }`, short-circuits with a JSON-RPC error response (`transformedGatewayResponse`) — the gateway returns that immediately without ever calling the target.
 5. On a control-plane failure (timeout, network error, non-2xx, unparseable body), or a 403 `{ allowed: false, code: "GOVERNANCE_UNAVAILABLE" }` because one of the control plane's own checks (the DLP scan, the SOP rules) could not run, **fails CLOSED by default** — deny, don't silently let a governed gateway call through ungoverned. Set `INTUTIC_FAIL_OPEN=true` to invert this if your own uptime requirements call for it.
-6. A 400 (`code: "INVALID_REQUEST"`, a body the control plane cannot read) is denied whatever `INTUTIC_FAIL_OPEN` says. A workspace in shadow mode (`ff_shadow_enforcement`) gets `{ allowed: true, degraded: true, code: "GOVERNANCE_UNAVAILABLE" }` from the control plane instead of the 403, and the call goes through.
+6. A 400 (`code: "INVALID_REQUEST"`, a body the control plane cannot read) is denied whatever `INTUTIC_FAIL_OPEN` says, and so is a 403 `code: "INSUFFICIENT_SCOPE"`: the key lacks the `gateway:use` scope (give it `gateway:use`, or `*`; see [API key scopes](/reference/api#api-key-scopes)). A workspace in shadow mode (`ff_shadow_enforcement`) gets `{ allowed: true, degraded: true, code: "GOVERNANCE_UNAVAILABLE" }` from the control plane instead of the 403, and the call goes through.
 
 ::: tip Confirmed against AWS's real interceptor contract, not assumed
 The exact event/response JSON shapes this Lambda implements (`interceptorInputVersion`/`interceptorOutputVersion: "1.0"`, `mcp.gatewayRequest`/`mcp.gatewayResponse`, `transformedGatewayRequest`/`transformedGatewayResponse`) were fetched live from AWS's current devguide (`docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-interceptors-types.html` and `.../gateway-interceptors-examples.html`, 2026-08-19) — see `tools/agentcore-interceptor/src/types.ts`'s module doc for exactly what was confirmed and where.
@@ -111,7 +111,7 @@ What the composed handler does:
 - **Otherwise Intutic checks the body your logic forwards**, rewrites included, because that is what reaches the target. Only `tools/call` is checked. If Intutic allows the call, your output is returned unchanged. If it denies, the caller gets the Intutic denial instead.
 - **Failures fail closed.** A control-plane failure follows `INTUTIC_FAIL_OPEN`, exactly as the stock handler does. If your logic throws, the call is denied regardless of that flag.
 
-If you need a different order, `checkToolCall(config, { toolName, toolInput, sessionId })` and `readConfig()` are exported too. `checkToolCall` returns `{ allowed, reason?, code?, degraded? }` (a 400 comes back as a denial with `code: "INVALID_REQUEST"`) and throws only when it gets no verdict: no answer at all, or `GOVERNANCE_UNAVAILABLE`. Deciding what that means is then up to you.
+If you need a different order, `checkToolCall(config, { toolName, toolInput, sessionId })` and `readConfig()` are exported too. `checkToolCall` returns `{ allowed, reason?, code?, degraded? }` (a 400 comes back as a denial with `code: "INVALID_REQUEST"`, a key without the scope as one with `code: "INSUFFICIENT_SCOPE"`) and throws only when it gets no verdict: no answer at all, or `GOVERNANCE_UNAVAILABLE`. Deciding what that means is then up to you.
 
 ### Short-circuit and streaming behavior
 
@@ -136,7 +136,7 @@ Package `dist/` (plus `node_modules` if you add runtime dependencies beyond Node
 |---|---|---|
 | `INTUTIC_CONTROL_PLANE_URL` | Yes | Your Intutic control-plane base URL, e.g. `https://your-intutic-control-plane.example.com` |
 | `INTUTIC_API_KEY` | Yes | A workspace virtual key (`vk_...`) from Settings › Security › Virtual API Keys in your Intutic dashboard (or `POST /api/v1/keys`). The endpoint refuses a key whose member is a Viewer (403), which the Lambda treats as a control-plane failure |
-| `INTUTIC_FAIL_OPEN` | No (default `false`) | Set `"true"` to allow tool calls through when the control-plane check itself fails or answers `GOVERNANCE_UNAVAILABLE`, instead of denying. A 400 is denied either way |
+| `INTUTIC_FAIL_OPEN` | No (default `false`) | Set `"true"` to allow tool calls through when the control-plane check itself fails or answers `GOVERNANCE_UNAVAILABLE`, instead of denying. A 400, or a key without `gateway:use`, is denied either way |
 | `INTUTIC_TIMEOUT_MS` | No (default `3000`) | Control-plane call timeout |
 | `AGENTCORE_GATEWAY_ID` | No | Attached to requests for control-plane log correlation only — never affects the verdict |
 

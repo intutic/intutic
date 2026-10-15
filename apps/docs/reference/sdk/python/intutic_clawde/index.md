@@ -323,6 +323,24 @@ POST /api/v1/loops/:loopRunId/complete -- `outcome` ("SUCCEEDED"
 or "FAILED") records how the run ended.
 
 
+##### ControlPlaneClient.create_api_key()
+
+```python
+def create_api_key(
+    label: str,
+    *,
+    scopes: Optional[List[str]] = None,
+    expires_in_days: Optional[int] = None,
+    allowed_models: Optional[List[str]] = None,
+    is_service_account: Optional[bool] = None,
+) -> ApiKeyCreateResult
+```
+
+POST /api/v1/keys -- a key for you, with `scopes` (`["*"]` when
+omitted). The plaintext `key` is in the response once and never
+stored. Called with a key, each scope must be granted by that key.
+
+
 ##### ControlPlaneClient.create_guardrail()
 
 ```python
@@ -737,6 +755,16 @@ GET /api/v1/routing/mirror-adoption-report -- how a mirror-tested
 candidate model compared. Reported only; changes nothing.
 
 
+##### ControlPlaneClient.get_optimizer_settings()
+
+```python
+def get_optimizer_settings() -> OptimizerSettings
+```
+
+GET /api/v1/dream-cycle/settings -- the SOP Optimizer's approval
+mode and auto-apply threshold.
+
+
 ##### ControlPlaneClient.get_policy_document()
 
 ```python
@@ -843,6 +871,15 @@ def kill_loop_run(loop_run_id: str) -> LoopRunActionResult
 ```
 
 POST /api/v1/loops/:loopRunId/kill
+
+
+##### ControlPlaneClient.list_api_keys()
+
+```python
+def list_api_keys() -> List[ApiKey]
+```
+
+GET /api/v1/keys -- your own keys in the workspace, revoked ones included.
 
 
 ##### ControlPlaneClient.list_findings()
@@ -1276,6 +1313,16 @@ POST .../guardrails/:guardrailId/retire -- gone from every rule
 endpoint on the next poll.
 
 
+##### ControlPlaneClient.revoke_api_key()
+
+```python
+def revoke_api_key(key_id: str) -> None
+```
+
+DELETE /api/v1/keys/:keyId -- revoke one of your keys; the answer is
+the same when you had no such live key.
+
+
 ##### ControlPlaneClient.revoke_gateway()
 
 ```python
@@ -1432,6 +1479,26 @@ def unset_provider_credential(provider: str) -> None
 DELETE /api/v1/workspace/provider-credentials/:provider
 
 
+##### ControlPlaneClient.update_api_key()
+
+```python
+def update_api_key(
+    key_id: str,
+    *,
+    scopes: Optional[List[str]] = None,
+    budgets: Optional[List[Dict[str, Any]]] = None,
+    rate_limit: Optional[Dict[str, Optional[int]]] = None,
+) -> ApiKey
+```
+
+PATCH /api/v1/keys/:keyId (OWNER, ADMIN) -- replace a key's scopes,
+spend budgets and/or rate limit; one left out is unchanged. Each budget
+is `{"period": "day"|"month", "limitUsd": ..., "enforcement":
+"hard"|"soft"}` (`budgets=[]` removes every budget); `rate_limit`
+takes `rpm` and `tpm`, None removing that limit. New scopes apply
+from the key's next request.
+
+
 ##### ControlPlaneClient.update_guardrail()
 
 ```python
@@ -1458,6 +1525,24 @@ def update_notification_rule(
 PUT /api/v1/notifications/rules/:ruleId -- only the fields given
 change. A switch to the webhook channel comes back with the new
 `signingSecret`.
+
+
+##### ControlPlaneClient.update_optimizer_settings()
+
+```python
+def update_optimizer_settings(
+    mode: str,
+    *,
+    auto_threshold: Optional[float] = None,
+) -> OptimizerSettings
+```
+
+PUT /api/v1/dream-cycle/settings (OWNER, ADMIN) -- set the approval
+mode. `auto` lets a manually triggered optimizer run apply a
+STRENGTHEN proposal whose score reaches `auto_threshold` without
+review; `manual` applies nothing. The route sets an omitted
+`auto_threshold` to 0.85, so pass the current one
+(`get_optimizer_settings`) to keep it.
 
 
 ##### ControlPlaneClient.update_siem_destination()
@@ -1694,8 +1779,9 @@ non-2xx or without a boolean `allowed`, or answers
 GOVERNANCE_UNAVAILABLE because its own checks could not run), the
 verdict is decided by `fail_closed`: True (the default) reports BLOCK,
 because a client with no verdict has nothing to defer to; False
-reports allow. A 400 INVALID_REQUEST is a BLOCK whatever `fail_closed`
-says. A shadow-mode workspace's {allowed: true, degraded: true} is an
+reports allow. A 400 INVALID_REQUEST, and a 403 INSUFFICIENT_SCOPE (the
+key lacks `gateway:use`), are a BLOCK whatever `fail_closed` says. A
+shadow-mode workspace's {allowed: true, degraded: true} is an
 allow.
 
 A `local_only` client makes no call and answers allow with code

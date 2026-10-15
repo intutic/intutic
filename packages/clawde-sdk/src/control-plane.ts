@@ -121,6 +121,12 @@ import type {
   SopCreateResult,
   OrgSop,
   OrgSopInput,
+  OptimizerSettings,
+  OptimizerSettingsUpdate,
+  ApiKey,
+  ApiKeyCreateResult,
+  ApiKeyUpdate,
+  CreateApiKeyOptions,
   AttenuateOptions,
   AttenuationResult,
   AttenuationChainLink,
@@ -1040,6 +1046,55 @@ export class ControlPlaneClient {
   /** DELETE /api/v1/workspace/org-sops/:orgSopId — answers 404 both for no such SOP and for a member without admin access. */
   public async deleteOrgSop(orgSopId: string): Promise<void> {
     await this.request('DELETE', `/api/v1/workspace/org-sops/${seg(orgSopId)}`)
+  }
+
+  // ─── API keys (`intutic keys`) ───
+
+  /** GET /api/v1/keys — your own keys in the workspace, revoked ones included. */
+  public async listApiKeys(): Promise<ApiKey[]> {
+    return this.listData('/api/v1/keys')
+  }
+
+  /**
+   * POST /api/v1/keys — a key for you, with `scopes` (`['*']` when omitted).
+   * The plaintext `key` is in the response once and never stored. Called with
+   * a key, each scope must be granted by that key.
+   */
+  public async createApiKey(label: string, options: CreateApiKeyOptions = {}): Promise<ApiKeyCreateResult> {
+    return this.request('POST', '/api/v1/keys', defined({ label, ...options }))
+  }
+
+  /**
+   * PATCH /api/v1/keys/:keyId (OWNER, ADMIN) — replace a key's scopes, spend
+   * budgets and/or rate limit; a field left out is unchanged. New scopes apply
+   * from the key's next request.
+   */
+  public async updateApiKey(keyId: string, changes: ApiKeyUpdate): Promise<ApiKey> {
+    return this.request('PATCH', `/api/v1/keys/${seg(keyId)}`, changes)
+  }
+
+  /** DELETE /api/v1/keys/:keyId — revoke one of your keys; the answer is the same when you had no such live key. */
+  public async revokeApiKey(keyId: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/keys/${seg(keyId)}`)
+  }
+
+  // ─── SOP Optimizer approval mode (`intutic optimizer`) ───
+
+  /** GET /api/v1/dream-cycle/settings — the SOP Optimizer's approval mode and auto-apply threshold. */
+  public async getOptimizerSettings(): Promise<OptimizerSettings> {
+    return (await this.request<{ settings: OptimizerSettings }>('GET', '/api/v1/dream-cycle/settings')).settings
+  }
+
+  /**
+   * PUT /api/v1/dream-cycle/settings (OWNER, ADMIN) — set the approval mode.
+   * `auto` lets a manually triggered optimizer run apply a STRENGTHEN
+   * proposal whose score reaches `autoThreshold` without review; `manual`
+   * applies nothing. The route sets an omitted `autoThreshold` to 0.85, so
+   * pass the current one (`getOptimizerSettings`) to keep it.
+   */
+  public async updateOptimizerSettings(settings: OptimizerSettingsUpdate): Promise<OptimizerSettings> {
+    const body = defined({ mode: settings.mode, autoThreshold: settings.autoThreshold })
+    return (await this.request<{ settings: OptimizerSettings }>('PUT', '/api/v1/dream-cycle/settings', body)).settings
   }
 
   // ─── Key attenuation, cost prediction, routing ───

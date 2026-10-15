@@ -55,6 +55,8 @@ export const GATE_REFUSAL_CODES = [
   'POLICY_SNAPSHOT_UNVERIFIED',
   'SOP_RULE',
   'HOOK_GATE',
+  // The API key lacks the scope the hook gate needs (client.ts).
+  'INSUFFICIENT_SCOPE',
   // The call is too large to evaluate (limits.ts), before any tier runs.
   'COMMAND_TOO_LARGE',
   // A chaos run's fault, injected after every tier allowed the call, or its

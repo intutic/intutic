@@ -50,6 +50,7 @@
       { "code": "POLICY_SNAPSHOT_UNVERIFIED", "meaning": "The policy snapshot on this machine failed its integrity check, so it admits no MCP server; the sync daemon restores the last verified snapshot" },
       { "code": "SOP_RULE", "meaning": "A block rule in the SOP register matched" },
       { "code": "HOOK_GATE", "meaning": "The control plane's hook gate refused the call or could not read it (`INVALID_REQUEST`), or, while `failClosed` is on, could not be reached or could not complete a check (`GOVERNANCE_UNAVAILABLE`)" },
+      { "code": "INSUFFICIENT_SCOPE", "meaning": "The API key lacks the scope the control plane's hook gate needs (`gateway:use`), so the hook gate refused the call whatever `failClosed` says; give the key `gateway:use`, or `*`" },
       { "code": "COMMAND_TOO_LARGE", "meaning": "The command is over 256 KiB, or the tool arguments over 1 MiB, the most a gate evaluates; split the work into smaller calls" },
       { "code": "CHAOS_FAULT", "meaning": "A chaos experiment (`intutic chaos run`) injected this failure into a call governance allowed, and the reason carries the run's `E-INTUTIC-` canary; or the experiment set a plan the gate cannot read. Not a governance decision" },
       { "code": "E_UNPINNED_LATEST", "meaning": "A deploy uses an image tagged `latest`" },

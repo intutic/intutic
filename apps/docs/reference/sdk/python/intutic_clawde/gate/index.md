@@ -212,8 +212,9 @@ non-2xx or without a boolean `allowed`, or answers
 GOVERNANCE_UNAVAILABLE because its own checks could not run), the
 verdict is decided by `fail_closed`: True (the default) reports BLOCK,
 because a client with no verdict has nothing to defer to; False
-reports allow. A 400 INVALID_REQUEST is a BLOCK whatever `fail_closed`
-says. A shadow-mode workspace's {allowed: true, degraded: true} is an
+reports allow. A 400 INVALID_REQUEST, and a 403 INSUFFICIENT_SCOPE (the
+key lacks `gateway:use`), are a BLOCK whatever `fail_closed` says. A
+shadow-mode workspace's {allowed: true, degraded: true} is an
 allow.
 
 A `local_only` client makes no call and answers allow with code

@@ -90,7 +90,7 @@ How a [Gate](classes/Gate.md) evaluates calls. Every field is optional.
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-allowed"></a> `allowed` | `boolean` | - |
-| <a id="property-code"></a> `code?` | `string` | The code the hook gate names, when it names one: the MCP registry's on its refusals, `GOVERNANCE_UNAVAILABLE` when its checks could not run, and `INVALID_REQUEST` when it could not read the request. |
+| <a id="property-code"></a> `code?` | `string` | The code the hook gate names, when it names one: the MCP registry's on its refusals, `GOVERNANCE_UNAVAILABLE` when its checks could not run, `INVALID_REQUEST` when it could not read the request, and `INSUFFICIENT_SCOPE` when the API key lacks the scope it needs. |
 | <a id="property-decisionid"></a> `decisionId?` | `string` | The hook gate's id for this decision, when this answer is its own verdict: every verdict it gives names one, and a `GOVERNANCE_UNAVAILABLE` refusal keeps it only while `failClosed` refuses too. The gate reports the call with it (`gateDecisionId`), so the control plane exports the decision to SIEM once and files its incident once. |
 | <a id="property-incidentid"></a> `incidentId?` | `string` | - |
 | <a id="property-reached"></a> `reached` | `boolean` | False when the hook gate gave no verdict and `failClosed` decided it. |
@@ -440,7 +440,7 @@ How long the hook script the sandbox bootstrap writes may run, from process star
 ### GATE\_REFUSAL\_CODES
 
 ```ts
-const GATE_REFUSAL_CODES: readonly ["SSO_GROUP", "SNAPSHOT", "HELD", "SERVER_BLOCKED", "SERVER_HELD", "SERVER_NOT_APPROVED", "TOOL_DISABLED", "SERVER_NOT_ALLOWED", "POLICY_SNAPSHOT_UNVERIFIED", "SOP_RULE", "HOOK_GATE", "COMMAND_TOO_LARGE", "CHAOS_FAULT", "E_UNPINNED_LATEST", "E_UNPINNED_TAG", "E_UNKNOWN_REGISTRY", "E_UNKNOWN_IMAGE", "E_DIGEST_MISMATCH", "E_MANIFEST_UNPARSEABLE", "WORKFLOW_SANDBOX", "NO_GATE"];
+const GATE_REFUSAL_CODES: readonly ["SSO_GROUP", "SNAPSHOT", "HELD", "SERVER_BLOCKED", "SERVER_HELD", "SERVER_NOT_APPROVED", "TOOL_DISABLED", "SERVER_NOT_ALLOWED", "POLICY_SNAPSHOT_UNVERIFIED", "SOP_RULE", "HOOK_GATE", "INSUFFICIENT_SCOPE", "COMMAND_TOO_LARGE", "CHAOS_FAULT", "E_UNPINNED_LATEST", "E_UNPINNED_TAG", "E_UNKNOWN_REGISTRY", "E_UNKNOWN_IMAGE", "E_DIGEST_MISMATCH", "E_MANIFEST_UNPARSEABLE", "WORKFLOW_SANDBOX", "NO_GATE"];
 ```
 
 Every `code` an [IntuticGateRefusal](classes/IntuticGateRefusal.md) can carry: the tier that refused,

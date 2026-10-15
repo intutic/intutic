@@ -17,6 +17,7 @@ Every resource in the Intutic provider can be imported, so a workspace configure
 | `intutic_guardrail` | Guardrail id, `pgr_…` | Authored guardrails only. A guardrail extracted from a policy document is refused, and so is a retired one. |
 | `intutic_workspace_settings` | Workspace id, `ws_…` | Must be the API key's workspace. Imports with no keys managed: the first plan shows each key in your configuration as a change. |
 | `intutic_workspace_budget` | Workspace id, `ws_…` | One per workspace. |
+| `intutic_sop_optimizer_settings` | Workspace id, `ws_…` | One per workspace. Must be the API key's workspace. |
 | `intutic_virtual_key` | Key id, `key_…` | Only keys of the member who owns the provider's key. `key` is null after import, since the API never returns a key again. |
 | `intutic_member_budget` | Member id, `mbr_…`, or `default` | Only a member, or the default, that has a budget. |
 | `intutic_gateway` | Gateway id, `gw_…` | `token` is null after import. |

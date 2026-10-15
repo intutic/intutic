@@ -24,6 +24,8 @@ Two behaviours that must not be "improved":
     `fail_closed=False` to treat the tier as advisory during an outage. A 400
     is refused whatever `fail_closed` says: it is this client's request that
     is wrong, not the control plane that is down, and allowing would hide it.
+    So is a 403 INSUFFICIENT_SCOPE: the key lacks the scope the hook gate
+    needs (`gateway:use`), a fault in its configuration.
   * `emit` NEVER raises. Telemetry that can break a run is worse than no
     telemetry.
 
@@ -65,6 +67,11 @@ REASON_MAX = 512   # control plane truncates at 512; do it here so logs match
 
 # The hook gate's code for a call whose checks could not run.
 GOVERNANCE_UNAVAILABLE = "GOVERNANCE_UNAVAILABLE"
+
+# The control plane's code for a key without a scope the route needs
+# (`requiredScopes`; the hook gate needs `gateway:use`). A fault in the key's
+# configuration, not an outage, so it refuses whatever fail_closed says.
+INSUFFICIENT_SCOPE = "INSUFFICIENT_SCOPE"
 
 # The code on a local-only client's hook-gate answer: no key, so no call was made.
 LOCAL_ONLY = "LOCAL_ONLY"
@@ -110,6 +117,18 @@ class HttpStatusError(requests.HTTPError):
         self.body = body
 
 
+def _insufficient_scope_reason(body: Dict[str, Any]) -> str:
+    """The reason for an INSUFFICIENT_SCOPE answer: the scope(s) the key
+    lacks, and the server's detail."""
+    required = body.get("requiredScopes")
+    scopes = [s for s in required if isinstance(s, str)] if isinstance(required, list) else []
+    needs = ("a scope it lacks" if not scopes else f"the {scopes[0]} scope" if len(scopes) == 1
+             else f"one of the scopes {', '.join(scopes)}")
+    detail = body.get("detail")
+    return (f"hook-gate refused the API key ({INSUFFICIENT_SCOPE}): it needs {needs}"
+            + (f" — {detail}" if isinstance(detail, str) else ""))
+
+
 @dataclass
 class GateResponse:
     allowed: bool
@@ -117,8 +136,9 @@ class GateResponse:
     incident_id: Optional[str] = None
     reached: bool = True   # False when the hook gate gave no verdict and fail_closed decided
     # The code the hook gate names, when it names one: the MCP registry's on its
-    # refusals, GOVERNANCE_UNAVAILABLE when its checks could not run, and
-    # INVALID_REQUEST when it could not read the request.
+    # refusals, GOVERNANCE_UNAVAILABLE when its checks could not run,
+    # INVALID_REQUEST when it could not read the request, and
+    # INSUFFICIENT_SCOPE when the API key lacks the scope it needs.
     code: Optional[str] = None
     # The hook gate's id for this decision, when this answer is its own
     # verdict: every verdict it gives names one, and a GOVERNANCE_UNAVAILABLE
@@ -206,8 +226,9 @@ class GateClient:
         GOVERNANCE_UNAVAILABLE because its own checks could not run), the
         verdict is decided by `fail_closed`: True (the default) reports BLOCK,
         because a client with no verdict has nothing to defer to; False
-        reports allow. A 400 INVALID_REQUEST is a BLOCK whatever `fail_closed`
-        says. A shadow-mode workspace's {allowed: true, degraded: true} is an
+        reports allow. A 400 INVALID_REQUEST, and a 403 INSUFFICIENT_SCOPE (the
+        key lacks `gateway:use`), are a BLOCK whatever `fail_closed` says. A
+        shadow-mode workspace's {allowed: true, degraded: true} is an
         allow.
 
         A `local_only` client makes no call and answers allow with code
@@ -237,6 +258,9 @@ class GateClient:
                            f"{why if isinstance(why, str) else exc}",
                     code="INVALID_REQUEST",
                 )
+            if exc.body.get("code") == INSUFFICIENT_SCOPE:
+                return GateResponse(allowed=False, reason=_insufficient_scope_reason(exc.body),
+                                    code=INSUFFICIENT_SCOPE)
             if exc.body.get("code") == GOVERNANCE_UNAVAILABLE:
                 return self._no_verdict(f"governance check unavailable ({GOVERNANCE_UNAVAILABLE})",
                                         GOVERNANCE_UNAVAILABLE, exc.body.get("decisionId"))

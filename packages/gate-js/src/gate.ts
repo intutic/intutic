@@ -561,8 +561,10 @@ export class Gate {
       if (!resp.allowed) {
         await this.emit('tool_blocked', toolName, resp.reason, toolInput, undefined, undefined, resp.decisionId)
         // The hook gate names the MCP registry's own code when the registry
-        // refused; anything else it refuses is HOOK_GATE.
-        const code = MCP_CODES.has(resp.code ?? '') ? (resp.code as GateRefusalCode) : 'HOOK_GATE'
+        // refused, and INSUFFICIENT_SCOPE when the key lacks its scope;
+        // anything else it refuses is HOOK_GATE.
+        const code =
+          MCP_CODES.has(resp.code ?? '') || resp.code === 'INSUFFICIENT_SCOPE' ? (resp.code as GateRefusalCode) : 'HOOK_GATE'
         throw new IntuticGateRefusal(this.shown(resp.reason), code, resp.incidentId)
       }
     }

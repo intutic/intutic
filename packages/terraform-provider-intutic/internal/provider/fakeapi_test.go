@@ -38,6 +38,10 @@ type fakeAPI struct {
 	// nulls a real row may carry.
 	sops  map[string]map[string]any
 	calls []string
+
+	// The SOP Optimizer's approval mode; empty is the API's default, manual at 0.85.
+	optimizerMode      string
+	optimizerThreshold float64
 }
 
 func (f *fakeAPI) record(r *http.Request, detail string) {
@@ -99,6 +103,8 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	case strings.HasPrefix(r.URL.Path, "/api/v1/sops/"):
 		f.serveSop(w, r, strings.TrimPrefix(r.URL.Path, "/api/v1/sops/"))
+	case r.URL.Path == optimizerSettingsPath:
+		f.serveOptimizerSettings(w, r)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = fmt.Fprintf(w, `{"error":"fake API has no %s %s"}`, r.Method, r.URL.Path)

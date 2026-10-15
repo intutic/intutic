@@ -529,6 +529,68 @@ class SopCreateResult(TypedDict):
     lifecycleState: str
 
 
+class KeySpendBudget(TypedDict):
+    """One spend budget of a key. ``hard`` refuses requests the budget does
+    not cover; ``soft`` only alerts."""
+
+    period: Literal["day", "month"]
+    limitUsd: float
+    enforcement: Literal["hard", "soft"]
+
+
+class KeyRateLimit(TypedDict):
+    """A key's per-minute limits; None is no limit."""
+
+    rpm: Optional[int]
+    tpm: Optional[int]
+
+
+class ApiKey(TypedDict):
+    """An API key without its secret."""
+
+    keyId: str
+    keyPrefix: str
+    label: str
+    #: API key scopes (``*``, ``gateway:use``, ``<area>:read``, ``<area>:write``).
+    scopes: List[str]
+    #: The key's model allowlist; None inherits the workspace's.
+    allowedModels: Optional[List[str]]
+    expiresAt: Optional[str]
+    lastUsedAt: Optional[str]
+    revokedAt: Optional[str]
+    createdAt: str
+    isServiceAccount: bool
+    budgets: List[KeySpendBudget]
+    rateLimit: KeyRateLimit
+
+
+class ApiKeyCreateResult(TypedDict):
+    """A created key, with its plaintext."""
+
+    keyId: str
+    #: The plaintext ``vk_`` key: shown once, never stored.
+    key: str
+    keyPrefix: str
+    label: str
+    scopes: List[str]
+    allowedModels: Optional[List[str]]
+    expiresAt: Optional[str]
+    createdAt: str
+    budgets: List[KeySpendBudget]
+    rateLimit: KeyRateLimit
+
+
+class OptimizerSettings(TypedDict):
+    """The SOP Optimizer's approval mode."""
+
+    workspaceId: str
+    #: ``auto`` lets a manually triggered optimizer run apply a STRENGTHEN
+    #: proposal that reaches ``autoThreshold``; ``manual`` applies nothing.
+    mode: Literal["manual", "auto"]
+    #: The score (0 to 1) a proposal must reach to be auto-applied in ``auto``.
+    autoThreshold: float
+
+
 class AttenuationResult(TypedDict):
     #: The child ``vk_`` key: shown once, never stored.
     childKey: str

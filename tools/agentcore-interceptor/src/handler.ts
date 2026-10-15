@@ -27,7 +27,8 @@
  * `GOVERNANCE_UNAVAILABLE` because one of its own checks could not run — as
  * `/api/v1/hook-gate` and the gate SDKs do. A 400 (`INVALID_REQUEST`) is a
  * denial whatever `INTUTIC_FAIL_OPEN` says: the request is wrong, not the
- * control plane down. A shadow-mode workspace's degraded allow is an allow. A Gateway an operator explicitly
+ * control plane down. So is a 403 `INSUFFICIENT_SCOPE`: the key lacks the
+ * `gateway:use` scope the route needs, a fault in its configuration. A shadow-mode workspace's degraded allow is an allow. A Gateway an operator explicitly
  * wired an interceptor onto is a production governance boundary — see
  * apps/docs/integrations/agentcore.md for the reasoning and the
  * `INTUTIC_FAIL_OPEN=true` escape hatch for operators who have judged their
@@ -94,7 +95,7 @@ export function readConfig(): InterceptorConfig {
 export interface GatewayCheckResponse {
   allowed: boolean
   reason?: string
-  /** `GOVERNANCE_UNAVAILABLE` on a shadow workspace's degraded allow; `INVALID_REQUEST` on a 400. */
+  /** `GOVERNANCE_UNAVAILABLE` on a shadow workspace's degraded allow; `INVALID_REQUEST` on a 400; `INSUFFICIENT_SCOPE` for a key without the scope. */
   code?: string
   degraded?: boolean
 }
@@ -102,12 +103,16 @@ export interface GatewayCheckResponse {
 /** The control plane's code for a call whose checks could not run. */
 const GOVERNANCE_UNAVAILABLE = 'GOVERNANCE_UNAVAILABLE'
 
+/** The control plane's code for a key without a scope the route needs (`requiredScopes`). */
+const INSUFFICIENT_SCOPE = 'INSUFFICIENT_SCOPE'
+
 /**
  * Call `POST /api/v1/integrations/agentcore/gateway-check`
  * (services/control-plane/src/routes/agentcoreGateway.ts) for a verdict.
  *
  * Never throws for an ordinary "the call was denied" outcome, nor for a 400
- * (`INVALID_REQUEST`, returned as a denial) — only for a genuine failure to
+ * (`INVALID_REQUEST`) or a 403 `INSUFFICIENT_SCOPE`, both returned as a
+ * denial — only for a genuine failure to
  * get a verdict (network error, timeout, non-2xx, unparseable body, or
  * `GOVERNANCE_UNAVAILABLE`), which the caller maps to `config.failOpen`.
  */
@@ -135,10 +140,18 @@ export async function checkToolCall(
     })
 
     if (!res.ok) {
-      const errorBody = (await res.json().catch(() => null)) as { code?: unknown; reason?: unknown } | null
+      const errorBody = (await res.json().catch(() => null)) as
+        | { code?: unknown; reason?: unknown; detail?: unknown; requiredScopes?: unknown }
+        | null
       if (res.status === 400) {
         const why = typeof errorBody?.reason === 'string' ? errorBody.reason : 'HTTP 400'
         return { allowed: false, code: 'INVALID_REQUEST', reason: `the control plane rejected the request (INVALID_REQUEST): ${why}` }
+      }
+      if (errorBody?.code === INSUFFICIENT_SCOPE) {
+        const scopes = Array.isArray(errorBody.requiredScopes) ? errorBody.requiredScopes.filter((s) => typeof s === 'string') : []
+        const needs = scopes.length > 0 ? `it needs the ${scopes.join(' or ')} scope` : 'it lacks a scope it needs'
+        const detail = typeof errorBody.detail === 'string' ? ` — ${errorBody.detail}` : ''
+        return { allowed: false, code: INSUFFICIENT_SCOPE, reason: `the control plane refused the API key (${INSUFFICIENT_SCOPE}): ${needs}${detail}` }
       }
       if (errorBody?.code === GOVERNANCE_UNAVAILABLE) {
         throw new Error(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`)

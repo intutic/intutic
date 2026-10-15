@@ -2496,6 +2496,61 @@ intutic sops org-rm osp_abc123
 
 ---
 
+## `intutic optimizer settings` <Badge type="warning" text="Biz Org+" />
+
+Print the [SOP Optimizer](/guide/metaclaw)'s approval mode and its auto-apply threshold.
+
+```bash
+intutic optimizer settings [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON: `workspaceId`, `mode` and `autoThreshold` |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Reads `GET /api/v1/dream-cycle/settings`. `manual` (the default) applies nothing automatically; `auto` lets a manually triggered optimizer run apply a `STRENGTHEN` proposal whose score reaches the threshold without review (see [What auto-apply applies](/guide/metaclaw#what-auto-apply-applies)). A workspace that never set the mode reads `manual` at 0.85. Any member can read it.
+
+**Example:**
+
+```bash
+intutic optimizer settings --json
+```
+
+---
+
+## `intutic optimizer set` <Badge type="warning" text="Biz Org+" />
+
+Set the SOP Optimizer's approval mode, and optionally its auto-apply threshold.
+
+```bash
+intutic optimizer set --mode <manual|auto> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--mode <mode>` | `manual` or `auto`. Required |
+| `--auto-threshold <n>` | The score from 0 to 1 a proposal must reach to be auto-applied in `auto`. Omit it to keep the current threshold |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sends `PUT /api/v1/dream-cycle/settings` with the mode and the threshold. The route takes both every time, so without `--auto-threshold` the command reads the current threshold first and sends it back unchanged. You need the OWNER or ADMIN role. This is the same switch as **Approval mode** on the SOP Optimizer page, and the one that replaced the removed `ff_metaclaw_auto_apply` feature flag; only a run started on a plan that includes the SOP Optimizer applies anything.
+
+**Examples:**
+
+```bash
+intutic optimizer set --mode auto --auto-threshold 0.9
+intutic optimizer set --mode manual
+```
+
+---
+
 ## `intutic credentials list` <Badge type="tip" text="Cloud" />
 
 Provisioning status for every provider in the credential registry — see
@@ -2669,6 +2724,104 @@ intutic attenuate chain <chainId> [options]
 
 **What it does:**
 Prints each link in the chain: parent key, child key, granted scopes, expiry and when it was minted. Needs the OWNER or ADMIN role. The same chains are shown on the dashboard's **Attenuated API Keys** card.
+
+---
+
+## `intutic keys list` <Badge type="tip" text="Cloud" />
+
+List your API keys in the workspace, revoked ones included.
+
+```bash
+intutic keys list [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints each key's id, label, prefix (`vk_…`), [scopes](/reference/api#api-key-scopes) and expiry (`never` when it has none), and when it was revoked. The key itself is never shown again after it is created. Every member sees only their own keys; `intutic budget keys` lists every key in the workspace with its spend.
+
+---
+
+## `intutic keys create` <Badge type="tip" text="Cloud" />
+
+Create an API key and print it once.
+
+```bash
+intutic keys create --label <label> [--scopes <scope,scope,...>] [--expires-in-days <n>] [--service-account] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--label <label>` | A name for the key (required) |
+| `--scopes <scopes>` | Comma-separated [API key scopes](/reference/api#api-key-scopes); `*` (everything your role allows) when left out |
+| `--expires-in-days <n>` | Expire the key after this many days, 1 to 365; never when left out |
+| `--service-account` | An automation key: exempt from the SSO idle-key check, because its owner may never sign in interactively. It still stops working when its owner is deactivated, and can still be revoked |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Creates the key for you and prints its id, label, prefix, scopes and expiry, then the key itself (`vk_…`). The key is shown **once** and never stored, so copy it when it is printed. Called with a key rather than a dashboard session, every scope asked for must be granted by that key. A scope that is not in the registry, or an `--expires-in-days` that is not a positive whole number, exits `1` before anything is sent, naming the valid scopes.
+
+**Example:**
+
+```bash
+# A key for a CI job that only runs agents
+intutic keys create --label ci-runner --scopes gateway:use --expires-in-days 90 --service-account
+```
+
+---
+
+## `intutic keys update <keyId>` <Badge type="tip" text="Cloud" />
+
+Replace a key's scopes. OWNER or ADMIN, for any live key in the workspace.
+
+```bash
+intutic keys update <keyId> --scopes <scope,scope,...> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--scopes <scopes>` | Comma-separated [API key scopes](/reference/api#api-key-scopes) the key will hold, replacing its current ones (required) |
+| `--json` | Print the key after the change as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sends the new scopes and prints the key with them. They apply from the key's next request, and the key's attenuated children are held to them too. A scope that is not in the registry exits `1` before anything is sent. Budgets and rate limits are set with `intutic budget key`.
+
+**Example:**
+
+```bash
+intutic keys update key_abc123 --scopes gateway:use,traces:read
+```
+
+---
+
+## `intutic keys revoke <keyId>` <Badge type="tip" text="Cloud" />
+
+Revoke one of your API keys.
+
+```bash
+intutic keys revoke <keyId> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Revokes the key: every request made with it is refused from then on, and it cannot be restored. The server answers the same whether or not you had such a live key, so check `intutic keys list` when in doubt.
 
 ---
 

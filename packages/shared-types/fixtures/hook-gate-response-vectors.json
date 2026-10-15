@@ -1,5 +1,5 @@
 {
-  "_comment": "How a gate SDK client reads an answer from the control plane's hook gate (POST /api/v1/hook-gate). Run by @intutic/gate's GateClient (packages/gate-js/src/__tests__/client.test.ts) intutic-clawde's (packages/intutic-clawde/tests/test_gate_client.py) and the AgentCore interceptor (tools/agentcore-interceptor/src/handler.test.ts, which reads only `allowed`, mapping failClosed to INTUTIC_FAIL_OPEN); `governanceUnavailable` is the control plane's answer when a check could not run, which its own tests hold it to. A `response` of null is a control plane that cannot be reached. `expect.reasonContains` is matched case-sensitively against the client's reason. GOVERNANCE_UNAVAILABLE is decided as an unreachable control plane is, by the client's failClosed; INVALID_REQUEST is a refusal whatever failClosed says. Every verdict the hook gate gives (not a 400) names a `decisionId`; the client keeps it (`expect.decisionId`; null when it must not) only when its answer is the hook gate's own verdict, so a report carrying it as `gateDecisionId` never stands for a decision the client reversed.",
+  "_comment": "How a gate SDK client reads an answer from the control plane's hook gate (POST /api/v1/hook-gate). Run by @intutic/gate's GateClient (packages/gate-js/src/__tests__/client.test.ts) intutic-clawde's (packages/intutic-clawde/tests/test_gate_client.py) and the AgentCore interceptor (tools/agentcore-interceptor/src/handler.test.ts, which reads only `allowed`, mapping failClosed to INTUTIC_FAIL_OPEN); `governanceUnavailable` is the control plane's answer when a check could not run, which its own tests hold it to. A `response` of null is a control plane that cannot be reached. `expect.reasonContains` is matched case-sensitively against the client's reason. GOVERNANCE_UNAVAILABLE is decided as an unreachable control plane is, by the client's failClosed; INVALID_REQUEST is a refusal whatever failClosed says, and so is INSUFFICIENT_SCOPE (a key without a scope the route needs, `requiredScopes`): a fault in the request or the key, not an outage. Every verdict the hook gate gives (not a 400) names a `decisionId`; the client keeps it (`expect.decisionId`; null when it must not) only when its answer is the hook gate's own verdict, so a report carrying it as `gateDecisionId` never stands for a decision the client reversed.",
   "governanceUnavailable": {
     "status": 403,
     "body": { "allowed": false, "code": "GOVERNANCE_UNAVAILABLE", "reason": "Governance check unavailable; the call was refused. Retry, or ask an admin.", "decisionId": "hgd_vector_unavailable" }
@@ -58,6 +58,18 @@
       "response": { "status": 400, "body": null },
       "failClosed": false,
       "expect": { "allowed": false, "reached": true, "code": "INVALID_REQUEST", "reasonContains": "HTTP 400" }
+    },
+    {
+      "name": "INSUFFICIENT_SCOPE refuses when failing open, naming the scope",
+      "response": { "status": 403, "body": { "error": "Forbidden", "code": "INSUFFICIENT_SCOPE", "detail": "This API key lacks the gateway:use scope needed for POST /api/v1/hook-gate. Its scopes: usage:read", "requiredScopes": ["gateway:use"] } },
+      "failClosed": false,
+      "expect": { "allowed": false, "reached": true, "code": "INSUFFICIENT_SCOPE", "reasonContains": "refused the API key (INSUFFICIENT_SCOPE): it needs the gateway:use scope", "decisionId": null }
+    },
+    {
+      "name": "INSUFFICIENT_SCOPE refuses when failing closed, with the server's detail",
+      "response": { "status": 403, "body": { "error": "Forbidden", "code": "INSUFFICIENT_SCOPE", "detail": "This API key lacks the gateway:use scope needed for POST /api/v1/hook-gate. Its scopes: usage:read", "requiredScopes": ["gateway:use"] } },
+      "failClosed": true,
+      "expect": { "allowed": false, "reached": true, "code": "INSUFFICIENT_SCOPE", "reasonContains": "gateway:use scope — This API key lacks the gateway:use scope", "decisionId": null }
     },
     {
       "name": "a server error is no verdict: failing closed refuses",

@@ -414,6 +414,40 @@ resource "intutic_workspace_budget" "this" {
 	)
 }
 
+func TestAccSopOptimizerSettings(t *testing.T) {
+	cfg := `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode           = "auto"
+  auto_threshold = 0.9
+}`
+	accTest(t,
+		resource.TestStep{
+			Config: cfg,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("intutic_sop_optimizer_settings.this", "mode", "auto"),
+				resource.TestCheckResourceAttr("intutic_sop_optimizer_settings.this", "auto_threshold", "0.9"),
+			),
+		},
+		clean(cfg),
+		imported("intutic_sop_optimizer_settings.this"),
+		drifted(cfg, func() {
+			api(t, "PUT", "/api/v1/dream-cycle/settings", map[string]any{"mode": "manual", "autoThreshold": 0.9})
+		}),
+		resource.TestStep{Config: cfg},
+		// Without auto_threshold the threshold is kept, not reset to the route's 0.85.
+		resource.TestStep{
+			Config: `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode = "manual"
+}`,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("intutic_sop_optimizer_settings.this", "mode", "manual"),
+				resource.TestCheckResourceAttr("intutic_sop_optimizer_settings.this", "auto_threshold", "0.9"),
+			),
+		},
+	)
+}
+
 func TestAccGateway(t *testing.T) {
 	cfg := func(requireVk bool) string {
 		return fmt.Sprintf(`

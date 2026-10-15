@@ -1,3 +1,17 @@
+## 0.5.0 (Unreleased)
+
+BREAKING CHANGES:
+
+* resource/intutic_notification_rule: `event_type` no longer accepts `incident.escalated`, `sop.status_changed`, `session.ended` or `calibration.threshold_breach`. Nothing emitted them, so a rule on one never fired; the API refuses them and the control plane's migration deletes existing rules on them. Remove such rules from your configuration before upgrading.
+
+FEATURES:
+
+* **New Resource:** `intutic_sop_optimizer_settings`: the SOP Optimizer's Approval mode (`mode`, `manual` or `auto`, and `auto_threshold`), through `GET` and `PUT /api/v1/dream-cycle/settings`. It brings back under Terraform the auto-apply switch that 0.3.0 removed with `featureFlags.ff_metaclaw_auto_apply`. An omitted `auto_threshold` keeps the workspace's current one; destroying the resource sets the mode back to `manual`.
+
+ENHANCEMENTS:
+
+* resource/intutic_notification_rule: accepts the event types `plan.rejected` and `plan.closed`, which the control plane sent and no rule could name.
+
 ## 0.4.0 (October 14, 2026)
 
 BREAKING CHANGES:

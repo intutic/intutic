@@ -5417,6 +5417,326 @@
       "returns": null
     },
     {
+      "ts": "listApiKeys",
+      "py": "list_api_keys",
+      "cli": "keys list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/keys"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "listProperty": "data",
+          "rowCase": "camel",
+          "data": [
+            {
+              "keyId": "key_1",
+              "keyPrefix": "vk_ab12",
+              "label": "CI runner",
+              "scopes": [
+                "gateway:use"
+              ],
+              "allowedModels": null,
+              "expiresAt": "2026-11-14T00:00:00.000Z",
+              "lastUsedAt": null,
+              "revokedAt": null,
+              "createdAt": "2026-10-15T00:00:00.000Z",
+              "isServiceAccount": true,
+              "budgets": [
+                {
+                  "period": "day",
+                  "limitUsd": 5,
+                  "enforcement": "hard"
+                }
+              ],
+              "rateLimit": {
+                "rpm": 60,
+                "tpm": null
+              }
+            }
+          ]
+        }
+      },
+      "returns": [
+        {
+          "keyId": "key_1",
+          "keyPrefix": "vk_ab12",
+          "label": "CI runner",
+          "scopes": [
+            "gateway:use"
+          ],
+          "allowedModels": null,
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "lastUsedAt": null,
+          "revokedAt": null,
+          "createdAt": "2026-10-15T00:00:00.000Z",
+          "isServiceAccount": true,
+          "budgets": [
+            {
+              "period": "day",
+              "limitUsd": 5,
+              "enforcement": "hard"
+            }
+          ],
+          "rateLimit": {
+            "rpm": 60,
+            "tpm": null
+          }
+        }
+      ]
+    },
+    {
+      "ts": "createApiKey",
+      "py": "create_api_key",
+      "cli": "keys create",
+      "args": [
+        "CI runner"
+      ],
+      "options": {
+        "scopes": [
+          "gateway:use"
+        ],
+        "expiresInDays": 30,
+        "isServiceAccount": true
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/keys",
+        "body": {
+          "label": "CI runner",
+          "scopes": [
+            "gateway:use"
+          ],
+          "expiresInDays": 30,
+          "isServiceAccount": true
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "keyId": "key_1",
+          "key": "vk_created_test",
+          "keyPrefix": "vk_ab12",
+          "label": "CI runner",
+          "scopes": [
+            "gateway:use"
+          ],
+          "allowedModels": null,
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "createdAt": "2026-10-15T00:00:00.000Z",
+          "budgets": [],
+          "rateLimit": {
+            "rpm": null,
+            "tpm": null
+          }
+        }
+      },
+      "returns": {
+        "keyId": "key_1",
+        "key": "vk_created_test",
+        "keyPrefix": "vk_ab12",
+        "label": "CI runner",
+        "scopes": [
+          "gateway:use"
+        ],
+        "allowedModels": null,
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "createdAt": "2026-10-15T00:00:00.000Z",
+        "budgets": [],
+        "rateLimit": {
+          "rpm": null,
+          "tpm": null
+        }
+      }
+    },
+    {
+      "ts": "updateApiKey",
+      "py": "update_api_key",
+      "cli": "keys update",
+      "args": [
+        "key_1"
+      ],
+      "options": {
+        "scopes": [
+          "gateway:use",
+          "traces:read"
+        ],
+        "budgets": [
+          {
+            "period": "month",
+            "limitUsd": 100,
+            "enforcement": "soft"
+          }
+        ],
+        "rateLimit": {
+          "rpm": 120
+        }
+      },
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/keys/key_1",
+        "body": {
+          "scopes": [
+            "gateway:use",
+            "traces:read"
+          ],
+          "budgets": [
+            {
+              "period": "month",
+              "limitUsd": 100,
+              "enforcement": "soft"
+            }
+          ],
+          "rateLimit": {
+            "rpm": 120
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "keyId": "key_1",
+          "keyPrefix": "vk_ab12",
+          "label": "CI runner",
+          "scopes": [
+            "gateway:use",
+            "traces:read"
+          ],
+          "allowedModels": null,
+          "expiresAt": "2026-11-14T00:00:00.000Z",
+          "lastUsedAt": null,
+          "revokedAt": null,
+          "createdAt": "2026-10-15T00:00:00.000Z",
+          "isServiceAccount": true,
+          "budgets": [
+            {
+              "period": "month",
+              "limitUsd": 100,
+              "enforcement": "soft"
+            }
+          ],
+          "rateLimit": {
+            "rpm": 120,
+            "tpm": null
+          }
+        }
+      },
+      "returns": {
+        "keyId": "key_1",
+        "keyPrefix": "vk_ab12",
+        "label": "CI runner",
+        "scopes": [
+          "gateway:use",
+          "traces:read"
+        ],
+        "allowedModels": null,
+        "expiresAt": "2026-11-14T00:00:00.000Z",
+        "lastUsedAt": null,
+        "revokedAt": null,
+        "createdAt": "2026-10-15T00:00:00.000Z",
+        "isServiceAccount": true,
+        "budgets": [
+          {
+            "period": "month",
+            "limitUsd": 100,
+            "enforcement": "soft"
+          }
+        ],
+        "rateLimit": {
+          "rpm": 120,
+          "tpm": null
+        }
+      }
+    },
+    {
+      "ts": "revokeApiKey",
+      "py": "revoke_api_key",
+      "cli": "keys revoke",
+      "args": [
+        "key_1"
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/keys/key_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "revoked": true
+        }
+      },
+      "returns": null
+    },
+    {
+      "ts": "getOptimizerSettings",
+      "py": "get_optimizer_settings",
+      "cli": "optimizer settings",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/dream-cycle/settings"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "settings": {
+            "workspaceId": "ws_1",
+            "mode": "auto",
+            "autoThreshold": 0.9
+          }
+        }
+      },
+      "returns": {
+        "workspaceId": "ws_1",
+        "mode": "auto",
+        "autoThreshold": 0.9
+      }
+    },
+    {
+      "ts": "updateOptimizerSettings",
+      "py": "update_optimizer_settings",
+      "cli": "optimizer set",
+      "tsArgs": [
+        {
+          "mode": "auto",
+          "autoThreshold": 0.9
+        }
+      ],
+      "pyArgs": [
+        "auto"
+      ],
+      "pyKwargs": {
+        "auto_threshold": 0.9
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/dream-cycle/settings",
+        "body": {
+          "mode": "auto",
+          "autoThreshold": 0.9
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "settings": {
+            "workspaceId": "ws_1",
+            "mode": "auto",
+            "autoThreshold": 0.9
+          }
+        }
+      },
+      "returns": {
+        "workspaceId": "ws_1",
+        "mode": "auto",
+        "autoThreshold": 0.9
+      }
+    },
+    {
       "ts": "attenuateKey",
       "py": "attenuate_key",
       "cli": "attenuate",
