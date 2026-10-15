@@ -115,7 +115,7 @@ Beyond the trace fields above, the proxy keeps two things that come from request
 - **Replay contexts.** A sampled 5% of requests (`WASM_CONTEXT_SNAPSHOT_RATE`) attach their rule-evaluation context to the trace, so a new rule can be replayed against real traffic. Each tool call in it carries its name and its arguments' top-level keys and size, not the argument values. A connected workspace can opt in to keeping the values with [`storeToolArguments`](/reference/workspace-settings); they are then kept with every secret and PII match redacted. Contexts a connected workspace stored before 2.5.1 are reduced to keys and sizes when its control plane upgrades.
 - **The response cache**, when a workspace or config turns it on (off by default; every [cost posture](/guide/settings#postures) turns exact matching on). An entry holds the prompt text and the answer for 24 hours. An exchange in which DLP finds a secret or personal data is never written to it.
 
-Whatever the live PII detector actions, everything the proxy keeps is redacted for every [PII detector](/guide/policies#pii-detectors), email and phone included, and for every secret pattern: replay contexts and the targets in a trace's change manifest (the commands, paths and URLs tool calls named). Live redaction of email and phone stays off by default because an agent editing a real address would write the placeholder back into the file.
+Whatever the live PII detector actions, everything the proxy keeps is redacted for every [PII detector](/guide/policies#pii-detectors), email and phone included, and for every secret pattern: replay contexts and the targets in a trace's change manifest (the commands, paths and URLs tool calls named). Live redaction of email and phone stays off by default because an agent editing a real address would write the placeholder back into the file. Change manifests a connected workspace stored before 2.6.0 have their targets withheld (`[WITHHELD]`) when its control plane upgrades; each entry keeps its tool, operation, kind, risk and size, and integrity roots sealed over those traces still verify (see [Trace Integrity](/concepts/trace-integrity)).
 
 ---
 
@@ -171,13 +171,25 @@ Intutic helps your organization meet regulatory requirements for AI governance:
 - **GDPR** — Article 17 erasure, consent management, and data processing
   agreements. Erasure is fulfilled by our team on request rather than through a
   self-service endpoint, within the one-month window Article 12(3) allows.
-  Identity and credential records are purged; execution traces are retained
+  Identity and credential records are purged, and so are the account's
+  sign-in records; execution traces are retained
   under their 3-year compliance obligation but de-identified, so they can no
   longer be attributed to the subject. Traces are deleted once they are 3 years
   old. Free-text and structured content is
   scrubbed on **exact identifier match** (name, email, account identifiers);
   indirect references — "the engineer who approved this" — are handled on
   specific request.
+- **Retention** — Traces are kept for 3 years while the workspace exists.
+  Sign-in records (time, method, IP address, user agent) are kept for 12
+  months, and deleted with the account. Workspace audit records are kept for
+  as long as the workspace exists. Deleting a workspace deletes its data with
+  it: traces and the records stored with them, audit records, findings,
+  policies and settings. The few rows that outlive that delete (sign-in
+  records, the notification log, derived statistics, and policy text no other
+  workspace shares) are deleted within 90 days. Billing records are kept for
+  7 years, including after the workspace is deleted, as a tax record. A daily
+  sweep applies each period; the append-only guards let it delete only rows
+  past their period. Database backups expire 7 days after they are taken.
 - **Data Residency** — Intutic Cloud keeps governance data in the US; EU
   residency is available on request. With enforcement on, a write served from
   outside the workspace's region is blocked and recorded as a violation.

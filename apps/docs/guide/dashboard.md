@@ -140,7 +140,11 @@ The sign-in page offers a password or an emailed sign-in link:
 - **GitHub and Google**: **Continue with GitHub** and **Continue with Google** appear only when the deployment has them configured.
 - **SSO**: enter the **SSO provider ID** your admin gave you and click **Continue with SSO**. See [Single Sign-On](/guide/security#single-sign-on-sso).
 
-**Sign-up.** **Create one** opens **Create your account**: your name, email, a password of at least 8 characters and a workspace name. **Create Account** creates the account and its first workspace, on a free trial, and signs you in. Sign-up works only on a deployment that has self-serve sign-up turned on; otherwise it is refused. A self-hosted deployment has no sign-up: an owner invites you.
+**Sign-up.** **Create one** opens **Create your account**: your name, email, a password of at least 8 characters, a workspace name and an unticked box, **I am 18 or older and agree to the Terms and the Privacy Policy**. **Create Account** and the GitHub and Google buttons stay off until the box is ticked; the control plane refuses an account without it (400 `TERMS_NOT_ACCEPTED`) and records on the new member when it was ticked and which version of the terms it covered. **Create Account** creates the account and its first workspace, on a free trial, and signs you in. Signing in with GitHub or Google from the sign-in page does not create an account: a first-time GitHub or Google user signs up from **Create your account**. Sign-up works only on a deployment that has self-serve sign-up turned on; otherwise it is refused. A self-hosted deployment has no sign-up: an owner invites you.
+
+**Members an administrator adds.** A member who is invited, provisioned through SCIM or created at their first SSO sign-in sees no sign-up form and ticks no box: they use the service under their organization's agreement, which the workspace owner accepted at sign-up.
+
+**Updated terms.** When the Terms or the Privacy Policy change materially, workspace owners are emailed at least 30 days before the change takes effect, and a member who accepted the earlier version sees a notice in the dashboard with the date. From that date the dashboard asks them to tick the same box to accept the new version, or sign out.
 
 **Email verification.** Signing up also sends a verification email. Its link is valid for 24 hours and works once. An expired link offers **Resend verification email**; a link that was already used says so.
 

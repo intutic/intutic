@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Signup records acceptance of the Terms and the Privacy Policy.** The
+  signup and org-signup request schemas (`SignupInputSchema`,
+  `OrgSignupInputSchema`) require `acceptTerms: true`, the signer's
+  confirmation that they are 18 or older and agree to the Terms and the
+  Privacy Policy; a request without it is refused with 400 and the new error
+  code `TERMS_NOT_ACCEPTED`. `AcceptTermsInputSchema` is the body for accepting
+  an updated version later. The documentation describes the signup box, the
+  members an administrator adds (covered by their organization's agreement)
+  and how updated terms are announced and accepted.
+
+### Changed
+
+- **Breaking (SDKs):** `signupOrg` takes `acceptTerms: true` in its params
+  (TypeScript), and `signup_org` takes a required keyword argument
+  `accept_terms` (Python). Without it the control plane refuses the call.
+- **The corrective-card dataset is opt-in.** The workspace setting
+  `governanceCardLabelingEnabled` now defaults to `false`. When an owner or
+  admin turns it on, corrective cards and whether they were followed are kept
+  and used only to improve Intutic's own self-hosted judge models, never for
+  training without a policy update.
+- **Retention periods for sign-in, billing and audit records.** These were
+  kept with no end. A connected workspace's sign-in records (time, method,
+  IP address, user agent) are now deleted after 12 months, and with the
+  account when it is erased; expired refresh tokens 12 months after expiry.
+  Billing records are kept for 7 years, including after the workspace is
+  deleted, then deleted. Deleting a workspace still deletes its traces, audit
+  records, findings and policies with it; the rows that outlived that delete
+  (sign-in records, the notification log, derived statistics, policy text no
+  other workspace shares) are now deleted within 90 days. A daily sweep
+  applies each period, and the append-only guards let it delete only rows
+  past their period.
+- **A workspace with a budget alert can be deleted.** The alert held a
+  reference that refused the delete; it is now deleted with the workspace.
+
+### Fixed
+
+- **A workspace moved to the free plan gets the free plan's spend caps.** A
+  personal workspace downgraded by a cancelled subscription, or by the third
+  failed payment, kept the paid plan's daily cap and monthly budget (Biz Org's
+  $2,250 a day). Cancellation now sets the free plan's caps and clears the
+  billing interval and term; the failed-payment downgrade lowers the caps to
+  the free plan's (never raises them) and restores the exact earlier caps,
+  including any an administrator set, when the payment is made. Organisations
+  already worked this way.
+
+- **Anthropic Managed Agents: a webhook delivery no longer re-answers old
+  pauses.** `poll()` (TypeScript `IntuticSessionConfirmer`, Python
+  `IntuticSessionConfirmer`) read a session's events oldest first and answered
+  each pause before seeing its later confirmation, so a fresh confirmer, which
+  a webhook handler creates on every delivery, re-sent a confirmation for every
+  pause the session had ever had; Anthropic accepted the duplicate without
+  applying it, but it woke the idle session. `poll()` now reads every
+  confirmation before answering anything. Verified against the live API.
+
+- **Change records stored before 2.6.0 are withheld.** The targets in a
+  trace's change manifest (commands, paths, URLs) have been redacted for
+  secrets and personal data since 2.6.0; those stored earlier are replaced
+  with `[WITHHELD]` when the control plane upgrades, keeping each entry's
+  tool, operation, kind, risk and size. Integrity roots sealed over those
+  traces still verify: `POST /api/v1/integrity/roots/:rootId/recompute`
+  lists them in the new `redactedTraceIds`, and any later edit to such a
+  trace is still reported in `changedTraceIds`.
+
 ## [2.6.0] - 2026-10-14
 
 ### Added

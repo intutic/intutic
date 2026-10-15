@@ -65,13 +65,13 @@ def test_signup_org_calls_post_without_bearer_token(mock_request):
         }
     )
     client = ControlPlaneClient(api_key="unused", base_url="https://cp.example.com")
-    res = client.signup_org("a@b.com", "password123", "A", "Acme")
+    res = client.signup_org("a@b.com", "password123", "A", "Acme", accept_terms=True)
 
     args, kwargs = mock_request.call_args
     assert args[0] == "POST"
     assert args[1] == "https://cp.example.com/api/v1/auth/signup/org"
     assert "Authorization" not in kwargs["headers"]
-    assert kwargs["json"] == {"email": "a@b.com", "password": "password123", "name": "A", "orgName": "Acme"}
+    assert kwargs["json"] == {"email": "a@b.com", "password": "password123", "name": "A", "orgName": "Acme", "acceptTerms": True}
     assert res["org"]["id"] == "org_1"
 
 

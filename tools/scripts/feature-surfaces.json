@@ -16,7 +16,9 @@
       "GET /intutic/probes": "loopback diagnostics of the local proxy",
       "POST /intutic/attest-sandbox": "loopback endpoint the sandbox entrypoint calls; part of sandboxed execution, which predates this manifest",
       "GET /api/v1/email/unsubscribe": "the unsubscribe link in promotional email, a legal requirement of sending it rather than a product feature; documented in the API reference",
-      "POST /api/v1/email/unsubscribe": "the unsubscribe link's confirmation and RFC 8058 one-click target, a legal requirement of sending promotional email rather than a product feature"
+      "POST /api/v1/email/unsubscribe": "the unsubscribe link's confirmation and RFC 8058 one-click target, a legal requirement of sending promotional email rather than a product feature",
+      "GET /api/v1/auth/terms": "whether the signed-in member must see or accept updated Terms, a legal requirement of changing them rather than a product feature; documented in guide/dashboard.md",
+      "POST /api/v1/auth/terms/accept": "records a member's acceptance of updated Terms, a legal requirement of changing them rather than a product feature; documented in guide/dashboard.md"
     },
     "eventTypes": {
       "billing.dunning.downgraded": "billing lifecycle notice (a failed payment moved the account to Free); billing is no governance feature this manifest lists, and its sibling billing.subscription.past_due is in the baseline; documented in guide/plans.md#failed-payments",

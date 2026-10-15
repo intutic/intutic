@@ -104,6 +104,12 @@ List recent events and answer every unanswered
 `agent.tool_use`/`agent.mcp_tool_use` pause found. Returns the sent
 confirmations, in event order.
 
+Two passes: `list()` returns events oldest first, so a pause precedes its
+own `user.tool_confirmation`. Every confirmation is noted before any
+pause is answered, or a fresh confirmer (one per webhook delivery)
+re-answers every pause the session ever had — the live API accepts the
+duplicate and it wakes an idle session.
+
 #### Parameters
 
 | Parameter | Type |
