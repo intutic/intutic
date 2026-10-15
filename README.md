@@ -10,7 +10,7 @@
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/intutic/intutic/actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen.svg)](https://github.com/intutic/intutic/pulls)
 
-[Quickstart](#-30-second-quickstart) • [Architecture](#%EF%B8%8F-architecture) • [Key Features](#-key-features) • [Supported Harnesses](#-supported-harnesses) • [Docs](https://docs.intutic.ai)
+[Quickstart](#-30-second-quickstart) • [Architecture](#%EF%B8%8F-architecture) • [Key Features](#-key-features) • [Supported Harnesses](#-supported-harnesses--frameworks) • [Docs](https://docs.intutic.ai)
 
 <br>
 
@@ -140,7 +140,7 @@ Intutic ships **43 harness adapters**: 18 install as native hook gates in the ha
 
 ## 📝 Write Your First SOP
 
-Intutic governance rules are written as standard Markdown files under `.intutic/sops/` in your repository, one folder per rule set (for example `.intutic/sops/safety/rules.md`), or as workspace SOPs on a connected control plane. `intutic connect` writes them into the file each harness reads, such as `.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc` or a marked section of `AGENTS.md` (never `CLAUDE.md`), and compiles them into the rules its gates enforce:
+Intutic governance rules are written as standard Markdown files under `.intutic/sops/` in your repository, or as workspace SOPs on a connected control plane. The proxy reads the `.md` files directly in `.intutic/sops/` (for example `.intutic/sops/safety.md`) and re-reads them every 30 seconds. `intutic connect` reads one folder per rule set (for example `.intutic/sops/safety/rules.md`), writes them into the file each harness reads, such as `.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc` or a marked section of `AGENTS.md` (never `CLAUDE.md`), and compiles them into the rules its gates enforce:
 
 ```markdown
 # Standard Operating Procedure (SOP): Safety Guardrails
@@ -178,6 +178,7 @@ Because Intutic evaluates prompts pre-flight, you can run interactive governance
   * [`@intutic/cli`](https://www.npmjs.com/package/@intutic/cli) — Developer onboarding CLI
   * [`@intutic/proxy`](https://www.npmjs.com/package/@intutic/proxy) — Native Rust proxy binary wrapper
   * [`@intutic/clawde`](https://www.npmjs.com/package/@intutic/clawde) — Programmatic TypeScript client SDK
+  * [`@intutic/gate`](https://www.npmjs.com/package/@intutic/gate) — In-process tool-call gates for SDK-gated TypeScript frameworks
   * [`@intutic/mcp-governance-proxy`](https://www.npmjs.com/package/@intutic/mcp-governance-proxy) — Stdio JSON-RPC MCP proxy
   * [`@intutic/shared-types`](https://www.npmjs.com/package/@intutic/shared-types) — Zod-validated shared TypeScript types
 
