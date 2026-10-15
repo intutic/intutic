@@ -277,6 +277,33 @@ sopsCmd
     await runSopsOrgRm(orgSopId, opts)
   })
 
+// ── SOP Optimizer approval mode ──────────────────────────────────────────
+const optimizerCmd = program
+  .command('optimizer')
+  .description("Read and set the SOP Optimizer's approval mode (whether it may auto-apply strengthening proposals)")
+
+optimizerCmd
+  .command('settings')
+  .description('Print the approval mode and the auto-apply threshold')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runOptimizerSettings } = await import('./commands/optimizer.js')
+    await runOptimizerSettings(opts)
+  })
+
+optimizerCmd
+  .command('set')
+  .description('Set the approval mode, and optionally the auto-apply threshold (OWNER, ADMIN)')
+  .requiredOption('--mode <mode>', 'manual (nothing is auto-applied) or auto')
+  .option('--auto-threshold <n>', 'Score from 0 to 1 a proposal needs to be auto-applied (default: keep the current one)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runOptimizerSet } = await import('./commands/optimizer.js')
+    await runOptimizerSet(opts)
+  })
+
 const policyCmd = program
   .command('policy')
   .description('WASM rules and the policy snapshot')
@@ -1528,6 +1555,56 @@ attenuateCmd
     await runAttenuateChain(chainId, opts)
   })
 
+// ── API keys and their scopes ────────────────────────────────────────────
+const keysCmd = program
+  .command('keys')
+  .description('List, create, re-scope and revoke your API keys')
+
+keysCmd
+  .command('list')
+  .description('List your API keys with their scopes and expiry')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runKeysList } = await import('./commands/keys.js')
+    await runKeysList(opts)
+  })
+
+keysCmd
+  .command('create')
+  .description('Create an API key and print it once')
+  .requiredOption('--label <label>', 'A name for the key')
+  .option('--scopes <scopes>', 'Comma-separated API key scopes (default: *, everything your role allows)')
+  .option('--expires-in-days <n>', 'Expire the key after this many days (1-365; default: never)')
+  .option('--service-account', 'An automation key: exempt from the SSO idle-key check')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runKeysCreate } = await import('./commands/keys.js')
+    await runKeysCreate(opts)
+  })
+
+keysCmd
+  .command('update <keyId>')
+  .description("Replace a key's scopes (OWNER, ADMIN)")
+  .requiredOption('--scopes <scopes>', 'Comma-separated API key scopes the key will hold')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (keyId, opts) => {
+    const { runKeysUpdate } = await import('./commands/keys.js')
+    await runKeysUpdate(keyId, opts)
+  })
+
+keysCmd
+  .command('revoke <keyId>')
+  .description('Revoke one of your API keys')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (keyId, opts) => {
+    const { runKeysRevoke } = await import('./commands/keys.js')
+    await runKeysRevoke(keyId, opts)
+  })
+
 // ── Org signup + team management ─────────────────────────────────────────
 const orgCmd = program
   .command('org')
@@ -1831,6 +1908,56 @@ siemCmd
   .action(async (destinationId, opts) => {
     const { runSiemRotateSecret } = await import('./commands/siem.js')
     await runSiemRotateSecret(destinationId, opts)
+  })
+
+const tasksCmd = program
+  .command('tasks')
+  .description('Manage task-management connections (Jira Cloud, Linear, PagerDuty) that attach ticket context to sessions')
+
+tasksCmd
+  .command('list')
+  .description('List task-management connections (tokens are never returned)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runTasksList } = await import('./commands/tasks.js')
+    await runTasksList(opts)
+  })
+
+tasksCmd
+  .command('add')
+  .description('Connect Jira Cloud, Linear or PagerDuty; the API token is read from --token or --token-file, never echoed')
+  .requiredOption('--provider <provider>', 'jira, linear or pagerduty')
+  .requiredOption('--base-url <url>', 'The provider\'s base URL (e.g. https://acme.atlassian.net)')
+  .requiredOption('--project-key <key>', 'Jira project key, Linear team key or PagerDuty service key')
+  .option('--account-email <email>', 'Jira only (required): the Atlassian account the API token belongs to')
+  .option('--token <token>', 'Provider API token')
+  .option('--token-file <path>', 'Read the API token from a file')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runTasksAdd } = await import('./commands/tasks.js')
+    await runTasksAdd(opts)
+  })
+
+tasksCmd
+  .command('test <connectionId>')
+  .description('Check that the provider still accepts a connection\'s stored credentials')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (connectionId, opts) => {
+    const { runTasksTest } = await import('./commands/tasks.js')
+    await runTasksTest(connectionId, opts)
+  })
+
+tasksCmd
+  .command('remove <connectionId>')
+  .description('Remove a task-management connection and its stored token')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (connectionId, opts) => {
+    const { runTasksRemove } = await import('./commands/tasks.js')
+    await runTasksRemove(connectionId, opts)
   })
 
 const complianceCmd = program

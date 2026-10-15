@@ -1,4 +1,4 @@
-/** SDK response types of the notification, SIEM, MCP registry, attenuation, compliance, GitHub webhook, gate liveness, cost prediction and routing routes, against their schemas. */
+/** SDK response types of the notification, SIEM, task-management connection, MCP registry, attenuation, compliance, GitHub webhook, gate liveness, cost prediction and routing routes, against their schemas. */
 import type {
   AttenuationChainResponse,
   AttenuationResponse,
@@ -19,6 +19,10 @@ import type {
   SiemDestinationUpdatedResponse,
   SiemSigningSecretResponse,
   Soc2CollectResponse,
+  TaskConnectionDeleteResponse,
+  TaskConnectionListResponse,
+  TaskConnectionResponse,
+  TaskConnectionTestResponse,
 } from '@intutic/shared-types'
 import type {
   AttenuationChainLink,
@@ -38,6 +42,9 @@ import type {
   SiemDestinationList,
   SiemSecretRotation,
   SiemSources,
+  TaskConnection,
+  TaskConnectionDeleteResult,
+  TaskConnectionTestResult,
 } from '../../src/types'
 import { conforms, type Rows } from './conforms'
 
@@ -63,6 +70,15 @@ conforms<SiemSources>()<SiemDestinationListResponse['sources']>()
 conforms<SiemDestination>()<SiemDestinationResponse | SiemDestinationCreatedResponse | SiemDestinationUpdatedResponse>()
 // rotateSiemDestinationSecret: POST /api/v1/siem/destinations/:destinationId/signing-secret
 conforms<SiemSecretRotation>()<SiemSigningSecretResponse>()
+
+// listTaskConnections: GET /api/v1/task-management/connections, unwrapped from `items`
+conforms<TaskConnection>()<Rows<TaskConnectionListResponse, 'items'>>()
+// createTaskConnection: POST /api/v1/task-management/connections
+conforms<TaskConnection>()<TaskConnectionResponse>()
+// testTaskConnection: POST /api/v1/task-management/connections/:connectionId/test
+conforms<TaskConnectionTestResult>()<TaskConnectionTestResponse>()
+// deleteTaskConnection: DELETE /api/v1/task-management/connections/:connectionId
+conforms<TaskConnectionDeleteResult>()<TaskConnectionDeleteResponse>()
 
 // getFrameworkCoverage: GET /api/v1/compliance/frameworks/:frameworkId/coverage
 conforms<FrameworkCoverage>()<FrameworkCoverageResponse>()

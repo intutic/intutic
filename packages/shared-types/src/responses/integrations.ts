@@ -1,5 +1,5 @@
 /**
- * Responses of the control plane routes in notifications.ts, siem.ts, mcpServers.ts, attenuate.ts, compliance.ts, githubWebhooks.ts,
+ * Responses of the control plane routes in notifications.ts, siem.ts, taskManagement.ts, mcpServers.ts, attenuate.ts, compliance.ts, githubWebhooks.ts,
  * openaiAgentTraces.ts, agentcoreGateway.ts, gateLiveness.ts, intelligence.ts and routing.ts.
  *
  * @module
@@ -149,6 +149,37 @@ export const SiemSigningSecretResponse = z.object({
   signingSecret: z.string().describe('The new signing secret in plaintext, shown only in this response.'),
 })
 export type SiemSigningSecretResponse = z.infer<typeof SiemSigningSecretResponse>
+
+// ─── Task-management connections (routes/taskManagement.ts) ─────────
+
+/** A Jira, Linear or PagerDuty connection. The API token is never returned. */
+export const TaskConnectionResponse = z.object({
+  connectionId: z.string(),
+  provider: z.enum(['jira', 'pagerduty', 'linear']),
+  baseUrl: z.string(),
+  projectKey: z.string(),
+  status: z.literal('connected').describe('Always `connected`: a connection is saved only once the provider accepts its credentials.'),
+  lastSyncAt: IsoTimestamp.nullable(),
+  createdAt: IsoTimestamp,
+})
+export type TaskConnectionResponse = z.infer<typeof TaskConnectionResponse>
+
+/** `GET /api/v1/task-management/connections`: the workspace's connections. */
+export const TaskConnectionListResponse = listEnvelope('items', 'camel').extend({ items: z.array(TaskConnectionResponse) })
+export type TaskConnectionListResponse = z.infer<typeof TaskConnectionListResponse>
+
+/** `POST /api/v1/task-management/connections/:connectionId/test`: whether the provider still accepts the stored credentials. */
+export const TaskConnectionTestResponse = z.object({
+  success: z.boolean(),
+  message: z.string(),
+})
+export type TaskConnectionTestResponse = z.infer<typeof TaskConnectionTestResponse>
+
+/** `DELETE /api/v1/task-management/connections/:connectionId`. */
+export const TaskConnectionDeleteResponse = z.object({
+  deleted: z.boolean().describe('False when the workspace has no connection with this id (already removed).'),
+})
+export type TaskConnectionDeleteResponse = z.infer<typeof TaskConnectionDeleteResponse>
 
 // ─── MCP server registry (routes/mcpServers.ts) ─────────────────────
 

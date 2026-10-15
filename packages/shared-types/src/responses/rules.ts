@@ -1,5 +1,5 @@
 /**
- * Responses of the control plane routes in wasmRules.ts, sops.ts, decisions.ts, judge.ts and hookEvents.ts.
+ * Responses of the control plane routes in wasmRules.ts, sops.ts, dreamCycle.ts, decisions.ts, judge.ts and hookEvents.ts.
  *
  * @module
  */
@@ -389,3 +389,21 @@ export const HookGateResponse = z.union([
   z.object({ allowed: z.literal(true), decisionId: z.string() }),
 ])
 export type HookGateResponse = z.infer<typeof HookGateResponse>
+
+// ─── SOP Optimizer approval mode (routes/dreamCycle.ts) ───────────────
+
+/**
+ * The SOP Optimizer's approval mode, as `dreamCycleService.ts`
+ * `getDreamCycleSettings` returns it: `manual` at 0.85 for a workspace that
+ * never set one.
+ */
+export const OptimizerSettingsResponse = z.object({
+  workspaceId: z.string(),
+  mode: z.enum(['manual', 'auto']).describe('`auto` lets a manually triggered optimizer run apply a STRENGTHEN proposal that reaches `autoThreshold` without review; `manual` applies nothing.'),
+  autoThreshold: z.number().describe('The score (0 to 1) a proposal must reach to be auto-applied in `auto`.'),
+})
+export type OptimizerSettingsResponse = z.infer<typeof OptimizerSettingsResponse>
+
+/** `GET /api/v1/dream-cycle/settings` and `PUT /api/v1/dream-cycle/settings`: the settings now in force. */
+export const DreamCycleSettingsResponse = z.object({ ok: z.literal(true), settings: OptimizerSettingsResponse })
+export type DreamCycleSettingsResponse = z.infer<typeof DreamCycleSettingsResponse>

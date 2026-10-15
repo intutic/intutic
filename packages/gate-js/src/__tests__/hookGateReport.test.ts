@@ -92,6 +92,14 @@ describe('a hook-gate answer', () => {
     ])
   })
 
+  it('a key without the hook gate\'s scope is refused as INSUFFICIENT_SCOPE, not HOOK_GATE', async () => {
+    const reason = 'hook-gate refused the API key (INSUFFICIENT_SCOPE): it needs the gateway:use scope'
+    const { client, refusal } = await refuse({ allowed: false, reason, code: 'INSUFFICIENT_SCOPE', reached: true })
+    expect(refusal?.code).toBe('INSUFFICIENT_SCOPE')
+    expect(refusal?.reason).toContain('gateway:use')
+    expect(reports(client)).toEqual([{ event: 'tool_blocked', toolName: 'Bash', reason }])
+  })
+
   it('an allow is reported with its decision id', async () => {
     const { client, refusal } = await refuse({ allowed: true, reason: '', decisionId: 'hgd_3', reached: true })
     expect(refusal).toBeNull()

@@ -22,6 +22,8 @@
  *     `failClosed=false` to treat the tier as advisory during an outage. A 400
  *     is refused whatever `failClosed` says: it is this client's request that
  *     is wrong, not the control plane that is down, and allowing would hide it.
+ *     So is a 403 `INSUFFICIENT_SCOPE`: the key lacks the scope the hook gate
+ *     needs (`gateway:use`), a fault in its configuration.
  *   * `emit` NEVER throws. Telemetry that can break a run is worse than no
  *     telemetry.
  *
@@ -66,8 +68,9 @@ export interface GateResponse {
   incidentId?: string | undefined
   /**
    * The code the hook gate names, when it names one: the MCP registry's on its
-   * refusals, `GOVERNANCE_UNAVAILABLE` when its checks could not run, and
-   * `INVALID_REQUEST` when it could not read the request.
+   * refusals, `GOVERNANCE_UNAVAILABLE` when its checks could not run,
+   * `INVALID_REQUEST` when it could not read the request, and
+   * `INSUFFICIENT_SCOPE` when the API key lacks the scope it needs.
    */
   code?: string | undefined
   /** False when the hook gate gave no verdict and `failClosed` decided it. */
@@ -103,6 +106,13 @@ export interface ApprovedBypassesAnswer {
 /** The hook gate's code for a call whose checks could not run. */
 const GOVERNANCE_UNAVAILABLE = 'GOVERNANCE_UNAVAILABLE'
 
+/**
+ * The control plane's code for a key without a scope the route needs
+ * (`requiredScopes`; the hook gate needs `gateway:use`). A fault in the key's
+ * configuration, not an outage, so it refuses whatever `failClosed` says.
+ */
+const INSUFFICIENT_SCOPE = 'INSUFFICIENT_SCOPE'
+
 /** The code on a local-only client's hook-gate answer: no key, so no call was made. */
 const LOCAL_ONLY = 'LOCAL_ONLY'
 
@@ -124,6 +134,15 @@ class HttpStatusError extends Error {
     super(`HTTP ${status} from ${path}`)
     this.name = 'HttpStatusError'
   }
+}
+
+/** The reason for an `INSUFFICIENT_SCOPE` answer: the scope(s) the key lacks, and the server's detail. */
+function insufficientScopeReason(body: Record<string, unknown>): string {
+  const scopes = Array.isArray(body.requiredScopes) ? body.requiredScopes.filter((s) => typeof s === 'string') : []
+  const needs =
+    scopes.length === 0 ? 'a scope it lacks' : scopes.length === 1 ? `the ${scopes[0]} scope` : `one of the scopes ${scopes.join(', ')}`
+  const detail = typeof body.detail === 'string' ? ` — ${body.detail}` : ''
+  return `hook-gate refused the API key (${INSUFFICIENT_SCOPE}): it needs ${needs}${detail}`
 }
 
 /** Options for a {@link GateClient}. Every field is optional. */
@@ -253,7 +272,8 @@ export class GateClient {
    * `GOVERNANCE_UNAVAILABLE` because its own checks could not run), the
    * verdict is decided by `failClosed`: true (the default) reports BLOCK,
    * because a client with no verdict has nothing to defer to; false reports
-   * allow. A 400 `INVALID_REQUEST` is a BLOCK whatever `failClosed` says. A
+   * allow. A 400 `INVALID_REQUEST`, and a 403 `INSUFFICIENT_SCOPE` (the key
+   * lacks `gateway:use`), are a BLOCK whatever `failClosed` says. A
    * shadow-mode workspace's `{allowed: true, degraded: true}` is an allow.
    *
    * A {@link localOnly} client makes no call and answers allow with code
@@ -294,6 +314,9 @@ export class GateClient {
           code: 'INVALID_REQUEST',
           reached: true,
         }
+      }
+      if (exc instanceof HttpStatusError && exc.body.code === INSUFFICIENT_SCOPE) {
+        return { allowed: false, reason: insufficientScopeReason(exc.body), code: INSUFFICIENT_SCOPE, reached: true }
       }
       if (exc instanceof HttpStatusError && exc.body.code === GOVERNANCE_UNAVAILABLE) {
         return this.noVerdict(`governance check unavailable (${GOVERNANCE_UNAVAILABLE})`, GOVERNANCE_UNAVAILABLE, exc.body.decisionId)

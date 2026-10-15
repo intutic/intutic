@@ -81,6 +81,24 @@ export function readJsonFile(path: string): unknown {
 }
 
 /**
+ * A third-party credential given as exactly one of `--token` or
+ * `--token-file` (the file's contents, trimmed). It is never echoed; `hint`
+ * ends the error for a command that has more to say about which to use.
+ */
+export function readTokenFlag(opts: { token?: string; tokenFile?: string }, hint = ''): string {
+  if (Boolean(opts.token) === Boolean(opts.tokenFile)) fail(`Give the credential with exactly one of --token or --token-file${hint}.`)
+  if (!opts.tokenFile) return opts.token as string
+  let credential: string
+  try {
+    credential = readFileSync(opts.tokenFile, 'utf8').trim()
+  } catch (err) {
+    fail(`Could not read --token-file: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  if (!credential) fail('--token-file is empty.')
+  return credential
+}
+
+/**
  * Writes a downloaded report to `out`, or to stdout when there is none, so it
  * can be piped. `what` names it in the confirmation.
  */

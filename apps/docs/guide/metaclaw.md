@@ -35,6 +35,8 @@ The **Approval mode** on the SOP Optimizer page is the one switch. In **manual**
 
 Every other proposal — `WEAKEN`, `CLARIFY`, `NARROW`, or one the classifier could not classify — stays in **Pending Proposals** for a person, with its classification and the reason on the card. If classification fails, nothing is applied. An applied change becomes the next version of the guideline in the same lifecycle state (a `VALIDATED` guideline stays enforcing, at the next patch version), the version it replaces is retired, and both carry an audit row with the actor `system:metaclaw`. It never leaves an unreviewed draft in force.
 
+Outside the dashboard, read and set the approval mode with [`intutic optimizer settings` and `intutic optimizer set`](/reference/cli#intutic-optimizer-set), the SDKs' `getOptimizerSettings` / `updateOptimizerSettings` (`get_optimizer_settings` / `update_optimizer_settings` in Python), or Terraform's [`intutic_sop_optimizer_settings`](/reference/terraform/resources/sop_optimizer_settings).
+
 ---
 
 ## Accessing the Optimizer

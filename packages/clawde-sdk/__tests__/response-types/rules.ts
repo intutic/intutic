@@ -1,6 +1,7 @@
-/** SDK response types of the WASM rule, SOP and decision routes, against their schemas. */
+/** SDK response types of the WASM rule, SOP, SOP Optimizer and decision routes, against their schemas. */
 import type {
   DecisionReviewResponse,
+  DreamCycleSettingsResponse,
   RuleCandidateBundleResponse,
   RuleCandidateSourceResponse,
   SopCreatedResponse,
@@ -11,6 +12,7 @@ import type {
 import type {
   BundleUploadResult,
   DecisionReviewResult,
+  OptimizerSettings,
   RuleCandidateSource,
   SopCreateResult,
   SopDetail,
@@ -33,3 +35,5 @@ conforms<SopDetail>()<SopResponse>()
 conforms<SopCreateResult>()<SopCreatedResponse>()
 // approveDecision / rejectDecision: POST /api/v1/decisions/:entryId/review
 conforms<DecisionReviewResult>()<DecisionReviewResponse>()
+// getOptimizerSettings / updateOptimizerSettings: GET and PUT /api/v1/dream-cycle/settings, unwrapped from `settings`
+conforms<OptimizerSettings>()<DreamCycleSettingsResponse['settings']>()

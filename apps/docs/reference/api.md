@@ -1016,7 +1016,7 @@ Every route the control plane serves: 408 routes, grouped by the source file tha
 |--------|------|------|-----------|-------------|
 | GET | `/api/v1/keys` | Authenticated | `keys:read` | List API keys for the workspace |
 | POST | `/api/v1/keys` | Authenticated | `keys:write` | Create a new API key |
-| DELETE | `/api/v1/keys/:id` | Authenticated | `keys:write` | Revoke an API key |
+| DELETE | `/api/v1/keys/:id` | Authenticated | `keys:write` | Revoke an API key (your own; OWNER/ADMIN: any in the workspace) |
 | PATCH | `/api/v1/keys/:id` | OWNER/ADMIN | `keys:write` | Set a key's spend budgets, rate limit and scopes |
 
 ### `loops.ts` <Badge type="tip" text="Cloud" />

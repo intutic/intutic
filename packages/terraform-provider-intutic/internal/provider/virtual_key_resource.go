@@ -101,7 +101,8 @@ func (r *virtualKeyResource) Schema(_ context.Context, _ resource.SchemaRequest,
 		Description: "A virtual API key (`vk_…`), created through `POST /api/v1/keys` for the member that owns the " +
 			"provider's own key. The key value is returned once, at creation, and stored in Terraform state as a " +
 			"sensitive value; protect the state accordingly. The spend budgets and rate limits change in place " +
-			"(an OWNER or ADMIN may set them); any other change replaces the key. Destroying the resource revokes it.",
+			"(an OWNER or ADMIN may set them); any other change replaces the key. Destroying the resource revokes it, " +
+			"also when an OWNER or ADMIN other than the member who created it runs Terraform.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -316,7 +317,8 @@ func (r *virtualKeyResource) Read(ctx context.Context, req resource.ReadRequest,
 			continue
 		}
 		if k.RevokedAt != nil {
-			break
+			resp.State.RemoveResource(ctx)
+			return
 		}
 		k.applyTo(&state)
 		if state.IsServiceAccount.IsNull() || state.IsServiceAccount.IsUnknown() {
@@ -328,7 +330,54 @@ func (r *virtualKeyResource) Read(ctx context.Context, req resource.ReadRequest,
 		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 		return
 	}
+	// Not one of the calling member's keys. An OWNER or ADMIN may still manage
+	// (and, on destroy, revoke) a key another member's credentials created,
+	// say when a different admin runs Terraform; GET /api/v1/budget/keys lists
+	// every live key in the workspace to them. Only for a key already in state:
+	// an import needs the fields that list does not carry.
+	if !state.CreatedAt.IsNull() && !state.CreatedAt.IsUnknown() {
+		if live, err := r.workspaceKey(ctx, state.ID.ValueString()); err != nil {
+			resp.Diagnostics.AddError("Reading virtual keys failed", err.Error())
+			return
+		} else if live != nil {
+			state.Label = types.StringValue(live.Label)
+			state.KeyPrefix = types.StringValue(live.KeyPrefix)
+			f := fieldsFrom(live.Budgets)
+			state.DailyBudgetUsd, state.DailyBudgetEnforcement = f.DailyUsd, f.DailyEnforcement
+			state.MonthlyBudgetUsd, state.MonthlyBudgetEnforcement = f.MonthlyUsd, f.MonthlyEnforcement
+			state.RateLimitRpm = int64OrNull(live.RateLimit.Rpm)
+			state.RateLimitTpm = int64OrNull(live.RateLimit.Tpm)
+			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+			return
+		}
+	}
 	resp.State.RemoveResource(ctx)
+}
+
+// workspaceKeyRow is one row of GET /api/v1/budget/keys: every live key in the
+// workspace to an OWNER, ADMIN or EM, the caller's own to anyone else.
+type workspaceKeyRow struct {
+	KeyID     string        `json:"keyId"`
+	KeyPrefix string        `json:"keyPrefix"`
+	Label     string        `json:"label"`
+	Budgets   []spendBudget `json:"budgets"`
+	RateLimit keyRateLimit  `json:"rateLimit"`
+}
+
+// workspaceKey finds a live key in the workspace's key list, or nil.
+func (r *virtualKeyResource) workspaceKey(ctx context.Context, keyID string) (*workspaceKeyRow, error) {
+	var out struct {
+		Keys []workspaceKeyRow `json:"keys"`
+	}
+	if err := r.client.Get(ctx, "/api/v1/budget/keys", &out); err != nil {
+		return nil, err
+	}
+	for i := range out.Keys {
+		if out.Keys[i].KeyID == keyID {
+			return &out.Keys[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // Update changes the budgets and rate limit, the only attributes that do not

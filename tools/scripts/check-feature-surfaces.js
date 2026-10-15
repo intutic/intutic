@@ -77,6 +77,19 @@
  * So the pull request that adds a feature's first surface also decides its
  * other ten.
  *
+ * Notification events, end to end. Every type in NOTIFICATION_EVENT_TYPES
+ * must be one the control plane emits to the notification hub (an emitter
+ * outside the hub's own consumers, and a route to the hub: the router's
+ * subscription list or a direct dispatch), and every type the router sends
+ * must be in the list, or a rule can name an event that never comes, or never
+ * name one that does. The dashboard's rule picker (NotificationSettingsPanel's
+ * EVENT_TYPES) and the table in guide/settings.md under "The **Event Type**
+ * list offers" must offer exactly the list. On 2026-10-15 the picker offered
+ * 39 of 65 types; four types had no emitter and one was never routed, two
+ * routed types could not be named, and six reached no rule because the event
+ * named no workspace (that last kind is a runtime fault this cannot see; the
+ * emitters' own tests hold it).
+ *
  * Files under enterprise-only trees (the dashboard, the control plane) are
  * absent in the open-core checkout. Evidence there is counted as skipped and
  * reported, as is the SIEM source inventory, so a run that checked nothing
@@ -116,6 +129,22 @@ const EXTERNAL = { website: 'INTUTIC_WEBSITE_DIR' }
 const PLAN_BADGE = /<Badge[^>]*text="([^"]+)"/
 const SIEM_REGISTRY = 'services/control-plane/src/services/siem/eventSourceRegistry.ts'
 const TF_PROVIDER = 'packages/terraform-provider-intutic/internal/provider'
+const NOTIFICATION_PICKER = 'apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx'
+const NOTIFICATION_ROUTER = 'services/control-plane/src/services/notificationRouterService.ts'
+const CONTROL_PLANE_SRC = 'services/control-plane/src'
+/**
+ * Control-plane files that consume, format or export notification events
+ * rather than emit them: an event type named only in these has no emitter.
+ */
+const EVENT_CONSUMERS = [
+  'services/notificationRouterService.ts',
+  'services/notificationHubService.ts',
+  'services/governanceNotificationService.ts',
+  'services/emailService.ts',
+  'services/adapters/',
+  'services/siem/',
+  'routes/notifications.ts',
+]
 
 const cache = new Map()
 const text = (rel, base = ROOT) => {
@@ -243,6 +272,108 @@ function notificationEventTypes() {
   const src = text('packages/shared-types/src/notifications.ts') ?? ''
   const body = /export const NOTIFICATION_EVENT_TYPES = \[([\s\S]*?)\n\] as const/.exec(src)?.[1] ?? ''
   return [...body.matchAll(/^\s*'([^']+)',/gm)].map((m) => m[1])
+}
+
+const EVENT_LITERAL = /'([a-z0-9_]+(?:\.[a-z0-9_]+)+)'/g
+
+/**
+ * The notification event types the control plane emits to the hub, or null in
+ * a checkout without it: a type some non-consumer file names as a string
+ * (`emitter.emit('x', …)`, `event: 'x'`, a map to it) that the router
+ * subscribes to (its `secondaryEvents` list, or a dedicated handler building
+ * `type: 'x'`), plus the `type: 'x'` a file that imports the hub dispatches
+ * itself. `routed` is everything the router sends, emitter or not.
+ */
+export function emittedNotificationTypes() {
+  const router = text(NOTIFICATION_ROUTER)
+  if (router === null) return null
+  const literals = (src) => [...src.matchAll(EVENT_LITERAL)].map((m) => m[1])
+  const list = /const secondaryEvents = \[([\s\S]*?)\n\s*\]/.exec(router)?.[1] ?? ''
+  const routed = new Set([
+    ...literals(list.replace(/\/\/.*$/gm, '')),
+    ...[...router.matchAll(/type: '([a-z0-9_.]+)'/g)].map((m) => m[1]),
+  ])
+  const produced = new Set()
+  const direct = new Set()
+  const dir = join(ROOT, CONTROL_PLANE_SRC)
+  for (const full of files(dir, (f) => f.endsWith('.ts') && !/\.test\./.test(f))) {
+    const rel = relative(dir, full).split(sep).join('/')
+    if (EVENT_CONSUMERS.some((c) => rel.startsWith(c))) continue
+    const src = readFileSync(full, 'utf8').replace(/^\s*(\/\/|\*).*$/gm, '')
+    for (const t of literals(src)) produced.add(t)
+    if (src.includes('notificationHubService')) for (const m of src.matchAll(/type: '([a-z0-9_.]+)'/g)) direct.add(m[1])
+  }
+  const emitted = new Set([...[...routed].filter((t) => produced.has(t)), ...direct])
+  return { emitted, routed }
+}
+
+/** The `value`s of the dashboard rule picker's EVENT_TYPES, or null without the dashboard. */
+function pickerEventTypes() {
+  const src = text(NOTIFICATION_PICKER)
+  if (src === null) return null
+  const body = /const EVENT_TYPES = \[([\s\S]*?)\n\]/.exec(src)?.[1] ?? ''
+  return [...body.matchAll(/\{ value: '([^']+)', label: '[^']+' \}/g)].map((m) => m[1])
+}
+
+/** The event types in guide/settings.md's table of what the picker offers, or null when it has none. */
+function settingsTableEventTypes() {
+  const md = text('apps/docs/guide/settings.md') ?? ''
+  const at = md.indexOf('The **Event Type** list offers')
+  if (at < 0) return null
+  const out = []
+  for (const line of md.slice(at).split('\n').slice(1)) {
+    if (line.trim() === '') { if (out.length) break; else continue }
+    const m = /^\| `([^`]+)` \|/.exec(line)
+    if (m) out.push(m[1])
+    else if (!line.startsWith('|')) break
+  }
+  return out
+}
+
+/**
+ * The notification event list against its emitters, the dashboard picker and
+ * the settings guide, both ways. Returns { problems, checked, skipped }.
+ */
+export function checkNotificationEvents() {
+  const problems = []
+  let checked = 0
+  let skipped = 0
+  const listed = notificationEventTypes()
+  // A checkout with no event list (a fixture) has nothing to hold the rest to.
+  if (listed.length === 0) return { problems, checked, skipped }
+  const inList = new Set(listed)
+  const both = (name, offered, fix) => {
+    const have = new Set(offered)
+    for (const t of listed) if (!have.has(t)) problems.push(`${name} does not offer the notification event ${t} — ${fix}`)
+    for (const t of have) if (!inList.has(t)) problems.push(`${name} offers ${t}, which is not in NOTIFICATION_EVENT_TYPES`)
+    for (const t of offered.filter((t, i) => offered.indexOf(t) !== i)) problems.push(`${name} offers ${t} twice`)
+  }
+  const sent = emittedNotificationTypes()
+  if (sent === null) skipped += 1
+  else {
+    checked += 1
+    for (const t of listed)
+      if (!sent.emitted.has(t))
+        problems.push(
+          `NOTIFICATION_EVENT_TYPES lists ${t}, which nothing in the control plane emits to the notification hub — ` +
+            'emit it and route it (notificationRouterService secondaryEvents), or remove it from the list, the Terraform copy and the docs',
+        )
+    for (const t of sent.routed)
+      if (sent.emitted.has(t) && !inList.has(t))
+        problems.push(`the notification router sends ${t}, which NOTIFICATION_EVENT_TYPES does not list, so no rule can name it`)
+  }
+  const picker = pickerEventTypes()
+  if (picker === null) skipped += 1
+  else {
+    checked += 1
+    both(`the dashboard's rule picker (${NOTIFICATION_PICKER})`, picker, 'add it to EVENT_TYPES with a label')
+  }
+  const table = settingsTableEventTypes()
+  if (table !== null) {
+    checked += 1
+    both("guide/settings.md's table of event types", table, 'add a row with its dashboard label')
+  }
+  return { problems, checked, skipped }
 }
 
 /**
@@ -577,7 +708,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   const surfaces = check(manifest)
   const claims = checkClaims(manifest, read('feature-surfaces-baseline.json'), inventory())
-  const problems = [...surfaces.problems, ...claims.problems]
+  const notifications = checkNotificationEvents()
+  const problems = [...surfaces.problems, ...claims.problems, ...notifications.problems]
   if (problems.length) {
     console.error(`[FAIL] ${problems.length} feature-surface problem(s):`)
     for (const p of problems) console.error(`  ${p}`)
@@ -587,10 +719,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.error('[FAIL] no feature surface or inventory item was checked — this run asserted nothing.')
     process.exit(1)
   }
-  const skipped = surfaces.skipped + claims.skipped
+  const skipped = surfaces.skipped + claims.skipped + notifications.skipped
   console.log(
     `[PASS] ${surfaces.features} feature(s): ${surfaces.checked} surface(s) exist as listed; ` +
-      `${claims.checked} route(s), command(s), page(s), refusal code(s) and event type(s) each claimed, baselined or excused` +
+      `${claims.checked} route(s), command(s), page(s), refusal code(s) and event type(s) each claimed, baselined or excused; ` +
+      `notification events held to ${notifications.checked} of their emitters, the dashboard picker and the settings guide` +
       (skipped ? `; ${skipped} skipped (enterprise-only files, or the website with no checkout given)` : ''),
   )
 }

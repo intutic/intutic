@@ -414,6 +414,74 @@ resource "intutic_workspace_budget" "this" {
 	)
 }
 
+func TestAccSopOptimizerSettings(t *testing.T) {
+	cfg := `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode           = "auto"
+  auto_threshold = 0.9
+}`
+	accTest(t,
+		resource.TestStep{
+			Config: cfg,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("intutic_sop_optimizer_settings.this", "mode", "auto"),
+				resource.TestCheckResourceAttr("intutic_sop_optimizer_settings.this", "auto_threshold", "0.9"),
+			),
+		},
+		clean(cfg),
+		imported("intutic_sop_optimizer_settings.this"),
+		drifted(cfg, func() {
+			api(t, "PUT", "/api/v1/dream-cycle/settings", map[string]any{"mode": "manual", "autoThreshold": 0.9})
+		}),
+		resource.TestStep{Config: cfg},
+		// Without auto_threshold the threshold is kept, not reset to the route's 0.85.
+		resource.TestStep{
+			Config: `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode = "manual"
+}`,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("intutic_sop_optimizer_settings.this", "mode", "manual"),
+				resource.TestCheckResourceAttr("intutic_sop_optimizer_settings.this", "auto_threshold", "0.9"),
+			),
+		},
+	)
+}
+
+// test-jira.atlassian.net is the Jira adapter's fixture host: the control
+// plane accepts the connection without calling Atlassian.
+func TestAccTaskConnection(t *testing.T) {
+	cfg := func(projectKey string) string {
+		return fmt.Sprintf(`
+resource "intutic_task_connection" "jira" {
+  task_provider = "jira"
+  base_url      = "https://test-jira.atlassian.net"
+  project_key   = %q
+  account_email = "tf-acc@example.com"
+  api_token     = %q
+}`, projectKey, strings.Join([]string{"tf", "acc", "fixture"}, "-"))
+	}
+	accTest(t,
+		resource.TestStep{
+			Config: cfg("TFACC"),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrSet("intutic_task_connection.jira", "id"),
+				resource.TestCheckResourceAttr("intutic_task_connection.jira", "status", "connected"),
+			),
+		},
+		clean(cfg("TFACC")),
+		imported("intutic_task_connection.jira", "api_token", "account_email"),
+		// No update route: a new project key is a new connection.
+		resource.TestStep{
+			Config: cfg("TFACC2"),
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction("intutic_task_connection.jira", plancheck.ResourceActionDestroyBeforeCreate),
+			}},
+			Check: resource.TestCheckResourceAttr("intutic_task_connection.jira", "project_key", "TFACC2"),
+		},
+	)
+}
+
 func TestAccGateway(t *testing.T) {
 	cfg := func(requireVk bool) string {
 		return fmt.Sprintf(`

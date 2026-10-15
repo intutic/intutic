@@ -355,6 +355,29 @@ POST /api/v1/loops/:loopRunId/complete — `outcome` records how the run ended.
 
 ***
 
+### createApiKey()
+
+```ts
+createApiKey(label, options?): Promise<ApiKeyCreateResult>;
+```
+
+POST /api/v1/keys — a key for you, with `scopes` (`['*']` when omitted).
+The plaintext `key` is in the response once and never stored. Called with
+a key, each scope must be granted by that key.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `label` | `string` |
+| `options` | [`CreateApiKeyOptions`](../index.md#createapikeyoptions) |
+
+#### Returns
+
+`Promise`\<[`ApiKeyCreateResult`](../index.md#apikeycreateresult)\>
+
+***
+
 ### createGuardrail()
 
 ```ts
@@ -483,6 +506,30 @@ POST /api/v1/sops — one workspace SOP; `markdown_content` without front matter
 
 ***
 
+### createTaskConnection()
+
+```ts
+createTaskConnection(connection): Promise<TaskConnection>;
+```
+
+POST /api/v1/task-management/connections (OWNER, ADMIN). The control
+plane tests the credentials with the provider and saves the connection
+only if they are accepted (a 400 "Connection test failed" otherwise). A
+Jira connection needs `metadata.accountEmail`. There is no update: to
+change a connection, delete it and create it again.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `connection` | [`TaskConnectionInput`](../index.md#taskconnectioninput) |
+
+#### Returns
+
+`Promise`\<[`TaskConnection`](../index.md#taskconnection)\>
+
+***
+
 ### createTeam()
 
 ```ts
@@ -602,6 +649,26 @@ DELETE /api/v1/siem/destinations/:destinationId (OWNER, ADMIN) — deactivates i
 #### Returns
 
 `Promise`\<`void`\>
+
+***
+
+### deleteTaskConnection()
+
+```ts
+deleteTaskConnection(connectionId): Promise<TaskConnectionDeleteResult>;
+```
+
+DELETE /api/v1/task-management/connections/:connectionId (OWNER, ADMIN) — `deleted: false` when it was already gone.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `connectionId` | `string` |
+
+#### Returns
+
+`Promise`\<[`TaskConnectionDeleteResult`](../index.md#taskconnectiondeleteresult)\>
 
 ***
 
@@ -1135,6 +1202,20 @@ GET /api/v1/routing/mirror-adoption-report — how a mirror-tested candidate mod
 
 ***
 
+### getOptimizerSettings()
+
+```ts
+getOptimizerSettings(): Promise<OptimizerSettings>;
+```
+
+GET /api/v1/dream-cycle/settings — the SOP Optimizer's approval mode and auto-apply threshold.
+
+#### Returns
+
+`Promise`\<[`OptimizerSettings`](../index.md#optimizersettings)\>
+
+***
+
 ### getPolicyDocument()
 
 ```ts
@@ -1344,6 +1425,20 @@ POST /api/v1/loops/:loopRunId/kill
 #### Returns
 
 `Promise`\<[`LoopRunActionResult`](../index.md#looprunactionresult)\>
+
+***
+
+### listApiKeys()
+
+```ts
+listApiKeys(): Promise<ApiKey[]>;
+```
+
+GET /api/v1/keys — your own keys in the workspace, revoked ones included.
+
+#### Returns
+
+`Promise`\<[`ApiKey`](../index.md#apikey)[]\>
 
 ***
 
@@ -1738,6 +1833,20 @@ GET /api/v1/sops
 
 ***
 
+### listTaskConnections()
+
+```ts
+listTaskConnections(): Promise<TaskConnection[]>;
+```
+
+GET /api/v1/task-management/connections — the workspace's Jira, Linear and PagerDuty connections, unwrapped from `items`.
+
+#### Returns
+
+`Promise`\<[`TaskConnection`](../index.md#taskconnection)[]\>
+
+***
+
 ### listTeams()
 
 ```ts
@@ -2073,6 +2182,26 @@ POST …/guardrails/:guardrailId/retire — gone from every rule endpoint on the
 
 ***
 
+### revokeApiKey()
+
+```ts
+revokeApiKey(keyId): Promise<void>;
+```
+
+DELETE /api/v1/keys/:keyId — revoke one of your live keys, or as an OWNER or ADMIN any live key in the workspace; a key you may not revoke (none, already revoked, another member's below OWNER/ADMIN) throws `ClawdeConnectionError` with the 404.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `keyId` | `string` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### revokeGateway()
 
 ```ts
@@ -2331,6 +2460,26 @@ POST /api/v1/connectors/:connectorId/sync
 
 ***
 
+### testTaskConnection()
+
+```ts
+testTaskConnection(connectionId): Promise<TaskConnectionTestResult>;
+```
+
+POST /api/v1/task-management/connections/:connectionId/test (OWNER, ADMIN) — whether the provider still accepts the stored credentials.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `connectionId` | `string` |
+
+#### Returns
+
+`Promise`\<[`TaskConnectionTestResult`](../index.md#taskconnectiontestresult)\>
+
+***
+
 ### unsetProviderCredential()
 
 ```ts
@@ -2348,6 +2497,29 @@ DELETE /api/v1/workspace/provider-credentials/:provider
 #### Returns
 
 `Promise`\<`void`\>
+
+***
+
+### updateApiKey()
+
+```ts
+updateApiKey(keyId, changes): Promise<ApiKey>;
+```
+
+PATCH /api/v1/keys/:keyId (OWNER, ADMIN) — replace a key's scopes, spend
+budgets and/or rate limit; a field left out is unchanged. New scopes apply
+from the key's next request.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `keyId` | `string` |
+| `changes` | [`ApiKeyUpdate`](../index.md#apikeyupdate) |
+
+#### Returns
+
+`Promise`\<[`ApiKey`](../index.md#apikey)\>
 
 ***
 
@@ -2393,6 +2565,30 @@ A switch to the webhook channel comes back with the new `signingSecret`.
 #### Returns
 
 `Promise`\<[`NotificationRule`](../index.md#notificationrule)\>
+
+***
+
+### updateOptimizerSettings()
+
+```ts
+updateOptimizerSettings(settings): Promise<OptimizerSettings>;
+```
+
+PUT /api/v1/dream-cycle/settings (OWNER, ADMIN) — set the approval mode.
+`auto` lets a manually triggered optimizer run apply a STRENGTHEN
+proposal whose score reaches `autoThreshold` without review; `manual`
+applies nothing. The route sets an omitted `autoThreshold` to 0.85, so
+pass the current one (`getOptimizerSettings`) to keep it.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `settings` | [`OptimizerSettingsUpdate`](../index.md#optimizersettingsupdate) |
+
+#### Returns
+
+`Promise`\<[`OptimizerSettings`](../index.md#optimizersettings)\>
 
 ***
 

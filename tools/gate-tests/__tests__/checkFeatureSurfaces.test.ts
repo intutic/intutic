@@ -253,6 +253,103 @@ describe('feature surfaces', () => {
     })
   })
 
+  describe('notification events against their emitters, the dashboard picker and the settings guide', () => {
+    const ROUTER = 'services/control-plane/src/services/notificationRouterService.ts'
+    const PICKER = 'apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx'
+    const types = (list: string[]) =>
+      put(
+        'packages/shared-types/src/notifications.ts',
+        `export const NOTIFICATION_EVENT_TYPES = [\n${list.map((t) => `  '${t}',\n`).join('')}] as const\n`,
+      )
+    const router = (routed: string[]) =>
+      put(ROUTER, `const secondaryEvents = [\n${routed.map((t) => `  '${t}',\n`).join('')}    ]\n`)
+    const picker = (offered: string[]) =>
+      put(
+        PICKER,
+        `const EVENT_TYPES = [\n${offered.map((t) => `  { value: '${t}', label: 'Label ${t}' },\n`).join('')}]\n`,
+      )
+    const guide = (rows: string[]) =>
+      put(
+        'apps/docs/guide/settings.md',
+        `# Settings\n\nThe **Event Type** list offers only the events the control plane sends:\n\n| Event type | Label |\n|---|---|\n${rows.map((t) => `| \`${t}\` | Label |\n`).join('')}\nMore text.\n`,
+      )
+
+    beforeEach(async () => {
+      await baseline({
+        docsPages: ['reference/api.md', 'reference/cli.md', 'guide/settings.md'],
+        eventTypes: ['widget.created', 'widget.deleted'],
+      })
+      await manifest([feature(present)])
+      await types(['widget.created', 'widget.deleted'])
+      await router(['widget.created', 'widget.deleted'])
+      await put('services/control-plane/src/services/widgetService.ts', "emitter.emit('widget.created', {})\nemitter.emit('widget.deleted', {})\n")
+      await picker(['widget.created', 'widget.deleted'])
+      await guide(['widget.created', 'widget.deleted'])
+    })
+
+    it('passes when the list, the emitted set, the picker and the guide agree', async () => {
+      const r = await runGate(root)
+      expect(r.status, r.out).toBe(0)
+      expect(r.out).toContain('notification events held to 3 of their emitters')
+    })
+
+    it('fails a listed type nothing emits, or only a consumer names', async () => {
+      await put('services/control-plane/src/services/widgetService.ts', "emitter.emit('widget.created', {})\n")
+      await put('services/control-plane/src/services/adapters/slackBlockBuilder.ts', "case 'widget.deleted':\n")
+      const r = await runGate(root)
+      expect(r.status, r.out).toBe(1)
+      expect(r.out).toContain('NOTIFICATION_EVENT_TYPES lists widget.deleted, which nothing in the control plane emits')
+    })
+
+    it('fails a type that is emitted but never routed to the hub', async () => {
+      await router(['widget.created'])
+      const r = await runGate(root)
+      expect(r.status, r.out).toBe(1)
+      expect(r.out).toContain('NOTIFICATION_EVENT_TYPES lists widget.deleted, which nothing in the control plane emits')
+    })
+
+    it('counts a type a service dispatches to the hub itself', async () => {
+      await router(['widget.created'])
+      await put(
+        'services/control-plane/src/services/widgetService.ts',
+        "import { dispatch } from './notificationHubService.js'\nemitter.emit('widget.created', {})\nawait dispatch(db, valkey, ws, { type: 'widget.deleted' })\n",
+      )
+      const r = await runGate(root)
+      expect(r.status, r.out).toBe(0)
+    })
+
+    it('fails a type the router sends that no rule can name', async () => {
+      await router(['widget.created', 'widget.deleted', 'widget.renamed'])
+      await put(
+        'services/control-plane/src/services/widgetService.ts',
+        "emitter.emit('widget.created', {})\nemitter.emit('widget.deleted', {})\nemitter.emit('widget.renamed', {})\n",
+      )
+      const r = await runGate(root)
+      expect(r.status, r.out).toBe(1)
+      expect(r.out).toContain('the notification router sends widget.renamed, which NOTIFICATION_EVENT_TYPES does not list')
+    })
+
+    it.each([
+      ['the picker leaves one out', () => picker(['widget.created']), "rule picker (apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx) does not offer the notification event widget.deleted"],
+      ['the picker offers one not listed', () => picker(['widget.created', 'widget.deleted', 'widget.renamed']), 'NotificationSettingsPanel.tsx) offers widget.renamed, which is not in NOTIFICATION_EVENT_TYPES'],
+      ['the guide leaves one out', () => guide(['widget.created']), "guide/settings.md's table of event types does not offer the notification event widget.deleted"],
+      ['the guide lists one not listed', () => guide(['widget.created', 'widget.deleted', 'widget.renamed']), "guide/settings.md's table of event types offers widget.renamed"],
+    ])('fails when %s', async (_, change, why) => {
+      await change()
+      const r = await runGate(root)
+      expect(r.status, r.out).toBe(1)
+      expect(r.out).toContain(why)
+    })
+
+    it('skips the emitter and picker checks in a checkout without the control plane and the dashboard', async () => {
+      await rm(join(root, 'services'), { recursive: true, force: true })
+      await rm(join(root, 'apps/dashboard'), { recursive: true, force: true })
+      const r = await runGate(root)
+      expect(r.status, r.out).toBe(0)
+      expect(r.out).toContain('notification events held to 1 of their emitters')
+    })
+  })
+
   it('fails when every surface it lists was skipped as enterprise-only', async () => {
     await baseline({
       routes: ['GET /api/v1/widgets'],

@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Added
+
+- **API keys from the CLI and the SDKs, scopes included.** `intutic keys
+  list`, `intutic keys create --label <label> [--scopes <a,b>]
+  [--expires-in-days <n>] [--service-account]`, `intutic keys update <keyId>
+  --scopes <a,b>` and `intutic keys revoke <keyId>` list, create, re-scope and
+  revoke API keys (`/api/v1/keys`); scopes are checked against `API_SCOPES`
+  before anything is sent. `ControlPlaneClient` gains `listApiKeys`,
+  `createApiKey`, `updateApiKey` and `revokeApiKey` (`@intutic/clawde`), and
+  `list_api_keys`, `create_api_key`, `update_api_key` and `revoke_api_key`
+  (`intutic-clawde`). Until now only the dashboard and Terraform could set a
+  key's scopes.
+- **The SOP Optimizer's Approval mode from the CLI, the SDKs and Terraform.**
+  Since `featureFlags.ff_metaclaw_auto_apply` was removed in 2.5.1, the
+  Approval mode (`manual` or `auto`, with its auto-apply threshold) could only
+  be set on the SOP Optimizer page. `intutic optimizer settings` and
+  `intutic optimizer set --mode <manual|auto> [--auto-threshold <n>]` read
+  and set it (`set` keeps the current threshold unless given one);
+  `getOptimizerSettings` / `updateOptimizerSettings` (`@intutic/clawde`) and
+  `get_optimizer_settings` / `update_optimizer_settings` (`intutic-clawde`)
+  do the same; and the Terraform provider (0.5.0) adds
+  `intutic_sop_optimizer_settings` (destroy sets the mode back to `manual`).
+  `GET` and `PUT /api/v1/dream-cycle/settings` publish their response schema.
+- **Task-management connections from the CLI, the SDKs and Terraform.**
+  `intutic tasks list`, `intutic tasks add --provider <jira|linear|pagerduty>
+  --base-url <url> --project-key <key> [--account-email <email>]
+  (--token <token> | --token-file <path>)`, `intutic tasks test
+  <connectionId>` and `intutic tasks remove <connectionId>` manage the
+  Jira, Linear and PagerDuty connections, which only the dashboard could
+  before; the token is never echoed. `ControlPlaneClient` gains
+  `listTaskConnections`, `createTaskConnection`, `testTaskConnection` and
+  `deleteTaskConnection` (`list_task_connections`, … in `intutic-clawde`),
+  and the Terraform provider (0.5.0) adds `intutic_task_connection`: the API
+  token is a sensitive argument the API never returns, every argument
+  replaces the connection (there is no update route), and an imported
+  connection is replaced on its first apply, which sends the configured
+  token. The four task-management routes publish their response schemas.
+- **Notification rules on `plan.rejected` and `plan.closed`.** The control
+  plane sent both, and no rule could name them; the API, the CLI and the
+  Terraform provider accept them.
+
+### Changed
+
+- **The gate SDKs name a key that lacks the hook gate's scope.** A key without
+  `gateway:use` (or `*`) gets `403 INSUFFICIENT_SCOPE` from
+  `POST /api/v1/hook-gate`. `@intutic/gate` and `intutic_clawde.gate` read it as
+  an unreachable control plane: refused, with a reason that never named the
+  scope, under `failClosed`, and let through ungoverned with `failClosed` off.
+  It is now refused whatever `failClosed` says, with the code
+  `INSUFFICIENT_SCOPE` and the scopes the key needs, like `INVALID_REQUEST`. The
+  refusal the gate throws carries `INSUFFICIENT_SCOPE` (a new gate refusal
+  code), and the AgentCore interceptor denies such an answer the same way,
+  whatever `INTUTIC_FAIL_OPEN` says.
+
+### Removed
+
+- **Four notification event types nothing emitted**: `incident.escalated`,
+  `sop.status_changed`, `session.ended` and `calibration.threshold_breach`,
+  from `NOTIFICATION_EVENT_TYPES` and the Terraform provider (0.5.0). A rule on
+  one could never deliver; the API refuses them, and the control plane's
+  migration 246 deletes existing rules on them. `tools/scripts/check-feature-surfaces.js`
+  now fails when a listed event type has no emitter, when an event the
+  router sends is not listed, or when the dashboard's rule picker or the
+  settings guide leaves one out.
+
 ### Fixed
 
 - **`@intutic/clawde`: `signupOrg` accepts `acceptTerms`.** 2.7.0 made the
@@ -68,6 +134,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in front matter the proxy enforces (`hook_rule:` lines and
   `sql_guard: refuse`), and a proxy test parses the sample from the README and
   checks each refusal.
+- **The SOP Optimizer's routes work with an API key.** Every
+  `/api/v1/dream-cycle` route (the queue, approving and rejecting a
+  proposal, the manual trigger and the settings) answered 400 "Missing
+  x-workspace-id header" to a caller that did not send the header, which
+  only the dashboard does; they now fall back to the caller's workspace.
+- **Revoking an API key you have no live key for is a `404`.**
+  `DELETE /api/v1/keys/:id` answered `200 { "revoked": true }` for an id
+  that did not exist, belonged to another member or was already revoked, so
+  a mistyped id read as a revocation (and a second revoke rewrote the
+  revocation time). It now answers `404` with
+  `{ "error": "API key not found", "code": "E_NOT_FOUND" }` and changes and
+  records nothing; `intutic keys revoke` says so and exits 1, and the SDKs'
+  `revokeApiKey` / `revoke_api_key` raise. The Terraform provider already
+  treats a `404` on destroy as gone.
+- **An owner or admin can revoke any member's API key.** `DELETE
+  /api/v1/keys/:id` looked only among the caller's own keys, so an
+  administrator offboarding someone, or a Terraform destroy run with
+  another admin's key, could not withdraw it. An OWNER or ADMIN now revokes
+  any live key in the workspace (a DEVELOPER or VIEWER still only their
+  own; a key in another workspace is a `404`), and the credential change
+  records the key's owner beside who revoked it (`owner_id` in SIEM export,
+  `ownerId` on the audit timeline). `intutic_virtual_key` (Terraform
+  provider 0.5.0) keeps such a key in state and revokes it on destroy: its
+  refresh read only the caller's keys and dropped it.
+- **Six notification events reached no rule.** `sop.cascade.alert`,
+  `sop.cascade.invalidated`, `finops.tokens.classified` and the three
+  `org.cells.*` events were emitted without naming a workspace, and the
+  notification router can only dispatch an event to the rules of the
+  workspace it names, so a rule on any of them was accepted and never fired.
+  The cascade events name the root guideline's workspace (and carry the
+  fields the router reads), `finops.tokens.classified` the workspace whose
+  traces were classified, and each `org.cells.*` event every workspace of the
+  org. `identity.offboarding.completed` was emitted and never routed; it now
+  reaches its rules, HIGH when a step of the offboarding failed and INFO
+  otherwise.
 
 ## [2.7.0] - 2026-10-15
 
