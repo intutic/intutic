@@ -2,7 +2,7 @@ terraform {
   required_providers {
     intutic = {
       source  = "intutic/intutic"
-      version = "~> 0.2"
+      version = "~> 0.4"
     }
   }
 

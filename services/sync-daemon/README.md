@@ -15,7 +15,7 @@ fetch config → write harness files → compute hashes → report drift
 On each sync cycle the daemon:
 
 1. **Fetches** the latest SOP configuration from the control plane
-2. **Writes** harness-specific config files using its format-aware config writers
+2. **Writes** harness-specific config files: the CLI's harness adapters write the rules files, and this package's gate writers and config mergers the gates and settings they need
 3. **Computes** content hashes for drift detection
 4. **Reports** any detected drift back to the control plane
 
@@ -23,27 +23,27 @@ On each sync cycle the daemon:
 
 ### Config Writers
 
-Harness-specific config writers (one module per harness under `src/harness/`) that translate governance SOPs into native configuration formats (YAML, JSON, TOML, Markdown, environment variables); most of them emit blocking pre-tool gates. The authoritative list of which harness gets which gate shape is `gateKind.ts` in `@intutic/shared-types`, and `__tests__/harness/gateRegistry.ts` exercises every generated gate — counts are not repeated here because they drifted every time a harness was added.
+The rules files are written by the CLI's harness adapters (one module per harness under `tools/cli/src/harness/`), which `intutic connect` runs. This package's `src/harness/` holds what they call: the gate writers (`*Hooks.ts`) and config mergers that translate governance SOPs into native configuration formats (YAML, JSON, TOML, Markdown, environment variables); most harnesses get a blocking pre-tool gate. The authoritative list of which harness gets which gate shape is `gateKind.ts` in `@intutic/shared-types`, and `__tests__/harness/gateRegistry.ts` exercises every generated gate — counts are not repeated here because they drifted every time a harness was added.
 
 ### Atomic Writes
 
-All config file writes use a write-to-tmp + rename pattern to prevent partial writes from corrupting harness configurations.
+Every write of a file a harness or gate reads (gate scripts, hook registrations, harness settings, the policy snapshot) goes to a temp file beside the target and is renamed over it (`src/lib/atomicWrite.ts`), so a reader never sees a partial file.
 
 ### macOS Immutable Flag Enforcement
 
-On macOS, the daemon sets the immutable flag (`chflags uchg`) on managed config files to prevent accidental manual edits that would cause governance drift.
+When the workspace's `bypassEnforcementTier` is `immutable`, the daemon sets the macOS immutable flag (`chflags uchg`) on the rules files it manages between cycles, so a hand edit fails. The default tier, `rewrite`, sets no flag.
 
 ### Drift Detection
 
-Content-hash-based drift detection identifies when harness config files have been modified outside of the sync loop and reports the discrepancy to the control plane.
+Content-hash-based drift detection identifies when a harness rules file has been modified outside of the sync loop and reports the discrepancy to the control plane. Under the default `rewrite` tier the daemon also puts the file back, keeping the edited copy as `<file>.drift-backup`; under `alert-only` the edit stays and is only reported.
 
 ### Trajectory Monitoring
 
-Watches the proxy's live trace events, buffers them per session in a sliding window, and submits trajectory summaries to the control plane for governance evaluation. No LLM runs on the developer machine.
+Runs in the `intutic connect` process: watches the proxy's live trace events, buffers them per session in a sliding window, and submits trajectory summaries to the control plane for governance evaluation. A summary the control plane cannot take yet is spooled to `~/.intutic/events/offline-trajectories.jsonl` (capped at 16 MB) and retried; one it refuses with a non-retryable 4xx is dropped. No LLM runs on the developer machine.
 
 ### Config Capture
 
-Captures point-in-time snapshots of all harness configurations for audit, compliance, and historical comparison.
+Captures each recorded harness's rules file for the workspace's config history. By default a capture is metadata only (path, SHA-256 of the redacted text, size); with the workspace's `configBodyUpload` setting on, it carries the text too, credential-shaped strings replaced by `[redacted]` first.
 
 ## Usage
 

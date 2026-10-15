@@ -29,6 +29,7 @@ import { Gate, GateClient, install, wrapTools } from '@intutic/gate'
 
 const gate = new Gate(
   { workspaceId: process.env.INTUTIC_WORKSPACE_ID },
+  // throws unless INTUTIC_SESSION_ID is set or you pass { sessionId }
   GateClient.fromEnv({ harness: 'my-framework' }),
 )
 install(gate) // process-wide default; wrapTool()/wrapTools() pick it up
@@ -81,7 +82,7 @@ SDKs run `packages/shared-types/fixtures/gate-client-credentials-vectors.json`.
 | `GateClient` | `client.ts` | Control-plane client (`hookGate`, `emit`, `localOnly`, `GateClient.fromEnv(...)`). |
 | `wrapTool(fn \| tool, opts?)`, `wrapTools(list \| record, gate?)` | `wrapTools.ts` | Generic wrapping for a plain async function or an `{ execute, ... }`-shaped tool object. **This is the integration point for any JS framework without a dedicated adapter — LangChain.js included.** |
 | `intuticHeaders(opts?)` | `headers.ts` | Headers for a proxy-pointed HTTP/OpenAI-compatible client (`x-session-id`, `x-workspace-id`, `x-intutic-harness`). |
-| `loadSnapshot`, `evaluate`, `Snapshot`, `guardDisabledFromEnv` | `snapshot.ts` | Tier A1: reads `~/.intutic/hooks/policy-snapshot.rules`. |
+| `loadSnapshot`, `evaluate`, `Snapshot`, `guardDisabledFromEnv` | `snapshot.ts` | Tier A1: reads `~/.intutic/hooks/policy-snapshot.rules` (or the file `INTUTIC_SNAPSHOT_RULES` names). |
 | `parseRules`, `firstMatch`, `fetchRules`, `fetchRegister`, `parseRegister`, `SopRule`, `SopRegister` | `soprules.ts` | Tier A3: SOP-authored `WHERE`-clause rules, and the register they come in (rules plus the workspace's intervention mode). |
 | `checkCommand`, `checkImages`, `checkWrittenManifest`, `ImageVerdict` | `imagecheck.ts` | Tier A2: container-image provenance on deploy commands. |
 | `McpRegistryRecord`, `McpAllowlistRecord` | `mcpRegistryRecord.ts` | Tier M: the snapshot's MCP server registry and allowlist (`Snapshot.mcpRegistry`, `Snapshot.mcpAllowlist`), decided as the hook gates and the MCP proxy decide them; a byte-identical copy of `@intutic/shared-types`' module. |
