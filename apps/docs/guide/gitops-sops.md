@@ -1,7 +1,7 @@
 # GitOps for SOPs <Badge type="tip" text="Cloud" />
 
 Two planes hold SOPs, and until now they barely connected. `.intutic/sops/*.md`
-is the **file plane** — git-reviewable, enforced directly by the local proxy,
+and `.intutic/sops/<name>/*.md` are the **file plane** — git-reviewable, enforced directly by the local proxy,
 deliverable to a Kubernetes cluster as a `proxy-sops` ConfigMap (see
 [Agent Guidelines](/guide/sops) for where the proxy looks and what
 `INTUTIC_SOPS_DIR` is for). The control plane's `sop_registry` is the **DB

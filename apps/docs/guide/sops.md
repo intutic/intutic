@@ -162,6 +162,23 @@ That is exactly right for the deployment Intutic is built around: the proxy runs
 machine, beside the workspace whose rules it is enforcing, so the SOPs it should apply are the
 ones sitting in the repository you are working in.
 
+It reads every `.md` file directly in that directory and every `.md` file one folder down,
+so both layouts work and can be mixed:
+
+```text
+.intutic/sops/
+├── deploy.md            # loaded as "deploy"
+└── safety/              # a rule set
+    └── rules.md         # loaded as "safety/rules"
+```
+
+Deeper folders, and folders whose name starts with `.`, are not read. `intutic connect` reads
+the same files when it writes each harness's rules file, so a SOP is never in force at one
+layer and missing from the other. A session's `--sops` selection (see
+[Personal local-only SOPs](#personal-local-only-sops-session-scoping)) narrows which folders
+`intutic connect` writes into the rules files; the proxy enforces the front matter of every
+file whatever the selection, because the selection is made from inside the agent's own chat.
+
 ::: warning A proxy that does not run beside a workspace finds no SOPs at all
 Run the same binary in a container and the walk starts somewhere like
 `/home/intutic` and finds nothing. There is no error, because "this workspace has no SOPs" is
@@ -213,9 +230,8 @@ to be handed to a containerised proxy explicitly.
 <!-- ENTERPRISE_ONLY_START -->
 Guardrails derived from policy documents reach a disk-reading proxy the same way:
 `intutic guardrails pull` writes each SHADOW or ENFORCING front-matter guardrail to
-`.intutic/sops/guardrail-<id>.md`, flat beside your own SOPs — the proxy reads that one
-directory and titles each SOP by its file name, and that name is what its shadow reports are
-credited to. A gateway-mode proxy reads the served projection directly and ignores the
+`.intutic/sops/guardrail-<id>.md`, flat beside your own SOPs — the proxy titles each flat
+SOP by its file name, and that name is what its shadow reports are credited to. A gateway-mode proxy reads the served projection directly and ignores the
 directory. See [Policy Guardrails](/guide/policy-guardrails).
 <!-- ENTERPRISE_ONLY_END -->
 
@@ -278,10 +294,10 @@ The comment is for people reading the file: it names the SOP a rule came from, s
 
 In addition to organization-wide policies synced from the centralized control plane dashboard, Intutic allows developers to define **personal, local-only SOPs** scoped specifically to your local session workspace:
 
-* **File Location**: Organize your personal rules inside subdirectories of `.intutic/sops/` (e.g., `.intutic/sops/security-dlp/rules.md` or `.intutic/sops/postgres-migration/migration.md`).
+* **File Location**: Put your personal rules in `.intutic/sops/`, as files directly in it (e.g., `.intutic/sops/no-force-push.md`) or grouped into folders, one per rule set (e.g., `.intutic/sops/security-dlp/rules.md` or `.intutic/sops/postgres-migration/migration.md`). A folder is a rule set you can select for a session; a file directly in `.intutic/sops/` applies to every session.
 * **Initialization & Scoping**: When you run `@intutic initialize`, the control plane lists both open board tickets and detected local rules folders as numbered choices.
 * **Activating SOPs**: Start the session scoping to a subset of local SOPs using option indices or names with the `--sops` flag (e.g., `@intutic start 1 --sops=3` or `@intutic start --sops=security-dlp`).
-* **Execution**: During the scoped session, the local daemon merges only the selected active local rules with corporate policies before writing them to each harness's rules file (such as `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`) and evaluating pre-flight prompts. If no options are specified, all detected local SOP folders are active by default.
+* **Execution**: During the scoped session, the local daemon merges only the selected active local rules with corporate policies before writing them to each harness's rules file (such as `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`) and evaluating pre-flight prompts. If no options are specified, all detected local SOP folders are active by default. Files directly in `.intutic/sops/` are always included, and the proxy enforces the front matter of every SOP file whatever the selection (see [Where the proxy looks for SOPs](#where-the-proxy-looks-for-sops)).
 * **Privacy Preservation**: If a personal prose rule is violated, the anomaly is flagged in the developer's console output to offer steering guidance. `deny_tools:` front matter in the same files is enforced harder: a call to a denied tool is blocked outright (the proxy withholds the response that carries it and the agent reads an `UNAUTHORIZED_TOOL` refusal instead), and `allow_harnesses:` restricts which harnesses a role may use, but **no incident is logged in the remote organization database/dashboard**. `plan_steps:` is advisory rather than blocking — it declares the steps the SOP's task should consist of, and work drifting outside them raises a `SCOPE_VIOLATION` that steers. See [Graph guardrails](/guide/graph-guardrails#did-it-stay-inside-the-plan).
 * **Sharing & Version Control**: Since these rules are standard text files, you can check them into Git version control to share with specific teammates or add the `.intutic/sops/` folder to `.gitignore` to keep them strictly private to your machine.
 

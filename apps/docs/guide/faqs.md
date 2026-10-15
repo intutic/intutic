@@ -38,7 +38,7 @@ It is a hybrid system divided between the **Local Rust Proxy** and the **Remote 
 ### 4. Is Intutic usable in pure Open-Core?
 
 **Yes, absolutely.** The open-core version is fully functional as a developer sandbox:
-*   Developers can define personal, local-only guidelines in `.intutic/sops/` subdirectories.
+*   Developers can define personal, local-only guidelines in `.intutic/sops/`, as files directly in it or in subdirectories.
 *   Once a control plane is connected, the sync daemon (`intutic connect`) also merges these local guidelines into each harness's rules file as they change, such as `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`.
 *   The local proxy reads the same files: it injects the SOPs that apply into each request and blocks tool calls they list under `deny_tools`, and custom WASM rules run in its sandbox.
 *   This setup protects developer privacy: local rule deviations are kept entirely offline in your workspace, while providing active stream-level interception and rule enforcement. Central database logging, trajectory analysis and config-drift reporting are only enabled when connected to the commercial control plane.

@@ -74,6 +74,7 @@ import { SyncWsClient,
   writeBundledSkills,
   clearImmutable,
   setImmutable,
+  loadLocalSopEntries,
 } from '@intutic/sync-daemon'
 import { watch } from 'chokidar'
 // Named, not default: under `module: Node16` TypeScript resolves ioredis's
@@ -670,61 +671,23 @@ export async function runConnect(opts: {
     if (configMoved) {
       log.info(`Applying configuration v${syncConfig.configVersion}...`)
 
-      // Load and compile local SOP entries
-      const localSopEntries: SyncSopEntry[] = []
-      try {
-        const sessionContextPath = node_path.join(safeConfig.workspaceRoot, '.intutic', 'session-context.json')
-        let activeLocalSops: string[] | undefined
-        try {
-          const raw = await node_fs.readFile(sessionContextPath, 'utf-8')
-          const parsed = JSON.parse(raw)
-          activeLocalSops = parsed.activeLocalSops
-        } catch {
-          // not configured yet
-        }
-
-        const sopsDir = node_path.join(safeConfig.workspaceRoot, '.intutic', 'sops')
-        const entries = await node_fs.readdir(sopsDir, { withFileTypes: true })
-        const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name)
-
-        const activeDirs = activeLocalSops !== undefined
-          ? dirs.filter((d) => activeLocalSops!.includes(d))
-          : dirs
-
-        for (const dirName of activeDirs) {
-          const dirPath = node_path.join(sopsDir, dirName)
-          const files = await node_fs.readdir(dirPath)
-          const mdFiles = files.filter((f) => f.endsWith('.md'))
-          
-          for (const file of mdFiles) {
-            const filePath = node_path.join(dirPath, file)
-            const content = await node_fs.readFile(filePath, 'utf-8')
-            localSopEntries.push({
-              sopId: `local:${dirName}:${file}`,
-              title: `Local SOP: ${dirName}/${file}`,
-              content,
-              contentHash: '',
-              harnessTargets: safeConfig.harnesses as HarnessType[],
-            })
-          }
-        }
-      } catch (err) {
-        // Only a missing `.intutic/sops` is unremarkable — most workspaces have
-        // none, and `readdir` ENOENTs on the first line of the block.
-        //
-        // Everything else was being swallowed with it, and the block goes on to
-        // read every SOP file: an unreadable file or a permissions error dropped
-        // that SOP from `localSopEntries`, and the harness configs written a few
-        // lines below were then generated *without* it, silently. Governance
-        // content going missing is the failure this whole function exists to
-        // prevent, so it does not get to be quiet.
-        const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined
-        if (code !== 'ENOENT') {
-          log.warn(
-            `Failed to load local SOPs from .intutic/sops — harness configs will be written without them: ${err instanceof Error ? err.message : String(err)}`
-          )
-        }
-      }
+      // Load and compile local SOP entries: `.intutic/sops/*.md` and
+      // `.intutic/sops/<set>/*.md`, the files the proxy enforces. A pulled copy
+      // of a SOP this config already carries is left out, so it is not written
+      // twice.
+      //
+      // Only a missing `.intutic/sops` is unremarkable — most workspaces have
+      // none. Any other read error is reported: an unreadable file or a
+      // permissions error drops that SOP, and the harness configs written a
+      // few lines below are then generated *without* it. Governance content
+      // going missing is the failure this whole function exists to prevent, so
+      // it does not get to be quiet.
+      const localSopEntries = await loadLocalSopEntries(safeConfig.workspaceRoot, safeConfig.harnesses as HarnessType[], {
+        skipSopIds: new Set(syncConfig.sops.map((s) => s.sopId)),
+        onError: (err) => log.warn(
+          `Failed to load local SOPs from .intutic/sops — harness configs will be written without them: ${err instanceof Error ? err.message : String(err)}`
+        ),
+      })
 
       const combinedSops = [...syncConfig.sops, ...localSopEntries]
 

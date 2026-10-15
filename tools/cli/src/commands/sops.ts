@@ -6,6 +6,7 @@ import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
+import { listSopFiles } from '@intutic/sync-daemon'
 import {
   parseSopFile,
   titleFromFileName,
@@ -446,24 +447,12 @@ interface LocalSopFile {
  * them. Empty when the directory does not exist.
  */
 async function readLocalSops(sopsDir: string): Promise<LocalSopFile[]> {
-  let entries: import('node:fs').Dirent[]
-  try {
-    entries = await fs.readdir(sopsDir, { withFileTypes: true })
-  } catch {
-    return []
-  }
+  const files = await listSopFiles(sopsDir).catch(() => [])
   const out: LocalSopFile[] = []
-  const add = async (path: string, label: string) => {
+  for (const { path, folder, file } of files) {
+    if (folder === null && file.startsWith('guardrail-')) continue
     const raw = await fs.readFile(path, 'utf-8').catch(() => null)
-    if (raw !== null) out.push({ path, label, raw, parsed: parseSopFile(raw) })
-  }
-  for (const e of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
-    if (e.isFile() && e.name.endsWith('.md') && !e.name.startsWith('guardrail-')) {
-      await add(join(sopsDir, e.name), e.name)
-    } else if (e.isDirectory()) {
-      const inner = await fs.readdir(join(sopsDir, e.name)).catch(() => [] as string[])
-      for (const f of inner.filter((n) => n.endsWith('.md')).sort()) await add(join(sopsDir, e.name, f), `${e.name}/${f}`)
-    }
+    if (raw !== null) out.push({ path, label: folder === null ? file : `${folder}/${file}`, raw, parsed: parseSopFile(raw) })
   }
   return out
 }

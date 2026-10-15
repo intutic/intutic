@@ -15,6 +15,7 @@ import { promisify } from 'node:util'
 import { HarnessType as HarnessTypes, rulesFileOf } from '@intutic/shared-types'
 import type { HarnessType, SyncSopEntry, ConfigEdit } from '@intutic/shared-types'
 import { writeFileAtomic } from './lib/atomicWrite.js'
+import { listSopFiles, recordedSopId } from './lib/sopFiles.js'
 
 const execFile = promisify(_execFile)
 
@@ -74,54 +75,68 @@ export const HARNESS_FILES: Record<HarnessType, string> = Object.fromEntries(
   (Object.values(HarnessTypes) as HarnessType[]).map((h) => [h, rulesFileOf(h) ?? (ENV_INTUTIC_WRITERS.includes(h) ? '.env.intutic' : '')]),
 ) as Record<HarnessType, string>
 
+/** What {@link loadLocalSopEntries} can be asked besides the workspace. */
+export interface LoadLocalSopOptions {
+  /**
+   * Control-plane SOP ids already in hand (the synced SOPs). A local file whose
+   * `intutic_id:` names one of them is a copy `intutic sops pull` wrote, and
+   * loading it as well would put the same SOP into the rules file twice.
+   */
+  skipSopIds?: ReadonlySet<string>
+  /**
+   * Told of a read error other than a missing `.intutic/sops`; the SOPs read
+   * before it are still returned. Unset, errors are dropped.
+   */
+  onError?: (err: unknown) => void
+}
+
 /**
- * The workspace's local SOPs (`.intutic/sops/<dir>/*.md`, narrowed by
- * `session-context.json`'s `activeLocalSops` when present). Read by the
- * gate-cache refresh, which compiles their
- * `review_before:` tokens into hold rules. A missing
- * directory is an empty list.
+ * The workspace's local SOPs: `.intutic/sops/*.md` and `.intutic/sops/<set>/*.md`
+ * (see `lib/sopFiles.ts`), the same files the proxy enforces. A session's
+ * selection (`session-context.json`'s `activeLocalSops`, folder names) narrows
+ * the folders; a flat file is in every session. `guardrail-*.md` files are
+ * skipped: `intutic guardrails pull` writes them for a proxy that reads SOPs
+ * from disk, and a connected machine receives those guardrails from the
+ * control plane. Read by `intutic connect` for the harness rules files and by
+ * the gate-cache refresh, which compiles their `review_before:` tokens into
+ * hold rules. A missing directory is an empty list.
  */
-export async function loadLocalSopEntries(workspaceRoot: string, harnesses: HarnessType[]): Promise<SyncSopEntry[]> {
-const localSopEntries: SyncSopEntry[] = []
-try {
-  const sessionContextPath = node_path.join(workspaceRoot, '.intutic', 'session-context.json')
-  let activeLocalSops: string[] | undefined
+export async function loadLocalSopEntries(
+  workspaceRoot: string,
+  harnesses: HarnessType[],
+  opts: LoadLocalSopOptions = {},
+): Promise<SyncSopEntry[]> {
+  const localSopEntries: SyncSopEntry[] = []
   try {
-    const raw = await node_fs.readFile(sessionContextPath, 'utf-8')
-    const parsed = JSON.parse(raw)
-    activeLocalSops = parsed.activeLocalSops
-  } catch {
-    // not configured yet
-  }
+    const sessionContextPath = node_path.join(workspaceRoot, '.intutic', 'session-context.json')
+    let activeLocalSops: string[] | undefined
+    try {
+      const raw = await node_fs.readFile(sessionContextPath, 'utf-8')
+      const parsed = JSON.parse(raw)
+      activeLocalSops = parsed.activeLocalSops
+    } catch {
+      // not configured yet
+    }
 
-  const sopsDir = node_path.join(workspaceRoot, '.intutic', 'sops')
-  const entries = await node_fs.readdir(sopsDir, { withFileTypes: true })
-  const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name)
-
-  const activeDirs = activeLocalSops !== undefined
-    ? dirs.filter((d) => activeLocalSops!.includes(d))
-    : dirs
-
-  for (const dirName of activeDirs) {
-    const dirPath = node_path.join(sopsDir, dirName)
-    const files = await node_fs.readdir(dirPath)
-    const mdFiles = files.filter((f) => f.endsWith('.md'))
-    
-    for (const file of mdFiles) {
-      const filePath = node_path.join(dirPath, file)
-      const content = await node_fs.readFile(filePath, 'utf-8')
+    const files = await listSopFiles(node_path.join(workspaceRoot, '.intutic', 'sops'), (_folder, err) => opts.onError?.(err))
+    for (const { path, folder, file } of files) {
+      if (folder === null && file.startsWith('guardrail-')) continue
+      if (folder !== null && activeLocalSops !== undefined && !activeLocalSops.includes(folder)) continue
+      const content = await node_fs.readFile(path, 'utf-8')
+      const recorded = recordedSopId(content)
+      if (recorded !== null && opts.skipSopIds?.has(recorded)) continue
+      const label = folder === null ? file : `${folder}/${file}`
       localSopEntries.push({
-        sopId: `local:${dirName}:${file}`,
-        title: `Local SOP: ${dirName}/${file}`,
+        sopId: folder === null ? `local:${file}` : `local:${folder}:${file}`,
+        title: `Local SOP: ${label}`,
         content,
         contentHash: '',
         harnessTargets: harnesses,
       })
     }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') opts.onError?.(err)
   }
-} catch {
-  // ignore directory read errors (e.g. if sops folder doesn't exist)
-}
   return localSopEntries
 }
 

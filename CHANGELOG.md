@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The proxy and `intutic connect` read the same SOP files.** The proxy read
+  only the `.md` files directly in `.intutic/sops/`, while `intutic connect`
+  read only the files one folder down (`.intutic/sops/<set>/*.md`), so a SOP
+  was enforced by the proxy or written into the harness rules files, never
+  both. Every reader now takes both layouts: the proxy (a file in a folder is
+  titled `<set>/<name>`), `intutic connect`, the gate's local `review_before`
+  holds, `intutic sops status` and the agent report. Folders whose name starts
+  with `.` are skipped, so a Kubernetes ConfigMap mount is not read three
+  times. `intutic connect` leaves out `guardrail-*.md` files and pulled copies
+  of SOPs it already receives from the control plane, so the rules files do
+  not hold a SOP twice. A session's `--sops` selection still narrows the
+  folders written into the rules files; the proxy enforces every file.
+- **The README's first SOP enforces what it shows.** Its commands sat under a
+  "Denied Commands" heading that no gate reads. The sample now declares them
+  in front matter the proxy enforces (`hook_rule:` lines and
+  `sql_guard: refuse`), and a proxy test parses the sample from the README and
+  checks each refusal.
+
 ## [2.7.0] - 2026-10-15
 
 ### Added
