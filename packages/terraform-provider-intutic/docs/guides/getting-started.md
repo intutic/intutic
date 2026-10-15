@@ -20,7 +20,7 @@ terraform {
   required_providers {
     intutic = {
       source  = "intutic/intutic"
-      version = "~> 0.2"
+      version = "~> 0.4"
     }
   }
 }
@@ -28,7 +28,7 @@ terraform {
 
 `terraform init` downloads it from the Registry and checks its signature. Commit the `.terraform.lock.hcl` it writes, so every run uses the same build.
 
-Before 1.0, a minor release can change behaviour you rely on: 0.2.0 did. `~> 0.2` takes every later 0.x release, so read the [changelog](https://github.com/intutic/intutic/blob/main/packages/terraform-provider-intutic/CHANGELOG.md) before `terraform init -upgrade` moves the lock file to a new release.
+Before 1.0, a minor release can change behaviour you rely on: 0.4.0 removed the `intutic_policy` resource. `~> 0.4` takes every later 0.x release, so read the [changelog](https://github.com/intutic/intutic/blob/main/packages/terraform-provider-intutic/CHANGELOG.md) before `terraform init -upgrade` moves the lock file to a new release.
 
 ## Authenticate
 
@@ -110,7 +110,7 @@ terraform apply
 
 After the apply, `sop_lifecycle_state` is `DRAFT`, and the SOP is listed in the dashboard. Run `terraform plan` again: it reports no changes, because the workspace now matches the configuration.
 
-Change the SOP's `markdown_content` and plan again to see an update. A draft is edited in place. Once a SOP has left `DRAFT`, an edit creates a new draft version with a new id and retires the old one, as an edit in the dashboard does, and the plan shows the `id` as known after apply.
+Change the SOP's `markdown_content` and plan again to see an update. A draft is edited in place. Once a SOP has left `DRAFT`, an edit creates a new draft version with a new id, as an edit in the dashboard does, and the plan shows the `id` as known after apply. The old version keeps enforcing until the new one is promoted to `VALIDATED`.
 
 `terraform destroy` deletes the SOP. The API keeps its version history.
 

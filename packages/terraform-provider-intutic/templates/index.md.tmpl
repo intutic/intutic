@@ -1,16 +1,16 @@
 ---
 page_title: "Intutic Provider"
 description: |-
-  Manage an Intutic workspace's SOPs, policy guardrails, settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters, upstream provider credentials and MCP server decisions as code.
+  Manage an Intutic workspace's SOPs, policy guardrails, settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters, upstream provider credentials, MCP server decisions, and workspace and member spend budgets as code.
 ---
 
 # Intutic Provider
 
-The Intutic provider manages one Intutic workspace through the control plane's REST API: SOPs, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters (WASM and Rego rules), upstream provider credentials (bring your own key) and MCP server decisions.
+The Intutic provider manages one Intutic workspace through the control plane's REST API: SOPs, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters (WASM and Rego rules), upstream provider credentials (bring your own key), MCP server decisions, and workspace and member spend budgets.
 
 ## Authentication
 
-The provider authenticates with a workspace API key (`vk_…`). Create one under **Settings › Security › Virtual API Keys** and tick **This key is for automation**, which exempts it from the SSO-recency window while keeping it revocable and bound to its member. The provider acts as that key's member, so the member's role must allow every change in the configuration: most resources need OWNER or ADMIN.
+The provider authenticates with a workspace API key (`vk_…`). Create one under **Settings › Security › Virtual API Keys** and tick **This key is for automation**, which exempts it from the SSO-recency window while keeping it revocable and bound to its member. The provider acts as that key's member, so the member's role must allow every change in the configuration: most resources need OWNER or ADMIN. The key's `scopes` must cover those routes too; the default, `*`, covers everything the role allows.
 
 Pass the key as `api_key`, or set `INTUTIC_API_KEY`. For a self-hosted control plane, set `endpoint` or `INTUTIC_CONTROL_PLANE_URL`.
 
