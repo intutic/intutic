@@ -140,6 +140,29 @@ describe('connect runs the per-cycle sync work the docs promise', () => {
     expect(pollBody).toMatch(/if \(shouldCaptureThisIteration\(pollIteration\)\)/)
     expect(pollBody).toMatch(/pollIteration\+\+/)
   })
+
+  // connect read only `.intutic/sops/<set>/*.md` and the proxy only the flat
+  // `*.md`, so a SOP placed for one was missing from the other. Both layouts
+  // are read by the shared loader (tested in the sync daemon's
+  // localSopLayout.test.ts); this pins that connect uses it rather than a
+  // reader of its own.
+  it('writes the local SOPs the shared loader reads, flat and foldered, into the rules files', async () => {
+    const { applyBody } = await source()
+    const load = applyBody.indexOf('await loadLocalSopEntries(safeConfig.workspaceRoot,')
+    expect(load, 'connect must load local SOPs through loadLocalSopEntries').toBeGreaterThan(0)
+    expect(load).toBeLessThan(applyBody.indexOf('const combinedSops = [...syncConfig.sops, ...localSopEntries]'))
+    expect(applyBody).not.toMatch(/readdir\(sopsDir/)
+    expect(applyBody).toMatch(/skipSopIds: new Set\(syncConfig\.sops\.map\(\(s\) => s\.sopId\)\)/)
+  })
+
+  // `/intutic initialize` offered folders only, so a single-file SOP could
+  // not be selected for a session. connect reports the rule sets the shared
+  // lister gives (folders, then flat files; tested in localSopLayout.test.ts).
+  it('reports folders and flat files as the local rule sets', async () => {
+    const { src } = await source()
+    const scan = src.slice(src.indexOf('async function scanLocalSops('))
+    expect(scan.slice(0, scan.indexOf('\n}\n'))).toMatch(/return listSopSets\(node_path\.join\(workspaceRoot, '\.intutic', 'sops'\)\)/)
+  })
 })
 
 // The root Cargo.toml is a workspace with packages/proxy as a member, so the

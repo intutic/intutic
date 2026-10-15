@@ -44,7 +44,7 @@ Every governance check proxy mode applies to a stdio server — allowlists, `too
 
 ### DLP Scanning
 
-Built-in patterns, plus any the workspace adds. A match in a call's arguments blocks the call; a credential in a result is redacted before the agent reads it:
+Built-in patterns only: there are no workspace-defined DLP patterns here (custom patterns are a setting of the LLM proxy's own configuration, `dlp.patterns`). A match in a call's arguments blocks the call; a credential in a result is redacted before the agent reads it:
 
 - 9 secret patterns: OpenAI, Anthropic and Google API keys, GitHub personal access and server tokens, Slack bot and user tokens, AWS access key IDs, and long hex strings that look like secrets
 - 2 private-key patterns: PEM and EC private key headers
@@ -65,7 +65,7 @@ Built-in patterns, plus any the workspace adds. A match in a call's arguments bl
 | Binary | Description |
 |--------|-------------|
 | `intutic-mcp-proxy` | Wraps an MCP server (stdio or remote), or with no server to wrap, runs the standalone `intutic` MCP server |
-| `intutic-mcp-daemon` | Long-lived local daemon on a Unix socket (`~/.intutic/mcp-proxy.sock`, or `MCP_DAEMON_SOCKET`) that caches policy and batches telemetry for proxies running with `INTUTIC_MCP_PROXY_MODE=daemon`. Not an MCP server. |
+| `intutic-mcp-daemon` | Long-lived local daemon on a Unix socket (`~/.intutic/mcp-proxy.sock`, or `MCP_DAEMON_SOCKET`) that caches policy and batches telemetry for proxies running with `INTUTIC_MCP_PROXY_MODE=daemon` (read from `~/.intutic/env/runtime.env` only, which `intutic connect` writes from the workspace's `mcpProxyMode` setting). Its shared Valkey policy cache is keyed per caller (workspace, policy generation and a hash of the daemon's API key). Not an MCP server. |
 
 ## Installation
 

@@ -86,11 +86,11 @@ are set in the dashboard as usual.
 
 ## LLM-backed checks
 
-SOP scoring, the trajectory judge and the compliance probes call a model
-through LiteLLM, which the installer runs with `--with-litellm`. LiteLLM sends
-those calls to your own OpenAI-compatible model server (Ollama or vLLM); no
-hosted model is used. Without it the checks fall back to their deterministic
-versions.
+SOP scoring and the trajectory judge call a model through LiteLLM, which the
+installer runs with `--with-litellm`. LiteLLM sends those calls to your own
+OpenAI-compatible model server (Ollama or vLLM); no hosted model is used.
+Without it the checks fall back to their deterministic versions. The compliance
+probes are deterministic and do not use it.
 
 1. In `/opt/intutic/.env`, set:
 
@@ -128,11 +128,13 @@ Set `SMTP_URL` in `.env` (`smtp://host:25`, or `smtps://user:password@host:465`)
 and optionally `EMAIL_FROM` (default `noreply@<hostname>`), then
 `docker compose up -d`.
 
-The onboarding emails are promotional: each carries a one-click unsubscribe
-link, and a recipient who uses it gets no more of them (sign-in, billing and
-alert emails still arrive). Set `COMPANY_POSTAL_ADDRESS` to your postal
-address for their footer, which anti-spam law requires; unset, they go out
-without it and the control plane logs the gap at start-up.
+The onboarding check-in email, sent to a workspace's owner when the workspace
+has no agent sessions three days after it was created, is promotional: it
+carries a one-click unsubscribe link, and a recipient who uses it gets no more
+promotional email (sign-in, billing and alert emails still arrive). Set
+`COMPANY_POSTAL_ADDRESS` to your postal address for its footer, which anti-spam
+law requires; unset, it goes out without it and the control plane logs the gap
+at start-up.
 
 Alerts and approvals go out through the notification hub, which is on with
 every channel: email through `SMTP_URL`, webhooks, Slack and PagerDuty, as your

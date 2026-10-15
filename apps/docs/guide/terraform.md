@@ -14,6 +14,7 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | [`intutic_workspace_settings`](/reference/terraform/resources/workspace_settings) | Workspace settings, only the keys you set | `/api/v1/workspace/settings` |
 | [`intutic_virtual_key`](/reference/terraform/resources/virtual_key) | Virtual API keys (`vk_…`), with their spend budgets and rate limits | `/api/v1/keys` |
 | [`intutic_workspace_budget`](/reference/terraform/resources/workspace_budget) | The workspace's daily and monthly spend caps, and whether each refuses requests | `/api/v1/budget` |
+| [`intutic_sop_optimizer_settings`](/reference/terraform/resources/sop_optimizer_settings) | The [SOP Optimizer](/guide/metaclaw#what-auto-apply-applies)'s approval mode: whether it may auto-apply strengthening proposals (Biz Org and above) | `/api/v1/dream-cycle/settings` |
 | [`intutic_member_budget`](/reference/terraform/resources/member_budget) | A member's spend budgets, or the default member budget (Biz Org and above) | `/api/v1/budget/members` |
 | [`intutic_gateway`](/reference/terraform/resources/gateway) | Self-hosted gateway registrations and their live config | `/api/v1/gateways` |
 | [`intutic_notification_rule`](/reference/terraform/resources/notification_rule) | Slack, email, webhook and PagerDuty notification rules | `/api/v1/notifications/rules` |
@@ -21,6 +22,7 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | [`intutic_siem_destination`](/reference/terraform/resources/siem_destination) | [SIEM export](/guide/siem-export) destinations: syslog, webhook, Splunk, Datadog, GCS and S3 (Biz Org and above) | `/api/v1/siem/destinations` |
 | [`intutic_wasm_rule`](/reference/terraform/resources/wasm_rule) | [Custom filters](/guide/wasm-rules): native WASM rules and Rego policies, uploaded to the workspace (Biz Org and above) | `/api/v1/wasm-rules` |
 | [`intutic_provider_credential`](/reference/terraform/resources/provider_credential) | The workspace's own provider credentials, cloud providers included: AWS Bedrock, Google Vertex AI, Azure OpenAI | `/api/v1/workspace/provider-credentials` |
+| [`intutic_task_connection`](/reference/terraform/resources/task_connection) | Jira Cloud, Linear and PagerDuty connections that attach ticket and incident context to sessions | `/api/v1/task-management/connections` |
 
 Two data sources read the [workspace](/reference/terraform/data-sources/workspace) the key belongs to and its [members](/reference/terraform/data-sources/members). Every resource supports `terraform import`.
 
@@ -32,11 +34,14 @@ The provider is on the Terraform Registry as `intutic/intutic`. Declare it, then
 terraform {
   required_providers {
     intutic = {
-      source = "intutic/intutic"
+      source  = "intutic/intutic"
+      version = "~> 0.4"
     }
   }
 }
 ```
+
+Provider 0.4.0 removed the `intutic_policy` resource, with the control plane's policies API. Before upgrading from an earlier version, delete every `intutic_policy` block and run `terraform state rm` on each one. Write per-tool rules as `intutic_guardrail` with `kind = "hook_rule"`, and set the intervention mode with the `interventionMode` key of `intutic_workspace_settings`; a workspace that has not set it uses `TRANSPARENT`.
 
 Its source is in the open-core repository, under `packages/terraform-provider-intutic`. To run a build of your own instead, build it and point Terraform at the binary:
 
@@ -190,4 +195,5 @@ The API cannot change an uploaded rule's bytes, so a rebuilt file replaces the r
 - Approving a guardrail for shadow and promoting it are review decisions, not Terraform actions.
 - Org-wide SOPs, members and roles, SSO and SCIM are managed in the dashboard.
 - `intutic_workspace_budget` sets the workspace caps; destroying it leaves them as they are. A workspace that has not saved a daily cap is held to $100 a day (see [Budgets](/guide/budgets#workspace-caps)).
+- `intutic_sop_optimizer_settings` sets the SOP Optimizer's approval mode; destroying it sets the mode back to `manual`, and leaving `auto_threshold` out keeps the workspace's current threshold.
 - A virtual key belongs to the member whose key runs Terraform, and Terraform sees only that member's keys.

@@ -40,7 +40,7 @@ No environment-variable override for either the config or state-dir path is docu
 
 ### 2. Initialize Intutic
 
-Run `intutic connect` as normal, against the **main checkout** of the repository Agentic Orchestrator will manage, with its backends recorded. No extra step is needed for Agentic Orchestrator: there is no config for Intutic to write for Agentic Orchestrator itself; connecting Claude Code and/or Codex (the two backends this product can actually gate) is what matters.
+Run `intutic connect` as normal, against the **main checkout** of the repository Agentic Orchestrator will manage, with its backends recorded. No extra step is needed for Agentic Orchestrator: there is no config for Intutic to write for Agentic Orchestrator itself; connecting the backends you use (Claude Code, Codex, OpenCode) is what matters.
 
 ### 3. What gets written
 

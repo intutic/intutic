@@ -26,8 +26,9 @@ request or response path:
 |------|-------|---------|
 | Budget Gate | `plugins/budget_gate.rs`, called from `proxy.rs` | Refuse a request that would pass this machine's daily spend cap (standalone); workspace, key and member budgets are checked beside it in `proxy.rs` |
 | DLP | `dlp::scan`, inline on the request path | Block or redact sensitive data (secrets, PII, credentials); findings reach `DlpEscalationDetector` |
-| Tool authorisation | `UnauthorizedToolDetector` and `plugins/response_gate.rs` | Refuse tools an SOP's `deny_tools` names, on the request and before a response's tool call reaches the client |
-| Response Cache | `plugins/semantic_cache.rs` | Replay the answer to an identical request (exact match, Valkey), or to a reworded plain-text question in the same context (semantic match, TurboVec) |
+| Tool authorisation | `UnauthorizedToolDetector`, `plugins/response_gate.rs` and `plugins/hook_rules.rs` | Refuse tools an SOP's `deny_tools` names, and calls a hook-rule guardrail (a `hook_rule:` SOP line) refuses by tool and argument literals, on the request and before a response's tool call reaches the client (`TOOL_DENIED`, naming `deny_tools.<tool>` or `guardrail.<id>`). A hook rule scoped to workspace roles applies by the member role the caller's key resolves to; an unknown role is held to every rule |
+| Destructive SQL | `plugins/sql_guard.rs`, called from the response gate | Refuse or warn on `DROP`, `TRUNCATE` or an unqualified `DELETE` in a model-emitted shell command against a database outside the allowlist, when an SOP declares `sql_guard:` |
+| Response Cache | `plugins/semantic_cache.rs` | Replay the answer to an identical request (exact match, Valkey), or to a reworded plain-text question in the same context (semantic match, TurboVec). An exchange whose prompt or answer has a DLP match is served but not cached |
 | SOP injection | `sops.rs` | Resolve SOPs by role and inject their content into system prompts |
 
 ### Model Selection
@@ -51,7 +52,7 @@ request or response path:
 
 ### Network Enforcement
 
-- **TLS MITM**: Transparent interception for Windsurf and other harnesses
+- **TLS MITM**: Selective interception on `CONNECT` tunnels, for Windsurf and other harnesses that use the proxy as an HTTPS proxy: AI-provider hosts (plus `INTUTIC_EXTRA_AI_HOSTS`) are terminated and governed, every other host is tunnelled uninspected
 - **OS-level firewall rules**: Generates platform-native default-deny egress rules, so traffic leaves the machine only through the proxy (`intutic-proxy enforce`, `intutic enforce`)
   - macOS: `pf` (Packet Filter) anchor
   - Linux: `nftables`, or `iptables` when `nft` is absent
@@ -59,10 +60,10 @@ request or response path:
 
 ### Security & Observability
 
-- **DLP scanner**: Prefix-anchored secret patterns (no entropy-based matching), plus validated PII detectors for payment cards (Luhn), IBANs (mod 97) and US Social Security numbers (issued ranges), on by default, and email addresses and phone numbers, off by default. `intutic_settings.dlp.detectors` in this machine's config sets each detector's action, and a connected workspace's `piiDetectors` setting sets a baseline the local config may only make stricter. See [PII detectors](https://docs.intutic.ai/guide/policies#pii-detectors)
+- **DLP scanner**: Prefix-anchored secret patterns (no entropy-based matching), plus validated PII detectors for payment cards (Luhn), IBANs (mod 97) and US Social Security numbers (issued ranges), on by default, and email addresses and phone numbers, off by default. `intutic_settings.dlp.detectors` in this machine's config sets each detector's action, and a connected workspace's `piiDetectors` setting sets a baseline the local config may only make stricter. What the proxy keeps (replay contexts, change-manifest targets) is redacted for every detector, email and phone included, whatever the live action (`stored_action` in `src/dlp/pii_detectors.json`). See [PII detectors](https://docs.intutic.ai/guide/policies#pii-detectors)
 - **Code skeleton extraction**: Uses `tree-sitter` and `syn` for AST-level code analysis
 - **Token counting**: Accurate pre-flight token estimation via `tiktoken-rs`
-- **Telemetry**: OpenTelemetry OTLP export for traces and metrics — a `SpanExporter` and `SdkMeterProvider` ship in `src/main.rs`, with the exported instrument set declared in `src/metrics.rs` (snip compaction histograms, egress counters, policy refusals). No logs pipeline
+- **Telemetry**: OpenTelemetry OTLP export for traces and metrics, on when `OTEL_EXPORTER_OTLP_ENDPOINT` is set — a `SpanExporter` and `SdkMeterProvider` ship in `src/main.rs`, with the exported instrument set declared in `src/metrics.rs` (snip compaction histograms, egress counters, policy refusals, upstream retries and fallbacks). No logs pipeline
 
 ## Dependencies
 
@@ -96,6 +97,8 @@ The crate produces a single binary:
 ```
 intutic-proxy
 ```
+
+On npm, `@intutic/proxy` ships no binary: its launcher (`bin/proxy.js`) downloads this version's release asset for the platform on first run, verifies it against the release's `checksums.json`, and caches it in `~/.intutic/bin`.
 
 ## Part of Intutic
 

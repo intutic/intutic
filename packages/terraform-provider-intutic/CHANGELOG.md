@@ -1,3 +1,22 @@
+## 0.5.0 (Unreleased)
+
+BREAKING CHANGES:
+
+* resource/intutic_notification_rule: `event_type` no longer accepts `incident.escalated`, `sop.status_changed`, `session.ended` or `calibration.threshold_breach`. Nothing emitted them, so a rule on one never fired; the API refuses them and the control plane's migration deletes existing rules on them. Remove such rules from your configuration before upgrading.
+
+FEATURES:
+
+* **New Resource:** `intutic_sop_optimizer_settings`: the SOP Optimizer's Approval mode (`mode`, `manual` or `auto`, and `auto_threshold`), through `GET` and `PUT /api/v1/dream-cycle/settings`. It brings back under Terraform the auto-apply switch that 0.3.0 removed with `featureFlags.ff_metaclaw_auto_apply`. An omitted `auto_threshold` keeps the workspace's current one; destroying the resource sets the mode back to `manual`.
+* **New Resource:** `intutic_task_connection`: a Jira Cloud, Linear or PagerDuty connection (`task_provider`, `base_url`, `project_key`, `account_email` for Jira, and a sensitive `api_token`), through `/api/v1/task-management/connections`. The API tests the token with the provider before saving and never returns it, so it is kept in state as configured. The API has no update: changing any argument replaces the connection, and the first apply after an import replaces it with the configured token. A Jira connection without `account_email`, or `account_email` on another provider, fails at plan time.
+
+ENHANCEMENTS:
+
+* resource/intutic_notification_rule: accepts the event types `plan.rejected` and `plan.closed`, which the control plane sent and no rule could name.
+
+BUG FIXES:
+
+* resource/intutic_virtual_key: an OWNER or ADMIN other than the member whose credentials created a key keeps it in state and revokes it on destroy. The refresh read only the calling member's keys, so it dropped such a key from state and destroy never revoked it; it now also finds the key among the workspace's live keys (`GET /api/v1/budget/keys`), and the control plane lets an OWNER or ADMIN revoke any live key in the workspace.
+
 ## 0.4.0 (October 14, 2026)
 
 BREAKING CHANGES:

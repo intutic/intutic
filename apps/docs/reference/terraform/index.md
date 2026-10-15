@@ -42,6 +42,7 @@ provider "intutic" {
 - [intutic_workspace_settings](./resources/workspace_settings)
 - [intutic_virtual_key](./resources/virtual_key)
 - [intutic_workspace_budget](./resources/workspace_budget)
+- [intutic_sop_optimizer_settings](./resources/sop_optimizer_settings)
 - [intutic_member_budget](./resources/member_budget)
 - [intutic_gateway](./resources/gateway)
 - [intutic_notification_rule](./resources/notification_rule)
@@ -49,6 +50,7 @@ provider "intutic" {
 - [intutic_siem_destination](./resources/siem_destination)
 - [intutic_wasm_rule](./resources/wasm_rule)
 - [intutic_provider_credential](./resources/provider_credential)
+- [intutic_task_connection](./resources/task_connection)
 
 ## Data sources
 

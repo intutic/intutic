@@ -14,16 +14,18 @@ One source module per domain under `src/`. Among them:
 |--------|-----------|
 | `enums` | `EnforcementAction`, `HarnessType`, `RiskLevel`, `SopLifecycleState` |
 | `finops` | `TraceEntry`, `CostBreakdown`, `TraceFilters` |
-| `sop` | SOP lifecycle types, rule schemas, hook definitions |
-| `auth` | Session, token, credential types |
+| `sop` | SOPs, lifecycle transitions, proof trees, plans, decision-log entries |
+| `auth` | Login, signup and terms acceptance (`acceptTerms`), JWT payload, API key and member types |
+| `apiKeyScopes` | `API_SCOPES` and `API_SCOPE_AREAS`: what an API key may do (`*`, `gateway:use`, `<area>:read` / `<area>:write`) |
+| `api-contracts` | Request schemas such as `CreateTraceSchema`, each with its inferred type |
 | `identity` | SSO/OIDC provider config, cross-workspace user identity |
 | `sync` | Config sync state, drift detection, harness config types |
-| `policy` | Policy evaluation results, enforcement decisions |
-| `anomaly` | Anomaly detection signals, baseline models |
-| `notifications` | Notification channels, alert templates, delivery status |
-| `billing` | Subscription tiers, usage metering, invoice types |
-| `observability` | Trace spans, metric definitions, log schemas |
-| `responses/` | The control plane's response schemas (`<Thing>Response`, zod with the inferred type): what each route that declares one answers with, as published in the OpenAPI document |
+| `policy` | Permission sets, policy and plugin verdicts, `InterventionMode` |
+| `anomaly` | Anomaly events and classifications, probe results, trust scores (categories and severities come from `@intutic/anomaly-taxonomy`) |
+| `notifications` | Notification channels, event types, rules, delivery status, Slack and webhook payloads |
+| `billing` | Metered usage events and their reconciliation |
+| `observability` | The trace DAG: a trace's sessions and their parents |
+| `responses/` | The control plane's response schemas (`<Thing>Response`, zod with the inferred type): what each route that declares one answers with, as published in the OpenAPI document. `WireFields<T>` is a client's defensive read of one (every declared field, each `unknown` until checked); `fixtures/responses/` holds captured answers the tests hold to them |
 
 ## Usage
 

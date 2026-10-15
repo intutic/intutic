@@ -1,13 +1,15 @@
 {
   // Type-checks the SDK's response types against the control plane's response
-  // schemas (__tests__/response-types/, see conforms.ts there). vitest strips
-  // types without checking them, and the build config covers src/ only, so
-  // this pass is what compiles the assertions. Run by the `typecheck` script.
+  // schemas (__tests__/response-types/, see conforms.ts there), and the request
+  // types against what the control plane requires (__tests__/request-types/).
+  // vitest strips types without checking them, and the build config covers
+  // src/ only, so this pass is what compiles the assertions. Run by the
+  // `typecheck` script.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["__tests__/response-types"],
+  "include": ["__tests__/response-types", "__tests__/request-types"],
   "exclude": ["node_modules", "dist"]
 }

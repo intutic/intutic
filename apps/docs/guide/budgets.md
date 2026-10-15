@@ -43,6 +43,7 @@ Set the workspace's daily and monthly caps, the alert threshold, and whether eac
 - **Only what you send changes.** A field left out of the `PUT` keeps its value, and `null` returns it to its default. So changing the monthly cap alone does not save a daily cap.
 - A workspace that has never saved a daily cap has a **daily cap of $100**, hard like any other, and a monthly cap of $500 that only raises alerts. Settings › Billing and `intutic budget` say when the daily cap is that default, and `GET /api/v1/budget` answers `daily_budget_is_default: true`. Saving your own daily cap replaces the default at once.
 - To go back to the default daily cap, send `"daily_budget_usd": null`, run `intutic budget set --daily default`, choose **Use the $100.00 default daily cap** under **Budget Limits**, or leave `daily_budget_usd` out of `intutic_workspace_budget`.
+- **A workspace moved to the free plan gets the free plan's caps**: $5 a day and $150 a month. A cancelled subscription sets them. The third failed payment lowers the caps to the free plan's but never raises them, so a workspace outside an organization keeps a cap that was already lower, and the caps come back with the plan once the overdue payment is made. See [Failed payments](/guide/plans#failed-payments).
 
 The caps belong to the workspace: every member and every virtual key in it draws on the same amount. A change applies from each key's next request.
 

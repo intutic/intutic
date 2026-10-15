@@ -27,9 +27,9 @@ has the terms. Talk to Intutic sales to start.
 | nginx (Compose) or your Ingress (Kubernetes) | One HTTPS address for all of the above |
 
 Optional: a semantic response cache (TurboVec) and a LiteLLM gateway in front
-of your own model server, which powers the LLM-backed checks (SOP scoring, the
-trajectory judge, compliance probes). Without one, those checks fall back to
-their deterministic versions.
+of your own model server, which powers the LLM-backed checks (SOP scoring and
+the trajectory judge). Without one, those checks fall back to their
+deterministic versions. The compliance probes are deterministic and do not use it.
 
 ## What is different from Intutic Cloud
 

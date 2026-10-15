@@ -395,7 +395,7 @@ that login.
    `.agents/skills/` when they are missing.
 3. Every `--interval`, and whenever the control plane pushes a change, fetches the workspace
    config and writes each detected harness's config file from the workspace SOPs plus the local
-   SOP folders under `.intutic/sops/`, then refreshes the policy snapshot. Every configured
+   SOPs under `.intutic/sops/`, then refreshes the policy snapshot. Every configured
    harness that has a tool-call hook gets its gate. Where the harness has a key for it, the hook
    entry carries a 10-second timeout, and each gate refuses with `GATE_DEADLINE` one second
    before its harness's timeout, at most 9 seconds (see
@@ -2392,9 +2392,9 @@ intutic sops push <name> [options]
 | `--org` | Push as an org-wide floor instead of a workspace SOP (always creates) |
 
 **What it does:**
-For every `.md` file in `.intutic/sops/<name>/` — or, when there is no such folder, for the one file `.intutic/sops/<name>.md` — parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier on a new SOP), front matter stripped from the uploaded body, and then, per file:
+For every `.md` file in `.intutic/sops/<name>/` — or, when there is no such folder, for the one file `.intutic/sops/<name>.md` — parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier on a new SOP; a value other than `LOW`, `MEDIUM`, `HIGH` or `CRITICAL` counts as unstated), front matter stripped from the uploaded body, and then, per file:
 
-- **The file records a SOP** (`intutic_id:`, written by `sops pull` or an earlier push): if the file matches the SOP, nothing is sent (`up to date`). Otherwise the SOP is edited through the same path as the dashboard (`PUT /api/v1/sops/:id`): a DRAFT is edited in place; an approved SOP gets a new DRAFT version, and the approved one keeps enforcing until the draft is promoted. The file's `intutic_revision:` is sent as the precondition, so a SOP edited on the control plane since the pull is refused ("changed on the server since you pulled it") instead of overwritten; run `intutic sops pull`, or push with `--force` to overwrite. A push that would fork a second DRAFT of the same approved SOP is refused the same way. An edit that loosens the guideline needs an Owner, and the control plane's refusal is printed. A recorded SOP that no longer exists is refused unless `--create` is passed.
+- **The file records a SOP** (`intutic_id:`, written by `sops pull` or an earlier push): if the file matches the SOP, nothing is sent (`up to date`). Otherwise the SOP is edited through the same path as the dashboard (`PUT /api/v1/sops/:id`): a DRAFT is edited in place; an approved SOP gets a new DRAFT version, and the approved one keeps enforcing until the draft is promoted: the file is marked `intutic_enforced: false` and the approved version is written beside it as `<name>.approved.md`, which push skips. The file's `intutic_revision:` is sent as the precondition, so a SOP edited on the control plane since the pull is refused ("changed on the server since you pulled it") instead of overwritten; run `intutic sops pull`, or push with `--force` to overwrite. A push that would fork a second DRAFT of the same approved SOP is refused the same way. An edit that loosens the guideline needs an Owner, and the control plane's refusal is printed. A recorded SOP that no longer exists is refused unless `--create` is passed.
 - **The file records no SOP:** a new workspace SOP is created.
 
 After a successful create or update, the file's front matter records the SOP's id and revision (the new DRAFT's id when the edit forked one), with every other line of the file kept. Each file's result is printed; the command exits `1` if any file failed. Fails if neither the folder nor the file exists, or the folder contains no markdown. Creating and editing workspace SOPs needs the OWNER or ADMIN role; `--org` needs that role on a workspace in the org. See [GitOps for SOPs](/guide/gitops-sops) for the full push/pull/status flow and what does not round-trip (declarative enforcement keys like `deny_tools:` have no control-plane column).
@@ -2417,7 +2417,7 @@ intutic sops pull [options]
 | `--force` | Overwrite locally-modified files instead of refusing them |
 
 **What it does:**
-Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed, a `content_hash:` marker recording the body's hash, and the sync record `sops push` reads: `intutic_id:` (the SOP) and `intutic_revision:` (its edit counter). A SOP goes into the local file that already records its id — flat or in a `<name>/` folder, keeping that file's other front-matter keys — and otherwise into `.intutic/sops/<slug>.md`. An approved version is skipped when a local file tracks its DRAFT successor. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
+Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed, a `content_hash:` marker recording the body's hash, and the sync record `sops push` reads: `intutic_id:` (the SOP) and `intutic_revision:` (its edit counter). A SOP with no risk tier gets no `risk_tier:` line. Each file also records `intutic_enforced: true` for a `VALIDATED` SOP and `intutic_enforced: false` for any other state or a SOP no longer active; the proxy and the sync daemon skip a file marked `false`, so a pulled draft is not enforced locally (see [GitOps for SOPs](/guide/gitops-sops#pulled-sops-enforce-what-the-control-plane-enforces)). The key is updated on every pull, also over a locally edited file. While a file tracks a DRAFT forked from an approved SOP, the approved version is kept enforced in `<name>.approved.md` beside it (with an `intutic_draft:` line, so `sops push` never sends it); the first pull after the draft is promoted removes that file. A SOP goes into the local file that already records its id — flat or in a `<name>/` folder, keeping that file's other front-matter keys — and otherwise into `.intutic/sops/<slug>.md`. An approved version is skipped when a local file tracks its DRAFT successor. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
 
 ---
 
@@ -2492,6 +2492,61 @@ Deactivates the floor, so it stops applying to every workspace in the org. The r
 
 ```bash
 intutic sops org-rm osp_abc123
+```
+
+---
+
+## `intutic optimizer settings` <Badge type="warning" text="Biz Org+" />
+
+Print the [SOP Optimizer](/guide/metaclaw)'s approval mode and its auto-apply threshold.
+
+```bash
+intutic optimizer settings [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON: `workspaceId`, `mode` and `autoThreshold` |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Reads `GET /api/v1/dream-cycle/settings`. `manual` (the default) applies nothing automatically; `auto` lets a manually triggered optimizer run apply a `STRENGTHEN` proposal whose score reaches the threshold without review (see [What auto-apply applies](/guide/metaclaw#what-auto-apply-applies)). A workspace that never set the mode reads `manual` at 0.85. Any member can read it.
+
+**Example:**
+
+```bash
+intutic optimizer settings --json
+```
+
+---
+
+## `intutic optimizer set` <Badge type="warning" text="Biz Org+" />
+
+Set the SOP Optimizer's approval mode, and optionally its auto-apply threshold.
+
+```bash
+intutic optimizer set --mode <manual|auto> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--mode <mode>` | `manual` or `auto`. Required |
+| `--auto-threshold <n>` | The score from 0 to 1 a proposal must reach to be auto-applied in `auto`. Omit it to keep the current threshold |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sends `PUT /api/v1/dream-cycle/settings` with the mode and the threshold. The route takes both every time, so without `--auto-threshold` the command reads the current threshold first and sends it back unchanged. You need the OWNER or ADMIN role. This is the same switch as **Approval mode** on the SOP Optimizer page, and the one that replaced the removed `ff_metaclaw_auto_apply` feature flag; only a run started on a plan that includes the SOP Optimizer applies anything.
+
+**Examples:**
+
+```bash
+intutic optimizer set --mode auto --auto-threshold 0.9
+intutic optimizer set --mode manual
 ```
 
 ---
@@ -2669,6 +2724,104 @@ intutic attenuate chain <chainId> [options]
 
 **What it does:**
 Prints each link in the chain: parent key, child key, granted scopes, expiry and when it was minted. Needs the OWNER or ADMIN role. The same chains are shown on the dashboard's **Attenuated API Keys** card.
+
+---
+
+## `intutic keys list` <Badge type="tip" text="Cloud" />
+
+List your API keys in the workspace, revoked ones included.
+
+```bash
+intutic keys list [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Prints each key's id, label, prefix (`vk_…`), [scopes](/reference/api#api-key-scopes) and expiry (`never` when it has none), and when it was revoked. The key itself is never shown again after it is created. Every member sees only their own keys; `intutic budget keys` lists every key in the workspace with its spend.
+
+---
+
+## `intutic keys create` <Badge type="tip" text="Cloud" />
+
+Create an API key and print it once.
+
+```bash
+intutic keys create --label <label> [--scopes <scope,scope,...>] [--expires-in-days <n>] [--service-account] [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--label <label>` | A name for the key (required) |
+| `--scopes <scopes>` | Comma-separated [API key scopes](/reference/api#api-key-scopes); `*` (everything your role allows) when left out |
+| `--expires-in-days <n>` | Expire the key after this many days, 1 to 365; never when left out |
+| `--service-account` | An automation key: exempt from the SSO idle-key check, because its owner may never sign in interactively. It still stops working when its owner is deactivated, and can still be revoked |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Creates the key for you and prints its id, label, prefix, scopes and expiry, then the key itself (`vk_…`). The key is shown **once** and never stored, so copy it when it is printed. Called with a key rather than a dashboard session, every scope asked for must be granted by that key. A scope that is not in the registry, or an `--expires-in-days` that is not a positive whole number, exits `1` before anything is sent, naming the valid scopes.
+
+**Example:**
+
+```bash
+# A key for a CI job that only runs agents
+intutic keys create --label ci-runner --scopes gateway:use --expires-in-days 90 --service-account
+```
+
+---
+
+## `intutic keys update <keyId>` <Badge type="tip" text="Cloud" />
+
+Replace a key's scopes. OWNER or ADMIN, for any live key in the workspace.
+
+```bash
+intutic keys update <keyId> --scopes <scope,scope,...> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--scopes <scopes>` | Comma-separated [API key scopes](/reference/api#api-key-scopes) the key will hold, replacing its current ones (required) |
+| `--json` | Print the key after the change as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Sends the new scopes and prints the key with them. They apply from the key's next request, and the key's attenuated children are held to them too. A scope that is not in the registry exits `1` before anything is sent. Budgets and rate limits are set with `intutic budget key`.
+
+**Example:**
+
+```bash
+intutic keys update key_abc123 --scopes gateway:use,traces:read
+```
+
+---
+
+## `intutic keys revoke <keyId>` <Badge type="tip" text="Cloud" />
+
+Revoke an API key: one of yours, or, as an OWNER or ADMIN, any live key in the workspace.
+
+```bash
+intutic keys revoke <keyId> [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Revokes the key: every request made with it is refused from then on, and it cannot be restored. A key id you may not revoke (none live with that id in the workspace, one already revoked, or, below OWNER or ADMIN, another member's) is reported and exits `1`.
 
 ---
 
@@ -3108,10 +3261,15 @@ Settings often changed this way:
 | `piiDetectors` | The [PII detector](/guide/policies#pii-detectors) actions for the workspace, as a JSON object of detector id to `off`, `redact` or `block`; each machine's proxy config may only tighten them. `null` clears it |
 | `upstreamRetry` | The proxy's [retries and fallbacks](/guide/intelligent-routing#retries-and-fallbacks) for the workspace, as a JSON object; each field overrides the proxy's config. `null` clears it |
 | `configBodyUpload` | `true` or `false`: [config content upload](#config-content-upload) |
+| `interventionMode` | `TRANSPARENT`, `OPAQUE` or `SILENT_LOG`: what an agent is told when a call is refused on workspace policy ([Intervention Modes](/guide/policies#intervention-modes)). It is the only source of the mode; unset, it is `TRANSPARENT` |
+| `storeToolArguments` | `true` or `false`: keep tool-call argument values, redacted, in the replay contexts [`intutic policy replay`](#intutic-policy-replay) reads. Off by default |
+
+See [Workspace Settings](/reference/workspace-settings) for every key.
 
 **Examples:**
 
 ```bash
+intutic settings set interventionMode OPAQUE
 intutic settings set mcpDefaultPolicy deny
 intutic settings set mcpBudgets --file mcp-budgets.json
 intutic settings set sso_group_policy null
@@ -3621,6 +3779,104 @@ intutic siem rotate-secret <destination_id> [options]
 
 **What it does:**
 Generates a new signing secret and prints it once. Deliveries are signed with it from then on. The other types authenticate with their own credentials and are refused. You need the OWNER or ADMIN role.
+
+---
+
+## `intutic tasks list` <Badge type="tip" text="Cloud" />
+
+List the workspace's task-management connections.
+
+```bash
+intutic tasks list [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Lists each Jira Cloud, Linear and PagerDuty connection with its id, provider, project key, base URL and last sync. The API token is never returned. Any workspace member can list connections.
+
+---
+
+## `intutic tasks add` <Badge type="tip" text="Cloud" />
+
+Connect Jira Cloud, Linear or PagerDuty.
+
+```bash
+intutic tasks add --provider <provider> --base-url <url> --project-key <key> [--account-email <email>] (--token <token> | --token-file <path>) [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--provider <provider>` | `jira`, `linear` or `pagerduty` (required) |
+| `--base-url <url>` | The provider's base URL, e.g. `https://acme.atlassian.net` (required) |
+| `--project-key <key>` | The Jira project key, Linear team key or PagerDuty service key a ticket or incident is matched on (required) |
+| `--account-email <email>` | Jira only, and required for Jira: the Atlassian account the API token belongs to |
+| `--token <token>` | The provider API token (a Jira API token, a Linear API key, a PagerDuty REST API token) |
+| `--token-file <path>` | Read the API token from a file instead, keeping it out of shell history |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Exactly one of `--token` / `--token-file` is required, and the token is never echoed. A Jira connection without `--account-email` is refused before anything is sent. The control plane tests the credentials with the provider and saves the connection only if they are accepted; otherwise it says what to check. The token is stored encrypted and never returned. You need the OWNER or ADMIN role. Connections cannot be edited: to change one, remove it and add it again.
+
+---
+
+## `intutic tasks test <connectionId>` <Badge type="tip" text="Cloud" />
+
+Check a connection's stored credentials with the provider.
+
+```bash
+intutic tasks test <connectionId> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `connectionId` | The connection, as `intutic tasks list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Asks the provider whether it still accepts the stored token and prints the result. Exits 1 when it does not (a revoked or expired token). You need the OWNER or ADMIN role.
+
+---
+
+## `intutic tasks remove <connectionId>` <Badge type="tip" text="Cloud" />
+
+Remove a task-management connection.
+
+```bash
+intutic tasks remove <connectionId> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `connectionId` | The connection, as `intutic tasks list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Deletes the connection and its stored token; sessions stop picking up its tickets or incidents. Exits 1 when the workspace has no connection with that id. You need the OWNER or ADMIN role.
 
 ---
 
@@ -4251,7 +4507,7 @@ intutic enforce <action> [options]
 
 | Option | Description |
 |--------|-------------|
-| `--port <port>` | The proxy's listener port to permit. Default: the `PORT` environment variable, else `4000`; `INTUTIC_PROXY_URL` is not read. |
+| `--port <port>` | The proxy's listener port to permit. Default: `4000`; neither `PORT` nor `INTUTIC_PROXY_URL` is read, so pass it when the proxy listens elsewhere. |
 | `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to you: the user the command runs as, or under `sudo` the user who invoked sudo (`SUDO_UID`), not root. Pass it when the proxy runs as a different account. |
 | `--allow <cidrs>` | Comma-separated extra destinations to permit (control plane, private registries, etc.), each an IP address or CIDR block. A hostname is refused before anything is applied: resolve it to its address range first. |
 | `--no-dns` | Also deny outbound DNS — only if a local resolver serves the host. |
@@ -4314,7 +4570,7 @@ intutic enterprise install [options]
    - `cursor-hooks-jamf.json` / `cursor-hooks-intune.json` — Cursor system hooks for Jamf / Intune
    - `gemini-cli-hooks-jamf.json` / `gemini-cli-hooks-intune.json` — the Gemini CLI gate in Gemini CLI's system settings file, which it applies over user and workspace settings
    - `antigravity-hooks-jamf.json` / `antigravity-hooks-intune.json` — the Google Antigravity gate for each user's `~/.gemini/config/hooks.json` (Antigravity has no machine-wide hooks file)
-   - `jamf-firewall-manifest.json` / `intune-firewall-manifest.json` — a recurring managed script that runs `<cli-binary-path> enforce apply` with root/administrator privilege, so the egress firewall is re-applied on every check-in
+   - `jamf-firewall-manifest.json` / `intune-firewall-manifest.json` — a recurring managed script that runs `<cli-binary-path> enforce apply` with root/administrator privilege, so the egress firewall is re-applied on every check-in. On macOS and Linux it passes `--uid` for the user signed in at the console (the owner of `/dev/console`, or the active `seat0` session's user), whose proxy is then exempt from the deny
 
    With `--generate-mdm-only` the command stops here.
 3. Checks for admin/root privilege. If the shell is not elevated it prints a warning and still attempts the remaining steps.
@@ -4519,7 +4775,7 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 |----------|---------|--------|
 | `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of a workspace initialized with `intutic init --dev` and the one saved by `intutic login`, and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
 | `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`, unless `INTUTIC_CONTROL_PLANE_URL` is set. Any other value is ignored. |
-| `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read, except by `intutic enforce`, whose `--port` defaults to it. |
+| `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read. `intutic enforce` reads neither: its `--port` defaults to `4000`. |
 | `VALKEY_URL` | `intutic start`, `intutic connect` | Valkey/Redis the proxy uses. `start` passes it through only when a Valkey is reachable on `--valkey-port`; otherwise it uses `redis://127.0.0.1:<valkey-port>`. `connect` defaults to `redis://127.0.0.1:6379`. |
 | `CONTROL_PLANE_URL` | `intutic start` | When set and no Valkey is available, `start` does not force standalone mode; the proxy treats the run as a managed deployment and requires Valkey. The CLI does not use it to choose a control plane. |
 | `INTUTIC_SNAPSHOT_RULES` | Hook gates, `intutic policy snapshot`, `intutic doctor` | Path of the policy snapshot file the gates enforce. Default `~/.intutic/hooks/policy-snapshot.rules`. `policy snapshot` writes into this path's directory and always names the file `policy-snapshot.rules` (it warns if your path uses another name); `doctor` checks this path. |

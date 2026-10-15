@@ -55,7 +55,7 @@ Intutic is designed **AI-first**: AI coding agents (such as Claude Code, Antigra
 When interacting with model providers through the Intutic proxy, agents can issue commands directly inside prompt payloads by prepending `@intutic` or `/intutic`. The proxy intercepts these commands **pre-flight**, before the request reaches the provider, executes the governance action, and returns formatted response blocks:
 
 #### 1. Cost & Task Attribution
-* **`@intutic initialize`**: Lists the open tickets on the workspace's Jira and Linear connections, and the local SOP folders under `.intutic/sops/`, as numbered options, and marks the ticket your git branch names as Recommended.
+* **`@intutic initialize`**: Lists the open tickets on the workspace's Jira and Linear connections, and the local rule sets under `.intutic/sops/` (folders and single SOP files), as numbered options, and marks the ticket your git branch names as Recommended.
 * **`@intutic start [<option_number_or_ticket_key>] [--sops=<names>] [--auto-judge]`**: Locks cost attribution to a ticket (an option number from `initialize`, or the ticket key) and scopes active local SOP directories; `--auto-judge` (or `-j`) judges every later prompt in the session.
   * *Example:* `@intutic start 12 --sops=security-rules --auto-judge`
 
@@ -66,7 +66,7 @@ When interacting with model providers through the Intutic proxy, agents can issu
 #### 3. Policy Verification & Automated E2E Judging
 * **`@intutic verify <prompt>`**: Audits the prompt pre-flight against active SOPs and guidelines, returning pass/fail verdicts before submitting requests to the LLM.
 * **`@intutic review <prompt>`**: Quick heuristic check of the prompt (length, action verbs, SOP or policy reference) with a letter grade and suggestions.
-* **`@intutic judge <prompt>`**: Runs real-time LLM-as-a-judge compliance checkers on model responses out-of-band.
+* **`@intutic judge <prompt>`**: Runs real-time LLM-as-a-judge compliance checkers on model responses out-of-band. LLM judging, here and with `--auto-judge`, runs only on a plan that includes it; on a plan without it (Free) the response passes through unjudged.
 * **`@intutic status`**: Displays active session statistics, spent token budget, and average compliance score.
 * **`@intutic budget`**: Displays daily spend limits and remaining quota.
 

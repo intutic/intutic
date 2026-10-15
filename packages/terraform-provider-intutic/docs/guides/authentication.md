@@ -16,7 +16,8 @@ A workspace API key, which starts with `vk_`. Create one in the dashboard under 
 The key decides everything else:
 
 - **The workspace.** Every route resolves the workspace from the key, so the provider has no workspace argument, and one provider configuration manages one workspace. To manage a second one, add a provider alias with that workspace's key, as below.
-- **The member.** The provider acts as the member who owns the key, with that member's role. What the key may change is decided by the role alone: a key's `scopes` do not narrow what it may do through the API.
+- **The member.** The provider acts as the member who owns the key, with that member's role.
+- **The scopes.** A request needs both a role the route allows and one of the key's `scopes` covering the route: `<area>:read` for a read, `<area>:write` for a change. A key with the default scopes, `*`, is held to its member's role alone; a key narrowed to other scopes gets `HTTP 403`, naming the scope it lacks, on any route outside them. The scopes are listed under [API key scopes](https://docs.intutic.ai/reference/api#api-key-scopes).
 
 A key stops working when it is revoked, when it expires, or when its member is deactivated. Create the key Terraform uses as a member whose account outlives any one person's role, so that offboarding someone does not stop your pipeline.
 
@@ -54,7 +55,7 @@ terraform {
   required_providers {
     intutic = {
       source  = "intutic/intutic"
-      version = "~> 0.2"
+      version = "~> 0.4"
     }
     time = {
       source  = "hashicorp/time"

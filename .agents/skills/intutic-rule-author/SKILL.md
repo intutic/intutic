@@ -70,6 +70,6 @@ Rules install to `~/.intutic/wasm/` as `NN_name.wasm` (lower `NN` runs first; de
 
 ## 6. Guardrails
 
-- **Never embed secrets** (API keys, tokens, passwords) in rule sources or mock contexts — `intutic skill audit` flags them.
+- **Never embed secrets** (API keys, tokens, passwords) in rule sources or mock contexts. `intutic skill audit` will not catch them there: it reads the skill directories (`.agents/skills`, `.claude/skills`) and root rule files such as `CLAUDE.md` and `.cursorrules`, not rule sources.
 - **Local rules cannot weaken central rules.** Verdicts merge most-restrictive-wins: a BLOCK from any rule — local or centrally synced — ends the request. "Allow-override" rules are no-ops by design; do not author them.
 - Keep rule sources (`assembly/*.ts`, mock JSON files) in version control alongside the workspace.

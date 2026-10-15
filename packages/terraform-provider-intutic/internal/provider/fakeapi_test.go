@@ -38,6 +38,19 @@ type fakeAPI struct {
 	// nulls a real row may carry.
 	sops  map[string]map[string]any
 	calls []string
+
+	// The SOP Optimizer's approval mode; empty is the API's default, manual at 0.85.
+	optimizerMode      string
+	optimizerThreshold float64
+
+	// Task-management connections, in creation order.
+	taskConnections []*fakeTaskConnection
+
+	// Virtual keys: id → live. keysOwnedByAnother makes GET /api/v1/keys (the
+	// caller's own keys) leave them out, as when another admin runs Terraform;
+	// GET /api/v1/budget/keys (every live key, to an admin) still lists them.
+	keys               map[string]bool
+	keysOwnedByAnother bool
 }
 
 func (f *fakeAPI) record(r *http.Request, detail string) {
@@ -99,6 +112,12 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	case strings.HasPrefix(r.URL.Path, "/api/v1/sops/"):
 		f.serveSop(w, r, strings.TrimPrefix(r.URL.Path, "/api/v1/sops/"))
+	case r.URL.Path == "/api/v1/keys" || strings.HasPrefix(r.URL.Path, "/api/v1/keys/") || r.URL.Path == "/api/v1/budget/keys":
+		f.serveKeys(w, r)
+	case r.URL.Path == optimizerSettingsPath:
+		f.serveOptimizerSettings(w, r)
+	case r.URL.Path == taskConnectionPath || strings.HasPrefix(r.URL.Path, taskConnectionPath+"/"):
+		f.serveTaskConnections(w, r)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = fmt.Fprintf(w, `{"error":"fake API has no %s %s"}`, r.Method, r.URL.Path)

@@ -79,13 +79,13 @@ When a streaming response from an LLM provider finishes (not on the OpenAI Respo
 
 The circuit breaker is the runtime enforcement mechanism. It evaluates each request against:
 
-1. **SOP rules** — Does this request comply with active SOPs?
+1. **SOP rules** — Does this request comply with active SOPs and promoted [policy guardrails](/guide/policy-guardrails)?
 2. **Budget limits** — Is the workspace within its daily and monthly caps, and the key and its owner within their budgets?
 3. **Anomaly detectors** — Do the proxy's detectors (including findings promoted from the ARE) flag this request?
 
 Trust scores are kept per user and shown to administrators; they do not gate a request.
 
-If any check fails, the circuit breaker applies the appropriate enforcement action.
+If any check fails, the circuit breaker applies the appropriate enforcement action. When a check cannot run, the proxy's policy check refuses the request by default, and the control plane's hook gate always does (except in shadow mode); see [Circuit Breaker](/concepts/circuit-breaker) for each layer's fail mode.
 
 ## SOP Lifecycle
 

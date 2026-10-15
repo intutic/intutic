@@ -15,7 +15,7 @@ Integrate Intutic governance with Google's coding agents: [Google Antigravity](h
 
 `intutic init` detects the harness when it finds either product, a plain Gemini CLI install included. Each gate reports its events under its own name, so [gate health](/guide/settings), the [AI inventory](/guide/ai-inventory) and the [SIEM export](/guide/siem-export) show which product a call came through, and a machine with only one of the two is not expected to report from the other. It is still one harness: one entry in `intutic init`, one rules file, and one count in the harness total.
 
-Both gates run before every tool call, with the call as JSON on stdin, and enforce the same policy: the built-in protections, the destructive-command tier, your rule sets, group rules and holds for review. They are installed whether or not any rule set targets the harness.
+Both gates run before every tool call, with the call as JSON on stdin, and enforce the same policy: the built-in protections, the destructive-command tier, your rule sets and [policy guardrails](/guide/policy-guardrails) (`hook_rule`), group rules and holds for review. They are installed whether or not any rule set targets the harness.
 
 ## Rule sets
 

@@ -1,7 +1,7 @@
 # GitOps for SOPs <Badge type="tip" text="Cloud" />
 
 Two planes hold SOPs, and until now they barely connected. `.intutic/sops/*.md`
-is the **file plane** — git-reviewable, enforced directly by the local proxy,
+and `.intutic/sops/<name>/*.md` are the **file plane** — git-reviewable, enforced directly by the local proxy,
 deliverable to a Kubernetes cluster as a `proxy-sops` ConfigMap (see
 [Agent Guidelines](/guide/sops) for where the proxy looks and what
 `INTUTIC_SOPS_DIR` is for). The control plane's `sop_registry` is the **DB
@@ -104,6 +104,41 @@ written into that file, and only its synced keys and body are replaced: the
 enforcing keys the proxy reads stay. Two SOPs sharing a title get distinct
 file names (the second suffixed with part of its `sopId`) rather than one
 silently overwriting the other.
+
+### Pulled SOPs enforce what the control plane enforces
+
+`pull` writes every active SOP, drafts included, so you can edit one and push
+it back. Each file records whether the control plane enforces its SOP, as
+`intutic_enforced: true` or `intutic_enforced: false`. Only a `VALIDATED` SOP
+is enforced there: `DRAFT`, `PENDING_REVIEW`, `GENERATED` and `INVALIDATED`
+reach no agent, and `HYPOTHESIZED` / `REFINED` are synced as advisory text and
+judged in shadow with no gate acting on them. The proxy and the sync daemon
+skip a file marked `intutic_enforced: false`, so a pulled draft is not in force
+on your machine until the control plane promotes it and the next `pull` records
+that.
+
+The key follows the server on every `pull`, even over a file you edited (its
+body is left alone), and a file whose SOP is no longer active — deleted, or
+replaced by a newer version — is marked `intutic_enforced: false` too. Only the
+value `false` switches a file off; a file without the key, such as one you
+wrote yourself, is enforced as written.
+
+### Editing an approved SOP keeps it enforced
+
+A `push` that edits an approved SOP forks a `DRAFT`, and the control plane
+keeps enforcing the approved version until the draft is promoted. The file you
+edited now tracks the draft and is marked `intutic_enforced: false`, so `push`
+writes the approved version beside it — `deploy-checklist.md` gets
+`deploy-checklist.approved.md` — with its own `intutic_id:`,
+`intutic_enforced: true` and an `intutic_draft:` line naming the draft. A
+`pull` keeps that file current, and writes it back if it is missing.
+
+Keep editing the draft's file: `push` never sends a file with an
+`intutic_draft:` line, whether it is named directly or sits in a folder you
+push. Once the draft is promoted, the control plane retires the version it
+replaced, and the next `pull` marks the draft's file `intutic_enforced: true`
+and removes the `.approved.md` file (one you edited is marked
+`intutic_enforced: false` instead), leaving one enforced file per SOP.
 
 ### Refusing to clobber local edits
 

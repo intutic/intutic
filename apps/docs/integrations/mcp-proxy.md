@@ -119,7 +119,7 @@ variants:
 3. **Tool allowlist** (`mcpAllowedTools`) — refuses the individual tool the same way.
 4. **SSO group policy** — the workspace's `sso_group_policy`, applied to the member the proxy's API key belongs to. See [Who made the call](/guide/mcp-governance#caller-identity).
 5. **DLP scan** — blocks a request whose arguments contain a credential-shaped value or a destructive command pattern (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`). Command patterns are matched against each argument string as the tool receives it, object keys included, and the SQL keywords may be separated by any whitespace, a line continuation, a block or `--` comment, or an escaped `\n` / `\t`: `DROP/**/TABLE` and `DROP` and `TABLE` on separate lines are blocked. The scan reads text, not SQL, so a quoted mention such as `SELECT 'drop table'` is blocked too — a quoted string is also how a shell command carries the real statement.
-6. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` holds the call for a person's approval (`hold` above).
+6. **SOP policy rules** — workspace-defined `block` / `warn` / `require_approval` rules matched against tool name and serialized arguments. `require_approval` holds the call for a person's approval (`hold` above). The workspace's `hook_rule` [policy guardrails](/guide/policy-guardrails) arrive with these rules, an enforcing one as `block` and a shadow one as `warn`, with `ruleId` `guardrail.<id>`. The control plane serves only the guardrails that apply to the role of the member the proxy's API key belongs to.
 7. **Prompt-injection scan** (request direction) — see [Prompt-injection scanning](#prompt-injection-scanning) below.
 8. **Anomaly detectors** and **WASM rules**, native or [Rego](/guide/rego-policies) — see the session-scope note and [Custom rules](#custom-rules) below. A Rego rule's hold takes the same path as a `require_approval` rule.
 9. **Call budgets** (`mcpBudgets`) — counts the call in Valkey against every budget that covers it, and refuses it when one is used up. Last, so a call another step refuses spends nothing. See [Call budgets](/guide/mcp-governance#call-budgets).
@@ -177,7 +177,7 @@ The sequence detectors (`consecutive_repeat`, `ping_pong_cycle`, `landmark_cycle
 `tool_diversity_collapse`) and the reask ladder read a rolling window of the
 session's tool calls. `intutic connect` wraps **each** MCP server with its own
 proxy process, so a harness session with three servers runs three proxies — and
-until Wave 5.3 each kept its own window, so a loop that alternated between two
+each used to keep its own window, so a loop that alternated between two
 servers was invisible and a reask budget reset per server.
 
 The window is now shared through the local Valkey `intutic connect` runs: the
@@ -191,7 +191,7 @@ harness process that spawned them (`<workspace>:mcp:<parent pid>:<start token>`;
 
 It is never a hard dependency: with no URL configured, with Valkey down, or
 when a read takes longer than 200 ms, the proxy uses its own in-process window
-— exactly the behaviour before Wave 5.3. Standalone `intutic start` writes no
+— the behaviour before the window was shared. Standalone `intutic start` writes no
 runtime env, so sharing there needs `VALKEY_URL` in the harness's environment.
 Tool names are shared bare (the `tool_sequence` WASM rules see), so two servers
 that both expose a tool called `search` count as one; `session_id` in the WASM

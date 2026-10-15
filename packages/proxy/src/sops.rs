@@ -10,8 +10,9 @@
 //!
 //! # Where they come from
 //!
-//! `.intutic/sops/*.md` in the workspace, each optionally carrying YAML-ish
-//! front matter:
+//! `.intutic/sops/*.md` in the workspace, and `.intutic/sops/<set>/*.md` one
+//! folder down (see [`sop_files`]), each optionally carrying YAML-ish front
+//! matter:
 //!
 //! ```markdown
 //! ---
@@ -726,19 +727,81 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
     })
 }
 
-fn read_dir_sops(dir: &Path) -> Vec<Sop> {
+/// The SOP files in `dir`, each with the title it is loaded under: every `.md`
+/// file directly in it (titled by its stem, `deploy`) and every `.md` file one
+/// folder down (titled `<folder>/<stem>`, `safety/rules`). Both layouts are the
+/// documented one — `intutic sops pull` and `intutic guardrails pull` write flat
+/// files, and a rule set is a folder — and `intutic connect` reads the same two.
+///
+/// Folders whose name starts with `.` are not read: a Kubernetes ConfigMap
+/// volume links each top-level file into `..data/`, a timestamped `..<date>/`
+/// folder, and reading those as rule sets would load every SOP three times.
+fn sop_files(dir: &Path) -> Vec<(String, PathBuf)> {
+    let md_stem = |path: &Path| -> Option<String> {
+        if !path.is_file() || path.extension()?.to_str()? != "md" {
+            return None;
+        }
+        path.file_stem()?.to_str().map(str::to_string)
+    };
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut sops: Vec<Sop> = entries
-        .flatten()
-        .filter_map(|e| {
-            let path = e.path();
-            if !path.is_file() || path.extension()?.to_str()? != "md" {
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            out.extend(md_stem(&path).map(|stem| (stem, path)));
+            continue;
+        }
+        let Some(folder) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if folder.starts_with('.') {
+            continue;
+        }
+        let Ok(inner) = std::fs::read_dir(&path) else {
+            continue;
+        };
+        for file in inner.flatten().map(|e| e.path()) {
+            out.extend(md_stem(&file).map(|stem| (format!("{folder}/{stem}"), file)));
+        }
+    }
+    out
+}
+
+/// Whether `intutic sops pull` marked this file `intutic_enforced: false`: a
+/// copy of a SOP the control plane does not enforce (a draft, one under review
+/// or invalidated, one no longer active). Such a file is not loaded at all, so
+/// a SOP is not enforced here because it was pulled. Only that exact value
+/// switches a file off — a typo leaves it enforced — and only on disk: a SOP
+/// the control plane serves is in force by being served. Same fence rules as
+/// [`parse_front_matter`]; the sync daemon reads the key the same way
+/// (`markedNotEnforced` in `services/sync-daemon/src/lib/sopFiles.ts`).
+fn pulled_but_not_enforced(raw: &str) -> bool {
+    let Some(rest) = raw.trim_start().strip_prefix("---") else {
+        return false;
+    };
+    let Some(end) = rest.find("\n---") else {
+        return false;
+    };
+    rest[..end]
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("intutic_enforced:"))
+        .any(|v| {
+            v.trim()
+                .trim_matches(['"', '\''])
+                .eq_ignore_ascii_case("false")
+        })
+}
+
+fn read_dir_sops(dir: &Path) -> Vec<Sop> {
+    let mut sops: Vec<Sop> = sop_files(dir)
+        .into_iter()
+        .filter_map(|(title, path)| {
+            let raw = std::fs::read_to_string(&path).ok()?;
+            if pulled_but_not_enforced(&raw) {
                 return None;
             }
-            let raw = std::fs::read_to_string(&path).ok()?;
-            let title = path.file_stem()?.to_str()?.to_string();
             let source = path.display().to_string();
             parse_sop_content(title, &raw, &source, SopScope::Workspace)
         })
@@ -2680,6 +2743,148 @@ mod tests {
     #[test]
     fn a_missing_directory_is_not_an_error() {
         assert!(read_dir_sops(Path::new("/nonexistent/intutic/sops")).is_empty());
+    }
+
+    /// `intutic connect` writes `.intutic/sops/<set>/*.md` into each harness's
+    /// rules file, and the README tells people to put SOPs there. A proxy that
+    /// read only the flat files enforced none of them, so the same SOP was
+    /// in force at one layer and absent at the other.
+    #[test]
+    fn one_folder_down_is_read_beside_the_flat_files() {
+        let dir = std::env::temp_dir().join(format!("intutic-sops-nested-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("safety").join("deeper")).unwrap();
+        std::fs::write(dir.join("flat.md"), "---\ndeny_tools: FlatTool\n---\n").unwrap();
+        std::fs::write(
+            dir.join("safety").join("rules.md"),
+            "---\ndeny_tools: NestedTool\n---\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("safety").join("notes.txt"), "not a SOP").unwrap();
+        // Two levels down is not a rule set; the layout is one folder deep.
+        std::fs::write(dir.join("safety").join("deeper").join("x.md"), "- too deep").unwrap();
+
+        let sops = read_dir_sops(&dir);
+        assert_eq!(
+            sops.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(),
+            vec!["flat", "safety/rules"]
+        );
+        assert_eq!(sops[1].deny_tools, vec!["NestedTool"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `intutic sops pull` writes drafts and invalidated SOPs too, marked
+    /// `intutic_enforced: false`. Loading them would enforce, on this machine,
+    /// a SOP the control plane does not.
+    #[test]
+    fn a_pulled_sop_the_control_plane_does_not_enforce_is_not_loaded() {
+        let dir =
+            std::env::temp_dir().join(format!("intutic-sops-unenforced-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("draft.md"),
+            "---\ntitle: Draft\nintutic_id: sop_d\nintutic_enforced: false\ndeny_tools: Write\n---\nDraft.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("live.md"),
+            "---\nintutic_id: sop_v\nintutic_enforced: true\ndeny_tools: Bash\n---\nLive.\n",
+        )
+        .unwrap();
+        // Only `false` switches a file off.
+        std::fs::write(
+            dir.join("typo.md"),
+            "---\nintutic_enforced: flase\ndeny_tools: Edit\n---\n",
+        )
+        .unwrap();
+
+        let sops = read_dir_sops(&dir);
+        assert_eq!(
+            sops.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(),
+            vec!["live", "typo"]
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The README's first SOP is what people copy. It once listed its commands
+    /// under a "Denied Commands" heading that no gate reads, so the sample
+    /// enforced nothing it showed. Parse the sample as it stands in the README
+    /// and check the refusals it promises.
+    #[test]
+    fn the_readme_sample_sop_refuses_what_it_shows() {
+        use crate::plugins::hook_rules::{CallInput, HookRuleSet};
+        use crate::plugins::sql_guard::evaluate;
+        use serde_json::json;
+
+        let readme = include_str!("../../../README.md");
+        let section = &readme[readme
+            .find("## 📝 Write Your First SOP")
+            .expect("README has the first-SOP section")..];
+        let open = "```markdown\n";
+        let start = section.find(open).expect("the section has a sample") + open.len();
+        let sample = &section[start..start + section[start..].find("\n```").unwrap()];
+
+        let sop = parse_sop_content("safety".into(), sample, "README.md", SopScope::Workspace)
+            .expect("the sample parses to a SOP");
+        let sops = std::slice::from_ref(&sop);
+        let refused = |tool: &str, cmd: &str| {
+            let args = json!({ "command": cmd });
+            let by_rule = HookRuleSet::from_sops(sops, "")
+                .decide(tool, CallInput::Parsed(&args))
+                .refuse
+                .is_some();
+            let policy = sql_guard_from(sops, "", false);
+            let by_sql = evaluate(policy.as_slice(), tool, &args)
+                .iter()
+                .any(|v| v.refuses());
+            by_rule || by_sql
+        };
+
+        for cmd in [
+            "git push --force origin main",
+            "rm -rf build",
+            "psql -h db.internal -d app -c \"DROP TABLE users\"",
+            "psql -h db.internal -d app -c \"TRUNCATE events\"",
+        ] {
+            assert!(
+                refused("Bash", cmd),
+                "the README sample must refuse `{cmd}`"
+            );
+        }
+        for cmd in [
+            "git push origin main",
+            "ls build",
+            "psql -h db.internal -d app -c \"SELECT 1\"",
+        ] {
+            assert!(
+                !refused("Bash", cmd),
+                "the README sample must not refuse `{cmd}`"
+            );
+        }
+    }
+
+    /// A Kubernetes ConfigMap volume (how the bundled manifests deliver
+    /// `INTUTIC_SOPS_DIR`) links each top-level file into `..data/`, a
+    /// timestamped `..<date>/` folder. Reading those folders would load every
+    /// SOP a second and third time.
+    #[test]
+    fn folders_named_with_a_leading_dot_are_skipped() {
+        let dir = std::env::temp_dir().join(format!("intutic-sops-dotdir-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("..2026_10_15_00_00_00.1")).unwrap();
+        std::fs::create_dir_all(dir.join("..data")).unwrap();
+        std::fs::write(dir.join("policy.md"), "- rule").unwrap();
+        std::fs::write(
+            dir.join("..2026_10_15_00_00_00.1").join("policy.md"),
+            "- rule",
+        )
+        .unwrap();
+        std::fs::write(dir.join("..data").join("policy.md"), "- rule").unwrap();
+
+        let sops = read_dir_sops(&dir);
+        assert_eq!(
+            sops.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(),
+            vec!["policy"]
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
 

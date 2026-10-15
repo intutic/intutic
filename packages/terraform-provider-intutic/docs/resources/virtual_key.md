@@ -3,12 +3,12 @@
 page_title: "intutic_virtual_key Resource - intutic"
 subcategory: ""
 description: |-
-  A virtual API key (vk_…), created through POST /api/v1/keys for the member that owns the provider's own key. The key value is returned once, at creation, and stored in Terraform state as a sensitive value; protect the state accordingly. The spend budgets and rate limits change in place (an OWNER or ADMIN may set them); any other change replaces the key. Destroying the resource revokes it.
+  A virtual API key (vk_…), created through POST /api/v1/keys for the member that owns the provider's own key. The key value is returned once, at creation, and stored in Terraform state as a sensitive value; protect the state accordingly. The spend budgets and rate limits change in place (an OWNER or ADMIN may set them); any other change replaces the key. Destroying the resource revokes it, also when an OWNER or ADMIN other than the member who created it runs Terraform.
 ---
 
 # intutic_virtual_key (Resource)
 
-A virtual API key (`vk_…`), created through `POST /api/v1/keys` for the member that owns the provider's own key. The key value is returned once, at creation, and stored in Terraform state as a sensitive value; protect the state accordingly. The spend budgets and rate limits change in place (an OWNER or ADMIN may set them); any other change replaces the key. Destroying the resource revokes it.
+A virtual API key (`vk_…`), created through `POST /api/v1/keys` for the member that owns the provider's own key. The key value is returned once, at creation, and stored in Terraform state as a sensitive value; protect the state accordingly. The spend budgets and rate limits change in place (an OWNER or ADMIN may set them); any other change replaces the key. Destroying the resource revokes it, also when an OWNER or ADMIN other than the member who created it runs Terraform.
 
 ## Example Usage
 

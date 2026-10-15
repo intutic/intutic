@@ -16,7 +16,8 @@ Every resource in the Intutic provider can be imported, so a workspace configure
 | `intutic_sop` | SOP id, `sp_…` | Import the live version. A version an edit has replaced, or a deleted SOP, cannot be imported. |
 | `intutic_guardrail` | Guardrail id, `pgr_…` | Authored guardrails only. A guardrail extracted from a policy document is refused, and so is a retired one. |
 | `intutic_workspace_settings` | Workspace id, `ws_…` | Must be the API key's workspace. Imports with no keys managed: the first plan shows each key in your configuration as a change. |
-| `intutic_workspace_budget` | Workspace id, `ws_…` | One per workspace. |
+| `intutic_workspace_budget` | Workspace id, `ws_…` | Must be the API key's workspace; any other id fails with "Wrong workspace". One per workspace. |
+| `intutic_sop_optimizer_settings` | Workspace id, `ws_…` | One per workspace. Must be the API key's workspace. |
 | `intutic_virtual_key` | Key id, `key_…` | Only keys of the member who owns the provider's key. `key` is null after import, since the API never returns a key again. |
 | `intutic_member_budget` | Member id, `mbr_…`, or `default` | Only a member, or the default, that has a budget. |
 | `intutic_gateway` | Gateway id, `gw_…` | `token` is null after import. |
@@ -25,6 +26,7 @@ Every resource in the Intutic provider can be imported, so a workspace configure
 | `intutic_siem_destination` | Destination id, `siemdest_…` | `secret_config` reads back masked, so set the real values; `signing_secret` is null after import. |
 | `intutic_wasm_rule` | Rule id, `wasm_…` | If the file in `source` has different bytes from the uploaded rule, the next plan replaces the rule. |
 | `intutic_provider_credential` | Provider id, for example `anthropic` or `bedrock` | The API never returns the credential, so the first apply after the import sends `fields` again. |
+| `intutic_task_connection` | Connection id, `cc_…` | The API never returns `api_token` or `account_email` and has no update, so the first apply after the import replaces the connection with the configured values. |
 
 The workspace id is the `id` of the `intutic_workspace` data source, and member ids are listed by the `intutic_members` data source. Other ids come from the API's list routes, for example the SOPs:
 
@@ -43,7 +45,7 @@ terraform {
   required_providers {
     intutic = {
       source  = "intutic/intutic"
-      version = "~> 0.2"
+      version = "~> 0.4"
     }
   }
 }

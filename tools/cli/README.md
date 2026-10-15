@@ -41,7 +41,9 @@ intutic traces list        # See governance verdicts
 | `intutic status` | Show workspace status — auth, harnesses, sync state |
 | `intutic whoami` | Show current authenticated identity |
 | `intutic connect` | Start sync daemon — bidirectional config sync (`--interval`) |
-| `intutic traces list` | List execution traces (`--limit`, `--since`, `--action`, `--verdict`, `--model`, `--json`) |
+| `intutic disconnect` | Undo `intutic connect` — restore the harness configs it changed, remove its services, log out (`--harness`, `--dry-run`, `--keep-login`) |
+| `intutic doctor` | Diagnose workspace health — proxy, auth, daemon, configs, logs |
+| `intutic traces list` | List execution traces (`--limit`, `--since`, `--action` with a control plane, `--verdict` without one, `--model`, `--json`) |
 | `intutic traces inspect <id>` | Show full detail of a single trace |
 
 ## Supported Harnesses
@@ -58,7 +60,7 @@ Intutic auto-detects and configures AI coding harnesses, among them:
 | **n8n** | Running n8n instance (`N8N_URL`, default `http://localhost:5678`) | Workflow JSON file + external hook gate `~/.intutic/hooks/n8n-governance-hook.js` |
 | **OpenClaw** | `~/.openclaw/` or `.openclaw/openclaw.json` | `AGENTS.md` section in its agent workspace + `~/.intutic/hooks/openclaw/intutic-governance.cjs` (plugin gate, listed in `~/.openclaw/openclaw.json`) |
 | **Hermes** | `~/.hermes/` or `.hermes/config.yaml` | `AGENTS.md` section + `hooks.pre_tool_call` gate in `~/.hermes/config.yaml` |
-| **OpenCode** | `.opencode/`, `opencode.json`, `~/.config/opencode/` or `opencode` on PATH | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` (plugin gate) |
+| **OpenCode** | `.opencode/`, `opencode.json`, `~/.config/opencode/` or `opencode` on PATH | `AGENTS.md` + `.opencode/plugins/intutic-governance.js` (plugin gate; OpenCode 2.x: `.opencode/plugins/intutic-governance/index.js`) |
 
 ## Trace Inspection
 
@@ -68,13 +70,16 @@ View governance verdicts directly from the terminal:
 # List recent traces (last 24h)
 intutic traces list
 
-# Filter by enforcement action
+# Filter by enforcement action (connected to a control plane)
 intutic traces list --action KILL
+
+# Filter by the proxy's verdict (standalone: `intutic start`, no login)
+intutic traces list --verdict killed
 
 # Filter by model and time window
 intutic traces list --model claude-4 --since 7d
 
-# JSON output for scripting
+# JSON output for scripting (connected; standalone rows carry `.verdict`)
 intutic traces list --json | jq '.traces[] | select(.enforcementAction == "HIJACK")'
 
 # Inspect a specific trace

@@ -68,7 +68,8 @@ From **Settings › Security › Virtual API Keys**:
 
 | Action | Description |
 |--------|-------------|
-| **Create** | Generate a new key with a **Label / Description**, an optional **Expires In (Days)**, and optionally a list of allowed models |
+| **Create** | Generate a new key with a **Label / Description**, an optional **Expires In (Days)**, its **Access** ([scopes](/reference/api#api-key-scopes): **Full access**, **Agent traffic only**, or **Custom** per area), and optionally a list of allowed models |
+| **Edit scopes** | Change what an existing key may do (Owners and Admins). Applies from the key's next request |
 | **Revoke** | Immediately invalidate a key |
 
 There is no rotate action. To replace a key, create a new one, move its clients over, then revoke the old one.

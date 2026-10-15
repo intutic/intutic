@@ -33,7 +33,7 @@ func TestProviderSchemasAreValid(t *testing.T) {
 	for _, name := range []string{
 		"intutic_sop", "intutic_guardrail", "intutic_workspace_settings", "intutic_virtual_key",
 		"intutic_gateway", "intutic_notification_rule", "intutic_mcp_server_decision", "intutic_siem_destination",
-		"intutic_wasm_rule", "intutic_provider_credential",
+		"intutic_wasm_rule", "intutic_provider_credential", "intutic_task_connection",
 	} {
 		if _, ok := resp.ResourceSchemas[name]; !ok {
 			t.Errorf("missing resource %s", name)
@@ -130,6 +130,20 @@ resource "intutic_virtual_key" "k" {
   label           = "ci"
   expires_in_days = 400
 }`, `between 1 and 365`},
+		{"an approval mode the API does not know", `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode = "sometimes"
+}`, `value must be one of`},
+		{"an auto-apply threshold over 1", `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode           = "auto"
+  auto_threshold = 1.5
+}`, `must be between 0.000000 and 1.000000`},
+		{"an auto-apply threshold finer than the API stores", `
+resource "intutic_sop_optimizer_settings" "this" {
+  mode           = "auto"
+  auto_threshold = 0.8555
+}`, `three decimal places`},
 		{"empty SOP title", `
 resource "intutic_sop" "s" {
   title            = ""
@@ -332,6 +346,43 @@ resource "intutic_provider_credential" "c" {
   provider_id = "vertex_ai"
   fields      = { projectId = "my-project", serviceAccountJson = "not json" }
 }`, `Service Account JSON is not valid JSON`},
+		{"task connection: a provider the API does not register", `
+resource "intutic_task_connection" "t" {
+  task_provider = "asana"
+  base_url      = "https://app.asana.com"
+  project_key   = "P"
+  api_token     = "not-a-real-token"
+}`, `value must be one of`},
+		{"task connection: Jira without the token's account email", `
+resource "intutic_task_connection" "t" {
+  task_provider = "jira"
+  base_url      = "https://acme.atlassian.net"
+  project_key   = "PROJ"
+  api_token     = "not-a-real-token"
+}`, `A Jira connection needs account_email`},
+		{"task connection: a Jira account email that is not one", `
+resource "intutic_task_connection" "t" {
+  task_provider = "jira"
+  base_url      = "https://acme.atlassian.net"
+  project_key   = "PROJ"
+  account_email = "dev"
+  api_token     = "not-a-real-token"
+}`, `account_email must be an email address`},
+		{"task connection: an account email off Jira", `
+resource "intutic_task_connection" "t" {
+  task_provider = "linear"
+  base_url      = "https://api.linear.app"
+  project_key   = "ENG"
+  account_email = "dev@example.com"
+  api_token     = "not-a-real-token"
+}`, `Jira only`},
+		{"task connection: an empty token", `
+resource "intutic_task_connection" "t" {
+  task_provider = "pagerduty"
+  base_url      = "https://api.pagerduty.com"
+  project_key   = "PSVC"
+  api_token     = ""
+}`, `string length must be at least 1`},
 		{"unknown MCP status", `
 resource "intutic_mcp_server_decision" "m" {
   server_name = "github"

@@ -75,7 +75,7 @@ from typing import Optional
 from ..errors import ClawdeError
 from . import chaos, imagecheck, mcp_registry, snapshot, soprules, sso_groups
 from .actions import is_deploy, touches_infra
-from .client import GateClient
+from .client import INSUFFICIENT_SCOPE, GateClient
 from .hold import hold_key, hold_message, request_hold
 from .limits import too_large_reason
 from .opaque import OPAQUE_REFUSAL_MESSAGE
@@ -105,6 +105,8 @@ GATE_REFUSAL_CODES = (
     "POLICY_SNAPSHOT_UNVERIFIED",
     "SOP_RULE",
     "HOOK_GATE",
+    # The API key lacks the scope the hook gate needs (client.py).
+    INSUFFICIENT_SCOPE,
     # The call is too large to evaluate (limits.py), before any tier runs.
     "COMMAND_TOO_LARGE",
     # A chaos run's fault, injected after every tier allowed the call, or its
@@ -510,8 +512,9 @@ class Gate:
             if not resp.allowed:
                 self._emit("tool_blocked", tool_name, resp.reason, tool_input, gate_decision_id=resp.decision_id)
                 # The hook gate names the MCP registry's own code when the
-                # registry refused; anything else it refuses is HOOK_GATE.
-                code = resp.code if resp.code in MCP_CODES else "HOOK_GATE"
+                # registry refused, and INSUFFICIENT_SCOPE when the key lacks
+                # its scope; anything else it refuses is HOOK_GATE.
+                code = resp.code if resp.code in MCP_CODES or resp.code == INSUFFICIENT_SCOPE else "HOOK_GATE"
                 raise IntuticGateRefusal(self._shown(resp.reason), code, resp.incident_id)
 
         if tool_name not in READ_ONLY_TOOLS:

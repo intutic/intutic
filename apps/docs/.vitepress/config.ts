@@ -147,7 +147,7 @@ if (!IS_OSS) {
       { text: 'Overview (Cloud)', link: '/guide/dashboard' },
       { text: 'Developer Sessions (Cloud)', link: '/guide/agent-top' },
       { text: 'Intelligence Engine (Cloud)', link: '/guide/intelligence' },
-      { text: 'Activity Logs (Cloud)', link: '/guide/traces' },
+      { text: 'Activity Logs (Open-Core)', link: '/guide/traces' },
       { text: 'Agents (Cloud)', link: '/guide/agents' },
       { text: 'AI Inventory (Cloud)', link: '/guide/ai-inventory' },
       { text: 'Agent Guidelines (Cloud)', link: '/guide/sops' },

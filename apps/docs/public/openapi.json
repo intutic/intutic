@@ -3,7 +3,7 @@
   "info": {
     "title": "Intutic Control Plane API",
     "version": "v1",
-    "description": "Generated from the control plane's route source. 408 operations; 129 validate their JSON body and 70 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 163 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
+    "description": "Generated from the control plane's route source. 408 operations; 129 validate their JSON body and 70 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 169 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
   },
   "servers": [
     {
@@ -1922,7 +1922,7 @@
         "tags": [
           "auth.ts"
         ],
-        "summary": "Send the verification email again (2 per minute per address)",
+        "summary": "Send the verification email again (rate limited with the other sign-in routes: 10 a minute per IP)",
         "description": "**Auth:** None\n\n**Plan:** Cloud",
         "security": [],
         "requestBody": {
@@ -1947,9 +1947,6 @@
           },
           "409": {
             "description": "Conflict"
-          },
-          "429": {
-            "description": "Too Many Requests"
           },
           "500": {
             "description": "Internal Server Error"
@@ -5414,7 +5411,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DreamCycleSettingsResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -5426,7 +5430,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       },
       "put": {
         "operationId": "putApiV1DreamCycleSettings",
@@ -5455,7 +5459,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DreamCycleSettingsResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -5470,7 +5481,7 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/dream-cycle/trigger": {
@@ -8908,7 +8919,7 @@
         "tags": [
           "keys.ts"
         ],
-        "summary": "Revoke an API key",
+        "summary": "Revoke an API key (your own; OWNER/ADMIN: any in the workspace)",
         "description": "**Auth:** Authenticated\n\n**Plan:** Cloud",
         "security": [
           {
@@ -16006,7 +16017,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConnectionListResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -16018,7 +16036,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       },
       "post": {
         "operationId": "postApiV1TaskManagementConnections",
@@ -16047,7 +16065,14 @@
         },
         "responses": {
           "201": {
-            "description": "Created. No response schema in the route source."
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConnectionResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -16065,7 +16090,7 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/task-management/connections/{connectionId}": {
@@ -16096,7 +16121,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConnectionDeleteResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -16111,7 +16143,7 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/task-management/connections/{connectionId}/test": {
@@ -16142,7 +16174,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConnectionTestResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -16157,7 +16196,7 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/teams/{teamId}/workspaces": {
@@ -22828,14 +22867,10 @@
               "anomaly.detected",
               "anomaly.finding",
               "incident.created",
-              "incident.escalated",
-              "sop.status_changed",
-              "session.ended",
               "decision.pending",
               "decision.approved",
               "decision.rejected",
               "trajectory.alert",
-              "calibration.threshold_breach",
               "anomaly.drift.detected",
               "anomaly.capability_miss",
               "anomaly.trust.updated",
@@ -22863,6 +22898,8 @@
               "trial.day13_report_sent",
               "plan.captured",
               "plan.approved",
+              "plan.rejected",
+              "plan.closed",
               "plan.deviation.detected",
               "identity.offboarding.completed",
               "auth.login.failed",
@@ -23860,6 +23897,44 @@
           "txtRecordName",
           "txtRecordValue",
           "expiresAt"
+        ]
+      },
+      "DreamCycleSettingsResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "workspaceId": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "auto"
+                ],
+                "description": "`auto` lets a manually triggered optimizer run apply a STRENGTHEN proposal that reaches `autoThreshold` without review; `manual` applies nothing."
+              },
+              "autoThreshold": {
+                "type": "number",
+                "description": "The score (0 to 1) a proposal must reach to be auto-applied in `auto`."
+              }
+            },
+            "required": [
+              "workspaceId",
+              "mode",
+              "autoThreshold"
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "settings"
         ]
       },
       "EgressPolicyResponse": {
@@ -33850,14 +33925,10 @@
                     "anomaly.detected",
                     "anomaly.finding",
                     "incident.created",
-                    "incident.escalated",
-                    "sop.status_changed",
-                    "session.ended",
                     "decision.pending",
                     "decision.approved",
                     "decision.rejected",
                     "trajectory.alert",
-                    "calibration.threshold_breach",
                     "anomaly.drift.detected",
                     "anomaly.capability_miss",
                     "anomaly.trust.updated",
@@ -33885,6 +33956,8 @@
                     "trial.day13_report_sent",
                     "plan.captured",
                     "plan.approved",
+                    "plan.rejected",
+                    "plan.closed",
                     "plan.deviation.detected",
                     "identity.offboarding.completed",
                     "auth.login.failed",
@@ -34025,14 +34098,10 @@
               "anomaly.detected",
               "anomaly.finding",
               "incident.created",
-              "incident.escalated",
-              "sop.status_changed",
-              "session.ended",
               "decision.pending",
               "decision.approved",
               "decision.rejected",
               "trajectory.alert",
-              "calibration.threshold_breach",
               "anomaly.drift.detected",
               "anomaly.capability_miss",
               "anomaly.trust.updated",
@@ -34060,6 +34129,8 @@
               "trial.day13_report_sent",
               "plan.captured",
               "plan.approved",
+              "plan.rejected",
+              "plan.closed",
               "plan.deviation.detected",
               "identity.offboarding.completed",
               "auth.login.failed",
@@ -41237,6 +41308,156 @@
           "configVersion"
         ]
       },
+      "TaskConnectionDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "False when the workspace has no connection with this id (already removed)."
+          }
+        },
+        "required": [
+          "deleted"
+        ]
+      },
+      "TaskConnectionListResponse": {
+        "type": "object",
+        "properties": {
+          "listProperty": {
+            "type": "string",
+            "const": "items"
+          },
+          "rowCase": {
+            "type": "string",
+            "const": "camel"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "connectionId": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "jira",
+                    "pagerduty",
+                    "linear"
+                  ]
+                },
+                "baseUrl": {
+                  "type": "string"
+                },
+                "projectKey": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "const": "connected",
+                  "description": "Always `connected`: a connection is saved only once the provider accepts its credentials."
+                },
+                "lastSyncAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "connectionId",
+                "provider",
+                "baseUrl",
+                "projectKey",
+                "status",
+                "lastSyncAt",
+                "createdAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "listProperty",
+          "rowCase",
+          "items"
+        ]
+      },
+      "TaskConnectionResponse": {
+        "type": "object",
+        "properties": {
+          "connectionId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "jira",
+              "pagerduty",
+              "linear"
+            ]
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "projectKey": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "const": "connected",
+            "description": "Always `connected`: a connection is saved only once the provider accepts its credentials."
+          },
+          "lastSyncAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "connectionId",
+          "provider",
+          "baseUrl",
+          "projectKey",
+          "status",
+          "lastSyncAt",
+          "createdAt"
+        ]
+      },
+      "TaskConnectionTestResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ]
+      },
       "TeamCreateResponse": {
         "type": "object",
         "properties": {
@@ -42539,14 +42760,10 @@
               "anomaly.detected",
               "anomaly.finding",
               "incident.created",
-              "incident.escalated",
-              "sop.status_changed",
-              "session.ended",
               "decision.pending",
               "decision.approved",
               "decision.rejected",
               "trajectory.alert",
-              "calibration.threshold_breach",
               "anomaly.drift.detected",
               "anomaly.capability_miss",
               "anomaly.trust.updated",
@@ -42574,6 +42791,8 @@
               "trial.day13_report_sent",
               "plan.captured",
               "plan.approved",
+              "plan.rejected",
+              "plan.closed",
               "plan.deviation.detected",
               "identity.offboarding.completed",
               "auth.login.failed",

@@ -76,6 +76,7 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
   export ANTHROPIC_BASE_URL="http://localhost:4000"      # Anthropic SDKs append /v1/messages
   export OPENAI_BASE_URL="http://localhost:4000/v1"      # OpenAI SDKs append /chat/completions
   ```
+* **Keys:** A proxy with no `CONTROL_PLANE_URL` runs standalone whether or not a local Valkey is up. It forwards the provider key the client sends, and accepts a virtual key (`vk_…`) by sending the provider key from its own environment upstream.
 * **Approved models:** With no control plane to publish a workspace allowlist, the standalone proxy reads `allowedModels` from `~/.intutic/config.json` and enforces it the same way. See [Settings → Standalone allowlist](/guide/settings#standalone-allowedmodels-in-intutic-config-json).
 
 ::: warning Standalone has no control plane: leave mirroring off
@@ -180,4 +181,4 @@ print(response.content)
 To prevent client-side SDK parser failures, the proxy automatically formats the slash command response content to match the requested protocol schema:
 *   **OpenAI SDK:** Wraps the payload in a standard `chat.completion` Choice object.
 *   **Anthropic SDK:** Wraps the payload in a standard `message` JSON block.
-*   **Streaming Content:** `/fix` and `/draw` answer a `stream: true` request with Server-Sent Events (SSE) chunks. `/intutic` commands answer with a single JSON body.
+*   **Streaming Content:** every command answers a `stream: true` request with Server-Sent Events (SSE) in the route's format (Anthropic Messages, OpenAI chat completions or the Responses API), and any other request with a single JSON body.

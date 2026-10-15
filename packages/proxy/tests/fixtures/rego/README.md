@@ -12,5 +12,5 @@ OPA builds of Rego policies, shared by every host's tests: the Rust proxy
 | `conformance.expected.json` | `opa eval` on those cases: the oracle both hosts must reproduce |
 | `unsupported_builtin.*` | Needs `crypto.md5`, which no host provides: refused at load |
 
-Rebuild everything with `./build.sh` (needs OPA and a built CLI). It records the
-OPA version it used; these were built with OPA 1.20.2.
+Rebuild everything with `./build.sh` (needs OPA and a built CLI). It ends by
+printing the OPA version it used; these were built with OPA 1.20.2.

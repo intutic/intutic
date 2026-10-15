@@ -323,6 +323,24 @@ POST /api/v1/loops/:loopRunId/complete -- `outcome` ("SUCCEEDED"
 or "FAILED") records how the run ended.
 
 
+##### ControlPlaneClient.create_api_key()
+
+```python
+def create_api_key(
+    label: str,
+    *,
+    scopes: Optional[List[str]] = None,
+    expires_in_days: Optional[int] = None,
+    allowed_models: Optional[List[str]] = None,
+    is_service_account: Optional[bool] = None,
+) -> ApiKeyCreateResult
+```
+
+POST /api/v1/keys -- a key for you, with `scopes` (`["*"]` when
+omitted). The plaintext `key` is in the response once and never
+stored. Called with a key, each scope must be granted by that key.
+
+
 ##### ControlPlaneClient.create_guardrail()
 
 ```python
@@ -395,6 +413,19 @@ def create_sop(sop: SopInput) -> SopCreateResult
 POST /api/v1/sops -- one workspace SOP; `markdown_content` without front matter.
 
 
+##### ControlPlaneClient.create_task_connection()
+
+```python
+def create_task_connection(connection: TaskConnectionInput) -> TaskConnection
+```
+
+POST /api/v1/task-management/connections (OWNER, ADMIN). The
+control plane tests the credentials with the provider and saves the
+connection only if they are accepted (a 400 "Connection test failed"
+otherwise). A Jira connection needs `metadata.accountEmail`. There
+is no update: to change a connection, delete it and create it again.
+
+
 ##### ControlPlaneClient.create_team()
 
 ```python
@@ -451,6 +482,16 @@ def delete_siem_destination(destination_id: str) -> None
 DELETE /api/v1/siem/destinations/:destinationId (OWNER, ADMIN) --
 deactivates it; `update_siem_destination(id, {"isActive": True})`
 turns it back on.
+
+
+##### ControlPlaneClient.delete_task_connection()
+
+```python
+def delete_task_connection(connection_id: str) -> TaskConnectionDeleteResult
+```
+
+DELETE /api/v1/task-management/connections/:connectionId (OWNER,
+ADMIN) -- `deleted` is False when it was already gone.
 
 
 ##### ControlPlaneClient.disable_mcp_tool()
@@ -737,6 +778,16 @@ GET /api/v1/routing/mirror-adoption-report -- how a mirror-tested
 candidate model compared. Reported only; changes nothing.
 
 
+##### ControlPlaneClient.get_optimizer_settings()
+
+```python
+def get_optimizer_settings() -> OptimizerSettings
+```
+
+GET /api/v1/dream-cycle/settings -- the SOP Optimizer's approval
+mode and auto-apply threshold.
+
+
 ##### ControlPlaneClient.get_policy_document()
 
 ```python
@@ -843,6 +894,15 @@ def kill_loop_run(loop_run_id: str) -> LoopRunActionResult
 ```
 
 POST /api/v1/loops/:loopRunId/kill
+
+
+##### ControlPlaneClient.list_api_keys()
+
+```python
+def list_api_keys() -> List[ApiKey]
+```
+
+GET /api/v1/keys -- your own keys in the workspace, revoked ones included.
 
 
 ##### ControlPlaneClient.list_findings()
@@ -1098,6 +1158,16 @@ def list_sops(limit: Optional[int] = None) -> List[Dict[str, Any]]
 GET /api/v1/sops
 
 
+##### ControlPlaneClient.list_task_connections()
+
+```python
+def list_task_connections() -> List[TaskConnection]
+```
+
+GET /api/v1/task-management/connections -- the workspace's Jira,
+Linear and PagerDuty connections, unwrapped from `items`.
+
+
 ##### ControlPlaneClient.list_team_workspaces()
 
 ```python
@@ -1276,6 +1346,18 @@ POST .../guardrails/:guardrailId/retire -- gone from every rule
 endpoint on the next poll.
 
 
+##### ControlPlaneClient.revoke_api_key()
+
+```python
+def revoke_api_key(key_id: str) -> None
+```
+
+DELETE /api/v1/keys/:keyId -- revoke one of your live keys, or as
+an OWNER or ADMIN any live key in the workspace. A key you may not
+revoke (none, already revoked, another member's below OWNER/ADMIN)
+raises with the 404.
+
+
 ##### ControlPlaneClient.revoke_gateway()
 
 ```python
@@ -1423,6 +1505,16 @@ def sync_policy_source(connector_id: str) -> PolicySourceSyncResult
 POST /api/v1/connectors/:connectorId/sync
 
 
+##### ControlPlaneClient.test_task_connection()
+
+```python
+def test_task_connection(connection_id: str) -> TaskConnectionTestResult
+```
+
+POST /api/v1/task-management/connections/:connectionId/test (OWNER,
+ADMIN) -- whether the provider still accepts the stored credentials.
+
+
 ##### ControlPlaneClient.unset_provider_credential()
 
 ```python
@@ -1430,6 +1522,26 @@ def unset_provider_credential(provider: str) -> None
 ```
 
 DELETE /api/v1/workspace/provider-credentials/:provider
+
+
+##### ControlPlaneClient.update_api_key()
+
+```python
+def update_api_key(
+    key_id: str,
+    *,
+    scopes: Optional[List[str]] = None,
+    budgets: Optional[List[Dict[str, Any]]] = None,
+    rate_limit: Optional[Dict[str, Optional[int]]] = None,
+) -> ApiKey
+```
+
+PATCH /api/v1/keys/:keyId (OWNER, ADMIN) -- replace a key's scopes,
+spend budgets and/or rate limit; one left out is unchanged. Each budget
+is `{"period": "day"|"month", "limitUsd": ..., "enforcement":
+"hard"|"soft"}` (`budgets=[]` removes every budget); `rate_limit`
+takes `rpm` and `tpm`, None removing that limit. New scopes apply
+from the key's next request.
 
 
 ##### ControlPlaneClient.update_guardrail()
@@ -1458,6 +1570,24 @@ def update_notification_rule(
 PUT /api/v1/notifications/rules/:ruleId -- only the fields given
 change. A switch to the webhook channel comes back with the new
 `signingSecret`.
+
+
+##### ControlPlaneClient.update_optimizer_settings()
+
+```python
+def update_optimizer_settings(
+    mode: str,
+    *,
+    auto_threshold: Optional[float] = None,
+) -> OptimizerSettings
+```
+
+PUT /api/v1/dream-cycle/settings (OWNER, ADMIN) -- set the approval
+mode. `auto` lets a manually triggered optimizer run apply a
+STRENGTHEN proposal whose score reaches `auto_threshold` without
+review; `manual` applies nothing. The route sets an omitted
+`auto_threshold` to 0.85, so pass the current one
+(`get_optimizer_settings`) to keep it.
 
 
 ##### ControlPlaneClient.update_siem_destination()
@@ -1694,8 +1824,9 @@ non-2xx or without a boolean `allowed`, or answers
 GOVERNANCE_UNAVAILABLE because its own checks could not run), the
 verdict is decided by `fail_closed`: True (the default) reports BLOCK,
 because a client with no verdict has nothing to defer to; False
-reports allow. A 400 INVALID_REQUEST is a BLOCK whatever `fail_closed`
-says. A shadow-mode workspace's {allowed: true, degraded: true} is an
+reports allow. A 400 INVALID_REQUEST, and a 403 INSUFFICIENT_SCOPE (the
+key lacks `gateway:use`), are a BLOCK whatever `fail_closed` says. A
+shadow-mode workspace's {allowed: true, degraded: true} is an
 allow.
 
 A `local_only` client makes no call and answers allow with code

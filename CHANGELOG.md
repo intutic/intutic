@@ -7,6 +7,169 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Added
+
+- **API keys from the CLI and the SDKs, scopes included.** `intutic keys
+  list`, `intutic keys create --label <label> [--scopes <a,b>]
+  [--expires-in-days <n>] [--service-account]`, `intutic keys update <keyId>
+  --scopes <a,b>` and `intutic keys revoke <keyId>` list, create, re-scope and
+  revoke API keys (`/api/v1/keys`); scopes are checked against `API_SCOPES`
+  before anything is sent. `ControlPlaneClient` gains `listApiKeys`,
+  `createApiKey`, `updateApiKey` and `revokeApiKey` (`@intutic/clawde`), and
+  `list_api_keys`, `create_api_key`, `update_api_key` and `revoke_api_key`
+  (`intutic-clawde`). Until now only the dashboard and Terraform could set a
+  key's scopes.
+- **The SOP Optimizer's Approval mode from the CLI, the SDKs and Terraform.**
+  Since `featureFlags.ff_metaclaw_auto_apply` was removed in 2.5.1, the
+  Approval mode (`manual` or `auto`, with its auto-apply threshold) could only
+  be set on the SOP Optimizer page. `intutic optimizer settings` and
+  `intutic optimizer set --mode <manual|auto> [--auto-threshold <n>]` read
+  and set it (`set` keeps the current threshold unless given one);
+  `getOptimizerSettings` / `updateOptimizerSettings` (`@intutic/clawde`) and
+  `get_optimizer_settings` / `update_optimizer_settings` (`intutic-clawde`)
+  do the same; and the Terraform provider (0.5.0) adds
+  `intutic_sop_optimizer_settings` (destroy sets the mode back to `manual`).
+  `GET` and `PUT /api/v1/dream-cycle/settings` publish their response schema.
+- **Task-management connections from the CLI, the SDKs and Terraform.**
+  `intutic tasks list`, `intutic tasks add --provider <jira|linear|pagerduty>
+  --base-url <url> --project-key <key> [--account-email <email>]
+  (--token <token> | --token-file <path>)`, `intutic tasks test
+  <connectionId>` and `intutic tasks remove <connectionId>` manage the
+  Jira, Linear and PagerDuty connections, which only the dashboard could
+  before; the token is never echoed. `ControlPlaneClient` gains
+  `listTaskConnections`, `createTaskConnection`, `testTaskConnection` and
+  `deleteTaskConnection` (`list_task_connections`, … in `intutic-clawde`),
+  and the Terraform provider (0.5.0) adds `intutic_task_connection`: the API
+  token is a sensitive argument the API never returns, every argument
+  replaces the connection (there is no update route), and an imported
+  connection is replaced on its first apply, which sends the configured
+  token. The four task-management routes publish their response schemas.
+- **Notification rules on `plan.rejected` and `plan.closed`.** The control
+  plane sent both, and no rule could name them; the API, the CLI and the
+  Terraform provider accept them.
+
+### Changed
+
+- **The gate SDKs name a key that lacks the hook gate's scope.** A key without
+  `gateway:use` (or `*`) gets `403 INSUFFICIENT_SCOPE` from
+  `POST /api/v1/hook-gate`. `@intutic/gate` and `intutic_clawde.gate` read it as
+  an unreachable control plane: refused, with a reason that never named the
+  scope, under `failClosed`, and let through ungoverned with `failClosed` off.
+  It is now refused whatever `failClosed` says, with the code
+  `INSUFFICIENT_SCOPE` and the scopes the key needs, like `INVALID_REQUEST`. The
+  refusal the gate throws carries `INSUFFICIENT_SCOPE` (a new gate refusal
+  code), and the AgentCore interceptor denies such an answer the same way,
+  whatever `INTUTIC_FAIL_OPEN` says.
+
+### Removed
+
+- **Four notification event types nothing emitted**: `incident.escalated`,
+  `sop.status_changed`, `session.ended` and `calibration.threshold_breach`,
+  from `NOTIFICATION_EVENT_TYPES` and the Terraform provider (0.5.0). A rule on
+  one could never deliver; the API refuses them, and the control plane's
+  migration 246 deletes existing rules on them. `tools/scripts/check-feature-surfaces.js`
+  now fails when a listed event type has no emitter, when an event the
+  router sends is not listed, or when the dashboard's rule picker or the
+  settings guide leaves one out.
+
+### Fixed
+
+- **`@intutic/clawde`: `signupOrg` accepts `acceptTerms`.** 2.7.0 made the
+  signup routes require `acceptTerms: true`, but the TypeScript
+  `OrgSignupParams` had no such field, so a call that passed it did not
+  compile and one that left it out was refused with 400
+  `TERMS_NOT_ACCEPTED`. The field is now part of the type, and required.
+  (The Python `signup_org(accept_terms=...)` was already right.)
+- **`POST /api/v1/auth/resend-verification` answers 404 and 409 as documented.**
+  An address with no account got `500` instead of `404` (`E_NOT_FOUND`), and an
+  address already verified `500` instead of `409` (`ALREADY_VERIFIED`). Both
+  answers now carry `code`. The API reference names `E_NOT_FOUND`, the code the
+  route returns, where it said `USER_NOT_FOUND`.
+- **The control plane's Valkey subscribers honour `VALKEY_TLS`.** The
+  subscribers that read proxy traces and mirror pairs from Valkey opened their
+  own connection without TLS, so against a TLS-only Valkey they could not
+  connect unless `VALKEY_URL` was also written as `rediss://`. They now connect
+  with the same settings as the control plane's other Valkey connection.
+- **The Kitkat skill explains `INVALID_REQUEST`**, the code the hook gate
+  answers when it cannot read the request a gate SDK sent: a refusal whatever
+  the fail-open setting, and an integration fault to report rather than retry.
+- **The rule-author skill no longer says `intutic skill audit` catches secrets
+  in rule sources.** The audit reads skill directories and root rule files such
+  as `CLAUDE.md`, not WASM rule sources or mock contexts.
+- **The proxy and `intutic connect` read the same SOP files.** The proxy read
+  only the `.md` files directly in `.intutic/sops/`, while `intutic connect`
+  read only the files one folder down (`.intutic/sops/<set>/*.md`), so a SOP
+  was enforced by the proxy or written into the harness rules files, never
+  both. Every reader now takes both layouts: the proxy (a file in a folder is
+  titled `<set>/<name>`), `intutic connect`, the gate's local `review_before`
+  holds, `intutic sops status` and the agent report. Folders whose name starts
+  with `.` are skipped, so a Kubernetes ConfigMap mount is not read three
+  times. `intutic connect` leaves out `guardrail-*.md` files and pulled copies
+  of SOPs it already receives from the control plane, so the rules files do
+  not hold a SOP twice.
+- **A session's `--sops` selection no longer switches enforcement off.** It is
+  made from inside the agent's own chat, yet it decided which local SOPs'
+  `review_before:` holds the gates applied. It now narrows only the text
+  written into the harness rules files; every gate holds on every local SOP,
+  and the proxy enforces every file.
+- **A pulled SOP is enforced locally only when the control plane enforces
+  it.** `intutic sops pull` writes drafts and SOPs in shadow too, and the
+  proxy and `intutic connect` enforced every file it wrote. Each pulled file
+  now records `intutic_enforced: true` (an active `VALIDATED` SOP) or
+  `intutic_enforced: false` (any other state, or a SOP no longer active), the
+  key follows the server on every pull, and every local reader skips a file
+  marked `false`. While a file edits a draft forked from an approved SOP, the
+  approved version stays enforced locally in `<name>.approved.md` beside it
+  (written by `push` and kept by `pull`, never sent by `push`); the first pull
+  after the draft is promoted removes it, leaving one enforced file.
+- **Single-file SOPs are selectable rule sets.** `/intutic initialize`,
+  `/intutic start --sops` and `intutic loop start --sops` offered folders only;
+  a file directly in `.intutic/sops/` is now a rule set too, listed after the
+  folders as `.intutic/sops/<name>.md` and selected by name with or without
+  `.md`. Copies of workspace SOPs (files recording an `intutic_id:`) are not
+  listed.
+- **The README's first SOP enforces what it shows.** Its commands sat under a
+  "Denied Commands" heading that no gate reads. The sample now declares them
+  in front matter the proxy enforces (`hook_rule:` lines and
+  `sql_guard: refuse`), and a proxy test parses the sample from the README and
+  checks each refusal.
+- **The SOP Optimizer's routes work with an API key.** Every
+  `/api/v1/dream-cycle` route (the queue, approving and rejecting a
+  proposal, the manual trigger and the settings) answered 400 "Missing
+  x-workspace-id header" to a caller that did not send the header, which
+  only the dashboard does; they now fall back to the caller's workspace.
+- **Revoking an API key you have no live key for is a `404`.**
+  `DELETE /api/v1/keys/:id` answered `200 { "revoked": true }` for an id
+  that did not exist, belonged to another member or was already revoked, so
+  a mistyped id read as a revocation (and a second revoke rewrote the
+  revocation time). It now answers `404` with
+  `{ "error": "API key not found", "code": "E_NOT_FOUND" }` and changes and
+  records nothing; `intutic keys revoke` says so and exits 1, and the SDKs'
+  `revokeApiKey` / `revoke_api_key` raise. The Terraform provider already
+  treats a `404` on destroy as gone.
+- **An owner or admin can revoke any member's API key.** `DELETE
+  /api/v1/keys/:id` looked only among the caller's own keys, so an
+  administrator offboarding someone, or a Terraform destroy run with
+  another admin's key, could not withdraw it. An OWNER or ADMIN now revokes
+  any live key in the workspace (a DEVELOPER or VIEWER still only their
+  own; a key in another workspace is a `404`), and the credential change
+  records the key's owner beside who revoked it (`owner_id` in SIEM export,
+  `ownerId` on the audit timeline). `intutic_virtual_key` (Terraform
+  provider 0.5.0) keeps such a key in state and revokes it on destroy: its
+  refresh read only the caller's keys and dropped it.
+- **Six notification events reached no rule.** `sop.cascade.alert`,
+  `sop.cascade.invalidated`, `finops.tokens.classified` and the three
+  `org.cells.*` events were emitted without naming a workspace, and the
+  notification router can only dispatch an event to the rules of the
+  workspace it names, so a rule on any of them was accepted and never fired.
+  The cascade events name the root guideline's workspace (and carry the
+  fields the router reads), `finops.tokens.classified` the workspace whose
+  traces were classified, and each `org.cells.*` event every workspace of the
+  org. `identity.offboarding.completed` was emitted and never routed; it now
+  reaches its rules, HIGH when a step of the offboarding failed and INFO
+  otherwise.
+
 ## [2.7.0] - 2026-10-15
 
 ### Added

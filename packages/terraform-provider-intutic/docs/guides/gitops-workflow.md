@@ -26,7 +26,7 @@ terraform {
   required_providers {
     intutic = {
       source  = "intutic/intutic"
-      version = "~> 0.2"
+      version = "~> 0.4"
     }
   }
 
@@ -207,7 +207,7 @@ Three jobs:
 Anyone who can push a branch can change the workflow its pull request runs, so the key a pull request can reach should not be able to write. The workflow uses two keys:
 
 - `INTUTIC_API_KEY`, an OWNER or ADMIN automation key, lives in the secrets of a protected `intutic` environment that only the apply job uses.
-- `INTUTIC_PLAN_API_KEY`, a repository secret for the plan and drift jobs, can belong to a member with the EM role: a plan only reads, and EM can read everything this configuration manages. If the configuration manages `intutic_virtual_key` resources, both keys must belong to the same member, because the API shows a member only their own keys; the plan key then has the apply key's role and can write, so give it only to plan jobs you trust.
+- `INTUTIC_PLAN_API_KEY`, a repository secret for the plan and drift jobs, can belong to a member with the EM role: a plan only reads, and EM can read everything this configuration manages. If the configuration manages `intutic_virtual_key` resources, both keys must belong to the same member, because the API shows a member only their own keys; the plan key then has the apply key's role, so create it with read scopes only (for this configuration `sops:read`, `policies:read`, `settings:read`, `billing:read` and `inventory:read`, plus `keys:read` for virtual keys), and the API refuses its writes.
 
 Each job also needs whatever credentials your backend reads, which the example leaves out. GitHub does not pass secrets to workflows run from forks, so a pull request from a fork gets a failed plan rather than a key. The [authentication guide](https://registry.terraform.io/providers/intutic/intutic/latest/docs/guides/authentication) explains the roles.
 
@@ -232,7 +232,7 @@ Then either:
 - **Revert it:** run the apply job (or merge any change), and Terraform writes the configured value back.
 - **Keep it:** change the configuration to match in a pull request, and the next plan is clean.
 
-A SOP or guardrail edited in the dashboard is different. If the edit replaced it with a new version, the version in state is retired, and the plan proposes to create it again, which would leave two. To keep the dashboard's version instead, remove the old one from state and import the new one:
+A SOP or guardrail edited in the dashboard is different. If the edit replaced it with a new version, the version in state is retired (a SOP's once the new version is promoted to `VALIDATED`), and the plan proposes to create it again, which would leave two. To keep the dashboard's version instead, remove the old one from state and import the new one:
 
 ```shell
 terraform state rm 'intutic_sop.this["production-deploys"]'

@@ -4,20 +4,22 @@
 #
 # See AGENTS.md § "Hybrid Open-Core Development Workflow".
 #
-# DIRECTION: public -> enterprise is now the default. Open core leads for shared
-# client-facing code; enterprise consumes it. The old default (enterprise ->
-# public) is still available as --to-public, for backporting an enterprise-only
-# edit or a change that cannot be developed in the open.
+# DIRECTION: enterprise -> public is the default. Enterprise is the reference for
+# the shared trees: a change to a shared file lands in both repos in the same
+# batch, byte-identical, and check-public-parity.js (run in both repos' CI)
+# fails on drift; when the two disagree, enterprise wins. --from-public copies
+# the other way, for a community PR merged in the public repo that has not been
+# brought into enterprise yet. (--to-public is accepted and is the default.)
 #
 # Either direction is a dry run unless you pass --apply, and either way the
 # guards below are what make it safe: neither tree may be dirty, and the
 # destination is never moved to an older version than it already has.
 #
 # Usage:
-#   ./tools/scripts/sync-to-public.sh                # dry run, public -> enterprise
-#   ./tools/scripts/sync-to-public.sh --apply        # write, public -> enterprise
-#   ./tools/scripts/sync-to-public.sh --to-public    # dry run, enterprise -> public
-#   ./tools/scripts/sync-to-public.sh --to-public --apply
+#   ./tools/scripts/sync-to-public.sh                  # dry run, enterprise -> public
+#   ./tools/scripts/sync-to-public.sh --apply          # write, enterprise -> public
+#   ./tools/scripts/sync-to-public.sh --from-public    # dry run, public -> enterprise
+#   ./tools/scripts/sync-to-public.sh --from-public --apply
 #   ./tools/scripts/sync-to-public.sh --apply --allow-dirty
 #   ./tools/scripts/sync-to-public.sh --apply --allow-symbol-loss   # intended removals
 #
@@ -34,14 +36,15 @@ PUBLIC_DIR="/Users/ishangupta/intutic"
 APPLY=false
 ALLOW_SYMBOL_LOSS=false
 ALLOW_DIRTY=false
-TO_PUBLIC=false
+TO_PUBLIC=true
 for arg in "$@"; do
   case "$arg" in
     --apply)       APPLY=true ;;
     --allow-dirty) ALLOW_DIRTY=true ;;
     --to-public)   TO_PUBLIC=true ;;
+    --from-public) TO_PUBLIC=false ;;
     --allow-symbol-loss) ALLOW_SYMBOL_LOSS=true ;;
-    -h|--help)     sed -n '2,28p' "$0"; exit 0 ;;
+    -h|--help)     sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "Unknown argument: $arg" >&2; exit 1 ;;
   esac
 done

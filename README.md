@@ -10,7 +10,7 @@
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/intutic/intutic/actions)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen.svg)](https://github.com/intutic/intutic/pulls)
 
-[Quickstart](#-30-second-quickstart) • [Architecture](#%EF%B8%8F-architecture) • [Key Features](#-key-features) • [Supported Harnesses](#-supported-harnesses) • [Docs](https://docs.intutic.ai)
+[Quickstart](#-30-second-quickstart) • [Architecture](#%EF%B8%8F-architecture) • [Key Features](#-key-features) • [Supported Harnesses](#-supported-harnesses--frameworks) • [Docs](https://docs.intutic.ai)
 
 <br>
 
@@ -140,21 +140,25 @@ Intutic ships **43 harness adapters**: 18 install as native hook gates in the ha
 
 ## 📝 Write Your First SOP
 
-Intutic governance rules are written as standard Markdown files under `.intutic/sops/` in your repository, one folder per rule set (for example `.intutic/sops/safety/rules.md`), or as workspace SOPs on a connected control plane. `intutic connect` writes them into the file each harness reads, such as `.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc` or a marked section of `AGENTS.md` (never `CLAUDE.md`), and compiles them into the rules its gates enforce:
+Intutic governance rules are written as standard Markdown files under `.intutic/sops/` in your repository, or as workspace SOPs on a connected control plane. A file can sit directly in `.intutic/sops/` (for example `.intutic/sops/safety.md`) or one folder down, one folder per rule set (for example `.intutic/sops/safety/rules.md`); the proxy and `intutic connect` read both. `intutic connect` writes them into the file each harness reads, such as `.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc` or a marked section of `AGENTS.md` (never `CLAUDE.md`).
+
+The front matter is what gets enforced; the prose below it is guidance the agent reads. Save this as `.intutic/sops/safety.md`:
 
 ```markdown
-# Standard Operating Procedure (SOP): Safety Guardrails
+---
+sql_guard: refuse
+hook_rule: {"id": "safety.no-force-push", "tools": ["Bash"], "argContains": ["git push --force"], "reason": "Force-pushing rewrites shared history."}
+hook_rule: {"id": "safety.no-recursive-delete", "tools": ["Bash"], "argContains": ["rm -rf"], "reason": "Recursive deletes need a human."}
+---
+# Safety Guardrails
 
-## Rules
-1. **No Secret Leaks**: Agents must never output raw API keys or passwords.
-2. **File Boundaries**: Restrict file modifications to the current project directory.
-3. **No Force Push**: Block `git push --force` on all branches.
-
-## Denied Commands
-- `rm -rf`
-- `DROP TABLE`
-- `TRUNCATE`
+1. **No secret leaks**: never print raw API keys or passwords.
+2. **No force push**: `git push --force` is refused.
+3. **No recursive deletes**: `rm -rf` is refused.
+4. **No destructive SQL**: `DROP TABLE`, `TRUNCATE` and `DELETE` without `WHERE`, sent through `psql`, `mysql` or `sqlite3`, are refused.
 ```
+
+The proxy refuses a `Bash` call whose arguments contain `git push --force` or `rm -rf` (each `hook_rule` matches the tool name exactly, so list the shell tool of every harness you route, such as `shell` or `run_shell_command`), and `sql_guard: refuse` refuses destructive SQL against any database not named in an `sql_allow_dsns:` line. Secret leaks are not a SOP key: the proxy's DLP scanner catches them (see [Policies › Enforcement](https://docs.intutic.ai/guide/policies#enforcement)). See [SOP Front Matter](https://docs.intutic.ai/reference/sop-front-matter) for every key.
 
 ---
 
@@ -178,6 +182,7 @@ Because Intutic evaluates prompts pre-flight, you can run interactive governance
   * [`@intutic/cli`](https://www.npmjs.com/package/@intutic/cli) — Developer onboarding CLI
   * [`@intutic/proxy`](https://www.npmjs.com/package/@intutic/proxy) — Native Rust proxy binary wrapper
   * [`@intutic/clawde`](https://www.npmjs.com/package/@intutic/clawde) — Programmatic TypeScript client SDK
+  * [`@intutic/gate`](https://www.npmjs.com/package/@intutic/gate) — In-process tool-call gates for SDK-gated TypeScript frameworks
   * [`@intutic/mcp-governance-proxy`](https://www.npmjs.com/package/@intutic/mcp-governance-proxy) — Stdio JSON-RPC MCP proxy
   * [`@intutic/shared-types`](https://www.npmjs.com/package/@intutic/shared-types) — Zod-validated shared TypeScript types
 

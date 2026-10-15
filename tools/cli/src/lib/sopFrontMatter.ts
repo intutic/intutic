@@ -46,6 +46,12 @@ export interface ParsedSopFile {
    * `version:` semver.
    */
   revision: number | null
+  /**
+   * From an `intutic_draft:` key: this file is the approved version `intutic
+   * sops pull` / `push` keeps on disk while another file edits its DRAFT
+   * successor (that draft's id). `sops push` never sends it; edit the draft.
+   */
+  approvedCopyFor: string | null
   /** Everything after the front-matter fence, or the whole trimmed input when there is none. */
   body: string
 }
@@ -95,6 +101,7 @@ export function parseSopFile(raw: string): ParsedSopFile {
     contentHash: scalar(front, 'content_hash:'),
     intuticId: scalar(front, 'intutic_id:'),
     revision: parseRevision(scalar(front, 'intutic_revision:')),
+    approvedCopyFor: scalar(front, 'intutic_draft:'),
     body,
   }
 }
@@ -183,6 +190,8 @@ export function renderSopFile(sop: {
   version: string
   body: string
   record?: SopSyncRecord
+  /** {@link serverEnforces}; null writes no `intutic_enforced:` line. */
+  enforced?: boolean | null
 }): string {
   const hash = createHash('sha256').update(sop.body, 'utf8').digest('hex')
   return [
@@ -192,11 +201,32 @@ export function renderSopFile(sop: {
     `version: ${sop.version}`,
     `content_hash: ${hash}`,
     ...(sop.record ? [`intutic_id: ${sop.record.intuticId}`, `intutic_revision: ${sop.record.revision}`] : []),
+    ...(sop.enforced === undefined || sop.enforced === null ? [] : [`intutic_enforced: ${sop.enforced}`]),
     '---',
     '',
     sop.body,
     '',
   ].join('\n')
+}
+
+/**
+ * Whether the control plane enforces this SOP: an active `VALIDATED` one. Every
+ * other state is not enforced there — `DRAFT`, `PENDING_REVIEW`, `GENERATED`
+ * and `INVALIDATED` reach no agent, and `HYPOTHESIZED` / `REFINED` are synced
+ * as advisory text and judged in shadow, with no gate acting on them
+ * (`ENFORCEMENT_BY_STATE`, and the `VALIDATED` filter every gate applies). A
+ * SOP no longer active (deleted or replaced) is not enforced either. `null`
+ * when the server reported no state, which writes no marker.
+ *
+ * `intutic sops pull` records the answer as `intutic_enforced:`, and every
+ * local reader — the proxy and the sync daemon — skips a file marked
+ * `intutic_enforced: false`, so a SOP is never enforced locally because it was
+ * pulled.
+ */
+export function serverEnforces(sop: { lifecycleState?: string | null; isActive?: boolean | null }): boolean | null {
+  if (sop.isActive === false) return false
+  if (!sop.lifecycleState) return null
+  return sop.lifecycleState === 'VALIDATED'
 }
 
 /** `Deploy Checklist` / `deploy checklist!!` → `deploy-checklist`. */

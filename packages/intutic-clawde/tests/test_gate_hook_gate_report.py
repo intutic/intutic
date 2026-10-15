@@ -66,6 +66,15 @@ def test_a_rule_refusal_is_reported_with_its_decision_id(tmp_path, monkeypatch):
     assert reports(client) == [("tool_blocked", "Bash", "no shell on prod [sop.r1]", "hgd_2")]
 
 
+def test_a_key_without_the_hook_gate_scope_is_refused_as_insufficient_scope(tmp_path, monkeypatch):
+    reason = "hook-gate refused the API key (INSUFFICIENT_SCOPE): it needs the gateway:use scope"
+    client, refusal = guard(tmp_path, monkeypatch, GateResponse(
+        allowed=False, reason=reason, code="INSUFFICIENT_SCOPE"))
+    assert refusal.code == "INSUFFICIENT_SCOPE"
+    assert "gateway:use" in refusal.reason
+    assert reports(client) == [("tool_blocked", "Bash", reason, None)]
+
+
 def test_an_allow_is_reported_with_its_decision_id(tmp_path, monkeypatch):
     client, refusal = guard(tmp_path, monkeypatch, GateResponse(allowed=True, decision_id="hgd_3"))
     assert refusal is None

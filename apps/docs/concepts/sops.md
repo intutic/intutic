@@ -39,7 +39,7 @@ human-in-the-loop validation or in-process local interception:
 
 ### Comparison: Local Harness Rules vs. LLM-as-a-Judge
 
-| Feature | Local Harness Rules (rules files / WASM) | LLM-as-a-Judge (LLMProbe) |
+| Feature | Local Harness Rules (rules files / WASM) | LLM-as-a-Judge (response judge) |
 | :--- | :--- | :--- |
 | **Execution Timing** | **Pre-flight (Before execution)** | **Post-flight / Async (During/After execution)** |
 | **Latency** | **No model call and no network hop**: checked on the machine before the action runs (WASM rules are stopped by an instruction budget) | **A model call**: seconds, while or after the response streams |
@@ -49,7 +49,7 @@ human-in-the-loop validation or in-process local interception:
 
 ### 1. Standard SOPs
 Standard SOPs are authored in natural language markdown. They represent corporate policies (e.g., "Do not use deprecated cryptographic functions") and are used by:
-- **LLMProbe:** Running LLM-as-a-judge checks against prompt inputs and outputs.
+- **The response judge:** the proxy sends each model response to the control plane, chunk by chunk as it streams and again when it ends, where a self-hosted judge model grades it against the workspace's SOPs and records an incident for a violation.
 - **The harnesses and the proxy:** `intutic connect` writes them into each harness's rules file, and the proxy enforces the keys in their [front matter](/reference/sop-front-matter).
 
 ### 2. WASM Rules
@@ -93,7 +93,7 @@ that are tested in both directions rather than examples that were never executab
 
 ### 1. Secret & Credential Redaction (Markdown SOP)
 
-Save under `.intutic/sops/` (for example `.intutic/sops/secrets-dlp/rules.md`); `intutic connect` writes it into each harness's rules file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)):
+Save under `.intutic/sops/` (for example `.intutic/sops/secrets-dlp/rules.md`, or `.intutic/sops/secrets-dlp.md` directly in it); the proxy reads it from there, and `intutic connect` writes it into each harness's rules file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)):
 
 ```markdown
 # SOP: Secrets DLP & Credential Protection

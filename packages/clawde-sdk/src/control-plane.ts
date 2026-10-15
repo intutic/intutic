@@ -36,6 +36,10 @@ import type {
   SiemDestinationInput,
   SiemDestinationUpdate,
   SiemSecretRotation,
+  TaskConnection,
+  TaskConnectionInput,
+  TaskConnectionTestResult,
+  TaskConnectionDeleteResult,
   UsageOptions,
   MemberUsageResponse,
   TeamUsageResponse,
@@ -121,6 +125,12 @@ import type {
   SopCreateResult,
   OrgSop,
   OrgSopInput,
+  OptimizerSettings,
+  OptimizerSettingsUpdate,
+  ApiKey,
+  ApiKeyCreateResult,
+  ApiKeyUpdate,
+  CreateApiKeyOptions,
   AttenuateOptions,
   AttenuationResult,
   AttenuationChainLink,
@@ -533,6 +543,35 @@ export class ControlPlaneClient {
   /** POST /api/v1/siem/destinations/:destinationId/signing-secret (OWNER, ADMIN) */
   public async rotateSiemDestinationSecret(destinationId: string): Promise<SiemSecretRotation> {
     return this.request('POST', `/api/v1/siem/destinations/${seg(destinationId)}/signing-secret`)
+  }
+
+  // ─── Task-management connections (`intutic tasks`) ───
+
+  /** GET /api/v1/task-management/connections — the workspace's Jira, Linear and PagerDuty connections, unwrapped from `items`. */
+  public async listTaskConnections(): Promise<TaskConnection[]> {
+    const res = await this.request<{ items: TaskConnection[] }>('GET', '/api/v1/task-management/connections')
+    return res.items ?? []
+  }
+
+  /**
+   * POST /api/v1/task-management/connections (OWNER, ADMIN). The control
+   * plane tests the credentials with the provider and saves the connection
+   * only if they are accepted (a 400 "Connection test failed" otherwise). A
+   * Jira connection needs `metadata.accountEmail`. There is no update: to
+   * change a connection, delete it and create it again.
+   */
+  public async createTaskConnection(connection: TaskConnectionInput): Promise<TaskConnection> {
+    return this.request('POST', '/api/v1/task-management/connections', connection)
+  }
+
+  /** POST /api/v1/task-management/connections/:connectionId/test (OWNER, ADMIN) — whether the provider still accepts the stored credentials. */
+  public async testTaskConnection(connectionId: string): Promise<TaskConnectionTestResult> {
+    return this.request('POST', `/api/v1/task-management/connections/${seg(connectionId)}/test`)
+  }
+
+  /** DELETE /api/v1/task-management/connections/:connectionId (OWNER, ADMIN) — `deleted: false` when it was already gone. */
+  public async deleteTaskConnection(connectionId: string): Promise<TaskConnectionDeleteResult> {
+    return this.request('DELETE', `/api/v1/task-management/connections/${seg(connectionId)}`)
   }
 
   // ─── Usage (`intutic usage`) ───
@@ -1040,6 +1079,55 @@ export class ControlPlaneClient {
   /** DELETE /api/v1/workspace/org-sops/:orgSopId — answers 404 both for no such SOP and for a member without admin access. */
   public async deleteOrgSop(orgSopId: string): Promise<void> {
     await this.request('DELETE', `/api/v1/workspace/org-sops/${seg(orgSopId)}`)
+  }
+
+  // ─── API keys (`intutic keys`) ───
+
+  /** GET /api/v1/keys — your own keys in the workspace, revoked ones included. */
+  public async listApiKeys(): Promise<ApiKey[]> {
+    return this.listData('/api/v1/keys')
+  }
+
+  /**
+   * POST /api/v1/keys — a key for you, with `scopes` (`['*']` when omitted).
+   * The plaintext `key` is in the response once and never stored. Called with
+   * a key, each scope must be granted by that key.
+   */
+  public async createApiKey(label: string, options: CreateApiKeyOptions = {}): Promise<ApiKeyCreateResult> {
+    return this.request('POST', '/api/v1/keys', defined({ label, ...options }))
+  }
+
+  /**
+   * PATCH /api/v1/keys/:keyId (OWNER, ADMIN) — replace a key's scopes, spend
+   * budgets and/or rate limit; a field left out is unchanged. New scopes apply
+   * from the key's next request.
+   */
+  public async updateApiKey(keyId: string, changes: ApiKeyUpdate): Promise<ApiKey> {
+    return this.request('PATCH', `/api/v1/keys/${seg(keyId)}`, changes)
+  }
+
+  /** DELETE /api/v1/keys/:keyId — revoke one of your live keys, or as an OWNER or ADMIN any live key in the workspace; a key you may not revoke (none, already revoked, another member's below OWNER/ADMIN) throws `ClawdeConnectionError` with the 404. */
+  public async revokeApiKey(keyId: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/keys/${seg(keyId)}`)
+  }
+
+  // ─── SOP Optimizer approval mode (`intutic optimizer`) ───
+
+  /** GET /api/v1/dream-cycle/settings — the SOP Optimizer's approval mode and auto-apply threshold. */
+  public async getOptimizerSettings(): Promise<OptimizerSettings> {
+    return (await this.request<{ settings: OptimizerSettings }>('GET', '/api/v1/dream-cycle/settings')).settings
+  }
+
+  /**
+   * PUT /api/v1/dream-cycle/settings (OWNER, ADMIN) — set the approval mode.
+   * `auto` lets a manually triggered optimizer run apply a STRENGTHEN
+   * proposal whose score reaches `autoThreshold` without review; `manual`
+   * applies nothing. The route sets an omitted `autoThreshold` to 0.85, so
+   * pass the current one (`getOptimizerSettings`) to keep it.
+   */
+  public async updateOptimizerSettings(settings: OptimizerSettingsUpdate): Promise<OptimizerSettings> {
+    const body = defined({ mode: settings.mode, autoThreshold: settings.autoThreshold })
+    return (await this.request<{ settings: OptimizerSettings }>('PUT', '/api/v1/dream-cycle/settings', body)).settings
   }
 
   // ─── Key attenuation, cost prediction, routing ───

@@ -135,6 +135,8 @@ Since Claude Code's CLI natively intercepts prompts starting with `/` at the she
 3. **Interactive Validation**:
    Any output violating corporate SOPs or local personal rules will receive the synthesized `Intutic LLM-as-a-Judge` warning card appended dynamically to the CLI streams.
 
+LLM judging runs only on a plan that includes it. On a plan without it (Free), the proxy makes no judge call and passes responses through unjudged.
+
 ---
 
 ## MCP Server Integration (`~/.claude.json`)

@@ -176,6 +176,44 @@ class SiemSecretRotation(TypedDict):
     signingSecret: str
 
 
+class TaskConnection(TypedDict):
+    """A Jira Cloud, Linear or PagerDuty connection. Its API token is never returned."""
+
+    connectionId: str
+    provider: Literal["jira", "linear", "pagerduty"]
+    baseUrl: str
+    #: The Jira project key, Linear team key or PagerDuty service key tickets and incidents are matched on.
+    projectKey: str
+    #: Always "connected": a connection is saved only once the provider accepts its credentials.
+    status: Literal["connected"]
+    lastSyncAt: Optional[str]
+    createdAt: str
+
+
+class TaskConnectionInput(TypedDict, total=False):
+    """A create: ``provider``, ``baseUrl``, ``authToken`` and ``projectKey``
+    required; Jira also needs ``metadata: {"accountEmail": ...}``, the
+    Atlassian account the API token belongs to. The control plane tests the
+    token with the provider, encrypts it, and never returns it."""
+
+    provider: Literal["jira", "linear", "pagerduty"]
+    baseUrl: str
+    authToken: str
+    projectKey: str
+    metadata: Dict[str, str]
+
+
+class TaskConnectionTestResult(TypedDict):
+    #: Whether the provider still accepts the stored credentials.
+    success: bool
+    message: str
+
+
+class TaskConnectionDeleteResult(TypedDict):
+    #: False when the workspace has no connection with that id (already removed).
+    deleted: bool
+
+
 class MemberUsageResponse(TypedDict):
     #: "self" when the caller may see only their own calls.
     scope: Literal["workspace", "self"]
@@ -527,6 +565,68 @@ class SopCreateResult(TypedDict):
     complexityTier: str
     isActive: bool
     lifecycleState: str
+
+
+class KeySpendBudget(TypedDict):
+    """One spend budget of a key. ``hard`` refuses requests the budget does
+    not cover; ``soft`` only alerts."""
+
+    period: Literal["day", "month"]
+    limitUsd: float
+    enforcement: Literal["hard", "soft"]
+
+
+class KeyRateLimit(TypedDict):
+    """A key's per-minute limits; None is no limit."""
+
+    rpm: Optional[int]
+    tpm: Optional[int]
+
+
+class ApiKey(TypedDict):
+    """An API key without its secret."""
+
+    keyId: str
+    keyPrefix: str
+    label: str
+    #: API key scopes (``*``, ``gateway:use``, ``<area>:read``, ``<area>:write``).
+    scopes: List[str]
+    #: The key's model allowlist; None inherits the workspace's.
+    allowedModels: Optional[List[str]]
+    expiresAt: Optional[str]
+    lastUsedAt: Optional[str]
+    revokedAt: Optional[str]
+    createdAt: str
+    isServiceAccount: bool
+    budgets: List[KeySpendBudget]
+    rateLimit: KeyRateLimit
+
+
+class ApiKeyCreateResult(TypedDict):
+    """A created key, with its plaintext."""
+
+    keyId: str
+    #: The plaintext ``vk_`` key: shown once, never stored.
+    key: str
+    keyPrefix: str
+    label: str
+    scopes: List[str]
+    allowedModels: Optional[List[str]]
+    expiresAt: Optional[str]
+    createdAt: str
+    budgets: List[KeySpendBudget]
+    rateLimit: KeyRateLimit
+
+
+class OptimizerSettings(TypedDict):
+    """The SOP Optimizer's approval mode."""
+
+    workspaceId: str
+    #: ``auto`` lets a manually triggered optimizer run apply a STRENGTHEN
+    #: proposal that reaches ``autoThreshold``; ``manual`` applies nothing.
+    mode: Literal["manual", "auto"]
+    #: The score (0 to 1) a proposal must reach to be auto-applied in ``auto``.
+    autoThreshold: float
 
 
 class AttenuationResult(TypedDict):

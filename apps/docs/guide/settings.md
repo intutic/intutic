@@ -106,7 +106,7 @@ Create keys (`vk_` prefix) for developers and their agents to reach the Intutic 
 - Optionally limit a key to **Allowed models (optional)**, one model id per line
 - Mark a CI or service key **This key is for automation (CI, scripts, a service)**, so the SSO-recency window does not expire it (see [Security & Identity](/guide/security#automation-keys)). Ticking it also switches the key to **Agent traffic only**, the least-privilege choice for a pipeline; widen it if the pipeline calls the API too
 - The **Scopes** column lists each key's scopes. An OWNER or ADMIN can change them with **Edit scopes**; the change applies from the key's next request
-- **Revoke** a compromised key immediately
+- **Revoke** a compromised key immediately. This list shows your own keys; an OWNER or ADMIN revokes any member's live key from **Key budgets and rate limits** under [Billing](#billing), which lists every key with its owner (for example when someone leaves)
 
 A key whose scopes are all strings from before scopes were enforced (such as `read`) grants nothing: every request with it gets `403 INSUFFICIENT_SCOPE`. Set its scopes with **Edit scopes**, or replace it.
 
@@ -383,6 +383,8 @@ If agents are using stale governance rules, clear the policy cache from this tab
 
 Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity. Only an owner or admin can create, change or delete a rule or replace its signing secret, as for SIEM destinations; every member can see the rules and the delivery log. From the CLI, `intutic notifications list`, `create`, `update`, `delete` and `rotate-secret` manage the same rules ([CLI reference](/reference/cli#intutic-notifications-list)).
 
+The onboarding emails a new workspace's owner receives on day 3 and day 7 are not set here: each carries a one-click unsubscribe link, and an owner who used it gets neither. Sign-in, billing and alert emails are always sent.
+
 ### Channel Routing
 
 - **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack. A review card's **Approve** and **Reject** buttons work only from a linked account, and the review is recorded against you.
@@ -454,9 +456,12 @@ The **Event Type** list offers only the events the control plane sends:
 | `trajectory.alert` | Trajectory Drift Alert |
 | `anomaly.drift.detected` | Guideline Compliance Drifted: an enforced guideline's compliance moved 0.15 or more from its baseline in the hourly check; once per drift. HIGH when compliance fell (the guideline is also queued for a rewrite), INFO when it rose. See [Behavioral Drift](/guide/drift-detection#behavioral-drift) |
 | `anomaly.capability_miss` | Capability Miss (ungoverned task) |
+| `anomaly.trust.updated` | Developer Trust Score Changed: a developer's trust score moved after a hook event or a clean session; MEDIUM |
 | `sop.integrity.drift` | Guideline Integrity Drift |
 | `sop.stale.detected` | Guideline Went Stale |
 | `sop.cascade.invalidated` | Guideline Cascade Invalidated |
+| `sop.cascade.alert` | Guideline Cascade Affects Many Dependents: invalidating a guideline cascades to more dependent guidelines than the alert threshold; HIGH |
+| `sop.lifecycle.transitioned` | Guideline Lifecycle State Changed: a guideline moved between lifecycle states; INFO |
 | `sop.upstream.changed` | Guideline Changed Upstream |
 | `guardrail.ready` | Policy Guardrail Ready to Enforce |
 | `guardrail.stale` | Policy Guardrail Citation Went Stale |
@@ -468,14 +473,34 @@ The **Event Type** list offers only the events the control plane sends:
 | `mcp.budget.exceeded` | MCP Call Budget Exceeded: once per budget per period, on the first refused call |
 | `finops.budget.threshold` | Budget Threshold Reached: a workspace cap, key budget or member budget reached the alert threshold; once per budget per day or month. Carries `scope`, the key's or member's id and `enforcement` |
 | `finops.budget.exceeded` | Budget Exceeded: a workspace cap, key budget or member budget reached its limit; once per budget per day or month |
+| `finops.tokens.classified` | Token Spend Classified Useful or Wasted: a member labelled traces' tokens USEFUL or WASTED; INFO |
 | `plan.deviation.detected` | Plan Deviation Detected |
+| `plan.captured` | Agent Plan Captured; INFO |
+| `plan.approved` | Agent Plan Approved; INFO |
+| `plan.rejected` | Agent Plan Rejected; INFO |
+| `plan.closed` | Agent Plan Closed: HIGH when the plan failed, MEDIUM when it partly succeeded, INFO when it succeeded |
+| `workspace.context.updated` | Workspace Context Updated: the sync daemon reported a changed workspace context file; INFO |
 | `trial.expired_downgraded` | Trial Expired |
+| `trial.started` | Enterprise Trial Started; INFO |
+| `trial.day7_report_sent` | Trial Day-7 Report Sent; INFO |
+| `trial.day13_report_sent` | Trial Day-13 Report Sent (two days left); INFO |
+| `billing.subscription.past_due` | Subscription Past Due: Stripe could not collect the latest payment; MEDIUM. Sent to every workspace on the subscription |
+| `billing.dunning.downgraded` | Moved to Free Plan After Failed Payment: the final retry failed and the account is on the free plan (see [failed payments](/guide/plans#failed-payments)); HIGH |
+| `billing.dunning.restored` | Plan Restored After Payment: the overdue invoice was paid and the plan is back; INFO |
 | `gateway.stale.detected` | Self-Hosted Gateway Unreachable |
+| `gateway.cell.stuck_pending` | Managed Gateway Cell Stuck Pending: a managed cell registered and never came up; HIGH |
+| `region.sync.stale` | Region Out of Sync with the Control Plane: a region's cells are serving on stale control metadata; HIGH |
+| `org.cells.deprovision_scheduled` | Managed Gateway Cell Removal Scheduled: the plan no longer covers a managed cell, which is removed at the end of its grace period; HIGH |
+| `org.cells.deprovision_canceled` | Managed Gateway Cell Removal Cancelled: the plan covers the cell again; MEDIUM |
+| `org.cells.deprovisioned` | Managed Gateway Cell Removed; HIGH |
+| `provider.outage.detected` | LLM Provider Outage Detected: a new outage window opened for a provider this workspace's traffic reached; HIGH |
 | `device.enforcement.stale` | Device Enforcement Stale |
 | `device.enforcement.disabled` | Device Firewall Disabled |
 | `governance.gate.silent` | Gate Stopped Reporting: an installed harness's gate, or an SDK gate in regular use, has sent no event for 48 hours |
 | `governance.gate.recovered` | Gate Reporting Again |
 | `inventory.ungoverned.detected` | Ungoverned AI Tool Found: a machine's [AI inventory](/guide/ai-inventory) listed an ungoverned harness or MCP server for the first time; once per machine and item |
+| `skill.malware.detected` | Malware Found in a Skill Script: the opt-in VirusTotal lookup flagged a script bundled with a skill; HIGH |
+| `skill.semantic.flagged` | Skill Flagged by Semantic Review: the opt-in semantic review called a `SKILL.md` suspicious (MEDIUM) or malicious (HIGH) |
 | `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature, an altered append-only guard or a foreign key that is not enforced. See [Trace Integrity](/concepts/trace-integrity#alerts) |
 | `decision.pending` | Decision Held for Review: a call was held for approval and the hold was recorded; MEDIUM. On Slack the message carries **Approve** and **Reject** buttons (see [Slack interactive reviews](/guide/decisions#slack-interactive-reviews)) |
 | `decision.approved` | Held Decision Approved: an owner, admin or engineering manager approved a [held decision](/guide/decisions#slack-interactive-reviews), in Slack or with `intutic decision approve`; MEDIUM, because the held call can now run |
@@ -486,8 +511,11 @@ The **Event Type** list offers only the events the control plane sends:
 | `webhook.secret.rotated` | Webhook Signing Secret Replaced: an owner or admin replaced the signing secret of a notification webhook, a SIEM webhook destination or the GitHub pull-request webhook. Says whose and who, never the secret |
 | `evidence.exported` | Compliance Evidence Downloaded: a member downloaded the SOC 2 evidence archive, a framework coverage report as a file, or the human-oversight export; INFO. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
 | `credential.changed` | API Key or Provider Key Changed: a virtual key, gateway token or SCIM token was created, rotated or revoked, or a provider key was added, replaced or removed. Says which credential, what happened and who did it, never the value; INFO for a new virtual key, gateway token or SCIM token, MEDIUM otherwise. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
+| `identity.offboarding.completed` | Member Offboarding Finished: the offboarding cascade finished for a removed member; HIGH when a step failed and something is left to clean up by hand, INFO otherwise |
 
-Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
+Two events report failed payments: `billing.dunning.downgraded` (HIGH: the third failed payment moved the account to the free plan) and `billing.dunning.restored` (INFO: the plan is back once the payment is made). A rule for them can also be created with `intutic notifications create`, the API or the Terraform provider. See [Failed payments](/guide/plans#failed-payments).
+
+Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity. An event sent only at INFO, which no box selects, reaches a rule only with every box unticked; the form says so for those events.
 
 Through the API (`filters.severity` on `POST` and `PUT /api/v1/notifications/rules`), the CLI or the [Terraform provider](/reference/terraform/resources/notification_rule), the values are `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` and `INFO`, in any case. They are stored uppercase, and any other value is refused with `400` naming the valid ones. A rule saved before this with lowercase values matched no event; those rules were uppercased when the control plane upgraded, and values that are not severities were dropped. A rule whose filter held no severity at all was switched off rather than left to match every severity, and its id was printed in the upgrade's migration log: choose its severities before turning it back on.
 
@@ -505,7 +533,7 @@ The gate and integrity alerts do not rely on the cooldown. **Gate Stopped Report
 
 Task trackers, memory providers, file scanning, the GitHub pull-request webhook and SIEM export.
 
-- **Task Management** — connect Jira Cloud, Linear or PagerDuty. Intutic reads tickets and incidents to attach task context to sessions; it doesn't create or update them. A branch or commit that names a ticket (`PROJ-123`, or a Linear key such as `eng-123`) is matched to the connection with that project or team key, and the session picks up the ticket's story points, sprint and epic. With PagerDuty connected, a session that names no ticket picks up the newest triggered or acknowledged incident assigned to you, found by your email. **Add Connection** takes the provider, its base URL, an API token (a Linear API key, a PagerDuty REST API token), and a project key, team key or routing key. For Jira it also takes the **Account email**: the Atlassian account the API token belongs to, since Jira Cloud signs a token in as that account. A connection is saved only once the provider accepts its credentials. A Jira connection added before the email was asked for stops working; remove it and add it again with the email. To page on governance events, add a PagerDuty rule under [Notifications](#notifications) instead.
+- **Task Management** — connect Jira Cloud, Linear or PagerDuty. Intutic reads tickets and incidents to attach task context to sessions; it doesn't create or update them. A branch or commit that names a ticket (`PROJ-123`, or a Linear key such as `eng-123`) is matched to the connection with that project or team key, and the session picks up the ticket's story points, sprint and epic. With PagerDuty connected, a session that names no ticket picks up the newest triggered or acknowledged incident assigned to you, found by your email. **Add Connection** takes the provider, its base URL, an API token (a Linear API key, a PagerDuty REST API token), and a project key, team key or routing key. For Jira it also takes the **Account email**: the Atlassian account the API token belongs to, since Jira Cloud signs a token in as that account. A connection is saved only once the provider accepts its credentials. A Jira connection added before the email was asked for stops working; remove it and add it again with the email. Outside the dashboard, connections are managed with [`intutic tasks list`, `add`, `test` and `remove`](/reference/cli#intutic-tasks-list), the SDKs' `listTaskConnections`, `createTaskConnection`, `testTaskConnection` and `deleteTaskConnection` (`list_task_connections` and so on in Python), and the Terraform resource [`intutic_task_connection`](/reference/terraform/resources/task_connection). To page on governance events, add a PagerDuty rule under [Notifications](#notifications) instead.
 - **Memory Providers** — connect mem0, Supermemory, AgentMemory or a custom HTTP memory service so the `/fix` command can enhance prompts with what your team already knows. Owners and admins add, test and remove providers; every member sees the list. See [Prompt Commands](/guide/agent-commands).
 - **VirusTotal Skill Scanning** — opt in to checking the sha256 hash of skill-bundled scripts against VirusTotal; file content is never uploaded. See [VirusTotal Integration](/guide/virustotal-scanning).
 - **GitHub Pull Request Webhook** — the payload URL and signing secret for GitHub's pull request events, which map branches to pull requests for cost per pull request without a GitHub token. **Create webhook** makes it; **Replace secret** makes a new secret and keeps the URL. The secret is shown once. Owners and admins, Biz Org and above. See [Cost per pull request](/guide/budgets#cost-per-pull-request).

@@ -21,6 +21,66 @@
 
 ***
 
+### ApiKey
+
+An API key without its secret.
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-allowedmodels"></a> `allowedModels` | `string`[] \| `null` | The key's model allowlist; `null` inherits the workspace's. |
+| <a id="property-budgets"></a> `budgets` | [`KeySpendBudget`](#keyspendbudget)[] | - |
+| <a id="property-createdat"></a> `createdAt` | `string` | - |
+| <a id="property-expiresat"></a> `expiresAt` | `string` \| `null` | - |
+| <a id="property-isserviceaccount"></a> `isServiceAccount` | `boolean` | - |
+| <a id="property-keyid"></a> `keyId` | `string` | - |
+| <a id="property-keyprefix"></a> `keyPrefix` | `string` | - |
+| <a id="property-label"></a> `label` | `string` | - |
+| <a id="property-lastusedat"></a> `lastUsedAt` | `string` \| `null` | - |
+| <a id="property-ratelimit"></a> `rateLimit` | [`KeyRateLimit`](#keyratelimit) | - |
+| <a id="property-revokedat"></a> `revokedAt` | `string` \| `null` | - |
+| <a id="property-scopes"></a> `scopes` | `string`[] | API key scopes (`*`, `gateway:use`, `<area>:read`, `<area>:write`). |
+
+***
+
+### ApiKeyCreateResult
+
+A created key, with its plaintext.
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-allowedmodels-1"></a> `allowedModels` | `string`[] \| `null` | - |
+| <a id="property-budgets-1"></a> `budgets` | [`KeySpendBudget`](#keyspendbudget)[] | - |
+| <a id="property-createdat-1"></a> `createdAt` | `string` | - |
+| <a id="property-expiresat-1"></a> `expiresAt` | `string` \| `null` | - |
+| <a id="property-key"></a> `key` | `string` | The plaintext `vk_` key: shown once, never stored. |
+| <a id="property-keyid-1"></a> `keyId` | `string` | - |
+| <a id="property-keyprefix-1"></a> `keyPrefix` | `string` | - |
+| <a id="property-label-1"></a> `label` | `string` | - |
+| <a id="property-ratelimit-1"></a> `rateLimit` | [`KeyRateLimit`](#keyratelimit) | - |
+| <a id="property-scopes-1"></a> `scopes` | `string`[] | - |
+
+***
+
+### ApiKeyUpdate
+
+What `updateApiKey` changes; a field left out is unchanged.
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-budgets-2"></a> `budgets?` | `object`[] | Replaces the key's budgets; `[]` removes them. At most one per period. |
+| <a id="property-ratelimit-2"></a> `rateLimit?` | `object` | Sets a limit, or removes it with `null`. |
+| `rateLimit.rpm?` | `number` \| `null` | - |
+| `rateLimit.tpm?` | `number` \| `null` | - |
+| <a id="property-scopes-2"></a> `scopes?` | `string`[] | Replaces the key's scopes. |
+
+***
+
 ### AttenuateOptions
 
 #### Properties
@@ -39,8 +99,8 @@
 | ------ | ------ |
 | <a id="property-chainid"></a> `chainId` | `string` |
 | <a id="property-childkeyid"></a> `childKeyId` | `string` |
-| <a id="property-createdat"></a> `createdAt` | `string` |
-| <a id="property-expiresat"></a> `expiresAt` | `string` |
+| <a id="property-createdat-2"></a> `createdAt` | `string` |
+| <a id="property-expiresat-2"></a> `expiresAt` | `string` |
 | <a id="property-grantedcaps"></a> `grantedCaps` | `string`[] |
 | <a id="property-parentkeyid"></a> `parentKeyId` | `string` |
 | <a id="property-workspaceid"></a> `workspaceId` | `string` |
@@ -56,7 +116,7 @@
 | <a id="property-attenuationchainid"></a> `attenuationChainId` | `string` | - |
 | <a id="property-childkey"></a> `childKey` | `string` | The child `vk_` key: shown once, never stored. |
 | <a id="property-childkeyid-1"></a> `childKeyId` | `string` | - |
-| <a id="property-expiresat-1"></a> `expiresAt` | `string` | - |
+| <a id="property-expiresat-3"></a> `expiresAt` | `string` | - |
 | <a id="property-grantedcaps-1"></a> `grantedCaps` | `string`[] | - |
 
 ***
@@ -365,6 +425,19 @@ Options for a [ControlPlaneClient](classes/ControlPlaneClient.md).
 
 ***
 
+### CreateApiKeyOptions
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-allowedmodels-2"></a> `allowedModels?` | `string`[] | Narrows the workspace's approved models for this key; omitted inherits them. |
+| <a id="property-expiresindays"></a> `expiresInDays?` | `number` | 1 to 365; the key never expires when omitted. |
+| <a id="property-isserviceaccount-1"></a> `isServiceAccount?` | `boolean` | An automation key: exempt from the SSO idle-key check. |
+| <a id="property-scopes-3"></a> `scopes?` | `string`[] | API key scopes; `['*']` (everything the owner's role allows) when omitted. |
+
+***
+
 ### CreateOrgParams
 
 #### Properties
@@ -411,7 +484,7 @@ Options for a [ControlPlaneClient](classes/ControlPlaneClient.md).
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-1"></a> `createdAt` | `string` |
+| <a id="property-createdat-3"></a> `createdAt` | `string` |
 | <a id="property-disconnectid"></a> `disconnectId` | `string` |
 | <a id="property-fingerprint"></a> `fingerprint` | `string` |
 | <a id="property-harnesses"></a> `harnesses` | `string`[] |
@@ -496,7 +569,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | Property | Type |
 | ------ | ------ |
 | <a id="property-algorithm"></a> `algorithm` | `string` |
-| <a id="property-keyid"></a> `keyId` | `string` |
+| <a id="property-keyid-2"></a> `keyId` | `string` |
 | <a id="property-preimagedomain"></a> `preimageDomain` | `string` |
 | <a id="property-value"></a> `value` | `string` |
 
@@ -661,14 +734,14 @@ An evidence archive: the parts verification reads. Everything else is covered by
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-2"></a> `createdAt` | `string` |
+| <a id="property-createdat-4"></a> `createdAt` | `string` |
 | <a id="property-deploymenttarget"></a> `deploymentTarget` | `string` |
 | <a id="property-gatewayid"></a> `gatewayId` | `string` |
-| <a id="property-keyprefix"></a> `keyPrefix` | `string` |
+| <a id="property-keyprefix-2"></a> `keyPrefix` | `string` |
 | <a id="property-lastheartbeatat"></a> `lastHeartbeatAt` | `string` \| `null` |
 | <a id="property-name-5"></a> `name` | `string` |
 | <a id="property-proxyversion"></a> `proxyVersion` | `string` \| `null` |
-| <a id="property-revokedat"></a> `revokedAt` | `string` \| `null` |
+| <a id="property-revokedat-1"></a> `revokedAt` | `string` \| `null` |
 | <a id="property-status-2"></a> `status` | `string` |
 
 ***
@@ -771,7 +844,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | Property | Type |
 | ------ | ------ |
 | <a id="property-configured"></a> `configured` | `boolean` |
-| <a id="property-createdat-3"></a> `createdAt` | `string` \| `null` |
+| <a id="property-createdat-5"></a> `createdAt` | `string` \| `null` |
 | <a id="property-lastdeliveryat"></a> `lastDeliveryAt` | `string` \| `null` |
 | <a id="property-secretrotatedat"></a> `secretRotatedAt` | `string` \| `null` |
 | <a id="property-url"></a> `url` | `string` \| `null` |
@@ -1254,6 +1327,33 @@ The walk is the answer whether or not it found a break (the control plane answer
 
 ***
 
+### KeyRateLimit
+
+A key's per-minute limits; `null` is no limit.
+
+#### Properties
+
+| Property | Type |
+| ------ | ------ |
+| <a id="property-rpm"></a> `rpm` | `number` \| `null` |
+| <a id="property-tpm"></a> `tpm` | `number` \| `null` |
+
+***
+
+### KeySpendBudget
+
+One spend budget of a key.
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-enforcement"></a> `enforcement` | `"hard"` \| `"soft"` | `hard` refuses requests the budget does not cover; `soft` only alerts. |
+| <a id="property-limitusd"></a> `limitUsd` | `number` | - |
+| <a id="property-period"></a> `period` | `"day"` \| `"month"` | - |
+
+***
+
 ### LedgerDuplicates
 
 #### Properties
@@ -1502,16 +1602,44 @@ The body of a create. Channel config and filters are each stored whole.
 
 ***
 
+### OptimizerSettings
+
+The SOP Optimizer's approval mode.
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-autothreshold"></a> `autoThreshold` | `number` | The score (0 to 1) a proposal must reach to be auto-applied in `auto`. |
+| <a id="property-mode-1"></a> `mode` | [`OptimizerMode`](#optimizermode) | - |
+| <a id="property-workspaceid-4"></a> `workspaceId` | `string` | - |
+
+***
+
+### OptimizerSettingsUpdate
+
+What `updateOptimizerSettings` sends.
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-autothreshold-1"></a> `autoThreshold?` | `number` | 0 to 1. Left out, the control plane sets 0.85: pass the current value to keep it. |
+| <a id="property-mode-2"></a> `mode` | [`OptimizerMode`](#optimizermode) | - |
+
+***
+
 ### OrgSignupParams
 
 #### Properties
 
-| Property | Type |
-| ------ | ------ |
-| <a id="property-email-1"></a> `email` | `string` |
-| <a id="property-name-12"></a> `name` | `string` |
-| <a id="property-orgname-1"></a> `orgName` | `string` |
-| <a id="property-password"></a> `password` | `string` |
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-acceptterms"></a> `acceptTerms` | `true` | The caller is 18 or older and agrees to the Terms and the Privacy Policy. Required: the control plane refuses a signup without it (400 `TERMS_NOT_ACCEPTED`). |
+| <a id="property-email-1"></a> `email` | `string` | - |
+| <a id="property-name-12"></a> `name` | `string` | - |
+| <a id="property-orgname-1"></a> `orgName` | `string` | - |
+| <a id="property-password"></a> `password` | `string` | - |
 
 ***
 
@@ -1555,7 +1683,7 @@ The body of a create. Channel config and filters are each stored whole.
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-4"></a> `createdAt` | `string` |
+| <a id="property-createdat-6"></a> `createdAt` | `string` |
 | <a id="property-orgid-1"></a> `orgId?` | `string` |
 | <a id="property-orgsopid"></a> `orgSopId` | `string` |
 | <a id="property-risktier"></a> `riskTier` | `string` |
@@ -1693,7 +1821,7 @@ The body of a create. Channel config and filters are each stored whole.
 | <a id="property-inputtext"></a> `inputText?` | `string` | - |
 | <a id="property-inputtokencount"></a> `inputTokenCount?` | `number` | - |
 | <a id="property-model-2"></a> `model` | `string` | - |
-| <a id="property-workspaceid-4"></a> `workspaceId` | `string` | Must be the key's own workspace. |
+| <a id="property-workspaceid-5"></a> `workspaceId` | `string` | Must be the key's own workspace. |
 
 ***
 
@@ -1836,7 +1964,7 @@ list, such as Azure OpenAI, whose list names base models, not deployments).
 | <a id="property-pagerdutyincident"></a> `pagerdutyIncident?` | `string` |
 | <a id="property-sessionid"></a> `sessionId?` | `string` |
 | <a id="property-workingdirectory"></a> `workingDirectory?` | `string` |
-| <a id="property-workspaceid-5"></a> `workspaceId?` | `string` |
+| <a id="property-workspaceid-6"></a> `workspaceId?` | `string` |
 
 ***
 
@@ -2061,7 +2189,7 @@ The created SOP: `POST /api/v1/sops` answers with the SOP itself (it sends no `o
 | <a id="property-sopid-2"></a> `sopId` | `string` |
 | <a id="property-title-5"></a> `title` | `string` |
 | <a id="property-version-3"></a> `version` | `string` |
-| <a id="property-workspaceid-6"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-7"></a> `workspaceId` | `string` |
 
 ***
 
@@ -2126,7 +2254,7 @@ The body `intutic sops push` sends, in the route's snake_case.
 | Property | Type |
 | ------ | ------ |
 | <a id="property-domain-2"></a> `domain` | `string` |
-| <a id="property-expiresat-2"></a> `expiresAt` | `string` |
+| <a id="property-expiresat-4"></a> `expiresAt` | `string` |
 | <a id="property-txtrecordname-1"></a> `txtRecordName` | `string` |
 | <a id="property-txtrecordvalue-1"></a> `txtRecordValue` | `string` |
 | <a id="property-verificationid-2"></a> `verificationId` | `string` |
@@ -2145,13 +2273,67 @@ The body `intutic sops push` sends, in the route's snake_case.
 
 ***
 
+### TaskConnection
+
+A Jira Cloud, Linear or PagerDuty connection. Its API token is never returned.
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-baseurl-2"></a> `baseUrl` | `string` | - |
+| <a id="property-connectionid"></a> `connectionId` | `string` | - |
+| <a id="property-createdat-7"></a> `createdAt` | `string` | - |
+| <a id="property-lastsyncat"></a> `lastSyncAt` | `string` \| `null` | - |
+| <a id="property-projectkey"></a> `projectKey` | `string` | The Jira project key, Linear team key or PagerDuty service key tickets and incidents are matched on. |
+| <a id="property-provider-7"></a> `provider` | [`TaskConnectionProvider`](#taskconnectionprovider) | - |
+| <a id="property-status-18"></a> `status` | `"connected"` | Always `connected`: a connection is saved only once the provider accepts its credentials. |
+
+***
+
+### TaskConnectionDeleteResult
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-deleted"></a> `deleted` | `boolean` | `false` when the workspace has no connection with that id (already removed). |
+
+***
+
+### TaskConnectionInput
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-authtoken"></a> `authToken` | `string` | The provider API token; the control plane tests it with the provider, encrypts it, and never returns it. |
+| <a id="property-baseurl-3"></a> `baseUrl` | `string` | - |
+| <a id="property-metadata"></a> `metadata?` | `object` | Jira requires `accountEmail`: the Atlassian account the API token belongs to. |
+| `metadata.accountEmail?` | `string` | - |
+| <a id="property-projectkey-1"></a> `projectKey` | `string` | - |
+| <a id="property-provider-8"></a> `provider` | [`TaskConnectionProvider`](#taskconnectionprovider) | - |
+
+***
+
+### TaskConnectionTestResult
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-message-1"></a> `message` | `string` | - |
+| <a id="property-success-1"></a> `success` | `boolean` | Whether the provider still accepts the stored credentials. |
+
+***
+
 ### Team
 
 #### Properties
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-5"></a> `createdAt` | `string` |
+| <a id="property-createdat-8"></a> `createdAt` | `string` |
 | <a id="property-name-18"></a> `name` | `string` |
 | <a id="property-orgid-2"></a> `orgId` | `string` |
 | <a id="property-slug"></a> `slug` | `string` |
@@ -2233,7 +2415,7 @@ The body `intutic sops push` sends, in the route's snake_case.
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
-| <a id="property-enforcement"></a> `enforcement?` | `"BYPASS"` \| `"ENHANCE"` \| `"HIJACK"` \| `"KILL"` | - |
+| <a id="property-enforcement-1"></a> `enforcement?` | `"BYPASS"` \| `"ENHANCE"` \| `"HIJACK"` \| `"KILL"` | - |
 | <a id="property-limit-3"></a> `limit?` | `number` | 1 to 100; default 20. |
 | <a id="property-model-3"></a> `model?` | `string` | - |
 | <a id="property-offset"></a> `offset?` | `number` | - |
@@ -2300,7 +2482,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
-| <a id="property-period"></a> `period?` | [`UsagePeriod`](#usageperiod) | Default `monthly`. |
+| <a id="property-period-1"></a> `period?` | [`UsagePeriod`](#usageperiod) | Default `monthly`. |
 
 ***
 
@@ -2362,7 +2544,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | <a id="property-email-2"></a> `email` | `string` |
 | <a id="property-memberid-2"></a> `memberId` | `string` |
 | <a id="property-role-1"></a> `role` | `string` |
-| <a id="property-workspaceid-7"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-8"></a> `workspaceId` | `string` |
 
 ***
 
@@ -2372,11 +2554,11 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-6"></a> `createdAt` | `string` |
+| <a id="property-createdat-9"></a> `createdAt` | `string` |
 | <a id="property-name-19"></a> `name` | `string` |
 | <a id="property-plantier-1"></a> `planTier` | `string` |
 | <a id="property-slug-1"></a> `slug` | `string` |
-| <a id="property-workspaceid-8"></a> `workspaceId` | `string` |
+| <a id="property-workspaceid-9"></a> `workspaceId` | `string` |
 
 ***
 
@@ -2391,7 +2573,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-settings"></a> `settings` | `Record`\<`string`, `unknown`\> | Every setting, resolved with its default. |
-| <a id="property-workspaceid-9"></a> `workspaceId` | `string` | - |
+| <a id="property-workspaceid-10"></a> `workspaceId` | `string` | - |
 
 ***
 
@@ -2407,7 +2589,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 | ------ | ------ | ------ | ------ |
 | <a id="property-settings-1"></a> `settings` | `Record`\<`string`, `unknown`\> | Every setting, resolved with its default. | [`WorkspaceSettings`](#workspacesettings).[`settings`](#property-settings) |
 | <a id="property-updated"></a> `updated` | `true` | - | - |
-| <a id="property-workspaceid-10"></a> `workspaceId` | `string` | - | [`WorkspaceSettings`](#workspacesettings).[`workspaceId`](#property-workspaceid-9) |
+| <a id="property-workspaceid-11"></a> `workspaceId` | `string` | - | [`WorkspaceSettings`](#workspacesettings).[`workspaceId`](#property-workspaceid-10) |
 
 ## Type Aliases
 
@@ -2571,6 +2753,16 @@ An update sends only the fields that change; `channelConfig` and `filters` repla
 
 ***
 
+### OptimizerMode
+
+```ts
+type OptimizerMode = "manual" | "auto";
+```
+
+`manual` applies no optimizer proposal on its own; `auto` lets a manually triggered run apply a STRENGTHEN proposal that reaches the threshold.
+
+***
+
 ### PolicySourceProvider
 
 ```ts
@@ -2614,6 +2806,14 @@ type SiemDestinationSummary = Omit<SiemDestination, "config" | "signingSecret">;
 ```
 
 A destination as the list answers it: no adapter settings, and no signing secret.
+
+***
+
+### TaskConnectionProvider
+
+```ts
+type TaskConnectionProvider = "jira" | "linear" | "pagerduty";
+```
 
 ***
 

@@ -61,23 +61,24 @@ Suggests prompt adjustments or corrective prompt cards based on recent anomalies
 * **Output (Healthy)**: General optimization recommendations (e.g. conciseness, model budgeting, guidelines collapsing).
 
 ### 3. `/intutic initialize`
-Begins manual session cost attribution by listing the open tickets on the workspace's Jira and Linear connections, and the local SOP folders (`.intutic/sops/<folder>/`) the sync daemon reported, so a session can be scoped to some of them.
+Begins manual session cost attribution by listing the open tickets on the workspace's Jira and Linear connections, and the local rule sets the sync daemon reported — each folder (`.intutic/sops/<folder>/`) and each single SOP file of your own (`.intutic/sops/<name>.md`) — so a session can be scoped to some of them.
 * **Mechanism**: Asks each Jira and Linear connection for its open tickets, in parallel, and lists up to 10 per connection, most recently updated first. A tracker that errors or takes longer than 5 seconds is skipped and named ("Couldn't reach Linear (ENG)") while the rest are listed. If the session's git branch names one of the listed tickets (`feature/PROJ-101-…`), that ticket is marked Recommended; this is the same branch parse that tags sessions, with no model call. PagerDuty incidents are not listed, since the command cannot tell which incidents are yours. The options are cached in Valkey for 30 minutes so `/intutic start <n>` can resolve them.
 * **Output**:
   ```markdown
   ### 🔑 Initialize Intutic Session cost & governance attribution
-  Select a task from your board for cost attribution, or select local SOP directories to active-scope this session:
+  Select a task from your board for cost attribution, or select local rule sets to active-scope this session:
 
   **Connected Task Boards (FinOps):**
   - **[1] PROJ-101**: Implement pre-tool safety checks (jira) 🌟 *(Recommended)*
   - **[2] PROJ-105**: Fix Valkey replication lag (jira)
 
-  **Local Rules Directories (Governance):**
+  **Local Rule Sets (Governance):**
   - **[3]** `.intutic/sops/frontend-rules/`
+  - **[4]** `.intutic/sops/no-force-push.md`
   ```
   The output ends with how to run `/intutic start`, including `--sops` and `--auto-judge`.
 
-### 4. `/intutic start <option_number_or_ticket_key> [--sops=<folders>] [--auto-judge]` (or `-j`)
+### 4. `/intutic start <option_number_or_ticket_key> [--sops=<names>] [--auto-judge]` (or `-j`)
 Binds all sequential LLM request costs and traces in the current session (identified by `x-session-id`) to the selected task key, overriding the default git branch/commit cascade.
 * **Local SOP scoping**: `--sops=` takes option numbers or folder names, comma-separated (`--sops=3` or `--sops=frontend-rules`), and limits the session to those local SOP folders; a local SOP folder's option number also works as the first argument. Without it, every folder is active.
 * **Auto Judging Option**: Appending `--auto-judge` (or `-j`) judges every later response in this session, as `/intutic judge` does, for 24 hours. `/intutic start` without it turns auto-judging off.

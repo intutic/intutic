@@ -7,7 +7,7 @@ Manage an Intutic workspace's SOPs, policy guardrails, workspace settings, virtu
 
 ## Authentication
 
-A workspace API key (`vk_…`) created with **This key is for automation** ticked, in `INTUTIC_API_KEY` or the provider's `api_key`. The provider acts as the key's member; most resources need an OWNER or ADMIN role. For a self-hosted control plane, set `INTUTIC_CONTROL_PLANE_URL` or `endpoint`.
+A workspace API key (`vk_…`) created with **This key is for automation** ticked, in `INTUTIC_API_KEY` or the provider's `api_key`. The provider acts as the key's member; most resources need an OWNER or ADMIN role, and the key's scopes must cover the routes the configuration uses (the default, `*`, does). For a self-hosted control plane, set `INTUTIC_CONTROL_PLANE_URL` or `endpoint`.
 
 ## Develop
 
@@ -38,7 +38,7 @@ The tests create and destroy their own resources, but leave the workspace settin
 
 Releases are cut from the open-core repository by pushing a tag `terraform-provider-vX.Y.Z`. `.github/workflows/release-terraform-provider.yml` pushes this directory to `intutic/terraform-provider-intutic`, tags it `vX.Y.Z` there, and builds a signed GoReleaser release in that repository, which is where the Terraform Registry reads providers from.
 
-One-time setup before the first release (done on 2026-10-13: the provider is on the Registry as `intutic/intutic`, with v0.1.0 and v0.2.0; kept here for a fresh namespace):
+One-time setup before the first release (done on 2026-10-13: the provider is on the Registry as `intutic/intutic`; kept here for a fresh namespace):
 
 1. Create the public repository `intutic/terraform-provider-intutic`, empty.
 2. Generate a GPG signing key. The Registry accepts RSA or DSA keys, not ECC: `gpg --full-generate-key`, choose RSA, 4096 bits.

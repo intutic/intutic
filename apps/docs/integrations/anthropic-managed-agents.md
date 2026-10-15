@@ -66,6 +66,8 @@ app.post('/webhooks/anthropic', (req, res) => {
 })
 ```
 
+The webhook payload carries only the session id, not the tool call, so the handler always polls. `poll()` lists the session's `agent.tool_use`, `agent.mcp_tool_use` and `user.tool_confirmation` events (up to 1,000 by default; pass `limit`) and reads every confirmation before it answers anything, so a fresh confirmer created per delivery answers only the pauses that have no confirmation yet. `confirmer.handleWebhook(event)` checks that the event is a `session.requires_action` for the confirmer's own session, then polls.
+
 Or a live stream. `watch()` follows the session's event stream and reconnects when it drops — backoff from 500 ms doubling to 10 s, reset on any event — re-polling after every reconnect so a pause raised while the stream was down is still answered, and each `tool_use_id` is confirmed exactly once. A fatal 4xx (anything but 408 and 429) is rethrown rather than retried; the loop ends on a terminal event or on `signal` abort, and throws once `maxReconnects` (unbounded by default) is exhausted. `idleTimeoutMs` drops a silent stream and reopens it:
 
 ```ts
@@ -121,6 +123,8 @@ def handle_webhook(request):
         IntuticSessionConfirmer(client, event.data.id).poll()
     return "", 200
 ```
+
+As in TypeScript, `poll()` (`limit=1000` by default) reads every confirmation before answering, so a confirmer per delivery answers only unanswered pauses. `confirmer.handle_webhook(event)` is the one-call form.
 
 Or a live stream, with the same reconnect loop as the TS side (`max_reconnects`, `backoff_start_s`, `backoff_cap_s`, `idle_timeout_s` — passed to the SDK stream as its read timeout — and `stop`, a `threading.Event`):
 

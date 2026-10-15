@@ -10,6 +10,13 @@ export type NotificationChannel = 'slack' | 'email' | 'webhook' | 'pagerduty'
  * Every event a notification rule can subscribe to. The API refuses a rule
  * naming anything else, and the CLI and the Terraform provider check
  * against this list before they send one.
+ *
+ * Each one is sent: the control plane emits it to the notification hub, and
+ * the dashboard's rule picker offers every one of them.
+ * tools/scripts/check-feature-surfaces.js fails when a type here has no
+ * emitter, or the picker or guide/settings.md leaves one out or offers one
+ * not here. `incident.escalated`, `sop.status_changed`, `session.ended` and
+ * `calibration.threshold_breach` left on 2026-10-15: nothing emitted them.
  */
 export const NOTIFICATION_EVENT_TYPES = [
   // ── Core governance events (already wired) ──
@@ -28,17 +35,13 @@ export const NOTIFICATION_EVENT_TYPES = [
    */
   'anomaly.finding',
   'incident.created',
-  'incident.escalated',
-  'sop.status_changed',
-  'session.ended',
   'decision.pending',
   /** An OWNER, ADMIN or EM approved a held decision, in Slack or through the API and CLI. Carries `entryId`, `reviewerId` and `via`. */
   'decision.approved',
   /** An OWNER, ADMIN or EM rejected a held decision, in Slack or through the API and CLI. */
   'decision.rejected',
   'trajectory.alert',
-  // ── Calibration & drift (Q10 orphan audit) ──
-  'calibration.threshold_breach',
+  // ── Drift ──
   /**
    * An enforced SOP's rolling compliance moved 0.15 or more from its stored
    * baseline (`behavioralDriftService.ts`, the hourly SOP health sweep). Once per
@@ -91,6 +94,10 @@ export const NOTIFICATION_EVENT_TYPES = [
   // ── Plans ──
   'plan.captured',
   'plan.approved',
+  /** A captured plan was rejected (`POST /api/v1/plans/:planId/reject`). Carries `rejected_by` and `rationale`. INFO. */
+  'plan.rejected',
+  /** A plan was closed with an outcome (`SUCCESS`, `PARTIAL` or `FAILED`), by a member or when its session ended. HIGH when it failed, MEDIUM when partial, INFO otherwise. */
+  'plan.closed',
   'plan.deviation.detected',
   // ── Identity & compliance ──
   'identity.offboarding.completed',
