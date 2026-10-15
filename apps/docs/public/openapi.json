@@ -30208,6 +30208,13 @@
               "type": "string"
             }
           },
+          "redactedTraceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Traces rewritten by a documented redaction after the root was sealed; checked against the leaf recorded at the redaction."
+          },
           "retentionExpired": {
             "type": "boolean",
             "description": "True when the missing traces were deleted by the retention schedule, not lost."
@@ -30220,6 +30227,7 @@
           "recomputedRoot",
           "changedTraceIds",
           "missingTraceIds",
+          "redactedTraceIds",
           "retentionExpired"
         ]
       },

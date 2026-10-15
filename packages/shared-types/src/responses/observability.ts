@@ -355,6 +355,7 @@ export const IntegrityRecomputeResponse = z.object({
   recomputedRoot: z.string().nullable().describe('Null when traces are missing.'),
   changedTraceIds: z.array(z.string()).describe('Traces whose leaf no longer matches.'),
   missingTraceIds: z.array(z.string()),
+  redactedTraceIds: z.array(z.string()).describe('Traces rewritten by a documented redaction after the root was sealed; checked against the leaf recorded at the redaction.'),
   retentionExpired: z.boolean().describe('True when the missing traces were deleted by the retention schedule, not lost.'),
 })
 export type IntegrityRecomputeResponse = z.infer<typeof IntegrityRecomputeResponse>

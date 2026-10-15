@@ -61,6 +61,15 @@ curl -XPOST https://<control-plane>/api/v1/integrity/roots/<rootId>/recompute
 | `mismatch` | At least one trace changed after sealing. The response **names the trace ids**. |
 | `missing_traces` | A covered trace is gone. Reported separately, because a deletion is a different problem from an edit. When the root was sealed more than 3 years ago the response also carries `retentionExpired: true`: the traces were deleted by the 3-year trace retention, and the signed root still stands. |
 
+Every verdict also lists `redactedTraceIds`: covered traces rewritten by a
+documented redaction after their root was sealed. One has happened so far: the
+change-manifest targets stored before 2.6.0, when the proxy did not yet redact
+them, were withheld on upgrade. For each such trace the upgrade recorded the leaf
+of the rewritten row (`trace_leaf_redactions`), and only when the row still matched
+its sealed leaf. The recompute accepts a listed trace whose row hashes to that
+recorded leaf and uses the sealed leaf for the root, so the root still matches;
+any later edit to the row is reported in `changedTraceIds` as usual.
+
 Traces are kept for 3 years, then deleted by the daily retention sweep. A trace
 covered by a root sealed less than 3 years ago waits for that root to age out, so
 whether a missing trace was expected is always decidable from the root's own age.
