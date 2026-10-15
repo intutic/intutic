@@ -195,6 +195,12 @@ export interface OrgSignupParams {
   password: string
   name: string
   orgName: string
+  /**
+   * The caller is 18 or older and agrees to the Terms and the Privacy Policy.
+   * Required: the control plane refuses a signup without it (400
+   * `TERMS_NOT_ACCEPTED`).
+   */
+  acceptTerms: true
 }
 
 export interface OrgSignupResult {

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@intutic/clawde`: `signupOrg` accepts `acceptTerms`.** 2.7.0 made the
+  signup routes require `acceptTerms: true`, but the TypeScript
+  `OrgSignupParams` had no such field, so a call that passed it did not
+  compile and one that left it out was refused with 400
+  `TERMS_NOT_ACCEPTED`. The field is now part of the type, and required.
+  (The Python `signup_org(accept_terms=...)` was already right.)
+
 ## [2.7.0] - 2026-10-15
 
 ### Added
