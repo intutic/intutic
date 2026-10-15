@@ -103,6 +103,13 @@ export async function runSopsPush(
   const counts: Record<PushOutcome, number> = { created: 0, updated: 0, forked: 0, 'up-to-date': 0, skipped: 0, failed: 0 }
 
   for (const file of mdFiles) {
+    const raw = await fs.readFile(join(sopsDir, file), 'utf-8').catch(() => '')
+    const draftId = parseSopFile(raw).approvedCopyFor
+    if (draftId) {
+      log.info(`${file}: the approved version kept beside its draft (${draftId}); not pushed. Edit and push the draft's file.`)
+      counts.skipped += 1
+      continue
+    }
     const outcome = opts.org
       ? await pushOrgFile(client, sopsDir, file)
       : await pushFile(ctx, join(sopsDir, file), file)
@@ -353,7 +360,12 @@ async function updateFile(
   const revision = typeof sop.versionCounter === 'number' ? sop.versionCounter : (serverRevision ?? 0) + 1
   const extra: Record<string, string> = {}
   if (parsed.version !== null && sop.version && sop.version !== parsed.version) extra.version = sop.version
+  // The file now holds a DRAFT, which the control plane does not enforce; the
+  // approved version it forked from does, so it is kept on disk beside it.
+  const parentEnforced = forked && serverEnforces({ lifecycleState: current.lifecycleState }) === true
+  if (parentEnforced) extra.intutic_enforced = 'false'
   await recordSync(filePath, file, raw, { intuticId: sop.sopId, revision }, extra)
+  if (parentEnforced) await writeApprovedCopy(filePath, sop.sopId, { ...current, sopId: id })
 
   if (forked) {
     log.info(`${file} → new DRAFT version of "${title}"`)
@@ -511,10 +523,10 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
   const fileById = new Map<string, LocalSopFile>()
   for (const f of local) if (f.parsed.intuticId) fileById.set(f.parsed.intuticId, f)
   // An approved version whose DRAFT successor a local file tracks.
-  const supersededBy = new Map<string, string>()
+  const supersededBy = new Map<string, { draft: LocalSopFile; draftId: string }>()
   for (const item of items) {
     const tracked = fileById.get(item.sopId)
-    if (item.priorVersionId && tracked) supersededBy.set(item.priorVersionId, tracked.label)
+    if (item.priorVersionId && tracked) supersededBy.set(item.priorVersionId, { draft: tracked, draftId: item.sopId })
   }
 
   let written = 0
@@ -523,8 +535,21 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
 
   for (const item of items) {
     const tracked = fileById.get(item.sopId)
-    if (!tracked && supersededBy.has(item.sopId)) {
-      log.dim(`  ${item.title} (${item.sopId}): skipped, ${supersededBy.get(item.sopId)} tracks its newer version.`)
+    const successor = supersededBy.get(item.sopId)
+    if (!tracked && successor) {
+      // The approved version a tracked draft was forked from. Not written over
+      // the draft's file; while the control plane enforces it, it is kept in
+      // a file of its own beside the draft, so this machine enforces it too.
+      if (serverEnforces(item) !== true) {
+        log.dim(`  ${item.title} (${item.sopId}): skipped, ${successor.draft.label} tracks its newer version.`)
+        continue
+      }
+      try {
+        const parent = await client.get<SopDetail>(`/api/v1/sops/${item.sopId}`)
+        if (await writeApprovedCopy(successor.draft.path, successor.draftId, parent)) written += 1
+      } catch (err) {
+        log.warn(`${item.title}: failed to fetch the approved version, skipping (${err instanceof Error ? err.message : String(err)})`)
+      }
       continue
     }
 
@@ -605,7 +630,17 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
   // a newer version — tracks one the control plane no longer enforces.
   const listed = new Set(items.map((i) => i.sopId))
   for (const f of local) {
-    if (!f.parsed.intuticId || listed.has(f.parsed.intuticId) || markedNotEnforced(f.raw)) continue
+    if (!f.parsed.intuticId || listed.has(f.parsed.intuticId)) continue
+    // An approved copy whose SOP was replaced (its draft promoted) or deleted
+    // is removed when it is as pull wrote it: the promoted draft's own file
+    // now carries the enforced version.
+    const unedited = f.parsed.contentHash === createHash('sha256').update(f.parsed.body, 'utf8').digest('hex')
+    if (f.parsed.approvedCopyFor && unedited) {
+      await fs.rm(f.path, { force: true })
+      log.info(`${f.path}: removed; SOP ${f.parsed.intuticId} was replaced or deleted on the control plane.`)
+      continue
+    }
+    if (markedNotEnforced(f.raw)) continue
     await fs.writeFile(f.path, setFrontMatter(f.raw, { intutic_enforced: 'false' }), 'utf-8')
     log.info(`${f.path}: SOP ${f.parsed.intuticId} is no longer active on the control plane; marked intutic_enforced: false.`)
   }
@@ -614,6 +649,41 @@ export async function runSopsPull(opts: { dev?: boolean; force?: boolean }): Pro
   if (conflicts > 0) {
     log.info('Re-run with --force to overwrite locally-modified files.')
   }
+}
+
+/**
+ * Write the approved version a draft was forked from to its own file beside
+ * the draft's (`deploy.md` → `deploy.approved.md`): `intutic_enforced: true`,
+ * its own `intutic_id:`, and `intutic_draft:` naming the draft, which `sops
+ * push` reads as "never send this file". The control plane keeps enforcing
+ * the approved version until the draft is promoted, and so does a proxy
+ * reading this directory; the next pull after the promotion removes the copy.
+ * Refuses to overwrite a file of that name that records another SOP. Returns
+ * whether it wrote.
+ */
+async function writeApprovedCopy(
+  draftPath: string,
+  draftId: string,
+  parent: { sopId: string; title?: string; riskTier?: string | null; version?: string; versionCounter?: number; markdownContent?: string | null },
+): Promise<boolean> {
+  const copyPath = join(dirname(draftPath), `${basename(draftPath, '.md')}.approved.md`)
+  const existing = await fs.readFile(copyPath, 'utf-8').catch(() => null)
+  const recorded = existing === null ? null : parseSopFile(existing).intuticId
+  if (existing !== null && recorded !== parent.sopId) {
+    log.warn(`${copyPath}: exists and records ${recorded ?? 'no SOP'}; the approved version ${parent.sopId} was not written.`)
+    return false
+  }
+  const rendered = renderSopFile({
+    title: parent.title ?? '',
+    riskTier: parent.riskTier ?? null,
+    version: parent.version ?? '1.0.0',
+    body: (parent.markdownContent ?? '').trim(),
+    record: { intuticId: parent.sopId, revision: parent.versionCounter ?? 1 },
+    enforced: true,
+  })
+  await fs.writeFile(copyPath, setFrontMatter(rendered, { intutic_draft: draftId }), 'utf-8')
+  log.info(`${copyPath} ← "${parent.title}" (approved; enforced until ${draftId} is promoted)`)
+  return true
 }
 
 type SopDrift = 'in-sync' | 'local-ahead' | 'remote-ahead' | 'diverged' | 'push-only'

@@ -121,10 +121,24 @@ The key follows the server on every `pull`, even over a file you edited (its
 body is left alone), and a file whose SOP is no longer active — deleted, or
 replaced by a newer version — is marked `intutic_enforced: false` too. Only the
 value `false` switches a file off; a file without the key, such as one you
-wrote yourself, is enforced as written. While a file tracks the `DRAFT` that a
-`push` forked from an approved SOP, the approved version is not written to
-disk, so a proxy reading only this directory enforces neither until the draft
-is promoted.
+wrote yourself, is enforced as written.
+
+### Editing an approved SOP keeps it enforced
+
+A `push` that edits an approved SOP forks a `DRAFT`, and the control plane
+keeps enforcing the approved version until the draft is promoted. The file you
+edited now tracks the draft and is marked `intutic_enforced: false`, so `push`
+writes the approved version beside it — `deploy-checklist.md` gets
+`deploy-checklist.approved.md` — with its own `intutic_id:`,
+`intutic_enforced: true` and an `intutic_draft:` line naming the draft. A
+`pull` keeps that file current, and writes it back if it is missing.
+
+Keep editing the draft's file: `push` never sends a file with an
+`intutic_draft:` line, whether it is named directly or sits in a folder you
+push. Once the draft is promoted, the control plane retires the version it
+replaced, and the next `pull` marks the draft's file `intutic_enforced: true`
+and removes the `.approved.md` file (one you edited is marked
+`intutic_enforced: false` instead), leaving one enforced file per SOP.
 
 ### Refusing to clobber local edits
 

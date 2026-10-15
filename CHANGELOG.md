@@ -31,7 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now records `intutic_enforced: true` (an active `VALIDATED` SOP) or
   `intutic_enforced: false` (any other state, or a SOP no longer active), the
   key follows the server on every pull, and every local reader skips a file
-  marked `false`.
+  marked `false`. While a file edits a draft forked from an approved SOP, the
+  approved version stays enforced locally in `<name>.approved.md` beside it
+  (written by `push` and kept by `pull`, never sent by `push`); the first pull
+  after the draft is promoted removes it, leaving one enforced file.
 - **Single-file SOPs are selectable rule sets.** `/intutic initialize`,
   `/intutic start --sops` and `intutic loop start --sops` offered folders only;
   a file directly in `.intutic/sops/` is now a rule set too, listed after the

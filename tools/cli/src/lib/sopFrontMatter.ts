@@ -46,6 +46,12 @@ export interface ParsedSopFile {
    * `version:` semver.
    */
   revision: number | null
+  /**
+   * From an `intutic_draft:` key: this file is the approved version `intutic
+   * sops pull` / `push` keeps on disk while another file edits its DRAFT
+   * successor (that draft's id). `sops push` never sends it; edit the draft.
+   */
+  approvedCopyFor: string | null
   /** Everything after the front-matter fence, or the whole trimmed input when there is none. */
   body: string
 }
@@ -95,6 +101,7 @@ export function parseSopFile(raw: string): ParsedSopFile {
     contentHash: scalar(front, 'content_hash:'),
     intuticId: scalar(front, 'intutic_id:'),
     revision: parseRevision(scalar(front, 'intutic_revision:')),
+    approvedCopyFor: scalar(front, 'intutic_draft:'),
     body,
   }
 }

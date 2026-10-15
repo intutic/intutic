@@ -239,6 +239,97 @@ describe('sops pull records whether the control plane enforces each SOP', () => 
   })
 })
 
+// While a file tracks the DRAFT a push forked from an approved SOP, the
+// control plane keeps enforcing the approved version until the draft is
+// promoted. The draft's file is not enforced locally, so the approved version
+// has to be on disk too, or a proxy reading only this directory enforces
+// neither.
+describe('the approved version stays enforced while its draft is edited', () => {
+  const approved = (dir = sopsDir, stem = 'deploy-checklist') => path.join(dir, `${stem}.approved.md`)
+  const draftId = () => [...server.rows.values()].find((r) => r.priorVersionId === 'sp_1')!.sopId
+  /** The SOP ids a local reader enforces: every file not marked `intutic_enforced: false`. */
+  async function enforcedIds(): Promise<string[]> {
+    const ids: string[] = []
+    for (const name of (await fs.readdir(sopsDir)).sort()) {
+      const raw = await read(path.join(sopsDir, name))
+      if (!markedNotEnforced(raw)) ids.push(parseSopFile(raw).intuticId ?? name)
+    }
+    return ids
+  }
+
+  async function forkDraft(): Promise<void> {
+    seed('sp_1', { lifecycleState: 'VALIDATED' })
+    await run(() => runSopsPull({}))
+    await edit(file(), 'Run the tests before deploying.', 'Run the tests and get a review before deploying.')
+    await run(() => runSopsPush('deploy-checklist', {}))
+    expect(exitCode).toBeNull()
+  }
+
+  it('keeps the approved version enforced in its own file, and the draft not', async () => {
+    await forkDraft()
+    const draft = await read()
+    const kept = await read(approved())
+    expect(parseSopFile(draft).intuticId).toBe(draftId())
+    expect(markedNotEnforced(draft)).toBe(true)
+    expect(parseSopFile(kept).intuticId).toBe('sp_1')
+    expect(parseSopFile(kept).approvedCopyFor).toBe(draftId())
+    expect(kept).toMatch(/^intutic_enforced: true$/m)
+    expect(parseSopFile(kept).body).toBe('Run the tests before deploying.')
+
+    // A pull keeps that, and writes the approved file back when it is missing.
+    await fs.rm(approved())
+    await run(() => runSopsPull({}))
+    expect((await fs.readdir(sopsDir)).sort()).toEqual(['deploy-checklist.approved.md', 'deploy-checklist.md'])
+    expect(markedNotEnforced(await read())).toBe(true)
+    expect(markedNotEnforced(await read(approved()))).toBe(false)
+  })
+
+  it('after the draft is promoted, a pull leaves exactly one enforced file: the promoted version', async () => {
+    await forkDraft()
+    await run(() => runSopsPull({}))
+    expect(await enforcedIds()).toEqual(['sp_1'])
+    // Promotion makes the draft VALIDATED and the version it replaces inactive.
+    const id = draftId()
+    server.rows.set(id, { ...server.rows.get(id)!, lifecycleState: 'VALIDATED' })
+    server.rows.set('sp_1', { ...server.rows.get('sp_1')!, isActive: false })
+
+    await run(() => runSopsPull({}))
+    expect((await fs.readdir(sopsDir)).sort()).toEqual(['deploy-checklist.md'])
+    expect(await enforcedIds()).toEqual([id])
+    const promoted = await read()
+    expect(parseSopFile(promoted).intuticId).toBe(id)
+    expect(promoted).toMatch(/^intutic_enforced: true$/m)
+    expect(parseSopFile(promoted).body).toBe('Run the tests and get a review before deploying.')
+  })
+
+  it('push sends only the draft, never the approved file beside it', async () => {
+    seed('sp_1', { lifecycleState: 'VALIDATED' })
+    const folder = path.join(sopsDir, 'checklists')
+    await fs.mkdir(folder, { recursive: true })
+    const p = path.join(folder, 'deploy.md')
+    await fs.writeFile(p, '---\ntitle: Deploy Checklist\nrisk_tier: HIGH\nintutic_id: sp_1\nintutic_revision: 1\n---\nRun the tests before deploying.\n')
+    await edit(p, 'Run the tests', 'Run every test')
+    await run(() => runSopsPush('checklists', {}))
+    expect(server.puts.map((u) => u.sopId)).toEqual(['sp_1'])
+    expect((await fs.readdir(folder)).sort()).toEqual(['deploy.approved.md', 'deploy.md'])
+
+    // A second folder push edits the draft in place and skips the approved file.
+    await edit(p, 'Run every test', 'Run every single test')
+    server.puts = []
+    await run(() => runSopsPush('checklists', {}))
+    expect(exitCode).toBeNull()
+    expect(server.puts.map((u) => u.sopId)).toEqual([draftId()])
+    expect(server.rows.get('sp_1')!.markdownContent).toBe('Run the tests before deploying.')
+    expect(printed()).toContain('deploy.approved.md: the approved version kept beside its draft')
+
+    // Named directly, it is refused the same way.
+    server.puts = []
+    await run(() => runSopsPush('checklists/deploy.approved', {}))
+    expect(server.puts).toHaveLength(0)
+    expect([...server.rows.values()].filter((r) => r.priorVersionId === 'sp_1')).toHaveLength(1)
+  })
+})
+
 // A SOP written without a tier (the SOP health check writes none) has a null
 // riskTier. Pull wrote `risk_tier: null` into the file, which is not a tier.
 describe('a SOP with no risk tier', () => {
@@ -289,7 +380,7 @@ describe('sops push updates the SOP a file records', () => {
     expect(printed()).toContain('updated "Deploy Checklist" in place')
   })
 
-  it('an approved SOP gets a DRAFT successor; the approved one keeps enforcing and is not pulled back as a second file', async () => {
+  it('an approved SOP gets a DRAFT successor; the approved one keeps enforcing and is never written over the draft', async () => {
     seed('sp_1', { lifecycleState: 'VALIDATED' })
     await run(() => runSopsPull({}))
     await edit(file(), 'Run the tests before deploying.', 'Run the tests and get a review before deploying.')
@@ -309,13 +400,14 @@ describe('sops push updates the SOP a file records', () => {
     expect(parsed.revision).toBe(1)
     expect(printed()).toContain('keeps enforcing until the draft is promoted')
 
-    // A second push of the same file edits that draft, and a pull does not
-    // write the approved version back as a second file.
+    // A second push of the same file edits that draft, and a pull keeps the
+    // approved version in its own file, never over the draft's.
     await edit(file(), 'get a review', 'get two reviews')
     await run(() => runSopsPush('deploy-checklist', {}))
     expect([...server.rows.values()].filter((r) => r.priorVersionId === 'sp_1')).toHaveLength(1)
     await run(() => runSopsPull({}))
-    expect((await fs.readdir(sopsDir)).sort()).toEqual(['deploy-checklist.md'])
+    expect((await fs.readdir(sopsDir)).sort()).toEqual(['deploy-checklist.approved.md', 'deploy-checklist.md'])
+    expect(parseSopFile(await read()).body).toBe('Run the tests and get two reviews before deploying.')
     expect(exitCode).toBeNull()
   })
 
