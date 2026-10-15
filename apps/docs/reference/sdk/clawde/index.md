@@ -1633,12 +1633,13 @@ What `updateOptimizerSettings` sends.
 
 #### Properties
 
-| Property | Type |
-| ------ | ------ |
-| <a id="property-email-1"></a> `email` | `string` |
-| <a id="property-name-12"></a> `name` | `string` |
-| <a id="property-orgname-1"></a> `orgName` | `string` |
-| <a id="property-password"></a> `password` | `string` |
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-acceptterms"></a> `acceptTerms` | `true` | The caller is 18 or older and agrees to the Terms and the Privacy Policy. Required: the control plane refuses a signup without it (400 `TERMS_NOT_ACCEPTED`). |
+| <a id="property-email-1"></a> `email` | `string` | - |
+| <a id="property-name-12"></a> `name` | `string` | - |
+| <a id="property-orgname-1"></a> `orgName` | `string` | - |
+| <a id="property-password"></a> `password` | `string` | - |
 
 ***
 
