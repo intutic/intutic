@@ -2821,7 +2821,7 @@ intutic keys revoke <keyId> [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Revokes the key: every request made with it is refused from then on, and it cannot be restored. The server answers the same whether or not you had such a live key, so check `intutic keys list` when in doubt.
+Revokes the key: every request made with it is refused from then on, and it cannot be restored. A key id you have no live key for (none with that id, another member's, or one already revoked) is reported and exits `1`.
 
 ---
 
@@ -3774,6 +3774,104 @@ intutic siem rotate-secret <destination_id> [options]
 
 **What it does:**
 Generates a new signing secret and prints it once. Deliveries are signed with it from then on. The other types authenticate with their own credentials and are refused. You need the OWNER or ADMIN role.
+
+---
+
+## `intutic tasks list` <Badge type="tip" text="Cloud" />
+
+List the workspace's task-management connections.
+
+```bash
+intutic tasks list [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Lists each Jira Cloud, Linear and PagerDuty connection with its id, provider, project key, base URL and last sync. The API token is never returned. Any workspace member can list connections.
+
+---
+
+## `intutic tasks add` <Badge type="tip" text="Cloud" />
+
+Connect Jira Cloud, Linear or PagerDuty.
+
+```bash
+intutic tasks add --provider <provider> --base-url <url> --project-key <key> [--account-email <email>] (--token <token> | --token-file <path>) [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--provider <provider>` | `jira`, `linear` or `pagerduty` (required) |
+| `--base-url <url>` | The provider's base URL, e.g. `https://acme.atlassian.net` (required) |
+| `--project-key <key>` | The Jira project key, Linear team key or PagerDuty service key a ticket or incident is matched on (required) |
+| `--account-email <email>` | Jira only, and required for Jira: the Atlassian account the API token belongs to |
+| `--token <token>` | The provider API token (a Jira API token, a Linear API key, a PagerDuty REST API token) |
+| `--token-file <path>` | Read the API token from a file instead, keeping it out of shell history |
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Exactly one of `--token` / `--token-file` is required, and the token is never echoed. A Jira connection without `--account-email` is refused before anything is sent. The control plane tests the credentials with the provider and saves the connection only if they are accepted; otherwise it says what to check. The token is stored encrypted and never returned. You need the OWNER or ADMIN role. Connections cannot be edited: to change one, remove it and add it again.
+
+---
+
+## `intutic tasks test <connectionId>` <Badge type="tip" text="Cloud" />
+
+Check a connection's stored credentials with the provider.
+
+```bash
+intutic tasks test <connectionId> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `connectionId` | The connection, as `intutic tasks list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Asks the provider whether it still accepts the stored token and prints the result. Exits 1 when it does not (a revoked or expired token). You need the OWNER or ADMIN role.
+
+---
+
+## `intutic tasks remove <connectionId>` <Badge type="tip" text="Cloud" />
+
+Remove a task-management connection.
+
+```bash
+intutic tasks remove <connectionId> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `connectionId` | The connection, as `intutic tasks list` shows it |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+| `--dev` | Use local control plane (`http://localhost:3001`) |
+
+**What it does:**
+Deletes the connection and its stored token; sessions stop picking up its tickets or incidents. Exits 1 when the workspace has no connection with that id. You need the OWNER or ADMIN role.
 
 ---
 

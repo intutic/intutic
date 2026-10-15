@@ -176,6 +176,44 @@ class SiemSecretRotation(TypedDict):
     signingSecret: str
 
 
+class TaskConnection(TypedDict):
+    """A Jira Cloud, Linear or PagerDuty connection. Its API token is never returned."""
+
+    connectionId: str
+    provider: Literal["jira", "linear", "pagerduty"]
+    baseUrl: str
+    #: The Jira project key, Linear team key or PagerDuty service key tickets and incidents are matched on.
+    projectKey: str
+    #: Always "connected": a connection is saved only once the provider accepts its credentials.
+    status: Literal["connected"]
+    lastSyncAt: Optional[str]
+    createdAt: str
+
+
+class TaskConnectionInput(TypedDict, total=False):
+    """A create: ``provider``, ``baseUrl``, ``authToken`` and ``projectKey``
+    required; Jira also needs ``metadata: {"accountEmail": ...}``, the
+    Atlassian account the API token belongs to. The control plane tests the
+    token with the provider, encrypts it, and never returns it."""
+
+    provider: Literal["jira", "linear", "pagerduty"]
+    baseUrl: str
+    authToken: str
+    projectKey: str
+    metadata: Dict[str, str]
+
+
+class TaskConnectionTestResult(TypedDict):
+    #: Whether the provider still accepts the stored credentials.
+    success: bool
+    message: str
+
+
+class TaskConnectionDeleteResult(TypedDict):
+    #: False when the workspace has no connection with that id (already removed).
+    deleted: bool
+
+
 class MemberUsageResponse(TypedDict):
     #: "self" when the caller may see only their own calls.
     scope: Literal["workspace", "self"]

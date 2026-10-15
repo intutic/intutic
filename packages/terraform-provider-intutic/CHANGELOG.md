@@ -7,6 +7,7 @@ BREAKING CHANGES:
 FEATURES:
 
 * **New Resource:** `intutic_sop_optimizer_settings`: the SOP Optimizer's Approval mode (`mode`, `manual` or `auto`, and `auto_threshold`), through `GET` and `PUT /api/v1/dream-cycle/settings`. It brings back under Terraform the auto-apply switch that 0.3.0 removed with `featureFlags.ff_metaclaw_auto_apply`. An omitted `auto_threshold` keeps the workspace's current one; destroying the resource sets the mode back to `manual`.
+* **New Resource:** `intutic_task_connection`: a Jira Cloud, Linear or PagerDuty connection (`task_provider`, `base_url`, `project_key`, `account_email` for Jira, and a sensitive `api_token`), through `/api/v1/task-management/connections`. The API tests the token with the provider before saving and never returns it, so it is kept in state as configured. The API has no update: changing any argument replaces the connection, and the first apply after an import replaces it with the configured token. A Jira connection without `account_email`, or `account_email` on another provider, fails at plan time.
 
 ENHANCEMENTS:
 

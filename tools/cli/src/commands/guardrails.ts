@@ -21,6 +21,7 @@ import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
+import { readTokenFlag } from './apiCommand.js'
 import {
   SOURCE_PROVIDERS,
   GUARDRAIL_STATUSES,
@@ -140,23 +141,7 @@ export async function runGuardrailsSourcesAdd(
     log.error('--name is required.')
     process.exit(1)
   }
-  if (Boolean(opts.token) === Boolean(opts.tokenFile)) {
-    log.error('Give the credential with exactly one of --token or --token-file (a Google service-account key is a file).')
-    process.exit(1)
-  }
-  let credential = opts.token ?? ''
-  if (opts.tokenFile) {
-    try {
-      credential = (await readFile(opts.tokenFile, 'utf8')).trim()
-    } catch (err) {
-      log.error(`Could not read --token-file: ${errMessage(err)}`)
-      process.exit(1)
-    }
-    if (!credential) {
-      log.error('--token-file is empty.')
-      process.exit(1)
-    }
-  }
+  const credential = readTokenFlag(opts, ' (a Google service-account key is a file)')
   let config: Record<string, unknown> = {}
   if (opts.config) {
     try {

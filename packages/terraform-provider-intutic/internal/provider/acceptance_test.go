@@ -448,6 +448,40 @@ resource "intutic_sop_optimizer_settings" "this" {
 	)
 }
 
+// test-jira.atlassian.net is the Jira adapter's fixture host: the control
+// plane accepts the connection without calling Atlassian.
+func TestAccTaskConnection(t *testing.T) {
+	cfg := func(projectKey string) string {
+		return fmt.Sprintf(`
+resource "intutic_task_connection" "jira" {
+  task_provider = "jira"
+  base_url      = "https://test-jira.atlassian.net"
+  project_key   = %q
+  account_email = "tf-acc@example.com"
+  api_token     = %q
+}`, projectKey, strings.Join([]string{"tf", "acc", "fixture"}, "-"))
+	}
+	accTest(t,
+		resource.TestStep{
+			Config: cfg("TFACC"),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrSet("intutic_task_connection.jira", "id"),
+				resource.TestCheckResourceAttr("intutic_task_connection.jira", "status", "connected"),
+			),
+		},
+		clean(cfg("TFACC")),
+		imported("intutic_task_connection.jira", "api_token", "account_email"),
+		// No update route: a new project key is a new connection.
+		resource.TestStep{
+			Config: cfg("TFACC2"),
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction("intutic_task_connection.jira", plancheck.ResourceActionDestroyBeforeCreate),
+			}},
+			Check: resource.TestCheckResourceAttr("intutic_task_connection.jira", "project_key", "TFACC2"),
+		},
+	)
+}
+
 func TestAccGateway(t *testing.T) {
 	cfg := func(requireVk bool) string {
 		return fmt.Sprintf(`

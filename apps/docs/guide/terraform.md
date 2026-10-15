@@ -22,6 +22,7 @@ The Intutic Terraform provider manages a workspace's governance configuration as
 | [`intutic_siem_destination`](/reference/terraform/resources/siem_destination) | [SIEM export](/guide/siem-export) destinations: syslog, webhook, Splunk, Datadog, GCS and S3 (Biz Org and above) | `/api/v1/siem/destinations` |
 | [`intutic_wasm_rule`](/reference/terraform/resources/wasm_rule) | [Custom filters](/guide/wasm-rules): native WASM rules and Rego policies, uploaded to the workspace (Biz Org and above) | `/api/v1/wasm-rules` |
 | [`intutic_provider_credential`](/reference/terraform/resources/provider_credential) | The workspace's own provider credentials, cloud providers included: AWS Bedrock, Google Vertex AI, Azure OpenAI | `/api/v1/workspace/provider-credentials` |
+| [`intutic_task_connection`](/reference/terraform/resources/task_connection) | Jira Cloud, Linear and PagerDuty connections that attach ticket and incident context to sessions | `/api/v1/task-management/connections` |
 
 Two data sources read the [workspace](/reference/terraform/data-sources/workspace) the key belongs to and its [members](/reference/terraform/data-sources/members). Every resource supports `terraform import`.
 

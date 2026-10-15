@@ -104,6 +104,10 @@ from .types import (
     SigningJwks,
     SopCreateResult,
     SopInput,
+    TaskConnection,
+    TaskConnectionDeleteResult,
+    TaskConnectionInput,
+    TaskConnectionTestResult,
     TeamUsageResponse,
     TraceList,
     WasmReplayResult,
@@ -484,6 +488,35 @@ class ControlPlaneClient:
         """POST /api/v1/siem/destinations/:destinationId/signing-secret (OWNER, ADMIN)"""
         return cast(SiemSecretRotation, self._request(
             "POST", f"/api/v1/siem/destinations/{_quote(destination_id)}/signing-secret"
+        ))
+
+    # ─── Task-management connections (intutic tasks) ───
+
+    def list_task_connections(self) -> List[TaskConnection]:
+        """GET /api/v1/task-management/connections -- the workspace's Jira,
+        Linear and PagerDuty connections, unwrapped from ``items``."""
+        return cast(List[TaskConnection], self._list("/api/v1/task-management/connections", "items"))
+
+    def create_task_connection(self, connection: TaskConnectionInput) -> TaskConnection:
+        """POST /api/v1/task-management/connections (OWNER, ADMIN). The
+        control plane tests the credentials with the provider and saves the
+        connection only if they are accepted (a 400 "Connection test failed"
+        otherwise). A Jira connection needs ``metadata.accountEmail``. There
+        is no update: to change a connection, delete it and create it again."""
+        return cast(TaskConnection, self._request("POST", "/api/v1/task-management/connections", dict(connection)))
+
+    def test_task_connection(self, connection_id: str) -> TaskConnectionTestResult:
+        """POST /api/v1/task-management/connections/:connectionId/test (OWNER,
+        ADMIN) -- whether the provider still accepts the stored credentials."""
+        return cast(TaskConnectionTestResult, self._request(
+            "POST", f"/api/v1/task-management/connections/{_quote(connection_id)}/test"
+        ))
+
+    def delete_task_connection(self, connection_id: str) -> TaskConnectionDeleteResult:
+        """DELETE /api/v1/task-management/connections/:connectionId (OWNER,
+        ADMIN) -- ``deleted`` is False when it was already gone."""
+        return cast(TaskConnectionDeleteResult, self._request(
+            "DELETE", f"/api/v1/task-management/connections/{_quote(connection_id)}"
         ))
 
     # ─── Usage (intutic usage) ───
@@ -1044,8 +1077,9 @@ class ControlPlaneClient:
         ))
 
     def revoke_api_key(self, key_id: str) -> None:
-        """DELETE /api/v1/keys/:keyId -- revoke one of your keys; the answer is
-        the same when you had no such live key."""
+        """DELETE /api/v1/keys/:keyId -- revoke one of your live keys. A key
+        you have no live key for (none, another member's, already revoked)
+        raises with the 404."""
         self._request("DELETE", f"/api/v1/keys/{_quote(key_id)}")
 
     # ─── SOP Optimizer approval mode (intutic optimizer) ───

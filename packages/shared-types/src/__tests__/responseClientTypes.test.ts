@@ -133,6 +133,9 @@ const PYTHON: Pin[] = [
   ['SiemDestination', [[R.SiemDestinationResponse, ''], [R.SiemDestinationCreatedResponse, ''], [R.SiemDestinationUpdatedResponse, '']]],
   ['SiemSources', [[R.SiemDestinationListResponse, 'sources']]],
   ['SiemSecretRotation', [[R.SiemSigningSecretResponse, '']]],
+  ['TaskConnection', [[R.TaskConnectionListResponse, 'items[]'], [R.TaskConnectionResponse, '']]],
+  ['TaskConnectionTestResult', [[R.TaskConnectionTestResponse, '']]],
+  ['TaskConnectionDeleteResult', [[R.TaskConnectionDeleteResponse, '']]],
   ['FrameworkCoverage', [[R.FrameworkCoverageResponse, '']]],
   ['FrameworkCoverageSummary', [[R.FrameworkCoverageResponse, 'summary']]],
   ['EvidenceCollectResult', [[R.Soc2CollectResponse, '']]],
@@ -166,6 +169,7 @@ const TERRAFORM: Array<[file: string, ...Pin]> = [
   ['notification_rule_resource', 'apiChannelConfig', [[R.NotificationRuleResponse, 'channelConfig']]],
   ['notification_rule_resource', 'apiFilters', [[R.NotificationRuleResponse, 'filters']]],
   ['siem_destination_resource', 'apiSiemDestination', [[R.SiemDestinationResponse, ''], [R.SiemDestinationCreatedResponse, ''], [R.SiemDestinationUpdatedResponse, '']]],
+  ['task_connection_resource', 'apiTaskConnection', [[R.TaskConnectionListResponse, 'items[]'], [R.TaskConnectionResponse, '']]],
   ['mcp_server_decision_resource', 'apiMcpServer', [[R.McpServerListResponse, 'servers[]']]],
   ['mcp_server_decision_resource', 'apiMcpToolChange', [[R.McpServerListResponse, 'servers[].lastToolChange']]],
 ]

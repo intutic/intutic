@@ -506,6 +506,30 @@ POST /api/v1/sops — one workspace SOP; `markdown_content` without front matter
 
 ***
 
+### createTaskConnection()
+
+```ts
+createTaskConnection(connection): Promise<TaskConnection>;
+```
+
+POST /api/v1/task-management/connections (OWNER, ADMIN). The control
+plane tests the credentials with the provider and saves the connection
+only if they are accepted (a 400 "Connection test failed" otherwise). A
+Jira connection needs `metadata.accountEmail`. There is no update: to
+change a connection, delete it and create it again.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `connection` | [`TaskConnectionInput`](../index.md#taskconnectioninput) |
+
+#### Returns
+
+`Promise`\<[`TaskConnection`](../index.md#taskconnection)\>
+
+***
+
 ### createTeam()
 
 ```ts
@@ -625,6 +649,26 @@ DELETE /api/v1/siem/destinations/:destinationId (OWNER, ADMIN) — deactivates i
 #### Returns
 
 `Promise`\<`void`\>
+
+***
+
+### deleteTaskConnection()
+
+```ts
+deleteTaskConnection(connectionId): Promise<TaskConnectionDeleteResult>;
+```
+
+DELETE /api/v1/task-management/connections/:connectionId (OWNER, ADMIN) — `deleted: false` when it was already gone.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `connectionId` | `string` |
+
+#### Returns
+
+`Promise`\<[`TaskConnectionDeleteResult`](../index.md#taskconnectiondeleteresult)\>
 
 ***
 
@@ -1789,6 +1833,20 @@ GET /api/v1/sops
 
 ***
 
+### listTaskConnections()
+
+```ts
+listTaskConnections(): Promise<TaskConnection[]>;
+```
+
+GET /api/v1/task-management/connections — the workspace's Jira, Linear and PagerDuty connections, unwrapped from `items`.
+
+#### Returns
+
+`Promise`\<[`TaskConnection`](../index.md#taskconnection)[]\>
+
+***
+
 ### listTeams()
 
 ```ts
@@ -2130,7 +2188,7 @@ POST …/guardrails/:guardrailId/retire — gone from every rule endpoint on the
 revokeApiKey(keyId): Promise<void>;
 ```
 
-DELETE /api/v1/keys/:keyId — revoke one of your keys; the answer is the same when you had no such live key.
+DELETE /api/v1/keys/:keyId — revoke one of your live keys; a key you have no live key for (none, another member's, already revoked) throws `ClawdeConnectionError` with the 404.
 
 #### Parameters
 
@@ -2399,6 +2457,26 @@ POST /api/v1/connectors/:connectorId/sync
 #### Returns
 
 `Promise`\<[`PolicySourceSyncResult`](../index.md#policysourcesyncresult)\>
+
+***
+
+### testTaskConnection()
+
+```ts
+testTaskConnection(connectionId): Promise<TaskConnectionTestResult>;
+```
+
+POST /api/v1/task-management/connections/:connectionId/test (OWNER, ADMIN) — whether the provider still accepts the stored credentials.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `connectionId` | `string` |
+
+#### Returns
+
+`Promise`\<[`TaskConnectionTestResult`](../index.md#taskconnectiontestresult)\>
 
 ***
 

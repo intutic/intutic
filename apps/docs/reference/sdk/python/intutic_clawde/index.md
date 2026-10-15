@@ -413,6 +413,19 @@ def create_sop(sop: SopInput) -> SopCreateResult
 POST /api/v1/sops -- one workspace SOP; `markdown_content` without front matter.
 
 
+##### ControlPlaneClient.create_task_connection()
+
+```python
+def create_task_connection(connection: TaskConnectionInput) -> TaskConnection
+```
+
+POST /api/v1/task-management/connections (OWNER, ADMIN). The
+control plane tests the credentials with the provider and saves the
+connection only if they are accepted (a 400 "Connection test failed"
+otherwise). A Jira connection needs `metadata.accountEmail`. There
+is no update: to change a connection, delete it and create it again.
+
+
 ##### ControlPlaneClient.create_team()
 
 ```python
@@ -469,6 +482,16 @@ def delete_siem_destination(destination_id: str) -> None
 DELETE /api/v1/siem/destinations/:destinationId (OWNER, ADMIN) --
 deactivates it; `update_siem_destination(id, {"isActive": True})`
 turns it back on.
+
+
+##### ControlPlaneClient.delete_task_connection()
+
+```python
+def delete_task_connection(connection_id: str) -> TaskConnectionDeleteResult
+```
+
+DELETE /api/v1/task-management/connections/:connectionId (OWNER,
+ADMIN) -- `deleted` is False when it was already gone.
 
 
 ##### ControlPlaneClient.disable_mcp_tool()
@@ -1135,6 +1158,16 @@ def list_sops(limit: Optional[int] = None) -> List[Dict[str, Any]]
 GET /api/v1/sops
 
 
+##### ControlPlaneClient.list_task_connections()
+
+```python
+def list_task_connections() -> List[TaskConnection]
+```
+
+GET /api/v1/task-management/connections -- the workspace's Jira,
+Linear and PagerDuty connections, unwrapped from `items`.
+
+
 ##### ControlPlaneClient.list_team_workspaces()
 
 ```python
@@ -1319,8 +1352,9 @@ endpoint on the next poll.
 def revoke_api_key(key_id: str) -> None
 ```
 
-DELETE /api/v1/keys/:keyId -- revoke one of your keys; the answer is
-the same when you had no such live key.
+DELETE /api/v1/keys/:keyId -- revoke one of your live keys. A key
+you have no live key for (none, another member's, already revoked)
+raises with the 404.
 
 
 ##### ControlPlaneClient.revoke_gateway()
@@ -1468,6 +1502,16 @@ def sync_policy_source(connector_id: str) -> PolicySourceSyncResult
 ```
 
 POST /api/v1/connectors/:connectorId/sync
+
+
+##### ControlPlaneClient.test_task_connection()
+
+```python
+def test_task_connection(connection_id: str) -> TaskConnectionTestResult
+```
+
+POST /api/v1/task-management/connections/:connectionId/test (OWNER,
+ADMIN) -- whether the provider still accepts the stored credentials.
 
 
 ##### ControlPlaneClient.unset_provider_credential()

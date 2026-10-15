@@ -26,6 +26,7 @@ Every resource in the Intutic provider can be imported, so a workspace configure
 | `intutic_siem_destination` | Destination id, `siemdest_…` | `secret_config` reads back masked, so set the real values; `signing_secret` is null after import. |
 | `intutic_wasm_rule` | Rule id, `wasm_…` | If the file in `source` has different bytes from the uploaded rule, the next plan replaces the rule. |
 | `intutic_provider_credential` | Provider id, for example `anthropic` or `bedrock` | The API never returns the credential, so the first apply after the import sends `fields` again. |
+| `intutic_task_connection` | Connection id, `cc_…` | The API never returns `api_token` or `account_email` and has no update, so the first apply after the import replaces the connection with the configured values. |
 
 The workspace id is the `id` of the `intutic_workspace` data source, and member ids are listed by the `intutic_members` data source. Other ids come from the API's list routes, for example the SOPs:
 

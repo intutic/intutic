@@ -3,7 +3,7 @@
   "info": {
     "title": "Intutic Control Plane API",
     "version": "v1",
-    "description": "Generated from the control plane's route source. 408 operations; 129 validate their JSON body and 70 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 165 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
+    "description": "Generated from the control plane's route source. 408 operations; 129 validate their JSON body and 70 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 169 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
   },
   "servers": [
     {
@@ -16020,7 +16020,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConnectionListResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -16032,7 +16039,7 @@
         "x-intutic-auth": "Authenticated",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       },
       "post": {
         "operationId": "postApiV1TaskManagementConnections",
@@ -16061,7 +16068,14 @@
         },
         "responses": {
           "201": {
-            "description": "Created. No response schema in the route source."
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConnectionResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -16079,7 +16093,7 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/task-management/connections/{connectionId}": {
@@ -16110,7 +16124,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConnectionDeleteResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -16125,7 +16146,7 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/task-management/connections/{connectionId}/test": {
@@ -16156,7 +16177,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConnectionTestResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -16171,7 +16199,7 @@
         "x-intutic-auth": "OWNER/ADMIN",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "none",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/teams/{teamId}/workspaces": {
@@ -41281,6 +41309,156 @@
         "required": [
           "ack",
           "configVersion"
+        ]
+      },
+      "TaskConnectionDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "False when the workspace has no connection with this id (already removed)."
+          }
+        },
+        "required": [
+          "deleted"
+        ]
+      },
+      "TaskConnectionListResponse": {
+        "type": "object",
+        "properties": {
+          "listProperty": {
+            "type": "string",
+            "const": "items"
+          },
+          "rowCase": {
+            "type": "string",
+            "const": "camel"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "connectionId": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "jira",
+                    "pagerduty",
+                    "linear"
+                  ]
+                },
+                "baseUrl": {
+                  "type": "string"
+                },
+                "projectKey": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "const": "connected",
+                  "description": "Always `connected`: a connection is saved only once the provider accepts its credentials."
+                },
+                "lastSyncAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "connectionId",
+                "provider",
+                "baseUrl",
+                "projectKey",
+                "status",
+                "lastSyncAt",
+                "createdAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "listProperty",
+          "rowCase",
+          "items"
+        ]
+      },
+      "TaskConnectionResponse": {
+        "type": "object",
+        "properties": {
+          "connectionId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "jira",
+              "pagerduty",
+              "linear"
+            ]
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "projectKey": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "const": "connected",
+            "description": "Always `connected`: a connection is saved only once the provider accepts its credentials."
+          },
+          "lastSyncAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "connectionId",
+          "provider",
+          "baseUrl",
+          "projectKey",
+          "status",
+          "lastSyncAt",
+          "createdAt"
+        ]
+      },
+      "TaskConnectionTestResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "message"
         ]
       },
       "TeamCreateResponse": {

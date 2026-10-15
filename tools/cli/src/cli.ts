@@ -1910,6 +1910,56 @@ siemCmd
     await runSiemRotateSecret(destinationId, opts)
   })
 
+const tasksCmd = program
+  .command('tasks')
+  .description('Manage task-management connections (Jira Cloud, Linear, PagerDuty) that attach ticket context to sessions')
+
+tasksCmd
+  .command('list')
+  .description('List task-management connections (tokens are never returned)')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runTasksList } = await import('./commands/tasks.js')
+    await runTasksList(opts)
+  })
+
+tasksCmd
+  .command('add')
+  .description('Connect Jira Cloud, Linear or PagerDuty; the API token is read from --token or --token-file, never echoed')
+  .requiredOption('--provider <provider>', 'jira, linear or pagerduty')
+  .requiredOption('--base-url <url>', 'The provider\'s base URL (e.g. https://acme.atlassian.net)')
+  .requiredOption('--project-key <key>', 'Jira project key, Linear team key or PagerDuty service key')
+  .option('--account-email <email>', 'Jira only (required): the Atlassian account the API token belongs to')
+  .option('--token <token>', 'Provider API token')
+  .option('--token-file <path>', 'Read the API token from a file')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (opts) => {
+    const { runTasksAdd } = await import('./commands/tasks.js')
+    await runTasksAdd(opts)
+  })
+
+tasksCmd
+  .command('test <connectionId>')
+  .description('Check that the provider still accepts a connection\'s stored credentials')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (connectionId, opts) => {
+    const { runTasksTest } = await import('./commands/tasks.js')
+    await runTasksTest(connectionId, opts)
+  })
+
+tasksCmd
+  .command('remove <connectionId>')
+  .description('Remove a task-management connection and its stored token')
+  .option('--json', 'Output as JSON')
+  .option('--dev', 'Use local control plane (http://localhost:3001)')
+  .action(async (connectionId, opts) => {
+    const { runTasksRemove } = await import('./commands/tasks.js')
+    await runTasksRemove(connectionId, opts)
+  })
+
 const complianceCmd = program
   .command('compliance')
   .description('Compliance framework reports and the evidence archive')

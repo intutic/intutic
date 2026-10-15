@@ -1697,6 +1697,139 @@
       }
     },
     {
+      "ts": "listTaskConnections",
+      "py": "list_task_connections",
+      "cli": "tasks list",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/task-management/connections"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "items": [
+            {
+              "connectionId": "cc_1",
+              "provider": "jira",
+              "baseUrl": "https://acme.atlassian.net",
+              "projectKey": "PROJ",
+              "status": "connected",
+              "lastSyncAt": null,
+              "createdAt": "2026-10-15T00:00:00.000Z"
+            }
+          ],
+          "listProperty": "items",
+          "rowCase": "camel"
+        }
+      },
+      "returns": [
+        {
+          "connectionId": "cc_1",
+          "provider": "jira",
+          "baseUrl": "https://acme.atlassian.net",
+          "projectKey": "PROJ",
+          "status": "connected",
+          "lastSyncAt": null,
+          "createdAt": "2026-10-15T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "ts": "createTaskConnection",
+      "py": "create_task_connection",
+      "cli": "tasks add",
+      "args": [
+        {
+          "provider": "jira",
+          "baseUrl": "https://acme.atlassian.net",
+          "authToken": "test-value",
+          "projectKey": "PROJ",
+          "metadata": {
+            "accountEmail": "dev@example.com"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/task-management/connections",
+        "body": {
+          "provider": "jira",
+          "baseUrl": "https://acme.atlassian.net",
+          "authToken": "test-value",
+          "projectKey": "PROJ",
+          "metadata": {
+            "accountEmail": "dev@example.com"
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "connectionId": "cc_1",
+          "provider": "jira",
+          "baseUrl": "https://acme.atlassian.net",
+          "projectKey": "PROJ",
+          "status": "connected",
+          "lastSyncAt": null,
+          "createdAt": "2026-10-15T00:00:00.000Z"
+        }
+      },
+      "returns": {
+        "connectionId": "cc_1",
+        "provider": "jira",
+        "baseUrl": "https://acme.atlassian.net",
+        "projectKey": "PROJ",
+        "status": "connected",
+        "lastSyncAt": null,
+        "createdAt": "2026-10-15T00:00:00.000Z"
+      }
+    },
+    {
+      "ts": "testTaskConnection",
+      "py": "test_task_connection",
+      "cli": "tasks test",
+      "args": [
+        "cc_1"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/task-management/connections/cc_1/test"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "success": true,
+          "message": "Connection successful"
+        }
+      },
+      "returns": {
+        "success": true,
+        "message": "Connection successful"
+      }
+    },
+    {
+      "ts": "deleteTaskConnection",
+      "py": "delete_task_connection",
+      "cli": "tasks remove",
+      "args": [
+        "cc_1"
+      ],
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/task-management/connections/cc_1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "deleted": true
+        }
+      },
+      "returns": {
+        "deleted": true
+      }
+    },
+    {
       "ts": "getMemberUsage",
       "py": "get_member_usage",
       "cli": "usage members",

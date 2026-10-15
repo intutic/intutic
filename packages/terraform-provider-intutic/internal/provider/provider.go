@@ -101,6 +101,7 @@ func (p *intuticProvider) Resources(_ context.Context) []func() resource.Resourc
 		newSiemDestinationResource,
 		newWasmRuleResource,
 		newProviderCredentialResource,
+		newTaskConnectionResource,
 	}
 }
 

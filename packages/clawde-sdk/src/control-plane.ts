@@ -36,6 +36,10 @@ import type {
   SiemDestinationInput,
   SiemDestinationUpdate,
   SiemSecretRotation,
+  TaskConnection,
+  TaskConnectionInput,
+  TaskConnectionTestResult,
+  TaskConnectionDeleteResult,
   UsageOptions,
   MemberUsageResponse,
   TeamUsageResponse,
@@ -539,6 +543,35 @@ export class ControlPlaneClient {
   /** POST /api/v1/siem/destinations/:destinationId/signing-secret (OWNER, ADMIN) */
   public async rotateSiemDestinationSecret(destinationId: string): Promise<SiemSecretRotation> {
     return this.request('POST', `/api/v1/siem/destinations/${seg(destinationId)}/signing-secret`)
+  }
+
+  // ─── Task-management connections (`intutic tasks`) ───
+
+  /** GET /api/v1/task-management/connections — the workspace's Jira, Linear and PagerDuty connections, unwrapped from `items`. */
+  public async listTaskConnections(): Promise<TaskConnection[]> {
+    const res = await this.request<{ items: TaskConnection[] }>('GET', '/api/v1/task-management/connections')
+    return res.items ?? []
+  }
+
+  /**
+   * POST /api/v1/task-management/connections (OWNER, ADMIN). The control
+   * plane tests the credentials with the provider and saves the connection
+   * only if they are accepted (a 400 "Connection test failed" otherwise). A
+   * Jira connection needs `metadata.accountEmail`. There is no update: to
+   * change a connection, delete it and create it again.
+   */
+  public async createTaskConnection(connection: TaskConnectionInput): Promise<TaskConnection> {
+    return this.request('POST', '/api/v1/task-management/connections', connection)
+  }
+
+  /** POST /api/v1/task-management/connections/:connectionId/test (OWNER, ADMIN) — whether the provider still accepts the stored credentials. */
+  public async testTaskConnection(connectionId: string): Promise<TaskConnectionTestResult> {
+    return this.request('POST', `/api/v1/task-management/connections/${seg(connectionId)}/test`)
+  }
+
+  /** DELETE /api/v1/task-management/connections/:connectionId (OWNER, ADMIN) — `deleted: false` when it was already gone. */
+  public async deleteTaskConnection(connectionId: string): Promise<TaskConnectionDeleteResult> {
+    return this.request('DELETE', `/api/v1/task-management/connections/${seg(connectionId)}`)
   }
 
   // ─── Usage (`intutic usage`) ───
@@ -1073,7 +1106,7 @@ export class ControlPlaneClient {
     return this.request('PATCH', `/api/v1/keys/${seg(keyId)}`, changes)
   }
 
-  /** DELETE /api/v1/keys/:keyId — revoke one of your keys; the answer is the same when you had no such live key. */
+  /** DELETE /api/v1/keys/:keyId — revoke one of your live keys; a key you have no live key for (none, another member's, already revoked) throws `ClawdeConnectionError` with the 404. */
   public async revokeApiKey(keyId: string): Promise<void> {
     await this.request('DELETE', `/api/v1/keys/${seg(keyId)}`)
   }

@@ -2272,13 +2272,67 @@ The body `intutic sops push` sends, in the route's snake_case.
 
 ***
 
+### TaskConnection
+
+A Jira Cloud, Linear or PagerDuty connection. Its API token is never returned.
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-baseurl-2"></a> `baseUrl` | `string` | - |
+| <a id="property-connectionid"></a> `connectionId` | `string` | - |
+| <a id="property-createdat-7"></a> `createdAt` | `string` | - |
+| <a id="property-lastsyncat"></a> `lastSyncAt` | `string` \| `null` | - |
+| <a id="property-projectkey"></a> `projectKey` | `string` | The Jira project key, Linear team key or PagerDuty service key tickets and incidents are matched on. |
+| <a id="property-provider-7"></a> `provider` | [`TaskConnectionProvider`](#taskconnectionprovider) | - |
+| <a id="property-status-18"></a> `status` | `"connected"` | Always `connected`: a connection is saved only once the provider accepts its credentials. |
+
+***
+
+### TaskConnectionDeleteResult
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-deleted"></a> `deleted` | `boolean` | `false` when the workspace has no connection with that id (already removed). |
+
+***
+
+### TaskConnectionInput
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-authtoken"></a> `authToken` | `string` | The provider API token; the control plane tests it with the provider, encrypts it, and never returns it. |
+| <a id="property-baseurl-3"></a> `baseUrl` | `string` | - |
+| <a id="property-metadata"></a> `metadata?` | `object` | Jira requires `accountEmail`: the Atlassian account the API token belongs to. |
+| `metadata.accountEmail?` | `string` | - |
+| <a id="property-projectkey-1"></a> `projectKey` | `string` | - |
+| <a id="property-provider-8"></a> `provider` | [`TaskConnectionProvider`](#taskconnectionprovider) | - |
+
+***
+
+### TaskConnectionTestResult
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-message-1"></a> `message` | `string` | - |
+| <a id="property-success-1"></a> `success` | `boolean` | Whether the provider still accepts the stored credentials. |
+
+***
+
 ### Team
 
 #### Properties
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-7"></a> `createdAt` | `string` |
+| <a id="property-createdat-8"></a> `createdAt` | `string` |
 | <a id="property-name-18"></a> `name` | `string` |
 | <a id="property-orgid-2"></a> `orgId` | `string` |
 | <a id="property-slug"></a> `slug` | `string` |
@@ -2499,7 +2553,7 @@ The proxy's `x-intutic-upstream-attempts` / `x-intutic-upstream-fallback-from` h
 
 | Property | Type |
 | ------ | ------ |
-| <a id="property-createdat-8"></a> `createdAt` | `string` |
+| <a id="property-createdat-9"></a> `createdAt` | `string` |
 | <a id="property-name-19"></a> `name` | `string` |
 | <a id="property-plantier-1"></a> `planTier` | `string` |
 | <a id="property-slug-1"></a> `slug` | `string` |
@@ -2751,6 +2805,14 @@ type SiemDestinationSummary = Omit<SiemDestination, "config" | "signingSecret">;
 ```
 
 A destination as the list answers it: no adapter settings, and no signing secret.
+
+***
+
+### TaskConnectionProvider
+
+```ts
+type TaskConnectionProvider = "jira" | "linear" | "pagerduty";
+```
 
 ***
 

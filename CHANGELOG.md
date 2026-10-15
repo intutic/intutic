@@ -30,6 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   do the same; and the Terraform provider (0.5.0) adds
   `intutic_sop_optimizer_settings` (destroy sets the mode back to `manual`).
   `GET` and `PUT /api/v1/dream-cycle/settings` publish their response schema.
+- **Task-management connections from the CLI, the SDKs and Terraform.**
+  `intutic tasks list`, `intutic tasks add --provider <jira|linear|pagerduty>
+  --base-url <url> --project-key <key> [--account-email <email>]
+  (--token <token> | --token-file <path>)`, `intutic tasks test
+  <connectionId>` and `intutic tasks remove <connectionId>` manage the
+  Jira, Linear and PagerDuty connections, which only the dashboard could
+  before; the token is never echoed. `ControlPlaneClient` gains
+  `listTaskConnections`, `createTaskConnection`, `testTaskConnection` and
+  `deleteTaskConnection` (`list_task_connections`, … in `intutic-clawde`),
+  and the Terraform provider (0.5.0) adds `intutic_task_connection`: the API
+  token is a sensitive argument the API never returns, every argument
+  replaces the connection (there is no update route), and an imported
+  connection is replaced on its first apply, which sends the configured
+  token. The four task-management routes publish their response schemas.
 - **Notification rules on `plan.rejected` and `plan.closed`.** The control
   plane sent both, and no rule could name them; the API, the CLI and the
   Terraform provider accept them.
@@ -49,10 +63,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`GET` and `PUT /api/v1/dream-cycle/settings` work with an API key.** Both
-  answered 400 "Missing x-workspace-id header" to every caller that did not
-  send the header, which only the dashboard does; they now fall back to the
-  caller's workspace.
+- **The SOP Optimizer's routes work with an API key.** Every
+  `/api/v1/dream-cycle` route (the queue, approving and rejecting a
+  proposal, the manual trigger and the settings) answered 400 "Missing
+  x-workspace-id header" to a caller that did not send the header, which
+  only the dashboard does; they now fall back to the caller's workspace.
+- **Revoking an API key you have no live key for is a `404`.**
+  `DELETE /api/v1/keys/:id` answered `200 { "revoked": true }` for an id
+  that did not exist, belonged to another member or was already revoked, so
+  a mistyped id read as a revocation (and a second revoke rewrote the
+  revocation time). It now answers `404` with
+  `{ "error": "API key not found", "code": "E_NOT_FOUND" }` and changes and
+  records nothing; `intutic keys revoke` says so and exits 1, and the SDKs'
+  `revokeApiKey` / `revoke_api_key` raise. The Terraform provider already
+  treats a `404` on destroy as gone.
 - **Six notification events reached no rule.** `sop.cascade.alert`,
   `sop.cascade.invalidated`, `finops.tokens.classified` and the three
   `org.cells.*` events were emitted without naming a workspace, and the

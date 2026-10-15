@@ -503,6 +503,44 @@ export interface SiemSecretRotation extends SigningSecretRotation {
   destinationId: string
 }
 
+// Task-management connections
+
+export type TaskConnectionProvider = 'jira' | 'linear' | 'pagerduty'
+
+/** A Jira Cloud, Linear or PagerDuty connection. Its API token is never returned. */
+export interface TaskConnection {
+  connectionId: string
+  provider: TaskConnectionProvider
+  baseUrl: string
+  /** The Jira project key, Linear team key or PagerDuty service key tickets and incidents are matched on. */
+  projectKey: string
+  /** Always `connected`: a connection is saved only once the provider accepts its credentials. */
+  status: 'connected'
+  lastSyncAt: string | null
+  createdAt: string
+}
+
+export interface TaskConnectionInput {
+  provider: TaskConnectionProvider
+  baseUrl: string
+  /** The provider API token; the control plane tests it with the provider, encrypts it, and never returns it. */
+  authToken: string
+  projectKey: string
+  /** Jira requires `accountEmail`: the Atlassian account the API token belongs to. */
+  metadata?: { accountEmail?: string }
+}
+
+export interface TaskConnectionTestResult {
+  /** Whether the provider still accepts the stored credentials. */
+  success: boolean
+  message: string
+}
+
+export interface TaskConnectionDeleteResult {
+  /** `false` when the workspace has no connection with that id (already removed). */
+  deleted: boolean
+}
+
 // Usage
 
 export type UsagePeriod = 'daily' | 'monthly'
