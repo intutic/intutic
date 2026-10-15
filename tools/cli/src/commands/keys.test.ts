@@ -160,4 +160,14 @@ describe('intutic keys revoke', () => {
     expect(sent()).toMatchObject({ url: `${BASE}/api/v1/keys/key%2F1`, method: 'DELETE' })
     expect(printed()).toContain('key/1')
   })
+
+  it('says so and exits 1 when there is no such live key', async () => {
+    fetchMock.mockReturnValue(reply(404, { error: 'API key not found', code: 'E_NOT_FOUND' }))
+    await expectFailure(() => runKeysRevoke('key_gone', {}), 'You have no live API key key_gone')
+  })
+
+  it("prints the server's other refusals and exits 1", async () => {
+    fetchMock.mockReturnValue(reply(503, { error: 'API key cache invalidation service is temporarily unavailable' }))
+    await expectFailure(() => runKeysRevoke('key_1', {}), 'Failed to revoke API key key_1 (503)')
+  })
 })

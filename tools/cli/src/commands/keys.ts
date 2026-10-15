@@ -18,6 +18,7 @@
 
 import { unknownApiKeyScopes, unknownScopesMessage, type ApiKeyCreateResponse, type ApiKeyListResponse, type ApiKeyResponse } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
+import { getClient } from './skill.js'
 import { fail, list, positiveInt, runApiCommand, type ApiCommandOpts } from './apiCommand.js'
 
 /** The `--scopes` list, or exit 1 naming the valid scopes when one is not in the registry. */
@@ -95,12 +96,26 @@ export async function runKeysUpdate(keyId: string, opts: ApiCommandOpts & { scop
   )
 }
 
-/** `intutic keys revoke <keyId>` */
+/**
+ * `intutic keys revoke <keyId>`. A 404 means the caller has no such live key:
+ * none with that id, another member's, or one already revoked.
+ */
 export async function runKeysRevoke(keyId: string, opts: ApiCommandOpts): Promise<void> {
-  await runApiCommand(
-    opts,
-    `Failed to revoke API key ${keyId}`,
-    (client) => client.del<{ revoked: true }>(`/api/v1/keys/${encodeURIComponent(keyId)}`),
-    () => log.success(`API key ${keyId} revoked.`),
-  )
+  const client = await getClient(opts.dev)
+  let answer: { status: number; body: { revoked?: true; error?: string; detail?: string } }
+  try {
+    answer = await client.delWithStatus(`/api/v1/keys/${encodeURIComponent(keyId)}`)
+  } catch (err) {
+    fail(`Failed to revoke API key ${keyId}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  const { status, body } = answer
+  if (status === 404) {
+    fail(`You have no live API key ${keyId}: it does not exist, is another member's, or is already revoked. See intutic keys list.`)
+  }
+  if (status !== 200) fail(`Failed to revoke API key ${keyId} (${status}): ${body.detail ?? body.error ?? 'unknown error'}`)
+  if (opts.json) {
+    console.log(JSON.stringify(body, null, 2))
+    return
+  }
+  log.success(`API key ${keyId} revoked.`)
 }
