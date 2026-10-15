@@ -37,9 +37,9 @@ use) — see "1.x additions" below:
   and `..._agent_mcp_tool_use_event.py` — both carry
   `evaluated_permission: "allow"|"ask"|"deny"|None`. A tool call the server
   evaluated to `"ask"` (e.g. because its `permission_policy` is
-  `always_ask` — Anthropic's docs mark MCP toolsets as `always_ask` by
-  default; check current docs for built-in agent-toolset tools, whose default
-  is not encoded in the SDK types) PAUSES the session — Anthropic's own docs:
+  `always_ask` — checked live 2026-10-14: an agent created with no
+  `permission_policy` resolves to `always_ask` for an MCP toolset and to
+  `always_allow` for the built-in agent toolset) PAUSES the session — Anthropic's own docs:
   "Denied tools do not run." A `"deny"` verdict means the SERVER already
   denied the call (no confirmation is expected or accepted); `"allow"` or
   unset means the call never paused at all. **This is the real, documented
@@ -129,7 +129,11 @@ hook exists" is stated plainly rather than pretended otherwise). This module
 governs WHETHER the call runs; it does not — and cannot — inspect or modify
 what the tool body does once allowed.
 
-\## Webhook vs. streamed/polled delivery — both are real, verified live
+\## Webhook vs. streamed/polled delivery — both are real
+
+`stream()` and `list()` were exercised against a live session on
+2026-10-14; a signed webhook delivery has not been (it needs a public
+endpoint).
 
 `anthropic/resources/beta/webhooks.py`: `client.beta.webhooks.unwrap(payload,
 headers=..., key=...)` verifies the HMAC signature and returns a typed
@@ -256,6 +260,12 @@ confirmation params sent, in event order.
 Filters the listing to the three event types this module reads
 (`types=[...]`), so a busy session's message/thinking/usage events
 never cross the wire for nothing.
+
+Two passes: `list()` returns events oldest first, so a pause precedes
+its own `user.tool_confirmation`. Every confirmation is noted before
+any pause is answered, or a fresh confirmer (one per webhook delivery)
+re-answers every pause the session ever had — the live API accepts the
+duplicate and it wakes an idle session.
 
 
 ##### IntuticSessionConfirmer.watch()
