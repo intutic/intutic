@@ -691,7 +691,7 @@ Every route the control plane serves: 408 routes, grouped by the source file tha
 | POST | `/api/v1/auth/magic-link/request` | None | — | Email a one-time sign-in link |
 | GET | `/api/v1/auth/me` | Authenticated | Any | Get current user info |
 | POST | `/api/v1/auth/refresh` | None (refresh token in the body, or the refresh cookie with X-Intutic-CSRF) | — | Refresh access token |
-| POST | `/api/v1/auth/resend-verification` | None | — | Send the verification email again (2 per minute per address) |
+| POST | `/api/v1/auth/resend-verification` | None | — | Send the verification email again (rate limited with the other sign-in routes: 10 a minute per IP) |
 | GET | `/api/v1/auth/session` | Authenticated | Any |  |
 | POST | `/api/v1/auth/signup` | None | — | Self-serve signup with workspace auto-provisioning |
 | POST | `/api/v1/auth/signup/org` | None | — | Sign up and create an organization with its first workspace |
