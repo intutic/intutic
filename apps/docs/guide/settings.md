@@ -454,9 +454,12 @@ The **Event Type** list offers only the events the control plane sends:
 | `trajectory.alert` | Trajectory Drift Alert |
 | `anomaly.drift.detected` | Guideline Compliance Drifted: an enforced guideline's compliance moved 0.15 or more from its baseline in the hourly check; once per drift. HIGH when compliance fell (the guideline is also queued for a rewrite), INFO when it rose. See [Behavioral Drift](/guide/drift-detection#behavioral-drift) |
 | `anomaly.capability_miss` | Capability Miss (ungoverned task) |
+| `anomaly.trust.updated` | Developer Trust Score Changed: a developer's trust score moved after a hook event or a clean session; MEDIUM |
 | `sop.integrity.drift` | Guideline Integrity Drift |
 | `sop.stale.detected` | Guideline Went Stale |
 | `sop.cascade.invalidated` | Guideline Cascade Invalidated |
+| `sop.cascade.alert` | Guideline Cascade Affects Many Dependents: invalidating a guideline cascades to more dependent guidelines than the alert threshold; HIGH |
+| `sop.lifecycle.transitioned` | Guideline Lifecycle State Changed: a guideline moved between lifecycle states; INFO |
 | `sop.upstream.changed` | Guideline Changed Upstream |
 | `guardrail.ready` | Policy Guardrail Ready to Enforce |
 | `guardrail.stale` | Policy Guardrail Citation Went Stale |
@@ -468,14 +471,34 @@ The **Event Type** list offers only the events the control plane sends:
 | `mcp.budget.exceeded` | MCP Call Budget Exceeded: once per budget per period, on the first refused call |
 | `finops.budget.threshold` | Budget Threshold Reached: a workspace cap, key budget or member budget reached the alert threshold; once per budget per day or month. Carries `scope`, the key's or member's id and `enforcement` |
 | `finops.budget.exceeded` | Budget Exceeded: a workspace cap, key budget or member budget reached its limit; once per budget per day or month |
+| `finops.tokens.classified` | Token Spend Classified Useful or Wasted: a member labelled traces' tokens USEFUL or WASTED; INFO |
 | `plan.deviation.detected` | Plan Deviation Detected |
+| `plan.captured` | Agent Plan Captured; INFO |
+| `plan.approved` | Agent Plan Approved; INFO |
+| `plan.rejected` | Agent Plan Rejected; INFO |
+| `plan.closed` | Agent Plan Closed: HIGH when the plan failed, MEDIUM when it partly succeeded, INFO when it succeeded |
+| `workspace.context.updated` | Workspace Context Updated: the sync daemon reported a changed workspace context file; INFO |
 | `trial.expired_downgraded` | Trial Expired |
+| `trial.started` | Enterprise Trial Started; INFO |
+| `trial.day7_report_sent` | Trial Day-7 Report Sent; INFO |
+| `trial.day13_report_sent` | Trial Day-13 Report Sent (two days left); INFO |
+| `billing.subscription.past_due` | Subscription Past Due: Stripe could not collect the latest payment; MEDIUM. Sent to every workspace on the subscription |
+| `billing.dunning.downgraded` | Moved to Free Plan After Failed Payment: the final retry failed and the account is on the free plan (see [failed payments](/guide/plans#failed-payments)); HIGH |
+| `billing.dunning.restored` | Plan Restored After Payment: the overdue invoice was paid and the plan is back; INFO |
 | `gateway.stale.detected` | Self-Hosted Gateway Unreachable |
+| `gateway.cell.stuck_pending` | Managed Gateway Cell Stuck Pending: a managed cell registered and never came up; HIGH |
+| `region.sync.stale` | Region Out of Sync with the Control Plane: a region's cells are serving on stale control metadata; HIGH |
+| `org.cells.deprovision_scheduled` | Managed Gateway Cell Removal Scheduled: the plan no longer covers a managed cell, which is removed at the end of its grace period; HIGH |
+| `org.cells.deprovision_canceled` | Managed Gateway Cell Removal Cancelled: the plan covers the cell again; MEDIUM |
+| `org.cells.deprovisioned` | Managed Gateway Cell Removed; HIGH |
+| `provider.outage.detected` | LLM Provider Outage Detected: a new outage window opened for a provider this workspace's traffic reached; HIGH |
 | `device.enforcement.stale` | Device Enforcement Stale |
 | `device.enforcement.disabled` | Device Firewall Disabled |
 | `governance.gate.silent` | Gate Stopped Reporting: an installed harness's gate, or an SDK gate in regular use, has sent no event for 48 hours |
 | `governance.gate.recovered` | Gate Reporting Again |
 | `inventory.ungoverned.detected` | Ungoverned AI Tool Found: a machine's [AI inventory](/guide/ai-inventory) listed an ungoverned harness or MCP server for the first time; once per machine and item |
+| `skill.malware.detected` | Malware Found in a Skill Script: the opt-in VirusTotal lookup flagged a script bundled with a skill; HIGH |
+| `skill.semantic.flagged` | Skill Flagged by Semantic Review: the opt-in semantic review called a `SKILL.md` suspicious (MEDIUM) or malicious (HIGH) |
 | `governance.integrity.failed` | Trace Integrity Check Failed: the hourly integrity check found a broken root chain, a trace changed after sealing, a mismatched bucket copy, a bad signature, an altered append-only guard or a foreign key that is not enforced. See [Trace Integrity](/concepts/trace-integrity#alerts) |
 | `decision.pending` | Decision Held for Review: a call was held for approval and the hold was recorded; MEDIUM. On Slack the message carries **Approve** and **Reject** buttons (see [Slack interactive reviews](/guide/decisions#slack-interactive-reviews)) |
 | `decision.approved` | Held Decision Approved: an owner, admin or engineering manager approved a [held decision](/guide/decisions#slack-interactive-reviews), in Slack or with `intutic decision approve`; MEDIUM, because the held call can now run |
@@ -486,8 +509,9 @@ The **Event Type** list offers only the events the control plane sends:
 | `webhook.secret.rotated` | Webhook Signing Secret Replaced: an owner or admin replaced the signing secret of a notification webhook, a SIEM webhook destination or the GitHub pull-request webhook. Says whose and who, never the secret |
 | `evidence.exported` | Compliance Evidence Downloaded: a member downloaded the SOC 2 evidence archive, a framework coverage report as a file, or the human-oversight export; INFO. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
 | `credential.changed` | API Key or Provider Key Changed: a virtual key, gateway token or SCIM token was created, rotated or revoked, or a provider key was added, replaced or removed. Says which credential, what happened and who did it, never the value; INFO for a new virtual key, gateway token or SCIM token, MEDIUM otherwise. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
+| `identity.offboarding.completed` | Member Offboarding Finished: the offboarding cascade finished for a removed member; HIGH when a step failed and something is left to clean up by hand, INFO otherwise |
 
-Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
+Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity. An event sent only at INFO, which no box selects, reaches a rule only with every box unticked; the form says so for those events.
 
 Through the API (`filters.severity` on `POST` and `PUT /api/v1/notifications/rules`), the CLI or the [Terraform provider](/reference/terraform/resources/notification_rule), the values are `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` and `INFO`, in any case. They are stored uppercase, and any other value is refused with `400` naming the valid ones. A rule saved before this with lowercase values matched no event; those rules were uppercased when the control plane upgraded, and values that are not severities were dropped. A rule whose filter held no severity at all was switched off rather than left to match every severity, and its id was printed in the upgrade's migration log: choose its severities before turning it back on.
 
