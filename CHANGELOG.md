@@ -45,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Anthropic Managed Agents: a webhook delivery no longer re-answers old
+  pauses.** `poll()` (TypeScript `IntuticSessionConfirmer`, Python
+  `IntuticSessionConfirmer`) read a session's events oldest first and answered
+  each pause before seeing its later confirmation, so a fresh confirmer, which
+  a webhook handler creates on every delivery, re-sent a confirmation for every
+  pause the session had ever had; Anthropic accepted the duplicate without
+  applying it, but it woke the idle session. `poll()` now reads every
+  confirmation before answering anything. Verified against the live API.
+
 - **Change records stored before 2.6.0 are withheld.** The targets in a
   trace's change manifest (commands, paths, URLs) have been redacted for
   secrets and personal data since 2.6.0; those stored earlier are replaced
