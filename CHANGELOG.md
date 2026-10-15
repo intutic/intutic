@@ -45,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A workspace moved to the free plan gets the free plan's spend caps.** A
+  personal workspace downgraded by a cancelled subscription, or by the third
+  failed payment, kept the paid plan's daily cap and monthly budget (Biz Org's
+  $2,250 a day). Cancellation now sets the free plan's caps and clears the
+  billing interval and term; the failed-payment downgrade lowers the caps to
+  the free plan's (never raises them) and restores the exact earlier caps,
+  including any an administrator set, when the payment is made. Organisations
+  already worked this way.
+
 - **Anthropic Managed Agents: a webhook delivery no longer re-answers old
   pauses.** `poll()` (TypeScript `IntuticSessionConfirmer`, Python
   `IntuticSessionConfirmer`) read a session's events oldest first and answered
