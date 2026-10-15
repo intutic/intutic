@@ -154,7 +154,7 @@ Routing your OWN calls to the Messages API through the Intutic proxy is unrelate
 
 ## Known gaps
 
-- **Coverage is opt-in per tool.** `always_allow` tools are invisible to Intutic, and built-in tools' default `permission_policy` is not encoded in the SDK — verify it live rather than assuming `always_ask`.
+- **Coverage is opt-in per tool.** `always_allow` tools, and calls an `auto` policy allows, are invisible to Intutic. An agent created without a `permission_policy` gets `always_allow` for the built-in tools (bash, edit, read, write, glob, grep, web_fetch, web_search) and `always_ask` for an MCP toolset, so set `always_ask` on every built-in tool you want governed.
 - **Python decorator order.** `@guard` must go on the function before `@beta_tool` wraps it (see step 3).
-- **Beta product.** Managed Agents is in public beta. Both adapters are tested against fixtures for `@anthropic-ai/sdk` 0.131.0 and Python `anthropic` 1.11.0, not yet against a live session on a real account; an SDK or beta-header change can alter the event shapes.
-- **One responder per session.** `watch()` reconnects when the stream drops; what it cannot see is a session serviced by two responders at once (each answers what it sees, and the second answer to one `tool_use_id` is rejected server-side).
+- **Beta product.** Managed Agents is in public beta. Both adapters were run against live sessions with `@anthropic-ai/sdk` 0.131.0 and Python `anthropic` 1.11.0 (pause, allow, deny, stream and poll) on 2026-10-14; a signed webhook delivery has not been exercised live. An SDK or beta-header change can alter the event shapes.
+- **One responder per session.** `watch()` reconnects when the stream drops; what it cannot see is a session serviced by two responders at once (each answers what it sees; the server accepts a second answer to one `tool_use_id` without applying it, but the extra event wakes an idle session).

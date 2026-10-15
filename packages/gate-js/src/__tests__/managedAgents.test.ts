@@ -450,6 +450,26 @@ describe('IntuticSessionConfirmer', () => {
     expect(events.sent).toEqual(sent)
   })
 
+  it('poll() on a fresh confirmer does not re-answer a pause whose confirmation is listed AFTER it (the live order)', async () => {
+    // events.list() returns events oldest first (processed_at ascending, the
+    // live API's default), so a tool_use always precedes its own
+    // user.tool_confirmation. A confirmer built per webhook delivery starts
+    // with an empty `answered` set; live, the server accepted the duplicate
+    // and it woke the idle session (2026-10-14 live run).
+    const gate = new FakeGate('allow')
+    const { client, events } = fakeClient([
+      toolUseEvent({ id: 't1', input: { command: ALLOWED_COMMAND } }),
+      asEvent({ id: 'conf_1', type: 'user.tool_confirmation', tool_use_id: 't1', result: 'allow' }),
+      toolUseEvent({ id: 't2', input: { command: ALLOWED_COMMAND } }),
+    ])
+
+    const sent = await new IntuticSessionConfirmer(client, 'sess_1', { gate }).poll()
+
+    expect(sent.map((c) => c.tool_use_id)).toEqual(['t2'])
+    expect(events.sent.map((c) => c.tool_use_id)).toEqual(['t2'])
+    expect(gate.calls).toHaveLength(1)
+  })
+
   it('handleEvent does not double-send for the same id', async () => {
     const gate = new FakeGate('allow')
     const { client, events } = fakeClient()

@@ -42,9 +42,9 @@ latest). Re-read against `@anthropic-ai/sdk@0.131.0` — see
     `BetaManagedAgentsAgentMCPToolUseEvent` both carry
     `evaluated_permission?: 'allow' | 'ask' | 'deny'`. A call the server
     evaluated to `'ask'` (e.g. because its `permission_policy` is
-    `always_ask` — Anthropic's docs mark MCP toolsets as `always_ask` by
-    default; the SDK types do not encode a default for built-in
-    agent-toolset tools, so check current docs) PAUSES the session —
+    `always_ask` — checked live 2026-10-14: an agent created with no
+    `permission_policy` resolves to `always_ask` for an MCP toolset and to
+    `always_allow` for the built-in agent toolset) PAUSES the session —
     Anthropic's own docs: "Denied tools do not run." A `'deny'` verdict
     means the SERVER already denied the call (no confirmation is expected
     or accepted); `'allow'` or unset means the call never paused at all.
@@ -122,7 +122,11 @@ other Intutic adapter's posture toward a framework's built-in tool bodies
 WHETHER the call runs; it does not — and cannot — inspect or modify what
 the tool body does once allowed.
 
-## Webhook vs. streamed/polled delivery — both are real, verified live
+## Webhook vs. streamed/polled delivery — both are real
+
+`stream()` and `list()` were exercised against a live session on
+2026-10-14; a signed webhook delivery has not been (it needs a public
+endpoint).
 
 `resources/beta/webhooks.d.ts`: `client.beta.webhooks.unwrap(body, {
 headers, key })` verifies the HMAC signature and returns a typed event

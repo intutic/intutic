@@ -352,6 +352,27 @@ class TestIntuticSessionConfirmer:
         # listing, so it must not appear in `sent` even though it is `ask`.
         assert "t3" not in [c["tool_use_id"] for c in sent]
 
+    def test_fresh_confirmer_poll_skips_a_pause_whose_confirmation_is_listed_after_it(self, tmp_path, monkeypatch):
+        # events.list() returns events oldest first (the live API's default),
+        # so a tool_use precedes its own user.tool_confirmation. A confirmer
+        # built per webhook delivery starts with nothing answered; live, the
+        # server accepted the duplicate and it woke the idle session
+        # (2026-10-14 live run).
+        g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
+        listed = [
+            {"id": "t1", "type": "agent.tool_use", "name": "shell",
+             "input": {"command": ALLOWED_COMMAND}, "evaluated_permission": "ask"},
+            {"id": "conf_1", "type": "user.tool_confirmation", "tool_use_id": "t1", "result": "allow"},
+            {"id": "t2", "type": "agent.tool_use", "name": "shell",
+             "input": {"command": ALLOWED_COMMAND}, "evaluated_permission": "ask"},
+        ]
+        client = _FakeClient(listed=listed)
+
+        sent = IntuticSessionConfirmer(client, "sess_1", gate=g).poll()
+
+        assert [c["tool_use_id"] for c in sent] == ["t2"]
+        assert [c["tool_use_id"] for c in client.beta.sessions.events.sent] == ["t2"]
+
     def test_handle_event_does_not_double_send_for_the_same_id(self, tmp_path, monkeypatch):
         g = make_gate(tmp_path, monkeypatch, rules=[BLOCK_RULE])
         client = _FakeClient()

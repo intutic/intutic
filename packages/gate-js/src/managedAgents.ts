@@ -39,9 +39,9 @@
  *     `BetaManagedAgentsAgentMCPToolUseEvent` both carry
  *     `evaluated_permission?: 'allow' | 'ask' | 'deny'`. A call the server
  *     evaluated to `'ask'` (e.g. because its `permission_policy` is
- *     `always_ask` — Anthropic's docs mark MCP toolsets as `always_ask` by
- *     default; the SDK types do not encode a default for built-in
- *     agent-toolset tools, so check current docs) PAUSES the session —
+ *     `always_ask` — checked live 2026-10-14: an agent created with no
+ *     `permission_policy` resolves to `always_ask` for an MCP toolset and to
+ *     `always_allow` for the built-in agent toolset) PAUSES the session —
  *     Anthropic's own docs: "Denied tools do not run." A `'deny'` verdict
  *     means the SERVER already denied the call (no confirmation is expected
  *     or accepted); `'allow'` or unset means the call never paused at all.
@@ -119,7 +119,11 @@
  * WHETHER the call runs; it does not — and cannot — inspect or modify what
  * the tool body does once allowed.
  *
- * ## Webhook vs. streamed/polled delivery — both are real, verified live
+ * ## Webhook vs. streamed/polled delivery — both are real
+ *
+ * `stream()` and `list()` were exercised against a live session on
+ * 2026-10-14; a signed webhook delivery has not been (it needs a public
+ * endpoint).
  *
  * `resources/beta/webhooks.d.ts`: `client.beta.webhooks.unwrap(body, {
  * headers, key })` verifies the HMAC signature and returns a typed event
@@ -492,18 +496,24 @@ export class IntuticSessionConfirmer {
    * List recent events and answer every unanswered
    * `agent.tool_use`/`agent.mcp_tool_use` pause found. Returns the sent
    * confirmations, in event order.
+   *
+   * Two passes: `list()` returns events oldest first, so a pause precedes its
+   * own `user.tool_confirmation`. Every confirmation is noted before any
+   * pause is answered, or a fresh confirmer (one per webhook delivery)
+   * re-answers every pause the session ever had — the live API accepts the
+   * duplicate and it wakes an idle session.
    */
   async poll(opts: { limit?: number } = {}): Promise<UserToolConfirmationParams[]> {
     const sent: UserToolConfirmationParams[] = []
-    const events = this.client.beta.sessions.events.list(this.sessionId, {
+    const listed: ManagedAgentsSessionEventLike[] = []
+    for await (const event of this.client.beta.sessions.events.list(this.sessionId, {
       limit: opts.limit ?? 1000,
       types: ['agent.tool_use', 'agent.mcp_tool_use', 'user.tool_confirmation'],
-    })
-    for await (const event of events) {
-      if (event.type === 'user.tool_confirmation') {
-        this.noteConfirmationEvent(event)
-        continue
-      }
+    })) {
+      if (event.type === 'user.tool_confirmation') this.noteConfirmationEvent(event)
+      else listed.push(event)
+    }
+    for (const event of listed) {
       const confirmation = await this.handleEvent(event)
       if (confirmation !== null) sent.push(confirmation)
     }
