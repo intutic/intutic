@@ -93,7 +93,7 @@ that are tested in both directions rather than examples that were never executab
 
 ### 1. Secret & Credential Redaction (Markdown SOP)
 
-Save under `.intutic/sops/` (for example `.intutic/sops/secrets-dlp/rules.md`); `intutic connect` writes it into each harness's rules file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)):
+Save under `.intutic/sops/` (for example `.intutic/sops/secrets-dlp/rules.md`, or `.intutic/sops/secrets-dlp.md` directly in it); the proxy reads it from there, and `intutic connect` writes it into each harness's rules file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)):
 
 ```markdown
 # SOP: Secrets DLP & Credential Protection

@@ -36,6 +36,7 @@ import {
   combineCiscoSarifRuns,
   type CiscoDirScanResult,
 } from '../lib/ciscoScanner.js'
+import { listSopSets } from '@intutic/sync-daemon'
 import pc from 'picocolors'
 
 // ─── Shared response shapes ──────────────────────────────────────────
@@ -1137,19 +1138,16 @@ export async function getClient(dev?: boolean) {
   return createApiClient(controlPlaneUrl, creds.apiKey)
 }
 
+/**
+ * The local rule sets `--sops` names, by option number or name: folders, and
+ * the developer's own flat files (`deploy.md`, also matched as `deploy`), in
+ * the order `listSopSets` gives and `/intutic initialize` numbers.
+ */
 async function resolveLocalSops(sopsArg?: string): Promise<string[]> {
   if (!sopsArg) return []
   const config = loadConfig()
   const workspaceRoot = config?.workspaceRoot ?? process.cwd()
-  const sopsDir = join(workspaceRoot, '.intutic', 'sops')
-
-  let dirs: string[]
-  try {
-    const entries = await fs.readdir(sopsDir, { withFileTypes: true })
-    dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name)
-  } catch {
-    return []
-  }
+  const dirs = await listSopSets(join(workspaceRoot, '.intutic', 'sops'))
 
   const selectedSops: string[] = []
   const parts = sopsArg.split(',').map((p) => p.trim())
@@ -1160,6 +1158,7 @@ async function resolveLocalSops(sopsArg?: string): Promise<string[]> {
     } else {
       const partLower = part.toLowerCase()
       const matched = dirs.find((d) => d.toLowerCase() === partLower) ||
+                      dirs.find((d) => d.toLowerCase() === `${partLower}.md`) ||
                       dirs.find((d) => d.toLowerCase().includes(partLower))
       if (matched && !selectedSops.includes(matched)) {
         selectedSops.push(matched)

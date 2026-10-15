@@ -133,7 +133,8 @@ export async function localHoldTokensFor(
   settings: Record<string, unknown> | undefined,
   harnesses: HarnessType[] = [],
 ): Promise<string[]> {
-  const local = await loadLocalSopEntries(workspaceRoot, harnesses)
+  // Every local SOP, whatever the session selected: see `ignoreSelection`.
+  const local = await loadLocalSopEntries(workspaceRoot, harnesses, { ignoreSelection: true })
   return parseSopConstraints([...sops, ...local], settings).reviewBefore
 }
 
