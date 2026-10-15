@@ -1922,7 +1922,7 @@
         "tags": [
           "auth.ts"
         ],
-        "summary": "Send the verification email again (2 per minute per address)",
+        "summary": "Send the verification email again (rate limited with the other sign-in routes: 10 a minute per IP)",
         "description": "**Auth:** None\n\n**Plan:** Cloud",
         "security": [],
         "requestBody": {
@@ -1947,9 +1947,6 @@
           },
           "409": {
             "description": "Conflict"
-          },
-          "429": {
-            "description": "Too Many Requests"
           },
           "500": {
             "description": "Internal Server Error"

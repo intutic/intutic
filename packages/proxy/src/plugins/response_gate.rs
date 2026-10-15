@@ -26,18 +26,21 @@
 //!
 //! So the streaming gate matches on the tool **name only**. That is exactly
 //! sufficient for a denied-tools policy, which is itself keyed on names
-//! (`sops::denied_tools_for_role`), and it is honest about the limit:
-//! **argument-level matching is non-streaming-only.** Anything built on top of
-//! this that wants to gate on argument *values* must not assume the streaming
-//! path can see them.
+//! (`sops::denied_tools_for_role`), and for the SSO group policy, and it is
+//! honest about the limit: on a line-by-line stream, **argument-level matching
+//! needs the block held.** Anything built on top of this that wants to gate on
+//! argument *values* must not assume the streaming path can see them.
 //!
-//! The one argument-level rule, the destructive-SQL guard (`sql_guard:` in a
-//! SOP), gets its arguments on a stream the other way: while it is in
-//! force, the lines of a *shell-tool* block are held back until the block ends
-//! and evaluated whole — see [`crate::plugins::sql_guard::StreamHold`]. Every
-//! other block, and every stream with no SQL guard declared, flows unheld.
+//! Two argument-level checks get their arguments on a stream that way: the
+//! destructive-SQL guard (`sql_guard:` in a SOP), for *shell-tool* blocks, and
+//! the hook-rule guardrails (`plugins::hook_rules`), for a block whose tool a
+//! rule names and whose arguments that rule constrains. While one is in force,
+//! the lines of such a block are held back until the block ends and evaluated
+//! whole — see [`crate::plugins::sql_guard::StreamHold`]. This gate holds no
+//! other block; a hook rule that decides on the name alone is decided on the
+//! block's first line, like the deny list.
 //!
-//! # Wire shapes it does not see
+//! # Wire shapes
 //!
 //! Anthropic (`content[].type == "tool_use"`, `content_block_start`), OpenAI
 //! chat completions (`choices[].message.tool_calls[]`,
@@ -85,14 +88,16 @@
 //!
 //! Two-level, deliberately.
 //!
-//! 1. **Scope.** The gate is inert unless the role has a non-empty deny list
-//!    (or the workspace has an SSO group policy that names a tool).
-//!    A workspace that has declared no `deny_tools` cannot be broken by any of
+//! 1. **Scope.** Each check is inert unless the workspace declared what it
+//!    enforces: a non-empty deny list for the role, an SSO group policy that
+//!    names a tool, a `sql_guard:` policy, or a hook-rule guardrail.
+//!    A workspace that has declared none of these cannot be broken by any of
 //!    this, whatever the response looks like. That is what keeps a fail-closed
 //!    default from being reckless: the blast radius is the set of operators who
 //!    explicitly asked for enforcement.
 //! 2. **Within that scope, closed.** A response body that will not parse as
-//!    JSON cannot be shown to be free of a denied call, so with a deny list in
+//!    JSON cannot be shown to be free of a denied call, so while a deny list,
+//!    an SSO group policy, a refusing SQL guard or an enforcing hook rule is in
 //!    force it is refused rather than forwarded (`ResponseGateConfig::fail_closed`,
 //!    default `true`). An operator who would rather ship an unverifiable body
 //!    than a refusal sets `fail_closed: false`.

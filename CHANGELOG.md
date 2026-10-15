@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compile and one that left it out was refused with 400
   `TERMS_NOT_ACCEPTED`. The field is now part of the type, and required.
   (The Python `signup_org(accept_terms=...)` was already right.)
+- **`POST /api/v1/auth/resend-verification` answers 404 and 409 as documented.**
+  An address with no account got `500` instead of `404` (`E_NOT_FOUND`), and an
+  address already verified `500` instead of `409` (`ALREADY_VERIFIED`). Both
+  answers now carry `code`. The API reference names `E_NOT_FOUND`, the code the
+  route returns, where it said `USER_NOT_FOUND`.
+- **The control plane's Valkey subscribers honour `VALKEY_TLS`.** The
+  subscribers that read proxy traces and mirror pairs from Valkey opened their
+  own connection without TLS, so against a TLS-only Valkey they could not
+  connect unless `VALKEY_URL` was also written as `rediss://`. They now connect
+  with the same settings as the control plane's other Valkey connection.
+- **The Kitkat skill explains `INVALID_REQUEST`**, the code the hook gate
+  answers when it cannot read the request a gate SDK sent: a refusal whatever
+  the fail-open setting, and an integration fault to report rather than retry.
+- **The rule-author skill no longer says `intutic skill audit` catches secrets
+  in rule sources.** The audit reads skill directories and root rule files such
+  as `CLAUDE.md`, not WASM rule sources or mock contexts.
 
 ## [2.7.0] - 2026-10-15
 
