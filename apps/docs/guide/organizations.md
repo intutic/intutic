@@ -12,7 +12,7 @@ other in the data model.
 ## Creating an org
 
 Org creation is separate from the individual signup flow — it needs an org name, and it lands
-on a paid tier with a 30-day trial rather than the free tier's own trial. Creating a real org
+on Biz Org with a 30-day trial rather than the free tier's own trial. Creating a real org
 also auto-provisions a dedicated managed gateway cell for it, so it requires proving you own the
 org's domain first, via a DNS TXT record — the same mechanism Slack and Google Workspace use.
 There's no anonymous signup path for this: sign up personally first (`intutic init` / the
@@ -35,7 +35,15 @@ and switches your CLI session into it once verified. Equivalent API calls:
 
 An individual who already has a personal workspace can also create a real org later without
 losing their personal one — the two are entirely separate; a new membership row under the new
-org links to the same underlying user identity.
+org links to the same underlying user identity. Creating the org asks for no new acceptance of
+the Terms: the acceptance you gave at your own signup carries over to the new membership.
+
+The unauthenticated org signup, `POST /api/v1/auth/signup/org` (the SDKs' `signupOrg` /
+`signup_org`), is not used by the dashboard. It is refused with `403 DOMAIN_NOT_VERIFIED` unless
+the deployment sets `INTUTIC_PUBLIC_ORG_SIGNUP=true`, and always on a self-hosted control plane.
+Like personal signup, its body must carry `acceptTerms: true` (the signer is 18 or older and
+agrees to the Terms and the Privacy Policy); without it the request is refused with
+`400 TERMS_NOT_ACCEPTED` before anything else is checked.
 
 ## Managing teams
 
@@ -61,6 +69,13 @@ org — there's no separate org-admin role. A new workspace inherits the org's c
 and spend caps at creation time, and you're automatically added as its `OWNER` (a login session
 is workspace-scoped, so being an org admin elsewhere grants no automatic access to a workspace
 you didn't already have).
+
+## Members
+
+Members of an org's workspaces are added by an Owner or Admin under
+[Settings › Team Members](/guide/settings#members), through [SCIM](/guide/scim), or at their first
+SSO sign-in. They see no signup form and accept no terms of their own: they use the service under
+the organization's agreement, which its owner accepted at signup.
 
 ## Billing
 

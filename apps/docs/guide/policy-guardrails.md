@@ -108,8 +108,10 @@ mapped role moves a member — takes effect on the member's next call at the
 hosted hook gate, the AgentCore check and the LLM proxy. Connected machines
 rebuild their snapshot when the control plane pushes the change, and at the
 latest on their next sync, 30 seconds by default (`intutic connect
---interval`). The MCP proxy picks it up within its 60-second refresh (at
-once in daemon mode, which watches the workspace's config version). An SDK
+--interval`). The MCP proxy picks it up within its 60-second refresh (in
+daemon mode, on its next call when the MCP daemon shares the control plane's
+Valkey and sees the workspace's config version move, else within the daemon's
+five-minute cache). An SDK
 gate reads its rules once per process, so a running process keeps the rules
 it started with until it is restarted.
 
@@ -305,7 +307,7 @@ Four ways in, one API:
   foreign keys, hashes and verified substrings.
 - **Not the Context Graph.** That was a federation of harness config files and
   source-code symbols, removed when the product narrowed to circuit-breaker
-  scope (`9cfc0200`). Nothing here indexes source code, and there are no
+  scope. Nothing here indexes source code, and there are no
   embeddings, no vector store and no similarity search: where two passages are
   said to overlap, the row carries the intersection and union it was computed
   from.
@@ -344,9 +346,12 @@ Four ways in, one API:
   thresholds (mean F1 at least 0.80, per-document
   recall at least 0.60, citation verbatim at least 0.95, no clause from a
   negative). CI never calls a model.
-- **A promotion reaches machines on their own clocks.** The daemon re-reads
-  the rule set every 30 seconds; an MCP proxy polls every 60 seconds behind a
-  five-minute cache that a transition clears. No push exists.
+- **A promotion reaches machines within one refresh.** A transition pushes
+  the change to connected daemons and bumps the workspace's config version.
+  The push is best-effort, so the polls are the floor: the daemon re-reads
+  the rule set every 30 seconds, and an MCP proxy polls every 60 seconds
+  (an MCP daemon caches for up to five minutes unless it shares the control
+  plane's Valkey and sees the config version move).
 - **A gateway-mode proxy ignores the disk.** Pulled guardrail files are for a
   proxy that reads `.intutic/sops`; the two planes never merge.
 - **DLP rules are not generated.** A sentence about redacting or blocking

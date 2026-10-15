@@ -297,7 +297,7 @@ Nothing to migrate and nothing to rewrite. `intutic connect` sets
 | | Standalone | Connected |
 |---|---|---|
 | Bandit arm state | `~/.intutic/bandit-state.json` | `bandit:{workspaceId}` in Valkey |
-| Who updates arms | this proxy, deterministically | the control plane's judge, if it claims the workspace |
+| Who updates arms | this proxy, deterministically | the control plane's daily reward job (deterministic, no model call), once it claims the workspace |
 | Feature flags | `config.yaml` | control plane, authoritative |
 | Auth & budgets | local daily spend cap | workspace virtual keys and budgets |
 

@@ -383,6 +383,8 @@ If agents are using stale governance rules, clear the policy cache from this tab
 
 Route governance events to Slack, PagerDuty, a webhook or email. Each rule (**New Notification Rule**) names one event type and one channel, and can filter by severity. Only an owner or admin can create, change or delete a rule or replace its signing secret, as for SIEM destinations; every member can see the rules and the delivery log. From the CLI, `intutic notifications list`, `create`, `update`, `delete` and `rotate-secret` manage the same rules ([CLI reference](/reference/cli#intutic-notifications-list)).
 
+The onboarding emails a new workspace's owner receives on day 3 and day 7 are not set here: each carries a one-click unsubscribe link, and an owner who used it gets neither. Sign-in, billing and alert emails are always sent.
+
 ### Channel Routing
 
 - **Slack** — **Connect Slack** installs the Slack app through OAuth; a rule then sends to a Slack channel ID. **Link your Slack account** gives you a code to run as `/intutic link <code>` in Slack. A review card's **Approve** and **Reject** buttons work only from a linked account, and the review is recorded against you.
@@ -486,6 +488,8 @@ The **Event Type** list offers only the events the control plane sends:
 | `webhook.secret.rotated` | Webhook Signing Secret Replaced: an owner or admin replaced the signing secret of a notification webhook, a SIEM webhook destination or the GitHub pull-request webhook. Says whose and who, never the secret |
 | `evidence.exported` | Compliance Evidence Downloaded: a member downloaded the SOC 2 evidence archive, a framework coverage report as a file, or the human-oversight export; INFO. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
 | `credential.changed` | API Key or Provider Key Changed: a virtual key, gateway token or SCIM token was created, rotated or revoked, or a provider key was added, replaced or removed. Says which credential, what happened and who did it, never the value; INFO for a new virtual key, gateway token or SCIM token, MEDIUM otherwise. The [audit timeline](/guide/audit-timeline#what-it-shows) lists each one |
+
+Two events report failed payments: `billing.dunning.downgraded` (HIGH: the third failed payment moved the account to the free plan) and `billing.dunning.restored` (INFO: the plan is back once the payment is made). A rule for them can also be created with `intutic notifications create`, the API or the Terraform provider. See [Failed payments](/guide/plans#failed-payments).
 
 Tick one or more severities (LOW, MEDIUM, HIGH, CRITICAL) to narrow a rule; leave them all unticked to receive every severity.
 

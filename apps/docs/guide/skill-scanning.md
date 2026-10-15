@@ -136,7 +136,7 @@ same `skills` dimension described above.
 
 ## Cisco `skill-scanner` integration (opt-in)
 
-Phase S3 adds an OPTIONAL integration with Cisco's open-source
+There is an OPTIONAL integration with Cisco's open-source
 `skill-scanner` project — the one whose category taxonomy this page's native
 scanner already borrows (see above). It is a separate binary the operator
 installs themselves; nothing in this codebase's own runtime depends on it,
@@ -390,8 +390,8 @@ the exact wording.
 Stated plainly rather than buried: when this setting is on, `intutic skill
 audit` attaches the content of a `SKILL.md` file (its first 65,536 characters),
 with the SHA-256 and length of the whole file, to
-its `/skills/report` entry — never bundled scripts, which stay S2/S3/S4's
-domain. The control plane hands that content to the judge and then strips it
+its `/skills/report` entry — never bundled scripts, which stay the
+pattern scan's, the Cisco engine's and the VirusTotal lookup's domain. The control plane hands that content to the judge and then strips it
 before anything is persisted — the stored report never contains `content`,
 regardless of whether judging ran, succeeded, or was skipped. Only the
 verdict (`'clean' | 'suspicious' | 'malicious' | 'partially_scanned'`), a short,

@@ -120,11 +120,13 @@ def shell(command: str) -> str:
 1. the workspace's **SSO group policy** for the member the snapshot was issued to, carried in the policy snapshot,
 2. the compiled **policy snapshot** (`~/.intutic/hooks/policy-snapshot.rules`) — the same artifact the sync-daemon compiles for every shipped harness,
 3. the workspace's **MCP server registry** and `mcpAllowedServers` list, from the same snapshot, on an `mcp__<server>__<tool>` call,
-4. **SOP rules** authored in the product, including the argument-level `WHERE` clause (`argPattern`) — the gate sees the tool's full rendered arguments, with positionals bound to their parameter names so an argPattern cannot be dodged by calling convention,
+4. **SOP rules** authored in the product, and the workspace's `hook_rule` [policy guardrails](/guide/policy-guardrails) for your member role, including the argument-level `WHERE` clause (`argPattern`) — the gate sees the tool's full rendered arguments, with positionals bound to their parameter names so an argPattern cannot be dodged by calling convention,
 5. container **image provenance** on deploy commands,
-6. the control plane's **hook-gate** (`POST /api/v1/hook-gate`) — fail-closed by default: if the control plane cannot be reached, or answers `GOVERNANCE_UNAVAILABLE` because one of its checks could not run, the call is refused rather than waved through.
+6. the control plane's **hook-gate** (`POST /api/v1/hook-gate`) — fail-closed by default: if the control plane cannot be reached, or answers `GOVERNANCE_UNAVAILABLE` because one of its checks could not run, the call is refused rather than waved through. `fail_closed=False` on the client lets such calls run; a 400 `INVALID_REQUEST` is refused either way.
 
-Every decision is reported via `/api/v1/hook-events`, so gated LangGraph runs appear in the same audit feed as hook-based harnesses.
+Steps 4 and 6 need a `GateClient`: `install(Gate(GateConfig(), GateClient.from_env(session_id=run_id, harness="langgraph")))`. A `Gate` built without one runs the local steps only. `from_env()` reads `INTUTIC_API_KEY` or the key `intutic login` stored; with no key the client is local-only, and the hook gate's answer is an allow with code `LOCAL_ONLY`. See [Tool Gate SDK](/reference/gate-sdk).
+
+With a client, every decision is reported via `/api/v1/hook-events`, so gated LangGraph runs appear in the same audit feed as hook-based harnesses.
 
 ### 4. Trace attribution
 
@@ -172,7 +174,7 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness la
 Stated plainly, because the gaps are structural:
 
 - **There is no sync-daemon hook file.** Every hook-based harness has an on-disk config the daemon writes a pre-tool gate into; LangGraph has none — tools are Python callables inside your process. The daemon cannot gate what it cannot reach from disk. The adapter's registry entry records this deliberately (`NO_GATE` in the sync-daemon's gate registry) rather than leaving it to look like an oversight.
-- **Argument-level gating requires the SDK wrapper in your code.** Without `guard_tools`/`@guard`, the only tool enforcement is the proxy's response gate (Vector D), which withholds model-emitted denied tool calls — but cannot see a tool your code invokes directly, and on streams matches tool *name* only. Argument-level SOP rules (`argPattern`) evaluate against a tool call's full arguments only inside the SDK gate.
+- **Argument-level gating requires the SDK wrapper in your code.** Without `guard_tools`/`@guard`, the only tool enforcement is the proxy's response gate (Vector D), which withholds model-emitted denied tool calls (by name only, on streams) and those an enforcing `hook_rule` guardrail refuses, arguments included — but cannot see a tool your code invokes directly. Argument-level SOP rules (`argPattern`) evaluate against a tool call's full arguments only inside the SDK gate.
 - **Attribution is client-supplied.** `x-intutic-harness` scopes traces and observability; it is not authorization, and a client that lies about its harness is filed as what it claims. Authorization stays bound to the virtual key.
 
 ## Multi-agent graphs

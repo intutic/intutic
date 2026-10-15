@@ -247,7 +247,7 @@ These configure the control plane in hosted and Self-host deployments.
 | `ENCRYPTION_KEY_PREVIOUS` | ❌ | — | Only while rotating `ENCRYPTION_KEY`: the key it replaces (several separated by commas). Stored credentials sealed under it still open, and the control plane re-encrypts provider keys under `ENCRYPTION_KEY` when it starts. See [Rotate the encryption key](/guide/self-host#rotate-the-encryption-key) |
 | `APP_URL` | Self-host | — | The dashboard's address; links in emails and invitations point here. Its origin is the one browser origin allowed to call the API with credentials (CORS) |
 | `COMPANY_POSTAL_ADDRESS` | ❌ | — | The sender's postal address, in the footer of promotional email (the onboarding sequence) next to its unsubscribe link, as CAN-SPAM requires. Line breaks are kept. Unset, promotional email still sends without it and the control plane logs `promotional_email_config_missing` at start-up and `email_postal_address_missing` on each send. Never filled in by default |
-| `CORS_ALLOWED_ORIGINS` | ❌ | — | Further exact browser origins allowed to call the API with credentials, separated by commas (`https://admin.example.com`). No wildcards |
+| `CORS_ALLOWED_ORIGINS` | ❌ | — | Further exact browser origins allowed to call the API with credentials, separated by commas (`https://admin.example.com`). No wildcards. Unless `NODE_ENV` is `production`, the local dashboard dev servers (`http://localhost:3000`, `:5173` and the like) are allowed as well |
 | `API_BASE_URL` | Self-host | `http://localhost:3001` | The API's public address. Identity providers send users back here, so it builds the OIDC redirect URI (`/api/v1/auth/sso/callback`), the SAML ACS URL (`/api/v1/auth/saml/acs`) and the SCIM base URL |
 | `OIDC_CALLBACK_URL` | ❌ | built from `API_BASE_URL` | The full OIDC redirect URI, when users reach the API at a different address |
 | `SAML_ACS_URL` | ❌ | built from `API_BASE_URL` | The full SAML ACS URL, likewise |
@@ -255,6 +255,10 @@ These configure the control plane in hosted and Self-host deployments.
 | `TRACE_SIGNING_PRIVATE_KEY` | ❌ | — | Ed25519 PKCS#8 PEM. Signs the Merkle root sealed over each loop run's execution traces; the public half is served at `/.well-known/intutic-trace-signing.json`. Unset means roots are still sealed and re-derivable, just unattributable to this deployment by a third party. |
 | `TRACE_SIGNING_RETIRED_KEYS` | ❌ | — | Previously-active PEMs, any number of them, separated by newlines or commas or not at all (whole armoured blocks are matched). **Never used to sign** — they are published in the JWKS and used to verify roots sealed before a rotation, selected by the key id recorded on each root. Set this when you rotate `TRACE_SIGNING_PRIVATE_KEY`; without it, every root signed by the outgoing key becomes permanently unverifiable. A malformed entry here is logged and skipped rather than fatal, so one stale PEM cannot empty the JWKS. |
 | `PORT` | ❌ | `3001` | HTTP port for the control plane API |
+| `VALKEY_URL` | ❌ | `redis://localhost:6379` | Valkey for the auth cache, rate limits and the traces the proxies publish. Use a `rediss://` address for a Valkey that requires TLS |
+| `VALKEY_TLS` | ❌ | `false` | `true`: connect the main Valkey client over TLS |
+| `JWT_EXPIRY_SECONDS` | ❌ | `900` | Lifetime of a session access token and of the session cookie that carries it |
+| `REFRESH_TOKEN_EXPIRY_DAYS` | ❌ | `30` | Lifetime of a refresh token and of the `HttpOnly` refresh cookie |
 | `LITELLM_PROXY_URL` | ❌ | — | The LiteLLM endpoint for model calls (judges, probes, extraction). Takes precedence over `LITELLM_ADMIN_BASE_URL` |
 | `LITELLM_ADMIN_BASE_URL` | ❌ | `http://localhost:4000` | The LiteLLM endpoint when `LITELLM_PROXY_URL` is unset |
 | `LITELLM_PLATFORM_KEY` | ❌ | — | Scoped LiteLLM virtual key for judge/probe/generation calls — NOT LiteLLM's own admin secret, which this service never holds. See the key-rotation runbook for how it's minted. |

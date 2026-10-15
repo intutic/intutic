@@ -41,11 +41,12 @@ Tool call arrives
 
 1. **DLP Scanner** — credential patterns matched against the serialised tool arguments, and destructive commands (`rm -rf /`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`) matched against each argument string as the tool receives it, with the SQL keywords split by any whitespace, a block or `--` comment, or an escaped `\n`. The SQL patterns are the ones the MCP governance proxy uses. A hit blocks the call and opens an incident, which the response names as `incidentId`.
 2. **BLOCK: SOP match** — `VALIDATED` SOPs whose title begins `BLOCK:` are compiled to a pattern and tested against the tool name, and, in the `BLOCK:<tool> WHERE <args>:<reason>` form, against the serialised arguments too. The gate evaluates only `BLOCK:` titles. A title beginning `REQUIRE_APPROVAL:` is the same rule at the `hold` tier: the harness hook gates refuse the call and record it for **Findings › Review Queue › Held Changes** (approving it with `intutic decision approve <holdId>` or from Slack lets that exact call through once while the workspace's review-hold bypass is on, and otherwise records the decision); the MCP proxy and the [SDK gates](/reference/gate-sdk#holds) hold it the same way through the same decisions API (see [Approval holds](/guide/mcp-governance#approval-holds)); the proxy, which has no reviewer in the loop, treats it as a block.
-3. **SSO group policy** — decides the caller's [group clearance](/concepts/circuit-breaker#_3-sso-group-clearance) for the tool, from their SCIM groups while SCIM provisioning is on and from their last SSO sign-in otherwise. `DENIED` or `REQUIRES_OBO` blocks, and the reason names the deciding rule (`[sso_group.high_risk.<tool>]` or `[sso_group.require_obo.<tool>]`).
-4. **MCP server registry** — on an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance): a blocked or held server, a server not approved under `mcpDefaultPolicy: deny`, or a disabled tool blocks, with the MCP proxy's reason; then a server missing from a non-empty [`mcpAllowedServers`](/guide/mcp-governance#the-allowlist-mcpallowedservers) list blocks. The response names the refusal in `code` (`SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`, `SERVER_NOT_ALLOWED`) and `ruleId`, and a server refused as unapproved joins the approval queue on the MCP Servers page.
-5. **Promoted findings** — repeat anomaly findings that have been promoted to enforcement. Only a promoted `KILL` blocks; a promoted `HIJACK` allows the call and queues a corrective card for the session.
+3. **Policy guardrails** — the workspace's `hook_rule` [policy guardrails](/guide/policy-guardrails), tested against the tool name and the serialised arguments. An enforcing match blocks, with `ruleId: guardrail.<id>` and the rule id in brackets at the end of the reason; a shadow match lets the call on to the next check and counts as the guardrail's evidence. A rule scoped to roles applies only to callers with one of those roles.
+4. **SSO group policy** — decides the caller's [group clearance](/concepts/circuit-breaker#_3-sso-group-clearance) for the tool, from their SCIM groups while SCIM provisioning is on and from their last SSO sign-in otherwise. `DENIED` or `REQUIRES_OBO` blocks, and the reason names the deciding rule (`[sso_group.high_risk.<tool>]` or `[sso_group.require_obo.<tool>]`).
+5. **MCP server registry** — on an `mcp__<server>__<tool>` call, the workspace's [MCP server registry](/guide/mcp-governance): a blocked or held server, a server not approved under `mcpDefaultPolicy: deny`, or a disabled tool blocks, with the MCP proxy's reason; then a server missing from a non-empty [`mcpAllowedServers`](/guide/mcp-governance#the-allowlist-mcpallowedservers) list blocks. The response names the refusal in `code` (`SERVER_BLOCKED`, `SERVER_HELD`, `SERVER_NOT_APPROVED`, `TOOL_DISABLED`, `SERVER_NOT_ALLOWED`) and `ruleId`, and a server refused as unapproved joins the approval queue on the MCP Servers page.
+6. **Promoted findings** — repeat anomaly findings that have been promoted to enforcement. Only a promoted `KILL` blocks; a promoted `HIJACK` allows the call and queues a corrective card for the session.
 
-Between the registry and the promoted findings, two more checks run that the diagram leaves out: container-image provenance, which blocks only in a workspace that has turned it on, and SSL enforcement, which runs in shadow and never blocks (see [KILL](#kill)).
+The diagram leaves out the policy guardrails (step 3) and two more checks that run between the registry and the promoted findings: container-image provenance, which blocks only in a workspace that has turned it on, and SSL enforcement, which runs in shadow and never blocks (see [KILL](#kill)).
 
 **The first match wins, and the order is deliberate** — this is a short-circuit, not a
 strictest-wins merge. Deterministic policy (DLP, an operator-authored `BLOCK:` SOP, an SSO
@@ -81,7 +82,7 @@ hook-gated harness decide locally and report to the control plane asynchronously
 Everything on this page describes the gate. The local path enforces the
 protected-path and shell-bypass guards written into the generated hook script, plus the policy
 snapshot the sync daemon refreshes: the workspace's `BLOCK:` and `REQUIRE_APPROVAL:` rules, its
-SSO group policy, decided for the member the snapshot was issued to, and its MCP server registry
+policy guardrails, its SSO group policy, decided for the member the snapshot was issued to, and its MCP server registry
 and allowlist. A local gate refuses a
 high-risk tool when it does not know the member's groups. Promoted findings and the gate's DLP
 scan run only at the gate; the local gates carry their own secret-content patterns.
@@ -210,7 +211,7 @@ case 'allowed':
 
 The request passes through, but Intutic attaches governance metadata — warnings, annotations, or cost attribution tags — to the trace. The LLM request itself is not modified.
 
-ENHANCE is a policy and evaluator verdict rather than a value the proxy writes on a trace: an ENHANCE policy allows the tool as BYPASS does, and the evaluator scores a sample ENHANCE between its bypass and hijack thresholds. The proxy's own verdicts map only to BYPASS, HIJACK, REASK, KILL and OBSERVED, so no trace records ENHANCE: an annotation or a cost tag rides on a BYPASS trace, and a detector finding that steers the agent records HIJACK (below).
+ENHANCE is an evaluator verdict rather than a value the proxy writes on a trace: the evaluator scores a sample ENHANCE between its bypass and hijack thresholds. The proxy's own verdicts map only to BYPASS, HIJACK, REASK, KILL and OBSERVED, so no trace records ENHANCE: an annotation or a cost tag rides on a BYPASS trace, and a detector finding that steers the agent records HIJACK (below).
 
 **When it happens:**
 - A detector raises an advisory finding (recorded for review, not blocking)

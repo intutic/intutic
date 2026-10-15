@@ -450,7 +450,7 @@ The rule lands in `~/.intutic/wasm/` as `50_budget-guard.wasm` (lower priority n
 Filters are hot-reloaded into both proxies, the LLM proxy and the MCP governance proxy, without a restart:
 
 1. The compiled WASM binary is stored in the database, and the workspace's active rule set is published to Valkey and delivered with the MCP proxy's workspace policy
-2. The LLM proxy polls the rule set every 5 seconds; the MCP proxy receives it at its next policy refresh, within 60 seconds (there is no push channel)
+2. The LLM proxy polls the rule set every 5 seconds; the MCP proxy receives it at its next policy refresh, within 60 seconds. In `daemon` mode the MCP daemon serves its cached policy for up to five minutes, unless it shares the control plane's Valkey, where a rule change bumps the workspace's config version and the daemon refetches on its next call
 3. A new WebAssembly module is instantiated when the descriptor changes, once its bytes match the SHA-256 the descriptor names; the MCP proxy fetches each module by that hash, once
 4. The filter is active on the request path within one poll interval
 

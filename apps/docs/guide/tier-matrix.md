@@ -53,7 +53,7 @@ list is a trial or a degraded preview of a paid feature:
 | | Standalone | Connected |
 |---|---|---|
 | Bandit arm state | `~/.intutic/bandit-state.json` | `bandit:{workspaceId}` in Valkey — shared and durable |
-| Who updates routing arms | this proxy, deterministically | the control plane's judge, if it claims the workspace |
+| Who updates routing arms | this proxy, deterministically | the control plane's daily reward job (deterministic, no model call), once it claims the workspace |
 | Feature flags | `config.yaml` | control plane, authoritative |
 | Auth & budgets | local daily spend cap | workspace virtual keys; [spend budgets](/guide/budgets#setting-up-budget-limits) per workspace, per virtual key and (Biz Org and up) per member, by UTC day and month, each one refusing requests or alerting only; requests-per-minute and tokens-per-minute limits per key |
 | Response cache | per-process | shared across every proxy in the workspace |

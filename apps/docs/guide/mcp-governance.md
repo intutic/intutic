@@ -227,7 +227,8 @@ they already poll — `mcpRegistry` on `GET /api/v1/sop/rules` and
 `GET /api/v1/policy/resolve` — so a per-session proxy applies one within a
 minute. Proxies in `daemon` mode get it from the MCP daemon, which serves its
 cached policy for up to `MCP_DAEMON_POLICY_TTL_MS` (five minutes by default)
-before refetching.
+before refetching. A decision also bumps the workspace's config version, so a
+daemon that shares the control plane's Valkey refetches on its next call.
 
 The registry and the [allowlist](#the-allowlist-mcpallowedservers) both
 apply: a call has to pass each. The registry knows a server by its
@@ -766,7 +767,7 @@ looking output, for instance) is outside what a text scanner can see at all.
 ## The gate backstop
 
 Everything above is enforced by the **mcp-proxy** — the process that fronts
-each stdio (and, since the M2 bridge, remote HTTP/SSE) MCP server, with
+each stdio (and, through the bridge above, remote HTTP/SSE) MCP server, with
 tool-level granularity: it can refuse one `tools/call` while allowing the
 rest of that same server's tools. That is the PRIMARY enforcement point for
 MCP governance, and it stays that way.
@@ -863,13 +864,13 @@ apply to that gate's unit of evaluation at all.
 
 | Harness | MCP calls | Detail |
 |---|---|---|
-| Claude Code | ✅ yes | Dedicated `mcp__.*` `PreToolUse` matcher (M3). Claude Code's own MCP tool-naming convention IS `mcp__<server>__<tool>`. |
-| Cursor | ✅ yes | M3 fix: `beforeMCPExecution`'s `tool_name` (bare tool name) and top-level `command`/`url` (server identifier) are now composed into `mcp__<server>__<tool>` — confirmed against Cursor's own hooks documentation and a live payload example. |
-| Windsurf | ✅ yes | Confirmed 2026-08-18 (M3's original composition fix targeted Cursor's shape by analogy and was wrong): Cascade's real hook system registers `pre_run_command`/`pre_write_code`/`pre_mcp_tool_use`, and `pre_mcp_tool_use`'s `tool_info.mcp_server_name`/`tool_info.mcp_tool_name` are now composed into `mcp__<server>__<tool>` — confirmed against docs.devin.ai/desktop/cascade/hooks (current authoritative source) and covered by `windsurfHooks.test.ts` against the real payload shape. |
+| Claude Code | ✅ yes | Dedicated `mcp__.*` `PreToolUse` matcher. Claude Code's own MCP tool-naming convention IS `mcp__<server>__<tool>`. |
+| Cursor | ✅ yes | `beforeMCPExecution`'s `tool_name` (bare tool name) and top-level `command`/`url` (server identifier) are now composed into `mcp__<server>__<tool>` — confirmed against Cursor's own hooks documentation and a live payload example. |
+| Windsurf | ✅ yes | Confirmed 2026-08-18 (the original composition fix targeted Cursor's shape by analogy and was wrong): Cascade's real hook system registers `pre_run_command`/`pre_write_code`/`pre_mcp_tool_use`, and `pre_mcp_tool_use`'s `tool_info.mcp_server_name`/`tool_info.mcp_tool_name` are now composed into `mcp__<server>__<tool>` — confirmed against docs.devin.ai/desktop/cascade/hooks (current authoritative source) and covered by `windsurfHooks.test.ts` against the real payload shape. |
 | Cline | ⚠️ reachable | The `.clinerules/hooks/PreToolUse` file hook has no matcher and runs for every tool call, `use_mcp_tool` included; the shared gate composes `use_mcp_tool` {server_name, tool_name} into `mcp__<server>__<tool>` for the allowlist. The SDK's MCP tool naming is not verified. |
-| Codex CLI, GitHub Copilot | ⚠️ reachable | Already `.*` catch-all matchers; each harness's own MCP tool-naming convention was not independently verified during M3. |
+| Codex CLI, GitHub Copilot | ⚠️ reachable | Already `.*` catch-all matchers; each harness's own MCP tool-naming convention was not independently verified. |
 | Muse Code | ⚠️ reachable | Already a `.*` catch-all matcher across both `PreToolUse` and `PermissionRequest`. The `muse` binary could not be installed to confirm its own MCP tool-naming convention, or that its `mcp_servers` `streamable_http` entry shape matches the `url`/`headers` convention this repo's wrapper assumes. |
-| Goose, OpenHands, Hermes, Gemini CLI (Antigravity) | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified during M3. |
+| Goose, OpenHands, Hermes, Gemini CLI (Antigravity) | ⚠️ reachable | Bash-family: the gate script runs unconditionally for every tool call, matcher or not; each harness's own MCP tool-naming convention was not independently verified. |
 | Google Antigravity | ⚠️ reachable | Its `PreToolUse` registration uses matcher `*`, so the gate runs for every tool call; Antigravity's own MCP tool-naming convention is not documented and was not verified. |
 | Pi | ✅ yes | Pi registers each MCP tool as `mcp__<server>__<tool>` and runs its `tool_call` handlers for every tool. |
 | Openclaw | ✅ yes | OpenClaw names MCP tools `<server>__<tool>`; the plugin composes `mcp__<server>__<tool>` for the allowlist. |

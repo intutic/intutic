@@ -1,7 +1,7 @@
 # Gödel Guardrails Scoring <Badge type="tip" text="Cloud" />
 
 ::: warning Control plane required
-Automated Gödel scoring and LLMProbe quality evaluation require an active **Intutic Control Plane** (local dev stack or Intutic Cloud).
+Automated Gödel scoring requires an active **Intutic Control Plane** (local dev stack or Intutic Cloud).
 :::
 
 Automated quality scoring for Standard Operating Procedures (SOPs) using a 13-category rubric that gates SOP lifecycle transitions.
