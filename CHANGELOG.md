@@ -29,6 +29,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admin turns it on, corrective cards and whether they were followed are kept
   and used only to improve Intutic's own self-hosted judge models, never for
   training without a policy update.
+- **Retention periods for sign-in, billing and audit records.** These were
+  kept with no end. A connected workspace's sign-in records (time, method,
+  IP address, user agent) are now deleted after 12 months, and with the
+  account when it is erased; expired refresh tokens 12 months after expiry.
+  Billing records are kept for 7 years, including after the workspace is
+  deleted, then deleted. Deleting a workspace still deletes its traces, audit
+  records, findings and policies with it; the rows that outlived that delete
+  (sign-in records, the notification log, derived statistics, policy text no
+  other workspace shares) are now deleted within 90 days. A daily sweep
+  applies each period, and the append-only guards let it delete only rows
+  past their period.
+- **A workspace with a budget alert can be deleted.** The alert held a
+  reference that refused the delete; it is now deleted with the workspace.
+
+### Fixed
+
+- **Change records stored before 2.6.0 are withheld.** The targets in a
+  trace's change manifest (commands, paths, URLs) have been redacted for
+  secrets and personal data since 2.6.0; those stored earlier are replaced
+  with `[WITHHELD]` when the control plane upgrades, keeping each entry's
+  tool, operation, kind, risk and size. Integrity roots sealed over those
+  traces still verify: `POST /api/v1/integrity/roots/:rootId/recompute`
+  lists them in the new `redactedTraceIds`, and any later edit to such a
+  trace is still reported in `changedTraceIds`.
 
 ## [2.6.0] - 2026-10-14
 
