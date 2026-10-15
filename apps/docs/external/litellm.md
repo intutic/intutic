@@ -51,21 +51,21 @@ All production completions flow exclusively through the high-performance Rust pr
 ### Off-Hot-Path: LiteLLM Helper (Python)
 The commercial control plane deploys an internal Python `litellm` container. It sits entirely off the hot-path and acts as an administrative coordinator for the Node.js control plane:
 
-*   **LLM Probes (Layer 2 SOP Evaluation):** Captures tool-use events and executes asynchronous, deep LLM evaluations against your organization's SOP registry.
-*   **SOP Compliance Scoring:** Automatically evaluates newly added SOP rules across 13 compliance categories to generate structured quality metrics.
-*   **SOP Compilation:** Translates natural-language SOP markdown files into machine-readable JSON schemas using structured model outputs.
+*   **LLM Output Probe (opt-in):** When the LLM probe feature flag is on for a workspace and its plan allows an LLM judge, a sample of completed responses is graded asynchronously against the session's active SOP by a self-hosted judge model. The verdict is written to the control-plane log only; it is not stored and does not block or change the request.
+*   **SOP Quality Scoring:** Scores an SOP against a 13-category quality rubric (0–2 per category, 26 in total) when it is promoted from review to generated, and when the optional SOP refinement pass (off by default) proposes a rewrite. If the helper is unreachable, the control plane falls back to an offline structural score, marked `[offline]`.
+*   **SOP Compilation:** Translates natural-language SOP markdown into a machine-readable step graph (JSON) using the model's JSON output mode.
 *   **Not pricing (FinOps):** this container does not fetch rates. Token costs come from LiteLLM's published price list, re-pinned nightly into the proxy's offline pricing bundle and shipped with each release.
 
 ---
 
 ## 3. Intelligent Model Routing
 
-The **Intelligent Model Routing** engine — **Adaptive Reinforcement Selection** over a Thompson-sampling arm set — ships in the open-core Rust proxy and is shared by both deployments, optimizing cost vs. capability dynamically. In standalone open-core mode the proxy learns arm state itself from the local deterministic reward loop; the commercial control plane takes over arm learning to layer on the cloud refinements described below (LLM-as-a-judge classification refinement, daily decay, and outage penalties). 
+The **Intelligent Model Routing** engine — **Adaptive Reinforcement Selection** over a Thompson-sampling arm set — ships in the open-core Rust proxy and is shared by both deployments, optimizing cost vs. capability dynamically. In standalone open-core mode the proxy learns arm state itself from the local deterministic reward loop; the commercial control plane takes over arm learning with a daily reward of the same shape, computed from the traces it holds (with a member's useful/wasted label overriding a trace's integrity score), and adds the daily decay and outage penalties described below. No LLM judge takes part in either reward. 
 
 ### Adaptive Selection & Candidate Selection
 * **Candidate Pool:** The router chooses among the proxy's `candidate_models` (by default `claude-sonnet-5-5`, `gpt-4.1` and `gemini-3.8-flash`) or the workspace's own `routingCandidates`, narrowed per request to the candidates that request can reach: a format it can be translated to, allowed, within budget and with a credential. See [Which models a request can be routed to](/guide/intelligent-routing#which-models-a-request-can-be-routed-to).
 * **Automatic Bypass:** If a client explicitly requests a custom, specialized, or low-cost local model (e.g. `llama-3-8b`), the router automatically bypasses intelligent routing selection to prevent upgrading cheap requests to expensive frontier models.
-* **Cold-Start Fallback:** If a workspace has fewer than 20 cumulative requests handled, the routing model remains inactive to gather baseline observations first.
+* **Cold-Start Fallback:** Until the candidate arms for a request's SOP tier and task type have 20 recorded pulls between them, the router serves the requested model and gathers baseline observations first.
 
 ### Word-Boundary Task Classification
 Prompt text is classified at the gateway using a fast, non-allocating word-boundary matcher. This avoids regex/LLM latency, categorizing prompts into five task types:

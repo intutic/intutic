@@ -245,9 +245,10 @@ That path is real and inline. Two things it does **not** do, which earlier versi
 this page claimed:
 
 *   **It does not detect hallucinations.** There is no engine that checks whether a file
-    path or library the agent invented actually exists. What ships is output probing —
-    a background LLM probe scores completions against the active guideline and records
-    a verdict — which finds *policy* violations, not fabricated facts.
+    path or library the agent invented actually exists. What ships is response judging —
+    on plans that include it, a self-hosted judge model grades responses against the
+    workspace's SOPs and records an incident for a violation — which finds *policy*
+    violations, not fabricated facts.
 *   **It does not re-pin rules into the system prompt.** The corrective note is a
     message appended to a response, not a rewrite of the agent's system prompt, and it
     comes from the proxy rather than the sync daemon.
@@ -296,10 +297,10 @@ Intutic's active resilience and loop steering are supported by three newly optim
 
 #### Bespoke LLM Config Edit Synthesis & Conflict Auditing
 *   **The Optimization:** Suggestion config edits are dynamically generated using cheap evaluator prompts targeted specifically to the trace anomaly context, bypassing static boilerplate templates.
-*   **Safety Guards:** Suggested config patches are audited against the workspace's active `VALIDATED` security policies to block forbidden operations (e.g. enabling `child_process`) and parsed to verify JSON, YAML, and Markdown format safety before saving.
+*   **Safety Guards:** Suggested config patches are audited against the restrictions in the workspace's `VALIDATED` SOPs to block forbidden operations (e.g. enabling `child_process`) and parsed to verify JSON, YAML, and Markdown format safety before saving.
 
 #### Post-Completion Analysis
-*   **LLM Probe Verdicts**: Completed traces are probed against the active workspace SOP; each probe records a verdict and structured violations, which is what drives the compliance score on the trace.
+*   **Trace Compliance Scores**: Each trace's compliance score is computed when it is recorded, from what the proxy had to do to the request (its enforcement action) and what the ingest classifier found in it. No model call is involved, so the score can be reproduced from the trace row.
 *   **Cost Baselines**: An hourly sweep computes a median-cost baseline per (SOP, developer) from the trailing 14 days, published only once at least 20 traces support it. `TOKEN_WASTE` is raised against that baseline, so a run is compared to its own history rather than a global threshold.
 
 #### Sync-Daemon Overwrite Recovery
@@ -314,7 +315,7 @@ Instead of acting as a simple reactive alert or blocking tool, Intutic implement
 1. **Telemetry & Incident Logging:** When developers run agent harnesses, all stream violations, blocked tool calls and config-drift incidents are logged in real-time.
 2. **Background Pattern Analysis (Sleep Cycle):** A background analytical service periodically processes these incident logs to cluster them by category and evaluate their severity and frequency.
 3. **Auto-Proposed Rule Tightening:** When a recurring mistake pattern crosses safety thresholds, the platform automatically drafts a tightened rule amendment targeted at preventing that specific mistake.
-4. **Approval & Real-Time Sync:** Once approved (either manually by an administrator or automatically for high-confidence safety policies), the new rule is written to the central SOP registry. The local sync-daemon then instantly pushes these rule updates directly into each harness's rules file in the developer's workspace (such as `.cursor/rules/intutic-governance.mdc` or the rules section of `AGENTS.md`).
+4. **Approval & Real-Time Sync:** Once approved (by an owner or admin, or automatically when the [SOP Optimizer](/guide/metaclaw)'s Approval mode is auto, which applies only a change that strengthens the guideline, in a run an owner or admin started; the hourly sweep only proposes), the new rule is written to the central SOP registry. The local sync-daemon then instantly pushes these rule updates directly into each harness's rules file in the developer's workspace (such as `.cursor/rules/intutic-governance.mdc` or the rules section of `AGENTS.md`).
 5. **Proactive Prevention:** On the next prompt turn, the agent model ingests the updated rules in its context window and is steered away from making the same mistake, permanently closing the compliance loop.
 
 ---
@@ -360,4 +361,12 @@ Yes, absolutely. For complex governance checks that go beyond regular expression
   intutic policy test --wasm /path/to/rule.wasm --mock /path/to/context.json
   ```
   Once verified, `intutic policy install` (or a dashboard upload) puts the rule in place, and the proxy hot-reloads it without a restart.
+
+<!-- ENTERPRISE_ONLY_START -->
+---
+
+### 23. How long does a connected workspace's data stay?
+
+Traces are kept for 3 years. Sign-in records (time, method, IP address, user agent) are deleted after 12 months, and expired refresh tokens 12 months after they expire. Billing records are kept for 7 years, including after the workspace is deleted. Deleting a workspace deletes its traces, audit records, findings and policies with it, and the rows that outlive that delete are deleted within 90 days. See [Security › Compliance](/security#compliance).
+<!-- ENTERPRISE_ONLY_END -->
 

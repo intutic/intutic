@@ -9,6 +9,21 @@ Intutic protects your workspace using two complementary enforcement layers:
 1. **Layer 1 (Client/Rule Layer)** — Compiles and injects natural-language instructions (SOPs) directly into harness configuration files that agents read before starting
 2. **Layer 2 (Network/Packet Layer)** — Intercepts raw LLM API calls via the proxy to block policy violations, redact sensitive data, and break execution loops
 
+## The Policies area
+
+The dashboard's **Policies** area holds the rules that decide a call. `/policies` opens its first page, **Agent Guidelines**:
+
+| Page | What it holds |
+|------|---------------|
+| **Agent Guidelines** (`/policies/guidelines`) | The workspace's SOPs. See [Agent Guidelines](/guide/sops) |
+| **Policy Guardrails** (`/policies/guardrails`) | Guardrails cited from your policy documents or written directly, including `hook_rule` guardrails that block tool calls, with their sources and review. See [Policy Guardrails](/guide/policy-guardrails) |
+| **Custom Filters** (`/policies/filters`) | WASM and Rego rules. See [Custom Filters](/guide/wasm-rules) |
+| **Emergency Overrides** (`/policies/overrides`) | Break-glass grants. See [Emergency Overrides](/guide/break-glass) |
+| **MCP Servers** (`/policies/mcp-servers`) | The MCP server registry and call budgets. See [MCP Server Governance](/guide/mcp-governance#the-registry) |
+| **Compliance Scope** (`/policies/scope`) | How much of each agent environment is enforced. See [below](#compliance-scope) |
+
+Agent Guidelines is open to every member. The other pages are for Owners, Admins and Engineering Managers, and Policy Guardrails and Custom Filters only on plans that include them. There is no page for creating enforcement policies: that feature was removed in 2.6.0. In its place, `hook_rule` policy guardrails block tool calls, and the [intervention mode](#intervention-modes) setting decides what the agent is told when a call is refused.
+
 ---
 
 ## Data Loss Prevention (DLP)
@@ -272,7 +287,7 @@ While DLP and PCAS govern *what the model sees*, egress control governs
 *where the agent's traffic can go at all* — a guardrail alongside them,
 not a special case of either.
 
-Set the posture once per workspace and it reaches every proxy — they
+Set the posture once per workspace, on **Settings › Security › Network Egress Control**, and it reaches every proxy — they
 hot-reload it within roughly 30 seconds, no restart needed.
 
 | Mode | Behavior |
@@ -316,7 +331,7 @@ request; nothing is queued or lost in between.
 
 ## Sandboxed Execution
 
-A workspace-level requirement that agents run inside an isolated runtime —
+A workspace-level requirement (**Settings › Security › Sandboxed Execution**) that agents run inside an isolated runtime —
 a container or Firecracker microVM whose only egress is the governing
 proxy — enforced by the CLI on `intutic exec`.
 

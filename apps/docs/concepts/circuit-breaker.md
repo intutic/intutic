@@ -216,7 +216,8 @@ snapshot and decide with the same evaluator.
 The proxy reads every model response before the harness does, and withholds a tool call the
 group policy refuses, on streamed and whole responses alike. That covers harnesses with no hook
 system of their own, such as Roo Code or aider pointed at the proxy, where the response gate is
-the only gate. It is the same check that withholds a tool on an SOP's `deny_tools` list:
+the only gate. It is the same check that withholds a tool on an SOP's `deny_tools` list or on an
+enforcing `hook_rule` [policy guardrail](/guide/policy-guardrails):
 
 - **Who is checked.** The member the request's virtual key belongs to. The proxy asks the control
   plane for the workspace's group policy and that member's groups through the per-key

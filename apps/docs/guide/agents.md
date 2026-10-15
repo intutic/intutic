@@ -1,8 +1,10 @@
 # Agents <Badge type="tip" text="Cloud" />
 
-The **Agents** screen on [app.intutic.ai](https://app.intutic.ai) is the
+**Activity › Agents** (`/activity/agents`) on [app.intutic.ai](https://app.intutic.ai) is the
 workspace agent graph: one node per durable agent identity, the connections
-between them, and a concentric security-posture ring per agent.
+between them, and a concentric security-posture ring per agent. **Graph** is
+the default view; **Table** lists the same agents one row each, with **Agent**,
+**Harness**, **Role**, **Agent Key** and **Last Seen**, and no posture score.
 
 ## What an agent is
 
@@ -48,10 +50,13 @@ with it. The score is configurational — how much of the guardrail surface that
 scale). It is distinct from the behavioural [trust score](/concepts/enforcement-actions),
 which decays on anomalies and boosts on clean runs.
 
-By default the ring is scored deterministically; when the control plane's judge
-is configured, an LLM-as-judge pass can override per-facet scores with a semantic assessment of
-which SOP rules and primitives apply to each agent, harness and connection. The judge pass runs
-on Self-serve, Biz Org, Enterprise and Self-host, and in the 14-day trials; on Free the deterministic score is the score.
+The ring is scored deterministically. An Owner, Admin or Engineering Manager can
+click **Rescore with judge** on a selected agent to have a self-hosted judge model
+assess its facets (`POST /api/v1/agents/:id/judge-score`): where the judge answers,
+its per-facet score replaces the deterministic one, and the posture is then shown as
+**Judge-scored**. If the judge cannot be reached, the deterministic score is kept.
+The rescore is available on Self-serve, Biz Org, Enterprise and Self-host, and in
+the 14-day trials; on Free the route answers `403` and the deterministic score is the score.
 
 ## Reopening a session
 

@@ -13,7 +13,7 @@ Muse Code reads project rules from `AGENTS.md` once the workspace is trusted, fa
 The governance-critical half — hook registration and MCP proxy-wrapping — is written by the sync daemon's `museHooks.ts`, the same split Goose's plugin installer uses. Hooks are registered at **two tiers**:
 
 - **Project-level:** `<repo>/.muse/hooks.json`
-- **Managed (pre-approved) tier:** an Intutic-owned `~/.config/muse/intutic-managed-hooks.json`, referenced by a narrow merge into `~/.config/muse/settings.json`'s `managed_hooks_path` key. Per the phase brief this tier exists so a hook registered through it does not trigger a user trust/approval prompt the way a plain user-level `hooks.json` entry would — taken as given, not exercised against a real `muse` process.
+- **Managed (pre-approved) tier:** an Intutic-owned `~/.config/muse/intutic-managed-hooks.json`, referenced by a narrow merge into `~/.config/muse/settings.json`'s `managed_hooks_path` key. This tier is meant to keep a hook registered through it from triggering a user trust/approval prompt the way a plain user-level `hooks.json` entry would — taken as given, not exercised against a real `muse` process.
 
 Both tiers are written every sync cycle for defense in depth: `managed_hooks_path` is a single global setting, so a machine where it has not landed yet (first sync, or a failed settings.json write) still gets project-scoped coverage the same cycle.
 

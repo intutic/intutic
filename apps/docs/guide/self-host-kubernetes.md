@@ -158,7 +158,7 @@ set `global.imagePullSecrets`.
 | `ingress.className`, `ingress.annotations` | none | Your Ingress controller |
 | `ingress.tls.secretName` | none | Omit when your load balancer terminates TLS |
 | `emailFrom` | `noreply@<hostname>` | Sender for every email |
-| `companyPostalAddress` | none | Your postal address, in the footer of the onboarding emails (anti-spam law requires one in promotional email). Unset, they go out without it and the control plane logs the gap |
+| `companyPostalAddress` | none | Your postal address, in the footer of the onboarding check-in email, the one promotional email a Self-host deployment sends (anti-spam law requires one in promotional email). Unset, it goes out without it and the control plane logs the gap |
 | `global.imageRegistry` | `ghcr.io/intutic` | Your mirror of the Intutic images |
 | `global.imageTag` | the chart's version | |
 | `global.imagePullSecrets` | none | Pull Secrets for the registry, e.g. `[{name: intutic-ghcr}]` |

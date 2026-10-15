@@ -12,12 +12,12 @@ Intelligent Model Routing lets the proxy choose which model serves a request, fr
 1. **Proxy Interception**: Every outbound prompt from your developer tools is routed through the proxy gateway.
 2. **Gateway Classification**: The proxy performs deterministic keyword matching — in-process, no model call — to classify the prompt into one of five task types: `testing`, `deployment`, `review`, `debugging`, or `coding`.
 3. **Thompson Sampling Selection**: Intutic evaluates historical reward parameters ($\alpha, \beta$) for the `(Model × SOP Tier × Task Type)` Beta distribution to select the optimal model.
-4. **Reward Feedback**: Every routed request updates its arm's ($\alpha, \beta$) parameters in Valkey (standalone without one, `~/.intutic/bandit-state.json`). Where the reward signal comes from depends on your deployment: [local deterministic rewards](#local-deterministic-reward-mode-open-core) in standalone open-core mode, or LLM-as-a-Judge audits in cloud-managed workspaces.
+4. **Reward Feedback**: Each arm's ($\alpha, \beta$) parameters live in Valkey (standalone without one, `~/.intutic/bandit-state.json`). Where the reward comes from depends on your deployment: [local deterministic rewards](#local-deterministic-reward-mode-open-core) after every routed request in standalone open-core mode, or a deterministic daily score computed from the workspace's traces once a control plane manages it. Neither calls a model.
 
 <!-- ENTERPRISE_ONLY_START -->
-### Cloud Reward Feedback (LLM-as-a-Judge)
+### Cloud Reward Feedback
 
-Background **LLMProbe** workers audit trajectory outputs, evaluating response quality and SOP compliance. High-quality responses increment success parameters ($\alpha$), while failures increment ($\beta$) in Valkey.
+Once a control plane manages a workspace, a daily job scores each arm (routed model × SOP tier × task type) from the previous 24 hours of traces. The score uses the baseline, quality and cost terms of the [local reward](#local-deterministic-reward-mode-open-core): a baseline of `0.8`, minus `0.5 × (1 − mean response integrity)`, plus `0.2 × clamp(1 − cost ratio, −1, 1)`. A member's **USEFUL** or **WASTED** label on a trace (`POST /api/v1/usage/classify`) overrides that trace's integrity (as 100 or 0). Arms decay by `0.95` a day so an early winner cannot lock in, provider failures the proxy recorded during outages are added to $\beta$, and an arm with no measured traffic is skipped rather than credited.
 
 ```
  ┌────────────────┐       ┌─────────────────────┐       ┌─────────────────────┐
@@ -29,8 +29,8 @@ Background **LLMProbe** workers audit trajectory outputs, evaluating response qu
                                  Update (α, β)                     │
                                      │                             ▼
                           ┌──────────┴──────────┐       ┌─────────────────────┐
-                          │  LLM-as-a-Judge     │ <─────│ Async Background    │
-                          │  (LLMProbe Audit)   │       │ Trajectory Logger   │
+                          │  Daily reward job   │ <─────│  Execution traces   │
+                          │  (deterministic)    │       │  (integrity, cost)  │
                           └─────────────────────┘       └─────────────────────┘
 ```
 <!-- ENTERPRISE_ONLY_END -->
@@ -88,7 +88,7 @@ The arm update rule is identical to the cloud reward cron, so learning state car
 
 $$\text{scale} = \max\left(\tfrac{1}{\log_2(\text{pulls}+2)}, 0.1\right),\quad \alpha \mathrel{+}= r \cdot \text{scale},\quad \beta \mathrel{+}= (1-r) \cdot \text{scale}$$
 
-**Ownership hand-off**: the first local update claims the workspace by setting `bandit:reward_mode:{workspace}` to `local`. When a control plane takes over reward learning it sets the marker to `cloud`, and the local writer stands down automatically within ~60 seconds — arms transfer to LLMProbe without distortion.
+**Ownership hand-off**: the first local update claims the workspace by setting `bandit:reward_mode:{workspace}` to `local`. When a control plane takes over reward learning it sets the marker to `cloud`, and the local writer stands down automatically within ~60 seconds — arms transfer to the control plane's daily reward job without distortion.
 
 > [!NOTE]
 > Routing locks the selected model per **scope** (workspace + the best available caller identity — see [Session Lock and KV-Cache Affinity](#session-lock-and-kv-cache-affinity) below for exactly what that means), so one long-running scope contributes many pulls to a single arm rather than one per request. This matches cloud semantics; expect learning to converge per-workspace, not per-request.

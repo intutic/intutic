@@ -23,11 +23,11 @@ Every route except the ones in the next section takes a credential, in this orde
 1. `Authorization: Bearer <token>`, where the token is either
    - a session access token (a JWT from `POST /api/v1/auth/login`, `/refresh`, SSO or a magic link), or
    - a workspace API key (`vk_…`). A key acts with the role of the member it belongs to, and only within its [scopes](#api-key-scopes).
-2. The `__Host-intutic_session` cookie, which the dashboard uses when it signs in with a cookie session.
+2. The `__Host-intutic_session` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`), which every sign-in sets and the dashboard uses.
 
 A request with neither, an expired or revoked token, or a revoked key gets `401`. In the [route catalog](#route-catalog), **Authenticated** means any member's session or API key; `OWNER/ADMIN` and similar name the roles allowed, and every other caller gets `403`. The **Key scope** column says which scopes cover the route for an API key.
 
-`X-Workspace-Id` is optional. When you send it, it must name the workspace the token or key belongs to, or the request is refused with `403` (`Forbidden: workspace context mismatch`).
+`X-Workspace-Id` is optional. When you send it, it must name the workspace the token or key belongs to, or the request is refused with `403` (`Forbidden: workspace context mismatch`). The exception is `GET /api/v1/auth/session`, where the dashboard sends it to switch to another workspace the signed-in person is a member of.
 
 ### API key scopes
 
@@ -95,21 +95,27 @@ Some routes skip the session check because their caller cannot have a session, a
 
 | Auth | Who calls it |
 |---|---|
-| None | Probes, the public plan list, sign-up, sign-in starts, telemetry |
-| None (*a credential in the request*) | Sign-in steps that carry their own proof: a password, a refresh token, an OAuth state, a signed SAML assertion |
+| None | Probes, the public plan list, the deployment info the sign-in page reads, the public trace-signing key, sign-up, sign-in starts, telemetry |
+| None (*a credential in the request*) | Sign-in steps that carry their own proof: a password, a refresh token, an OAuth state, a signed SAML assertion. The unsubscribe link in promotional email, which carries a signed token |
 | API key (`vk_…`) | The proxy's judge, policy and command calls, which send the workspace key and are checked in the handler, scope included |
 | Gateway token (`gwk_…`) | A self-hosted gateway's heartbeat, config pull and token rotation |
 | SCIM token | Your identity provider, on the SCIM 2.0 endpoints under `/scim/v2` |
 | Admin token (`x-admin-token`) | Internal operations (trial conversion, offboarding retries) |
-| Stripe signature, Slack request signature, AWS SNS signature, Google-signed OIDC token | Webhooks from those services |
+| Stripe signature, Slack request signature, GitHub webhook signature, AWS SNS signature, Google-signed OIDC token | Webhooks from those services |
 
 ### Rate limits
 
-Requests are limited per client IP (the first `X-Forwarded-For` address): 10 a minute for sign-in, sign-up, email verification and magic-link routes; 40 a minute for token refresh; 60 a minute for the plan list; one an hour for changing the workspace region; 300 a minute for everything else. `/healthz` and `/readyz` are not limited. Each limited response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; over the limit, the answer is `429` with `Retry-After`.
+Requests are limited per client IP (the first `X-Forwarded-For` address): 10 a minute for sign-in, sign-up, email verification, magic-link and domain-verification routes; 40 a minute for token refresh; 60 a minute for the plan list and the email unsubscribe link; one an hour for changing the workspace region; 300 a minute for everything else. `GET /api/v1/auth/key-context`, which the proxy calls to validate a key, is limited to 6,000 a minute per key rather than per IP. `/healthz` and `/readyz` are not limited. Each limited response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; over the limit, the answer is `429` with `Retry-After`.
 
 ### List responses
 
 A list response names where its rows are: `listProperty` is the key that holds them (`traces`, `items`, `events`, …) and `rowCase` says whether row keys are `camel`, `snake` or `mixed`, so `body[body.listProperty]` always reads the rows. Each section below gives the key for its endpoints.
+
+### Errors
+
+An error response is JSON with `error`, a message. Most also carry `code`, a machine-readable code such as `INSUFFICIENT_SCOPE`, `TERMS_NOT_ACCEPTED` or `E_NOT_FOUND`, and errors raised by a service carry `requestId`, the same value as the `X-Request-Id` response header. A request body or query string that does not match the route's schema (a value of the wrong type, such as `?limit=abc`, or a missing required field) is refused with `400`, usually `{ "error": "Validation failed", "details": … }` with `details` naming each field. A numeric limit out of range is clamped, not refused, and fields a route does not read are ignored.
+
+Sign-up answers `422` for a body that fails its schema. An unknown route answers `404`, and an unexpected failure `500` with `requestId`.
 
 ---
 
@@ -128,6 +134,7 @@ Self-serve signup with workspace auto-provisioning. Creates a user, provisions a
   "email": "dev@example.com",
   "password": "securepassword",
   "name": "Jane Developer",
+  "acceptTerms": true,
   "workspaceName": "My Team"
 }
 ```
@@ -137,11 +144,14 @@ Self-serve signup with workspace auto-provisioning. Creates a user, provisions a
 | `email` | string | ✅ | Valid email |
 | `password` | string | ✅ | 8–128 chars |
 | `name` | string | ✅ | 1–128 chars |
+| `acceptTerms` | boolean | ✅ | Must be `true`: the signer is 18 or older and agrees to the Terms and the Privacy Policy |
 | `workspaceName` | string | ❌ | 1–64 chars, optional |
 
-**Response:** `201 Created`
+**Response:** `201 Created`, with the session cookies set
 
-**Error codes:** `409` EMAIL_ALREADY_EXISTS, `422` validation, `503` SIGNUP_DISABLED
+**Error codes:** `400` TERMS_NOT_ACCEPTED (checked before anything else in the body), `409` EMAIL_ALREADY_EXISTS, `422` validation, `503` SIGNUP_DISABLED
+
+`POST /api/v1/auth/signup/org` takes the same `email`, `password`, `name` and `acceptTerms`, with `orgName` (required) and `orgDomain` in place of `workspaceName`. Unless the deployment has opened public org signup it answers `403` DOMAIN_NOT_VERIFIED: sign up for a personal workspace, then create the organization from the dashboard.
 
 ---
 
@@ -160,7 +170,7 @@ Authenticate with email and password.
 }
 ```
 
-**Response:** `200 OK` with access token and refresh token
+**Response:** `200 OK` with an access token and a refresh token, and the session cookies set. A request that sends `X-Intutic-CSRF` gets the refresh token as the cookie only.
 
 **Error codes:** `400` validation, `401` invalid credentials
 
@@ -210,7 +220,7 @@ Verify email address with a token.
 
 ### POST /api/v1/auth/resend-verification
 
-Resend the email verification link. Rate limited to 2 req/min per email.
+Resend the email verification link. It counts toward the sign-in rate limit of 10 a minute per IP.
 
 **Auth:** None (public)
 
@@ -230,7 +240,7 @@ Resend the email verification link. Rate limited to 2 req/min per email.
 
 ### POST /api/v1/auth/logout
 
-Invalidate the current session.
+Invalidate the current session: the access token is blocked, the member's refresh tokens are revoked and both session cookies are cleared.
 
 **Auth:** Authenticated
 
@@ -344,7 +354,7 @@ Get a single execution trace by ID.
 
 Create a new SOP.
 
-**Auth:** Authenticated
+**Auth:** OWNER or ADMIN
 
 **Request body:**
 
@@ -417,7 +427,7 @@ Get SOP detail, with the IDs of the SOPs it depends on.
 
 Update an SOP. A `DRAFT` SOP is updated in place; editing an SOP in any other state creates a new `DRAFT` version and leaves the original as it was.
 
-**Auth:** Authenticated
+**Auth:** OWNER or ADMIN
 
 **Request body:** any of `title`, `markdown_content`, `risk_tier`, `complexity_tier` and `version` (same rules as create; dependencies cannot be changed here), plus:
 
@@ -435,7 +445,7 @@ Update an SOP. A `DRAFT` SOP is updated in place; editing an SOP in any other st
 
 Soft-delete SOP.
 
-**Auth:** Authenticated
+**Auth:** OWNER or ADMIN
 
 **Response:** `200 OK`
 
@@ -451,7 +461,7 @@ Soft-delete SOP.
 
 Lifecycle state transition.
 
-**Auth:** Authenticated
+**Auth:** OWNER or ADMIN
 
 **Request body:**
 
@@ -478,7 +488,7 @@ Lifecycle state transition.
 
 Cascade invalidation — invalidates this SOP and all dependents.
 
-**Auth:** Authenticated
+**Auth:** OWNER or ADMIN
 
 **Response:** `200 OK`
 
@@ -596,7 +606,7 @@ Per-model cost breakdown.
 
 Classify tokens as USEFUL or WASTED.
 
-**Auth:** Authenticated
+**Auth:** OWNER, ADMIN or EM
 
 **Request body:**
 
@@ -1472,11 +1482,13 @@ The `OWNER` role cannot be assigned via invite. Only existing Owners can transfe
 ```json
 {
   "memberId": "mbr_abc123",
-  "userId": "usr_def456",
+  "workspaceId": "ws_ghi789",
   "email": "newdev@example.com",
   "displayName": "Jane Developer",
   "role": "DEVELOPER",
-  "workspaceId": "ws_ghi789"
+  "isActive": true,
+  "lastLoginAt": null,
+  "createdAt": "2026-10-15T09:30:00.000Z"
 }
 ```
 

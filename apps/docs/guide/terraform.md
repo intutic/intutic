@@ -32,11 +32,14 @@ The provider is on the Terraform Registry as `intutic/intutic`. Declare it, then
 terraform {
   required_providers {
     intutic = {
-      source = "intutic/intutic"
+      source  = "intutic/intutic"
+      version = "~> 0.4"
     }
   }
 }
 ```
+
+Provider 0.4.0 removed the `intutic_policy` resource, with the control plane's policies API. Before upgrading from an earlier version, delete every `intutic_policy` block and run `terraform state rm` on each one. Write per-tool rules as `intutic_guardrail` with `kind = "hook_rule"`, and set the intervention mode with the `interventionMode` key of `intutic_workspace_settings`; a workspace that has not set it uses `TRANSPARENT`.
 
 Its source is in the open-core repository, under `packages/terraform-provider-intutic`. To run a build of your own instead, build it and point Terraform at the binary:
 

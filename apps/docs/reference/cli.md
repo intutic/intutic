@@ -2392,7 +2392,7 @@ intutic sops push <name> [options]
 | `--org` | Push as an org-wide floor instead of a workspace SOP (always creates) |
 
 **What it does:**
-For every `.md` file in `.intutic/sops/<name>/` — or, when there is no such folder, for the one file `.intutic/sops/<name>.md` — parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier on a new SOP), front matter stripped from the uploaded body, and then, per file:
+For every `.md` file in `.intutic/sops/<name>/` — or, when there is no such folder, for the one file `.intutic/sops/<name>.md` — parses `title:`/`risk_tier:`/`version:` front matter (falling back to the file's first `# ` heading, then the file name, for title; to `MEDIUM` for an unstated risk tier on a new SOP; a value other than `LOW`, `MEDIUM`, `HIGH` or `CRITICAL` counts as unstated), front matter stripped from the uploaded body, and then, per file:
 
 - **The file records a SOP** (`intutic_id:`, written by `sops pull` or an earlier push): if the file matches the SOP, nothing is sent (`up to date`). Otherwise the SOP is edited through the same path as the dashboard (`PUT /api/v1/sops/:id`): a DRAFT is edited in place; an approved SOP gets a new DRAFT version, and the approved one keeps enforcing until the draft is promoted. The file's `intutic_revision:` is sent as the precondition, so a SOP edited on the control plane since the pull is refused ("changed on the server since you pulled it") instead of overwritten; run `intutic sops pull`, or push with `--force` to overwrite. A push that would fork a second DRAFT of the same approved SOP is refused the same way. An edit that loosens the guideline needs an Owner, and the control plane's refusal is printed. A recorded SOP that no longer exists is refused unless `--create` is passed.
 - **The file records no SOP:** a new workspace SOP is created.
@@ -2417,7 +2417,7 @@ intutic sops pull [options]
 | `--force` | Overwrite locally-modified files instead of refusing them |
 
 **What it does:**
-Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed, a `content_hash:` marker recording the body's hash, and the sync record `sops push` reads: `intutic_id:` (the SOP) and `intutic_revision:` (its edit counter). A SOP goes into the local file that already records its id — flat or in a `<name>/` folder, keeping that file's other front-matter keys — and otherwise into `.intutic/sops/<slug>.md`. An approved version is skipped when a local file tracks its DRAFT successor. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
+Writes one file per SOP, with `title:`/`risk_tier:`/`version:` front matter reconstructed, a `content_hash:` marker recording the body's hash, and the sync record `sops push` reads: `intutic_id:` (the SOP) and `intutic_revision:` (its edit counter). A SOP with no risk tier gets no `risk_tier:` line. A SOP goes into the local file that already records its id — flat or in a `<name>/` folder, keeping that file's other front-matter keys — and otherwise into `.intutic/sops/<slug>.md`. An approved version is skipped when a local file tracks its DRAFT successor. Refuses to overwrite a file whose recorded hash no longer matches its current body (a local edit since the last pull) unless `--force` is passed; a file with no recorded hash at all is treated as unverifiable and always requires `--force`. See [GitOps for SOPs](/guide/gitops-sops).
 
 ---
 
@@ -3108,10 +3108,15 @@ Settings often changed this way:
 | `piiDetectors` | The [PII detector](/guide/policies#pii-detectors) actions for the workspace, as a JSON object of detector id to `off`, `redact` or `block`; each machine's proxy config may only tighten them. `null` clears it |
 | `upstreamRetry` | The proxy's [retries and fallbacks](/guide/intelligent-routing#retries-and-fallbacks) for the workspace, as a JSON object; each field overrides the proxy's config. `null` clears it |
 | `configBodyUpload` | `true` or `false`: [config content upload](#config-content-upload) |
+| `interventionMode` | `TRANSPARENT`, `OPAQUE` or `SILENT_LOG`: what an agent is told when a call is refused on workspace policy ([Intervention Modes](/guide/policies#intervention-modes)). It is the only source of the mode; unset, it is `TRANSPARENT` |
+| `storeToolArguments` | `true` or `false`: keep tool-call argument values, redacted, in the replay contexts [`intutic policy replay`](#intutic-policy-replay) reads. Off by default |
+
+See [Workspace Settings](/reference/workspace-settings) for every key.
 
 **Examples:**
 
 ```bash
+intutic settings set interventionMode OPAQUE
 intutic settings set mcpDefaultPolicy deny
 intutic settings set mcpBudgets --file mcp-budgets.json
 intutic settings set sso_group_policy null
@@ -4251,7 +4256,7 @@ intutic enforce <action> [options]
 
 | Option | Description |
 |--------|-------------|
-| `--port <port>` | The proxy's listener port to permit. Default: the `PORT` environment variable, else `4000`; `INTUTIC_PROXY_URL` is not read. |
+| `--port <port>` | The proxy's listener port to permit. Default: `4000`; neither `PORT` nor `INTUTIC_PROXY_URL` is read, so pass it when the proxy listens elsewhere. |
 | `--uid <uid>` | uid the proxy runs as, exempted from the deny. Defaults to you: the user the command runs as, or under `sudo` the user who invoked sudo (`SUDO_UID`), not root. Pass it when the proxy runs as a different account. |
 | `--allow <cidrs>` | Comma-separated extra destinations to permit (control plane, private registries, etc.), each an IP address or CIDR block. A hostname is refused before anything is applied: resolve it to its address range first. |
 | `--no-dns` | Also deny outbound DNS — only if a local resolver serves the host. |
@@ -4314,7 +4319,7 @@ intutic enterprise install [options]
    - `cursor-hooks-jamf.json` / `cursor-hooks-intune.json` — Cursor system hooks for Jamf / Intune
    - `gemini-cli-hooks-jamf.json` / `gemini-cli-hooks-intune.json` — the Gemini CLI gate in Gemini CLI's system settings file, which it applies over user and workspace settings
    - `antigravity-hooks-jamf.json` / `antigravity-hooks-intune.json` — the Google Antigravity gate for each user's `~/.gemini/config/hooks.json` (Antigravity has no machine-wide hooks file)
-   - `jamf-firewall-manifest.json` / `intune-firewall-manifest.json` — a recurring managed script that runs `<cli-binary-path> enforce apply` with root/administrator privilege, so the egress firewall is re-applied on every check-in
+   - `jamf-firewall-manifest.json` / `intune-firewall-manifest.json` — a recurring managed script that runs `<cli-binary-path> enforce apply` with root/administrator privilege, so the egress firewall is re-applied on every check-in. On macOS and Linux it passes `--uid` for the user signed in at the console (the owner of `/dev/console`, or the active `seat0` session's user), whose proxy is then exempt from the deny
 
    With `--generate-mdm-only` the command stops here.
 3. Checks for admin/root privilege. If the shell is not elevated it prints a warning and still attempts the remaining steps.
@@ -4519,7 +4524,7 @@ Environment variables the CLI, and the hook gates and proxy it sets up, read. Co
 |----------|---------|--------|
 | `INTUTIC_CONTROL_PLANE_URL` | Every command that calls a control-plane API | The control plane to use, ahead of a workspace initialized with `intutic init --dev` and the one saved by `intutic login`, and behind a `--control-plane-url` or `--dev` flag. See [Choosing a control plane](#control-plane-url). |
 | `INTUTIC_DEV` | Every command that calls a control-plane API | `1` targets the local control plane at `http://localhost:3001`, the same as `--dev`, unless `INTUTIC_CONTROL_PLANE_URL` is set. Any other value is ignored. |
-| `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read, except by `intutic enforce`, whose `--port` defaults to it. |
+| `INTUTIC_PROXY_URL` | `intutic exec`, `start`, `connect`, `budget`, `doctor`, `daemon install --proxy`, `enterprise install`, and the setup output of `init` and `connect` | Base URL of the local proxy, default `http://localhost:4000`. Its port is the one every command uses: `start`, `connect` and `daemon install --proxy` run the proxy there unless `--port` says otherwise, and `budget` and `doctor` probe it there. `exec` points the child process's SDK variables at it. `enterprise install` uses it when `--proxy-url` is not given. `init` and `connect` print it as your gateway endpoint (with `/v1` appended). The shell's `PORT` is not read. `intutic enforce` reads neither: its `--port` defaults to `4000`. |
 | `VALKEY_URL` | `intutic start`, `intutic connect` | Valkey/Redis the proxy uses. `start` passes it through only when a Valkey is reachable on `--valkey-port`; otherwise it uses `redis://127.0.0.1:<valkey-port>`. `connect` defaults to `redis://127.0.0.1:6379`. |
 | `CONTROL_PLANE_URL` | `intutic start` | When set and no Valkey is available, `start` does not force standalone mode; the proxy treats the run as a managed deployment and requires Valkey. The CLI does not use it to choose a control plane. |
 | `INTUTIC_SNAPSHOT_RULES` | Hook gates, `intutic policy snapshot`, `intutic doctor` | Path of the policy snapshot file the gates enforce. Default `~/.intutic/hooks/policy-snapshot.rules`. `policy snapshot` writes into this path's directory and always names the file `policy-snapshot.rules` (it warns if your path uses another name); `doctor` checks this path. |

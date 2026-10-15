@@ -40,7 +40,7 @@ node's **serialized parameters** are what command/path rules and ` WHERE `
 | Harness type | `n8n` |
 | Rules file | None (n8n reads no instructions file) |
 | Config file | `~/.intutic/n8n/governance-workflow.json` |
-| Status | ✅ Fully Supported (Phase 3) |
+| Status | ✅ Fully Supported |
 | Format | n8n 1.x Workflow JSON |
 
 ---

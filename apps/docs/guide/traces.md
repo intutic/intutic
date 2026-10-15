@@ -22,7 +22,7 @@ Each execution trace contains (field names as written to the local JSONL; connec
 | `verdict` | The proxy's own enforcement verdict — locally, exactly one of `allowed`, `killed`, `upstream_error`, `reasked`, `hijacked` |
 | `harness_type` | Which coding agent/IDE issued the request |
 
-Two fields you may see referenced elsewhere are **connected-mode only, with no local equivalent**: a compliance/quality **score**, and the four-way `BYPASS`/`ENHANCE`/`HIJACK`/`KILL` enforcement-action vocabulary used by the control plane's PCAS layer. A standalone proxy's own `verdict` field uses a different, narrower vocabulary (above) — `allowed ≠ BYPASS`, and there is no local equivalent of ENHANCE or HIJACK's control-plane meaning.
+Two fields you may see referenced elsewhere are **connected-mode only**: a compliance/quality **score**, and the `enforcementAction` the control plane's PCAS layer records. When a trace reaches a control plane, its `verdict` becomes the enforcement action: `allowed` → `BYPASS`, `hijacked` → `HIJACK`, `reasked` → `REASK`, `killed` → `KILL`, and `upstream_error` → `OBSERVED` (the provider failed, so nothing was enforced). `ENHANCE` has no local verdict.
 
 ## Local vs connected
 
@@ -31,8 +31,8 @@ Two fields you may see referenced elsewhere are **connected-mode only, with no l
 | Data source | `~/.intutic/logs/traces-*.jsonl`, read directly | Control-plane API |
 | `traces list` / `inspect` | Read the local log | Query the API |
 | Compliance / quality score | Not available — never fabricated as a placeholder | Available |
-| Enforcement action | `verdict` only (`allowed`/`killed`/`upstream_error`/`reasked`/`hijacked`) | `BYPASS`/`ENHANCE`/`HIJACK`/`KILL` |
-| Filtering | `--verdict` | `--action` |
+| Enforcement action | `verdict` only (`allowed`/`killed`/`upstream_error`/`reasked`/`hijacked`) | `BYPASS`/`ENHANCE`/`HIJACK`/`REASK`/`KILL`, or `OBSERVED` |
+| Filtering | `--verdict` | `--action` (`BYPASS`/`ENHANCE`/`HIJACK`/`KILL`) |
 | History depth | Whatever's on disk, capped at 64MB/day per shard — see below | Retained per your plan |
 | `--json` output shape | `{traces, total, malformedLines, cappedFiles}` — its own local shape | `TraceListResult` |
 
@@ -167,9 +167,22 @@ The request was compliant but could be improved. The proxy enriched the prompt, 
 ### HIJACK
 The request was rerouted — typically for cost optimization (downgrading an expensive model to an equivalent cheaper one) or capability routing (sending a coding task to a code-specialized model).
 
+### REASK
+The attempt was refused and the reason handed back to the agent, which may correct course and retry. Repeated trips escalate to KILL.
+
 ### KILL
 The request was blocked. Common reasons:
 - Budget exceeded for the user's tier
 - SOP policy violation detected
 - A deterministic anomaly detector fired (loop, forbidden tool, credential sweep, budget breach)
 - Unauthorized tool call attempted
+
+### OBSERVED
+The provider failed to answer (a 5xx or a model it could not serve), so there was no response to act on. The trace is a record of the failure, not of an enforcement.
+
+## What a trace keeps
+
+Beyond the fields above, the proxy keeps two records that can name what an agent touched. Both are stored redacted for every secret pattern and every [PII detector](/guide/policies#pii-detectors), email and phone included, whatever the live DLP actions:
+
+- **Change manifest** — one entry per file, URL or command a tool call named: the tool, operation, target, kind, risk and size. Change manifests a connected workspace stored before 2.6.0 have their targets replaced with `[WITHHELD]` when its control plane upgrades; each entry keeps its tool, operation, kind, risk and size, and integrity roots sealed over those traces still verify (see [Trace Integrity](/concepts/trace-integrity)).
+- **Replay context** — on a sample of requests (`WASM_CONTEXT_SNAPSHOT_RATE`, 5% by default), the rule-evaluation context, so a new rule can be replayed against real traffic. Each tool call keeps its name and its arguments' top-level keys and size, not the argument values (`tool_arguments: "keys_only"`). A connected workspace can keep the values, redacted, with the [`storeToolArguments`](/reference/workspace-settings) setting.

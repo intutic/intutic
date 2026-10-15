@@ -181,7 +181,8 @@ Intutic helps your organization meet regulatory requirements for AI governance:
   specific request.
 - **Retention** — Traces are kept for 3 years while the workspace exists.
   Sign-in records (time, method, IP address, user agent) are kept for 12
-  months, and deleted with the account. Workspace audit records are kept for
+  months, and deleted with the account; expired refresh tokens are deleted 12
+  months after they expire. Workspace audit records are kept for
   as long as the workspace exists. Deleting a workspace deletes its data with
   it: traces and the records stored with them, audit records, findings,
   policies and settings. The few rows that outlive that delete (sign-in

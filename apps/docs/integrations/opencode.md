@@ -76,7 +76,7 @@ OpenCode's own `permission` map in `opencode.json` (1.x; `permissions` array in 
 
 ## MCP servers
 
-`intutic connect` rewrites each server in the `mcp` block of `opencode.json` so that the [MCP governance proxy](/guide/mcp-governance) fronts it, each time it applies a new config version — so a server added later is wrapped at the next config change or restart of `intutic connect`. Tool-description poisoning checks, DLP on results and TOFU pinning then apply to OpenCode's MCP traffic as they do for every other harness.
+`intutic connect` rewrites each server in the `mcp` block of `opencode.json` so that the [MCP governance proxy](/guide/mcp-governance) fronts it, on every sync cycle — so a server added later is wrapped on the next cycle (30 seconds by default). Tool-description poisoning checks, DLP on results and TOFU pinning then apply to OpenCode's MCP traffic as they do for every other harness.
 
 - A `local` server's `command` becomes `["node", <proxy>, "--workspace-id", <ws>, "--server-name", <name>, "--", ...original command]`. `environment`, `cwd`, `enabled` and `timeout` are kept.
 - A `remote` server becomes a `local` entry that runs the proxy in bridge mode (`--remote-url <url> --remote-transport http`). Its `headers` move to the `INTUTIC_REMOTE_HEADERS` environment variable, so they never appear in the process list.
