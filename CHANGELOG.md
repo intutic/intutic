@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **API keys from the CLI and the SDKs, scopes included.** `intutic keys
+  list`, `intutic keys create --label <label> [--scopes <a,b>]
+  [--expires-in-days <n>] [--service-account]`, `intutic keys update <keyId>
+  --scopes <a,b>` and `intutic keys revoke <keyId>` list, create, re-scope and
+  revoke API keys (`/api/v1/keys`); scopes are checked against `API_SCOPES`
+  before anything is sent. `ControlPlaneClient` gains `listApiKeys`,
+  `createApiKey`, `updateApiKey` and `revokeApiKey` (`@intutic/clawde`), and
+  `list_api_keys`, `create_api_key`, `update_api_key` and `revoke_api_key`
+  (`intutic-clawde`). Until now only the dashboard and Terraform could set a
+  key's scopes.
+- **The SOP Optimizer's Approval mode from the CLI, the SDKs and Terraform.**
+  Since `featureFlags.ff_metaclaw_auto_apply` was removed in 2.5.1, the
+  Approval mode (`manual` or `auto`, with its auto-apply threshold) could only
+  be set on the SOP Optimizer page. `intutic optimizer settings` and
+  `intutic optimizer set --mode <manual|auto> [--auto-threshold <n>]` read
+  and set it (`set` keeps the current threshold unless given one);
+  `getOptimizerSettings` / `updateOptimizerSettings` (`@intutic/clawde`) and
+  `get_optimizer_settings` / `update_optimizer_settings` (`intutic-clawde`)
+  do the same; and the Terraform provider (0.5.0) adds
+  `intutic_sop_optimizer_settings` (destroy sets the mode back to `manual`).
+  `GET` and `PUT /api/v1/dream-cycle/settings` publish their response schema.
+- **Notification rules on `plan.rejected` and `plan.closed`.** The control
+  plane sent both, and no rule could name them; the API, the CLI and the
+  Terraform provider accept them.
+
+### Changed
+
+- **The gate SDKs name a key that lacks the hook gate's scope.** A key without
+  `gateway:use` (or `*`) gets `403 INSUFFICIENT_SCOPE` from
+  `POST /api/v1/hook-gate`. `@intutic/gate` and `intutic_clawde.gate` read it as
+  an unreachable control plane: refused, with a reason that never named the
+  scope, under `failClosed`, and let through ungoverned with `failClosed` off.
+  It is now refused whatever `failClosed` says, with the code
+  `INSUFFICIENT_SCOPE` and the scopes the key needs, like `INVALID_REQUEST`. The
+  refusal the gate throws carries `INSUFFICIENT_SCOPE` (a new gate refusal
+  code), and the AgentCore interceptor denies such an answer the same way,
+  whatever `INTUTIC_FAIL_OPEN` says.
+
+### Fixed
+
+- **`GET` and `PUT /api/v1/dream-cycle/settings` work with an API key.** Both
+  answered 400 "Missing x-workspace-id header" to every caller that did not
+  send the header, which only the dashboard does; they now fall back to the
+  caller's workspace.
+- **Six notification events reached no rule.** `sop.cascade.alert`,
+  `sop.cascade.invalidated`, `finops.tokens.classified` and the three
+  `org.cells.*` events were emitted without naming a workspace, and the
+  notification router can only dispatch an event to the rules of the
+  workspace it names, so a rule on any of them was accepted and never fired.
+  The cascade events name the root guideline's workspace (and carry the
+  fields the router reads), `finops.tokens.classified` the workspace whose
+  traces were classified, and each `org.cells.*` event every workspace of the
+  org. `identity.offboarding.completed` was emitted and never routed; it now
+  reaches its rules, HIGH when a step of the offboarding failed and INFO
+  otherwise.
+
+### Removed
+
+- **Four notification event types nothing emitted**: `incident.escalated`,
+  `sop.status_changed`, `session.ended` and `calibration.threshold_breach`,
+  from `NOTIFICATION_EVENT_TYPES` and the Terraform provider (0.5.0). A rule on
+  one could never deliver; the API refuses them, and the control plane's
+  migration 246 deletes existing rules on them. `tools/scripts/check-feature-surfaces.js`
+  now fails when a listed event type has no emitter, when an event the
+  router sends is not listed, or when the dashboard's rule picker or the
+  settings guide leaves one out.
+
 ## [2.7.0] - 2026-10-15
 
 ### Added
