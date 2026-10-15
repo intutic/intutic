@@ -187,7 +187,7 @@ function argumentStrings(value: unknown): string[] {
 /**
  * Scan tool arguments for DLP findings.
  *
- * Value patterns (credentials, PII, workspace patterns) match the serialized
+ * Value patterns (credentials, PII) match the serialized
  * arguments. Command patterns match each decoded string instead: in the JSON a
  * newline is the two characters `\n`, so a command split across lines no
  * longer had whitespace between its words.
@@ -200,9 +200,9 @@ export function scanToolInput(toolInput: unknown): DlpScanResult {
   const strings = argumentStrings(toolInput)
   const findings: DlpFinding[] = []
 
-  // The full set — floor plus workspace patterns — on the input direction too:
-  // a workspace pattern that blocked results but not the input that exfiltrates
-  // them would be scanning the wrong side.
+  // The same set as results, on the input direction too: a pattern that blocked
+  // results but not the input that exfiltrates them would be scanning the wrong
+  // side.
   let words: PhraseText[] | null = null
   for (const p of DLP_PATTERNS) {
     let hit: boolean

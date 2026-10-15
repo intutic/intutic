@@ -44,7 +44,7 @@ Every governance check proxy mode applies to a stdio server — allowlists, `too
 
 ### DLP Scanning
 
-Built-in patterns, plus any the workspace adds. A match in a call's arguments blocks the call; a credential in a result is redacted before the agent reads it:
+Built-in patterns. A match in a call's arguments blocks the call; a credential in a result is redacted before the agent reads it:
 
 - 9 secret patterns: OpenAI, Anthropic and Google API keys, GitHub personal access and server tokens, Slack bot and user tokens, AWS access key IDs, and long hex strings that look like secrets
 - 2 private-key patterns: PEM and EC private key headers
