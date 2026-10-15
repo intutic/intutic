@@ -97,8 +97,9 @@ export async function runKeysUpdate(keyId: string, opts: ApiCommandOpts & { scop
 }
 
 /**
- * `intutic keys revoke <keyId>`. A 404 means the caller has no such live key:
- * none with that id, another member's, or one already revoked.
+ * `intutic keys revoke <keyId>`: one of the caller's keys, or as an OWNER or
+ * ADMIN any live key in the workspace. A 404 means there is no such live key
+ * the caller may revoke.
  */
 export async function runKeysRevoke(keyId: string, opts: ApiCommandOpts): Promise<void> {
   const client = await getClient(opts.dev)
@@ -110,7 +111,7 @@ export async function runKeysRevoke(keyId: string, opts: ApiCommandOpts): Promis
   }
   const { status, body } = answer
   if (status === 404) {
-    fail(`You have no live API key ${keyId}: it does not exist, is another member's, or is already revoked. See intutic keys list.`)
+    fail(`No live API key ${keyId} you can revoke: it does not exist in this workspace, is already revoked, or (below OWNER or ADMIN) is another member's. See intutic keys list.`)
   }
   if (status !== 200) fail(`Failed to revoke API key ${keyId} (${status}): ${body.detail ?? body.error ?? 'unknown error'}`)
   if (opts.json) {

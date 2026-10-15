@@ -77,6 +77,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   records nothing; `intutic keys revoke` says so and exits 1, and the SDKs'
   `revokeApiKey` / `revoke_api_key` raise. The Terraform provider already
   treats a `404` on destroy as gone.
+- **An owner or admin can revoke any member's API key.** `DELETE
+  /api/v1/keys/:id` looked only among the caller's own keys, so an
+  administrator offboarding someone, or a Terraform destroy run with
+  another admin's key, could not withdraw it. An OWNER or ADMIN now revokes
+  any live key in the workspace (a DEVELOPER or VIEWER still only their
+  own; a key in another workspace is a `404`), and the credential change
+  records the key's owner beside who revoked it (`owner_id` in SIEM export,
+  `ownerId` on the audit timeline). `intutic_virtual_key` (Terraform
+  provider 0.5.0) keeps such a key in state and revokes it on destroy: its
+  refresh read only the caller's keys and dropped it.
 - **Six notification events reached no rule.** `sop.cascade.alert`,
   `sop.cascade.invalidated`, `finops.tokens.classified` and the three
   `org.cells.*` events were emitted without naming a workspace, and the

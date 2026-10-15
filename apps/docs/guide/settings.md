@@ -106,7 +106,7 @@ Create keys (`vk_` prefix) for developers and their agents to reach the Intutic 
 - Optionally limit a key to **Allowed models (optional)**, one model id per line
 - Mark a CI or service key **This key is for automation (CI, scripts, a service)**, so the SSO-recency window does not expire it (see [Security & Identity](/guide/security#automation-keys)). Ticking it also switches the key to **Agent traffic only**, the least-privilege choice for a pipeline; widen it if the pipeline calls the API too
 - The **Scopes** column lists each key's scopes. An OWNER or ADMIN can change them with **Edit scopes**; the change applies from the key's next request
-- **Revoke** a compromised key immediately
+- **Revoke** a compromised key immediately. This list shows your own keys; an OWNER or ADMIN revokes any member's live key from **Key budgets and rate limits** under [Billing](#billing), which lists every key with its owner (for example when someone leaves)
 
 A key whose scopes are all strings from before scopes were enforced (such as `read`) grants nothing: every request with it gets `403 INSUFFICIENT_SCOPE`. Set its scopes with **Edit scopes**, or replace it.
 

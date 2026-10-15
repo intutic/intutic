@@ -1077,8 +1077,9 @@ class ControlPlaneClient:
         ))
 
     def revoke_api_key(self, key_id: str) -> None:
-        """DELETE /api/v1/keys/:keyId -- revoke one of your live keys. A key
-        you have no live key for (none, another member's, already revoked)
+        """DELETE /api/v1/keys/:keyId -- revoke one of your live keys, or as
+        an OWNER or ADMIN any live key in the workspace. A key you may not
+        revoke (none, already revoked, another member's below OWNER/ADMIN)
         raises with the 404."""
         self._request("DELETE", f"/api/v1/keys/{_quote(key_id)}")
 

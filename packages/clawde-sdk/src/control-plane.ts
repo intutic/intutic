@@ -1106,7 +1106,7 @@ export class ControlPlaneClient {
     return this.request('PATCH', `/api/v1/keys/${seg(keyId)}`, changes)
   }
 
-  /** DELETE /api/v1/keys/:keyId — revoke one of your live keys; a key you have no live key for (none, another member's, already revoked) throws `ClawdeConnectionError` with the 404. */
+  /** DELETE /api/v1/keys/:keyId — revoke one of your live keys, or as an OWNER or ADMIN any live key in the workspace; a key you may not revoke (none, already revoked, another member's below OWNER/ADMIN) throws `ClawdeConnectionError` with the 404. */
   public async revokeApiKey(keyId: string): Promise<void> {
     await this.request('DELETE', `/api/v1/keys/${seg(keyId)}`)
   }

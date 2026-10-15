@@ -2807,7 +2807,7 @@ intutic keys update key_abc123 --scopes gateway:use,traces:read
 
 ## `intutic keys revoke <keyId>` <Badge type="tip" text="Cloud" />
 
-Revoke one of your API keys.
+Revoke an API key: one of yours, or, as an OWNER or ADMIN, any live key in the workspace.
 
 ```bash
 intutic keys revoke <keyId> [options]
@@ -2821,7 +2821,7 @@ intutic keys revoke <keyId> [options]
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Revokes the key: every request made with it is refused from then on, and it cannot be restored. A key id you have no live key for (none with that id, another member's, or one already revoked) is reported and exits `1`.
+Revokes the key: every request made with it is refused from then on, and it cannot be restored. A key id you may not revoke (none live with that id in the workspace, one already revoked, or, below OWNER or ADMIN, another member's) is reported and exits `1`.
 
 ---
 

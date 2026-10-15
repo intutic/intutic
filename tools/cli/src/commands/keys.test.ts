@@ -163,7 +163,7 @@ describe('intutic keys revoke', () => {
 
   it('says so and exits 1 when there is no such live key', async () => {
     fetchMock.mockReturnValue(reply(404, { error: 'API key not found', code: 'E_NOT_FOUND' }))
-    await expectFailure(() => runKeysRevoke('key_gone', {}), 'You have no live API key key_gone')
+    await expectFailure(() => runKeysRevoke('key_gone', {}), 'No live API key key_gone you can revoke')
   })
 
   it("prints the server's other refusals and exits 1", async () => {

@@ -13,6 +13,10 @@ ENHANCEMENTS:
 
 * resource/intutic_notification_rule: accepts the event types `plan.rejected` and `plan.closed`, which the control plane sent and no rule could name.
 
+BUG FIXES:
+
+* resource/intutic_virtual_key: an OWNER or ADMIN other than the member whose credentials created a key keeps it in state and revokes it on destroy. The refresh read only the calling member's keys, so it dropped such a key from state and destroy never revoked it; it now also finds the key among the workspace's live keys (`GET /api/v1/budget/keys`), and the control plane lets an OWNER or ADMIN revoke any live key in the workspace.
+
 ## 0.4.0 (October 14, 2026)
 
 BREAKING CHANGES:

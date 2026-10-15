@@ -8922,7 +8922,7 @@
         "tags": [
           "keys.ts"
         ],
-        "summary": "Revoke an API key",
+        "summary": "Revoke an API key (your own; OWNER/ADMIN: any in the workspace)",
         "description": "**Auth:** Authenticated\n\n**Plan:** Cloud",
         "security": [
           {

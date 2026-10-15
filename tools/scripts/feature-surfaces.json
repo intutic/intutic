@@ -1021,7 +1021,8 @@
         "dashboard": [
           { "file": "apps/dashboard/src/routes/AuditTimelinePage.tsx", "contains": "credentialChangeTitle" },
           { "file": "apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx", "contains": "credential.changed" },
-          { "file": "apps/dashboard/src/components/settings/EditSiemSourcesModal.tsx", "contains": "credential_changes" }
+          { "file": "apps/dashboard/src/components/settings/EditSiemSourcesModal.tsx", "contains": "credential_changes" },
+          { "file": "apps/dashboard/src/components/settings/SpendBudgetsPanel.tsx", "contains": "useRevokeApiKey" }
         ],
         "cli": [{ "ref": "credentials set", "badge": false }, { "ref": "credentials unset", "badge": false }],
         "gateSdk": { "none": "not agent-facing" },
@@ -1042,7 +1043,10 @@
           { "file": "services/control-plane/src/services/credentialEncryptionBackfill.ts", "contains": "proxyKeyReadiness" },
           { "file": "services/control-plane/src/services/secretReencryption.ts" },
           { "file": "packages/proxy/src/store/valkey.rs", "contains": "CREDENTIAL_KEYS_ANNOUNCE_PREFIX" },
-          { "file": "services/control-plane/src/services/credentialChangeService.ts" }
+          { "file": "services/control-plane/src/services/credentialChangeService.ts" },
+          { "file": "services/control-plane/src/services/credentialChangeService.ts", "contains": "ownerId" },
+          { "file": "packages/db/src/postgres/migrations/247_credential_changes_owner.sql" },
+          { "file": "services/control-plane/src/services/apiKeyService.ts", "contains": "anyKeyInWorkspace" }
         ]
       }
     },
