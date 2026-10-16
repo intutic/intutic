@@ -3,8 +3,9 @@
  * pricing-repin-review.mjs — what a regenerated pricing bundle changed, and
  * whether the nightly re-pin may merge it without a person.
  *
- * Compares packages/proxy/src/pricing/offline_bundle.json at HEAD with the
- * working tree (after build-offline-pricing-bundle.ts ran) and prints a
+ * Compares packages/proxy/src/pricing/offline_bundle.json and the model
+ * catalog (packages/shared-types/src/modelCatalog.generated.ts) at HEAD with
+ * the working tree (after build-offline-pricing-bundle.ts ran) and prints a
  * Markdown summary: models added and dropped, and every rate that moved, old
  * → new, per 1k tokens.
  *
@@ -12,7 +13,8 @@
  *   0  rates or models changed, and nothing below calls for a person:
  *      tools/scripts/pricing-repin.sh merges it once CI passes.
  *   2  nothing but the pin changed (no rate, no model): no pull request.
- *   3  a person reviews first: a model we priced was dropped, a non-zero
+ *   3  a person reviews first: a model we priced or listed in the catalog
+ *      was dropped, a non-zero
  *      rate went to zero or disappeared, or more rates moved at once than
  *      ordinary upstream edits do (MAX_CHANGED_RATES), which is what a broken
  *      upstream file or a unit change looks like.
@@ -25,6 +27,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const BUNDLE = 'packages/proxy/src/pricing/offline_bundle.json'
+const CATALOG = 'packages/shared-types/src/modelCatalog.generated.ts'
 const RATES = ['input_cost_per_1k', 'output_cost_per_1k', 'cache_read_cost_per_1k', 'cache_write_cost_per_1k']
 export const MAX_CHANGED_RATES = 20
 
@@ -43,14 +46,25 @@ function ratesOf(bundle) {
   return out
 }
 
-/** The review of `before` → `after`: Markdown and the exit code (see the header). */
-export function review(before, after) {
+/** The catalog refs in a generated modelCatalog.generated.ts. */
+export function catalogRefs(source) {
+  return [...source.matchAll(/^ {2}\{ ref: ("[^"]*")/gm)].map((m) => JSON.parse(m[1]))
+}
+
+/**
+ * The review of `before` → `after`: Markdown and the exit code (see the header).
+ * `catalog` holds the catalog refs before and after; a ref that disappears is
+ * a dropped model even when the bundle kept its price.
+ */
+export function review(before, after, catalog = { before: [], after: [] }) {
   const was = ratesOf(before)
   const now = ratesOf(after)
   const modelsBefore = new Set(Object.keys(before.models ?? {}))
   const modelsAfter = new Set(Object.keys(after.models ?? {}))
   const added = [...modelsAfter].filter((m) => !modelsBefore.has(m)).sort()
   const dropped = [...modelsBefore].filter((m) => !modelsAfter.has(m)).sort()
+  const listedAfter = new Set(catalog.after)
+  const unlisted = [...new Set(catalog.before)].filter((r) => !listedAfter.has(r)).sort()
 
   const moved = []
   const lost = []
@@ -65,12 +79,13 @@ export function review(before, after) {
 
   const reasons = []
   if (dropped.length) reasons.push(`${dropped.length} model(s) we priced were dropped`)
+  if (unlisted.length) reasons.push(`${unlisted.length} model(s) left the catalog`)
   if (lost.length) reasons.push(`${lost.length} rate(s) went to zero or disappeared`)
   if (moved.length > MAX_CHANGED_RATES) reasons.push(`${moved.length} rates moved at once (more than ${MAX_CHANGED_RATES})`)
 
   const lines = []
-  if (!added.length && !dropped.length && !moved.length && !lost.length) return { code: 2, markdown: 'No rate or model changed.' }
-  lines.push(reasons.length ? `**Needs a person:** ${reasons.join('; ')}.` : '**Safe to merge on green CI:** no model dropped, no rate zeroed, and fewer than the changed-rate limit.')
+  if (!added.length && !dropped.length && !unlisted.length && !moved.length && !lost.length) return { code: 2, markdown: 'No rate or model changed.' }
+  lines.push(reasons.length ? `**Needs a person:** ${reasons.join('; ')}.` : '**Safe to merge on green CI:** no model dropped from the bundle or the catalog, no rate zeroed, and fewer than the changed-rate limit.')
   lines.push('')
   if (moved.length || lost.length) {
     lines.push('| Rate (per 1k tokens) | Was | Now |', '|---|---|---|')
@@ -79,6 +94,7 @@ export function review(before, after) {
   }
   if (added.length) lines.push(`Added (${added.length}): ${added.map((m) => `\`${m}\``).join(', ')}`, '')
   if (dropped.length) lines.push(`Dropped (${dropped.length}): ${dropped.map((m) => `\`${m}\``).join(', ')}`, '')
+  if (unlisted.length) lines.push(`Left the catalog (${unlisted.length}): ${unlisted.map((m) => `\`${m}\``).join(', ')}`, '')
   return { code: reasons.length ? 3 : 0, markdown: lines.join('\n').trim() }
 }
 
@@ -86,7 +102,11 @@ function main() {
   try {
     const before = JSON.parse(execFileSync('git', ['show', `HEAD:${BUNDLE}`], { cwd: ROOT, encoding: 'utf8' }))
     const after = JSON.parse(readFileSync(resolve(ROOT, BUNDLE), 'utf8'))
-    const { code, markdown } = review(before, after)
+    const catalog = {
+      before: catalogRefs(execFileSync('git', ['show', `HEAD:${CATALOG}`], { cwd: ROOT, encoding: 'utf8' })),
+      after: catalogRefs(readFileSync(resolve(ROOT, CATALOG), 'utf8')),
+    }
+    const { code, markdown } = review(before, after, catalog)
     console.log(markdown)
     return code
   } catch (err) {
