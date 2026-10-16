@@ -28,7 +28,7 @@ import { resolve } from 'node:path'
 // ship unreviewed. The nightly re-pin (pricing-repin.sh) moves it to LiteLLM's
 // last commit before 00:00 UTC; its review (pricing-repin-review.mjs) holds a
 // change that drops a priced model or zeroes a rate for a person.
-const LITELLM_PRICES_SHA = 'e638540de943eddb66f2fd543bfc75210d9c4b77' // 2026-10-08
+const LITELLM_PRICES_SHA = '9d442b1300966d7c8873be87c50a4ab03ef91db0' // 2026-10-16
 const LITELLM_PRICES_URL = `https://raw.githubusercontent.com/BerriAI/litellm/${LITELLM_PRICES_SHA}/model_prices_and_context_window.json`
 
 const OUTPUT_PATH = resolve(
