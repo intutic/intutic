@@ -22,6 +22,7 @@ model_list:
 
 ## Project, location and credentials
 
+<!-- ENTERPRISE_ONLY_START -->
 **A workspace's own credential.** Provision it under Settings → Provider Keys, with `intutic credentials set`, the SDKs' `setProviderCredential`, or the Terraform `intutic_provider_credential` resource. It takes the project, an optional location (default `global`) and a service-account key:
 
 ```bash
@@ -32,6 +33,7 @@ intutic credentials set vertex_ai --field projectId=my-project --field location=
 Requests made with an Intutic key (`vk_…`) use it. On a gateway that requires provisioned keys, a workspace without one is refused with `402 byok_required`.
 
 The key is checked as soon as it is saved, and again from **Test** on the Provider Keys card, by asking Google for an access token with it. A key Google refuses is reported as rejected; project access and the enabled models are checked on the first model call. A stored credential must be a service-account key (or an `authorized_user` file); a workload identity federation file is accepted only from a self-hosted proxy's own configuration, below.
+<!-- ENTERPRISE_ONLY_END -->
 
 **A self-hosted proxy's own credentials.** Set the project with `GOOGLE_CLOUD_PROJECT` (or `ANTHROPIC_VERTEX_PROJECT_ID`, as Claude Code uses) or `intutic_settings.providers.vertex.project`, and the location with `GOOGLE_CLOUD_LOCATION` or `CLOUD_ML_REGION`. The proxy then finds credentials as Application Default Credentials do:
 

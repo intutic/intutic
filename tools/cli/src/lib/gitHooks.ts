@@ -11,7 +11,8 @@
 
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
-import { secretPatternAlternation } from '@intutic/shared-types'
+import { CONTROL_PLANE_PRODUCT_RELEASED, secretPatternAlternation } from '@intutic/shared-types'
+import { loadCredentials } from '../config/store.js'
 import { writeFileAtomic } from '@intutic/sync-daemon/lib/atomicWrite'
 import { log } from './logger.js'
 
@@ -164,6 +165,11 @@ async function writeHookIfOursOrAbsent(
  */
 export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
   const gitDir = node_path.join(workspaceRoot, '.git')
+  // `intutic sync-context` sends what these hooks record to a control plane.
+  // With none, it is not a workaround worth naming.
+  const workaround = CONTROL_PLANE_PRODUCT_RELEASED || (await loadCredentials()) !== null
+    ? (why: string) => `${why}; run \`intutic sync-context\` manually as a workaround, or add Intutic's sync call to your own hook.`
+    : () => 'It only records context for a control plane, so nothing is lost without one.'
 
   try {
     const stat = await node_fs.stat(gitDir)
@@ -192,8 +198,7 @@ export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
       gitContextSyncContent(),
       GIT_CONTEXT_MARKER,
       "A post-commit hook already exists and is not Intutic's — left untouched. " +
-        'Branch/commit context will not sync automatically on commit; run ' +
-        '`intutic sync-context` manually as a workaround, or add Intutic\'s sync call to your own hook.',
+        workaround('Branch/commit context will not sync automatically on commit'),
     )
     const postCheckoutInstalled = await writeHookIfOursOrAbsent(
       hooksDir,
@@ -201,8 +206,7 @@ export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
       gitContextSyncContent(),
       GIT_CONTEXT_MARKER,
       "A post-checkout hook already exists and is not Intutic's — left untouched. " +
-        'Branch/commit context will not sync automatically on checkout; run ' +
-        '`intutic sync-context` manually as a workaround, or add Intutic\'s sync call to your own hook.',
+        workaround('Branch/commit context will not sync automatically on checkout'),
     )
 
     // Pre-commit secret scan. Unlike the two tracking hooks above, this one
@@ -236,8 +240,7 @@ export async function installGitHooks(workspaceRoot: string): Promise<boolean> {
       postMergeContent(),
       POST_MERGE_MARKER,
       "A post-merge hook already exists and is not Intutic's — left untouched. " +
-        'The governed decisions log will still refresh on the daemon\'s normal poll cycle; run ' +
-        '`intutic sync-context` manually as a workaround if you need it sooner.',
+        workaround("The governed decisions log will still refresh on the daemon's normal poll cycle"),
     )
 
     // Summary log line, kept honest: only name a hook as installed if it

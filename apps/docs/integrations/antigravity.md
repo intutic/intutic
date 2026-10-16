@@ -1,6 +1,6 @@
 # Google Antigravity and Gemini CLI
 
-Integrate Intutic governance with Google's coding agents: [Google Antigravity](https://antigravity.google/) — the desktop app, the IDE and Antigravity CLI — and [Gemini CLI](https://geminicli.com/), which Antigravity CLI replaced for individual users in 2026 and which enterprise and API-key users keep. Both keep their configuration under `~/.gemini`, and one harness, `antigravity`, governs both: `intutic connect` installs a blocking gate for each.
+Integrate Intutic governance with Google's coding agents: [Google Antigravity](https://antigravity.google/) — the desktop app, the IDE and Antigravity CLI — and [Gemini CLI](https://geminicli.com/), which Antigravity CLI replaced for individual users in 2026 and which enterprise and API-key users keep. Both keep their configuration under `~/.gemini`, and one harness, `antigravity`, governs both: `intutic gates install` installs a blocking gate for each.
 
 ## How it works
 
@@ -15,7 +15,7 @@ Integrate Intutic governance with Google's coding agents: [Google Antigravity](h
 
 `intutic init` detects the harness when it finds either product, a plain Gemini CLI install included. Each gate reports its events under its own name, so [gate health](/guide/settings), the [AI inventory](/guide/ai-inventory) and the [SIEM export](/guide/siem-export) show which product a call came through, and a machine with only one of the two is not expected to report from the other. It is still one harness: one entry in `intutic init`, one rules file, and one count in the harness total.
 
-Both gates run before every tool call, with the call as JSON on stdin, and enforce the same policy: the built-in protections, the destructive-command tier, your rule sets and [policy guardrails](/guide/policy-guardrails) (`hook_rule`), group rules and holds for review. They are installed whether or not any rule set targets the harness.
+Both gates run before every tool call, with the call as JSON on stdin, and enforce the same policy: the built-in protections, the destructive-command tier (which flags rather than blocks), your rule sets and [policy guardrails](/guide/policy-guardrails) (`hook_rule`), group rules and holds for review. They are installed whether or not any rule set targets the harness.
 
 ## Rule sets
 
@@ -39,7 +39,7 @@ Never print a credential...
 - **Gemini CLI** loads `GEMINI.md` from the project directory and every parent up to the git root, and `~/.gemini/GEMINI.md`, and sends them with every prompt; `/memory show` prints what it loaded. It reads the project's files only in a folder you have trusted, so trust the project when Gemini CLI asks. If you renamed the context file with `context.fileName` in `settings.json`, keep `GEMINI.md` in the list, or Gemini CLI will not read the rules.
 - **Antigravity** (app, IDE and CLI) loads `GEMINI.md` and `AGENTS.md` from each directory between the file it is working on and the workspace root, and keeps them active on every turn. It truncates any rules file over 24 KB, so keep `GEMINI.md`, rule sets included, under that size.
 
-The first sync appends the section to an existing `GEMINI.md`, or creates the file; later syncs replace the text between the markers, wherever you moved the section, and leave the file alone when nothing changed. An edit inside the section is replaced on the next sync; edits outside it are yours, and are not reported as drift.
+The first write appends the section to an existing `GEMINI.md`, or creates the file; later writes replace the text between the markers, wherever you moved the section, and leave the file alone when nothing changed. An edit inside the section is replaced on the next write; edits outside it are yours, and are not reported as drift.
 
 Earlier versions wrote the rule sets into a `customInstructions` key of `.gemini/settings.json`, which neither product reads. `intutic disconnect` removes that key.
 
@@ -87,7 +87,7 @@ Gemini CLI's shell tool is `run_shell_command`; a hold such as `review_before: a
 
 ## MCP servers
 
-`intutic connect` puts the [MCP governance proxy](/guide/mcp-governance) in front of each product's MCP servers on every sync, so a server you add later is wrapped on the next one. The registry, allowlists, call budgets, DLP on results, prompt-injection scanning and TOFU pinning then apply to every MCP call either product makes, in addition to the gates.
+With the [MCP governance proxy](/guide/mcp-governance) in front of each product's MCP servers, the registry, allowlists, call budgets, DLP on results, prompt-injection scanning and TOFU pinning apply to every MCP call either product makes, in addition to the gates.<!-- ENTERPRISE_ONLY_START --> `intutic connect` puts it in front of them on every sync, so a server you add later is wrapped on the next one.<!-- ENTERPRISE_ONLY_END -->
 
 | | Google Antigravity | Gemini CLI |
 |---|---|---|
@@ -130,7 +130,11 @@ intutic init
   ✔ antigravity → /path/to/project/GEMINI.md
 ```
 
-The harness is detected from a `.gemini/` directory or an `.agents/hooks.json` file in the project, Antigravity's app-data directories (`~/.gemini/antigravity`, `~/.gemini/antigravity-cli`, `~/.gemini/antigravity-ide`), `antigravity` or `gemini` on `PATH`, or a `~/.gemini/settings.json` with a setting of its own. `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+The harness is detected from a `.gemini/` directory or an `.agents/hooks.json` file in the project, Antigravity's app-data directories (`~/.gemini/antigravity`, `~/.gemini/antigravity-cli`, `~/.gemini/antigravity-ide`), `antigravity` or `gemini` on `PATH`, or a `~/.gemini/settings.json` with a setting of its own. `intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 ### 2. Start the proxy
 
@@ -138,27 +142,35 @@ The harness is detected from a `.gemini/` directory or an `.agents/hooks.json` f
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 Gemini model traffic is not served by the proxy, so for these agents the gates, and the MCP governance proxy in front of their MCP servers, are the enforcement points.
 
 ::: tip Non-destructive merge
-Every file is read first and merged; all other settings and hooks are preserved. A file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
+Every file is read first and merged; all other settings and hooks are preserved. A file that is not plain JSON (for example one with comments) is left untouched and reported.
 :::
 
 ## Tamper protection
 
 Every Intutic gate refuses an agent tool call that names `.gemini/settings.json`, `.gemini/config/hooks.json` or `.agents/hooks.json`, by a file write or in a shell command, so an agent cannot remove its own gate or register a hook that runs ahead of it.
 
-`intutic connect` watches `~/.gemini/settings.json` and `~/.gemini/config/hooks.json`. If a gate registration is removed or disabled, or the file is deleted, it is put back and the change is reported to the control plane. Like every gate file, it is restored under every hand-edit setting, Record only included: see [Settings](/guide/settings).
+If a gate registration is removed or disabled, or the file is deleted, run `intutic gates install` again to put it back.
 
+<!-- ENTERPRISE_ONLY_START -->
+`intutic connect` watches `~/.gemini/settings.json` and `~/.gemini/config/hooks.json`. If a gate registration is removed or disabled, or the file is deleted, it is put back and the change is reported to the control plane. Like every gate file, it is restored under every hand-edit setting, Record only included: see [Settings](/guide/settings).
+<!-- ENTERPRISE_ONLY_END -->
+
+<!-- ENTERPRISE_ONLY_START -->
 ## Fleet deployment
 
 `intutic enterprise install` writes Jamf and Intune manifests for both gates: `gemini-cli-hooks-*.json` places the Gemini CLI hook in Gemini CLI's system settings file, which Gemini CLI applies over user and workspace settings, and `antigravity-hooks-*.json` places the Antigravity hook in each user's `~/.gemini/config/hooks.json` (Antigravity has no machine-wide hooks file). See [`intutic enterprise install`](/reference/cli#intutic-enterprise-install).
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Disconnecting
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness antigravity`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `GEMINI.md` only the marked section is removed, and each wrapped MCP server is rebuilt from its command, or taken from the copy of the file connect kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness antigravity`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. In `GEMINI.md` only the marked section is removed, and each wrapped MCP server is rebuilt from its command, or taken from the copy of the file Intutic kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Config details
 

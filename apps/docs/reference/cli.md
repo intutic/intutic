@@ -18,7 +18,7 @@ npx @intutic/proxy
 | Option | Description |
 |--------|-------------|
 | `--version`, `-V` | Show the CLI version. Only before a command: `intutic --version`. |
-| `--help`, `-h` | Show help for the program or for any command, e.g. `intutic policy replay --help` |
+| `--help`, `-h` | Show help for the program or for any command, e.g. `intutic gates install --help` |
 
 `intutic trace` is an alias of `intutic traces`, and `intutic install-daemon` /
 `intutic uninstall-daemon` are shortcuts for `intutic daemon install` / `intutic daemon uninstall`.
@@ -88,6 +88,8 @@ intutic init [options]
 | `--dev` | Record dev mode, so later commands use the local control plane (`http://localhost:3001`) |
 | `--git-hooks` | Install the Intutic Git hooks without asking |
 | `--no-git-hooks` | Skip the Git hooks without asking |
+| `--gates` | Install the harness gates and rules files ([`intutic gates install`](#intutic-gates-install)) without asking |
+| `--no-gates` | Skip the harness gates without asking |
 
 **What it does:**
 1. Finds the workspace root: the nearest directory, from the current one upwards, that holds `.git/` or `package.json`. Exits `1` if there is none.
@@ -95,23 +97,25 @@ intutic init [options]
 3. Reports whether you are logged in. No login is needed: `init` makes no network call.
 4. Records the workspace root, the detected harnesses and dev mode in `~/.intutic/config.json`, keeping any other settings already there.
 5. Installs the Git hooks if you agree: `post-commit` and `post-checkout` (record the branch and commit with `intutic sync-context`), `pre-commit` (refuses a commit that stages a credential, and warns on risky skill files) and `post-merge` (refreshes the decisions log). A hook that already exists and is not Intutic's is left untouched.
-6. Prints setup instructions for pointing each detected harness at the local proxy (`http://localhost:4000`, or `INTUTIC_PROXY_URL`).
+6. With no login and at least one harness detected, installs the harness gates and rules files if you agree: the same as running [`intutic gates install`](#intutic-gates-install) afterwards.
+7. Prints setup instructions for pointing each detected harness at the local proxy (`http://localhost:4000`, or `INTUTIC_PROXY_URL`).
 
-`init` writes no harness config files. [`intutic connect`](#intutic-connect) writes them, from the
-control plane's SOPs plus your local `.intutic/sops/`, once a control plane is attached; standalone,
-run [`intutic start`](#intutic-start) and point the harness at the proxy.
+Without the gates, `init` writes no harness config files. [`intutic gates install`](#intutic-gates-install)
+writes them from this machine alone; on a machine with a login, [`intutic connect`](#intutic-connect)
+writes them instead, from the control plane's SOPs plus your local `.intutic/sops/`.
 
-**Prompts:** with a terminal attached, `init` asks before installing the Git hooks. Without one (CI,
-a provisioning script, `stdin` redirected) it never asks: it skips the hooks unless `--git-hooks`
-is passed, and says so. `--git-hooks` and `--no-git-hooks` skip the question either way.
+**Prompts:** with a terminal attached, `init` asks before installing the Git hooks, and before
+installing the gates. Without one (CI, a provisioning script, `stdin` redirected) it never asks: it
+skips both unless `--git-hooks` or `--gates` is passed, and says so. `--git-hooks`/`--no-git-hooks`
+and `--gates`/`--no-gates` skip each question either way.
 
 **Examples:**
 
 ```bash
 intutic init
 
-# Non-interactive, with the hooks
-intutic init --git-hooks
+# Non-interactive, with the hooks and the gates
+intutic init --git-hooks --gates
 ```
 
 ---
@@ -131,12 +135,14 @@ intutic start [options]
 | `--port <port>` | Port the proxy listens on | The port of `INTUTIC_PROXY_URL`, else `4000` |
 | `--valkey-port <port>` | Local Valkey port to use or start | `6379` |
 | `--upstream-url <url>` | Upstream LLM provider base URL, passed to the proxy as `UPSTREAM_URL` | _(proxy default)_ |
+| `--no-gates` | Neither refresh the local gates nor watch `.intutic/sops` | Refresh and watch |
 
 **What it does:**
 
-1. **Valkey (best-effort).** Checks for a Valkey or Redis on `127.0.0.1:<valkey-port>`. If none is listening, it tries, in order: starting an `intutic-valkey` Docker container (`valkey/valkey:8-alpine`), then `valkey-server` or `redis-server` from `PATH`. If none of these works, it warns and continues in standalone mode: routing, policies, DLP, and local spend caps all still work; bandit learning persists to `~/.intutic`, and the response cache lasts only as long as the process.
-2. **Proxy binary.** Runs the version-matched binary in `~/.intutic/bin/` if it is there, otherwise `intutic-proxy` from `PATH`. If neither exists it prints `npm install -g @intutic/proxy` and exits with status `1`.
-3. **Proxy environment.** Starts the proxy with your environment plus:
+1. **Local gates.** On a machine with no login whose gates [`intutic gates install`](#intutic-gates-install) installed, refreshes them before the proxy starts (the gate scripts, the rules files from `.intutic/sops/` and the policy snapshot), and again whenever `.intutic/sops/` changes while the proxy runs. The refresh never writes routing. With no gates installed, one line names the recorded harnesses that have none. `--no-gates` skips this step.
+2. **Valkey (best-effort).** Checks for a Valkey or Redis on `127.0.0.1:<valkey-port>`. If none is listening, it tries, in order: starting an `intutic-valkey` Docker container (`valkey/valkey:8-alpine`), then `valkey-server` or `redis-server` from `PATH`. If none of these works, it warns and continues in standalone mode: routing, policies, DLP, and local spend caps all still work; bandit learning persists to `~/.intutic`, and the response cache lasts only as long as the process.
+3. **Proxy binary.** Runs the version-matched binary in `~/.intutic/bin/` if it is there, otherwise `intutic-proxy` from `PATH`. If neither exists it prints `npm install -g @intutic/proxy` and exits with status `1`.
+4. **Proxy environment.** Starts the proxy with your environment plus:
    - `PORT` set to `--port`
    - with Valkey running: `VALKEY_URL`, taken from your environment if set, otherwise `redis://127.0.0.1:<valkey-port>`
    - without Valkey: `INTUTIC_STANDALONE=1` — unless `CONTROL_PLANE_URL` is set in your environment. That marks a managed deployment, where the proxy requires Valkey and refuses to start without it; `intutic start` leaves that decision to the proxy.
@@ -152,6 +158,64 @@ export ANTHROPIC_BASE_URL=http://localhost:4000
 
 # Different port, and a Valkey on 6380
 intutic start --port 8080 --valkey-port 6380
+```
+
+---
+
+## `intutic gates install`
+
+Install the tool-call gate and rules file for each harness `intutic init` recorded, from this
+machine alone — no account or control plane needed.
+
+```bash
+intutic gates install [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--harness <id>` | Only this harness, for example `cursor`. It must be recorded in `~/.intutic/config.json`, unless `--add` is passed too |
+| `--add` | With `--harness`: record the harness in `~/.intutic/config.json` first |
+| `--route` | Also point each harness's LLM traffic at the local proxy (`http://127.0.0.1:4000`, or the port of `INTUTIC_PROXY_URL`). The proxy must then be running, for example as a service with [`intutic daemon install --proxy`](#intutic-daemon-install), or the harnesses cannot reach their model |
+| `--dry-run` | Print what would be written, and write nothing |
+| `--workspace <path>` | The workspace to write into. Default: the one `intutic init` recorded |
+
+**What it writes**, for every recorded harness (one with `--harness`):
+
+1. **The gate.** The same tool-call gate [`intutic connect`](#intutic-connect) installs, registered where the harness reads it (`.claude/settings.json` for Claude Code, Cursor's `hooks.json`, and so on). Your own hooks and settings stay. Every gate enforces the built-in protections, such as refusing an agent's attempt to remove or unlock Intutic's own files.
+2. **The policy snapshot** (`~/.intutic/hooks/policy-snapshot.rules` and `.json`) every gate reads: the destructive-command and skill-directory tiers, and each `review_before:` token in `.intutic/sops/`. With no control plane to approve a hold, a `review_before:` token is refused outright, with a message saying so, rather than held. The snapshot names no workspace and is marked `source: local`.
+3. **The rules files** from the SOPs in `.intutic/sops/`, into each harness's own file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). A harness no SOP targets gets no rules file.
+
+It also blanks the API key an earlier `intutic connect` may have left in `~/.intutic/env/runtime.env`,
+so no gate posts events to that control plane, and moves `.intutic/events/hook-events.jsonl` aside to
+`hook-events.jsonl.1` once it passes 10 MB: with no control plane, nothing drains it.
+
+**Not written:** proxy routing (unless `--route`), MCP server wrapping, the bundled agent skills, and
+anything sent anywhere: it makes no network call. `.env.intutic`, which Codex and the SDK frameworks
+read only when you source it, is still written for a harness a SOP targets. With `--route`, Windsurf's
+traffic goes through the proxy's TLS interception, which needs the Intutic CA (`~/.intutic/ca.crt`,
+created when the proxy first runs) trusted; `gates install` does not trust it for you.
+
+It prints each file written and the gate file of each harness, and ends with `Undo with intutic disconnect`.
+Re-run it after editing `.intutic/sops/`, or keep [`intutic start`](#intutic-start) running, which
+refreshes the gates when the SOPs change.
+
+Refused, with exit status `1`, on a machine with a login (`intutic connect` installs and refreshes the
+gates there; run [`intutic disconnect`](#intutic-disconnect) first to switch to local gates), and
+before `intutic init`.
+
+**Examples:**
+
+```bash
+intutic gates install
+
+# What it would write, for Cursor only
+intutic gates install --harness cursor --dry-run
+
+# Also route the harnesses through a proxy that runs as a service
+intutic daemon install --proxy
+intutic gates install --route
 ```
 
 ---
@@ -328,6 +392,7 @@ No options. Displays:
 - Current authentication state: email, workspace, and the control plane commands use (see [Choosing a control plane](#control-plane-url))
 - The workspace root, dev mode and config version recorded by `intutic init`
 - The harnesses recorded by `intutic init`, by name
+- Gates: installed locally (by [`intutic gates install`](#intutic-gates-install)), installed by `intutic connect`, or none
 - Sync state: last sync timestamp and the number of tracked files, and whether the sync daemon is running
 - Running agent processes, with a warning when a recorded harness is running but the sync daemon is not
 
@@ -357,7 +422,7 @@ Diagnose workspace health — proxy, auth, daemon, configs, logs, Valkey, CA tru
 intutic doctor
 ```
 
-No options. Runs nine checks in order, each printing ✓ or ✗ plus a one-line remediation on failure:
+No options. Runs these checks in order, each printing ✓ or ✗ plus a one-line remediation on failure:
 
 1. Proxy reachable (`http://127.0.0.1:4000/health`, or the port of `INTUTIC_PROXY_URL`)
 2. Control plane auth (the stored credentials against `/api/v1/auth/me`)
@@ -367,10 +432,12 @@ No options. Runs nine checks in order, each printing ✓ or ✗ plus a one-line 
 6. Valkey reachable (TCP probe on `127.0.0.1:6379`)
 7. CA cert trust (`~/.intutic/ca.crt` plus the OS trust store)
 8. Policy snapshot present, valid, non-empty and fresh (`~/.intutic/hooks/policy-snapshot.rules`)
-9. Cisco skill scanner on `PATH` (optional; never fails)
+9. Local gates, on a machine with no login: a gate file for each recorded harness that has one
+10. Cisco skill scanner on `PATH` (optional; never fails)
 
-Checks 2–5 and 8 need a control plane. On a machine with no login they are skipped with one note,
-and the proxy and CA-trust remediations point at `intutic start`.
+Checks 2–5 need a control plane. On a machine with no login they are skipped with one note, the
+proxy and CA-trust remediations point at `intutic start`, and checks 8 and 9 look at what
+[`intutic gates install`](#intutic-gates-install) wrote and point at it to fix what is missing.
 
 See [`intutic doctor`](/reference/cli-doctor) for what each check verifies and how to fix it.
 
@@ -524,7 +591,7 @@ interval. Files larger than 512 KB are not captured.
 
 ## `intutic disconnect`
 
-Undo `intutic connect` on this machine: put every harness config it changed back the way it was, remove the background services, and log out.
+Undo `intutic connect` or [`intutic gates install`](#intutic-gates-install) on this machine: put every harness config they changed back the way it was, remove the gates and the background services, and log out.
 
 ```bash
 intutic disconnect [options]
@@ -549,7 +616,7 @@ intutic disconnect [options]
 - **What connect replaced or removed** comes back: the Claude Code `permissions.deny` rules connect replaced, and Aider's `test-cmd`, `lint-cmd`, `auto-test` and `auto-lint`.
 - **Agent skills** (without `--harness`): the [Kitkat](/integrations/kitkat) and [Rule Author](/integrations/rule-author) skills connect wrote into `.agents/skills/`, unless you have edited them. A copy that was there before connect, or that an earlier version of connect wrote, stays.
 
-Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted (in the macOS login keychain, or connect's `intutic-connect-ca.crt` in the Linux system trust store, which needs root: run as a user, disconnect prints the `sudo rm` and bundle-rebuild commands instead), the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/`, `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
+Without `--harness` it also removes the services [`intutic daemon install`](#intutic-daemon-install) set up for your user (a system-wide one is listed with the command that removes it), the Intutic CA certificate connect trusted (in the macOS login keychain, or connect's `intutic-connect-ca.crt` in the Linux system trust store, which needs root: run as a user, disconnect prints the `sudo rm` and bundle-rebuild commands instead), the `intutic-valkey` Docker container connect started, the gate caches in `~/.intutic/hooks/` (the policy snapshot with its verified copy, the approved bypasses and the egress policy), `~/.intutic/env/runtime.env` (the copy of the API key the gates read) and, unless `--keep-login`, the stored credentials. It resets the synced config version, so a later `intutic connect` writes everything again.
 
 **How it knows what you had:** before connect first writes a file, it keeps a copy of it, in `.intutic/originals/` for files in the workspace and `~/.intutic/originals/` for the rest (owner-only, and ignored by git). A file you have not changed since is restored byte for byte. In one you have changed, only Intutic's entries are taken out and your edits stay. A file connect writes whole that you edited is left as it is, and listed.
 
@@ -557,7 +624,7 @@ Without `--harness` it also removes the services [`intutic daemon install`](#int
 
 **Left in place:** your SOPs in `.intutic/sops/`, Intutic's own state in `~/.intutic/` (configuration, logs, events, the downloaded proxy), `<file>.drift-backup` copies (they hold edits connect reverted), and a `valkey-server` or `redis-server` connect started outside Docker. Git hooks from `intutic init --git-hooks` live in `.git/hooks/`, and variables from [`intutic env persist`](#intutic-env-persist) are removed with [`intutic env clear`](#intutic-env-clear).
 
-**The control plane is told:** before it removes the credentials, a real run reports the disconnect (`POST /api/v1/devices/disconnect`, with the machine's fingerprint and the harnesses), so the control plane stops expecting the machine's gates instead of alerting that they went [silent](/guide/settings), the devices list and the [AI inventory](/guide/ai-inventory) show the machine or harness as disconnected rather than stale or newly ungoverned, and the disconnect is recorded for [SIEM export](/guide/siem-export) (`device_disconnects`). If the control plane cannot be reached within five seconds, the disconnect goes ahead and says so. Running `intutic connect` again reconnects.
+**The control plane is told** (with a login; with none there is no control plane, and nothing is sent): before it removes the credentials, a real run reports the disconnect (`POST /api/v1/devices/disconnect`, with the machine's fingerprint and the harnesses), so the control plane stops expecting the machine's gates instead of alerting that they went [silent](/guide/settings), the devices list and the [AI inventory](/guide/ai-inventory) show the machine or harness as disconnected rather than stale or newly ungoverned, and the disconnect is recorded for [SIEM export](/guide/siem-export) (`device_disconnects`). If the control plane cannot be reached within five seconds, the disconnect goes ahead and says so. Running `intutic connect` again reconnects.
 
 **While connect runs:** a running `intutic connect` would write everything straight back. A real run stops the services first, then exits with status `1` before changing any file if an `intutic connect` you started yourself is still running. `--dry-run` only warns.
 
@@ -3988,7 +4055,7 @@ Writes the archive as JSON: to stdout, so it can be piped, or to `--out`. OWNER 
 
 ---
 
-## `intutic compliance verify <file>`
+## `intutic compliance verify <file>` <Badge type="tip" text="Cloud" />
 
 Check an evidence archive's hashes and signature.
 

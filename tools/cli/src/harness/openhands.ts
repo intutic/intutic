@@ -19,7 +19,7 @@ import { join, dirname } from 'node:path'
 import { access, readFile, mkdir } from 'node:fs/promises'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
-import type { IHarnessAdapter } from './types.js'
+import type { HarnessWriteOptions, IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { writeOpenHandsHooks, mergeOpenHandsToml, isOpenHandsConfig } from '@intutic/sync-daemon/harness/openhandsHooks'
 import { keepOriginal } from '@intutic/sync-daemon'
@@ -53,11 +53,12 @@ export const openhandsAdapter: IHarnessAdapter = {
   },
 
   /** The .openhands/hooks.json PreToolUse hook. */
-  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
-    await writeOpenHandsHooks(workspaceRoot, proxyUrl)
+  async installGate(workspaceRoot: string, proxyUrl: string, opts?: HarnessWriteOptions): Promise<void> {
+    await writeOpenHandsHooks(workspaceRoot, proxyUrl, undefined, opts?.routing !== false)
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string, opts?: HarnessWriteOptions): Promise<string | null> {
+    if (opts?.routing === false) return writeOwnRulesFile(workspaceRoot, RULES_FILE, sops, proxyUrl)
     // Merged into the user's config.toml: [llm] base_url; everything else is
     // kept. A file that does not parse is left alone.
     const configPath = join(workspaceRoot, CONFIG_FILE)

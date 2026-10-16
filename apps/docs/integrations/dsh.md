@@ -12,7 +12,7 @@ Unlike every other native harness Intutic supports, dsh has no `hooks.json`/shel
 
 That module is a genuine [Cordis Plugin](https://github.com/cordiverse/cordis) subscribed to dsh's `tools/pre-execute` event — a `waterfall` (Cordis's cooperative, composable event-dispatch mode) that runs before every tool call. It calls into `@intutic/gate`'s own `Gate.guard()` evaluator and returns `{kind: 'deny', reason}` to veto a call, or calls the waterfall's `next()` to let it (and any other listener, including dsh's own built-in approval flow) proceed.
 
-Intutic's sync daemon does not generate this plugin file — it already exists, published on npm. What the daemon writes is the **registration**: a row in every existing dsh profile's `cordis.patch.yml` naming the plugin, plus the `@intutic/gate` dependency declaration in that profile's `package.json`, plus — in that same `cordis.patch.yml` — a `baseURL` override on the `llm-deepseek` entry, dsh's default LLM route, for LLM egress. It also (re)generates `$DSH_HOME/INSTALL.md` on every sync — see step 5 and "What gets written" below.
+Intutic does not generate this plugin file — it already exists, published on npm. What Intutic writes is the **registration**: a row in every existing dsh profile's `cordis.patch.yml` naming the plugin, plus the `@intutic/gate` dependency declaration in that profile's `package.json`, plus — in that same `cordis.patch.yml` — with `--route`, a `baseURL` override on the `llm-deepseek` entry, dsh's default LLM route, for LLM egress. It also (re)generates `$DSH_HOME/INSTALL.md` each time it writes — see step 5 and "What gets written" below.
 
 ## Setup
 
@@ -32,15 +32,24 @@ intutic init
   ✔ dsh → /path/to/project/AGENTS.md
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
-
-### 3. Connect
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
 
 ```bash
-intutic connect
+intutic gates install
 ```
 
-`intutic connect` starts the proxy and writes the dsh registration described below (dsh must be in `~/.intutic/config.json`'s `harnesses`, which `intutic init` records when it detects dsh).
+### 3. Start the proxy and route dsh
+
+```bash
+intutic start
+intutic gates install --route
+```
+
+`intutic gates install` writes the dsh registration described below (dsh must be in `~/.intutic/config.json`'s `harnesses`, which `intutic init` records when it detects dsh). `--route` also points dsh's default LLM route at the proxy; the proxy must be running.
+
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 ### 4. Run dsh with a profile at least once
 
@@ -50,7 +59,7 @@ dsh's own CLI **requires** `--profile <name>` on every invocation — there is n
 dsh --profile myproject
 ```
 
-If you have never run `dsh` before, `intutic connect` logs `dsh_skip` and does nothing yet — there is no profile to register into. The next sync cycle after your first `dsh --profile <name>` run picks it up automatically.
+If you have never run `dsh` before, Intutic logs `dsh_skip` and registers nothing yet — there is no profile to register into. Run `intutic gates install` again after your first `dsh --profile <name>` run<!-- ENTERPRISE_ONLY_START -->; under `intutic connect` the next sync cycle picks it up automatically<!-- ENTERPRISE_ONLY_END -->.
 
 ### 5. Install the plugin's dependency
 
@@ -73,31 +82,35 @@ intutic-governance (@intutic/gate/dsh): failed to import
 dsh offers no way for a profile row to make startup fail instead, so this step is permanent and manual. `intutic status` shows which profiles are registered but not yet activated.
 :::
 
+<!-- ENTERPRISE_ONLY_START -->
 The CLI's own onboarding text (shown when `intutic connect` starts with dsh recorded) prints this same command, with a `<name>` placeholder, and points at `$DSH_HOME/INSTALL.md`, so you don't have to come back to this page to find it.
+<!-- ENTERPRISE_ONLY_END -->
 
-Every sync also (re)writes `$DSH_HOME/INSTALL.md`, listing the exact `dsh plugin --profile <name> add @intutic/gate` command for every profile currently registered — a standing, always-current reference alongside the onboarding text (the same pattern the [n8n integration](/integrations/n8n)'s own auto-generated INSTALL.md follows).
+Each write also (re)writes `$DSH_HOME/INSTALL.md`, listing the exact `dsh plugin --profile <name> add @intutic/gate` command for every profile currently registered — a standing, always-current reference alongside the onboarding text (the same pattern the [n8n integration](/integrations/n8n)'s own auto-generated INSTALL.md follows).
 
 ## Coverage visibility
 
-Two places surface the "silent no-profile window" (dsh installed but never run, so there is no profile to register into) and the pending activation step above, so neither goes unnoticed between syncs:
+These surface the "silent no-profile window" (dsh installed but never run, so there is no profile to register into) and the pending activation step above, so neither goes unnoticed between syncs:
 
 - **`intutic status`** prints a dedicated `dsh (DeepSeek harness):` block: a warning when dsh is detected but has zero profiles, or — once profiles exist — a per-profile breakdown of which ones are registered but not yet activated (pointing at `INSTALL.md`), versus fully registered and activated.
+<!-- ENTERPRISE_ONLY_START -->
 - **`intutic connect`** checks once at startup (not on every poll tick, since the gap only changes state on your first `dsh --profile <name>` run) and logs a warning if dsh is present on the machine with zero profiles yet.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## What gets written
 
 - **Plugin registration:** a `{ insert: [{ id: 'intutic-governance', name: '@intutic/gate/dsh', config: {...} }] }` row merged into every existing `$DSH_HOME/profiles/*/cordis.patch.yml` — a structural YAML edit (via the `yaml` package's `parseDocument`/`setIn`) that preserves every other row and any comments/formatting around it.
 - **Dependency:** `@intutic/gate` `^2.0.0` added to that profile's `package.json` `dependencies` only when the profile declares none — a range `dsh plugin add` already wrote is left alone (see step 5 above for why the declaration alone is not enough).
-- **LLM egress — default route:** a `{ id: llm-deepseek, config: { baseURL: <proxy> } }` override in the same `cordis.patch.yml`. In dsh 0.2 the `llm-deepseek` entry is `@deepseek-ai/dsh-llm-deepseek-api-key`, which serves the `deepseek-official` provider that `dsh-base`'s `agent-default-model` row selects (`deepseek-flash`). A Cordis override replaces the entry's whole `config`, so when the profile already overrides `llm-deepseek` (for example after a Models-page save), only `baseURL` is set on that row and its other fields (`apiKeyEnv`, `reasoningEffort`, `models`, ...) are kept. Requests then go to `<proxy>/v1/messages` in the Anthropic Messages format.
+- **LLM egress — default route** (with `--route`)**:** a `{ id: llm-deepseek, config: { baseURL: <proxy> } }` override in the same `cordis.patch.yml`. In dsh 0.2 the `llm-deepseek` entry is `@deepseek-ai/dsh-llm-deepseek-api-key`, which serves the `deepseek-official` provider that `dsh-base`'s `agent-default-model` row selects (`deepseek-flash`). A Cordis override replaces the entry's whole `config`, so when the profile already overrides `llm-deepseek` (for example after a Models-page save), only `baseURL` is set on that row and its other fields (`apiKeyEnv`, `reasoningEffort`, `models`, ...) are kept. Requests then go to `<proxy>/v1/messages` in the Anthropic Messages format.
 - **How the proxy forwards them:** the proxy sends DeepSeek's own API model ids (`deepseek-chat`, `deepseek-reasoner`, and `deepseek-flash`, which dsh uses) to DeepSeek. These Messages requests go unchanged to DeepSeek's Anthropic-compatible API at `$DEEPSEEK_UPSTREAM_URL/anthropic/v1/messages` (default `https://api.deepseek.com`). OpenAI-format requests (`/v1/chat/completions`) for the same models go to `$DEEPSEEK_UPSTREAM_URL/v1/chat/completions`, and any other route naming one of them is refused with 400 `unsupported_route`. DeepSeek requests get the same governance as any other provider: DLP, SOP rules, the response gate's tool-call refusals, and metering. Open-weight names such as `deepseek-r1`, `deepseek-coder-v2-instruct` or `deepseek-r1:7b` are not DeepSeek's API and keep going to `OPENAI_UPSTREAM_URL`. The upstream key comes from one of two places:
   - **dsh's own `DEEPSEEK_API_KEY`:** dsh sends it in `x-api-key`, and the proxy passes it through.
   - **An Intutic virtual key:** if you set `DEEPSEEK_API_KEY` to a virtual key (`vk_...`), as a gateway that accepts only virtual keys requires, the proxy sends the workspace's DeepSeek key in its place. Provision that key under Settings › Security › Provider Keys, or set `DEEPSEEK_API_KEY` on a self-hosted proxy. Without one, the request is refused with 402 (`no_upstream_credential`, or `byok_required` where the gateway requires your own key). The virtual key is never sent to DeepSeek.
 - **Not redirected:** the signed-in DeepSeek *account* route (`llm-deepseek-account`), whose token dsh only releases to DeepSeek's own origin, and `llm-pi-ai` routes you configure yourself. Earlier versions of this integration also wrote an `llm-pi-ai` route into `$DSH_HOME/settings.yaml`; dsh 0.2 no longer reads that file (it imports it once into the first profile that boots and renames it `settings.yaml.imported`), so Intutic no longer writes it.
-- **`$DSH_HOME/INSTALL.md`:** regenerated every sync (write-if-changed) — lists the manual `dsh plugin --profile <name> add @intutic/gate` command for every currently-registered profile. See step 5 above.
+- **`$DSH_HOME/INSTALL.md`:** regenerated on each write (write-if-changed) — lists the manual `dsh plugin --profile <name> add @intutic/gate` command for every currently-registered profile. See step 5 above.
 - **Protected paths:** agent tool calls that touch `.dsh/profiles`, `.dsh/cordis.patch.yml` (the home-level patch layer, which outranks every profile's) or `.dsh/settings.yaml` are blocked by the generated gates.
 - **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, which the default profile's agent-instructions plugin reads. It is written when at least one SOP targets dsh or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)).
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness dsh`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness dsh`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (blocking)
 
@@ -109,7 +122,7 @@ dsh's veto contract is **confirmed**, not assumed — read from `@deepseek-ai/ds
 - Intutic's plugin calls `next()` on allow (so later listeners — including dsh's own built-in approval flow — still run) and returns `{kind:'deny', reason}` without calling `next()` to veto, per Cordis's own waterfall semantics ("a listener that does not call `next()` vetoes the rest of the chain").
 - A crash inside the gate (anything other than its own structured refusal) is treated as "cannot evaluate" and denied — fail-closed, the same posture every other harness's gate in this product takes.
 
-Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to the control plane, same as every other harness.
+Every decision is appended to `.intutic/events/hook-events.jsonl`<!-- ENTERPRISE_ONLY_START --> and, under `intutic connect`, drained to the control plane<!-- ENTERPRISE_ONLY_END -->, same as every other harness.
 
 ::: tip Enforcement tiers under dsh vs. under a shell/JS hook
 `@intutic/gate`'s Tier A1 (the local policy snapshot) reads **only** `~/.intutic/hooks/policy-snapshot.rules` — unlike the shell/JS gates this product generates for other harnesses, it does not separately compile in the "static floor" (bypass/secret-content/skill-surface pattern tables). A dsh workspace therefore gets Tier A0 (SSO group policy from the snapshot), Tier A1 (snapshot rules), the MCP server registry and allowlist checks, Tier A2 (image integrity), Tier A3 (SOP rules), and Tier B (the control-plane `/hook-gate` call) — a strict subset of the compiled-in floor a generated shell/JS hook enforces, by design (this is a pre-existing, documented gap in the `@intutic/gate` package itself, not something dsh's integration introduced). See `@intutic/gate`'s own README for the full accounting.

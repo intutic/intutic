@@ -22,7 +22,11 @@ The CLI detects Cline and registers it as a harness:
   ✔ cline → /path/to/project/.clinerules/intutic-governance.md
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 ### 2. Start the proxy
 
@@ -30,18 +34,20 @@ The CLI detects Cline and registers it as a harness:
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## What gets written
 
 * **Gate:** `.clinerules/hooks/PreToolUse` — an executable Node.js script that evaluates shell commands, file edits and MCP tool calls against the built-in protections and your SOPs.
 * **Rules:** `.clinerules/intutic-governance.md` — your SOP text.
 
-`.clinerules` has to be a directory for both to fit. A flat `.clinerules` file that an earlier Intutic version wrote is converted automatically. A flat `.clinerules` file you wrote yourself is left alone, and no gate is installed until you move its content into a file inside a `.clinerules/` directory; the `intutic connect` log says so. A `PreToolUse` hook you wrote yourself is never overwritten.
+`.clinerules` has to be a directory for both to fit. A flat `.clinerules` file that an earlier Intutic version wrote is converted automatically. A flat `.clinerules` file you wrote yourself is left alone, and no gate is installed until you move its content into a file inside a `.clinerules/` directory, and Intutic reports it. A `PreToolUse` hook you wrote yourself is never overwritten.
 
-An agent cannot edit or remove the gate: the Intutic gate refuses a tool call that names `.clinerules/hooks`, reading it included, under Cline and under every other harness with a hook gate. If the gate is deleted, replaced or made non-executable anyway, the sync daemon writes it back while `intutic connect` runs. Cline runs the hooks in its other hook directories as well, and refuses a call when any of them does, so a hook added there cannot override the gate.
+An agent cannot edit or remove the gate: the Intutic gate refuses a tool call that names `.clinerules/hooks`, reading it included, under Cline and under every other harness with a hook gate. If the gate is deleted, replaced or made non-executable anyway, run `intutic gates install` to write it back<!-- ENTERPRISE_ONLY_START -->; under `intutic connect` the sync daemon writes it back on its own<!-- ENTERPRISE_ONLY_END -->. Cline runs the hooks in its other hook directories as well, and refuses a call when any of them does, so a hook added there cannot override the gate.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness cline`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness cline`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Proxy routing
 

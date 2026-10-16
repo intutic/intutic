@@ -33,7 +33,11 @@ intutic init
   ✔ eve → /path/to/project/.env.intutic
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 ### 2. Gate authored tools (SDK)
 
@@ -161,7 +165,7 @@ The `.env.intutic` this integration writes says the same thing in its pointer co
 
 Same `.env.intutic` shape as every other JS/TS SDK-gated framework — proxy URLs plus a pointer at `@intutic/gate/eve`. Sourcing it does **not** route eve's own LLM egress (see the limitation above) and does not gate tools — the blocking gate is the `approval` policies you attach in `agent/`.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness eve`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness eve`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## What the adapter does NOT do
 

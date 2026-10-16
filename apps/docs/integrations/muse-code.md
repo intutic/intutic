@@ -8,14 +8,14 @@ The `muse` binary could not be installed in the environment this integration was
 
 ## How it works
 
-Muse Code reads project rules from `AGENTS.md` once the workspace is trusted, falling back to `CLAUDE.md` when there is no `AGENTS.md`. Intutic writes the rule sets as a marked section of the workspace's `AGENTS.md` and keeps your own text in it. The section is shared with every other harness in the workspace that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Once connect creates `AGENTS.md` in a workspace that only had a `CLAUDE.md`, Muse Code reads `AGENTS.md` in its place.
+Muse Code reads project rules from `AGENTS.md` once the workspace is trusted, falling back to `CLAUDE.md` when there is no `AGENTS.md`. Intutic writes the rule sets as a marked section of the workspace's `AGENTS.md` and keeps your own text in it. The section is shared with every other harness in the workspace that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Once Intutic creates `AGENTS.md` in a workspace that only had a `CLAUDE.md`, Muse Code reads `AGENTS.md` in its place.
 
-The governance-critical half — hook registration and MCP proxy-wrapping — is written by the sync daemon's `museHooks.ts`, the same split Goose's plugin installer uses. Hooks are registered at **two tiers**:
+The governance-critical half, hook registration, is written by `museHooks.ts`, the same split Goose's plugin installer uses (MCP proxy-wrapping is separate and needs a control plane). Hooks are registered at **two tiers**:
 
 - **Project-level:** `<repo>/.muse/hooks.json`
 - **Managed (pre-approved) tier:** an Intutic-owned `~/.config/muse/intutic-managed-hooks.json`, referenced by a narrow merge into `~/.config/muse/settings.json`'s `managed_hooks_path` key. This tier is meant to keep a hook registered through it from triggering a user trust/approval prompt the way a plain user-level `hooks.json` entry would — taken as given, not exercised against a real `muse` process.
 
-Both tiers are written every sync cycle for defense in depth: `managed_hooks_path` is a single global setting, so a machine where it has not landed yet (first sync, or a failed settings.json write) still gets project-scoped coverage the same cycle.
+Both tiers are written every time for defense in depth: `managed_hooks_path` is a single global setting, so a machine where it has not landed yet (a failed settings.json write) still gets project-scoped coverage from the same write.
 
 Muse Code exposes twelve lifecycle hook events; only two are blocking, and both are registered against the same gate script:
 
@@ -43,7 +43,11 @@ intutic init
   ✔ muse-code → /path/to/project/AGENTS.md
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 ### 3. Start the proxy
 
@@ -51,11 +55,13 @@ intutic init
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 ### 4. LLM egress — launcher/env-var only, not a persistent setting
 
-Muse exposes a `META_API_KEY` env var and a `--base-url` CLI flag for routing model traffic, but **no persistent proxy base-URL key could be confirmed** in `settings.json` from available docs/source. This is a materially different situation from every SDK-gated framework on this site: there, the gap is "which provider is proxy-routable"; here, the gap is "whether Muse Code has a config-file-level proxy setting at all." Route via the launcher flag or the env var per-invocation if you want LLM egress governed; do not expect `intutic init`/`intutic connect` to write one into `settings.json` for you — nothing is written for egress today. The client hook (`PreToolUse`/`PermissionRequest`, both tiers) is the primary, confirmed enforcement surface regardless of how (or whether) egress is routed.
+Muse exposes a `META_API_KEY` env var and a `--base-url` CLI flag for routing model traffic, but **no persistent proxy base-URL key could be confirmed** in `settings.json` from available docs/source. This is a materially different situation from every SDK-gated framework on this site: there, the gap is "which provider is proxy-routable"; here, the gap is "whether Muse Code has a config-file-level proxy setting at all." Route via the launcher flag or the env var per-invocation if you want LLM egress governed; do not expect `intutic init`/`intutic gates install --route` to write one into `settings.json` for you — nothing is written for egress today. The client hook (`PreToolUse`/`PermissionRequest`, both tiers) is the primary, confirmed enforcement surface regardless of how (or whether) egress is routed.
 
 ## What gets written
 
@@ -63,16 +69,18 @@ Muse exposes a `META_API_KEY` env var and a `--base-url` CLI flag for routing mo
 - **Hook registration:** `<repo>/.muse/hooks.json` (project tier) and `~/.config/muse/intutic-managed-hooks.json` (managed tier, referenced via `managed_hooks_path` in `~/.config/muse/settings.json`). Both are assumed to share the same `{ hooks: { <Event>: [{ matcher, hooks: [{ type, command }] }] } }` shape `codexHooks.ts` established for Codex's `hooks.json` — the closest architectural analog, not a confirmed Muse-specific schema.
 - **Hook script:** `.intutic/hooks/muse-check.js` — the same shared gate evaluator (compiled protection floor + policy snapshot + ` WHERE `/argPattern rules) every other JavaScript-family harness in this product runs, registered for both `PreToolUse` and `PermissionRequest`.
 - **`~/.config/muse/settings.json`:** narrow merge-write — only `managed_hooks_path` is set/updated; `schema_version` (defaulted to `1` if the file is new) and everything else (`mcp_servers`, any user-set key) is preserved.
-- **MCP servers:** entries under `mcp_servers` in `settings.json` (both `stdio` and `streamable_http` transports) are proxy-wrapped the same way every other JSON-map harness's servers are — though the `streamable_http` entry shape itself is an assumption; see the callout below.
+<!-- ENTERPRISE_ONLY_START -->
+- **MCP servers** (with `intutic connect`)**:** entries under `mcp_servers` in `settings.json` (both `stdio` and `streamable_http` transports) are proxy-wrapped the same way every other JSON-map harness's servers are — though the `streamable_http` entry shape itself is an assumption; see the callout below.
+<!-- ENTERPRISE_ONLY_END -->
 - **Skills:** nothing Muse-specific. The product's skill inventory reads the workspace's `.agents/skills/`; a user-level `~/.agents/skills` is not scanned.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness muse-code`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness muse-code`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (blocking, but the block contract is ASSUMED)
 
 Muse's own documentation confirms that `PreToolUse` and `PermissionRequest` are blocking lifecycle hooks, but does not state **how** a hook signals a refusal. `muse-check.js` uses **exit code 2** — the same contract `codexHooks.ts` uses for Codex — because it is the closest architectural analog (a JS gate reading JSON on stdin, registered at a project-level and a user-scoped `hooks.json`), not because it has been observed against a real `muse` process. If the real contract turns out to be a JSON object on stdout instead, every Muse Code block today exits 2 with nothing on stdout — which a stdout-reading harness would treat identically to an ALLOW. State this plainly to anyone relying on this integration in production: it would look correct in every test this repository runs (which drives the emitted script directly and asserts on its exit code) while doing nothing against the real product.
 
-Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to the control plane, same as every other harness — that audit trail itself does not depend on which block contract turns out to be correct.
+Every decision is appended to `.intutic/events/hook-events.jsonl`<!-- ENTERPRISE_ONLY_START --> and, under `intutic connect`, drained to the control plane<!-- ENTERPRISE_ONLY_END -->, same as every other harness — that audit trail itself does not depend on which block contract turns out to be correct.
 
 ::: warning Four assumptions, not four facts
 1. **The block/deny wire contract** — exit code 2, copied from Codex, not confirmed for Muse.
@@ -94,4 +102,4 @@ Each is a small, isolated edit in `museHooks.ts`/`mcpAutoWrite.ts` once a real i
 | Format | Markdown (rules), JSON (hooks/settings) |
 | Write strategy | Atomic (write to `.intutic-tmp`, then rename) |
 | Block contract | Exit code 2 — **ASSUMED**, copied from Codex's confirmed contract, not verified against a real `muse` install |
-| LLM egress | `META_API_KEY` env var / `--base-url` flag — launcher-only; no persistent `settings.json` key confirmed, nothing written by `intutic init`/`intutic connect` |
+| LLM egress | `META_API_KEY` env var / `--base-url` flag — launcher-only; no persistent `settings.json` key confirmed, nothing written by `intutic init`/`intutic gates install` |

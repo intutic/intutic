@@ -17,6 +17,8 @@ npx @intutic/cli init
 **5 minutes to your first governance verdict:**
 
 ```bash
+intutic init               # Detect harnesses, record them in ~/.intutic/config.json
+intutic gates install      # Write each harness's gate and rules file from .intutic/sops/
 intutic start              # Run the proxy standalone — no account needed
 intutic traces list        # See governance verdicts
 ```
@@ -36,10 +38,11 @@ intutic traces list        # See governance verdicts
 
 | Command | Description |
 |---------|-------------|
-| `intutic init` | Initialize workspace — detect harnesses, record them in `~/.intutic/config.json` |
-| `intutic start` | Start the proxy standalone — no account or control plane needed (`--port`, `--upstream-url`) |
+| `intutic init` | Initialize workspace — detect harnesses, record them in `~/.intutic/config.json`, and offer to install the gates (`--gates`, `--no-gates`) |
+| `intutic gates install` | Write each recorded harness's gate and rules file from local SOPs (`.intutic/sops/`), with no control plane (`--harness`, `--route` to also write proxy routing while the proxy runs, `--dry-run`, `--workspace`) |
+| `intutic start` | Start the proxy standalone — no account or control plane needed; refreshes the installed gates when `.intutic/sops/` changes (`--port`, `--upstream-url`, `--no-gates`) |
 | `intutic status` | Show workspace status — auth, harnesses, sync state |
-| `intutic disconnect` | Undo `intutic connect` — restore the harness configs it changed, remove its services, log out (`--harness`, `--dry-run`, `--keep-login`) |
+| `intutic disconnect` | Undo `intutic gates install` — restore the harness configs it changed (`--harness`, `--dry-run`, `--keep-login`) |
 | `intutic doctor` | Diagnose workspace health — proxy, auth, daemon, configs, logs |
 | `intutic traces list` | List execution traces (`--limit`, `--since`, `--action` with a control plane, `--verdict` without one, `--model`, `--json`) |
 | `intutic traces inspect <id>` | Show full detail of a single trace |
@@ -48,6 +51,7 @@ intutic traces list        # See governance verdicts
 | `intutic logout` | Clear stored credentials |
 | `intutic whoami` | Show current authenticated identity |
 | `intutic connect` | Start sync daemon — bidirectional config sync (`--interval`) |
+| `intutic disconnect` | Also undoes `intutic connect`: removes its services and logs out unless `--keep-login` |
 -->
 
 ## Supported Harnesses
@@ -60,7 +64,7 @@ Intutic auto-detects and configures AI coding harnesses, among them:
 | **Cursor** | `.cursor/` or `.cursorrules` in the workspace, or `~/.cursor/` | `.cursor/rules/intutic-governance.mdc` + gate in `.cursor/hooks.json` |
 | **Aider** | `.aider.conf.yml` in the workspace | `.intutic/aider-sops.md`, loaded by `read:` in `.aider.conf.yml` |
 | **Antigravity** | `~/.gemini/antigravity*/`, `.agents/hooks.json`, `.gemini/` in the workspace, or `antigravity` / `gemini` on PATH | `GEMINI.md` section + `PreToolUse` gate in `~/.gemini/config/hooks.json` (Gemini CLI: `BeforeTool` gate in `~/.gemini/settings.json`) |
-| **Codex** | `codex` on PATH, or `CODEX_HOME` set | `AGENTS.md` section + gate in `.codex/hooks.json`; proxy routing in `~/.codex/config.toml` |
+| **Codex** | `codex` on PATH, or `CODEX_HOME` set | `AGENTS.md` section + gate in `.codex/hooks.json`; proxy routing in `~/.codex/config.toml` (with `--route`) |
 | **n8n** | Running n8n instance (`N8N_URL`, default `http://localhost:5678`) | Workflow JSON file + external hook gate `~/.intutic/hooks/n8n-governance-hook.js` |
 | **OpenClaw** | `~/.openclaw/` or `.openclaw/openclaw.json` | `AGENTS.md` section in its agent workspace + `~/.intutic/hooks/openclaw/intutic-governance.cjs` (plugin gate, listed in `~/.openclaw/openclaw.json`) |
 | **Hermes** | `~/.hermes/` or `.hermes/config.yaml` | `AGENTS.md` section + `hooks.pre_tool_call` gate in `~/.hermes/config.yaml` |
@@ -98,7 +102,7 @@ Credentials are stored at `~/.intutic/credentials.json` (mode `0600`).
 
 | Variable | Description |
 |----------|-------------|
-| `INTUTIC_CONTROL_PLANE_URL` | Control plane URL for this shell (overrides the one `intutic login --control-plane-url` saved) |
+| `INTUTIC_CONTROL_PLANE_URL` | Control plane URL for this shell (overrides the one a control-plane login saved) |
 | `INTUTIC_DEV` | `1` targets the local control plane (`http://localhost:3001`), like `--dev` |
 | `INTUTIC_PROXY_URL` | Local proxy URL; its port is the proxy port (default `4000`) |
 

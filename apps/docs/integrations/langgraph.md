@@ -23,7 +23,11 @@ intutic init
   ✔ langgraph → /path/to/project/.env.intutic
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 ### 2. Route LLM traffic through the proxy {#2-route-llm-traffic-through-the-proxy}
 
@@ -124,7 +128,7 @@ def shell(command: str) -> str:
 5. container **image provenance** on deploy commands,
 6. the control plane's **hook-gate** (`POST /api/v1/hook-gate`) — fail-closed by default: if the control plane cannot be reached, or answers `GOVERNANCE_UNAVAILABLE` because one of its checks could not run, the call is refused rather than waved through. `fail_closed=False` on the client lets such calls run; a 400 `INVALID_REQUEST` is refused either way.
 
-Steps 4 and 6 need a `GateClient`: `install(Gate(GateConfig(), GateClient.from_env(session_id=run_id, harness="langgraph")))`. A `Gate` built without one runs the local steps only. `from_env()` reads `INTUTIC_API_KEY` or the key `intutic login` stored; with no key the client is local-only, and the hook gate's answer is an allow with code `LOCAL_ONLY`. See [Tool Gate SDK](/reference/gate-sdk).
+Steps 4 and 6 need a `GateClient`: `install(Gate(GateConfig(), GateClient.from_env(session_id=run_id, harness="langgraph")))`. A `Gate` built without one runs the local steps only. `from_env()` reads `INTUTIC_API_KEY` or the key a control-plane login stored; with no key the client is local-only, and the hook gate's answer is an allow with code `LOCAL_ONLY`. See [Tool Gate SDK](/reference/gate-sdk).
 
 With a client, every decision is reported via `/api/v1/hook-events`, so gated LangGraph runs appear in the same audit feed as hook-based harnesses.
 
@@ -167,7 +171,7 @@ export INTUTIC_SOP_COUNT=5
 # body runs. See https://docs.intutic.ai/integrations/langgraph
 ```
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness langgraph`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness langgraph`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## What the adapter does NOT do
 

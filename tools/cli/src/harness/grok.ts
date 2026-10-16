@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
-import type { IHarnessAdapter } from './types.js'
+import type { HarnessWriteOptions, IHarnessAdapter } from './types.js'
 import { writeGrokHooks } from '@intutic/sync-daemon/harness/grokHooks'
 import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 
@@ -45,8 +45,8 @@ export const grokAdapter: IHarnessAdapter = {
 
   /** PreToolUse gate (project + user level) + config.toml model base_url
    *  merge (project + user level). */
-  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
-    await writeGrokHooks(workspaceRoot, proxyUrl, '')
+  async installGate(workspaceRoot: string, proxyUrl: string, opts?: HarnessWriteOptions): Promise<void> {
+    await writeGrokHooks(workspaceRoot, proxyUrl, '', opts?.routing !== false)
   },
 
   writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {

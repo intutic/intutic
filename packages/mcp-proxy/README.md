@@ -65,7 +65,7 @@ Built-in patterns only: there are no workspace-defined DLP patterns here (custom
 | Binary | Description |
 |--------|-------------|
 | `intutic-mcp-proxy` | Wraps an MCP server (stdio or remote), or with no server to wrap, runs the standalone `intutic` MCP server |
-| `intutic-mcp-daemon` | Long-lived local daemon on a Unix socket (`~/.intutic/mcp-proxy.sock`, or `MCP_DAEMON_SOCKET`) that caches policy and batches telemetry for proxies running with `INTUTIC_MCP_PROXY_MODE=daemon` (read from `~/.intutic/env/runtime.env` only, which `intutic connect` writes from the workspace's `mcpProxyMode` setting). Its shared Valkey policy cache is keyed per caller (workspace, policy generation and a hash of the daemon's API key). Not an MCP server. |
+| `intutic-mcp-daemon` | Long-lived local daemon on a Unix socket (`~/.intutic/mcp-proxy.sock`, or `MCP_DAEMON_SOCKET`) that caches policy and batches telemetry for proxies running with `INTUTIC_MCP_PROXY_MODE=daemon` (read from `~/.intutic/env/runtime.env` only, which the sync daemon writes from a control-plane workspace's `mcpProxyMode` setting). Its shared Valkey policy cache is keyed per caller (workspace, policy generation and a hash of the daemon's API key). Not an MCP server. |
 
 ## Installation
 
@@ -120,7 +120,7 @@ The package has two binaries, so `npx` needs `-p @intutic/mcp-governance-proxy` 
 
 `--remote-transport` accepts `sse` or `http` (default `http`, the SDK's current non-deprecated `StreamableHTTPClientTransport`). `--remote-url` and a positional stdio command (`--` followed by a command) are mutually exclusive — pass one or the other. Auth headers ride via the `INTUTIC_REMOTE_HEADERS` environment variable (a JSON object string), never as a CLI argument — argv is visible to any local process via `ps`.
 
-`--server-name` is the name the registry, the server allowlist and the TOFU pin file (`~/.intutic/mcp-pins/<workspace>__<server>.json`) know the server by; without it the server is `unknown`. `intutic connect` sets it when it wraps a harness's servers. Every environment variable and flag is listed in the [MCP Server Governance guide](https://docs.intutic.ai/guide/mcp-governance#configuration-reference).
+`--server-name` is the name the registry, the server allowlist and the TOFU pin file (`~/.intutic/mcp-pins/<workspace>__<server>.json`) know the server by; without it the server is `unknown`. Intutic sets it when it wraps a harness's servers. Every environment variable and flag is listed in the [MCP Server Governance guide](https://docs.intutic.ai/guide/mcp-governance#configuration-reference).
 
 ## Part of Intutic
 

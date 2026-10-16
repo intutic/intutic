@@ -84,7 +84,7 @@ A hold rule asks a person before the call runs: a `REQUIRE_APPROVAL:` SOP, which
 
 1. It looks for an approval of this exact call in `GET /api/v1/decisions/approved-bypasses`. "Exact" means the same rule, the same tool and the same arguments, compared as a SHA-256 of the arguments with their keys sorted. If it finds one that has not expired, the call goes on to the next tier and the gate reports `hold_approved_bypass_used`.
 2. Otherwise it records a hold with `POST /api/v1/decisions`, reports `tool_held`, and throws `IntuticGateHold`, a subclass of `IntuticGateRefusal` with `code` `HELD` and the hold's id in `holdId` (`hold_id`). Its message starts with `[Intutic Governance] HELD:` and tells the agent who can approve the hold and when a retry passes. The hold appears in **Findings › Review Queue**, and the workspace gets the `decision.pending` notification, Slack card included.
-3. An owner, admin or engineering manager approves or rejects it with `intutic decision approve <holdId>` (or `reject`), the review API, or the Slack card. A developer cannot approve their own hold.
+3. An owner, admin or engineering manager approves or rejects it with the review API or the Slack card<!-- ENTERPRISE_ONLY_START -->, or with `intutic decision approve <holdId>` (or `reject`)<!-- ENTERPRISE_ONLY_END -->. A developer cannot approve their own hold.
 4. With the workspace's `reviewHoldBypassEnabled` setting on, approval lets the identical call through for `reviewHoldBypassTtlMinutes` (10 by default). With it off, the default, approval records the decision only and a retry is held again.
 
 A `review_before:` entry can name a tool (`Write`) or an action (`action:deploy`, `action:publish`, `action:release`, `action:db_write`). For an action, the gate classifies the call's `command` with the same phrases as the hook gates and the proxy, whatever separates their words: `git push` with a tab or a line continuation between the words, `kubectl --context prod apply` and `DROP/**/TABLE users` are held like their plain spellings.
@@ -128,7 +128,7 @@ Without the plan nothing changes, and `enforce: false` (`enforce=False`) skips t
 
 The image allowlist is JSON: `require_digest` (default `true`), `registries_allowed` (repository prefixes; empty allows any registry) and `images`, keyed by repository, each with its `approved_digests`.
 
-`GateClient.fromEnv({ sessionId?, harness?, failClosed? })` (`GateClient.from_env(session_id=None, harness=..., fail_closed=True)`) reads `INTUTIC_CONTROL_PLANE_URL`, `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_SESSION_ID`, and falls back to the key and workspace that `intutic login` stored in `~/.intutic/credentials.json`. With no key in either place, the client is local-only (see [Without credentials](#without-credentials)).
+`GateClient.fromEnv({ sessionId?, harness?, failClosed? })` (`GateClient.from_env(session_id=None, harness=..., fail_closed=True)`) reads `INTUTIC_CONTROL_PLANE_URL`, `INTUTIC_API_KEY`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_SESSION_ID`, and falls back to the key and workspace a control-plane login stored in `~/.intutic/credentials.json`. With no key in either place, the client is local-only (see [Without credentials](#without-credentials)).
 
 ## Refusals
 

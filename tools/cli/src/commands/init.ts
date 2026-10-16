@@ -2,9 +2,11 @@
  * `intutic init` — Initialize workspace.
  *
  * Detects workspace root, auto-detects harnesses, checks for stored
- * credentials, and writes local config. It writes no harness config files and
- * makes no network call: `intutic connect` writes the harness configs, from
- * the control plane's SOPs plus the local `.intutic/sops`.
+ * credentials, and writes local config. It makes no network call. With no
+ * login it offers to install the harness gates and rules files
+ * (`intutic gates install`, from the local `.intutic/sops`); with one,
+ * `intutic connect` writes them from the control plane's SOPs plus the local
+ * ones.
  *
  * @module
  */
@@ -57,7 +59,7 @@ async function resolveWantHooks(
   return normalized === '' || normalized === 'y' || normalized === 'yes'
 }
 
-export async function runInit(opts: { dev?: boolean; gitHooks?: boolean }): Promise<void> {
+export async function runInit(opts: { dev?: boolean; gitHooks?: boolean; gates?: boolean }): Promise<void> {
   log.header('Intutic — Workspace Initialization')
 
   // 1. Find workspace root
@@ -95,9 +97,9 @@ export async function runInit(opts: { dev?: boolean; gitHooks?: boolean }): Prom
   if (!creds) {
     log.info('Not authenticated — fine for local use.')
     log.info('To run the proxy locally, no account needed: `intutic start`.')
+    log.info('Harness gates and rules files are installed by `intutic gates install`, no account needed.')
     if (CONTROL_PLANE_PRODUCT_RELEASED) {
-      log.info('Harness config files are written by `intutic connect`, which syncs with a control plane')
-      log.info('(open core does not include one; `intutic login` first if you run your own).')
+      log.info('With a control plane, `intutic login` and `intutic connect` install and sync them instead.')
     }
   } else {
     log.success(`Authenticated as ${creds.email}`)
@@ -143,6 +145,29 @@ export async function runInit(opts: { dev?: boolean; gitHooks?: boolean }): Prom
     await installGitHooks(workspaceRoot)
   } else if (opts.gitHooks === undefined && !isTTY) {
     log.dim('Git hooks not installed (no terminal to ask). Re-run with --git-hooks to install them.')
+  }
+
+  // 6. Harness gates: with no login, from this machine (`intutic gates
+  // install`); with one, connect owns them. Nothing to gate without a harness.
+  if (creds) {
+    if (opts.gates) log.info('Gates not installed: `intutic connect` installs and refreshes them on a machine with a login.')
+  } else if (detected.length > 0) {
+    const wantGates = await resolveWantHooks(opts.gates, isTTY, async () => {
+      const readline = await import('node:readline')
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+      return new Promise<string>((resolve) => {
+        rl.question('Install the Intutic tool-call gates and rules files for the detected harnesses? [Y/n]: ', (answer) => {
+          rl.close()
+          resolve(answer)
+        })
+      })
+    })
+    if (wantGates) {
+      const { runGatesInstall } = await import('./gates.js')
+      await runGatesInstall({})
+    } else if (opts.gates === undefined && !isTTY) {
+      log.dim('Gates not installed (no terminal to ask). Run `intutic gates install` to install them.')
+    }
   }
 
   log.success('Workspace initialized.')

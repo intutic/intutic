@@ -37,8 +37,8 @@ workspace's control plane, on every plan; their sections are badged
 
 ## How a server gets here at all
 
-`intutic connect` and the sync daemon's continuous sync loop rewrite each
-stdio MCP server entry in a harness config (Claude Code's `~/.claude.json`,
+Each stdio MCP server entry in a harness config is rewritten<!-- ENTERPRISE_ONLY_START --> by
+`intutic connect` and the sync daemon's continuous sync loop<!-- ENTERPRISE_ONLY_END --> (Claude Code's `~/.claude.json`,
 Claude Desktop, Cursor, Cline, Windsurf, Continue, Goose, OpenHands, Muse
 Code, Grok Build, OpenCode, Gemini CLI and Google Antigravity — seventeen config
 paths across twelve harnesses)
@@ -55,7 +55,7 @@ earlier version, which kept only a remote server's URL and headers, is read
 back from the wrapped command: the original command follows `--`.
 
 For Claude Code that means the user-scope servers in `~/.claude.json`, the
-local-scope servers of the project `intutic connect` ran in
+local-scope servers of the project Intutic ran in
 (`projects[<path>].mcpServers` in the same file), and the project-scope servers
 in the repo's `.mcp.json`. That last file is committed and shared with the
 team, so it is never rewritten — that would put one machine's proxy path into
@@ -471,8 +471,8 @@ decides (`mcpProxyFailBehavior`, else `INTUTIC_MCP_FAIL_OPEN` — see
   and the setting.
 
 So a budget needs a Valkey on every machine whose proxies it should limit:
-`intutic connect` and the sync daemon write `INTUTIC_VALKEY_URL` to
-`runtime.env` when their local Valkey runs.
+the proxies find it through `INTUTIC_VALKEY_URL` in `runtime.env`<!-- ENTERPRISE_ONLY_START -->, which
+`intutic connect` and the sync daemon write when their local Valkey runs<!-- ENTERPRISE_ONLY_END -->.
 
 ## Server-level TOFU pinning
 
@@ -643,8 +643,8 @@ gateway or router the organization already runs to aggregate several
 internal MCP servers behind one endpoint. If that gateway speaks MCP over
 HTTP or SSE, it needs no special support: point Intutic's proxy at it the
 same way you would point it at any other remote server, wired in as the
-harness's `mcp.json` entry (or written by `intutic connect`, once the sync
-daemon discovers it as a `url`-keyed entry):
+harness's `mcp.json` entry<!-- ENTERPRISE_ONLY_START --> (or written by `intutic connect`, once the sync
+daemon discovers it as a `url`-keyed entry)<!-- ENTERPRISE_ONLY_END -->:
 
 ```bash
 npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy \
@@ -774,7 +774,7 @@ MCP governance, and it stays that way.
 
 A second, deliberately smaller layer sits in the per-harness `PreToolUse`
 gate scripts every harness writer already generates (the same scripts that
-block a write to `.claude/settings.json` or an `rm -rf /`). They recognise a
+block a write to `.claude/settings.json`, and flag an `rm -rf /`). They recognise a
 `mcp__<server>__<tool>`-shaped tool name and refuse it on two of the
 workspace's MCP settings, delivered through the sync daemon's policy snapshot:
 
@@ -882,7 +882,7 @@ apply to that gate's unit of evaluation at all.
 | LangGraph | ❌ n/a | No generated gate file — the SDK-side `intutic_clawde.gate` is out of scope for this phase's per-harness matcher work. |
 | Aider | ❌ n/a | No `PreToolUse` hook mechanism exists for this harness at all (see `NO_GATE` in `gateRegistry.ts`). |
 | Continue | ❌ n/a | No tool-call gate: its CLI loads `PreToolUse` hooks but never fires them, and the IDE extension has no hook system (see `NO_GATE` in `gateRegistry.ts`). |
-| Xirp | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a Xirp-managed session is whatever the WRAPPED harness (Claude Code, Codex, …) sends, and is covered by that harness's own row above when that harness's hook is registered at user level, which applies in every `git worktree`. Project-level gate files are written only into the checkout `intutic connect` ran in, so a hook registered only at project level is absent from the worktree a Xirp session runs in — see [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage). |
+| Xirp | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a Xirp-managed session is whatever the WRAPPED harness (Claude Code, Codex, …) sends, and is covered by that harness's own row above when that harness's hook is registered at user level, which applies in every `git worktree`. Project-level gate files are written only into the checkout `intutic gates install` ran in, so a hook registered only at project level is absent from the worktree a Xirp session runs in — see [Worktree Coverage](/reference/harness-security-matrix#worktree-coverage). |
 | Agentic Orchestrator | ❌ n/a (delegated) | Not itself an AI agent — no tool calls of its own to match. An `mcp__<server>__<tool>`-shaped call made inside a session is whatever the WRAPPED backend (Claude Code, Codex, or OpenCode) sends. Claude Code/Codex calls are covered by that backend's own row above on the same terms as Xirp — through user-level hooks, which reach its per-feature worktrees, and not through project-level files, which do not; OpenCode calls are covered by the OpenCode row above (the plugin fires for MCP tools and composes their ids for the allowlist). |
 
 ## Configuration reference {#configuration-reference}
@@ -890,7 +890,7 @@ apply to that gate's unit of evaluation at all.
 The proxy is `intutic-mcp-proxy` from `@intutic/mcp-governance-proxy`. The
 package has two binaries, so `npx` needs the package and the binary named:
 `npx -y -p @intutic/mcp-governance-proxy intutic-mcp-proxy …`.
-`intutic connect` writes all of this for you; the table is for running the
+<!-- ENTERPRISE_ONLY_START -->`intutic connect` writes all of this for you; <!-- ENTERPRISE_ONLY_END -->the table is for running the
 proxy by hand.
 
 | Flag | What it does |

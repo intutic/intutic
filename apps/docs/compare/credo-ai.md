@@ -15,7 +15,7 @@ Intutic enforces policy where agents act: a pre-execution gate decides each tool
 |---|---|---|
 | **Primary job** | Runtime enforcement and audit for AI agents | Governance system of record for AI systems |
 | **Runtime enforcement** | Production: native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks, request and response proxy, MCP governance proxy, egress firewall, sandboxed execution | Agent Governor, Research Preview for design partners with no production SLA, Claude Code only (Codex, Cursor and Microsoft Copilot listed as coming soon); guardrails for ChatGPT, Claude and Gemini deployments. Enforcement through CI/CD, CASB and API gateways is planned |
-| **Decisions at the tool call** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, shadow; on model traffic the proxy also redacts and re-asks | Allow, block, escalate, advise |
+| **Decisions at the tool call** | Allow, warn, require approval (the call is refused and held for review; with a control plane, once a reviewer approves it the identical retry passes if the workspace has opted in, and with none it stays refused), block, shadow; on model traffic the proxy also redacts and re-asks | Allow, block, escalate, advise |
 | **Where policy lives** | Files in your repository (`.intutic/sops/*.md`), reviewed in git; policy documents in Notion, Confluence, GitHub or Google Docs, or an uploaded file, can be turned into enforced controls with [Policy Guardrails](/guide/policy-guardrails) | Authored in the Credo AI platform. Agent Governor applies a curated policy library at a permissive, balanced or strict posture, compiled into code; custom and uploaded policies are listed as coming soon |
 | **Regulatory mapping** | SOC 2 evidence pack, OWASP LLM and Agentic posture mapping, partial control mapping to the EU AI Act, ISO/IEC 42001, NIST AI RMF and MITRE ATLAS exported as Markdown, CSV, PDF or JSON, and an Article 14 human-oversight export; the evidence pack and the oversight export are signed when a signing key is configured | Policy packs for the EU AI Act, NIST AI RMF, ISO 42001 and SOC 2 |
 | **Inventory and risk** | Agent registry with posture scoring and an agent graph, for the agents Intutic governs | AI registry with auto-discovery, shadow AI discovery and MCP server governance; risk assessments, Agent Cards and audit-ready reports; automated red teaming and drift detection |
@@ -42,7 +42,9 @@ Intutic enforces policy where agents act: a pre-execution gate decides each tool
 - You need tool calls decided before they run, across the coding agents and frameworks your teams use today.
 - You want policy in git, enforced by the same code path that reads it.
 - You need approval holds, egress control and sandboxing, not only allow and block.
+<!-- ENTERPRISE_ONLY_START -->
 - You want an audit trail you can verify independently, on infrastructure you control.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## When to choose Credo AI
 

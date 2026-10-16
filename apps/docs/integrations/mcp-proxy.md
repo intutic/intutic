@@ -92,10 +92,12 @@ You can configure both modes together in `claude_desktop_config.json` or `~/.cla
 }
 ```
 
+<!-- ENTERPRISE_ONLY_START -->
 In practice you rarely hand-write this: `intutic connect` and the sync
 daemon's continuous sync loop rewrite each MCP server entry in a harness
 config to route through this proxy automatically — see [How a server gets
 here at all](/guide/mcp-governance#how-a-server-gets-here-at-all).
+<!-- ENTERPRISE_ONLY_END -->
 
 ---
 
@@ -175,14 +177,14 @@ In a workspace whose [intervention mode](/guide/policies#intervention-modes) is 
 
 The sequence detectors (`consecutive_repeat`, `ping_pong_cycle`, `landmark_cycle`,
 `tool_diversity_collapse`) and the reask ladder read a rolling window of the
-session's tool calls. `intutic connect` wraps **each** MCP server with its own
+session's tool calls. Each MCP server is wrapped with its own
 proxy process, so a harness session with three servers runs three proxies — and
 each used to keep its own window, so a loop that alternated between two
 servers was invisible and a reask budget reset per server.
 
-The window is now shared through the local Valkey `intutic connect` runs: the
-daemon writes `INTUTIC_VALKEY_URL` into `~/.intutic/env/runtime.env` when its
-Valkey is up, and every proxy of one harness session — identified by the
+The window is now shared through a local Valkey named by `INTUTIC_VALKEY_URL`
+in `~/.intutic/env/runtime.env`<!-- ENTERPRISE_ONLY_START --> (`intutic connect` runs one and writes
+the variable when it is up)<!-- ENTERPRISE_ONLY_END -->: every proxy of one harness session — identified by the
 harness process that spawned them (`<workspace>:mcp:<parent pid>:<start token>`;
 `INTUTIC_MCP_SESSION_SCOPE` overrides it) — reads and appends the same
 60-entry sequence, the same 60-second call window and the same reask counters
@@ -333,8 +335,7 @@ The Intutic MCP proxy guarantees strict `stdio` isolation — all governance log
 * **Symptom**: Claude Desktop or Cursor displays a red `Server disconnected` status badge when opening the application.
 * **Root Cause**: The entry's command could not start the proxy — usually a path to `dist/index.js` that does not exist on this machine, or `npx @intutic/mcp-governance-proxy` without `-p` (the package has two binaries, `intutic-mcp-proxy` and `intutic-mcp-daemon`, so `npx` cannot pick one and exits). An entry with no command after `--` and no `--remote-url` is not an error: it runs the standalone governance server.
 * **Remedy**:
-  1. **Automatic Fix (Recommended)**: Run `intutic connect` in your terminal. The Intutic Sync Daemon automatically detects your installed MCP servers and prepends the proxy wrapper cleanly.
-  2. **Manual Fix**: Ensure your `claude_desktop_config.json` passes a valid target MCP server command after `--`:
+  1. <!-- ENTERPRISE_ONLY_START -->**Automatic Fix (Recommended)**: Run `intutic connect` in your terminal. The Intutic Sync Daemon automatically detects your installed MCP servers and prepends the proxy wrapper cleanly. <!-- ENTERPRISE_ONLY_END -->**Manual Fix**: Ensure your `claude_desktop_config.json` passes a valid target MCP server command after `--`:
      ```json
      {
        "mcpServers": {

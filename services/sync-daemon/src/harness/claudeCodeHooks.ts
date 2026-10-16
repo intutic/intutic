@@ -291,7 +291,9 @@ export async function updatePreToolUseHooks(
     hooks: [
       {
         type: 'command',
-        command: `node ${node_path.join(workspaceRoot, '.intutic', 'hooks', 'claude-code-check.js')}`,
+        // Quoted: a workspace path with a space in it split the command, and
+        // a hook that cannot start is an error, not a block.
+        command: `node ${JSON.stringify(node_path.join(workspaceRoot, '.intutic', 'hooks', 'claude-code-check.js'))}`,
         timeout: HOOK_TIMEOUT_SECONDS,
         statusMessage: 'Verifying tool execution against Intutic SOP policy...',
       },

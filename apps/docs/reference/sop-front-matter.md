@@ -19,7 +19,7 @@ ignore it.
 | `allow_harnesses:` | `claude-code, cursor` | Restricts which harnesses a role may use. |
 | `plan_steps:` | `Read, Edit, Bash, action:run_tests` | Work drifting outside the declared steps is steered. |
 | `scope_paths:` | `src, docs` | A file write outside these paths is steered; reads are not checked. |
-| `review_before:` | `action:deploy` | Holds the run for human approval — at every hook gate before the call runs, and at the proxy after it. |
+| `review_before:` | `action:deploy` | Holds the run for human approval — at every hook gate before the call runs, and at the proxy after it. Approval needs a control plane: without one, the gates refuse the call. |
 | `requires_before:` | `A -> B` | B is refused unless A appeared earlier. |
 | `forbid_after:` | `A -> B` | B is refused if A appeared earlier. |
 | `max_calls:` | `A <= N` | Refuses the N+1th call of A. |
@@ -55,22 +55,22 @@ own detectors are concerned, it is.
 The parser reads keys by line prefix and ignores every key it does not know,
 so a SOP may carry annotations the proxy never acts on. Intutic's own tooling
 writes six: the first two come from generating front matter from a cited
-policy passage, the last three are `intutic sops pull`/`push`'s sync record:
+policy passage, the last four are the sync record a pull from, or push to, a control plane leaves:
 
 | Key | Shape | What it is |
 | :--- | :--- | :--- |
 | `source:` | a URL | Where the rule's text came from — the upstream page. |
 | `cite:` | a hex digest | The hash of the exact passage the rule was derived from. |
-| `content_hash:` | a hex digest | `intutic sops pull` and `intutic guardrails pull`'s marker: the hash of the body when the file was written, so a later pull can tell an upstream change from a local edit. |
-| `intutic_id:` | a SOP id (`sp_…`) | The control-plane SOP this file was last pulled from or pushed to; `intutic sops push` updates it instead of creating a new one. |
+| `content_hash:` | a hex digest | The marker a pull of SOPs or guardrails from a control plane leaves: the hash of the body when the file was written, so a later pull can tell an upstream change from a local edit. |
+| `intutic_id:` | a SOP id (`sp_…`) | The control-plane SOP this file was last pulled from or pushed to; a push updates it instead of creating a new one. |
 | `intutic_revision:` | an integer | That SOP's edit counter at the last sync, sent as the push's precondition so an edit made on the control plane since is refused, not overwritten. Not the `version:` semver. |
-| `intutic_draft:` | a SOP id (`sp_…`) | On the `<name>.approved.md` file `intutic sops push`/`pull` keep beside a file that edits a draft: the draft this approved version is waiting on. `intutic sops push` never sends such a file. |
+| `intutic_draft:` | a SOP id (`sp_…`) | On the `<name>.approved.md` file a push or pull keeps beside a file that edits a draft: the draft this approved version is waiting on. A push never sends such a file. |
 
 None of them blocks, steers or holds anything. They exist so a rule on disk still
 says which sentence it stands on; the enforcing keys above are the only ones
 the proxy reads.
 
-One more key from `intutic sops pull` does change what is enforced, in one
+One more key from a pull does change what is enforced, in one
 direction only. `intutic_enforced: false` marks a pulled copy of a SOP the
 control plane does not enforce (any state but `VALIDATED`, or a SOP no longer
 active), and the proxy and the sync daemon skip that file entirely. Any other
@@ -272,7 +272,7 @@ command passes untouched. The response gate must be on
 
 A hook-rule [policy guardrail](/guide/policy-guardrails) reaches the proxy as
 one `hook_rule:` line, in the SOP the control plane serves for it (and the file
-`intutic guardrails pull` writes). The value is one JSON object on one line:
+a guardrails pull writes). The value is one JSON object on one line:
 
 ```yaml
 ---

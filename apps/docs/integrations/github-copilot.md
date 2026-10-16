@@ -20,21 +20,29 @@ The CLI detects GitHub Copilot presence (via `.git` or `.github` folders) and re
   ✔ github-copilot → /path/to/project/.github/copilot-instructions.md
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
-
-### 2. Start sync
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
 
 ```bash
-npx @intutic/cli connect
+intutic gates install
 ```
+
+### 2. Start the proxy
+
+```bash
+intutic start
+```
+
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## What gets written
 
 Intutic writes rules and configures:
 * **Instructions:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in `.github/copilot-instructions.md`, holding the active rules and the proxy URL reference. The file is created if it does not exist; nothing outside the markers is changed. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
-* **Agent-mode hook (Preview):** `.github/hooks/intutic-governance.json` (workspace) and `~/.copilot/hooks/intutic-governance.json` (user), registering the blocking gate `.intutic/hooks/github-copilot-check.js`. The Intutic gate refuses an agent tool call that names either hook file, and the sync daemon writes one back if it is deleted or loses the gate.
+* **Agent-mode hook (Preview):** `.github/hooks/intutic-governance.json` (workspace) and `~/.copilot/hooks/intutic-governance.json` (user), registering the blocking gate `.intutic/hooks/github-copilot-check.js`. The Intutic gate refuses an agent tool call that names either hook file; if one is deleted or loses the gate, `intutic gates install` writes it back<!-- ENTERPRISE_ONLY_START -->, and under `intutic connect` the sync daemon does so on its own<!-- ENTERPRISE_ONLY_END -->.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness github-copilot`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `.github/copilot-instructions.md` only the marked section is taken out. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness github-copilot`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. In `.github/copilot-instructions.md` only the marked section is taken out. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (Preview)
 
@@ -42,7 +50,7 @@ To undo what `intutic connect` writes here, run `intutic disconnect --harness gi
 VS Code agent hooks are a **Preview** mechanism and the format may change
 between releases. The generated gate fails **closed**: a stdin payload it does
 not recognise is refused (exit 2) rather than silently allowed, so a format
-shift surfaces as loud blocks — restart `intutic connect` after upgrading so it rewrites the gate.
+shift surfaces as loud blocks — run `intutic gates install` after upgrading so it rewrites the gate.
 :::
 
 In agent mode, Copilot fires the PreToolUse hook before each tool call with
@@ -65,11 +73,13 @@ the hook file itself) to false drops that location. No VS Code policy locks
 - Every Intutic hook gate refuses an agent edit (Write, Edit) that sets either
   key, in any settings file, and a shell command that names either one (rules
   `hook_settings.vscode_key_written` and `hook_settings.vscode_key_command`).
-- The sync daemon watches your VS Code user settings and the workspace's
+<!-- ENTERPRISE_ONLY_START -->
+- Under `intutic connect`, the sync daemon watches your VS Code user settings and the workspace's
   `.vscode/settings.json`. If either key is set to switch the gate off, it sets
   that value back to true, changes nothing else in the file, comments included,
   and reports the change as a `config_tamper` incident. It does this only while
   the Copilot gate is installed.
+<!-- ENTERPRISE_ONLY_END -->
 
 To change hook settings yourself, edit them in VS Code's settings rather than
 through an agent.

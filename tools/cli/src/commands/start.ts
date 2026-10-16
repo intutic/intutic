@@ -20,19 +20,89 @@
  * `connect` is unchanged and still correct for Cloud and self-hosted control
  * planes.
  *
+ * Gates. With no login, and the local gates installed (`intutic gates
+ * install`), the gates, rules files and policy snapshot are refreshed before
+ * the proxy starts, and again whenever `.intutic/sops` changes while it runs.
+ * The refresh never writes routing: whether the harnesses go through the
+ * proxy is decided by `gates install --route`, not by starting it. With the
+ * gates not installed, one line names the recorded harnesses that have none.
+ * `--no-gates` skips both.
+ *
  * @module
  */
 
 import { spawn } from 'node:child_process'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { watch } from 'chokidar'
+import { gateKindForHarness, type HarnessType } from '@intutic/shared-types'
+import { findGateFile } from '@intutic/sync-daemon'
 import { log } from '../lib/logger.js'
+import { loadConfig, loadCredentials } from '../config/store.js'
+import { installLocalGates, localGatesInstalled } from '../lib/localGates.js'
 import { ensureValkey, valkeyRemediation } from '../lib/ensureValkey.js'
 import { localProxyBinary, sandboxBindEnv } from '../lib/proxyBinary.js'
 import { localProxyPort } from '../lib/localProxy.js'
+
+/** How long `.intutic/sops` must be quiet before the gates are refreshed. */
+const SOPS_DEBOUNCE_MS = 500
+
+/**
+ * Refreshes the local gates, or says which recorded harnesses have none.
+ * Returns a stop function for the `.intutic/sops` watcher, or null when there
+ * is nothing to watch: a login (connect owns the gates), no `intutic init`,
+ * or local gates not installed.
+ */
+async function prepareLocalGates(): Promise<(() => Promise<void>) | null> {
+  if ((await loadCredentials()) !== null) return null
+  const config = loadConfig()
+  if (!config) return null
+  const root = config.workspaceRoot
+  const disconnected = new Set<string>(config.disconnectedHarnesses ?? [])
+  const harnesses = config.harnesses.filter((h) => !disconnected.has(h))
+
+  if (!(await localGatesInstalled())) {
+    const ungated: string[] = []
+    for (const h of harnesses) {
+      if (gateKindForHarness(h as HarnessType) === 'hook' && (await findGateFile(h, root, homedir())) === null) ungated.push(h)
+    }
+    if (ungated.length > 0) log.info(`No tool-call gate for ${ungated.join(', ')}: install them with \`intutic gates install\`.`)
+    return null
+  }
+
+  const refresh = async (why: string): Promise<void> => {
+    try {
+      const result = await installLocalGates({ workspaceRoot: root, harnesses, routing: false, warn: (line) => log.warn(line) })
+      log.info(`Local gates ${why} (${result.snapshot.ruleCount} snapshot rules, ${result.gates.length} harness(es)).`)
+    } catch (err) {
+      log.warn(`Could not refresh the local gates: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  await refresh('refreshed')
+
+  let timer: NodeJS.Timeout | null = null
+  let running: Promise<void> = Promise.resolve()
+  const watcher = watch(join(root, '.intutic', 'sops'), { ignoreInitial: true })
+  watcher.on('all', () => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = null
+      running = running.then(() => refresh('refreshed after an .intutic/sops change'))
+    }, SOPS_DEBOUNCE_MS)
+  })
+  watcher.on('error', (err) => log.warn(`Stopped watching .intutic/sops: ${err instanceof Error ? err.message : String(err)}`))
+  return async () => {
+    if (timer) clearTimeout(timer)
+    await watcher.close()
+  }
+}
 
 export async function runStart(opts: {
   port?: string
   valkeyPort?: string
   upstreamUrl?: string
+  /** False with `--no-gates`. */
+  gates?: boolean
 }): Promise<void> {
   // The port every other command probes (`localProxyPort`), unless --port
   // says otherwise; never the shell's PORT, which usually belongs to some
@@ -52,6 +122,8 @@ export async function runStart(opts: {
     for (const line of valkeyRemediation(valkeyPort).split('\n')) log.info(line)
     log.info('')
   }
+
+  const stopWatching = opts.gates === false ? null : await prepareLocalGates()
 
   // Prefer the binary the proxy launcher already downloaded; fall back to the
   // `intutic-proxy` shim on PATH, which downloads on first run.
@@ -101,5 +173,7 @@ export async function runStart(opts: {
   process.on('SIGINT', stop)
   process.on('SIGTERM', stop)
 
-  child.on('exit', (code) => process.exit(code ?? 0))
+  child.on('exit', (code) => {
+    void (stopWatching?.() ?? Promise.resolve()).finally(() => process.exit(code ?? 0))
+  })
 }

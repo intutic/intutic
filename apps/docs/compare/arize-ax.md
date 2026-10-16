@@ -16,7 +16,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Primary job** | Runtime enforcement and audit for AI agents | Observability and evaluation for LLM applications |
 | **Where it enforces** | Pre-execution gates inside the agent (native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Guards on user input or model output in your application code |
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | Tracing plugins for Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, OpenCode and others; the Claude Code plugin records 16 hook events as OpenInference spans. Tracing only: the plugins fail open and do not block a call |
-| **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Block, re-ask, or substitute a default response |
+| **Decisions** | Allow, warn, require approval (the call is refused and held for review; with a control plane, once a reviewer approves it the identical retry passes if the workspace has opted in, and with none it stays refused), block, redact, re-ask, shadow | Block, re-ask, or substitute a default response |
 | **Evaluation** | Shadow mode measures how often a rule would act before it enforces; judge verdicts in the uncertain band go to a human review queue | LLM-as-judge and online evaluations, human annotation and labeling queues |
 | **Tracing** | Enforcement decisions per tool call; OpenTelemetry traces and metrics of Intutic's own components | Full application traces with spans, evaluations and annotations |
 | **Source** | Open core (MIT) | AX is closed; Phoenix is source-available under the Elastic License 2.0 |
@@ -41,7 +41,9 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 - Your agents run commands, edit files and call MCP tools, and you need each call decided before it runs.
 - You want risky calls held for human approval.
 - You need egress control and sandboxing so an agent cannot route around governance.
+<!-- ENTERPRISE_ONLY_START -->
 - You want an audit trail you can verify independently.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## When to choose Arize AX
 

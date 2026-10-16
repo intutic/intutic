@@ -16,7 +16,7 @@ import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
-import type { IHarnessAdapter } from './types.js'
+import type { HarnessWriteOptions, IHarnessAdapter } from './types.js'
 import { hashFile } from '../lib/hash.js'
 import { AIDER_SOPS_FILE, mergeAiderConfig } from '@intutic/sync-daemon/harness/aiderConfigMerger'
 import { buildSopSections } from './rulesFiles.js'
@@ -37,7 +37,7 @@ export const aiderAdapter: IHarnessAdapter = {
     }
   },
 
-  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {
+  async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string, opts?: HarnessWriteOptions): Promise<string | null> {
     const filePath = join(workspaceRoot, CONFIG_FILE)
 
     const sopsText = sops.length > 0 ? buildSopSections(sops) : undefined
@@ -45,7 +45,8 @@ export const aiderAdapter: IHarnessAdapter = {
     // Safe merge: strips test-cmd/lint-cmd, preserves all other user keys,
     // routes OpenAI (openai-api-base) and Anthropic (set-env) models through
     // the proxy and lists the SOPs as a read-only context file.
-    return (await mergeAiderConfig(filePath, proxyUrl, sopsText)) ? filePath : null
+    // Without routing, only the read-file listing and the stripped keys.
+    return (await mergeAiderConfig(filePath, proxyUrl, sopsText, opts?.routing !== false)) ? filePath : null
   },
 
   async readCurrentHash(workspaceRoot: string): Promise<string | null> {

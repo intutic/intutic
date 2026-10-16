@@ -49,8 +49,8 @@ from agent_framework import Agent
 from intutic_clawde.gate import Gate, GateClient, GateConfig, install as install_gate
 from intutic_clawde.gate.adapters.agent_framework import IntuticFunctionMiddleware
 
-# The client reads INTUTIC_API_KEY / INTUTIC_WORKSPACE_ID, or the credentials
-# `intutic login` saved. Without it the gate still enforces the local policy
+# The client reads INTUTIC_API_KEY / INTUTIC_WORKSPACE_ID, or the credentials a
+# control-plane login saved. Without it the gate still enforces the local policy
 # snapshot, but skips your SOP rules, the control-plane check and audit events.
 client = GateClient.from_env(session_id=run_id, harness="agent-framework")
 install_gate(Gate(GateConfig(workspace_id=client.workspace_id), client=client))
@@ -96,7 +96,7 @@ client = OpenAIChatClient(
 
 The same `.env.intutic` shape as LangGraph: proxy URLs plus a pointer at `intutic_clawde.gate.adapters.agent_framework.IntuticFunctionMiddleware`.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness agent-framework`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness agent-framework`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## What the adapter does NOT do
 

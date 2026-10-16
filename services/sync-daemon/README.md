@@ -23,7 +23,7 @@ On each sync cycle the daemon:
 
 ### Config Writers
 
-The rules files are written by the CLI's harness adapters (one module per harness under `tools/cli/src/harness/`), which `intutic connect` runs. This package's `src/harness/` holds what they call: the gate writers (`*Hooks.ts`) and config mergers that translate governance SOPs into native configuration formats (YAML, JSON, TOML, Markdown, environment variables); most harnesses get a blocking pre-tool gate. The authoritative list of which harness gets which gate shape is `gateKind.ts` in `@intutic/shared-types`, and `__tests__/harness/gateRegistry.ts` exercises every generated gate — counts are not repeated here because they drifted every time a harness was added.
+The rules files are written by the CLI's harness adapters (one module per harness under `tools/cli/src/harness/`), which `intutic gates install` runs, and the daemon with a control plane. This package's `src/harness/` holds what they call: the gate writers (`*Hooks.ts`) and config mergers that translate governance SOPs into native configuration formats (YAML, JSON, TOML, Markdown, environment variables); most harnesses get a blocking pre-tool gate. The authoritative list of which harness gets which gate shape is `gateKind.ts` in `@intutic/shared-types`, and `__tests__/harness/gateRegistry.ts` exercises every generated gate — counts are not repeated here because they drifted every time a harness was added.
 
 ### Atomic Writes
 
@@ -39,7 +39,7 @@ Content-hash-based drift detection identifies when a harness rules file has been
 
 ### Trajectory Monitoring
 
-Runs in the `intutic connect` process: watches the proxy's live trace events, buffers them per session in a sliding window, and submits trajectory summaries to the control plane for governance evaluation. A summary the control plane cannot take yet is spooled to `~/.intutic/events/offline-trajectories.jsonl` (capped at 16 MB) and retried; one it refuses with a non-retryable 4xx is dropped. No LLM runs on the developer machine.
+Runs in the sync daemon process, with a control plane: watches the proxy's live trace events, buffers them per session in a sliding window, and submits trajectory summaries to the control plane for governance evaluation. A summary the control plane cannot take yet is spooled to `~/.intutic/events/offline-trajectories.jsonl` (capped at 16 MB) and retried; one it refuses with a non-retryable 4xx is dropped. No LLM runs on the developer machine.
 
 ### Config Capture
 

@@ -71,7 +71,7 @@ Models named `bedrock/…`, `vertex/…` and `azure/…` go to AWS Bedrock, Goog
 | `INTUTIC_WASM_MANIFEST_ROOT` | unset (off) | The directory WASM rules may read files from: when a tool call names a manifest (`kubectl apply -f k8s/deploy.yaml`), the proxy reads that file under this root and hands its contents to the rule. Unset, rules see only the path. `~/` is expanded |
 | `WASM_CONTEXT_SNAPSHOT_RATE` | `0.05` | The fraction of requests (0–1) whose rule-evaluation context is attached to the trace, so a new rule can be replayed against real traffic before it ships. The context holds the request's tool calls — each one's name and its arguments' top-level keys and size, not the argument values unless the workspace sets [`storeToolArguments`](/reference/workspace-settings) — tool names and descriptions, DLP finding names and session counters, not the message text. Every string in it is redacted for secrets and all five PII detectors, email and phone included. Traces go to the control plane when one is connected, and to `~/.intutic/logs` otherwise. `0` turns it off |
 | `INTUTIC_LOCAL_BUDGET_ENFORCE` | on | `0`, `false` or `no`: keep counting spend against the [local daily cap](/guide/budgets#local-daily-cap) but stop refusing requests over it |
-| `INTUTIC_LOCAL_VAULTS` | unset | `off` turns off the local notes-vault search `/fix` uses. `intutic connect` sets it from the workspace's policy |
+| `INTUTIC_LOCAL_VAULTS` | unset | `off` turns off the local notes-vault search `/fix` uses. With a control plane, the sync daemon sets it from the workspace's policy |
 | `OFFLINE_PRICING_PATH` | the bundled price list | A JSON price list to use for cost estimates instead of the one built in. A file that does not parse is logged and ignored |
 | `JUDGE_FINALIZE_DEADLINE_MS` | `5000` | How long the end of a judged streamed response may wait for the judge before the client gets its final event. `0` or a negative value waits as long as the judge takes |
 
@@ -122,15 +122,15 @@ Settings for a proxy deployed as a shared or self-hosted gateway.<!-- ENTERPRISE
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `CONTROL_PLANE_URL` | unset | Set when `intutic start` runs, the proxy it starts is managed (see above) |
-| `INTUTIC_CONTROL_PLANE_URL` | a workspace's `init --dev` setting, else the URL `intutic login` saved, else the hosted control plane | The control plane every command talks to. A `--control-plane-url` or `--dev` flag takes precedence |
+| `INTUTIC_CONTROL_PLANE_URL` | a workspace's `init --dev` setting, else the URL a control-plane login saved; none otherwise (this release has no default control plane) | The control plane every command talks to. A `--control-plane-url` or `--dev` flag takes precedence |
 | `INTUTIC_DEV` | unset | `1`: talk to a local control plane at `http://localhost:3001` instead of the saved or hosted one. `INTUTIC_CONTROL_PLANE_URL` takes precedence |
 | `VALKEY_URL` | `redis://127.0.0.1:6379` | Passed to the proxy the CLI starts |
-| `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` and `intutic enterprise` point agents at. Its port is the one `intutic connect` and `intutic start` (without `--port`) run the proxy on, the one `intutic budget` and `intutic doctor` probe, and the one Windsurf's proxy setting points at. `PORT` is not read for this |
+| `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy `intutic exec` points agents at. Its port is the one `intutic start` (without `--port`) runs the proxy on, the one `intutic budget` and `intutic doctor` probe, and the one Windsurf's proxy setting points at. `PORT` is not read for this |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | Where the CLI writes the policy snapshot the hook gate reads |
 | `INTUTIC_APPROVED_BYPASSES` | `~/.intutic/hooks/approved-bypasses.jsonl` | The approved-bypass list the hook gates read, which `intutic chaos run` copies into each repetition with the snapshot |
 | `INTUTIC_WASM_DIR` | `~/.intutic/wasm` | Where `intutic policy install` puts WASM rules |
 | `INTUTIC_OPA_BIN` | `opa` on the `PATH` | The OPA binary `intutic rules build` compiles Rego with |
-| `N8N_URL` | `http://localhost:5678` | The n8n instance `intutic connect` configures |
+| `N8N_URL` | `http://localhost:5678` | The n8n instance `intutic init` looks for |
 | `N8N_API_TOKEN` | unset | Its API key |
 | `INTUTIC_FC_KERNEL` | none (required) | For `intutic exec --sandbox firecracker`: the guest kernel image |
 | `INTUTIC_FC_ROOTFS` | none (required) | The guest root filesystem |
@@ -144,7 +144,9 @@ Settings for a proxy deployed as a shared or self-hosted gateway.<!-- ENTERPRISE
 | `INTUTIC_NODE_ID` | unset | Likewise: the agent that ran the nested `intutic exec`, which becomes its parent |
 | `INTUTIC_DEPTH` | `0` | Likewise: how deep in the graph that agent is |
 
+<!-- ENTERPRISE_ONLY_START -->
 `intutic connect` also passes `ANTHROPIC_API_KEY` from its own environment to the proxy it starts.
+<!-- ENTERPRISE_ONLY_END -->
 
 ### Gate SDK
 
@@ -152,9 +154,9 @@ Read by `@intutic/gate`. The MCP daemon and the Python `intutic-clawde` gate rea
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `INTUTIC_API_KEY` | from `intutic login` | The workspace key (`vk_…`) |
-| `INTUTIC_WORKSPACE_ID` | from `intutic login` | The workspace |
-| `INTUTIC_CONTROL_PLANE_URL` | the hosted control plane | The control plane |
+| `INTUTIC_API_KEY` | from a control-plane login | The workspace key (`vk_…`) |
+| `INTUTIC_WORKSPACE_ID` | from a control-plane login | The workspace |
+| `INTUTIC_CONTROL_PLANE_URL` | none (this release has no default control plane) | The control plane |
 | `INTUTIC_PROXY_URL` | `http://localhost:4000` | The proxy the Vercel AI SDK helper points models at |
 | `INTUTIC_SESSION_ID` | none | The session id reported with each verdict. `GateClient.fromEnv()` throws without it or a `sessionId`; the OpenAI Agents and dsh installers generate one |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | The local policy snapshot |
@@ -162,7 +164,7 @@ Read by `@intutic/gate`. The MCP daemon and the Python `intutic-clawde` gate rea
 
 ### Sync daemon
 
-Read by the sync daemon `intutic connect` runs.
+Read when Intutic writes harness files: by `intutic gates install`, and by the sync daemon on a control plane.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |

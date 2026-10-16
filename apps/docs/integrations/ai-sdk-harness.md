@@ -27,7 +27,11 @@ intutic init
   ✔ ai-sdk-harness → /path/to/project/.env.intutic
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 Detection triggers on any of: `@ai-sdk/harness` itself, any `@ai-sdk/harness-*` runtime adapter, or any `@ai-sdk/sandbox-*` provider in `package.json`.
 
@@ -158,7 +162,7 @@ Until those three close, treat the approval flow + `permissionMode` + `inactiveT
 
 Same `.env.intutic` shape as every SDK-gated framework, with the preamble corrected for this execution model: the proxy base-URL vars govern LLM egress **from your own process only** — they do not and cannot route sandbox traffic.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness ai-sdk-harness`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness ai-sdk-harness`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. `.env.intutic` stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Config details
 

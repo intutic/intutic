@@ -32,8 +32,10 @@ Observability tools and LLM gateways (like LangSmith or Portkey) work on model t
 
 Intutic runs as a local or self-hosted proxy, written in Rust, between your agents and their model providers:
 
+`intutic gates install` installs a tool-call gate in each harness that supports one and writes its rules file from `.intutic/sops/`, with no control plane; `intutic start` rewrites them when a rule set changes.
+
 <!-- UNRELEASED:cloud
-With `intutic connect`, a sync daemon (`sync-daemon`) also installs a tool-call gate in each harness that supports one and keeps its rules files in sync.
+With `intutic connect`, a sync daemon (`sync-daemon`) does the same and keeps the rules files in sync with a control plane.
 -->
 
 ```mermaid
@@ -50,7 +52,7 @@ flowchart TD
     end
 
     Providers["🌐 LLM providers<br><i>Anthropic · OpenAI · Gemini · Bedrock · Vertex · Azure · OpenRouter · …</i>"]
-    Daemon["🔄 Sync daemon<br><i>(intutic connect)</i>"]
+    Installer["🧩 Gate installer<br><i>(intutic gates install)</i>"]
 
     Agent -->|1. Model request| Proxy
     Proxy -->|2. Allowed request| Providers
@@ -58,7 +60,7 @@ flowchart TD
     Proxy -->|4. Response, or refusal| Agent
     Agent -->|5. Each tool call| Gate
     SOP -->|Reloaded every 30 s| Checks
-    Daemon -->|Writes gates and rules files| Gate
+    Installer -->|Writes gates and rules files| Gate
 ```
 
 ---
@@ -74,18 +76,26 @@ npm install -g @intutic/cli @intutic/proxy
 npx @intutic/proxy
 ```
 
-### 2. Start the Proxy
+### 2. Install the Gates
+Inside your project folder, detect your coding agents and install a blocking gate in each, with its rules file written from `.intutic/sops/`:
+```bash
+intutic init
+intutic gates install
+```
+
+### 3. Start the Proxy
 Run `intutic start` inside your project folder. This boots the local high-speed Rust proxy on port `4000` — no account, configuration file or control plane needed:
 ```bash
 intutic start
 ```
 
-### 3. Route Any Agent to Intutic
+### 4. Route Any Agent to Intutic
 Point your favorite LLM client or agent framework to the local proxy:
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:4000"     # Anthropic SDKs append /v1/messages
 export OPENAI_BASE_URL="http://localhost:4000/v1"      # OpenAI SDKs append /chat/completions
 ```
+Or launch it with `intutic exec -- <agent>`, or run `intutic gates install --route` to write the proxy URL into the configs of the agents that have a setting for it.
 
 That's it! Your agent is now governed by real-time safety guardrails.
 
@@ -96,7 +106,7 @@ That's it! Your agent is now governed by real-time safety guardrails.
 | Feature | Description |
 | :--- | :--- |
 | ⚡ **In-Process WASM Engine** | Policy evaluation runs in-process — no model call and no network hop — so it adds no round-trip to the tool-call path. |
-| 🛡️ **Zero-Trust Tool Interception** | Intercepts dangerous commands before they touch your system: `rm -rf` and `git push --force` are blocked at the harness hook gate; a `DROP TABLE` in an MCP tool call is blocked by the MCP governance proxy, at the hook gate it is flagged for triage rather than blocked, and the LLM proxy refuses one in a model-emitted shell command (`psql`, `mysql`, `sqlite3`, `dropdb`) whose target database is not on the workspace's DSN allowlist — opt-in, via `sql_guard:` in a SOP. |
+| 🛡️ **Zero-Trust Tool Interception** | Intercepts dangerous commands before they touch your system: with no configuration, the harness hook gate blocks writes to its own hook files and settings, governance-bypass commands and secrets, and flags `rm -rf /`, `mkfs` and similar destructive commands without blocking them, while the LLM proxy refuses those in a model's code-execution tool call; `git push --force` or any other command is refused once a rule you add names it (a SOP's `hook_rule:`, which the proxy enforces, or a WASM or Rego rule); a `DROP TABLE` in an MCP tool call is blocked by the MCP governance proxy, at the hook gate it is flagged for triage rather than blocked, and the LLM proxy refuses one in a model-emitted shell command (`psql`, `mysql`, `sqlite3`, `dropdb`) whose target database is not on the workspace's DSN allowlist — opt-in, via `sql_guard:` in a SOP. |
 | 🔐 **Secret DLP & Masking** | Automatically redacts API keys (`[REDACTED_SECRET]`), AWS credentials, and tokens in prompts & tool payloads. |
 | 💰 **Session Spend Ceilings** | Prevents "loop burn" by enforcing token spending ceilings per session (e.g. $5.00 limit). |
 | 🔄 **43 Harness Adapters** | Pre-configured support for Claude Code CLI, Cursor, Windsurf, Aider, Antigravity, OpenCode, DeepSeek dsh, Spotify Xirp, DoorDash Agentic Orchestrator, AWS Bedrock AgentCore Runtime, and more. |
@@ -122,7 +132,7 @@ Every tool call and prompt evaluated by Intutic produces one of five **PCAS Acti
 2. **`ENHANCE`**: Inject contextual SOP prompt rules or architectural guidelines.
 3. **`HIJACK`**: Substitute dangerous tool parameters or redact secrets on the fly.
 4. **`REASK`**: Refuse the attempt and hand the reason back to the agent, which may retry a bounded number of times before the finding escalates to a block.
-5. **`KILL`**: Hard-abort execution thread if an agent attempts destructive file/git ops or hits loop caps.
+5. **`KILL`**: Refuse the request outright, for example when a model's code-execution tool call carries a destructive operation (`rm -rf /`, `mkfs`, `dd if=`) or a session hits its loop caps.
 
 ---
 

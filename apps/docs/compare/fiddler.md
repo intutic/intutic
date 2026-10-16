@@ -16,14 +16,13 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 | **Primary job** | Runtime enforcement and audit for AI agents | Observability, evaluation and guardrails for ML models, LLM applications and agents |
 | **Where it enforces** | Native pre-execution hook gates in 18 of the 43 harnesses and in-process SDK gates, plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Inline at a third-party AI gateway (LiteLLM, AgentGateway 1.4.0 or later, or Kong), on model requests and responses; its Guardrails API from your own code |
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Cline and Gemini CLI | Any agent whose model traffic passes a supported gateway; telemetry setup documented for Claude Code and GitHub Copilot. The Claude Code plugin (public preview) traces tool inputs and outputs and fails open; Claude Cowork log ingestion is in private preview |
-| **Gemini CLI** | A `BeforeTool` hook in `~/.gemini/settings.json` runs Intutic's gate before every tool call, MCP tools included, and blocks the call before it runs. `intutic connect` installs it when `intutic init` finds Gemini CLI: `gemini` on the `PATH`, a project `.gemini/` directory or `~/.gemini/settings.json`. Antigravity CLI, which replaced Gemini CLI for individual users in June 2026, gets its own `PreToolUse` gate in `~/.gemini/config/hooks.json` | Named as an agent telemetry source at launch, with no setup guide in its docs. Gateway guardrails apply to Gemini CLI traffic routed through a supported gateway |
+| **Gemini CLI** | A `BeforeTool` hook in `~/.gemini/settings.json` runs Intutic's gate before every tool call, MCP tools included, and blocks the call before it runs. `intutic gates install` installs it when `intutic init` finds Gemini CLI: `gemini` on the `PATH`, a project `.gemini/` directory or `~/.gemini/settings.json`. Antigravity CLI, which replaced Gemini CLI for individual users in June 2026, gets its own `PreToolUse` gate in `~/.gemini/config/hooks.json` | Named as an agent telemetry source at launch, with no setup guide in its docs. Gateway guardrails apply to Gemini CLI traffic routed through a supported gateway |
 | **Decisions** | Allow, warn, require approval (the call is refused and queued for approval in Slack or the CLI), block, redact, re-ask, shadow | Allow, block, redact (Kong blocks only). Human approval for high-risk decisions is announced, not documented |
 | **Tool calls** | The gate sees the tool name and its full arguments, such as the shell command, file path or MCP call, before the tool runs | PII or secrets in tool-call arguments block the request. Through LiteLLM, tool calls replayed in Anthropic-format history, as Claude Code sends them, are not scanned |
 | **Sensitive data** | Pattern DLP for 17 kinds of secret and credential, and validated PII detectors for payment cards, IBANs and US Social Security numbers (email and phone opt-in), redacted or blocked; add your own patterns | Model-based PII detection (12 entity types by default, 27 in full mode, plus health entities) and about 42 credential formats |
 | **Content judgement** | Pattern-based prompt-injection detection that steers or re-asks the model; tool-description poisoning detection. Self-hosted open-weight judges review responses against your rules after the fact and do not block | Centor Models score safety across 11 categories, including jailbreaks, and faithfulness to context; escalation of safety checks to a larger hosted model is in private preview. Its gateway integrations run only the PII and secrets checks |
 | **MCP** | MCP governance proxy: server and tool allowlists, SSO-group clearance, DLP, approval holds, pinned tool definitions | Traces MCP tool calls through AgentGateway or LiteLLM; enforcement at the MCP boundary is in early access. The Fiddler MCP Server lets an agent query Fiddler data; it is not a gateway |
 | **Containment** | Opt-in default-deny egress; sandboxed runs in a container or Firecracker microVM | None documented |
-| **Audit and export** | Signed Merkle roots you can check with `intutic integrity verify`; SIEM export to syslog (CEF), Splunk, Datadog, webhooks, S3 and GCS | Full traces with each verdict attached; OTel export; trace export from Kong |
 | **Cost** | Spend caps enforced before a request leaves; cost and token reporting by model, virtual key, developer, team (from SCIM groups), branch, commit and GitHub pull request | Cost, tokens and adoption by developer, team and model; cost per pull request and commit |
 | **Model monitoring** | None | Drift, data integrity, performance and fairness for predictive models |
 | **Source** | Open core (MIT) | Closed; its Claude Code plugin is Apache-2.0 |
@@ -32,6 +31,7 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 
 | | Intutic | Fiddler AI |
 |---|---|---|
+| **Audit and export** | Signed Merkle roots you can check with `intutic integrity verify`; SIEM export to syslog (CEF), Splunk, Datadog, webhooks, S3 and GCS | Full traces with each verdict attached; OTel export; trace export from Kong |
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | Hosted; VPC or on-premises on Enterprise |
 | **Pricing** | [Published plans](/guide/plans) | Guardrails free; Developer at $0.002 per trace; Enterprise by quote |
 
@@ -50,7 +50,7 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 - Your agents run shell commands, write files and call MCP tools, and you need each call decided before it runs.
 - You use coding agents beyond Claude Code, or agent frameworks such as LangGraph and CrewAI.
 - You want risky calls held for human approval rather than only allowed or blocked.
-- You need egress control, sandboxing and an audit trail you can verify independently.
+- You need egress control and sandboxing<!-- ENTERPRISE_ONLY_START -->, and an audit trail you can verify independently<!-- ENTERPRISE_ONLY_END -->.
 - You want enforcement that does not depend on routing every agent through one gateway.
 
 ## When to choose Fiddler AI

@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`intutic gates install`: harness gates without a control plane.** Until
+  now only `intutic connect` wrote the harness hook gates and rules files, and
+  it needs a control plane, so the open core ran the proxy alone. The new
+  command compiles the SOPs in `.intutic/sops/` into a local policy snapshot
+  and writes each recorded harness's gate and rules file from it, with no
+  account and no network. `--harness <id>` limits it to one harness,
+  `--dry-run` prints what it would write, and `--route` also points the
+  harnesses' LLM traffic at the proxy (off by default, so a harness keeps
+  working when the proxy is not running). It refuses on a machine that is
+  logged in to a control plane, where `connect` installs the gates.
+  `intutic disconnect` takes everything out again and restores the files it
+  changed.
+  - `intutic init` offers to install the gates (`--gates` / `--no-gates`).
+  - `intutic start` refreshes installed gates before the proxy starts and
+    whenever `.intutic/sops/` changes (`--no-gates` skips it).
+  - `doctor` checks the local policy snapshot and that each recorded harness
+    has its gate; `status` says whether gates are installed locally or by
+    `connect`.
+  - With no control plane, a `review_before:` token makes the gate refuse
+    the call, saying that holding it for approval needs a control plane.
+
+### Fixed
+
+- `intutic disconnect` left an empty `"permissions": {"deny": []}` in a
+  Claude Code settings file that had none before.
+- The Claude Code hook command quotes the gate's path, so a workspace whose
+  path contains a space works.
+- Open-core messages (`status`, the git hooks, `doctor`) no longer point at
+  commands that need a control plane.
+- The docs, READMEs and the Kitkat skill describe the open-core path
+  (`intutic init`, then `intutic gates install`, then `intutic start`), and
+  say what the destructive-command tier does: the hook gate flags
+  `rm -rf /`, `mkfs` and similar rather than blocking them, while the proxy
+  refuses them in a model's code-execution tool call.
+
 ## [2.8.1] - 2026-10-16
 
 ### Changed

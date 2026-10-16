@@ -15,10 +15,12 @@
  * 6. Valkey connectivity (proxy /health or TCP probe port 6379)
  * 7. CA cert trust (~/.intutic/ca.crt + OS trust store)
  * 8. Policy snapshot present, intact, and current
+ * 8b. Local gates (open core): a gate on disk for each recorded harness
  *
- * Checks 2-5 and 8 need a control plane. While no control plane product has
+ * Checks 2-5 need a control plane. While no control plane product has
  * launched (CONTROL_PLANE_PRODUCT_RELEASED) and nobody has logged in, they are
- * skipped with one note instead of failing and pointing at hidden commands.
+ * skipped with one note instead of failing and pointing at hidden commands,
+ * and checks 8 and 8b look at the gates `intutic gates install` wrote.
  *
  * No subscription checks — enforcement is server-side (covenant 13).
  *
@@ -32,7 +34,8 @@ import { createHash } from 'node:crypto'
 import { execSync } from 'node:child_process'
 import pc from 'picocolors'
 
-import { CONTROL_PLANE_PRODUCT_RELEASED, NO_CONTROL_PLANE_MESSAGE } from '@intutic/shared-types'
+import { CONTROL_PLANE_PRODUCT_RELEASED, NO_CONTROL_PLANE_MESSAGE, gateKindForHarness, type HarnessType } from '@intutic/shared-types'
+import { findGateFile } from '@intutic/sync-daemon'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { isSyncDaemonRunning } from '../lib/process.js'
@@ -548,8 +551,10 @@ function checkCertTrust(startCommand = 'intutic connect'): CheckResult {
  * sync in over a week, which is a fault whatever the gates are doing with the
  * rules they still have.
  */
-export function describePolicySnapshot(snap: PolicySnapshotHealth): CheckResult {
+export function describePolicySnapshot(snap: PolicySnapshotHealth, opts: { local?: boolean } = {}): CheckResult {
   const name = 'Policy Snapshot'
+  // With no control plane, `intutic gates install` is what writes it.
+  const rewrite = opts.local ? 'intutic gates install' : 'intutic policy snapshot'
   const dropped = snap.droppedRules > 0 ? `, ${snap.droppedRules} rule(s) dropped as uncompilable` : ''
 
   switch (snap.state) {
@@ -567,8 +572,9 @@ export function describePolicySnapshot(snap: PolicySnapshotHealth): CheckResult 
         detail:
           `${snap.ageDays} days old and still enforced (${snap.ruleCount} rule(s)) — ` +
           `nothing has refreshed it in over ${SNAPSHOT_STALE_AFTER_DAYS} days${dropped}`,
-        remediation:
-          'The daemon has not synced. Check `intutic daemon status`, then refresh with `intutic policy snapshot`.',
+        remediation: opts.local
+          ? 'Nothing has refreshed it. Refresh it with `intutic gates install`, or keep `intutic start` running.'
+          : 'The daemon has not synced. Check `intutic daemon status`, then refresh with `intutic policy snapshot`.',
       }
 
     case 'invalid':
@@ -579,7 +585,7 @@ export function describePolicySnapshot(snap: PolicySnapshotHealth): CheckResult 
           `Failed its ${snap.workspaceId ? 'digest or workspace' : 'digest'} check at ${snap.path} — ` +
           'every gate has DROPPED the dynamic rules, so workspace policy is enforcing nothing',
         remediation:
-          'The file was edited or belongs to another workspace. Overwrite it with `intutic policy snapshot`.',
+          `The file was edited or belongs to another workspace. Overwrite it with \`${rewrite}\`.`,
       }
 
     case 'empty':
@@ -590,7 +596,9 @@ export function describePolicySnapshot(snap: PolicySnapshotHealth): CheckResult 
         // quiet workspace — it is a compile that produced nothing.
         detail: `Present at ${snap.path} but contains no rules — the policy compile produced nothing${dropped}`,
         remediation:
-          'Check that the workspace has active BLOCK: SOPs, then rebuild it with `intutic policy snapshot`.',
+          opts.local
+            ? 'Rebuild it with `intutic gates install`.'
+            : 'Check that the workspace has active BLOCK: SOPs, then rebuild it with `intutic policy snapshot`.',
       }
 
     case 'absent':
@@ -598,7 +606,9 @@ export function describePolicySnapshot(snap: PolicySnapshotHealth): CheckResult 
         name,
         passed: false,
         detail: `No snapshot at ${snap.path} — built-in protections only, workspace policy enforces nothing`,
-        remediation: 'Write it with `intutic policy snapshot`, or start the daemon with `intutic connect`.',
+        remediation: opts.local
+          ? 'Write it with `intutic gates install`.'
+          : 'Write it with `intutic policy snapshot`, or start the daemon with `intutic connect`.',
       }
   }
 }
@@ -616,6 +626,39 @@ async function checkPolicySnapshot(): Promise<CheckResult> {
   // the comparison is skipped rather than guessed, exactly as the gates skip it.
   const creds = await loadCredentials()
   return describePolicySnapshot(readPolicySnapshot({ expectedWorkspaceId: creds?.workspaceId }))
+}
+
+/**
+ * Check 8b (open core): a tool-call gate on disk for every recorded harness
+ * that has one (`findGateFile`), which `intutic gates install` writes.
+ */
+export async function checkLocalGates(): Promise<CheckResult> {
+  const name = 'Local Gates'
+  const config = loadConfig()
+  if (!config) {
+    return { name, passed: false, detail: 'No workspace config found', remediation: 'Run `intutic init`, then `intutic gates install`.' }
+  }
+  const disconnected = new Set<string>(config.disconnectedHarnesses ?? [])
+  const hooked = config.harnesses.filter((h) => !disconnected.has(h) && gateKindForHarness(h as HarnessType) === 'hook')
+  if (hooked.length === 0) {
+    return { name, passed: true, detail: 'No recorded harness has a tool-call gate to install' }
+  }
+  const missing: string[] = []
+  for (const h of hooked) {
+    if ((await findGateFile(h, config.workspaceRoot, homedir())) === null) missing.push(h)
+  }
+  if (missing.length === 0) {
+    return { name, passed: true, detail: `${hooked.length} gate(s) installed: ${hooked.join(', ')}` }
+  }
+  return {
+    name,
+    passed: false,
+    detail:
+      missing.length === hooked.length
+        ? `None installed for ${missing.join(', ')} — tool calls are not gated`
+        : `${hooked.length - missing.length}/${hooked.length} installed; none for ${missing.join(', ')}`,
+    remediation: 'Install them with `intutic gates install`.',
+  }
 }
 
 /**
@@ -671,7 +714,13 @@ export async function runDoctor(): Promise<void> {
   }
   results.push(await checkValkey())
   results.push(checkCertTrust(connected ? 'intutic connect' : 'intutic start'))
-  if (connected) results.push(await checkPolicySnapshot())
+  if (connected) {
+    results.push(await checkPolicySnapshot())
+  } else {
+    // The snapshot `intutic gates install` wrote, with no workspace to compare.
+    results.push(describePolicySnapshot(readPolicySnapshot({}), { local: true }))
+    results.push(await checkLocalGates())
+  }
   results.push(await checkCiscoScanner())
 
   // Print results
@@ -696,7 +745,7 @@ export async function runDoctor(): Promise<void> {
   }
 
   if (!connected) {
-    console.log(`  ${pc.dim('–')} ${pc.dim('Control plane, sync daemon, harness sync, daemon log and policy snapshot checks skipped: open core, no control plane connected.')}`)
+    console.log(`  ${pc.dim('–')} ${pc.dim('Control plane, sync daemon, harness sync and daemon log checks skipped: open core, no control plane connected. The gates are checked as `intutic gates install` writes them.')}`)
   }
 
   // Summary

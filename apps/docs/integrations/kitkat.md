@@ -12,7 +12,11 @@ Instead of merging rules globally into host machine config files, you can place 
 
 The skill also tells the agent what to do when Intutic refuses or holds a call: what every refusal code means, which ones it may retry and which it must not, that a held call needs an owner, admin or engineering manager to approve it (and that the retry passes only while the workspace's review-hold bypass is on), and how to tell the user.
 
+<!-- ENTERPRISE_ONLY_START -->
 `intutic connect` writes it to `.agents/skills/intutic-governance-kitkat/SKILL.md` in the workspace when it is missing, next to the [Rule Author skill](/integrations/rule-author), and never overwrites a copy that is already there. `intutic disconnect` deletes the copy connect wrote, unless you have edited it. The steps below are for a workspace that does not run `intutic connect`.
+<!-- ENTERPRISE_ONLY_END -->
+
+The steps below add it to a workspace by hand.
 
 ---
 
@@ -40,7 +44,9 @@ Boot the proxy to begin intercepting requests:
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 *Your agentic assistant will now detect the Kitkat governance persona, apply token predictions, and prompt-intercept through the local proxy port (`4000`).*
 

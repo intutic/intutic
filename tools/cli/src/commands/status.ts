@@ -14,6 +14,7 @@ import { NOT_AUTHENTICATED } from '../lib/authMessages.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { configuredControlPlaneUrl } from '../config/paths.js'
 import { getActiveAgentProcesses, isSyncDaemonRunning } from '../lib/process.js'
+import { gatesSource } from '../lib/localGates.js'
 import { resolveDshHome, listDshProfileDirs, detectDshCoverageGap } from '@intutic/sync-daemon/harness/dshHooks'
 import pc from 'picocolors'
 
@@ -101,12 +102,24 @@ export async function runStatus(): Promise<void> {
       }
     }
 
+    const source = await gatesSource()
+    log.field(
+      'Gates',
+      source === 'local'
+        ? 'installed locally (`intutic gates install`)'
+        : source === 'connect'
+          ? 'installed by `intutic connect`'
+          : creds
+            ? 'none — `intutic connect` installs them'
+            : 'none — install them with `intutic gates install`',
+    )
+
     // Integrity
     const integrity = loadIntegrity(config.workspaceRoot)
     if (integrity) {
       log.field('Last Sync', integrity.lastSyncAt)
       log.field('Tracked Files', String(Object.keys(integrity.files).length))
-    } else {
+    } else if (creds) {
       log.dim('  No sync data yet. Run `intutic connect` to start syncing.')
     }
 
@@ -127,8 +140,9 @@ export async function runStatus(): Promise<void> {
     console.log('')
     log.field('Sync Daemon State', daemonRunning ? pc.green('Running') : pc.red('Stopped'))
 
-    // Warning highlights
-    if (!daemonRunning && activeProcs.length > 0) {
+    // Warning highlights. With no login there is no daemon to run: the
+    // gates are local (`intutic gates install`).
+    if (creds && !daemonRunning && activeProcs.length > 0) {
       const runningNames = new Set(activeProcs.map(p => p.name))
       const configuredHarnesses = config.harnesses
 

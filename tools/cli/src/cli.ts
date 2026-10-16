@@ -75,6 +75,8 @@ program
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .option('--git-hooks', 'Install the Intutic Git hooks without asking')
   .option('--no-git-hooks', 'Skip the Git hooks without asking (the default when stdin is not a terminal)')
+  .option('--gates', 'Install the harness gates (`intutic gates install`) without asking')
+  .option('--no-gates', 'Skip the harness gates without asking (the default when stdin is not a terminal)')
   .action(async (opts) => {
     const { runInit } = await import('./commands/init.js')
     await runInit(opts)
@@ -116,7 +118,7 @@ program
 
 program
   .command('disconnect')
-  .description('Undo intutic connect: restore every harness config it changed, remove its services, and log out')
+  .description('Undo intutic connect or intutic gates install: restore every harness config they changed, remove the gates and services, and log out')
   .option('--harness <id>', 'Disconnect one harness only (credentials and services stay)')
   .option('--dry-run', 'Print exactly what would change, and change nothing')
   .option('--keep-login', 'Keep the stored credentials')
@@ -748,9 +750,33 @@ program
   .option('--port <port>', 'Proxy port (default: the port of $INTUTIC_PROXY_URL, else 4000)')
   .option('--valkey-port <port>', 'Valkey port', '6379')
   .option('--upstream-url <url>', 'Upstream LLM provider base URL')
+  .option('--no-gates', 'Do not refresh the local gates (`intutic gates install`) or watch .intutic/sops while the proxy runs')
   .action(async (opts) => {
     const { runStart } = await import('./commands/start.js')
     await runStart(opts)
+  })
+
+const gatesCmd = program
+  .command('gates')
+  .description('Harness hook gates and rules files, without a control plane')
+
+gatesCmd
+  .command('install')
+  .description(
+    'Install the tool-call gate and rules file for each recorded harness, from this machine alone: ' +
+      'the built-in protections, the local .intutic/sops, and review_before: tokens (refused, as nothing can approve a hold)',
+  )
+  .option('--harness <id>', 'Only this harness (it must be recorded by `intutic init`, or pass --add)')
+  .option('--add', 'With --harness: record the harness in ~/.intutic/config.json if it is not')
+  .option('--route', "Also point the harnesses' LLM traffic at the local proxy, which must then be running (e.g. `intutic daemon install --proxy`)")
+  .option('--dry-run', 'Print what would be written, and write nothing')
+  .option('--workspace <path>', 'Workspace to write into (default: the one `intutic init` recorded)')
+  .action(async (opts) => {
+    // The writers log each file at info, as JSON; the command prints its own
+    // list. Warnings (a file left alone because it does not parse) still show.
+    process.env.LOG_LEVEL ??= 'warn'
+    const { runGatesInstall } = await import('./commands/gates.js')
+    await runGatesInstall(opts)
   })
 
 // L2 mandatory egress firewall. Makes the governing proxy
@@ -1165,7 +1191,7 @@ function defineDaemonInstall(cmd: Command): Command {
     )
     .option('--workspace-id <id>', 'Workspace ID (e.g. wk_xxxx) — required unless --proxy')
     .option('--api-key <key>', 'Workspace API key (e.g. vk_xxxx) — required unless --proxy')
-    .option('--control-plane-url <url>', `Control plane the daemon connects to (default: $INTUTIC_CONTROL_PLANE_URL, then a workspace set up with \`intutic init --dev\`, then the URL saved by \`intutic login\`${CLOUD_RELEASED ? `, then ${HOSTED_CONTROL_PLANE_URL}` : ''})`)
+    .addOption(controlPlaneOption('--control-plane-url <url>', `Control plane the daemon connects to (default: $INTUTIC_CONTROL_PLANE_URL, then a workspace set up with \`intutic init --dev\`, then the URL saved by \`intutic login\`${CLOUD_RELEASED ? `, then ${HOSTED_CONTROL_PLANE_URL}` : ''})`))
     .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process); with --proxy, absolute path to intutic-proxy')
     .option('--dry-run', 'Print what would be done without writing files')
     .option('--system', 'Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux)')

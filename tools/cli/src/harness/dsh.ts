@@ -21,7 +21,7 @@ import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
-import type { IHarnessAdapter } from './types.js'
+import type { HarnessWriteOptions, IHarnessAdapter } from './types.js'
 import { writeDshHooks, resolveDshHome } from '@intutic/sync-daemon/harness/dshHooks'
 import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 
@@ -74,8 +74,8 @@ export const dshAdapter: IHarnessAdapter = {
   // The plugin registration + egress row in each profile patch is the
   // entirety of what this harness gets, and it happens for every existing
   // profile, not one file.
-  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
-    await writeDshHooks(workspaceRoot, proxyUrl, '')
+  async installGate(workspaceRoot: string, proxyUrl: string, opts?: HarnessWriteOptions): Promise<void> {
+    await writeDshHooks(workspaceRoot, proxyUrl, '', opts?.routing !== false)
   },
 
   writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {

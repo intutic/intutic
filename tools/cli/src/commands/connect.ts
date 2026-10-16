@@ -32,6 +32,7 @@ import { resolveControlPlaneUrl, getIntuticDir } from '../config/paths.js'
 import { createApiClient } from '../lib/api.js'
 import { getActiveAgentProcesses } from '../lib/process.js'
 import { getAdapter } from '../harness/detector.js'
+import { writeHarnessConfigs } from '../harness/writeHarnessConfigs.js'
 import { printOnboardingGuide } from '../lib/onboarding.js'
 import { writeEnforcementState, readEnforcementState, computeFingerprint, containmentExpected } from '../lib/enforcementState.js'
 import { ensureLinuxCaTrust, verifyCaTrust } from '../lib/caTrust.js'
@@ -39,7 +40,7 @@ import { reportDeviceState } from '../lib/deviceReport.js'
 import { reportMachineInventory, shouldReportInventoryThisIteration } from '../lib/inventory.js'
 import { parseChecksums, verifyChecksum } from '../lib/binaryChecksum.js'
 import { newIso } from '@intutic/id'
-import { HarnessType, rulesFileOf } from '@intutic/shared-types'
+import { HarnessType } from '@intutic/shared-types'
 import type { SopFileHash, SyncConfigPayload, SyncSopEntry } from '@intutic/shared-types'
 import pc from 'picocolors'
 
@@ -113,63 +114,9 @@ function isPortInUse(port: number): Promise<boolean> {
 
 
 
-/**
- * Applies a synced configuration to each configured harness.
- *
- * The gate is installed whatever rule sets the workspace has: it enforces the
- * built-in protections, the destructive-command tier, group rules and holds,
- * none of which need a rule set. Gating it on rule sets left a workspace with
- * none, or with none targeting a harness, with that harness ungoverned. The
- * rules file is written only when a rule set targets the harness, or on a
- * forced sync.
- *
- * Harnesses that read the same file (Codex, Grok Build, OpenCode, Muse Code
- * and others all read `AGENTS.md`) each get every rule set aimed at any of
- * them that is configured here: one section, the same for every writer, so
- * the last writer no longer replaces the others' rules.
- *
- * Claude Code reads its own `.claude/rules/` file at every launch, and also
- * the workspace's `AGENTS.md` when there is no `CLAUDE.md` on the path (or
- * the user chose `claude-md-and-agents-md`; see claudeAgentsMd.ts). When it
- * does, a rule set aimed at both Claude Code and an `AGENTS.md` reader
- * reaches it through `AGENTS.md`, so its own file leaves that rule set out
- * rather than load it twice.
- *
- * @returns how many rule sets were written into rules files.
- */
-export async function writeHarnessConfigs(
-  harnesses: readonly string[],
-  workspaceRoot: string,
-  sops: readonly SyncSopEntry[],
-  proxyUrl: string,
-  force: boolean,
-): Promise<number> {
-  let written = 0
-  const writtenFiles = new Set<string>()
-  const agentsMdReaders = harnesses.filter((h) => rulesFileOf(h as HarnessType) === 'AGENTS.md')
-  const claudeFromAgentsMd =
-    harnesses.includes(HarnessType.CLAUDE_CODE) && agentsMdReaders.length > 0 && (await claudeCodeReadsAgentsMd(workspaceRoot))
-  for (const harnessType of harnesses) {
-    const adapter = getAdapter(harnessType)
-    if (!adapter) continue
-
-    await adapter.installGate?.(workspaceRoot, proxyUrl)
-
-    const file = rulesFileOf(harnessType as HarnessType)
-    const readers = file === null ? [harnessType] : harnesses.filter((h) => rulesFileOf(h as HarnessType) === file)
-    const aimed = sops.filter((sop) => sop.harnessTargets.some((t) => readers.includes(t)))
-    const viaAgentsMd = harnessType === HarnessType.CLAUDE_CODE && claudeFromAgentsMd
-    const targetSops = viaAgentsMd ? aimed.filter((sop) => !sop.harnessTargets.some((t) => agentsMdReaders.includes(t))) : aimed
-    // Claude Code's own file is rewritten even when every rule set aimed at
-    // it now comes through AGENTS.md, so it stops carrying them.
-    if (aimed.length === 0 && !force) continue
-    if (!(await adapter.writeConfig(workspaceRoot, targetSops, proxyUrl))) continue
-    // A shared file counts once, however many of its readers wrote it.
-    if (file === null || !writtenFiles.has(file)) written += targetSops.length
-    if (file !== null) writtenFiles.add(file)
-  }
-  return written
-}
+// Moved to harness/writeHarnessConfigs.ts, which `intutic gates install`
+// shares; re-exported so existing imports keep working.
+export { writeHarnessConfigs }
 
 /**
  * Asset names MUST match publish.yml's build-rust-proxy matrix

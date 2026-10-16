@@ -19,7 +19,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
-import type { IHarnessAdapter } from './types.js'
+import type { HarnessWriteOptions, IHarnessAdapter } from './types.js'
 import { loadCredentials } from '../config/store.js'
 import { AGENTS_MD, agentsMdHash, writeAgentsMd } from './agentsMd.js'
 import { writePiHooks } from '@intutic/sync-daemon'
@@ -43,9 +43,9 @@ export const piAdapter: IHarnessAdapter = {
     }
   },
 
-  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+  async installGate(workspaceRoot: string, proxyUrl: string, opts?: HarnessWriteOptions): Promise<void> {
     const creds = await loadCredentials()
-    await writePiHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local')
+    await writePiHooks(workspaceRoot, proxyUrl, creds?.workspaceId || 'local', opts?.routing !== false)
   },
 
   writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {

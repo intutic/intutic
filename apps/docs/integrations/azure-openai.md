@@ -17,6 +17,7 @@ model_list:
 
 ## Endpoint and credentials
 
+<!-- ENTERPRISE_ONLY_START -->
 **A workspace's own credential.** Provision it under Settings → Provider Keys, with `intutic credentials set`, the SDKs' `setProviderCredential`, or the Terraform `intutic_provider_credential` resource. It takes the resource endpoint and an API key:
 
 ```bash
@@ -25,6 +26,7 @@ intutic credentials set azure_openai \
 ```
 
 The endpoint must be an `https` address on `*.openai.azure.com`, `*.services.ai.azure.com` or `*.cognitiveservices.azure.com`: the gateway sends the key wherever the endpoint points, so it only points at Azure. Requests made with an Intutic key (`vk_…`) use the workspace's credential; on a gateway that requires provisioned keys, a workspace without one is refused with `402 byok_required`.
+<!-- ENTERPRISE_ONLY_END -->
 
 **A self-hosted proxy's own credentials.** Set `AZURE_OPENAI_ENDPOINT` or `intutic_settings.providers.azure.endpoint` — any `http(s)` address, so an API gateway or private endpoint in front of Azure works — and authenticate with one of:
 
@@ -34,7 +36,9 @@ The endpoint must be an `https` address on `*.openai.azure.com`, `*.services.ai.
 
 Entra ID tokens are requested for `https://cognitiveservices.azure.com/.default` (for Claude deployments, `https://ai.azure.com/.default`) and cached until five minutes before they expire; the identity needs the Cognitive Services OpenAI User role on the resource (Foundry User for Claude).
 
+<!-- ENTERPRISE_ONLY_START -->
 A stored credential is checked as soon as it is saved, and again from **Test** on the Provider Keys card, by listing the resource's models with the key.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## What you can send
 

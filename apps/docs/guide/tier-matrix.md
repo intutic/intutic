@@ -21,7 +21,7 @@ There are three tiers, not two:
 
 1. **Standalone (Open-Core)** — no account, no control plane, runs entirely
    on your machine.
-2. **Connected, Free** — `intutic connect` to a workspace with no paid plan.
+2. **Connected, Free** — connected to a control plane, in a workspace with no paid plan.
 3. **Connected, Paid** — a workspace on a paid plan: Self-serve, Biz Org or
    Enterprise<!-- ENTERPRISE_ONLY_START -->, or a Self-host license on your own infrastructure<!-- ENTERPRISE_ONLY_END -->.
 
@@ -30,17 +30,18 @@ There are three tiers, not two:
 Everything here works fully offline, today, in open core — nothing on this
 list is a trial or a degraded preview of a paid feature:
 
-- **Local rule sync** — the sync daemon compiles your `.intutic/sops/`
-  markdown into each harness's rules file, such as
+- **Local rules and gates** — `intutic gates install` compiles your
+  `.intutic/sops/` markdown into each harness's rules file, such as
   `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md`
-  or the rules section of `AGENTS.md`, as files change.
+  or the rules section of `AGENTS.md`, and installs each harness's blocking
+  gate; `intutic start` rewrites them as files change.
 - **Local policy enforcement** — the Rust proxy intercepts every LLM
   request/response, evaluates it against local WASM rules, blocks prohibited
   tool calls, and injects steering warnings into the stream in real time.
 - **Local cost and token ledger** — session traces and daily spend land in
   local JSONL logs (`~/.intutic/logs/`), which `intutic traces list` reads
-  with no account. Pre-flight estimates (`intutic predict-cost`) come from a
-  connected workspace's recorded usage, so they need a control plane.
+  with no account. Pre-flight estimates from recorded usage need a connected
+  workspace; standalone, `@intutic predict` uses static per-model multipliers.
 - **Local spend caps** — a daily budget ceiling (`~/.intutic/config.json`),
   enforced natively inside the proxy on every request.
 - **Intelligent routing and the bandit** — the routing engine and its
@@ -114,8 +115,8 @@ config and billing state:
 
 1. **Standalone** — `intutic start`, budget enforced against
    `~/.intutic/config.json`.
-2. **Connected, Free** — register on the dashboard, then
-   `intutic connect --workspace-id <wk_id> --api-key <api_key>`. The sync
+2. **Connected, Free** — register on the dashboard, then connect to it<!-- ENTERPRISE_ONLY_START -->
+   (`intutic connect --workspace-id <wk_id> --api-key <api_key>`)<!-- ENTERPRISE_ONLY_END -->. The sync
    daemon uploads buffered local traces and starts syncing workspace rules
    immediately; no reinstall.
 3. **Connected, Paid** — an administrator sets limits and unlocks tier

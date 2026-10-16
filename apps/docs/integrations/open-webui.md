@@ -4,7 +4,7 @@ Integrate Intutic governance with [Open WebUI](https://openwebui.com) — the we
 
 ## How it works
 
-`intutic connect` writes a Python filter, `~/.open-webui/intutic-governance-filter.py`, that an Open WebUI admin adds once as a Function (**Admin → Settings → Functions → + New Function**, paste the file). The filter sees each prompt and refuses it when it matches a snapshot rule marked block. Open WebUI loads filters only through its admin UI, so Intutic cannot install it into a running instance.
+`intutic gates install` writes a Python filter, `~/.open-webui/intutic-governance-filter.py`, that an Open WebUI admin adds once as a Function (**Admin → Settings → Functions → + New Function**, paste the file). The filter sees each prompt and refuses it when it matches a snapshot rule marked block. Open WebUI loads filters only through its admin UI, so Intutic cannot install it into a running instance.
 
 ## Setup
 
@@ -12,7 +12,11 @@ Integrate Intutic governance with [Open WebUI](https://openwebui.com) — the we
 
 Open WebUI runs as a server (usually in Docker), so `intutic init` cannot detect it. Add `"open-webui"` to the `harnesses` list in `~/.intutic/config.json` yourself (create the file with `intutic init` first).
 
-`intutic init` writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 ### 2. Start the proxy
 
@@ -20,7 +24,9 @@ Open WebUI runs as a server (usually in Docker), so `intutic init` cannot detect
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## What gets written
 
@@ -30,4 +36,4 @@ Intutic generates:
 
 Open WebUI has **no instructions file**: system prompts live in its own settings, so the text of your rule sets does not reach the model. The filter still refuses prompts that match a block rule. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness open-webui`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness open-webui`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).

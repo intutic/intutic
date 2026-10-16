@@ -54,11 +54,13 @@ export function openHandsHooksConfig(hookScriptPath: string): Record<string, unk
  * @param workspaceRoot - Absolute workspace root.
  * @param proxyUrl      - Intutic proxy URL.
  * @param workspaceId   - Workspace ID embedded in hook event payloads.
+ * @param routing       - Also set `[llm] base_url` in ~/.openhands/config.toml.
  */
 export async function writeOpenHandsHooks(
   workspaceRoot: string,
   proxyUrl: string,
   workspaceId = '',
+  routing = true,
 ): Promise<void> {
   const openhandsDir = path.join(workspaceRoot, '.openhands')
   const hooksPath = path.join(openhandsDir, 'hooks.json')
@@ -157,7 +159,7 @@ exit 0
   // ── user-level config.toml llm.base_url ───────────────────────────
   // The workspace config.toml is the adapter's: it merges `[llm] base_url`
   // there (`mergeOpenHandsToml`).
-  await mergeUserOpenHandsConfig(proxyUrl)
+  if (routing) await mergeUserOpenHandsConfig(proxyUrl)
 }
 
 /**
