@@ -43,6 +43,14 @@ function resolveGitDir() {
   return path.resolve(REPO_ROOT, '.git');
 }
 
+// The hooks are for people. A CI job that commits and pushes (the nightly
+// pricing re-pin) would otherwise run them against an unbuilt checkout and
+// fail; CI runs the same gates itself, on the pull request, before any merge.
+if (process.env.CI) {
+  console.log('[SKIP] CI is set: git hooks are not installed.');
+  process.exit(0);
+}
+
 const GIT_DIR = resolveGitDir();
 const HOOKS_DIR = path.join(GIT_DIR, 'hooks');
 const SRC_HOOKS_DIR_RESOLVED = SRC_HOOKS_DIR;

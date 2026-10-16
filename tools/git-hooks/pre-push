@@ -28,9 +28,12 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   # Register cleanup trap to shut down containers on script exit
   trap 'docker compose -f docker-compose.test.yml down' EXIT
   
-  echo "Running database migrations..."
-  DATABASE_URL="postgresql://intutic:changeme@127.0.0.1:5436/intutic_test" \
-  pnpm db:migrate:postgres
+  # The open-core checkout has no database package and nothing to migrate.
+  if [ -d packages/db ]; then
+    echo "Running database migrations..."
+    DATABASE_URL="postgresql://intutic:changeme@127.0.0.1:5436/intutic_test" \
+    pnpm db:migrate:postgres
+  fi
   
   echo "Running Vitest suite..."
   DATABASE_URL="postgresql://intutic:changeme@127.0.0.1:5436/intutic_test" \
