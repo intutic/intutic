@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "source": "https://raw.githubusercontent.com/BerriAI/litellm/e638540de943eddb66f2fd543bfc75210d9c4b77/model_prices_and_context_window.json",
-    "generated_at": "2026-10-08",
+    "source": "https://raw.githubusercontent.com/BerriAI/litellm/9d442b1300966d7c8873be87c50a4ab03ef91db0/model_prices_and_context_window.json",
+    "generated_at": "2026-10-16",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
@@ -202,7 +202,7 @@
     "deepseek.v3-v1:0": {
       "input_cost_per_1k": 0.00058,
       "output_cost_per_1k": 0.00168,
-      "max_tokens": 81920
+      "max_tokens": 8000
     },
     "deepseek.v3.2": {
       "input_cost_per_1k": 0.00062,
@@ -646,7 +646,19 @@
       "max_tokens": 16384,
       "cache_read_cost_per_1k": 0.000075
     },
+    "gpt-4o-mini-search-preview-2025-03-11": {
+      "input_cost_per_1k": 0.00015,
+      "output_cost_per_1k": 0.0006,
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.000075
+    },
     "gpt-4o-search-preview": {
+      "input_cost_per_1k": 0.0025,
+      "output_cost_per_1k": 0.01,
+      "max_tokens": 16384,
+      "cache_read_cost_per_1k": 0.00125
+    },
+    "gpt-4o-search-preview-2025-03-11": {
       "input_cost_per_1k": 0.0025,
       "output_cost_per_1k": 0.01,
       "max_tokens": 16384,
@@ -680,12 +692,12 @@
     "mistral.mistral-7b-instruct-v0:2": {
       "input_cost_per_1k": 0.00015,
       "output_cost_per_1k": 0.0002,
-      "max_tokens": 8191
+      "max_tokens": 4096
     },
     "mistral.mistral-large-2402-v1:0": {
       "input_cost_per_1k": 0.004,
       "output_cost_per_1k": 0.012,
-      "max_tokens": 8191
+      "max_tokens": 4096
     },
     "mistral.mistral-large-2407-v1:0": {
       "input_cost_per_1k": 0.002,
@@ -700,12 +712,12 @@
     "mistral.mistral-small-2402-v1:0": {
       "input_cost_per_1k": 0.001,
       "output_cost_per_1k": 0.003,
-      "max_tokens": 8191
+      "max_tokens": 4096
     },
     "mistral.mixtral-8x7b-instruct-v0:1": {
       "input_cost_per_1k": 0.00045,
       "output_cost_per_1k": 0.0007,
-      "max_tokens": 8191
+      "max_tokens": 4096
     },
     "mistral.voxtral-mini-3b-2507": {
       "input_cost_per_1k": 0.00004,
@@ -840,13 +852,13 @@
     "mistral/mistral-large-4": {
       "input_cost_per_1k": 0.00068,
       "output_cost_per_1k": 0.00209,
-      "max_tokens": 524288,
+      "max_tokens": 1048576,
       "cache_read_cost_per_1k": 0.000068
     },
     "mistral/mistral-large-4-0": {
       "input_cost_per_1k": 0.00068,
       "output_cost_per_1k": 0.00209,
-      "max_tokens": 524288,
+      "max_tokens": 1048576,
       "cache_read_cost_per_1k": 0.000068
     },
     "mistral/mistral-large-latest": {
@@ -1191,6 +1203,18 @@
       "cache_read_cost_per_1k": 0.00001,
       "cache_write_cost_per_1k": 0.000125
     },
+    "gemini-robotics-er-2-preview": {
+      "input_cost_per_1k": 0.001,
+      "output_cost_per_1k": 0.005,
+      "max_tokens": 65536,
+      "cache_read_cost_per_1k": 0.0001
+    },
+    "gemini/gemini-4-argon": {
+      "input_cost_per_1k": 0.002,
+      "output_cost_per_1k": 0.01,
+      "max_tokens": 1048576,
+      "cache_read_cost_per_1k": 0.0001
+    },
     "claude-3-7-sonnet-20250219": {
       "input_cost_per_1k": 0.003,
       "output_cost_per_1k": 0.015,
@@ -1364,18 +1388,6 @@
       "input_cost_per_1k": 0.00015,
       "output_cost_per_1k": 0.0006,
       "max_tokens": 16384
-    },
-    "gpt-4o-mini-search-preview-2025-03-11": {
-      "input_cost_per_1k": 0.00015,
-      "output_cost_per_1k": 0.0006,
-      "max_tokens": 16384,
-      "cache_read_cost_per_1k": 0.000075
-    },
-    "gpt-4o-search-preview-2025-03-11": {
-      "input_cost_per_1k": 0.0025,
-      "output_cost_per_1k": 0.01,
-      "max_tokens": 16384,
-      "cache_read_cost_per_1k": 0.00125
     },
     "mistral/codestral-2405": {
       "input_cost_per_1k": 0.001,
