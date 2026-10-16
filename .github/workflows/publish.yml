@@ -115,7 +115,7 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm@11.6.0
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -159,7 +159,7 @@ jobs:
           [ "$fail" -eq 0 ] && echo "✅ No workspace: refs in any tarball"
           exit $fail
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-tarballs
           path: npm-tarballs/*.tgz
@@ -187,13 +187,13 @@ jobs:
         with:
           lfs: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: "https://registry.npmjs.org"
 
       - name: Download packed tarballs
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: npm-tarballs
           path: npm-tarballs/
@@ -301,7 +301,7 @@ jobs:
           else
             cp target/${{ matrix.target }}/release/intutic-proxy dist-release/${{ matrix.artifact_name }}
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.artifact_name }}
           path: dist-release/${{ matrix.artifact_name }}
@@ -319,7 +319,7 @@ jobs:
           lfs: true
       - name: Install pnpm
         run: npm install -g pnpm@11.6.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -340,7 +340,7 @@ jobs:
           # engines range (>=20.19).
           pnpm --filter @intutic/cli exec pkg package.json --targets node22-macos-arm64,node22-macos-x64,node22-linux-x64,node22-win-x64 --out-path ../../dist-cli
           mv dist-cli/cli-macos-arm64 dist-cli/cli-macos-arm64 2>/dev/null || true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: cli-standalone-binaries
           path: dist-cli/*
@@ -359,7 +359,7 @@ jobs:
           lfs: true
       - name: Install pnpm
         run: npm install -g pnpm@11.6.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -379,7 +379,7 @@ jobs:
           done
 
       - name: Download All Compiled Binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: release-assets/
           merge-multiple: true
@@ -468,7 +468,7 @@ jobs:
       # a dry run, where no release exists, so a glibc regression is caught in
       # the rehearsal instead of after the packages are public.
       - name: Download the binary that is about to ship
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ matrix.asset }}
           path: smoke/
