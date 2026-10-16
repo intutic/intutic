@@ -34,9 +34,9 @@ Steps:
    a rate-limited or unreachable response is reported but never blocks.
 6. **Persist** — connected mode saves the credential to your workspace (the same
    `PUT /api/v1/workspace/provider-credentials/:provider` route `intutic credentials set` uses);
-   local mode writes a `.intutic.env` file (mode `0600`) you source yourself, and points you at
+   local mode writes a `.intutic.env` file (mode `0600`) you source yourself<!-- ENTERPRISE_ONLY_START -->, and points you at
    [`intutic judge configure`](/reference/cli#intutic-judge-configure) to set up an on-prem
-   judge on a self-hosted model.
+   judge on a self-hosted model<!-- ENTERPRISE_ONLY_END -->.
 7. **Summary.**
 
 `intutic init` is unaffected — it stays exactly as it was, flag-driven and safe for CI. `intutic
@@ -60,5 +60,5 @@ scan from a browser tab) — that part is CLI-only.
 ## Related
 
 - [Settings & Configuration — Provider Keys, Judges](/guide/settings)
-- [CLI Reference — `intutic setup`](/reference/cli#intutic-setup)
-- [On-prem judge setup](/external/on-prem-judge)
+- [CLI Reference — `intutic setup`](/reference/cli#intutic-setup)<!-- ENTERPRISE_ONLY_START -->
+- [On-prem judge setup](/external/on-prem-judge)<!-- ENTERPRISE_ONLY_END -->

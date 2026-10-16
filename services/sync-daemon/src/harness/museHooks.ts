@@ -47,6 +47,7 @@ import { keepOriginal } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitJsGate, emitJsFailClosedPrelude } from './gateBody.js'
 import { writeFileAtomic } from '../lib/atomicWrite.js'
+import { hookHostFallback } from '../lib/hookHost.js'
 
 const log = createLogger('sync-muse-hooks')
 
@@ -83,7 +84,7 @@ const https = require('https');
 
 // Runtime credentials
 const _runtimeEnvPath = path.join(os.homedir(), '.intutic', 'env', 'runtime.env');
-let _intuticHost = 'https://api.intutic.ai', _intuticKey = '', _intuticWsId = ${JSON.stringify(workspaceId)};
+let _intuticHost = ${JSON.stringify(hookHostFallback())}, _intuticKey = '', _intuticWsId = ${JSON.stringify(workspaceId)};
 try {
   fs.readFileSync(_runtimeEnvPath, 'utf-8').split('\\n').forEach(line => {
     const eq = line.indexOf('='); if (eq < 0) return;

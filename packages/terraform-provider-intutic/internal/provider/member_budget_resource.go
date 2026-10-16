@@ -68,8 +68,8 @@ func (r *memberBudgetResource) Schema(_ context.Context, _ resource.SchemaReques
 	resp.Schema = schema.Schema{
 		Description: "A member's LLM spend budgets per UTC day and month, or the default member budget " +
 			"(`member_id = \"default\"`). A member's own budget for a period replaces the default's for that period. " +
-			"Needs a plan with member budgets (Biz Org and up) and the OWNER or ADMIN role. Destroying the resource " +
-			"removes the budgets.",
+			"Needs " + planNote("a plan with member budgets (Biz Org and up) and ") + "the OWNER or ADMIN role. " +
+			"Destroying the resource removes the budgets.",
 		Attributes: attrs,
 	}
 }

@@ -11,7 +11,8 @@ involved: [Getting Started](/guide/getting-started) has the standalone
 architecture, [Security](/security) has the Standalone-vs-Connected data-flow
 diagrams and the Enterprise-tier identity/compliance summary,
 [Security & Identity](/guide/security) has the full team-role table, and the
-[FAQ](/guide/faqs) has the upgrade narrative. This page is the one place that
+[FAQ](/guide/faqs) has the standalone works/doesn't-work split<!-- ENTERPRISE_ONLY_START --> and the
+upgrade narrative<!-- ENTERPRISE_ONLY_END -->. This page is the one place that
 states the whole boundary at once — everything below is drawn from those
 pages, not new content, so treat this as the index and follow the links for
 the full detail on any row.
@@ -22,7 +23,7 @@ There are three tiers, not two:
    on your machine.
 2. **Connected, Free** — `intutic connect` to a workspace with no paid plan.
 3. **Connected, Paid** — a workspace on a paid plan: Self-serve, Biz Org or
-   Enterprise, or a Self-host license on your own infrastructure.
+   Enterprise<!-- ENTERPRISE_ONLY_START -->, or a Self-host license on your own infrastructure<!-- ENTERPRISE_ONLY_END -->.
 
 ## What runs 100% locally, with no account
 
@@ -120,8 +121,10 @@ config and billing state:
 3. **Connected, Paid** — an administrator sets limits and unlocks tier
    features from the dashboard; the next sync-daemon handshake picks them up.
 
+<!-- ENTERPRISE_ONLY_START -->
 See the [FAQ](/guide/faqs) (Q17) for the full upgrade narrative, including
 how onboarding provisions new members.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Related
 
@@ -131,5 +134,5 @@ how onboarding provisions new members.
   encryption, and the Enterprise-tier identity/compliance summary
 - [Security & Identity](/guide/security) — the full team-role table, SSO
   setup, and API key management
-- [FAQ](/guide/faqs) — the upgrade narrative and the standalone
+- [FAQ](/guide/faqs) — <!-- ENTERPRISE_ONLY_START -->the upgrade narrative and <!-- ENTERPRISE_ONLY_END -->the standalone
   works/doesn't-work split this page draws from

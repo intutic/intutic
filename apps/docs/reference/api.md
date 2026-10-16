@@ -149,9 +149,9 @@ Self-serve signup with workspace auto-provisioning. Creates a user, provisions a
 
 **Response:** `201 Created`, with the session cookies set
 
-**Error codes:** `400` TERMS_NOT_ACCEPTED (checked before anything else in the body), `409` EMAIL_ALREADY_EXISTS, `422` validation, `503` SIGNUP_DISABLED
+**Error codes:** `400` TERMS_NOT_ACCEPTED (checked before anything else in the body), `403` SIGNUP_CLOSED (sign-up is invite-only and the address is not on the deployment's allow-list, `INTUTIC_SIGNUP_ALLOWLIST`; checked before EMAIL_ALREADY_EXISTS), `409` EMAIL_ALREADY_EXISTS, `422` validation, `503` SIGNUP_DISABLED
 
-`POST /api/v1/auth/signup/org` takes the same `email`, `password`, `name` and `acceptTerms`, with `orgName` (required) and `orgDomain` in place of `workspaceName`. Unless the deployment has opened public org signup it answers `403` DOMAIN_NOT_VERIFIED: sign up for a personal workspace, then create the organization from the dashboard.
+`POST /api/v1/auth/signup/org` takes the same `email`, `password`, `name` and `acceptTerms`, with `orgName` (required) and `orgDomain` in place of `workspaceName`. Unless the deployment has opened public org signup it answers `403` DOMAIN_NOT_VERIFIED: sign up for a personal workspace, then create the organization from the dashboard. It answers `403` SIGNUP_CLOSED as `/signup` does, and so does a GitHub or Google callback that would create an account. `GET /api/v1/deployment` reports `signupOpen: false` while sign-up is invite-only.
 
 ---
 
@@ -795,7 +795,7 @@ Every route the control plane serves: 408 routes, grouped by the source file tha
 
 | Method | Path | Auth | Key scope | Description |
 |--------|------|------|-----------|-------------|
-| GET | `/api/v1/deployment` | None | — | Deployment kind (`saas` or `self_host`), the docs address and whether sign-up is open |
+| GET | `/api/v1/deployment` | None | — | Deployment kind (`saas` or `self_host`), the docs address, whether sign-up is switched on (`signupEnabled`) and whether anyone may use it (`signupOpen`: false while sign-up is invite-only) |
 | GET | `/api/v1/license` | Authenticated | `settings:read` | The Self-host license's status, customer and dates; 404 on Intutic Cloud |
 | PUT | `/api/v1/license` | OWNER | `settings:write` | Install a license file (`{ license }`); refused unless it verifies against this image |
 

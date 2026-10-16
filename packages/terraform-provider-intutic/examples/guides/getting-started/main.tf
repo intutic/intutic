@@ -1,5 +1,5 @@
-# The API key comes from INTUTIC_API_KEY. Intutic Cloud is the default
-# endpoint; a self-hosted control plane is set with INTUTIC_CONTROL_PLANE_URL.
+# The API key comes from INTUTIC_API_KEY, and the control plane's base URL
+# from INTUTIC_CONTROL_PLANE_URL.
 provider "intutic" {}
 
 # The workspace and member the key acts as. Reading it is a quick check that

@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import * as node_os from 'node:os'
+import { CLOUD_RELEASED, HOSTED_CONTROL_PLANE_URL } from '@intutic/shared-types'
 import { writeN8nHooks } from '../../src/harness/n8nHooks.js'
 
 const PROXY_URL = 'http://127.0.0.1:4000'
@@ -68,13 +69,24 @@ describe('n8n event-forwarding workflow', () => {
     expect(header(node, 'X-Intutic-Workspace-Id')).toBe('ws_n8n')
   })
 
-  it('falls back to the hosted control plane when runtime.env is absent', async () => {
+  it.runIf(CLOUD_RELEASED)('falls back to the hosted control plane when runtime.env is absent', async () => {
     await writeN8nHooks(workspaceRoot, PROXY_URL, 'ws_n8n')
     const node = await forwardNode()
-    expect(node.parameters.url).toBe('https://api.intutic.ai/api/v1/hook-events')
+    expect(node.parameters.url).toBe(`${HOSTED_CONTROL_PLANE_URL}/api/v1/hook-events`)
+  })
+
+  it.runIf(!CLOUD_RELEASED)('writes the gate but no forwarding workflow with no control plane to forward to', async () => {
+    await writeN8nHooks(workspaceRoot, PROXY_URL, 'ws_n8n')
+    await expect(node_fs.access(node_path.join(home, '.intutic', 'hooks', 'n8n-governance-hook.js'))).resolves.toBeUndefined()
+    await expect(node_fs.access(node_path.join(home, '.intutic', 'n8n', 'governance-workflow.json'))).rejects.toThrow()
+    const install = await node_fs.readFile(node_path.join(home, '.intutic', 'n8n', 'INSTALL.md'), 'utf-8')
+    expect(install).toContain('EXTERNAL_HOOK_FILES')
+    expect(install).not.toContain('event-forwarding workflow')
   })
 
   it('sends the API key through an n8n expression, not as literal braces', async () => {
+    await node_fs.mkdir(node_path.join(home, '.intutic', 'env'), { recursive: true })
+    await node_fs.writeFile(node_path.join(home, '.intutic', 'env', 'runtime.env'), 'INTUTIC_HOST=https://cp.example.test\n')
     await writeN8nHooks(workspaceRoot, PROXY_URL, 'ws_n8n')
     const node = await forwardNode()
 

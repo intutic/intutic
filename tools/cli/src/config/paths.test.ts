@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveControlPlaneUrl } from './paths.js'
+import { CLOUD_RELEASED, HOSTED_CONTROL_PLANE_URL, NO_CONTROL_PLANE_MESSAGE } from '@intutic/shared-types'
+import { configuredControlPlaneUrl, NoControlPlaneError, resolveControlPlaneUrl } from './paths.js'
 
 describe('resolveControlPlaneUrl', () => {
   const saved = { HOME: process.env.HOME, url: process.env.INTUTIC_CONTROL_PLANE_URL, dev: process.env.INTUTIC_DEV }
@@ -31,8 +32,14 @@ describe('resolveControlPlaneUrl', () => {
     }
   })
 
-  it('falls back to the hosted control plane with nothing set', () => {
-    expect(resolveControlPlaneUrl()).toBe('https://api.intutic.ai')
+  it.runIf(CLOUD_RELEASED)('falls back to the hosted control plane with nothing set', () => {
+    expect(resolveControlPlaneUrl()).toBe(HOSTED_CONTROL_PLANE_URL)
+  })
+
+  it.runIf(!CLOUD_RELEASED)('has no default before the hosted control plane is released', () => {
+    expect(() => resolveControlPlaneUrl()).toThrow(NoControlPlaneError)
+    expect(() => resolveControlPlaneUrl()).toThrow(NO_CONTROL_PLANE_MESSAGE)
+    expect(configuredControlPlaneUrl()).toBeUndefined()
   })
 
   it('uses the URL saved by login over the default', () => {
@@ -71,6 +78,12 @@ describe('resolveControlPlaneUrl', () => {
 
   it('skips the saved URL when asked to', () => {
     storeLogin('https://cp.stored.example')
-    expect(resolveControlPlaneUrl(false, { useStored: false })).toBe('https://api.intutic.ai')
+    if (CLOUD_RELEASED) {
+      expect(resolveControlPlaneUrl(false, { useStored: false })).toBe(HOSTED_CONTROL_PLANE_URL)
+    } else {
+      expect(() => resolveControlPlaneUrl(false, { useStored: false })).toThrow(NoControlPlaneError)
+    }
+    process.env.INTUTIC_CONTROL_PLANE_URL = 'https://cp.env.example'
+    expect(resolveControlPlaneUrl(false, { useStored: false })).toBe('https://cp.env.example')
   })
 })

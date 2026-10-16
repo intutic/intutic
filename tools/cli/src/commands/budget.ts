@@ -3,6 +3,7 @@
  */
 
 import type { IntuticConfig } from '@intutic/shared-types'
+import { CLOUD_RELEASED } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
@@ -109,14 +110,12 @@ export async function runBudget(opts: { dev?: boolean }): Promise<void> {
   const config = loadConfig()
 
   if (creds) {
-    const controlPlaneUrl = resolveControlPlaneUrl(opts.dev)
-    const client = createApiClient(controlPlaneUrl, creds.apiKey)
-
-    // 1. Fetch Cloud Budget Status
+    // 1. Fetch the workspace budget from the control plane
     try {
+      const client = createApiClient(resolveControlPlaneUrl(opts.dev), creds.apiKey)
       const budgetRes = await client.get<BudgetStatusResponse>('/api/v1/budget')
       if (budgetRes) {
-        log.info('Cloud Budget Status:')
+        log.info(CLOUD_RELEASED ? 'Cloud Budget Status:' : 'Workspace Budget Status:')
         log.field('Workspace ID', budgetRes.workspace_id)
         log.field('Daily Spend', `$${budgetRes.daily_spend_usd.toFixed(4)} / $${budgetRes.daily_budget_usd.toFixed(2)} (${budgetRes.pct_daily_used}%)`)
         log.field('Daily Cap', dailyCapNote(budgetRes))
@@ -127,7 +126,7 @@ export async function runBudget(opts: { dev?: boolean }): Promise<void> {
         }
       }
     } catch (err) {
-      log.warn(`Failed to fetch cloud budget status: ${err instanceof Error ? err.message : String(err)}`)
+      log.warn(`Failed to fetch ${CLOUD_RELEASED ? 'cloud' : 'workspace'} budget status: ${err instanceof Error ? err.message : String(err)}`)
     }
   } else {
     log.info('Running in Standalone (Offline) Mode.')
@@ -151,9 +150,8 @@ export async function runBudget(opts: { dev?: boolean }): Promise<void> {
 
   // 3. Fetch Active Loops (requires connection)
   if (creds) {
-    const controlPlaneUrl = resolveControlPlaneUrl(opts.dev)
-    const client = createApiClient(controlPlaneUrl, creds.apiKey)
     try {
+      const client = createApiClient(resolveControlPlaneUrl(opts.dev), creds.apiKey)
       const loopsRes = await client.get<LoopListResponse>('/api/v1/loops')
       if (loopsRes.ok && loopsRes.loops) {
         const activeLoops = loopsRes.loops.filter(l => l.status === 'ACTIVE')

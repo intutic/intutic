@@ -3,12 +3,12 @@
 page_title: "intutic_gateway Resource - intutic"
 subcategory: ""
 description: |-
-  A self-hosted gateway registered with POST /api/v1/gateways (Enterprise and Self-host plans). Gateways belong to the workspace's organization. Registration returns the gateway's gwk_… token once; it is stored in state as a sensitive value for INTUTIC_GATEWAY_TOKEN. Destroying the resource revokes the gateway and its token at once. Needs an OWNER or ADMIN key.
+  A self-hosted gateway registered with POST /api/v1/gateways. Gateways belong to the workspace's organization. Registration returns the gateway's gwk_… token once; it is stored in state as a sensitive value for INTUTIC_GATEWAY_TOKEN. Destroying the resource revokes the gateway and its token at once. Needs an OWNER or ADMIN key.
 ---
 
 # intutic_gateway (Resource)
 
-A self-hosted gateway registered with `POST /api/v1/gateways` (Enterprise and Self-host plans). Gateways belong to the workspace's organization. Registration returns the gateway's `gwk_…` token once; it is stored in state as a sensitive value for `INTUTIC_GATEWAY_TOKEN`. Destroying the resource revokes the gateway and its token at once. Needs an OWNER or ADMIN key.
+A self-hosted gateway registered with `POST /api/v1/gateways`. Gateways belong to the workspace's organization. Registration returns the gateway's `gwk_…` token once; it is stored in state as a sensitive value for `INTUTIC_GATEWAY_TOKEN`. Destroying the resource revokes the gateway and its token at once. Needs an OWNER or ADMIN key.
 
 ## Example Usage
 

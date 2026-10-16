@@ -8,7 +8,7 @@
 
 import pc from 'picocolors'
 import { log } from './logger.js'
-import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
+import { anthropicBaseUrl, openaiBaseUrl, CONTROL_PLANE_PRODUCT_RELEASED } from '@intutic/shared-types'
 
 /**
  * Print tailored setup instructions for a list of harnesses.
@@ -255,6 +255,10 @@ export function printOnboardingGuide(harnesses: string[], userAuthToken?: string
   }
 
   writeCliOutput('')
-  log.info(`Start the sync daemon using: ${pc.bold('intutic connect')}`)
+  log.info(
+    CONTROL_PLANE_PRODUCT_RELEASED
+      ? `Start the sync daemon using: ${pc.bold('intutic connect')}`
+      : `Start the proxy using: ${pc.bold('intutic start')}`,
+  )
   writeCliOutput('')
 }

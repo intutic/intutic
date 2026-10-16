@@ -23,6 +23,8 @@ describe('resolveSandboxRequirement', () => {
     await fs.mkdir(path.join(tmpHome, '.intutic'), { recursive: true })
     origHome = process.env.HOME
     process.env.HOME = tmpHome
+    // The control plane the credentials were saved with.
+    await fs.writeFile(path.join(tmpHome, '.intutic', 'credentials.json'), JSON.stringify({ controlPlaneUrl: 'https://cp.test.invalid' }))
   })
   afterEach(async () => {
     process.env.HOME = origHome

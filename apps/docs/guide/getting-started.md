@@ -122,6 +122,7 @@ intutic login --api-key vk_your_key_here
 ```
 :::
 
+<!-- ENTERPRISE_ONLY_START -->
 ::: tip Self-hosted control plane
 Log in with its URL once; every later command, `intutic connect` included, uses it:
 ```bash
@@ -130,6 +131,7 @@ intutic login --control-plane-url https://intutic.internal.example
 `INTUTIC_CONTROL_PLANE_URL` does the same per shell. See
 [Choosing a control plane](/reference/cli#control-plane-url).
 :::
+<!-- ENTERPRISE_ONLY_END -->
 
 ::: details Local development
 If you are running a control plane on this machine, point at it with `--dev`:
@@ -255,7 +257,7 @@ you to authenticate against an account you have no way to create. Use it only if
 you are running a control plane yourself.
 :::
 
-### Connected (Cloud / self-hosted control plane)
+### Connected<!-- ENTERPRISE_ONLY_START --> (Cloud / self-hosted control plane)<!-- ENTERPRISE_ONLY_END -->
 
 With a control plane available, `intutic connect` additionally opens a WebSocket
 for live policy updates and watches your harness configs for drift:

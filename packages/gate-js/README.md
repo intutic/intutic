@@ -68,8 +68,12 @@ A `GateClient` with no API key (what `fromEnv()` builds when neither
 (`client.localOnly`): it sends nothing, the gate skips the SOP register and
 the hook gate, whose answer is an allow with code `LOCAL_ONLY`, and the
 snapshot, SSO-group, MCP-registry and image tiers still decide. A key the
-control plane refuses (401) is not local-only and fails closed as above. Both
-SDKs run `packages/shared-types/fixtures/gate-client-credentials-vectors.json`.
+control plane refuses (401) is not local-only and fails closed as above. A
+key needs a control plane address: `baseUrl`, `INTUTIC_CONTROL_PLANE_URL`, or
+(for `fromEnv()`) the `controlPlaneUrl` in `~/.intutic/credentials.json`.
+With a key and none, the constructor throws rather than skip the hook gate
+without a word. Both SDKs run
+`packages/shared-types/fixtures/gate-client-credentials-vectors.json`.
 
 ## Public API surface
 

@@ -18,9 +18,6 @@ import (
 	"github.com/intutic/terraform-provider-intutic/internal/client"
 )
 
-// DefaultEndpoint is Intutic Cloud's control plane, the same default the CLI uses.
-const DefaultEndpoint = "https://api.intutic.ai"
-
 type intuticProvider struct {
 	version string
 }
@@ -43,15 +40,21 @@ func (p *intuticProvider) Metadata(_ context.Context, _ provider.MetadataRequest
 }
 
 func (p *intuticProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
+	endpoint := "Control-plane base URL. Defaults to `INTUTIC_CONTROL_PLANE_URL`; one of the two is required."
+	if cloudReleased {
+		endpoint = "Control-plane base URL. Defaults to `INTUTIC_CONTROL_PLANE_URL`, then " + hostedEndpoint + "."
+	}
+	if selfHostReleased {
+		endpoint += " A self-hosted deployment uses its own control-plane address."
+	}
 	resp.Schema = schema.Schema{
 		Description: "Manage an Intutic workspace's SOPs, policy guardrails, settings, " +
 			"virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters, " +
 			"upstream provider credentials and MCP server decisions as code.",
 		Attributes: map[string]schema.Attribute{
 			"endpoint": schema.StringAttribute{
-				Optional: true,
-				Description: "Control-plane base URL. Defaults to `INTUTIC_CONTROL_PLANE_URL`, then " +
-					DefaultEndpoint + ". A self-hosted deployment uses its own control-plane address.",
+				Optional:    true,
+				Description: endpoint,
 			},
 			"api_key": schema.StringAttribute{
 				Optional:  true,
@@ -71,13 +74,23 @@ func (p *intuticProvider) Configure(ctx context.Context, req provider.ConfigureR
 		return
 	}
 
-	endpoint := firstSet(cfg.Endpoint, os.Getenv("INTUTIC_CONTROL_PLANE_URL"), DefaultEndpoint)
+	endpoint := firstSet(cfg.Endpoint, os.Getenv("INTUTIC_CONTROL_PLANE_URL"), defaultEndpoint())
 	apiKey := firstSet(cfg.APIKey, os.Getenv("INTUTIC_API_KEY"), "")
 	if apiKey == "" {
+		where := "Create it with \"This key is for automation\" ticked."
+		if cloudReleased {
+			where = "Create the key under Settings › Security › Virtual API Keys and tick " +
+				"\"This key is for automation\"."
+		}
 		resp.Diagnostics.AddAttributeError(path.Root("api_key"), "Missing API key",
-			"Set api_key in the provider block or INTUTIC_API_KEY in the environment. "+
-				"Create the key under Settings › Security › Virtual API Keys and tick "+
-				"\"This key is for automation\".")
+			"Set api_key in the provider block or INTUTIC_API_KEY in the environment. "+where)
+	}
+	if endpoint == "" {
+		resp.Diagnostics.AddAttributeError(path.Root("endpoint"), "Missing control-plane endpoint",
+			"Set endpoint in the provider block or INTUTIC_CONTROL_PLANE_URL in the environment "+
+				"to the control plane's base URL.")
+	}
+	if resp.Diagnostics.HasError() {
 		return
 	}
 

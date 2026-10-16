@@ -89,7 +89,7 @@ The proxy decides what to do with each `CONNECT` it receives when clients use it
 
 #### Shared gateway
 
-Settings for a proxy deployed as a shared or self-hosted gateway. See [Self-hosted gateway](/external/self-hosted-gateway) and [On-prem judge](/external/on-prem-judge).
+Settings for a proxy deployed as a shared or self-hosted gateway.<!-- ENTERPRISE_ONLY_START --> See [Self-hosted gateway](/external/self-hosted-gateway) and [On-prem judge](/external/on-prem-judge).<!-- ENTERPRISE_ONLY_END -->
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
@@ -261,6 +261,7 @@ These configure the control plane in hosted and Self-host deployments.
 | `REFRESH_TOKEN_EXPIRY_DAYS` | ❌ | `30` | Lifetime of a refresh token and of the `HttpOnly` refresh cookie |
 | `LITELLM_PROXY_URL` | ❌ | — | The LiteLLM endpoint for model calls (judges, probes, extraction). Takes precedence over `LITELLM_ADMIN_BASE_URL` |
 | `LITELLM_ADMIN_BASE_URL` | ❌ | `http://localhost:4000` | The LiteLLM endpoint when `LITELLM_PROXY_URL` is unset |
+| `INTUTIC_SIGNUP_ALLOWLIST` | ❌ | — | Makes self sign-up invite-only: comma-separated `domain` (that exact domain, not its subdomains) or `name@domain` entries, case-insensitive. Set, sign-up (email, org, and a first GitHub or Google sign-in) refuses any other address with 403 `SIGNUP_CLOSED`, and `GET /api/v1/deployment` reports `signupOpen: false`; set but empty admits no one. Invites, SCIM, SSO and sign-in are unaffected. Unset, sign-up is open wherever `INTUTIC_SELF_SERVE_SIGNUP` is `true`. A Self-host deployment has no sign-up either way. Entries match the typed address, which signup does not verify |
 | `LITELLM_PLATFORM_KEY` | ❌ | — | Scoped LiteLLM virtual key for judge/probe/generation calls — NOT LiteLLM's own admin secret, which this service never holds. See the key-rotation runbook for how it's minted. |
 
 The control plane refuses to start when `JWT_SECRET` or `ENCRYPTION_KEY` is

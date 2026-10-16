@@ -7,8 +7,8 @@ administration, as distinct from `ClawdeClient`'s data-plane chat calls.
 
 Deliberately a separate class, not new methods on `ClawdeClient`:
 `ClawdeClient.baseUrl` targets the *proxy* (default `http://localhost:4000`);
-the control plane is a different origin entirely (default Intutic's
-hosted control plane, or a self-hosted `CONTROL_PLANE_URL`). Bolting
+the control plane is a different origin entirely (`baseUrl` or
+`INTUTIC_CONTROL_PLANE_URL`; see release.ts for the default). Bolting
 management calls onto `ClawdeClient` would silently need a second base URL
 on a class whose whole contract today is "one client, one proxy."
 
@@ -32,13 +32,13 @@ that act on the machine they run on: `init`, `setup`, `doctor`,
 here), `sops status`, `guardrails pull`, and `policy
 compile|install|snapshot|list-local`.
 
-Works unmodified against a self-hosted control plane — there is no
-SaaS-vs-self-hosted branch anywhere in this file. An open-core user who
-runs the proxy standalone with no control plane configured simply never
-constructs this class (or does, points it at nothing, and gets a
-`ClawdeConnectionError` on the first call) — the same framing
-`whoami.ts` already uses: "This command needs an Intutic control plane,
-which open core does not include."
+Works unmodified against any control plane it is pointed at. An open-core
+user who runs the proxy standalone with no control plane configured simply
+never constructs this class: with no address (no `baseUrl`, no
+`INTUTIC_CONTROL_PLANE_URL`, and no default before the hosted control plane
+is released) the constructor throws — the same framing `whoami.ts` already
+uses: "This command needs an Intutic control plane, which open core does
+not include."
 
 Auth: the same `apiKey` type `ClawdeClient` accepts — a `vk_` token or a
 JWT both satisfy `services/control-plane/src/middleware/auth.ts`, which

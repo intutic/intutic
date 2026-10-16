@@ -10,9 +10,21 @@ The Intutic provider manages one Intutic workspace through the control plane's R
 
 ## Authentication
 
-The provider authenticates with a workspace API key (`vk_…`). Create one under **Settings › Security › Virtual API Keys** and tick **This key is for automation**, which exempts it from the SSO-recency window while keeping it revocable and bound to its member. The provider acts as that key's member, so the member's role must allow every change in the configuration: most resources need OWNER or ADMIN. The key's `scopes` must cover those routes too; the default, `*`, covers everything the role allows.
+The provider authenticates with a workspace API key (`vk_…`) created with **This key is for automation** ticked, which exempts it from the SSO-recency window while keeping it revocable and bound to its member. The provider acts as that key's member, so the member's role must allow every change in the configuration: most resources need OWNER or ADMIN. The key's `scopes` must cover those routes too; the default, `*`, covers everything the role allows.
 
-Pass the key as `api_key`, or set `INTUTIC_API_KEY`. For a self-hosted control plane, set `endpoint` or `INTUTIC_CONTROL_PLANE_URL`.
+<!-- UNRELEASED:cloud
+Create the key under **Settings › Security › Virtual API Keys** and tick **This key is for automation**.
+-->
+
+Pass the key as `api_key`, or set `INTUTIC_API_KEY`. Set the control plane's base URL as `endpoint` or `INTUTIC_CONTROL_PLANE_URL`; the provider has no default endpoint.
+
+<!-- UNRELEASED:cloud
+Without `endpoint` or `INTUTIC_CONTROL_PLANE_URL`, the provider uses Intutic Cloud's control plane, `https://api.intutic.ai`.
+-->
+
+<!-- UNRELEASED:self-host
+For a self-hosted control plane, set `endpoint` or `INTUTIC_CONTROL_PLANE_URL`.
+-->
 
 Virtual keys, gateway tokens and webhook signing secrets created by the provider are returned once and stored in Terraform state as sensitive values, as are the upstream provider credentials you configure. Keep the state in an encrypted backend.
 

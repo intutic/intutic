@@ -1,6 +1,7 @@
 import time
 import requests
 from typing import Dict, Any, Optional
+from .control_plane import NO_CONTROL_PLANE_URL
 from .errors import ClawdeConnectionError
 
 class BudgetChecker:
@@ -17,7 +18,7 @@ class BudgetChecker:
     for API/cache-behavior compatibility with callers already using them.
     """
 
-    def __init__(self, control_plane_url: str, api_key: str):
+    def __init__(self, control_plane_url: Optional[str], api_key: str):
         self.control_plane_url = control_plane_url
         self.api_key = api_key
         self.cache: Dict[str, Dict[str, Any]] = {}
@@ -30,6 +31,9 @@ class BudgetChecker:
 
         if cached and (now - cached["timestamp"]) < self.cache_ttl:
             return cached["result"]
+
+        if not self.control_plane_url:
+            raise ClawdeConnectionError(f"check_budget() needs a control plane. {NO_CONTROL_PLANE_URL}")
 
         try:
             url = f"{self.control_plane_url}/api/v1/budget"

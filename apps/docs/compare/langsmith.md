@@ -21,8 +21,15 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Cost control** | Daily spend caps enforced before a request leaves; a loop run that exceeds its budget is stopped | Hard spend caps and rate limits in the gateway |
 | **Containment** | Opt-in default-deny egress firewall on the machine the agent runs on; sandboxed runs in a container or Firecracker microVM | Sandboxes: microVMs with credentials injected by an auth proxy and domain allow and deny lists, for code an agent sends there. A local coding agent's own tool calls are not gated |
 | **Evaluation** | Shadow mode measures how often a rule would act before it enforces; judge verdicts in the uncertain band go to a human review queue | Datasets and evaluators for LLM application quality |
-| **Deployment** | Cloud, or fully self-hosted including air-gapped | Cloud; self-hosted and BYOC on Enterprise; the gateway self-hosts with Helm |
 | **Source** | Open core (MIT) | Closed platform |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | LangSmith |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted including air-gapped | Cloud; self-hosted and BYOC on Enterprise; the gateway self-hosts with Helm |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where LangSmith is stronger
 

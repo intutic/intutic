@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { CONTROL_PLANE_PRODUCT_RELEASED, SELF_HOST_RELEASED } from '@intutic/shared-types'
 
 vi.mock('./init.js', () => ({ findWorkspaceRoot: vi.fn(() => null) }))
 vi.mock('../harness/detector.js', () => ({ detectHarnesses: vi.fn(async () => []) }))
@@ -118,13 +119,31 @@ describe('runSetup — connected mode', () => {
     expect(putMock).toHaveBeenCalledWith('/api/v1/workspace/provider-credentials/openai', { apiKey: 'sk-bad-key-1234567890' })
   })
 
-  it('not authenticated + connected mode refuses before any prompt for credentials', async () => {
+  it.runIf(CONTROL_PLANE_PRODUCT_RELEASED)('not authenticated + connected mode refuses before any prompt for credentials', async () => {
     vi.mocked(loadCredentials).mockResolvedValueOnce(null)
     const io = new FakeIO(['connected'])
 
     await runSetup({}, io)
     expect(io.calls.some((c) => c.method === 'log.error' && String(c.arg).includes('Not authenticated'))).toBe(true)
     expect(putMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('runSetup — unreleased control plane', () => {
+  it.runIf(!CONTROL_PLANE_PRODUCT_RELEASED)('does not offer connected mode to someone not logged in', async () => {
+    vi.mocked(loadCredentials).mockResolvedValueOnce(null)
+    const tmpDir = mkdtempSync(join(tmpdir(), 'intutic-setup-test-'))
+    vi.mocked(findWorkspaceRoot).mockReturnValue(tmpDir)
+    try {
+      // No mode answer: the first select is the provider.
+      const io = new FakeIO(['anthropic', 'sk-ant-' + 'local-key-1234567890'])
+      await runSetup({}, io)
+      expect(io.calls.some((c) => c.method === 'select' && String(c.arg).includes('How do you want'))).toBe(false)
+      expect(readFileSync(join(tmpDir, '.intutic.env'), 'utf-8')).toContain('INTUTIC_ANTHROPIC_APIKEY=')
+      expect(putMock).not.toHaveBeenCalled()
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -160,6 +179,6 @@ describe('runSetup — local mode', () => {
     expect(noteCall).toBeDefined()
     expect(JSON.stringify(noteCall)).not.toContain('sk-ant-' + 'local-key-1234567890')
     // No judge-model prompt; the on-prem judge is pointed at a self-hosted model separately.
-    expect(io.calls.some((c) => c.method === 'note' && String((c.arg as { msg?: string }).msg).includes('intutic judge configure'))).toBe(true)
+    expect(io.calls.some((c) => c.method === 'note' && String((c.arg as { msg?: string }).msg).includes('intutic judge configure'))).toBe(SELF_HOST_RELEASED)
   })
 })

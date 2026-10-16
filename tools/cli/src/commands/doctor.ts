@@ -16,6 +16,10 @@
  * 7. CA cert trust (~/.intutic/ca.crt + OS trust store)
  * 8. Policy snapshot present, intact, and current
  *
+ * Checks 2-5 need a control plane. While no control plane product has
+ * launched (CONTROL_PLANE_PRODUCT_RELEASED) and nobody has logged in, they are
+ * skipped with one note instead of failing and pointing at hidden commands.
+ *
  * No subscription checks — enforcement is server-side (covenant 13).
  *
  * @module
@@ -28,12 +32,13 @@ import { createHash } from 'node:crypto'
 import { execSync } from 'node:child_process'
 import pc from 'picocolors'
 
+import { CONTROL_PLANE_PRODUCT_RELEASED, NO_CONTROL_PLANE_MESSAGE } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { loadCredentials, loadConfig, loadIntegrity } from '../config/store.js'
 import { isSyncDaemonRunning } from '../lib/process.js'
 import { caTrustCommandFor, LINUX_CA_TRUST_PATHS } from '../lib/caTrust.js'
 import { getPaths } from './install-daemon.js'
-import { resolveControlPlaneUrl } from '../config/paths.js'
+import { configuredControlPlaneUrl } from '../config/paths.js'
 import { localProxyProbeBase } from '../lib/localProxy.js'
 
 /** The local proxy's health endpoint, on the port every command uses. */
@@ -75,7 +80,7 @@ const VALKEY_PROBE_TIMEOUT_MS = 2_000
 /**
  * Check 1: Proxy reachable on its local port.
  */
-async function checkProxy(): Promise<CheckResult> {
+async function checkProxy(startCommand = 'intutic connect'): Promise<CheckResult> {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS)
@@ -97,7 +102,7 @@ async function checkProxy(): Promise<CheckResult> {
       name: 'Proxy',
       passed: false,
       detail: `Responded with HTTP ${res.status}`,
-      remediation: 'Start the proxy with `intutic connect` or check proxy logs.',
+      remediation: `Start the proxy with \`${startCommand}\` or check proxy logs.`,
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
@@ -105,7 +110,7 @@ async function checkProxy(): Promise<CheckResult> {
       name: 'Proxy',
       passed: false,
       detail: `Not reachable — ${message}`,
-      remediation: 'Start the proxy: ensure `intutic connect` is running or the proxy binary is started.',
+      remediation: `Start the proxy: ensure \`${startCommand}\` is running or the proxy binary is started.`,
     }
   }
 }
@@ -132,7 +137,10 @@ export async function checkControlPlane(): Promise<CheckResult> {
 
   // The same control plane every other command would use for these
   // credentials, so this checks what they will actually hit.
-  const controlPlaneUrl = resolveControlPlaneUrl()
+  const controlPlaneUrl = configuredControlPlaneUrl()
+  if (controlPlaneUrl === undefined) {
+    return { name: 'Control Plane Auth', passed: false, detail: NO_CONTROL_PLANE_MESSAGE }
+  }
   const url = `${controlPlaneUrl}/api/v1/auth/me`
 
   try {
@@ -650,12 +658,17 @@ export async function runDoctor(): Promise<void> {
 
   const results: CheckResult[] = []
 
+  // An open-core install with no login has no control plane to check.
+  const connected = CONTROL_PLANE_PRODUCT_RELEASED || (await loadCredentials()) !== null
+
   // Run checks in sequence (some depend on network)
-  results.push(await checkProxy())
-  results.push(await checkControlPlane())
-  results.push(checkSyncDaemon())
-  results.push(checkHarnessConfigs())
-  results.push(checkDaemonLog())
+  results.push(await checkProxy(connected ? 'intutic connect' : 'intutic start'))
+  if (connected) {
+    results.push(await checkControlPlane())
+    results.push(checkSyncDaemon())
+    results.push(checkHarnessConfigs())
+    results.push(checkDaemonLog())
+  }
   results.push(await checkValkey())
   results.push(checkCertTrust())
   results.push(await checkPolicySnapshot())
@@ -680,6 +693,10 @@ export async function runDoctor(): Promise<void> {
         console.log(`    ${pc.dim('→')} ${pc.dim(result.remediation)}`)
       }
     }
+  }
+
+  if (!connected) {
+    console.log(`  ${pc.dim('–')} ${pc.dim('Control plane, sync daemon, harness sync and daemon log checks skipped: open core, no control plane connected.')}`)
   }
 
   // Summary

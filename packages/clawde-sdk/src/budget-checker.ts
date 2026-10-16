@@ -1,5 +1,6 @@
 import { BudgetCheckResult } from './types'
 import { ClawdeConnectionError } from './errors'
+import { NO_CONTROL_PLANE_URL } from './release'
 
 interface CacheEntry {
   result: BudgetCheckResult
@@ -15,10 +16,10 @@ interface WorkspaceBudgetStatus {
 export class BudgetChecker {
   private cache = new Map<string, CacheEntry>()
   private cacheTtl = 30000 // 30s TTL
-  private controlPlaneUrl: string
+  private controlPlaneUrl: string | undefined
   private apiKey: string
 
-  constructor(controlPlaneUrl: string, apiKey: string) {
+  constructor(controlPlaneUrl: string | undefined, apiKey: string) {
     this.controlPlaneUrl = controlPlaneUrl
     this.apiKey = apiKey
   }
@@ -42,6 +43,10 @@ export class BudgetChecker {
 
     if (cached && now - cached.timestamp < this.cacheTtl) {
       return cached.result
+    }
+
+    if (!this.controlPlaneUrl) {
+      throw new ClawdeConnectionError(`checkBudget() needs a control plane. ${NO_CONTROL_PLANE_URL}`)
     }
 
     try {

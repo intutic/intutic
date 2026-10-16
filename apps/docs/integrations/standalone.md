@@ -158,8 +158,8 @@ Any internal, microservice-based, or custom company agent framework can be gover
 For strict security environments requiring zero data egress:
 
 1. **100% Offline Local Operation**: Intutic Proxy, WASM policy engine, and Valkey memory cache operate entirely inside your private VPC or local workstation without sending telemetry to external clouds.
-2. **Local Log & Spend Sharding**: Offline telemetry and prompt logs are written to sharded local files (`~/.intutic/logs/traces-YYYY-MM-DD.jsonl`).
-3. **Automated Offline Sync**: When a VPC network connection is established (or during scheduled sync windows), the sync daemon reconciles spend back to your self-hosted Control Plane (`/api/v1/traces/sync-back`).
+2. **Local Log & Spend Sharding**: Offline telemetry and prompt logs are written to sharded local files (`~/.intutic/logs/traces-YYYY-MM-DD.jsonl`).<!-- ENTERPRISE_ONLY_START -->
+3. **Automated Offline Sync**: When a VPC network connection is established (or during scheduled sync windows), the sync daemon reconciles spend back to your self-hosted Control Plane (`/api/v1/traces/sync-back`).<!-- ENTERPRISE_ONLY_END -->
 
 ---
 

@@ -326,7 +326,7 @@ Options for a [ClawdeClient](classes/ClawdeClient.md).
 | <a id="property-apikey"></a> `apiKey` | `string` | `undefined` | The key the proxy authenticates: an Intutic virtual key (`vk_…`) or a provider key. |
 | <a id="property-autocontext"></a> `autoContext?` | `boolean` | `true` | Resolve context (`resolveContext()`) and register a session carrying the repository, branch and commit on the first `chat()`. `false` does neither. |
 | <a id="property-baseurl"></a> `baseUrl?` | `string` | `INTUTIC_BASE_URL`, then `http://localhost:4000` | The proxy's address. |
-| <a id="property-controlplaneurl"></a> `controlPlaneUrl?` | `string` | `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane | Control-plane base URL used by checkBudget() and session registration (a different origin from `baseUrl` — see [ControlPlaneClient](classes/ControlPlaneClient.md)). |
+| <a id="property-controlplaneurl"></a> `controlPlaneUrl?` | `string` | `INTUTIC_CONTROL_PLANE_URL`; this release has no default control plane | Control-plane base URL used by checkBudget() and session registration (a different origin from `baseUrl` — see [ControlPlaneClient](classes/ControlPlaneClient.md)). With none, checkBudget() throws `ClawdeConnectionError` and no session is registered. |
 | <a id="property-graphidentity"></a> `graphIdentity?` | `Partial`\<`GraphIdentity`\> | `undefined` | This client's position in the agent graph. Omit and it is inherited from the environment, so a spawned agent is automatically a child of its spawner. Supply it when one process drives several logical agents and the environment cannot describe the shape. |
 | <a id="property-provider"></a> `provider?` | `"openai"` \| `"anthropic"` \| `"google"` | `undefined` | `'anthropic'` sends `chat()` to the proxy's `/v1/messages` route, converting the request and the answer between the OpenAI and Anthropic shapes. Otherwise the request goes to `/v1/chat/completions` as it is. |
 | <a id="property-retries"></a> `retries?` | `number` | `2` | How many times a transport failure, a timeout or a 5xx answer is retried. |
@@ -406,7 +406,7 @@ Options for a [ControlPlaneClient](classes/ControlPlaneClient.md).
 | Property | Type | Default value | Description |
 | ------ | ------ | ------ | ------ |
 | <a id="property-apikey-1"></a> `apiKey` | `string` | `undefined` | An Intutic virtual key (`vk_…`) or a login JWT. |
-| <a id="property-baseurl-1"></a> `baseUrl?` | `string` | `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane | The control plane's address. |
+| <a id="property-baseurl-1"></a> `baseUrl?` | `string` | `INTUTIC_CONTROL_PLANE_URL`; this release has no default control plane | The control plane's address. With none, the constructor throws. |
 
 ***
 

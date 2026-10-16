@@ -185,8 +185,9 @@ static fromEnv(opts?): GateClient;
 Build a client from the environment, falling back to CLI credentials.
 
 Reading `~/.intutic/credentials.json` means the gate works with whatever
-workspace `intutic login` already bound, instead of duplicating the key.
-With no key in either place the client is [localOnly](#localonly).
+workspace `intutic login` already bound, instead of duplicating the key:
+its key, workspace and the control plane it logged in to. With no key in
+either place the client is [localOnly](#localonly).
 
 #### Parameters
 

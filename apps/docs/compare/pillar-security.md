@@ -7,7 +7,7 @@ description: Pillar Security red-teams AI applications, guards model traffic thr
 
 *Last reviewed: 2026-10-10*
 
-Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. It is open core, runs fully self-hosted including air-gapped, and publishes its prices. Pillar Security ([pillar.security](https://www.pillar.security)) is an AI security platform with three parts that touch agents: red teaming of agents and workflows, guardrails on model traffic through gateways you already run, and an Agentic Endpoint that hooks Claude Code, Codex CLI and Cursor before each tool call and decides locally. Pillar spans testing and model traffic as well as the endpoint; Intutic governs each action a coding agent takes, across many more harnesses, and adds MCP, network and sandbox containment around it.
+Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. It is open core<!-- ENTERPRISE_ONLY_START -->, runs fully self-hosted including air-gapped, and publishes its prices<!-- ENTERPRISE_ONLY_END -->. Pillar Security ([pillar.security](https://www.pillar.security)) is an AI security platform with three parts that touch agents: red teaming of agents and workflows, guardrails on model traffic through gateways you already run, and an Agentic Endpoint that hooks Claude Code, Codex CLI and Cursor before each tool call and decides locally. Pillar spans testing and model traffic as well as the endpoint; Intutic governs each action a coding agent takes, across many more harnesses, and adds MCP, network and sandbox containment around it.
 
 ## Comparison
 
@@ -21,9 +21,16 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 | **Red teaming** | — | Multi-turn black-box [red teaming](https://www.pillar.security/platform/red-teaming-risk-detection) of agents and workflows, with an attack-surface graph and findings mapped to OWASP, MITRE ATLAS and SAIL |
 | **Discovery and inventory** | [AI inventory](/guide/ai-inventory) of developer machines that run `intutic connect`: the harnesses, MCP servers and skill bundles on each, and which run ungoverned | Endpoint posture scans and MCP server inventory; hooks rolled out through Jamf Pro, Kandji, JumpCloud or any MDM that runs scripts, tamper-proof for Codex and Cursor on macOS and Linux |
 | **Audit and SIEM** | Merkle tree with per-trace inclusion proofs and Ed25519-signed roots, verifiable in the browser or with `intutic integrity verify`; six SIEM destinations, including Splunk HEC, Syslog/CEF and Datadog | SIEM integration |
-| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | [Managed cloud, self-hosted or hybrid](https://www.pillar.security/platform/deployment). Self-hosting needs Kubernetes (EKS) with at least three GPU nodes and your own Postgres, Redis and Kafka; adaptive guardrails are cloud-only. The vendor says one customer runs it air-gapped, with some outbound access for sign-in and configuration |
 | **Source** | Open core (MIT): the proxy, hook gates, MCP proxy, CLI and sync daemon | Closed |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | Pillar Security |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | [Managed cloud, self-hosted or hybrid](https://www.pillar.security/platform/deployment). Self-hosting needs Kubernetes (EKS) with at least three GPU nodes and your own Postgres, Redis and Kafka; adaptive guardrails are cloud-only. The vendor says one customer runs it air-gapped, with some outbound access for sign-in and configuration |
 | **Pricing** | [Published](/guide/plans); the open core is free | Not published |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where Pillar Security is stronger
 
@@ -38,7 +45,7 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 - Your developers use coding agents beyond Claude Code, Codex and Cursor, such as GitHub Copilot, Windsurf, Cline or Goose, or agent frameworks such as LangGraph, and you want each tool call decided before it runs.
 - You want MCP calls to pass through a governance proxy, with approval holds, rather than only an allow-list.
 - You need an egress firewall and a sandbox so an agent cannot route around governance.
-- You need to run the whole product on your own infrastructure, including air-gapped, and want to read the code that blocks a call.
+- You want to read the code that blocks a call<!-- ENTERPRISE_ONLY_START -->, and need to run the whole product on your own infrastructure, including air-gapped<!-- ENTERPRISE_ONLY_END -->.
 
 ## When to choose Pillar Security
 

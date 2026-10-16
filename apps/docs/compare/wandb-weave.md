@@ -19,8 +19,15 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Whatever your code does with a scorer's result |
 | **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | Traces MCP clients and servers |
 | **Containment** | Default-deny egress firewall and sandboxed runs on Docker, Podman or Firecracker | Not part of the product |
-| **Deployment** | Cloud, or fully self-hosted including air-gapped | Multi-tenant cloud, or Dedicated Cloud on AWS, Google Cloud or Azure; self-managed in private preview |
 | **Source** | Open core (MIT) | SDK is Apache-2.0 |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | W&B Weave |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted including air-gapped | Multi-tenant cloud, or Dedicated Cloud on AWS, Google Cloud or Azure; self-managed in private preview |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where Weave is stronger
 

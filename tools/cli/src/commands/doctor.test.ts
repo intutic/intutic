@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer, type AddressInfo } from 'node:net'
-import { describePolicySnapshot, checkCiscoScanner, checkControlPlane, checkValkey, linuxCaTrustInstalled } from './doctor.js'
+import { describePolicySnapshot, checkCiscoScanner, checkControlPlane, checkValkey, linuxCaTrustInstalled, runDoctor } from './doctor.js'
 import { loadCredentials } from '../config/store.js'
 
 vi.mock('../config/store.js', async (importOriginal) => ({
@@ -199,6 +199,23 @@ describe('checkControlPlane', () => {
     const result = await checkControlPlane()
     expect(result.passed).toBe(false)
     expect(result.remediation).toContain('intutic login')
+  })
+})
+
+describe('runDoctor on an open-core install', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('skips the control-plane checks instead of pointing at hidden commands', async () => {
+    vi.mocked(loadCredentials).mockResolvedValue(null)
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'))
+    const lines: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { lines.push(args.join(' ')) })
+    await runDoctor()
+    const out = lines.join('\n')
+    expect(out).toContain('skipped: open core, no control plane connected')
+    expect(out).toContain('intutic start')
+    expect(out).not.toMatch(/intutic (login|connect)/)
+    expect(out).not.toContain('Control Plane Auth')
   })
 })
 

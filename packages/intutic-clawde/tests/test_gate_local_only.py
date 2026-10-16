@@ -69,7 +69,7 @@ def _reset(plane):
 def test_local_only_exactly_when_there_is_no_key():
     assert GateClient().local_only is True
     assert GateClient(api_key="").local_only is True
-    assert GateClient(api_key="k").local_only is False
+    assert GateClient(api_key="k", base_url="https://cp.example").local_only is False
 
 
 def test_a_local_only_client_sends_no_events(plane):

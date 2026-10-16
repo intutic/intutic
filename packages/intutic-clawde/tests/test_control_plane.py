@@ -19,15 +19,18 @@ def test_requires_api_key():
         ControlPlaneClient(api_key="")
 
 
-def test_defaults_base_url():
-    with patch.dict(os.environ, {}, clear=False):
-        os.environ.pop("INTUTIC_CONTROL_PLANE_URL", None)
-        client = ControlPlaneClient(api_key="vk_test")
-        # The API host, not the dashboard's: app.intutic.ai serves the web app.
-        assert client.base_url == "https://api.intutic.ai"
-        # One default for the whole package: the gate client resolves the same host.
-        from intutic_clawde.gate.client import GateClient
-        assert GateClient(api_key="vk_test").base_url == client.base_url
+def test_defaults_base_url(monkeypatch):
+    # With the hosted cloud released (release.CLOUD_RELEASED), the default is
+    # Intutic's API host; test_release_defaults.py covers the unreleased build.
+    from intutic_clawde import control_plane
+    monkeypatch.setattr(control_plane, "DEFAULT_CONTROL_PLANE_URL", "https://api.intutic.ai")
+    monkeypatch.delenv("INTUTIC_CONTROL_PLANE_URL", raising=False)
+    client = ControlPlaneClient(api_key="vk_test")
+    # The API host, not the dashboard's: app.intutic.ai serves the web app.
+    assert client.base_url == "https://api.intutic.ai"
+    # One default for the whole package: the gate client resolves the same host.
+    from intutic_clawde.gate.client import GateClient
+    assert GateClient(api_key="vk_test").base_url == client.base_url
 
 
 def test_respects_env_base_url():

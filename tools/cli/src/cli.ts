@@ -10,8 +10,14 @@
  * @module
  */
 
-import { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { createRequire } from 'node:module'
+import {
+  CLOUD_RELEASED,
+  CONTROL_PLANE_PRODUCT_RELEASED,
+  HOSTED_CONTROL_PLANE_URL,
+  SELF_HOST_RELEASED,
+} from '@intutic/shared-types'
 import { DEFAULT_SANDBOX_IMAGE } from './lib/sandbox/image.js'
 
 // Read the version from package.json rather than repeating it here. The literal
@@ -24,13 +30,42 @@ const { version } = createRequire(import.meta.url)('../package.json') as { versi
 
 const program = new Command()
 
+// Release flags (packages/shared-types/src/release.ts). A command that only
+// works against a control plane, or only in the self-hosted distribution, is
+// left out of help until that product is released. Hidden is all it is: the
+// command still parses and runs, so staging and existing users are unaffected.
+const needsControlPlane = { hidden: !CONTROL_PLANE_PRODUCT_RELEASED }
+const needsSelfHost = { hidden: !SELF_HOST_RELEASED }
+
+/** An option of a visible command that only does anything against a control plane. */
+function controlPlaneOption(flags: string, description: string): Option {
+  const option = new Option(flags, description)
+  return CONTROL_PLANE_PRODUCT_RELEASED ? option : option.hideHelp()
+}
+
+// A command that needs a control plane, run with none configured, throws
+// NoControlPlaneError (config/paths.ts) from an async action. Say that plainly
+// rather than as an unhandled rejection with a stack; anything else still
+// crashes as before.
+process.on('unhandledRejection', (err) => {
+  if (err instanceof Error && err.name === 'NoControlPlaneError') {
+    console.error(err.message)
+    process.exit(1)
+  }
+  throw err
+})
+
 // Positional options: `--version` and `--help` belong to the program only when
 // they come before a subcommand. Without this, commander matches program
 // options anywhere on the line, so a subcommand option named `--version` would
 // print the CLI version and exit before its command ever saw it.
 program
   .name('intutic')
-  .description('Intutic CLI — AI governance control plane for developer workspaces')
+  .description(
+    CONTROL_PLANE_PRODUCT_RELEASED
+      ? 'Intutic CLI — AI governance control plane for developer workspaces'
+      : 'Intutic CLI — open-core AI governance for developer workspaces: a local proxy, gates and policy for coding agents',
+  )
   .version(version)
   .enablePositionalOptions()
 
@@ -56,7 +91,7 @@ program
   })
 
 const judgeCmd = program
-  .command('judge')
+  .command('judge', needsSelfHost)
   .description('Configure the LLM-as-judge path')
 
 judgeCmd
@@ -69,7 +104,7 @@ judgeCmd
   })
 
 program
-  .command('login')
+  .command('login', needsControlPlane)
   .description('Authenticate with the Intutic control plane')
   .option('--api-key <key>', 'Authenticate with an API key (vk_*)')
   .option('--control-plane-url <url>', 'Control plane to log in to (e.g. a self-hosted one); saved for every later command')
@@ -91,7 +126,7 @@ program
   })
 
 program
-  .command('logout')
+  .command('logout', needsControlPlane)
   .description('Clear stored credentials')
   .action(async () => {
     const { runLogout } = await import('./commands/logout.js')
@@ -126,7 +161,11 @@ program
 
 const budgetCmd = program
   .command('budget')
-  .description('Check remaining daily/monthly budget and list active loops; set workspace, key and member budgets')
+  .description(
+    CONTROL_PLANE_PRODUCT_RELEASED
+      ? 'Check remaining daily/monthly budget and list active loops; set workspace, key and member budgets'
+      : 'Check the local spending cap and what this machine has spent today',
+  )
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .option('--watch', 'Continuously print machine-local and workspace spend, one line per tick')
   .option('--interval <seconds>', 'Tick interval in seconds for --watch', String(5))
@@ -141,7 +180,7 @@ const budgetCmd = program
   })
 
 budgetCmd
-  .command('set')
+  .command('set', needsControlPlane)
   .description("Set the workspace's daily and monthly caps, alert threshold and whether each cap refuses requests (OWNER, ADMIN)")
   .option('--daily <usd>', 'Daily cap in USD (0: no daily cap; default: back to the $100 default)')
   .option('--monthly <usd>', 'Monthly cap in USD (0: no monthly cap; default: back to the $500 default)')
@@ -158,7 +197,7 @@ budgetCmd
   })
 
 budgetCmd
-  .command('keys')
+  .command('keys', needsControlPlane)
   .description("Every virtual key's spend budgets, rate limit and spend today and this month")
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
@@ -168,7 +207,7 @@ budgetCmd
   })
 
 budgetCmd
-  .command('key <keyId>')
+  .command('key <keyId>', needsControlPlane)
   .description("Set a virtual key's spend budgets and rate limit (OWNER, ADMIN)")
   .option('--daily <usd>', 'Day budget in USD, or none to remove it')
   .option('--monthly <usd>', 'Month budget in USD, or none to remove it')
@@ -184,7 +223,7 @@ budgetCmd
   })
 
 budgetCmd
-  .command('members')
+  .command('members', needsControlPlane)
   .description("The default member budget, and each member's budgets and spend (Biz Org+)")
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
@@ -194,7 +233,7 @@ budgetCmd
   })
 
 budgetCmd
-  .command('member <memberId>')
+  .command('member <memberId>', needsControlPlane)
   .description("Set a member's spend budgets, or the default member budget with `default` (OWNER, ADMIN; Biz Org+)")
   .option('--daily <usd>', 'Day budget in USD, or none to remove it')
   .option('--monthly <usd>', 'Month budget in USD, or none to remove it')
@@ -208,7 +247,7 @@ budgetCmd
   })
 
 program
-  .command('predict-cost')
+  .command('predict-cost', needsControlPlane)
   .description(
     'Pre-flight cost estimate for a prompt/task before it runs (requires `intutic login`). ' +
     "Estimates output tokens from the workspace's recorded usage and prices them with the same " +
@@ -225,7 +264,7 @@ program
   })
 
 const sopsCmd = program
-  .command('sops')
+  .command('sops', needsControlPlane)
   .description('Manage local and global SOP rules')
 
 sopsCmd
@@ -279,7 +318,7 @@ sopsCmd
 
 // ── SOP Optimizer approval mode ──────────────────────────────────────────
 const optimizerCmd = program
-  .command('optimizer')
+  .command('optimizer', needsControlPlane)
   .description("Read and set the SOP Optimizer's approval mode (whether it may auto-apply strengthening proposals)")
 
 optimizerCmd
@@ -306,10 +345,10 @@ optimizerCmd
 
 const policyCmd = program
   .command('policy')
-  .description('WASM rules and the policy snapshot')
+  .description(CONTROL_PLANE_PRODUCT_RELEASED ? 'WASM rules and the policy snapshot' : 'WASM rules: compile, test and install them locally')
 
 policyCmd
-  .command('snapshot')
+  .command('snapshot', needsControlPlane)
   .description(
     'Compile workspace policy to ~/.intutic/hooks/policy-snapshot.rules — the file every gate reads.\n' +
     '\n' +
@@ -336,10 +375,10 @@ policyCmd
   .command('compile')
   .description('Compile an AssemblyScript rule to WASM (wraps asc)')
   .option('--src <path>', 'Rule source entry file (default: assembly/index.ts)')
-  .option('--out <path>', 'Output .wasm path (default: build/rule.wasm, or build/<candidate>.wasm with --candidate)')
+  .option('--out <path>', `Output .wasm path (default: build/rule.wasm${CONTROL_PLANE_PRODUCT_RELEASED ? ', or build/<candidate>.wasm with --candidate' : ''})`)
   .option('--debug', 'Include debug info and source maps')
-  .option('--candidate <id>', 'Compile a rule candidate from its source of record on the control plane (fetched and hash-verified; not with --src)')
-  .option('--upload', 'With --candidate: upload the bundle to the candidate with its source hash and print the gate results')
+  .addOption(controlPlaneOption('--candidate <id>', 'Compile a rule candidate from its source of record on the control plane (fetched and hash-verified; not with --src)'))
+  .addOption(controlPlaneOption('--upload', 'With --candidate: upload the bundle to the candidate with its source hash and print the gate results'))
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
     const { runPolicyCompile } = await import('./commands/policy.js')
@@ -366,7 +405,7 @@ policyCmd
   })
 
 policyCmd
-  .command('replay <ruleId>')
+  .command('replay <ruleId>', needsControlPlane)
   .description(
     "Replay a rule (installed or not) against this workspace's own recent traffic and report " +
     'what it would have done, without touching enforcement.'
@@ -422,7 +461,7 @@ rulesCmd
 // `intutic sops` is files on disk; this namespace is the cited guardrails
 // extracted from policy documents and their shadow -> promote lifecycle.
 const guardrailsCmd = program
-  .command('guardrails')
+  .command('guardrails', needsControlPlane)
   .description('Policy documents, cited clauses and the guardrails compiled from them')
 
 const guardrailsSourcesCmd = guardrailsCmd
@@ -695,7 +734,7 @@ guardrailsCmd
   })
 
 program
-  .command('whoami')
+  .command('whoami', needsControlPlane)
   .description('Show current authenticated identity')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
@@ -742,7 +781,7 @@ for (const [action, desc] of [
 }
 
 enforceCmd
-  .command('report')
+  .command('report', needsControlPlane)
   .description(
     'Report locally recorded enforcement state (firewall/CA-trust/system-hooks) to the control plane. ' +
       'No privilege needed — for when apply/remove ran elevated and could not reach stored credentials.',
@@ -758,7 +797,7 @@ enforceCmd
 // tools/scripts/intutic-enterprise-install.sh, an unrelated air-gapped
 // docker-compose installer. Does not touch the host firewall; see `enforce`.
 const enterpriseCmd = program
-  .command('enterprise')
+  .command('enterprise', needsControlPlane)
   .description('Enterprise fleet rollout: CA trust, Cursor system hooks, MDM manifests')
 
 enterpriseCmd
@@ -804,7 +843,7 @@ envCmd
   })
 
 program
-  .command('connect')
+  .command('connect', needsControlPlane)
   .description('Start sync daemon — bidirectional config sync with control plane (requires an account)')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .option('--interval <ms>', 'Poll interval in milliseconds', '30000')
@@ -817,7 +856,7 @@ program
   })
 
 program
-  .command('sync-context')
+  .command('sync-context', needsControlPlane)
   .description('Record the Git branch and commit in .intutic/git-context.json, which a running `intutic connect` reports')
   .option('--git', 'Read the branch and commit from the repository (for any not given below)')
   .option('--branch <name>', 'Current Git branch name')
@@ -828,7 +867,7 @@ program
   })
 
 program
-  .command('decisions-log-refresh')
+  .command('decisions-log-refresh', needsControlPlane)
   .description(
     'One-shot refresh of the governed decisions log (.intutic/DECISIONS.md, and the recent ' +
       'entries in each governed harness\'s instructions file) — no-ops if decisionsLogEnabled is off. Invoked by the optional ' +
@@ -942,7 +981,7 @@ traces
 // ── Findings (detector_findings adjudication) ───────────────────────────────
 
 const findings = program
-  .command('findings')
+  .command('findings', needsControlPlane)
   .description('Query and adjudicate detector findings — the TP/FP labeling surface')
 
 findings
@@ -995,7 +1034,7 @@ findings
 // ── Governance incidents ───────────────────────────────────────────────────
 
 const incidentsCmd = program
-  .command('incidents')
+  .command('incidents', needsControlPlane)
   .description('Governance incidents, as on Findings › Incidents (OWNER, ADMIN, EM)')
 
 incidentsCmd
@@ -1026,7 +1065,7 @@ incidentsCmd
 // ── Trace integrity ────────────────────────────────────────────────────────
 
 const integrity = program
-  .command('integrity')
+  .command('integrity', needsControlPlane)
   .description(
     'Verify sealed trace roots — list, re-derive, walk the root chain, and walk the config snapshot chain'
   )
@@ -1079,7 +1118,7 @@ integrity
 // ── Routing reports ─────────────────────────────────────────────────────────
 
 const routing = program
-  .command('routing')
+  .command('routing', needsControlPlane)
   .description('Read-only reports for the routing subsystem')
 
 routing
@@ -1126,7 +1165,7 @@ function defineDaemonInstall(cmd: Command): Command {
     )
     .option('--workspace-id <id>', 'Workspace ID (e.g. wk_xxxx) — required unless --proxy')
     .option('--api-key <key>', 'Workspace API key (e.g. vk_xxxx) — required unless --proxy')
-    .option('--control-plane-url <url>', 'Control plane the daemon connects to (default: $INTUTIC_CONTROL_PLANE_URL, then a workspace set up with `intutic init --dev`, then the URL saved by `intutic login`, then https://api.intutic.ai)')
+    .option('--control-plane-url <url>', `Control plane the daemon connects to (default: $INTUTIC_CONTROL_PLANE_URL, then a workspace set up with \`intutic init --dev\`, then the URL saved by \`intutic login\`${CLOUD_RELEASED ? `, then ${HOSTED_CONTROL_PLANE_URL}` : ''})`)
     .option('--binary-path <path>', 'Path to intutic CLI binary (defaults to current process); with --proxy, absolute path to intutic-proxy')
     .option('--dry-run', 'Print what would be done without writing files')
     .option('--system', 'Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux)')
@@ -1272,7 +1311,7 @@ skillCmd
 
 // ── Loop commands ──────────────────────────────────────────────────────────
 const loopCmd = program
-  .command('loop')
+  .command('loop', needsControlPlane)
   .description('Manage and execute recursive agent loops with budget limits')
 
 loopCmd
@@ -1348,7 +1387,7 @@ loopCmd
 // module doc for why `intutic loop review` was never the right command for
 // this — it addresses a different id space (Loop Runs, not decisions).
 const decisionCmd = program
-  .command('decision')
+  .command('decision', needsControlPlane)
   .description('Approve or reject a decision (e.g. a review_before hold) held for human review')
 
 decisionCmd
@@ -1377,7 +1416,7 @@ decisionCmd
 // hand-written curl against services/control-plane/src/routes/gateways.ts —
 // see commands/gateway.ts's module doc.
 const gatewayCmd = program
-  .command('gateway')
+  .command('gateway', needsControlPlane)
   .description('Manage self-hosted gateway registrations (Docker / Kubernetes / bare metal)')
 
 gatewayCmd
@@ -1486,7 +1525,7 @@ gatewayCmd
 // Provision a workspace's own upstream provider keys — the BYO-key wizard's
 // API, previously dashboard-only. See commands/credentials.ts's module doc.
 const credentialsCmd = program
-  .command('credentials')
+  .command('credentials', needsControlPlane)
   .description('Manage this workspace\'s own upstream provider API keys (BYO-key)')
 
 credentialsCmd
@@ -1535,7 +1574,7 @@ credentialsCmd
 // "CLI mints, dashboard audits": this is the mint/inspect half. See
 // commands/attenuate.ts's module doc.
 const attenuateCmd = program
-  .command('attenuate')
+  .command('attenuate', needsControlPlane)
   .description('Attenuate one of your API keys to a child key with narrower scopes (and an optional TTL)')
   .option('--parent-key <keyId>', 'Parent API key ID to attenuate')
   .option('--caps <scopes>', 'Comma-separated API key scopes for the child key (e.g. gateway:use,traces:read); each must be granted by the parent key')
@@ -1557,7 +1596,7 @@ attenuateCmd
 
 // ── API keys and their scopes ────────────────────────────────────────────
 const keysCmd = program
-  .command('keys')
+  .command('keys', needsControlPlane)
   .description('List, create, re-scope and revoke your API keys')
 
 keysCmd
@@ -1607,7 +1646,7 @@ keysCmd
 
 // ── Org signup + team management ─────────────────────────────────────────
 const orgCmd = program
-  .command('org')
+  .command('org', needsControlPlane)
   .description('Create and manage orgs')
 
 orgCmd
@@ -1626,7 +1665,7 @@ orgCmd
   })
 
 const teamCmd = program
-  .command('team')
+  .command('team', needsControlPlane)
   .description('Manage teams and workspaces under an org')
 
 teamCmd
@@ -1680,7 +1719,7 @@ teamCmd
 // route. Previously dashboard-only. See commands/apiCommand.ts for the shape
 // they share.
 const settingsCmd = program
-  .command('settings')
+  .command('settings', needsControlPlane)
   .description('Read and change workspace settings (MCP policy, budgets, group policy, config content upload, ...)')
 
 settingsCmd
@@ -1705,7 +1744,7 @@ settingsCmd
   })
 
 const mcpCmd = program
-  .command('mcp')
+  .command('mcp', needsControlPlane)
   .description('Review the MCP servers the workspace\'s MCP proxies have seen, and decide on them')
 
 mcpCmd
@@ -1750,7 +1789,7 @@ for (const [action, enabled, desc] of [
 }
 
 const notificationsCmd = program
-  .command('notifications')
+  .command('notifications', needsControlPlane)
   .description('Manage notification rules: which events go to Slack, email, a webhook or PagerDuty')
 
 function ruleOptions(cmd: Command): Command {
@@ -1823,7 +1862,7 @@ notificationsCmd
   })
 
 const siemCmd = program
-  .command('siem')
+  .command('siem', needsControlPlane)
   .description('Manage SIEM export destinations and the event sources each receives')
 
 function destinationOptions(cmd: Command): Command {
@@ -1911,7 +1950,7 @@ siemCmd
   })
 
 const tasksCmd = program
-  .command('tasks')
+  .command('tasks', needsControlPlane)
   .description('Manage task-management connections (Jira Cloud, Linear, PagerDuty) that attach ticket context to sessions')
 
 tasksCmd
@@ -1961,7 +2000,7 @@ tasksCmd
   })
 
 const complianceCmd = program
-  .command('compliance')
+  .command('compliance', needsControlPlane)
   .description('Compliance framework reports and the evidence archive')
 
 complianceCmd
@@ -2011,7 +2050,7 @@ complianceCmd
   })
 
 const usageCmd = program
-  .command('usage')
+  .command('usage', needsControlPlane)
   .description('LLM usage across the fleet, by member, team, branch, commit or pull request')
 
 for (const [view, handler, desc] of [
@@ -2045,7 +2084,7 @@ usageCmd
   })
 
 const githubWebhookCmd = program
-  .command('github')
+  .command('github', needsControlPlane)
   .description('GitHub integration for cost per pull request')
   .command('webhook')
   .description('The pull-request webhook: payload URL and signing secret')
@@ -2071,7 +2110,7 @@ githubWebhookCmd
   })
 
 const inventoryCmd = program
-  .command('inventory')
+  .command('inventory', needsControlPlane)
   .description('AI harnesses, MCP servers and skills on connected developer machines, governed or not')
 
 inventoryCmd
@@ -2139,7 +2178,7 @@ inventoryCmd
   })
 
 program
-  .command('gate-liveness')
+  .command('gate-liveness', needsControlPlane)
   .description('Whether each installed harness\'s gate is reporting, and any open silent-gate alert')
   .option('--json', 'Output as JSON')
   .option('--dev', 'Use local control plane (http://localhost:3001)')

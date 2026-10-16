@@ -25,14 +25,20 @@ COPY packages/theme/ ./packages/theme/
 COPY apps/docs/ ./apps/docs/
 COPY tsconfig.base.json ./tsconfig.base.json
 
-# docs.intutic.ai publishes every page, open-source and paid-tier alike: the
-# Cloud and Enterprise pages carry their badge, and the dashboard's help links
-# point at them (an open-source-only site answered 14 of its 22 links with a
-# 404). See the guard in apps/docs/.vitepress/config.ts.
-ENV INTUTIC_ENTERPRISE_BUILD=true
-# Fail the build outright if it would leave the paid-tier pages out: that site
-# would break the dashboard's help links.
-ENV INTUTIC_REQUIRE_FULL=true
+# Edition: which pages the site carries.
+#   oss  (default) the open-source pages only. VitePress leaves out every page
+#        badged Cloud, Self-serve+, Biz Org+, Enterprise or Self-host, plus Plans
+#        & pricing, strips ENTERPRISE_ONLY blocks, and refuses to build if a
+#        hosted or self-host term survives (apps/docs/.vitepress/config.ts).
+#   full every page, for the copy bundled with a Self-host deployment
+#        (release-selfhost.yml, selfhost-smoke.yml), whose dashboard help links
+#        point at the paid-tier pages.
+# docs.intutic.ai builds oss until the hosted Cloud and the Self-host
+# distribution launch: only the open-source core is released. At launch, pass
+# --build-arg DOCS_EDITION=full in .github/workflows/deploy.yml (docs leg) and
+# tools/scripts/deploy.sh (docs component), and relax the check in
+# verify_oss_posture() that refuses exactly that.
+ARG DOCS_EDITION=oss
 # Path the site is served under: `/` for docs.intutic.ai, `/docs/` for the copy
 # bundled with a Self-host deployment (release-selfhost.yml).
 ARG DOCS_BASE=/
@@ -40,11 +46,26 @@ ENV DOCS_BASE=$DOCS_BASE
 
 # Build theme first, so that custom variables and synced assets exist
 RUN pnpm --filter=@intutic/theme run build
-RUN pnpm --filter=@intutic/docs run build
-# The flags above are only intent; check the result. Settings is a Cloud page,
-# and the dashboard links to it more than any other.
-RUN test -f apps/docs/.vitepress/dist/guide/settings.html \
- || { echo 'docs image is missing the paid-tier pages (guide/settings.html); the dashboard help links would 404' >&2; exit 1; }
+# INTUTIC_ENTERPRISE_BUILD is the only mode signal config.ts reads; full also
+# sets INTUTIC_REQUIRE_FULL, which makes config.ts throw rather than build
+# without the paid-tier pages. An unknown edition fails here.
+RUN case "$DOCS_EDITION" in \
+      full) export INTUTIC_ENTERPRISE_BUILD=true INTUTIC_REQUIRE_FULL=true ;; \
+      oss)  export INTUTIC_ENTERPRISE_BUILD=false INTUTIC_REQUIRE_FULL=false ;; \
+      *)    echo "DOCS_EDITION must be oss or full, not '$DOCS_EDITION'" >&2; exit 1 ;; \
+    esac \
+ && pnpm --filter=@intutic/docs run build
+# The edition is only intent; check the result. Settings is the Cloud page the
+# dashboard links to most; Self-host and Plans & pricing are the pages the
+# open-source site most needs to leave out. full must have all three, oss none.
+RUN for page in guide/settings guide/self-host guide/plans; do \
+      f="apps/docs/.vitepress/dist/$page.html"; \
+      if [ "$DOCS_EDITION" = full ]; then \
+        test -f "$f" || { echo "full docs image is missing $page.html; the dashboard help links would 404" >&2; exit 1; }; \
+      else \
+        test ! -e "$f" || { echo "oss docs image carries the paid-tier page $page.html" >&2; exit 1; }; \
+      fi; \
+    done
 # The Content-Security-Policy allows the pages' inline scripts by hash, and one
 # of them changes with every build, so the hashes come from this build's pages.
 RUN node apps/docs/scripts/csp-script-hashes.mjs apps/docs/.vitepress/dist > /app/csp-script-hashes.txt

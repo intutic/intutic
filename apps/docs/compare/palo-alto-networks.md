@@ -7,7 +7,7 @@ description: Palo Alto Networks secures coding agents with Agentic Endpoint Secu
 
 *Last reviewed: 2026-10-10*
 
-Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. It is open core, runs fully self-hosted including air-gapped, and publishes its prices. Palo Alto Networks reaches coding agents from two sides. On the endpoint, it [completed its acquisition of Koi](https://www.paloaltonetworks.com/company/press/2026/palo-alto-networks-completes-acquisition-of-koi-to-secure-the-agentic-endpoint) on 2026-04-14 and sells it as Agentic Endpoint Security (AES): standalone, as a Cortex XDR module and as part of Prisma AIRS. AES manages hooks in the coding agent that block or ask on its actions, with Prisma AIRS supplying detectors. On the network, Prisma AIRS covers agent runtime security, red teaming, artifact scanning and posture, and Prisma AIRS AI Gateway (formerly Portkey) carries model, MCP and agent-to-agent traffic; see [Intutic vs Portkey](/compare/portkey) for the gateway comparison. This page covers the endpoint side.
+Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. It is open core<!-- ENTERPRISE_ONLY_START -->, runs fully self-hosted including air-gapped, and publishes its prices<!-- ENTERPRISE_ONLY_END -->. Palo Alto Networks reaches coding agents from two sides. On the endpoint, it [completed its acquisition of Koi](https://www.paloaltonetworks.com/company/press/2026/palo-alto-networks-completes-acquisition-of-koi-to-secure-the-agentic-endpoint) on 2026-04-14 and sells it as Agentic Endpoint Security (AES): standalone, as a Cortex XDR module and as part of Prisma AIRS. AES manages hooks in the coding agent that block or ask on its actions, with Prisma AIRS supplying detectors. On the network, Prisma AIRS covers agent runtime security, red teaming, artifact scanning and posture, and Prisma AIRS AI Gateway (formerly Portkey) carries model, MCP and agent-to-agent traffic; see [Intutic vs Portkey](/compare/portkey) for the gateway comparison. This page covers the endpoint side.
 
 ## Comparison
 
@@ -20,9 +20,16 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 | **MCP governance** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | AES rules on MCP tools in the agent; scanning of MCP servers as artifacts; MCP threat detection on the network through the Prisma AIRS VM-Series firewall, managed in Strata Cloud Manager or Panorama; MCP routing through Prisma AIRS AI Gateway (see [Portkey](/compare/portkey)) |
 | **Red teaming** | — | Part of Prisma AIRS since version 3.0 (2026-03-23), with scanning of agent code, MCP servers and skills |
 | **Discovery and inventory** | [AI inventory](/guide/ai-inventory) of developer machines that run `intutic connect`: the harnesses, MCP servers and skill bundles on each, and which run ungoverned | AES inventories agents, extensions, packages, skills and binaries on the endpoint and detects personal accounts; Prisma AIRS adds posture management and agent identity |
-| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | AES runs on the endpoint; Strata Cloud Manager is hosted. No self-hosted or air-gapped control plane is documented |
 | **Source** | Open core (MIT): the proxy, hook gates, MCP proxy, CLI and sync daemon | Closed; hook examples published on GitHub |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | Palo Alto Networks |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | AES runs on the endpoint; Strata Cloud Manager is hosted. No self-hosted or air-gapped control plane is documented |
 | **Pricing** | [Published](/guide/plans); the open core is free | No list prices. Bring-your-own-license on Software NGFW credits; the runtime API is metered in tokens |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where Palo Alto Networks is stronger
 
@@ -35,9 +42,9 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 
 - Your developers use coding agents beyond those AES names, such as Windsurf, Cline, Roo Code or Goose, or agent frameworks such as LangGraph, and you want each tool call decided before it runs.
 - Your developers use Linux, which the Cortex XDR module of AES does not support.
-- You want risky calls held for approval rather than only allowed or blocked.
-- You need to run the whole product on your own infrastructure, including air-gapped.
-- You want to read the code that blocks a call, verify the audit trail yourself, and see published prices.
+- You want risky calls held for approval rather than only allowed or blocked.<!-- ENTERPRISE_ONLY_START -->
+- You need to run the whole product on your own infrastructure, including air-gapped.<!-- ENTERPRISE_ONLY_END -->
+- You want to read the code that blocks a call and verify the audit trail yourself<!-- ENTERPRISE_ONLY_START -->, and to see published prices<!-- ENTERPRISE_ONLY_END -->.
 
 ## When to choose Palo Alto Networks
 

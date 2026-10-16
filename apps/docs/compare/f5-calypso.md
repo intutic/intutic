@@ -20,8 +20,15 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 | **Custom policy** | SOPs in git, WASM and Rego rules; policy documents turned into deterministic rules with [Policy Guardrails](/guide/policy-guardrails), proven in shadow mode before a person promotes them | A phrase becomes a versioned guardrail that F5's own model evaluates on each prompt or response; regex and keyword scanners |
 | **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | An MCP gateway with an approved-server registry and per-agent access limits, in the AI Gateway (early access since August 2026) |
 | **Red teaming** | — | Automated red teaming with multi-turn attacker agents, scheduled campaigns and new attack prompts every month; AI Remediate turns findings into guardrails, retests them and holds them for approval |
-| **Deployment** | Cloud, or fully self-hosted including air-gapped | Public cloud, private cloud, on-prem, air-gapped |
 | **Source** | Open core (MIT) | Closed |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | F5 AI Guardrails |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted including air-gapped | Public cloud, private cloud, on-prem, air-gapped |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where F5 is stronger
 

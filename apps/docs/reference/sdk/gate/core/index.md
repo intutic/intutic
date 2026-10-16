@@ -52,7 +52,7 @@ Options for a [GateClient](classes/GateClient.md). Every field is optional.
 | Property | Type | Default value | Description |
 | ------ | ------ | ------ | ------ |
 | <a id="property-apikey"></a> `apiKey?` | `string` | `''` | The API key. Without one the client is [local-only](classes/GateClient.md#localonly). |
-| <a id="property-baseurl"></a> `baseUrl?` | `string` | `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane | The control plane's address. |
+| <a id="property-baseurl"></a> `baseUrl?` | `string` | `INTUTIC_CONTROL_PLANE_URL`; this release has no default control plane | The control plane's address. A client with an `apiKey` needs one: with none the constructor throws rather than skip the hook gate unannounced. |
 | <a id="property-failclosed"></a> `failClosed?` | `boolean` | `true` | Block a call when the hook gate gives no verdict: the control plane cannot be reached, answers without one, or answers `GOVERNANCE_UNAVAILABLE`. `false` lets such a call go ahead. |
 | <a id="property-harness"></a> `harness?` | `string` | `'generic'` | Attributes incidents to the right adapter. Sent as `harnessType` on every gate call and event. |
 | <a id="property-sessionid"></a> `sessionId?` | `string` | `''` | - |

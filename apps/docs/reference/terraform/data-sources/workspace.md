@@ -6,7 +6,7 @@ title: "intutic_workspace"
 
 # intutic_workspace (data source) <Badge type="tip" text="Cloud" />
 
-The workspace the provider's API key belongs to, its plan, and the member the key acts as (`GET /api/v1/auth/me` and `GET /api/v1/trial/status`).
+The workspace the provider's API key belongs to, its tier, and the member the key acts as (`GET /api/v1/auth/me`).
 
 ## Example Usage
 
@@ -27,6 +27,6 @@ output "plan" {
 - `id` (String) The workspace id.
 - `member_id` (String) The member the API key acts as.
 - `org_id` (String) The workspace's organization id.
-- `plan_name` (String) The plan's display name.
-- `plan_tier` (String) The plan tier, for example `biz_org` or `ent_lic`.
+- `plan_name` (String) The tier's display name.
+- `plan_tier` (String) The workspace's tier, as the control plane reports it.
 - `role` (String) That member's role: `OWNER`, `ADMIN`, `EM`, `DEVELOPER` or `VIEWER`.

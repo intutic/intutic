@@ -25,6 +25,7 @@ import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 import { parseDocument, isMap, isScalar } from 'yaml'
 import { writeFileAtomic } from '../lib/atomicWrite.js'
+import { hookHostFallback } from '../lib/hookHost.js'
 
 const log = createLogger('sync-goose-hooks')
 
@@ -121,7 +122,7 @@ HOOK_EVENTS_LOG=${JSON.stringify(hookEventsLog)}
 # a machine with no runtime.env to source, an unset name kills the gate before
 # it can exit 2. Spelling matters — INTUTIC_, never INTUITIC_.
 RUNTIME_ENV="$HOME/.intutic/env/runtime.env"
-INTUTIC_HOST="https://api.intutic.ai"
+INTUTIC_HOST=${JSON.stringify(hookHostFallback())}
 INTUTIC_API_KEY=""
 INTUTIC_WORKSPACE_ID=${JSON.stringify(workspaceId)}
 [ -f "$RUNTIME_ENV" ] && source "$RUNTIME_ENV" 2>/dev/null || true

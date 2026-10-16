@@ -26,9 +26,16 @@ Intutic decides each agent tool call before it runs, across 43 harnesses: native
 | **Audit and export** | Signed Merkle roots you can check with `intutic integrity verify`; SIEM export to syslog (CEF), Splunk, Datadog, webhooks, S3 and GCS | Full traces with each verdict attached; OTel export; trace export from Kong |
 | **Cost** | Spend caps enforced before a request leaves; cost and token reporting by model, virtual key, developer, team (from SCIM groups), branch, commit and GitHub pull request | Cost, tokens and adoption by developer, team and model; cost per pull request and commit |
 | **Model monitoring** | None | Drift, data integrity, performance and fairness for predictive models |
+| **Source** | Open core (MIT) | Closed; its Claude Code plugin is Apache-2.0 |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | Fiddler AI |
+|---|---|---|
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | Hosted; VPC or on-premises on Enterprise |
 | **Pricing** | [Published plans](/guide/plans) | Guardrails free; Developer at $0.002 per trace; Enterprise by quote |
-| **Source** | Open core (MIT) | Closed; its Claude Code plugin is Apache-2.0 |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where Fiddler is stronger
 
@@ -69,7 +76,7 @@ Fiddler AI, as of 2026-10-10:
 
 Google: [Gemini CLI hooks](https://geminicli.com/docs/hooks/), [Antigravity hooks](https://antigravity.google/docs/hooks/) and [Transitioning Gemini CLI to Antigravity CLI](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
 
-Intutic: [Integrations](/integrations/), [Antigravity (Gemini)](/integrations/antigravity), [MCP governance](/guide/mcp-governance), [Sandboxed execution](/guide/sandboxed-execution), [Trace integrity](/concepts/trace-integrity), [SIEM export](/guide/siem-export) and [Self-hosting](/guide/self-host).
+Intutic: <!-- ENTERPRISE_ONLY_START -->[Self-hosting](/guide/self-host), <!-- ENTERPRISE_ONLY_END -->[Integrations](/integrations/), [Antigravity (Gemini)](/integrations/antigravity), [MCP governance](/guide/mcp-governance), [Sandboxed execution](/guide/sandboxed-execution), [Trace integrity](/concepts/trace-integrity) and [SIEM export](/guide/siem-export).
 
 ---
 

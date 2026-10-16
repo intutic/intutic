@@ -58,8 +58,8 @@ export async function resolveSandboxRequirement(
   const coerce = (v: unknown): SandboxRequirement =>
     v === 'warn' || v === 'require' ? v : 'off'
 
-  const base = resolveControlPlaneUrl()
   try {
+    const base = resolveControlPlaneUrl()
     const res = await fetch(`${base}/api/v1/workspace/settings`, {
       headers: {
         Authorization: `Bearer ${creds.apiKey}`,

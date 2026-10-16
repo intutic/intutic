@@ -11,7 +11,7 @@ from .context_resolver import resolve_context
 from .git_context import resolve_git_context
 from .budget_checker import BudgetChecker
 from .circuit_breaker import CircuitBreaker
-from .control_plane import DEFAULT_CONTROL_PLANE_URL
+from .control_plane import resolve_control_plane_url
 
 #: The harness a session this SDK registers is recorded under.
 SDK_HARNESS = "clawde_sdk"
@@ -29,11 +29,12 @@ class ClawdeClient:
 
     `base_url` is the proxy's address: `INTUTIC_BASE_URL`, then
     http://localhost:4000. `control_plane_url` is used by `check_budget()` and
-    session registration: `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted
-    control plane. `auto_context=False` turns off context resolution and
-    session registration. `timeout` is how long one attempt may take, in
-    seconds, and `retries` how many times a transport failure, a timeout or a
-    5xx answer is retried.
+    session registration, else `INTUTIC_CONTROL_PLANE_URL`; without either
+    (this release has no default control plane), `check_budget()` raises
+    `ClawdeConnectionError` and no session is registered. `auto_context=False`
+    turns off context resolution and session registration. `timeout` is how
+    long one attempt may take, in seconds, and `retries` how many times a
+    transport failure, a timeout or a 5xx answer is retried.
     """
 
     def __init__(
@@ -52,11 +53,7 @@ class ClawdeClient:
         self.base_url = base_url or os.environ.get("INTUTIC_BASE_URL") or "http://localhost:4000"
         # Control plane is a different origin from the proxy base_url above --
         # used by checkBudget() (see budget_checker.py's doc comment).
-        self.control_plane_url = (
-            control_plane_url
-            or os.environ.get("INTUTIC_CONTROL_PLANE_URL")
-            or DEFAULT_CONTROL_PLANE_URL
-        )
+        self.control_plane_url = resolve_control_plane_url(control_plane_url)
         self.provider = provider
         self.auto_context = auto_context
         self.timeout = timeout
@@ -233,6 +230,10 @@ class ClawdeClient:
             if context.get("sessionId"):
                 return context["sessionId"]
             if not self.api_key.startswith("vk_"):
+                return None
+            # No control plane address (this release has no default): nowhere
+            # to register a session.
+            if not self.control_plane_url:
                 return None
             git = resolve_git_context(context.get("workingDirectory") or os.getcwd(), context.get("gitBranch"))
             if not git:

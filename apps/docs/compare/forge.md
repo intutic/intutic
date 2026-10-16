@@ -7,7 +7,7 @@ description: Intutic is the enforcement point at the agent's tool call, open cor
 
 *Last reviewed: 2026-10-10*
 
-Intutic and Forge start from different places. Intutic is the enforcement point itself: a gate inside the coding agent that decides each tool call before it runs, in 36 of its 43 supported harnesses, backed by a policy proxy, an MCP governance proxy, a default-deny egress firewall and sandboxed execution. It is open core, runs fully self-hosted including air-gapped, and publishes its prices. Forge ([forge.ai](https://forge.ai), by a37) is a hosted governance platform that works top-down: it discovers AI agents and non-human identities across an organization, brokers their cloud credentials, and enforces policy through its own device agent, MCP gateway and LLM gateway plus the security tools you already run.
+Intutic and Forge start from different places. Intutic is the enforcement point itself: a gate inside the coding agent that decides each tool call before it runs, in 36 of its 43 supported harnesses, backed by a policy proxy, an MCP governance proxy, a default-deny egress firewall and sandboxed execution. It is open core<!-- ENTERPRISE_ONLY_START -->, runs fully self-hosted including air-gapped, and publishes its prices<!-- ENTERPRISE_ONLY_END -->. Forge ([forge.ai](https://forge.ai), by a37) is a hosted governance platform that works top-down: it discovers AI agents and non-human identities across an organization, brokers their cloud credentials, and enforces policy through its own device agent, MCP gateway and LLM gateway plus the security tools you already run.
 
 ## Comparison
 
@@ -24,9 +24,16 @@ Intutic and Forge start from different places. Intutic is the enforcement point 
 | **Identity** | SAML and OIDC with group claims; SCIM 2.0 with nested groups, which map to roles and, while SCIM is on, replace sign-in claims as the member's groups; an SSO group policy uses those groups to restrict high-risk tools at the server, MCP, local and SDK gates and in the proxy's response gate; virtual keys with enforced scopes (agent traffic only, or read or write per API area), model allowlists and attenuated child keys that can only narrow; an agent registry with posture scoring and an agent graph | Agent identities, a non-human-identity inventory, and short-lived credentials issued for AWS, Microsoft Entra, Google Cloud and GitHub |
 | **Devices** | CA trust and Jamf/Intune MDM profiles (`intutic enterprise install`), stale-device detection | Native device agent for Windows (Intune), macOS (Network Extension, Jamf or other MDM) and Linux (systemd), also deployable through CrowdStrike or SentinelOne; or no install at all, by routing agent traffic through Zscaler, Prisma Access, Cloudflare WARP or Cato |
 | **Compliance** | Eleven hourly compliance probes against live workspace state, a SOC 2 evidence pack, OWASP LLM and Agentic posture mapping, partial control mapping to the EU AI Act, ISO/IEC 42001, NIST AI RMF and MITRE ATLAS exported as Markdown, CSV, PDF or JSON, and an EU AI Act Article 14 human-oversight export, both exports signed when a signing key is configured | Framework mapping to NIST AI RMF, EU AI Act, ISO 42001, SOC 2, HIPAA, PCI DSS, GDPR, CCPA/CPRA, AIUC-1, OWASP, MITRE ATLAS and others, exported as PDF, CSV or JSON |
-| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | Hosted service; Resource Gateways run in your environment and connect out to Forge. No self-hosted or air-gapped option is documented |
 | **Source** | Open core (MIT): the proxy, hook gates, MCP proxy, CLI and sync daemon | Closed |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | Forge |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | Hosted service; Resource Gateways run in your environment and connect out to Forge. No self-hosted or air-gapped option is documented |
 | **Pricing** | [Published](/guide/plans); the open core is free | Not published |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 On audit integrity, Intutic covers what Forge's ledger does (a hash chain, database-enforced immutability, scheduled verification and signed checkpoints) and adds two things Forge does not document: a Merkle inclusion proof for every trace, and verification you run yourself, in a browser or with the CLI, against a published key set. See [Trace Integrity](/concepts/trace-integrity).
 
@@ -43,8 +50,8 @@ On audit integrity, Intutic covers what Forge's ledger does (a hash chain, datab
 
 ## When to choose Intutic
 
-- Your agents are coding agents and agent frameworks, such as Windsurf, Cline, Goose or LangGraph alongside Claude Code and Cursor, and you want each tool call decided before it runs.
-- You need to run the whole product on your own infrastructure, including air-gapped.
+- Your agents are coding agents and agent frameworks, such as Windsurf, Cline, Goose or LangGraph alongside Claude Code and Cursor, and you want each tool call decided before it runs.<!-- ENTERPRISE_ONLY_START -->
+- You need to run the whole product on your own infrastructure, including air-gapped.<!-- ENTERPRISE_ONLY_END -->
 - You want to read the code that blocks a call, and to verify the audit trail yourself.
 - You want an approval hold, a sandbox and an egress firewall that work with or without the rest of your security stack.
 

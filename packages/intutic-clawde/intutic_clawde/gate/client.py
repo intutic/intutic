@@ -49,7 +49,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import requests
 
-from ..control_plane import DEFAULT_CONTROL_PLANE_URL
+from ..control_plane import NO_CONTROL_PLANE_URL, resolve_control_plane_url
 
 DEFAULT_TIMEOUT = 2.0
 EVENT_TIMEOUT = 2.0
@@ -151,9 +151,10 @@ class GateResponse:
 class GateClient:
     """Control-plane client for the pre-execution gate.
 
-    `base_url` is the control plane's address: `INTUTIC_CONTROL_PLANE_URL`,
-    then Intutic's hosted control plane. Without an `api_key` the client is
-    `local_only`. `harness` defaults to "langgraph" and is sent as
+    `base_url` is the control plane's address, else `INTUTIC_CONTROL_PLANE_URL`
+    (this release has no default control plane). Without an `api_key` the
+    client is `local_only` and needs no address; with one and no address,
+    `ValueError`. `harness` defaults to "langgraph" and is sent as
     `harnessType` on every gate call and event, so incidents attribute to the
     right adapter. Override it when wrapping a different framework.
     `fail_closed` blocks a call when the hook gate gives no verdict (the
@@ -169,8 +170,11 @@ class GateClient:
                  timeout: float = DEFAULT_TIMEOUT,
                  transport: Optional[Transport] = None,
                  get_transport: Optional[GetTransport] = None):
-        self.base_url = (base_url or os.environ.get("INTUTIC_CONTROL_PLANE_URL")
-                         or DEFAULT_CONTROL_PLANE_URL).rstrip("/")
+        self.base_url = (resolve_control_plane_url(base_url) or "").rstrip("/")
+        if api_key and not self.base_url:
+            # A key says the caller wants the control-plane tiers; dropping to
+            # local-only would skip the hook gate without a word.
+            raise ValueError(NO_CONTROL_PLANE_URL)
         self.api_key = api_key
         self.workspace_id = workspace_id
         self.session_id = session_id
@@ -449,20 +453,22 @@ class GateClient:
         """Build a client from the environment, falling back to CLI credentials.
 
         Reading ~/.intutic/credentials.json means the gate works with whatever
-        workspace `intutic login` already bound, instead of duplicating the key.
-        With no key in either place the client is `local_only`.
+        workspace `intutic login` already bound, instead of duplicating the key:
+        its key, workspace and the control plane it logged in to. With no key in
+        either place the client is `local_only`.
         """
-        base = os.environ.get("INTUTIC_CONTROL_PLANE_URL", DEFAULT_CONTROL_PLANE_URL)
+        base = os.environ.get("INTUTIC_CONTROL_PLANE_URL", "")
         key = os.environ.get("INTUTIC_API_KEY", "")
         ws = os.environ.get("INTUTIC_WORKSPACE_ID", "")
 
-        if not key or not ws:
+        if not key or not ws or not base:
             cred_path = os.path.join(os.path.expanduser("~"), ".intutic", "credentials.json")
             try:
                 with open(cred_path, encoding="utf-8") as fh:
                     c = json.load(fh)
                 key = key or c.get("apiKey", "")
                 ws = ws or c.get("workspaceId", "")
+                base = base or c.get("controlPlaneUrl", "")
             except OSError:
                 pass
 

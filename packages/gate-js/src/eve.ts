@@ -603,9 +603,9 @@ export function intuticAuditHooks(opts: IntuticAuditHooksOptions = {}): EveAudit
       try {
         client = GateClient.fromEnv({ harness: 'eve', sessionId })
       } catch {
-        // fromEnv only throws on a missing session id, which we always
-        // supply — but a telemetry hook must never take the run down over a
-        // client it could not build.
+        // fromEnv throws on a missing session id, which we always supply, or
+        // on a key with no control plane address — but a telemetry hook must
+        // never take the run down over a client it could not build.
         client = null
       }
       perSession.set(sessionId, client)

@@ -30,7 +30,11 @@ Observability tools and LLM gateways (like LangSmith or Portkey) work on model t
 
 ## 🏗️ Architecture
 
-Intutic runs as a local or self-hosted proxy, written in Rust, between your agents and their model providers. With `intutic connect`, a sync daemon (`sync-daemon`) also installs a tool-call gate in each harness that supports one and keeps its rules files in sync:
+Intutic runs as a local or self-hosted proxy, written in Rust, between your agents and their model providers:
+
+<!-- UNRELEASED:cloud
+With `intutic connect`, a sync daemon (`sync-daemon`) also installs a tool-call gate in each harness that supports one and keeps its rules files in sync.
+-->
 
 ```mermaid
 flowchart TD
@@ -140,7 +144,11 @@ Intutic ships **43 harness adapters**: 18 install as native hook gates in the ha
 
 ## 📝 Write Your First SOP
 
-Intutic governance rules are written as standard Markdown files under `.intutic/sops/` in your repository, or as workspace SOPs on a connected control plane. A file can sit directly in `.intutic/sops/` (for example `.intutic/sops/safety.md`) or one folder down, one folder per rule set (for example `.intutic/sops/safety/rules.md`); the proxy and `intutic connect` read both. `intutic connect` writes them into the file each harness reads, such as `.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc` or a marked section of `AGENTS.md` (never `CLAUDE.md`).
+Intutic governance rules are written as standard Markdown files under `.intutic/sops/` in your repository. A file can sit directly in `.intutic/sops/` (for example `.intutic/sops/safety.md`) or one folder down, one folder per rule set (for example `.intutic/sops/safety/rules.md`); the proxy reads both.
+
+<!-- UNRELEASED:cloud
+SOPs can also be workspace SOPs on a connected control plane. `intutic connect` reads both layouts too, and writes the SOPs into the file each harness reads, such as `.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc` or a marked section of `AGENTS.md` (never `CLAUDE.md`).
+-->
 
 The front matter is what gets enforced; the prose below it is guidance the agent reads. Save this as `.intutic/sops/safety.md`:
 
@@ -162,6 +170,7 @@ The proxy refuses a `Bash` call whose arguments contain `git push --force` or `r
 
 ---
 
+<!-- UNRELEASED:cloud
 ## 💬 Interactive Slash Commands
 
 Because Intutic evaluates prompts pre-flight, you can run interactive governance commands directly inside your agent chat. The proxy intercepts them before they reach the model, and a connected control plane answers them (open core alone has none, so standalone they reply that the command is unavailable):
@@ -172,6 +181,7 @@ Because Intutic evaluates prompts pre-flight, you can run interactive governance
 ```
 
 ---
+-->
 
 ## 📚 Documentation & Community
 
@@ -200,11 +210,13 @@ If you find Intutic useful, please give us a star on GitHub! It helps us support
 
 ---
 
+<!-- UNRELEASED:self-host
 ## 🏢 Enterprise & Commercial Licensing
 
 For custom VPC deployments, enterprise-grade SSO/SAML, dedicated SLA support, or team compliance auditing, visit [intutic.ai](https://intutic.ai) or contact us at [support@intutic.ai](mailto:support@intutic.ai).
 
 ---
+-->
 
 ## 📄 License
 

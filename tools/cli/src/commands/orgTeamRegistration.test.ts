@@ -13,7 +13,7 @@ const source = readFileSync(CLI, 'utf8')
 
 describe('org command registration', () => {
   it('registers the org command group', () => {
-    expect(source).toMatch(/\.command\(\s*['"]org['"]\s*\)/)
+    expect(source).toMatch(/\.command\(\s*['"]org['"]\s*(,\s*needsControlPlane\s*)?\)/)
   })
 
   it('wires create to its handler', () => {
@@ -24,7 +24,7 @@ describe('org command registration', () => {
 
 describe('team command registration', () => {
   it('registers the team command group', () => {
-    expect(source).toMatch(/\.command\(\s*['"]team['"]\s*\)/)
+    expect(source).toMatch(/\.command\(\s*['"]team['"]\s*(,\s*needsControlPlane\s*)?\)/)
   })
 
   it.each([

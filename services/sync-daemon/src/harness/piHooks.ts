@@ -53,6 +53,7 @@ import { newIso } from '@intutic/id'
 import { emitJsGate, REVIEW_REQUESTS_BASENAME } from './gateBody.js'
 import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { writeFileAtomic } from '../lib/atomicWrite.js'
+import { hookHostFallback } from '../lib/hookHost.js'
 import { anthropicBaseUrl, openaiBaseUrl } from '@intutic/shared-types'
 
 const log = createLogger('sync-pi-hooks')
@@ -100,7 +101,7 @@ const https = require('https');
 
 // Runtime credentials, read when Pi loads the extension.
 const _runtimeEnvPath = path.join(os.homedir(), '.intutic', 'env', 'runtime.env');
-let _intuticHost = 'https://api.intutic.ai', _intuticKey = '', _intuticWsId = ${JSON.stringify(workspaceId)};
+let _intuticHost = ${JSON.stringify(hookHostFallback())}, _intuticKey = '', _intuticWsId = ${JSON.stringify(workspaceId)};
 try {
   fs.readFileSync(_runtimeEnvPath, 'utf-8').split('\\n').forEach(line => {
     const eq = line.indexOf('='); if (eq < 0) return;

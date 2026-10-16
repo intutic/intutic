@@ -1075,7 +1075,7 @@ HOOK_EVENTS_LOG="<ROOT>/.intutic/events/hook-events.jsonl"
 # a machine with no runtime.env to source, an unset name kills the gate before
 # it can exit 2. Spelling matters — INTUTIC_, never INTUITIC_.
 RUNTIME_ENV="$HOME/.intutic/env/runtime.env"
-INTUTIC_HOST="https://api.intutic.ai"
+INTUTIC_HOST=""
 INTUTIC_API_KEY=""
 INTUTIC_WORKSPACE_ID="ws_test"
 [ -f "$RUNTIME_ENV" ] && source "$RUNTIME_ENV" 2>/dev/null || true
@@ -2937,7 +2937,7 @@ HOOK_EVENTS_LOG="<ROOT>/.intutic/events/hook-events.jsonl"
 # a machine with no runtime.env to source, an unset name kills the gate before
 # it can exit 2. Spelling matters — INTUTIC_, never INTUITIC_.
 RUNTIME_ENV="$HOME/.intutic/env/runtime.env"
-INTUTIC_HOST="https://api.intutic.ai"
+INTUTIC_HOST=""
 INTUTIC_API_KEY=""
 INTUTIC_WORKSPACE_ID="ws_test"
 [ -f "$RUNTIME_ENV" ] && source "$RUNTIME_ENV" 2>/dev/null || true
@@ -3792,7 +3792,7 @@ if [ -f "<ROOT>/.intutic/env/runtime.env" ]; then
   source "<ROOT>/.intutic/env/runtime.env"
 fi
 
-INTUTIC_HOST="\${INTUTIC_HOST:-https://api.intutic.ai}"
+INTUTIC_HOST="\${INTUTIC_HOST:-}"
 INTUTIC_API_KEY="\${INTUTIC_API_KEY:-}"
 INTUTIC_WORKSPACE_ID="\${INTUTIC_WORKSPACE_ID:-ws_test}"
 
@@ -6665,7 +6665,7 @@ HOOK_EVENTS_LOG="<ROOT>/.intutic/events/hook-events.jsonl"
 # a machine with no runtime.env to source, an unset name kills the gate before
 # it can exit 2. Spelling matters — INTUTIC_, never INTUITIC_.
 RUNTIME_ENV="$HOME/.intutic/env/runtime.env"
-INTUTIC_HOST="https://api.intutic.ai"
+INTUTIC_HOST=""
 INTUTIC_API_KEY=""
 INTUTIC_WORKSPACE_ID="ws_test"
 [ -f "$RUNTIME_ENV" ] && source "$RUNTIME_ENV" 2>/dev/null || true

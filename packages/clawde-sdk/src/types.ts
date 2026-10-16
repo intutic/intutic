@@ -9,8 +9,10 @@ export interface ClawdeClientOptions {
   baseUrl?: string
   /**
    * Control-plane base URL used by checkBudget() and session registration (a
-   * different origin from `baseUrl` — see {@link ControlPlaneClient}).
-   * @defaultValue `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane
+   * different origin from `baseUrl` — see {@link ControlPlaneClient}). With
+   * none, checkBudget() throws `ClawdeConnectionError` and no session is
+   * registered.
+   * @defaultValue `INTUTIC_CONTROL_PLANE_URL`; this release has no default control plane
    */
   controlPlaneUrl?: string
   /**
@@ -177,8 +179,8 @@ export interface ControlPlaneClientOptions {
   /** An Intutic virtual key (`vk_…`) or a login JWT. */
   apiKey: string
   /**
-   * The control plane's address.
-   * @defaultValue `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane
+   * The control plane's address. With none, the constructor throws.
+   * @defaultValue `INTUTIC_CONTROL_PLANE_URL`; this release has no default control plane
    */
   baseUrl?: string
 }

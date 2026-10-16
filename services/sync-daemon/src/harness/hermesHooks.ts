@@ -26,6 +26,7 @@ import { newIso } from '@intutic/id'
 import { HOOK_TIMEOUT_SECONDS } from '@intutic/shared-types'
 import { emitShellGate, SHELL_EXTRACT, emitShellFailClosed } from './gateBody.js'
 import { writeFileAtomic } from '../lib/atomicWrite.js'
+import { hookHostFallback } from '../lib/hookHost.js'
 
 const log = createLogger('sync-hermes-hooks')
 
@@ -56,7 +57,7 @@ if [ -f "${runtimeEnv}" ]; then
   source "${runtimeEnv}"
 fi
 
-INTUTIC_HOST="\${INTUTIC_HOST:-https://api.intutic.ai}"
+INTUTIC_HOST="\${INTUTIC_HOST:-${hookHostFallback()}}"
 INTUTIC_API_KEY="\${INTUTIC_API_KEY:-}"
 INTUTIC_WORKSPACE_ID="\${INTUTIC_WORKSPACE_ID:-${workspaceId}}"
 
