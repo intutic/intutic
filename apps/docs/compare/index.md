@@ -7,7 +7,7 @@ description: Where Intutic enforces, and how it compares with AI-agent governanc
 
 *Last reviewed: 2026-10-10*
 
-Intutic decides each agent tool call before it runs. A native pre-execution gate inside the coding agent allows, blocks or holds the call for approval, and the same policy runs in a request and response proxy that redacts sensitive data, an MCP governance proxy, a default-deny egress firewall and a sandboxed runtime. It covers **43** supported harnesses, seals its execution traces into a signed audit trail you can verify yourself, is open core under MIT, runs fully self-hosted including air-gapped, and publishes its [prices](/guide/plans).
+Intutic decides each agent tool call before it runs. A native pre-execution gate inside the coding agent allows, blocks or holds the call for approval, and the same policy runs in a request and response proxy that redacts sensitive data, an MCP governance proxy, a default-deny egress firewall and a sandboxed runtime. It covers **43** supported harnesses, seals its execution traces into a signed audit trail you can verify yourself, and is open core under MIT<!-- ENTERPRISE_ONLY_START -->; it runs fully self-hosted including air-gapped, and publishes its [prices](/guide/plans)<!-- ENTERPRISE_ONLY_END -->.
 
 The products on these pages start from other places: governance platforms that inventory agents across an organization, security gateways that guard model inputs and outputs, and observability platforms that trace and evaluate LLM applications. Several now enforce at runtime too. Each detail page says where.
 
@@ -33,8 +33,8 @@ The products on these pages start from other places: governance platforms that i
 
 - **It sits at the tool call.** The gate runs inside the agent, before the shell command, file write or MCP call executes, and fails closed if it crashes or receives a malformed payload. A built-in destructive-command tier blocks with no configuration.
 - **It covers the agents developers actually run.** Coverage across 43 harnesses, from Claude Code, Cursor, GitHub Copilot, Windsurf and Cline to LangGraph, CrewAI and the OpenAI Agents SDK. See [Integrations](/integrations/).
-- **You can verify it.** The proxy, hook gates, MCP proxy, CLI and sync daemon are open source, and the audit trail is a signed Merkle tree you can check in a browser or with `intutic integrity verify`. See [Trace Integrity](/concepts/trace-integrity).
-- **It runs where you need it.** Cloud, or the whole product on your own infrastructure from a signed, air-gap-ready bundle.
+- **You can verify it.** The proxy, hook gates, MCP proxy, CLI and sync daemon are open source, and the audit trail is a signed Merkle tree you can check in a browser or with `intutic integrity verify`. See [Trace Integrity](/concepts/trace-integrity).<!-- ENTERPRISE_ONLY_START -->
+- **It runs where you need it.** Cloud, or the whole product on your own infrastructure from a signed, air-gap-ready bundle.<!-- ENTERPRISE_ONLY_END -->
 
 Intutic is not the only open-source project that enforces on tool calls: Microsoft's Agent Governance Toolkit, agentgateway, Invariant Guardrails, LiteLLM's tool-permission guardrail, and the Docker and Lasso MCP gateways do as well. What Intutic adds is gates inside 36 of its 43 supported harnesses (native hooks in 18, in-process SDK gates in 17, and a bridge gate in one), approval holds, egress and sandbox containment, and a verifiable audit trail in one product. Endpoint security vendors are arriving too: Microsoft Defender for Endpoint, in [public preview](https://learn.microsoft.com/en-us/defender-endpoint/ai-agent-runtime-protection-overview), audits or blocks prompt injection in Claude Code and GitHub Copilot on Windows, but enforces no other tool-call policy.
 

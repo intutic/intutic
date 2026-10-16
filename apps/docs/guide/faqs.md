@@ -7,7 +7,7 @@ This page provides a detailed breakdown of how the open-core and enterprise boun
 ### 1. How do Slash Commands work for Open-Core/Free users?
 
 The slash command pipeline operates differently depending on the deployment mode:
-*   **Online/Connected Mode (Free Tier / SaaS):** Outbound slash commands (like `@intutic initialize` or `@intutic start`) are intercepted by the local proxy and forwarded via HTTP to the control-plane API (which is either hosted in the cloud or run locally in a developer sandbox Docker container). The control plane executes `slashCommandService.ts` to perform database/Valkey queries (e.g., fetching Jira tickets) and returns a rendered Markdown card response.
+*   **Online/Connected Mode<!-- ENTERPRISE_ONLY_START --> (Free Tier / SaaS)<!-- ENTERPRISE_ONLY_END -->:** Outbound slash commands (like `@intutic initialize` or `@intutic start`) are intercepted by the local proxy and forwarded via HTTP to the control-plane API (which is either hosted in the cloud or run locally in a developer sandbox Docker container). The control plane executes `slashCommandService.ts` to perform database/Valkey queries (e.g., fetching Jira tickets) and returns a rendered Markdown card response.
 *   **Offline/Standalone Mode (Pure Open-Core):** There is no control plane to answer slash commands, so a standalone proxy (one without `CONTROL_PLANE_URL`) does not intercept them, and the message reaches the model unchanged. The exception is `@intutic predict`, which the proxy answers itself from static multipliers (see question 6).
 
 ---
@@ -105,7 +105,7 @@ Predictions are per request, not per session. Each turn of an agent session carr
 
 ### 9. What works and what does not work in pure Standalone Open-Core mode?
 
-If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with zero connection to the control plane or SaaS free tier), here is exactly what works and what does not:
+If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with zero connection to the control plane<!-- ENTERPRISE_ONLY_START --> or SaaS free tier<!-- ENTERPRISE_ONLY_END -->), here is exactly what works and what does not:
 
 #### What works 100% locally in Standalone Open-Core:
 *   **Local Interception & Policy Enforcement:** The local Rust proxy intercepts LLM prompt/response streams, injects the local SOPs that apply into each request, blocks the tools they deny, runs your custom WASM rules, and redacts secrets with its DLP patterns.
@@ -113,7 +113,7 @@ If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with ze
 *   **Local Cost Predictions:** `@intutic predict` estimates from the static per-model multipliers (see question 6); a standalone proxy keeps no token baseline.
 *   **Local Spending Caps (Rust Proxy):** Enforces global daily limits set in `~/.intutic/config.json` natively inside the proxy gateway.
 
-#### What is Gated (Requires control plane / SaaS Tier):
+#### What is Gated (Requires control plane<!-- ENTERPRISE_ONLY_START --> / SaaS Tier<!-- ENTERPRISE_ONLY_END -->):
 *   **Writing SOPs into harness rules files:** the sync daemon (`intutic connect`) merges `.intutic/sops/` into each harness's rules file (such as `.cursor/rules/intutic-governance.mdc` or the rules section of `AGENTS.md`), and it needs a control plane. Standalone, the proxy injects the same SOPs into each request instead.
 *   **Ticket Board Integrations (Jira / Linear):** `@intutic initialize` cannot log into enterprise APIs to pull issues. Scoping local rules via `--sops` still works, but cost attribution to a Jira key is unavailable.
 *   **Central Governance Dashboard:** The web UI for tracking team-wide spending, compute budgets, and developer audits is disabled.
@@ -166,11 +166,11 @@ This returns a markdown card with today's and this month's spend against the wor
 
 ---
 
-### 11. How are Budgets and Daily Monitored LLM Volume Limits enforced across Connected/SaaS and Standalone/Offline modes?
+### 11. How are Budgets and Daily Monitored LLM Volume Limits enforced across Connected<!-- ENTERPRISE_ONLY_START -->/SaaS<!-- ENTERPRISE_ONLY_END --> and Standalone/Offline modes?
 
 Intutic enforces financial controls differently based on connection state to ensure zero-latency routing and fail-safe cost management:
 
-#### Connected / SaaS Mode (Active Centralized Enforcement)
+#### Connected<!-- ENTERPRISE_ONLY_START --> / SaaS<!-- ENTERPRISE_ONLY_END --> Mode (Active Centralized Enforcement)
 *   **Central Workspace Limits:** Daily monitored LLM volume limits and active budget thresholds are managed at the workspace level. A workspace that has not saved a daily cap is held to $100 a day; save your own on Settings › Billing › Budget Limits or with `PUT /api/v1/budget`.
 *   **Valkey Fast-Path Interception:** The corporate control plane caches live billing limits and cumulative usage counters in Valkey. On every request, the proxy does a cache precheck (`hard_block`) — a single Valkey GET.
 *   **Fail-Closed Protection:** If the cache layer is unreachable, spend cannot be verified, and the budget gate fails closed — the request is rejected with `503 BUDGET_UNVERIFIABLE` rather than admitted on an unverifiable budget. This is deliberately the opposite of the usual rate-limiter convention: a spend cap is a financial control that you explicitly opted into, so the cost of wrongly allowing is unbounded, while the cost of wrongly denying is a retry. Note this applies only to control-plane-managed workspaces; standalone has no central cap to verify and is bounded by the local daily cap instead.
@@ -273,6 +273,7 @@ To keep the global developer installation lightweight, the local Rust proxy bina
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
 ### 17. How does the upgrade path work from Open Core (Offline) to Free Tier SaaS to Paid SaaS?
 
 No changes to the CLI or local proxy binaries are required to upgrade tiers. The progression operates dynamically through config updates and billing webhooks:
@@ -287,6 +288,7 @@ No changes to the CLI or local proxy binaries are required to upgrade tiers. The
 3.  **A paid plan (Self-serve, Biz Org or Enterprise):** The administrator chooses a plan in **Settings › Upgrade**. The control plane checks the plan as it serves each request, so the updated tier limits and capabilities (like workspace-wide SOP Registry or semantic caching) unlock without any change on developers' machines.
 
 ---
+<!-- ENTERPRISE_ONLY_END -->
 
 ### 18. How does the Real-Time Governance & Resilience Loop (Optimizations) work?
 

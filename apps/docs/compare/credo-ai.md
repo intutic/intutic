@@ -21,8 +21,15 @@ Intutic enforces policy where agents act: a pre-execution gate decides each tool
 | **Inventory and risk** | Agent registry with posture scoring and an agent graph, for the agents Intutic governs | AI registry with auto-discovery, shadow AI discovery and MCP server governance; risk assessments, Agent Cards and audit-ready reports; automated red teaming and drift detection |
 | **Continuous evidence** | Eleven hourly compliance probes against live workspace state | Trace ingestion with continuous evaluation, escalation to a person and real-time compliance monitoring, alongside assessment and reporting workflows |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, hash-chained and mirrored to your own bucket | Governance records and reports |
-| **Deployment** | Cloud, or fully self-hosted including air-gapped | Private cloud on Kubernetes or VMs, including air-gapped |
 | **Source** | Open core (MIT) | Closed |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | Credo AI |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted including air-gapped | Private cloud on Kubernetes or VMs, including air-gapped |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where Credo AI is stronger
 

@@ -2,6 +2,12 @@
 
 Python SDK for Intutic Agentic AI Governance proxy wrappers.
 
+The proxy's address is `INTUTIC_BASE_URL`, else `http://localhost:4000`. What talks to an Intutic control plane (`ControlPlaneClient`, `check_budget()`, session registration, the gate's control-plane tiers) needs its address: pass it to the client or set `INTUTIC_CONTROL_PLANE_URL`. There is no default; without one, `ControlPlaneClient` raises `ValueError` and `ClawdeClient.chat()` still works through the proxy.
+
+<!-- UNRELEASED:cloud
+Without an address, the clients use Intutic Cloud's control plane, `https://api.intutic.ai`.
+-->
+
 `ClawdeClient.chat()` sends a request through the Intutic proxy and returns the completion with `verdict` set to `"allow"`. A governance refusal (policy block, reask, loop run held for review, spend cap, DLP block) raises `ClawdeBlockedError` with the proxy's `verdict`, `code`, `rule_id` (when the proxy names the rule) and reason, fires the matching `kill` / `reask` / `hold` event, and is never retried; transport failures and 5xx answers are retried, except a 5xx the proxy already retried upstream. See [Verdicts and Errors](https://docs.intutic.ai/reference/clawde-sdk#_5-verdicts-and-errors) for every refusal code.
 
 When the proxy withholds a tool call from the model's answer (a tool an SOP denies, the SSO group policy, destructive SQL, sensitive output), the answer arrives as a 200 that names the refusal in the `x-intutic-refusal` and `x-intutic-refusal-rule` headers; `chat()` raises `ClawdeBlockedError` for it too. For a stream you read yourself, pass each line to `stream_refusal()`.

@@ -50,11 +50,12 @@ callbacks for refusal verdicts. For the operator APIs, use
 
 `base_url` is the proxy's address: `INTUTIC_BASE_URL`, then
 http://localhost:4000. `control_plane_url` is used by `check_budget()` and
-session registration: `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted
-control plane. `auto_context=False` turns off context resolution and
-session registration. `timeout` is how long one attempt may take, in
-seconds, and `retries` how many times a transport failure, a timeout or a
-5xx answer is retried.
+session registration, else `INTUTIC_CONTROL_PLANE_URL`; without either
+(this release has no default control plane), `check_budget()` raises
+`ClawdeConnectionError` and no session is registered. `auto_context=False`
+turns off context resolution and session registration. `timeout` is how
+long one attempt may take, in seconds, and `retries` how many times a
+transport failure, a timeout or a 5xx answer is retried.
 
 
 #### Attributes
@@ -172,8 +173,9 @@ CLI exposes, as methods with the same names as the TypeScript SDK's in
 snake_case. Each method's docstring names the route it calls.
 
 `api_key` is an Intutic virtual key (`vk_...`) or a login JWT. `base_url`
-is the control plane's address: `INTUTIC_CONTROL_PLANE_URL`, then Intutic's
-hosted control plane. A call that fails raises `ClawdeConnectionError`
+is the control plane's address, else `INTUTIC_CONTROL_PLANE_URL`; without
+either, `ValueError` (this release has no default control plane). A call
+that fails raises `ClawdeConnectionError`
 with the method, path, status and the control plane's answer.
 
 
@@ -1728,9 +1730,10 @@ class GateClient(
 
 Control-plane client for the pre-execution gate.
 
-`base_url` is the control plane's address: `INTUTIC_CONTROL_PLANE_URL`,
-then Intutic's hosted control plane. Without an `api_key` the client is
-`local_only`. `harness` defaults to "langgraph" and is sent as
+`base_url` is the control plane's address, else `INTUTIC_CONTROL_PLANE_URL`
+(this release has no default control plane). Without an `api_key` the
+client is `local_only` and needs no address; with one and no address,
+`ValueError`. `harness` defaults to "langgraph" and is sent as
 `harnessType` on every gate call and event, so incidents attribute to the
 right adapter. Override it when wrapping a different framework.
 `fail_closed` blocks a call when the hook gate gives no verdict (the
@@ -1803,8 +1806,9 @@ def from_env(
 Build a client from the environment, falling back to CLI credentials.
 
 Reading ~/.intutic/credentials.json means the gate works with whatever
-workspace `intutic login` already bound, instead of duplicating the key.
-With no key in either place the client is `local_only`.
+workspace `intutic login` already bound, instead of duplicating the key:
+its key, workspace and the control plane it logged in to. With no key in
+either place the client is `local_only`.
 
 
 ##### GateClient.hook_gate()

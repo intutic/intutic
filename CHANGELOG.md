@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **No default control plane.** Only the open core is released, so nothing
+  points at a hosted control plane by default any more. The CLI, `@intutic/clawde`,
+  `@intutic/gate`, `intutic-clawde` and the Terraform provider use a control
+  plane only when one is named: `INTUTIC_CONTROL_PLANE_URL`,
+  `--control-plane-url`, `--dev`, the URL `intutic login` saved, or the
+  provider's `endpoint`. A command or client that needs one and has none says
+  so and stops: the CLI exits 1, `ControlPlaneClient` and a keyed
+  `GateClient` throw on construction, `checkBudget()` /
+  `check_budget()` raise `ClawdeConnectionError`, and the provider reports
+  "Missing control-plane endpoint". A `GateClient` with no API key is
+  local-only, as before. Generated hook scripts carry the address `connect`
+  used, or none.
+- **The CLI's help lists the open-core commands.** The commands that need a
+  control plane (`login`, `connect`, `keys`, `org`, `team`, `guardrails`,
+  `gateway`, `siem` and the rest) and the on-prem `judge configure` and
+  `enterprise install` are hidden from `--help`; they still run. `doctor` on a
+  machine with no login skips its control-plane checks instead of failing
+  them, and points at `intutic start`.
+- **The docs build in the open-core edition by default.** The docs image
+  takes `DOCS_EDITION` (`oss` by default, `full` for a bundle that ships the
+  control plane). The open-core edition leaves out every section whose heading
+  carries a plan badge, as it already left out such pages, and a link to a
+  page it leaves out renders as plain text.
+- Release flags live in `packages/shared-types/src/release.ts`, with twins in
+  the Python SDK and the Terraform provider;
+  `node tools/scripts/release-content.js --check` (in `pnpm lint:claims`)
+  fails when they disagree.
+
 ## [2.8.0] - 2026-10-15
 
 

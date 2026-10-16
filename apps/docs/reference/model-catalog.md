@@ -2,9 +2,9 @@
 
 Intutic ships a generated catalog of LLM models — which provider offers each one, its context
 window, output token limit, per-1K token cost, and whether it's a reasonable fit for judging
-another model's work. It's what powers the self-hosted model picker in
-[`intutic judge configure`](/reference/cli#intutic-judge-configure), and it's available directly
-from `@intutic/shared-types` for anything else you build against Intutic's provider registry.
+another model's work. It's available from `@intutic/shared-types` for anything you build
+against Intutic's provider registry<!-- ENTERPRISE_ONLY_START -->, and it powers the self-hosted model picker in
+[`intutic judge configure`](/reference/cli#intutic-judge-configure)<!-- ENTERPRISE_ONLY_END -->.
 
 ## Where it comes from
 
@@ -79,7 +79,7 @@ import {
   normalizeModelRef,
 } from '@intutic/shared-types'
 
-// Judge-capable models an on-prem judge may use (Ollama, Ollama Cloud excluded)
+// Judge-capable models a self-hosted judge may use (Ollama, Ollama Cloud excluded)
 const choices = selfHostedJudgeModelChoices()
 
 // Refuse a hosted judge model
@@ -99,13 +99,13 @@ normalizeModelRef('anthropic/anthropic/claude-haiku-4-5')
 ## Custom and BYO model names
 
 A name outside the catalog is legal — an on-prem LiteLLM deployment can serve any model under
-any alias it chooses, and `intutic judge configure` accepts such a name with a warning. Catalog
+any alias it chooses<!-- ENTERPRISE_ONLY_START -->, and `intutic judge configure` accepts such a name with a warning<!-- ENTERPRISE_ONLY_END -->. Catalog
 membership is informational. What is refused is a hosted model: a custom judge reference for
-which `isHostedModelRef()` is true. See [the on-prem judge](/external/on-prem-judge) for where
-this matters in practice.
+which `isHostedModelRef()` is true.<!-- ENTERPRISE_ONLY_START --> See [the on-prem judge](/external/on-prem-judge) for where
+this matters in practice.<!-- ENTERPRISE_ONLY_END -->
 
 ## Related
 
-- [Settings & Configuration — Judges](/guide/settings#judges)
-- [On-prem judge setup](/external/on-prem-judge)
+- [Settings & Configuration — Judges](/guide/settings#judges)<!-- ENTERPRISE_ONLY_START -->
+- [On-prem judge setup](/external/on-prem-judge)<!-- ENTERPRISE_ONLY_END -->
 - [Provider Keys](/guide/settings#provider-keys)

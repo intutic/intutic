@@ -74,13 +74,13 @@ def test_resolve_context_merges_config_and_environment_field_by_field(tmp_path, 
 
 @patch("requests.get")
 def test_budget_checker_cache(mock_get, monkeypatch):
-    # Asserts the DEFAULT control-plane origin, so the env override must be
-    # absent: test_control_plane.py sets INTUTIC_CONTROL_PLANE_URL and a shell
-    # that exports it (a local dev pointing at 127.0.0.1:3001) made this fail
-    # under a full run on 2026-09-15 while passing alone.
-    monkeypatch.delenv("INTUTIC_CONTROL_PLANE_URL", raising=False)
+    # The control plane comes from the environment (this release has no
+    # default; test_release_defaults.py covers resolution). Set here, not
+    # inherited: a shell that exports another one (a local dev pointing at
+    # 127.0.0.1:3001) made this fail under a full run on 2026-09-15.
+    monkeypatch.setenv("INTUTIC_CONTROL_PLANE_URL", "https://cp.example")
     client = ClawdeClient(api_key="test-key")
-    assert client.control_plane_url == "https://api.intutic.ai"
+    assert client.control_plane_url == "https://cp.example"
 
     # Mock the REAL control-plane response shape (GET /api/v1/budget),
     # not the historical nonexistent /v1/budget/check shape.
@@ -95,7 +95,7 @@ def test_budget_checker_cache(mock_get, monkeypatch):
     assert res1["remaining_usd"] == 150.0
     assert mock_get.call_count == 1
     called_url = mock_get.call_args[0][0]
-    assert called_url == "https://api.intutic.ai/api/v1/budget"
+    assert called_url == "https://cp.example/api/v1/budget"
 
     # Second call: hits cache, doesn't hit API again
     res2 = client.check_budget("gpt-4o", 100)
@@ -105,7 +105,7 @@ def test_budget_checker_cache(mock_get, monkeypatch):
 
 @patch("requests.get")
 def test_budget_checker_alert_triggered_is_not_allowed(mock_get):
-    client = ClawdeClient(api_key="test-key")
+    client = ClawdeClient(api_key="test-key", control_plane_url="https://cp.example")
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"budget_remaining_usd": 0, "alert_triggered": True}

@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
+import { CLOUD_RELEASED, HOSTED_CONTROL_PLANE_URL, NO_CONTROL_PLANE_MESSAGE } from '@intutic/shared-types'
 
 /**
  * Returns the Intutic config directory path for a given home directory.
@@ -79,7 +80,17 @@ export function getIntegrityPath(workspaceRoot: string): string {
 }
 
 const LOCAL_CONTROL_PLANE_URL = 'http://localhost:3001'
-const HOSTED_CONTROL_PLANE_URL = 'https://api.intutic.ai'
+
+/**
+ * Thrown by {@link resolveControlPlaneUrl} when no control plane is named and
+ * the hosted one is not released. cli.ts prints its message without a stack.
+ */
+export class NoControlPlaneError extends Error {
+  constructor() {
+    super(NO_CONTROL_PLANE_MESSAGE)
+    this.name = 'NoControlPlaneError'
+  }
+}
 
 /**
  * The control plane `intutic login` saved with the credentials, or undefined.
@@ -125,7 +136,8 @@ function trimTrailingSlashes(s: string): string {
  * 3. a workspace initialised with `intutic init --dev`
  * 4. the URL `intutic login` saved with the credentials (`useStored: false`
  *    skips it, for credentials supplied on the command line instead)
- * 5. the hosted control plane
+ * 5. the hosted control plane, once it is released (`CLOUD_RELEASED` in
+ *    @intutic/shared-types); until then, a {@link NoControlPlaneError}
  *
  * Every command resolves through here and passes only its own `--dev` flag,
  * never the workspace setting, so the precedence is the same everywhere. A
@@ -136,6 +148,19 @@ export function resolveControlPlaneUrl(
   devFlag?: boolean,
   opts: { flagUrl?: string; useStored?: boolean } = {},
 ): string {
+  const url = configuredControlPlaneUrl(devFlag, opts)
+  if (url === undefined) throw new NoControlPlaneError()
+  return url
+}
+
+/**
+ * {@link resolveControlPlaneUrl}, but undefined instead of a throw when there
+ * is no control plane: for a command that reports one rather than calls it.
+ */
+export function configuredControlPlaneUrl(
+  devFlag?: boolean,
+  opts: { flagUrl?: string; useStored?: boolean } = {},
+): string | undefined {
   const url =
     opts.flagUrl ||
     (devFlag ? LOCAL_CONTROL_PLANE_URL : undefined) ||
@@ -143,6 +168,6 @@ export function resolveControlPlaneUrl(
     (process.env.INTUTIC_DEV === '1' ? LOCAL_CONTROL_PLANE_URL : undefined) ||
     (workspaceDevMode() ? LOCAL_CONTROL_PLANE_URL : undefined) ||
     (opts.useStored === false ? undefined : storedControlPlaneUrl()) ||
-    HOSTED_CONTROL_PLANE_URL
-  return trimTrailingSlashes(url)
+    (CLOUD_RELEASED ? HOSTED_CONTROL_PLANE_URL : undefined)
+  return url === undefined ? undefined : trimTrailingSlashes(url)
 }

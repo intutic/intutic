@@ -19,8 +19,15 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Block, re-ask, or substitute a default response |
 | **Evaluation** | Shadow mode measures how often a rule would act before it enforces; judge verdicts in the uncertain band go to a human review queue | LLM-as-judge and online evaluations, human annotation and labeling queues |
 | **Tracing** | Enforcement decisions per tool call; OpenTelemetry traces and metrics of Intutic's own components | Full application traces with spans, evaluations and annotations |
-| **Deployment** | Cloud, or fully self-hosted including air-gapped | Cloud; self-hosted on Kubernetes for Enterprise |
 | **Source** | Open core (MIT) | AX is closed; Phoenix is source-available under the Elastic License 2.0 |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | Arize AX |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted including air-gapped | Cloud; self-hosted on Kubernetes for Enterprise |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where Arize is stronger
 

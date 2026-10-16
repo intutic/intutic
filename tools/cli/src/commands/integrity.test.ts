@@ -321,8 +321,11 @@ describe('table padding is ANSI-aware', () => {
 
 describe('command exit status', () => {
   let exitCode: number | null
+  // There is no default control plane while none has launched; name one.
+  const savedUrl = process.env.INTUTIC_CONTROL_PLANE_URL
 
   beforeEach(() => {
+    process.env.INTUTIC_CONTROL_PLANE_URL = 'https://cp.example'
     exitCode = null
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       exitCode = code ?? 0
@@ -335,6 +338,8 @@ describe('command exit status', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    if (savedUrl === undefined) delete process.env.INTUTIC_CONTROL_PLANE_URL
+    else process.env.INTUTIC_CONTROL_PLANE_URL = savedUrl
   })
 
   /** Run a command that is expected to call process.exit, and report the code. */

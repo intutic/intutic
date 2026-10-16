@@ -28,6 +28,7 @@ import { readJsonObjectForMerge } from './jsonMergeTarget.js'
 import { keepOriginal, noteWritten, readOriginal } from '../disconnect/originals.js'
 import { recordGateSightings } from './gateSightings.js'
 import { writeFileAtomic } from '../lib/atomicWrite.js'
+import { hookHostFallback } from '../lib/hookHost.js'
 
 const log = createLogger('sync-claude-hooks')
 
@@ -342,7 +343,7 @@ export async function updatePreToolUseHooks(
  *
  * Governance events are appended to .intutic/events/hook-events.jsonl
  * and drained to the control plane by the sync-daemon on each cycle.
- * Control plane: ${controlPlaneUrl ?? 'https://api.intutic.ai'}
+ * Control plane: ${hookHostFallback(controlPlaneUrl) || 'none configured'}
  */
 ${emitJsFailClosedPrelude({ harness: 'claude-code', contract: 'exit2' })}
 const path = require('path');
@@ -353,7 +354,7 @@ const https = require('https');
 
 // ── Runtime credentials (sourced from ~/.intutic/env/runtime.env at invocation time) ──
 const _runtimeEnvPath = path.join(os.homedir(), '.intutic', 'env', 'runtime.env');
-let _intuticHost = 'https://api.intutic.ai', _intuticKey = '', _intuticWsId = ${JSON.stringify(workspaceId ?? '')};
+let _intuticHost = ${JSON.stringify(hookHostFallback(controlPlaneUrl))}, _intuticKey = '', _intuticWsId = ${JSON.stringify(workspaceId ?? '')};
 try {
   fs.readFileSync(_runtimeEnvPath, 'utf-8').split('\\n').forEach(line => {
     const eq = line.indexOf('='); if (eq < 0) return;

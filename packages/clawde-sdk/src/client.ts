@@ -16,7 +16,7 @@ import { normalizeRequest, normalizeResponse } from './schema-enforcer'
 import { resolveContext } from './context-resolver'
 import { resolveGitContext } from './git-context'
 import { BudgetChecker } from './budget-checker'
-import { DEFAULT_CONTROL_PLANE_URL } from './control-plane'
+import { DEFAULT_CONTROL_PLANE_URL } from './release'
 import { CircuitBreaker } from './circuit-breaker'
 import { ClawdeEventEmitter } from './event-emitter'
 import { deriveIdentity, identityHeaders, type GraphIdentity } from './graph-identity'
@@ -35,7 +35,8 @@ export const SDK_HARNESS = 'clawde_sdk'
 export class ClawdeClient {
   private apiKey: string
   private baseUrl: string
-  private controlPlaneUrl: string
+  /** Undefined when nothing names a control plane (see release.ts). */
+  private controlPlaneUrl: string | undefined
   private provider?: 'openai' | 'anthropic' | 'google'
   private autoContext: boolean
   private timeout: number
@@ -228,6 +229,8 @@ export class ClawdeClient {
     const context = await resolveContext()
     if (context.sessionId) return context.sessionId
     if (!this.apiKey.startsWith('vk_')) return null
+    // No control plane address: nowhere to register a session.
+    if (!this.controlPlaneUrl) return null
     const git = await resolveGitContext(context.workingDirectory ?? process.cwd(), context.gitBranch)
     if (Object.keys(git).length === 0) return null
     try {

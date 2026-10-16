@@ -16,9 +16,12 @@
  *     directory (VitePress clean URLs);
  *   - the anchor, if any: a heading of that page whose slug (VitePress's
  *     slugify of the heading's text, or an explicit `{#id}`) equals it.
- * Every page is published: docs.intutic.ai builds the full site (see
- * apps/docs/Dockerfile and the INTUTIC_REQUIRE_FULL guard in
- * apps/docs/.vitepress/config.ts).
+ * The pages are checked in the full edition, which every link must resolve in:
+ * the Self-host bundle serves it at /docs/ (DOCS_EDITION=full in
+ * apps/docs/Dockerfile, with the INTUTIC_REQUIRE_FULL guard in
+ * apps/docs/.vitepress/config.ts), and docs.intutic.ai will at launch. Until
+ * then docs.intutic.ai carries the open-source pages only, and so does not
+ * answer the links to paid-tier pages; the dashboard is not released either.
  *
  * And every page the navigation lists (AREAS in
  * apps/dashboard/src/components/layout/areas.tsx) must carry a help link: its

@@ -3,8 +3,8 @@ administration, as distinct from ClawdeClient's data-plane chat calls.
 
 Deliberately a separate class, not new methods on ClawdeClient:
 ClawdeClient.base_url targets the *proxy* (default http://localhost:4000);
-the control plane is a different origin entirely (default
-https://api.intutic.ai, or a self-hosted CONTROL_PLANE_URL). Bolting
+the control plane is a different origin entirely (``base_url`` or
+INTUTIC_CONTROL_PLANE_URL; see release.py for the default). Bolting
 management calls onto ClawdeClient would silently need a second base URL
 on a class whose whole contract today is "one client, one proxy."
 
@@ -50,6 +50,7 @@ import requests
 from typing import Any, Dict, List, Optional, Sequence, Union, cast
 from urllib.parse import quote, quote_plus
 from .errors import ClawdeConnectionError
+from .release import CLOUD_RELEASED, HOSTED_CONTROL_PLANE_URL
 from .toon import unwrap_toon_envelope
 from .types import (
     ApiKey,
@@ -113,9 +114,21 @@ from .types import (
     WasmReplayResult,
 )
 
-#: Intutic's hosted control plane: the API host, as the gate and the CLI default
-#: to. The dashboard host serves the web app, not the API.
-DEFAULT_CONTROL_PLANE_URL = "https://api.intutic.ai"
+#: The control plane used when neither an argument nor INTUTIC_CONTROL_PLANE_URL
+#: names one: Intutic's hosted control plane once it is released (see
+#: release.py), and None until then, so a client needs an explicit address.
+DEFAULT_CONTROL_PLANE_URL: Optional[str] = HOSTED_CONTROL_PLANE_URL if CLOUD_RELEASED else None
+
+#: What a client says when it has no control plane address.
+NO_CONTROL_PLANE_URL = (
+    "No Intutic control plane URL: pass it to the client or set INTUTIC_CONTROL_PLANE_URL."
+)
+
+
+def resolve_control_plane_url(explicit: Optional[str] = None) -> Optional[str]:
+    """The control plane's address: ``explicit``, then INTUTIC_CONTROL_PLANE_URL,
+    then ``DEFAULT_CONTROL_PLANE_URL``; None when none of them names one."""
+    return explicit or os.environ.get("INTUTIC_CONTROL_PLANE_URL") or DEFAULT_CONTROL_PLANE_URL
 
 #: The connector providers ``intutic guardrails sources`` lists: the ones that are policy sources.
 POLICY_SOURCE_PROVIDERS = frozenset({"notion", "confluence", "github", "gdrive"})
@@ -132,8 +145,9 @@ class ControlPlaneClient:
     snake_case. Each method's docstring names the route it calls.
 
     `api_key` is an Intutic virtual key (`vk_...`) or a login JWT. `base_url`
-    is the control plane's address: `INTUTIC_CONTROL_PLANE_URL`, then Intutic's
-    hosted control plane. A call that fails raises `ClawdeConnectionError`
+    is the control plane's address, else `INTUTIC_CONTROL_PLANE_URL`; without
+    either, `ValueError` (this release has no default control plane). A call
+    that fails raises `ClawdeConnectionError`
     with the method, path, status and the control plane's answer.
     """
 
@@ -141,11 +155,10 @@ class ControlPlaneClient:
         if not api_key:
             raise ValueError("API key is required to initialize ControlPlaneClient.")
         self.api_key = api_key
-        self.base_url = (
-            base_url
-            or os.environ.get("INTUTIC_CONTROL_PLANE_URL")
-            or DEFAULT_CONTROL_PLANE_URL
-        )
+        url = resolve_control_plane_url(base_url)
+        if not url:
+            raise ValueError(NO_CONTROL_PLANE_URL)
+        self.base_url = url
 
     def _send(
         self,

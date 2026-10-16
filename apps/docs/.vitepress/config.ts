@@ -3,22 +3,26 @@ import fs from 'fs'
 import path from 'path'
 
 // OSS build mode (open-source pages only) unless INTUTIC_ENTERPRISE_BUILD === 'true'.
-// docs.intutic.ai builds the full site (apps/docs/Dockerfile). The flag is the
-// only signal: an earlier version also required services/control-plane to
-// exist, which the Docker build context never contains, so the published image
-// came out open-source-only while the flag said otherwise.
+// apps/docs/Dockerfile sets it from its DOCS_EDITION build-arg: oss (the
+// default, and what docs.intutic.ai builds until the hosted Cloud and Self-host
+// launch) or full (the Self-host bundle's /docs/). The flag is the only signal:
+// an earlier version also required services/control-plane to exist, which the
+// Docker build context never contains, so the published image came out
+// open-source-only while the flag said otherwise.
 const IS_OSS = process.env.INTUTIC_ENTERPRISE_BUILD !== 'true';
 
 /**
- * Fail-closed guard for the published site.
+ * Fail-closed guard for a full-edition build.
  *
- * docs.intutic.ai publishes every page: the Cloud and Enterprise pages carry
+ * The full edition carries every page: the Cloud and Enterprise pages carry
  * their badge, and the dashboard's help links point at them, so an
- * open-source-only build there breaks those links (it answered 14 of the
- * dashboard's 22 with a 404). The build for that site sets
- * INTUTIC_REQUIRE_FULL=true (apps/docs/Dockerfile, whose flags the deploy
- * script re-checks), and this throws rather than emit a site without them;
- * the Dockerfile then checks the output for a paid-tier page as well.
+ * open-source-only build where the dashboard runs breaks those links (it once
+ * answered 14 of the dashboard's 22 with a 404). The full-edition image build
+ * (apps/docs/Dockerfile, DOCS_EDITION=full: the Self-host bundle, and
+ * docs.intutic.ai after launch) sets INTUTIC_REQUIRE_FULL=true, and this
+ * throws rather than emit a site without them; the Dockerfile then checks the
+ * output for the paid-tier pages as well (and, in the oss edition, for their
+ * absence).
  */
 if (process.env.INTUTIC_REQUIRE_FULL === 'true' && IS_OSS) {
   throw new Error(
@@ -70,6 +74,65 @@ function paidTierPages(): string[] {
 }
 
 const PAID_TIER_PAGES = IS_OSS ? paidTierPages() : []
+
+/** A heading that carries a plan badge (guide/plans.md#badges). */
+const PAID_TIER_HEADING = /^(#{2,6})\s.*<Badge[^>]*text="(Cloud|Self-serve\+|Biz Org\+|Enterprise|Self-host)"/
+
+/**
+ * Drops every section whose heading carries a plan badge, up to the next
+ * heading of the same or a higher level, the same way paidTierPages() drops a
+ * page whose H1 carries one. The CLI reference documents each control-plane
+ * command under its own badged heading; the open-source CLI hides those
+ * commands from its help, so the open-source docs leave them out too. Lines in
+ * fenced code blocks are never headings.
+ */
+function stripPaidTierSections(src: string): string {
+  const out: string[] = []
+  let fence: string | null = null
+  let dropLevel = 0
+  for (const line of src.split('\n')) {
+    const marker = line.match(/^\s*(```|~~~)/)?.[1]
+    if (marker && (fence === null || fence === marker)) fence = fence === null ? marker : null
+    else if (fence === null) {
+      const heading = line.match(/^(#{1,6})\s/)
+      if (heading && dropLevel && heading[1].length <= dropLevel) dropLevel = 0
+      const paid = line.match(PAID_TIER_HEADING)
+      if (paid && !dropLevel) dropLevel = paid[1].length
+    }
+    if (!dropLevel) out.push(line)
+  }
+  return out.join('\n')
+}
+
+/**
+ * The page a docs link opens, as a key of EXCLUDED_PAGE_KEYS ('guide/settings',
+ * 'guide/index'), or null when it leaves the docs site. Handles absolute and
+ * relative paths, https://docs.intutic.ai/… URLs, a .md or .html suffix, a
+ * trailing slash, and a #anchor or ?query. `fromPage` is the linking page's
+ * path relative to the docs root (VitePress's env.relativePath).
+ */
+function docsPageKey(href: string, fromPage: string): string | null {
+  let target = href
+  const absolute = /^https?:\/\/docs\.intutic\.ai(?=[/?#]|$)/i
+  if (absolute.test(target)) target = target.replace(absolute, '') || '/'
+  else if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('//')) return null
+  target = target.replace(/[?#].*$/, '')
+  if (target === '') return null // an anchor on the same page
+  try {
+    target = decodeURIComponent(target)
+  } catch {
+    return null
+  }
+  let resolved = path.posix.resolve('/', path.posix.dirname(fromPage), target)
+  if (target.endsWith('/') && !resolved.endsWith('/')) resolved += '/'
+  if (resolved.endsWith('/')) resolved += 'index'
+  return resolved.slice(1).replace(/\.(md|html)$/, '')
+}
+
+/** The pages this build leaves out, keyed as docsPageKey() returns them. */
+const EXCLUDED_PAGE_KEYS = new Set(
+  PAID_TIER_PAGES.map((p) => p.split(path.sep).join('/').replace(/\.md$/, '')),
+)
 
 /**
  * The Terraform provider's resources (or data sources): the pages tfplugindocs
@@ -344,10 +407,10 @@ export default defineConfig({
     config: (md) => {
       if (!IS_OSS) return
       md.core.ruler.before('normalize', 'strip-enterprise-only', (state) => {
-        state.src = state.src.replace(
+        state.src = stripPaidTierSections(state.src.replace(
           /<!-- ENTERPRISE_ONLY_START -->[\s\S]*?<!-- ENTERPRISE_ONLY_END -->/gm,
           ''
-        )
+        ))
 
         // Fail the build on hosted-infrastructure terms that survive stripping.
         //
@@ -385,6 +448,32 @@ export default defineConfig({
           // nothing to do with our hosting.
           'GKE control plane',
           'GKE Control Plane',
+          // The hosted Cloud's plans and the Self-host distribution, neither
+          // of them released. Precise phrases, not bare words: 'air-gapped'
+          // and 'self-hosted' describe competitors on the compare pages and
+          // the open core's own offline mode and open-weight judges.
+          'helm install',
+          'helm registry login',
+          'ghcr.io/intutic/charts',
+          'Self-host license',
+          'fully self-hosted',
+          'air-gap bundle',
+          'air-gap-ready',
+          'offline license',
+          'Settings › Upgrade',
+          'Free Tier SaaS',
+          'Paid SaaS',
+          'SaaS free tier',
+          'SaaS Tier',
+          'Free Tier / SaaS',
+          'Connected/SaaS',
+          'Connected / SaaS',
+          // Links to the pages this build leaves out for the same reason: the
+          // plans and the self-host and on-prem guides.
+          '](/guide/plans',
+          '](/guide/self-host',
+          '](/external/on-prem-judge',
+          '](/external/self-hosted-gateway',
         ]
         const src = state.src
         const found = BANNED.filter((t) => src.includes(t))
@@ -397,6 +486,33 @@ export default defineConfig({
               `  Wrap them in <!-- ENTERPRISE_ONLY_START --> … <!-- ENTERPRISE_ONLY_END -->, ` +
               `or reword to describe a control plane generically.`
           )
+        }
+      })
+
+      // A link to a page this build leaves out would open a 404 on the
+      // published site (177 did, to 27 left-out pages). Render it as its plain
+      // text instead: drop the link_open and link_close and keep what is
+      // between them. Sidebar and nav entries are gated where they are defined.
+      md.core.ruler.push('unlink-excluded-pages', (state) => {
+        const fromPage = state.env?.relativePath ?? 'index.md'
+        for (const block of state.tokens) {
+          if (block.type !== 'inline' || !block.children) continue
+          const kept: typeof block.children = []
+          let dropClose = false
+          for (const t of block.children) {
+            if (t.type === 'link_open') {
+              const key = docsPageKey(t.attrGet('href') ?? '', fromPage)
+              if (key !== null && EXCLUDED_PAGE_KEYS.has(key)) {
+                dropClose = true // links do not nest, so the next close is this one's
+                continue
+              }
+            } else if (t.type === 'link_close' && dropClose) {
+              dropClose = false
+              continue
+            }
+            kept.push(t)
+          }
+          block.children = kept
         }
       })
     },
@@ -573,8 +689,8 @@ export default defineConfig({
         enforce: 'pre',
         transform(code: string, id: string) {
           if (IS_OSS && (id.endsWith('.md') || id.includes('.md?'))) {
-            let transformed = code
-              .replace(/<!-- ENTERPRISE_ONLY_START -->[\s\S]*?<!-- ENTERPRISE_ONLY_END -->/gm, '')
+            let transformed = stripPaidTierSections(code
+              .replace(/<!-- ENTERPRISE_ONLY_START -->[\s\S]*?<!-- ENTERPRISE_ONLY_END -->/gm, ''))
               .replace(/https:\/\/api\.intutic\.ai/g, 'http://localhost:3001')
               .replace(/https:\/\/proxy\.intutic\.ai/g, 'http://localhost:4000')
               .replace(/https:\/\/app\.intutic\.ai/g, 'http://localhost:5174')

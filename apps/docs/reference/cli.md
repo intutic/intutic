@@ -29,14 +29,19 @@ cannot, the command fails with the roles it needs, for example
 `API PUT /api/v1/budget refused (403): Requires the OWNER or ADMIN role`. A Viewer can run the
 read-only commands and manage their own login and keys.
 
+<!-- ENTERPRISE_ONLY_START -->
 ## Plan badges
 
 Commands without a badge run on your machine with no account. A badge on a command means it calls
-a control plane and needs `intutic login` first; the badge names the plan, as in
-[Plan badges](/guide/plans#badges): <Badge type="tip" text="Cloud" /> works on any connected
-workspace, free included; <Badge type="warning" text="Self-serve+" />,
-<Badge type="warning" text="Biz Org+" /> and <Badge type="danger" text="Enterprise" /> need that
-plan or higher. Every command ships in the open-core CLI; the badge says what it needs to work.
+a control plane, which the open core does not include, and needs `intutic login` first. Every
+command ships in the open-core CLI; the badge says what it needs to work.
+
+<!-- ENTERPRISE_ONLY_START -->
+The badge names the plan, as in [Plan badges](/guide/plans#badges):
+<Badge type="tip" text="Cloud" /> works on any connected workspace, free included;
+<Badge type="warning" text="Self-serve+" />, <Badge type="warning" text="Biz Org+" /> and
+<Badge type="danger" text="Enterprise" /> need that plan or higher.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Choosing a control plane {#control-plane-url}
 
@@ -47,10 +52,16 @@ Every command that talks to a control plane picks it the same way; the first tha
 2. The environment: `INTUTIC_CONTROL_PLANE_URL`, or `INTUTIC_DEV=1` for the local one.
 3. A workspace initialized with `intutic init --dev`, which uses the local one.
 4. The control plane `intutic login` saved with your credentials.
+<!-- ENTERPRISE_ONLY_START -->
 5. Intutic's hosted control plane.
+<!-- ENTERPRISE_ONLY_END -->
+
+With none of these set, a command that needs a control plane says so and exits: the open core runs
+locally (`intutic start`) and has no default control plane.
 
 `intutic status` shows the control plane this order picks.
 
+<!-- ENTERPRISE_ONLY_START -->
 For a self-hosted control plane, log in once with its URL and every later command uses it:
 
 ```bash
@@ -58,6 +69,7 @@ intutic login --control-plane-url https://intutic.internal.example
 intutic whoami
 intutic connect
 ```
+<!-- ENTERPRISE_ONLY_END -->
 
 ---
 
@@ -172,8 +184,8 @@ intutic setup [options]
    confirmation before proceeding anyway; a rate-limited or unreachable response is reported but
    does not block
 5. Saves the credential (`PUT /api/v1/workspace/provider-credentials/:provider`, same route
-   `intutic credentials set` hits) or writes the local env file; local mode then points you at
-   `intutic judge configure` for an on-prem judge
+   `intutic credentials set` hits) or writes the local env file<!-- ENTERPRISE_ONLY_START -->; local mode then points you at
+   `intutic judge configure` for an on-prem judge<!-- ENTERPRISE_ONLY_END -->
 
 There is no judge-model step: judges run only on self-hosted models, so a workspace has no
 judge model to choose.
@@ -190,6 +202,7 @@ intutic setup --dev
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
 ## `intutic judge configure`
 
 Generate the local artifacts an on-prem LLM-as-judge needs: a `litellm_config.yaml`, an env
@@ -244,6 +257,7 @@ helm install my-gateway oci://ghcr.io/intutic/charts/intutic-gateway --version <
 the image pull Secret) is in [Self-Hosted Gateway](/external/self-hosted-gateway).
 
 ---
+<!-- ENTERPRISE_ONLY_END -->
 
 ## `intutic login` <Badge type="tip" text="Cloud" />
 
@@ -277,16 +291,20 @@ intutic login
 # API key login
 intutic login --api-key vk_abc123def456
 
-# A self-hosted control plane, saved for every later command
-intutic login --control-plane-url https://intutic.internal.example
-
 # Local dev
 intutic login --dev
 ```
 
+<!-- ENTERPRISE_ONLY_START -->
+```bash
+# A self-hosted control plane, saved for every later command
+intutic login --control-plane-url https://intutic.internal.example
+```
+<!-- ENTERPRISE_ONLY_END -->
+
 ---
 
-## `intutic logout`
+## `intutic logout` <Badge type="tip" text="Cloud" />
 
 Clear stored credentials.
 
@@ -350,6 +368,9 @@ No options. Runs nine checks in order, each printing ✓ or ✗ plus a one-line 
 7. CA cert trust (`~/.intutic/ca.crt` plus the OS trust store)
 8. Policy snapshot present, valid, non-empty and fresh (`~/.intutic/hooks/policy-snapshot.rules`)
 9. Cisco skill scanner on `PATH` (optional; never fails)
+
+Checks 2–5 and 8 need a control plane. On a machine with no login they are skipped with one note,
+and the proxy and CA-trust remediations point at `intutic start`.
 
 See [`intutic doctor`](/reference/cli-doctor) for what each check verifies and how to fix it.
 
@@ -419,11 +440,15 @@ intutic connect --interval 10000
 
 # Local dev with fast polling
 intutic connect --dev --interval 5000
+```
 
+<!-- ENTERPRISE_ONLY_START -->
+```bash
 # Self-hosted control plane, explicit workspace credentials
 intutic connect --workspace-id wk_xxxx --api-key "$INTUTIC_API_KEY" \
   --control-plane-url https://intutic.internal.example
 ```
+<!-- ENTERPRISE_ONLY_END -->
 
 The daemon runs in the foreground. Use `Ctrl+C` to stop.
 
@@ -553,7 +578,7 @@ intutic disconnect --harness cursor
 
 ---
 
-## `intutic sync-context`
+## `intutic sync-context` <Badge type="tip" text="Cloud" />
 
 Record the current Git branch and commit for the sync daemon to report.
 
@@ -2827,9 +2852,9 @@ Revokes the key: every request made with it is refused from then on, and it cann
 
 ## `intutic gateway register` <Badge type="danger" text="Enterprise" />
 
-Register a [self-hosted gateway](/external/self-hosted-gateway) — an org's own Docker,
-Kubernetes, or bare-metal (systemd) deployment of the Intutic proxy — and print its one-time
-management token.
+Register a self-hosted gateway — an org's own Docker, Kubernetes, or bare-metal (systemd)
+deployment of the Intutic proxy — and print its one-time management token.<!-- ENTERPRISE_ONLY_START --> See
+[Self-Hosted Gateway](/external/self-hosted-gateway).<!-- ENTERPRISE_ONLY_END -->
 
 ```bash
 intutic gateway register --name <name> --target <docker|kubernetes|bare_metal> [options]
@@ -2964,8 +2989,8 @@ intutic gateway config set <gateway_id> [--require-vk <true|false>] [--require-p
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 The gateway applies the change on its next heartbeat, without a restart or a redeploy, on every
-deployment target: within `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS` (30 seconds by default). See
-[Changing a gateway's config](/external/self-hosted-gateway#changing-a-gateway-s-config).
+deployment target: within `INTUTIC_GATEWAY_HEARTBEAT_INTERVAL_SECS` (30 seconds by default).<!-- ENTERPRISE_ONLY_START --> See
+[Changing a gateway's config](/external/self-hosted-gateway#changing-a-gateway-s-config).<!-- ENTERPRISE_ONLY_END -->
 
 ---
 
@@ -4542,7 +4567,7 @@ sudo intutic enforce remove
 
 ---
 
-## `intutic enterprise install`
+## `intutic enterprise install` <Badge type="danger" text="Enterprise" />
 
 Prepare a managed fleet: write MDM manifests and, when run with admin/root privilege, trust the Intutic CA system-wide and install system-level Cursor hooks.
 
@@ -4615,7 +4640,7 @@ Also available as the top-level shortcut `intutic install-daemon`, with the same
 |--------|-------------|---------|
 | `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required unless `--proxy`) | — |
 | `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required unless `--proxy`) | — |
-| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL` (or `INTUTIC_DEV=1`), then a workspace initialized with `intutic init --dev`, then the URL saved by `intutic login`, then Intutic's hosted control plane |
+| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL` (or `INTUTIC_DEV=1`), then a workspace initialized with `intutic init --dev`, then the URL saved by `intutic login`; this release has no default |
 | `--binary-path <path>` | Path to the `intutic` CLI binary; with `--proxy`, an absolute path to `intutic-proxy` | _(current process; with `--proxy`, the launcher's pinned binary, then `intutic-proxy` on PATH)_ |
 | `--dry-run` | Print what would be done without writing files | — |
 | `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |

@@ -17,6 +17,7 @@
 
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
+import { CONTROL_PLANE_PRODUCT_RELEASED, SELF_HOST_RELEASED } from '@intutic/shared-types'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -135,7 +136,9 @@ export async function runSetup(opts: SetupOpts, io: SetupIO = createClackIO()): 
 
   // ── Step 2: mode ──
   const creds = await loadCredentials()
-  const mode = await io.select({
+  // Until a control plane product is released, connected mode is offered only
+  // to someone already logged in to one; everyone else gets local without asking.
+  const mode = !creds && !CONTROL_PLANE_PRODUCT_RELEASED ? 'local' : await io.select({
     message: 'How do you want to configure this provider?',
     options: [
       {
@@ -201,7 +204,9 @@ export async function runSetup(opts: SetupOpts, io: SetupIO = createClackIO()): 
     io.log.warn(`${envPath} contains a secret — do not commit it. Source it yourself before running your harness.`)
     // Judges run only on self-hosted models (owner rule, 2026-10-03), so there
     // is no judge model to pick here; an on-prem local judge is set up apart.
-    io.note('To run judges on-prem, point the local judge at a self-hosted model:\n  intutic judge configure', 'Next step')
+    if (SELF_HOST_RELEASED) {
+      io.note('To run judges on-prem, point the local judge at a self-hosted model:\n  intutic judge configure', 'Next step')
+    }
   }
 
   io.outro(pc.bold('Setup complete.'))

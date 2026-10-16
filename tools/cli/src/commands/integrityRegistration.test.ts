@@ -34,7 +34,7 @@ describe('integrity command registration', () => {
       source,
       'the integrity command group is gone from cli.ts, so `intutic integrity` no longer ' +
         'exists in the binary — while the handlers it dispatches to stay fully tested',
-    ).toMatch(/\.command\(\s*['"]integrity['"]\s*\)/)
+    ).toMatch(/\.command\(\s*['"]integrity['"]\s*(,\s*needsControlPlane\s*)?\)/)
   })
 
   // `verify` takes an argument, so its registration reads `verify <root_id>` —

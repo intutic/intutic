@@ -77,7 +77,7 @@ time-limited links to three files: the bundle
 their signature (`SHA256SUMS.sigstore.json`). Verify the
 bundle where you downloaded it, before it goes into your network. You need
 [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.0 or
-later and Intutic's public key, [`intutic-cosign.pub`](../intutic-cosign.pub):
+later and Intutic's public key, [`intutic-cosign.pub`](../intutic-cosign.pub){target="_self" download}:
 
 ```bash
 cosign verify-blob --key intutic-cosign.pub --bundle SHA256SUMS.sigstore.json SHA256SUMS

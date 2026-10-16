@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { createServer, Server } from 'http'
 import { ControlPlaneClient } from '../src/control-plane'
 import { ClawdeConnectionError } from '../src/errors'
+import { CLOUD_RELEASED, HOSTED_CONTROL_PLANE_URL } from '../src/release'
 
 describe('ControlPlaneClient', () => {
   let server: Server
@@ -355,7 +356,17 @@ describe('ControlPlaneClient', () => {
     await expect(client.whoami()).rejects.toThrow(ClawdeConnectionError)
   })
 
-  it('defaults to the hosted API host, the one @intutic/gate and the CLI use, when nothing names one', async () => {
+  it.runIf(!CLOUD_RELEASED)('refuses to construct with no control plane named', () => {
+    const original = process.env.INTUTIC_CONTROL_PLANE_URL
+    delete process.env.INTUTIC_CONTROL_PLANE_URL
+    try {
+      expect(() => new ControlPlaneClient({ apiKey: 'vk_test' })).toThrow(/INTUTIC_CONTROL_PLANE_URL/)
+    } finally {
+      if (original !== undefined) process.env.INTUTIC_CONTROL_PLANE_URL = original
+    }
+  })
+
+  it.runIf(CLOUD_RELEASED)('defaults to the hosted API host, the one @intutic/gate and the CLI use, when nothing names one', async () => {
     const original = process.env.INTUTIC_CONTROL_PLANE_URL
     delete process.env.INTUTIC_CONTROL_PLANE_URL
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -367,7 +378,7 @@ describe('ControlPlaneClient', () => {
     try {
       await new ControlPlaneClient({ apiKey: 'vk_test' }).whoami()
       // Not the dashboard host: app.intutic.ai serves the web app, not /api/v1.
-      expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://api.intutic.ai/api/v1/auth/me')
+      expect(String(fetchSpy.mock.calls[0]![0])).toBe(`${HOSTED_CONTROL_PLANE_URL}/api/v1/auth/me`)
     } finally {
       fetchSpy.mockRestore()
       if (original !== undefined) process.env.INTUTIC_CONTROL_PLANE_URL = original

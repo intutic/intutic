@@ -127,8 +127,9 @@ func (r *siemDestinationResource) Metadata(_ context.Context, req resource.Metad
 func (r *siemDestinationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "A SIEM export destination (`/api/v1/siem/destinations`): where the workspace streams governance " +
-			"events, and which ones. SIEM export needs the Biz Org, Enterprise or Self-host plan (or a trial); on " +
-			"another plan the API refuses to create or change a destination. The adapter's credentials go in " +
+			"events, and which ones. " + planNote("SIEM export needs the Biz Org, Enterprise or Self-host plan "+
+			"(or a trial); on another plan the API refuses to create or change a destination. ") +
+			"The adapter's credentials go in " +
 			"`secret_config`, everything else in `config`. A `webhook_https` destination signs every delivery with " +
 			"a secret the API generates, returns once and Terraform keeps as `signing_secret`; " +
 			"`secret_rotation_triggers` replaces it. Destroying the resource deactivates the destination: the API " +

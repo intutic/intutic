@@ -7,7 +7,15 @@ Manage an Intutic workspace's SOPs, policy guardrails, workspace settings, virtu
 
 ## Authentication
 
-A workspace API key (`vk_…`) created with **This key is for automation** ticked, in `INTUTIC_API_KEY` or the provider's `api_key`. The provider acts as the key's member; most resources need an OWNER or ADMIN role, and the key's scopes must cover the routes the configuration uses (the default, `*`, does). For a self-hosted control plane, set `INTUTIC_CONTROL_PLANE_URL` or `endpoint`.
+A workspace API key (`vk_…`) created with **This key is for automation** ticked, in `INTUTIC_API_KEY` or the provider's `api_key`. The provider acts as the key's member; most resources need an OWNER or ADMIN role, and the key's scopes must cover the routes the configuration uses (the default, `*`, does). Set the control plane's base URL in `INTUTIC_CONTROL_PLANE_URL` or `endpoint`; the provider has no default endpoint.
+
+<!-- UNRELEASED:cloud
+Without `INTUTIC_CONTROL_PLANE_URL` or `endpoint`, the provider uses Intutic Cloud's control plane, `https://api.intutic.ai`.
+-->
+
+<!-- UNRELEASED:self-host
+For a self-hosted control plane, set `INTUTIC_CONTROL_PLANE_URL` or `endpoint`.
+-->
 
 ## Develop
 
@@ -26,11 +34,15 @@ go generate ./...  # regenerate docs/ and the docs site's reference pages after 
 
 ```sh
 export INTUTIC_CONTROL_PLANE_URL=http://127.0.0.1:3081
-export INTUTIC_API_KEY=vk_...              # an OWNER key; self-hosted gateways need an Enterprise or Self-host plan
+export INTUTIC_API_KEY=vk_...              # an OWNER key
 export INTUTIC_TEST_WORKSPACE_ID=ws_...    # the key's workspace
 export INTUTIC_TEST_MCP_SERVER=...         # optional: an MCP server a proxy has already reported
 TF_ACC=1 go test ./... -run TestAcc
 ```
+
+<!-- UNRELEASED:cloud
+The key's workspace needs an Enterprise or Self-host plan for the self-hosted gateway tests.
+-->
 
 The tests create and destroy their own resources, but leave the workspace settings they write as they set them. Intutic's CI runs them against a control plane on a throwaway database, started by `services/control-plane/scripts/terraform-acceptance-server.ts`, which writes these variables to a file.
 

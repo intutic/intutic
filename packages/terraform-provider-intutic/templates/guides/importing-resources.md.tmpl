@@ -31,7 +31,7 @@ Every resource in the Intutic provider can be imported, so a workspace configure
 The workspace id is the `id` of the `intutic_workspace` data source, and member ids are listed by the `intutic_members` data source. Other ids come from the API's list routes, for example the SOPs:
 
 ```shell
-curl -s -H "Authorization: Bearer $INTUTIC_API_KEY" https://api.intutic.ai/api/v1/sops
+curl -s -H "Authorization: Bearer $INTUTIC_API_KEY" "$INTUTIC_CONTROL_PLANE_URL/api/v1/sops"
 ```
 
 An ID that matches nothing fails with `Cannot import non-existent remote object`.

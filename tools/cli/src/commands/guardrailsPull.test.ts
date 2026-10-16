@@ -52,7 +52,7 @@ describe('runGuardrailsPull', () => {
     process.env.HOME = root
     delete process.env.INTUTIC_DEV
     await fs.mkdir(path.join(root, '.intutic'), { recursive: true })
-    await fs.writeFile(path.join(root, '.intutic', 'credentials.json'), JSON.stringify({ apiKey: 'vk_test', workspaceId: 'ws_test' }), { mode: 0o600 })
+    await fs.writeFile(path.join(root, '.intutic', 'credentials.json'), JSON.stringify({ apiKey: 'vk_test', workspaceId: 'ws_test', controlPlaneUrl: 'https://cp.test.invalid' }), { mode: 0o600 })
     await fs.writeFile(path.join(root, '.intutic', 'config.json'), JSON.stringify({ workspaceRoot: root }), { mode: 0o600 })
     fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

@@ -5,14 +5,16 @@
  * intutic-clawde's tests/test_gate_local_only.py.
  */
 import { createServer, type Server } from 'node:http'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { CLOUD_RELEASED as CANONICAL_CLOUD_RELEASED } from '@intutic/shared-types'
 import { GateClient } from '../client.js'
 import { IntuticGateRefusal } from '../errors.js'
 import { Gate } from '../gate.js'
+import { CLOUD_RELEASED } from '../release.js'
 import { rulesText } from './fixtures/rulesFile.js'
 
 interface Answer {
@@ -25,6 +27,12 @@ interface HookGateVector {
   failClosed: boolean
   response: Answer
   expect: { allowed: boolean; reached: boolean; code?: string; requests?: number; reasonContains?: string }
+}
+interface ConstructionVector {
+  name: string
+  apiKey: string
+  cloudReleased: boolean
+  expect: { throws: boolean; localOnly?: boolean; messageContains?: string }
 }
 interface GuardVector {
   name: string
@@ -40,7 +48,7 @@ const VECTORS = JSON.parse(
     join(dirname(fileURLToPath(import.meta.url)), '../../../shared-types/fixtures/gate-client-credentials-vectors.json'),
     'utf8',
   ),
-) as { hookGate: HookGateVector[]; guard: GuardVector[] }
+) as { hookGate: HookGateVector[]; guard: GuardVector[]; construction: ConstructionVector[] }
 
 let server: Server
 let baseUrl: string
@@ -77,7 +85,7 @@ describe('GateClient.localOnly', () => {
   it('is true exactly when there is no API key', () => {
     expect(new GateClient().localOnly).toBe(true)
     expect(new GateClient({ apiKey: '' }).localOnly).toBe(true)
-    expect(new GateClient({ apiKey: 'k' }).localOnly).toBe(false)
+    expect(new GateClient({ baseUrl, apiKey: 'k' }).localOnly).toBe(false)
   })
 
   it('sends no events', async () => {
@@ -121,6 +129,53 @@ describe('Gate.guard with and without a key, as the shared vectors say', () => {
     } finally {
       if (previous === undefined) delete process.env.INTUTIC_SNAPSHOT_RULES
       else process.env.INTUTIC_SNAPSHOT_RULES = previous
+    }
+  })
+})
+
+/** Runs `fn` with INTUTIC_CONTROL_PLANE_URL unset (and HOME at `home`, when given), then restores both. */
+function withoutControlPlane<T>(fn: () => T, home?: string): T {
+  const saved = { url: process.env.INTUTIC_CONTROL_PLANE_URL, home: process.env.HOME }
+  delete process.env.INTUTIC_CONTROL_PLANE_URL
+  if (home) process.env.HOME = home
+  try {
+    return fn()
+  } finally {
+    if (saved.url !== undefined) process.env.INTUTIC_CONTROL_PLANE_URL = saved.url
+    if (saved.home === undefined) delete process.env.HOME
+    else process.env.HOME = saved.home
+  }
+}
+
+describe('GateClient with no control-plane address, as the shared vectors say', () => {
+  it('keeps its release flag in step with @intutic/shared-types', () => {
+    expect(CLOUD_RELEASED).toBe(CANONICAL_CLOUD_RELEASED)
+  })
+
+  it.each(VECTORS.construction.filter((v) => v.cloudReleased === CLOUD_RELEASED).map((v) => [v.name, v] as const))('%s', (_name, v) => {
+    withoutControlPlane(() => {
+      const make = () => new GateClient({ apiKey: v.apiKey, workspaceId: 'ws_1', sessionId: 's_1' })
+      if (v.expect.throws) {
+        expect(make).toThrow(v.expect.messageContains)
+      } else {
+        expect(make().localOnly).toBe(v.expect.localOnly)
+      }
+    })
+  })
+
+  it('fromEnv takes the control plane intutic login saved', () => {
+    const home = mkdtempSync(join(tmpdir(), 'intutic-gate-home-'))
+    try {
+      mkdirSync(join(home, '.intutic'))
+      writeFileSync(
+        join(home, '.intutic', 'credentials.json'),
+        JSON.stringify({ apiKey: 'k', workspaceId: 'ws_1', controlPlaneUrl: 'https://cp.saved.example' }),
+      )
+      const client = withoutControlPlane(() => GateClient.fromEnv({ sessionId: 's_1' }), home)
+      expect(client.baseUrl).toBe('https://cp.saved.example')
+      expect(client.localOnly).toBe(false)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
     }
   })
 })

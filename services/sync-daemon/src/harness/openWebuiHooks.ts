@@ -23,6 +23,7 @@ import { keepOriginal, noteWritten } from '../disconnect/originals.js'
 import { newIso } from '@intutic/id'
 import { emitPythonGate } from './gateBody.js'
 import { writeFileAtomic } from '../lib/atomicWrite.js'
+import { hookHostFallback } from '../lib/hookHost.js'
 
 const log = createLogger('sync-open-webui-hooks')
 
@@ -54,7 +55,7 @@ RUNTIME_ENV_PATH = os.path.expanduser("~/.intutic/env/runtime.env")
 
 def _load_runtime_env():
     env = {
-        "INTUTIC_HOST": "https://api.intutic.ai",
+        "INTUTIC_HOST": ${JSON.stringify(hookHostFallback())},
         "INTUTIC_API_KEY": "",
         "INTUTIC_WORKSPACE_ID": WORKSPACE_ID,
     }

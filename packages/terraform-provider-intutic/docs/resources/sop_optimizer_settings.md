@@ -3,12 +3,12 @@
 page_title: "intutic_sop_optimizer_settings Resource - intutic"
 subcategory: ""
 description: |-
-  The SOP Optimizer's approval mode (Labs › SOP Optimizer › Approval mode): whether a manually triggered optimizer run may apply a strengthening proposal without review. It replaces the removed featureFlags.ff_metaclaw_auto_apply key of intutic_workspace_settings. One per workspace; the OWNER or ADMIN role writes it, and only a run on a plan that includes the SOP Optimizer (Biz Org and up) applies anything. Destroying the resource sets the mode back to manual and keeps the threshold.
+  The SOP Optimizer's approval mode (Labs › SOP Optimizer › Approval mode): whether a manually triggered optimizer run may apply a strengthening proposal without review. It replaces the removed featureFlags.ff_metaclaw_auto_apply key of intutic_workspace_settings. One per workspace; the OWNER or ADMIN role writes it. Destroying the resource sets the mode back to manual and keeps the threshold.
 ---
 
 # intutic_sop_optimizer_settings (Resource)
 
-The SOP Optimizer's approval mode (Labs › SOP Optimizer › Approval mode): whether a manually triggered optimizer run may apply a strengthening proposal without review. It replaces the removed `featureFlags.ff_metaclaw_auto_apply` key of `intutic_workspace_settings`. One per workspace; the OWNER or ADMIN role writes it, and only a run on a plan that includes the SOP Optimizer (Biz Org and up) applies anything. Destroying the resource sets the mode back to `manual` and keeps the threshold.
+The SOP Optimizer's approval mode (Labs › SOP Optimizer › Approval mode): whether a manually triggered optimizer run may apply a strengthening proposal without review. It replaces the removed `featureFlags.ff_metaclaw_auto_apply` key of `intutic_workspace_settings`. One per workspace; the OWNER or ADMIN role writes it. Destroying the resource sets the mode back to `manual` and keeps the threshold.
 
 ## Example Usage
 

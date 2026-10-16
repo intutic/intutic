@@ -1,6 +1,6 @@
 # @intutic/cli
 
-> AI governance control plane for developer workspaces.
+> AI governance for developer workspaces.
 
 Intutic intercepts agent-to-LLM traffic, enforces SOPs, detects anomalies, and tracks costs — all without changing how your team codes.
 
@@ -21,6 +21,7 @@ intutic start              # Run the proxy standalone — no account needed
 intutic traces list        # See governance verdicts
 ```
 
+<!-- UNRELEASED:cloud
 **With a control plane:**
 
 ```bash
@@ -29,6 +30,7 @@ intutic init               # Detect harnesses, record them for sync
 intutic connect            # Start sync daemon — writes harness rules and gates
 intutic traces list        # See governance verdicts
 ```
+-->
 
 ## Commands
 
@@ -36,15 +38,17 @@ intutic traces list        # See governance verdicts
 |---------|-------------|
 | `intutic init` | Initialize workspace — detect harnesses, record them in `~/.intutic/config.json` |
 | `intutic start` | Start the proxy standalone — no account or control plane needed (`--port`, `--upstream-url`) |
-| `intutic login` | Authenticate with control plane (`--api-key`, `--control-plane-url`, `--dev`) |
-| `intutic logout` | Clear stored credentials |
 | `intutic status` | Show workspace status — auth, harnesses, sync state |
-| `intutic whoami` | Show current authenticated identity |
-| `intutic connect` | Start sync daemon — bidirectional config sync (`--interval`) |
 | `intutic disconnect` | Undo `intutic connect` — restore the harness configs it changed, remove its services, log out (`--harness`, `--dry-run`, `--keep-login`) |
 | `intutic doctor` | Diagnose workspace health — proxy, auth, daemon, configs, logs |
 | `intutic traces list` | List execution traces (`--limit`, `--since`, `--action` with a control plane, `--verdict` without one, `--model`, `--json`) |
 | `intutic traces inspect <id>` | Show full detail of a single trace |
+<!-- UNRELEASED:cloud
+| `intutic login` | Authenticate with control plane (`--api-key`, `--control-plane-url`, `--dev`) |
+| `intutic logout` | Clear stored credentials |
+| `intutic whoami` | Show current authenticated identity |
+| `intutic connect` | Start sync daemon — bidirectional config sync (`--interval`) |
+-->
 
 ## Supported Harnesses
 
@@ -98,6 +102,7 @@ Credentials are stored at `~/.intutic/credentials.json` (mode `0600`).
 | `INTUTIC_DEV` | `1` targets the local control plane (`http://localhost:3001`), like `--dev` |
 | `INTUTIC_PROXY_URL` | Local proxy URL; its port is the proxy port (default `4000`) |
 
+<!-- UNRELEASED:cloud
 For non-interactive auth, use `intutic login --api-key vk_...`.
 
 ### Development Mode
@@ -109,6 +114,7 @@ intutic login --dev
 intutic connect --dev
 intutic traces list --dev
 ```
+-->
 
 ## Documentation
 

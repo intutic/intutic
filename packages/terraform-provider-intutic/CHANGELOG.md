@@ -1,3 +1,13 @@
+## 0.6.0 (Unreleased)
+
+BREAKING CHANGES:
+
+* provider: there is no default `endpoint`. Only the open core is released, so the provider no longer falls back to a hosted control plane: set `endpoint` or `INTUTIC_CONTROL_PLANE_URL`. Without either, it reports "Missing control-plane endpoint" (with the missing-key error, when both are absent).
+
+ENHANCEMENTS:
+
+* Resource and data-source descriptions no longer name plans.
+
 ## 0.5.0 (October 15, 2026)
 
 BREAKING CHANGES:

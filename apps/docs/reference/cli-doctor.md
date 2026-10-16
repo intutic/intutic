@@ -17,7 +17,9 @@ No flags. The command reads `~/.intutic/` and the workspace recorded by `intutic
 
 ## Checks
 
-The doctor runs these nine checks in order:
+The doctor runs these nine checks in order. Checks 2–5 and 8 need a control plane: on a machine with
+no login they are skipped with one note, and the proxy and CA-trust remediations point at
+`intutic start`.
 
 | # | Check | What it verifies | Pass condition |
 |---|---|---|---|

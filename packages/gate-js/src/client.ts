@@ -40,6 +40,7 @@ import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { DEFAULT_CONTROL_PLANE_URL, NO_CONTROL_PLANE_URL } from './release.js'
 
 const DEFAULT_TIMEOUT_MS = 2_000
 const EVENT_TIMEOUT_MS = 2_000
@@ -148,8 +149,9 @@ function insufficientScopeReason(body: Record<string, unknown>): string {
 /** Options for a {@link GateClient}. Every field is optional. */
 export interface GateClientOptions {
   /**
-   * The control plane's address.
-   * @defaultValue `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted control plane
+   * The control plane's address. A client with an `apiKey` needs one: with
+   * none the constructor throws rather than skip the hook gate unannounced.
+   * @defaultValue `INTUTIC_CONTROL_PLANE_URL`; this release has no default control plane
    */
   baseUrl?: string
   /**
@@ -199,11 +201,15 @@ export class GateClient {
   readonly timeoutMs: number
 
   constructor(opts: GateClientOptions = {}) {
-    this.baseUrl = (opts.baseUrl || process.env.INTUTIC_CONTROL_PLANE_URL || 'https://api.intutic.ai').replace(
+    this.baseUrl = (opts.baseUrl || process.env.INTUTIC_CONTROL_PLANE_URL || DEFAULT_CONTROL_PLANE_URL || '').replace(
       /\/$/,
       '',
     )
     this.apiKey = opts.apiKey ?? ''
+    // A key says the caller wants the control-plane tiers; with nowhere to
+    // send them, dropping to local-only would skip the hook gate without a
+    // word. No key: local-only, which needs no address.
+    if (this.apiKey && !this.baseUrl) throw new Error(NO_CONTROL_PLANE_URL)
     this.workspaceId = opts.workspaceId ?? ''
     this.sessionId = opts.sessionId ?? ''
     this.harness = opts.harness ?? 'generic'
@@ -432,20 +438,22 @@ export class GateClient {
    * Build a client from the environment, falling back to CLI credentials.
    *
    * Reading `~/.intutic/credentials.json` means the gate works with whatever
-   * workspace `intutic login` already bound, instead of duplicating the key.
-   * With no key in either place the client is {@link localOnly}.
+   * workspace `intutic login` already bound, instead of duplicating the key:
+   * its key, workspace and the control plane it logged in to. With no key in
+   * either place the client is {@link localOnly}.
    */
   static fromEnv(opts: { sessionId?: string; harness?: string; failClosed?: boolean } = {}): GateClient {
-    const base = process.env.INTUTIC_CONTROL_PLANE_URL || 'https://api.intutic.ai'
+    let base = process.env.INTUTIC_CONTROL_PLANE_URL || ''
     let key = process.env.INTUTIC_API_KEY || ''
     let ws = process.env.INTUTIC_WORKSPACE_ID || ''
 
-    if (!key || !ws) {
+    if (!key || !ws || !base) {
       try {
         const credPath = join(homedir(), '.intutic', 'credentials.json')
         const c = JSON.parse(readFileSync(credPath, 'utf-8')) as Record<string, unknown>
         key = key || String(c.apiKey ?? '')
         ws = ws || String(c.workspaceId ?? '')
+        base = base || (typeof c.controlPlaneUrl === 'string' ? c.controlPlaneUrl : '')
       } catch {
         // No credentials file — fall through with whatever env supplied.
       }

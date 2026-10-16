@@ -62,7 +62,8 @@ func (r *gatewayResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
 	replace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	resp.Schema = schema.Schema{
-		Description: "A self-hosted gateway registered with `POST /api/v1/gateways` (Enterprise and Self-host plans). " +
+		Description: "A self-hosted gateway registered with `POST /api/v1/gateways`" +
+			planNote(" (Enterprise and Self-host plans)") + ". " +
 			"Gateways belong to the workspace's organization. Registration returns the gateway's `gwk_…` token " +
 			"once; it is stored in state as a sensitive value for `INTUTIC_GATEWAY_TOKEN`. Destroying the resource " +
 			"revokes the gateway and its token at once. Needs an OWNER or ADMIN key.",

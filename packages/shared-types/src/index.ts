@@ -892,3 +892,12 @@ export { mcpDaemonPolicyGenKey, mcpDaemonPolicyKey, legacyMcpDaemonPolicyKey } f
 
 // Control-plane response schemas (src/responses/): what each declared route answers with.
 export * from './responses/index.js'
+
+// Release flags: which products have shipped (release.ts).
+export {
+  CLOUD_RELEASED,
+  SELF_HOST_RELEASED,
+  CONTROL_PLANE_PRODUCT_RELEASED,
+  HOSTED_CONTROL_PLANE_URL,
+  NO_CONTROL_PLANE_MESSAGE,
+} from './release.js'

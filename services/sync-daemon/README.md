@@ -47,6 +47,9 @@ Captures each recorded harness's rules file for the workspace's config history. 
 
 ## Usage
 
+The package has no executable of its own; the CLI runs it against a control plane, which open core does not include.
+
+<!-- UNRELEASED:cloud
 The daemon is started via the CLI:
 
 ```bash
@@ -54,7 +57,8 @@ intutic connect                   # Start with default 30s interval
 intutic connect --interval 10000  # Custom sync interval (milliseconds)
 ```
 
-The package has no executable of its own; `intutic connect` is how it runs.
+`intutic connect` is how it runs.
+-->
 
 ## Part of Intutic
 

@@ -16,6 +16,7 @@ import { loadCredentials, loadConfig, saveConfig } from '../config/store.js'
 import { detectHarnesses } from '../harness/detector.js'
 import { printOnboardingGuide } from '../lib/onboarding.js'
 import type { HarnessType } from '@intutic/shared-types'
+import { CONTROL_PLANE_PRODUCT_RELEASED } from '@intutic/shared-types'
 import pc from 'picocolors'
 
 /**
@@ -94,8 +95,10 @@ export async function runInit(opts: { dev?: boolean; gitHooks?: boolean }): Prom
   if (!creds) {
     log.info('Not authenticated — fine for local use.')
     log.info('To run the proxy locally, no account needed: `intutic start`.')
-    log.info('Harness config files are written by `intutic connect`, which syncs with a control plane')
-    log.info('(open core does not include one; `intutic login` first if you run your own).')
+    if (CONTROL_PLANE_PRODUCT_RELEASED) {
+      log.info('Harness config files are written by `intutic connect`, which syncs with a control plane')
+      log.info('(open core does not include one; `intutic login` first if you run your own).')
+    }
   } else {
     log.success(`Authenticated as ${creds.email}`)
   }

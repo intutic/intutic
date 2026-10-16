@@ -7,7 +7,7 @@ description: Noma Security governs coding agents through open-source hook plugin
 
 *Last reviewed: 2026-10-10*
 
-Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. It is open core, runs fully self-hosted including air-gapped, and publishes its prices. Noma Security ([noma.security](https://noma.security)) is an AI security platform whose coding-agent controls ship as hook plugins for Claude Code, Codex, Cursor and GitHub Copilot. The plugins are open source under Apache-2.0 and call Noma's closed backend with an API key. On 2026-09-28 Noma [announced](https://www.prnewswire.com/news-releases/noma-extends-agent-security-and-governance-to-the-employee-endpoint-302890925.html) endpoint coverage for more agents, discovered through EDR and MDM tools; the announcement carries no general-availability label. The sharpest difference is what happens when the policy layer cannot answer: Noma's plugins let the call proceed, Intutic's gates block it.
+Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. It is open core<!-- ENTERPRISE_ONLY_START -->, runs fully self-hosted including air-gapped, and publishes its prices<!-- ENTERPRISE_ONLY_END -->. Noma Security ([noma.security](https://noma.security)) is an AI security platform whose coding-agent controls ship as hook plugins for Claude Code, Codex, Cursor and GitHub Copilot. The plugins are open source under Apache-2.0 and call Noma's closed backend with an API key. On 2026-09-28 Noma [announced](https://www.prnewswire.com/news-releases/noma-extends-agent-security-and-governance-to-the-employee-endpoint-302890925.html) endpoint coverage for more agents, discovered through EDR and MDM tools; the announcement carries no general-availability label. The sharpest difference is what happens when the policy layer cannot answer: Noma's plugins let the call proceed, Intutic's gates block it.
 
 ## Comparison
 
@@ -20,9 +20,16 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 | **MCP governance** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | Discovery of MCP servers, policy per server, tool or group, flagging or blocking unapproved servers, and detection of poisoning in tool responses. No MCP gateway of its own is documented |
 | **Red teaming** | — | Listed as a module on its website; no product documentation found |
 | **Discovery and inventory** | [AI inventory](/guide/ai-inventory) of developer machines that run `intutic connect`: the harnesses, MCP servers and skill bundles on each, and which run ungoverned | Agents, MCP servers and skills discovered through EDR and MDM tools (CrowdStrike is named), kept in a governed registry as approved, under review or blocked (announced) |
-| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | The vendor says on-premises and hosted; no air-gapped deployment is documented |
 | **Source** | Open core (MIT): the proxy, hook gates, MCP proxy, CLI and sync daemon | Plugins Apache-2.0; the backend they call is closed and needs an API key |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | Noma Security |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | The vendor says on-premises and hosted; no air-gapped deployment is documented |
 | **Pricing** | [Published](/guide/plans); the open core is free | Not published |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where Noma Security is stronger
 
@@ -35,8 +42,8 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 - You need a tool call blocked when the policy layer is unreachable or the input is malformed, not allowed through.
 - You want risky calls held in a review queue and released with `intutic decision approve`, rather than decided at the agent's own permission prompt.
 - Your developers use coding agents beyond the four Noma ships plugins for, such as Windsurf, Cline or Goose, or agent frameworks such as LangGraph.
-- You want an egress firewall and a sandbox so an agent cannot route around governance, and an audit trail you can verify yourself.
-- You need to run the whole product on your own infrastructure, including air-gapped.
+- You want an egress firewall and a sandbox so an agent cannot route around governance, and an audit trail you can verify yourself.<!-- ENTERPRISE_ONLY_START -->
+- You need to run the whole product on your own infrastructure, including air-gapped.<!-- ENTERPRISE_ONLY_END -->
 
 ## When to choose Noma Security
 

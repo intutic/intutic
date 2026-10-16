@@ -11,7 +11,11 @@ The provider calls the control plane's REST API with a workspace API key, sent a
 
 ## Which keys the provider accepts
 
-A workspace API key, which starts with `vk_`. Create one in the dashboard under **Settings › Security › Virtual API Keys**, or with the [`intutic_virtual_key`](https://registry.terraform.io/providers/intutic/intutic/latest/docs/resources/virtual_key) resource. Other credentials, such as a self-hosted gateway's `gwk_…` token, are refused.
+A workspace API key, which starts with `vk_`. The [`intutic_virtual_key`](https://registry.terraform.io/providers/intutic/intutic/latest/docs/resources/virtual_key) resource creates more of them. Other credentials, such as a self-hosted gateway's `gwk_…` token, are refused.
+
+<!-- UNRELEASED:cloud
+Create one in the dashboard under **Settings › Security › Virtual API Keys**, or with the `intutic_virtual_key` resource.
+-->
 
 The key decides everything else:
 
@@ -36,7 +40,10 @@ Tick **This key is for automation (CI, scripts, a service)** when you create the
 Two things narrow this:
 
 - **Virtual keys are per member.** `intutic_virtual_key` creates keys for the member who owns the provider's key, and the API shows a member only their own keys. A plan run with another member's key sees none of them and proposes to create them all again. If the configuration manages virtual keys, plan and apply with keys of the same member.
+
+<!-- UNRELEASED:cloud
 - **Some resources depend on the workspace's Intutic plan.** Member budgets, SIEM destinations, custom filters and self-hosted gateways are refused on a plan without them, whatever the role; the reference page of each names the plans.
+-->
 
 A key whose role is too low gets `HTTP 403` from the API, with the roles that may make the call, for example:
 
@@ -56,7 +63,11 @@ The provider block sets neither `api_key` nor a literal endpoint:
 
 - The key comes from `INTUTIC_API_KEY`. In CI, store it as a secret and expose it to the Terraform step as that variable; GitHub Actions, for example, uses `env: INTUTIC_API_KEY: ${{"{{"}} secrets.INTUTIC_API_KEY {{"}}"}}`. Terraform records neither the environment nor the key in state or in a saved plan file.
 - A second workspace's key comes from a sensitive variable, set with `TF_VAR_staging_api_key`, never from a `.tfvars` file in the repository. Terraform does record variable values in a saved plan file (`terraform plan -out`), so treat such a file as a secret, or apply without one.
+- `endpoint` is an ordinary variable. Null falls back to `INTUTIC_CONTROL_PLANE_URL`; the provider has no default endpoint.
+
+<!-- UNRELEASED:cloud
 - `endpoint` is an ordinary variable. Null falls back to `INTUTIC_CONTROL_PLANE_URL`, then to `https://api.intutic.ai`.
+-->
 
 State is the other place a secret can land. Keys, gateway tokens and webhook signing secrets the provider creates, and the provider credentials you configure, are stored in state as sensitive values. Keep state in a remote backend that encrypts it, and limit who can read it.
 
@@ -66,10 +77,14 @@ The provider retries a request the API answered with 429, 502, 503 or 504 up to 
 
 Rotate the key Terraform authenticates with outside Terraform, since a configuration cannot safely replace the key it is running on:
 
-1. As the same member, create a new automation key under **Settings › Security › Virtual API Keys**. Keeping the member keeps every virtual key Terraform manages visible to the new key.
+1. As the same member, create a new automation key. Keeping the member keeps every virtual key Terraform manages visible to the new key.
 2. Replace the CI secret with the new key.
 3. Run `terraform plan`. It should report no changes, and the `intutic_workspace` data source should show the same member.
 4. Revoke the old key in the dashboard.
+
+<!-- UNRELEASED:cloud
+1. As the same member, create a new automation key under **Settings › Security › Virtual API Keys**.
+-->
 
 A revoked or expired key makes every request fail with `HTTP 401: Unauthorized`.
 
@@ -77,7 +92,11 @@ A revoked or expired key makes every request fail with `HTTP 401: Unauthorized`.
 
 For a key Terraform creates and hands to another system, let Terraform rotate it. In the configuration above, `time_rotating` comes due every 60 days, `time_static` turns that into a replacement, and `replace_triggered_by` replaces the key. `create_before_destroy` creates the new key before the old one is revoked, so whatever reads `intutic_virtual_key.pipeline.key` gets the new value in the same apply.
 
-The rotation happens on the first apply after the date passes, so run applies at least as often as the gap between `rotation_days` and `expires_in_days`. If your Intutic plan limits the number of active keys, leave room for one more during the swap.
+The rotation happens on the first apply after the date passes, so run applies at least as often as the gap between `rotation_days` and `expires_in_days`.
+
+<!-- UNRELEASED:cloud
+If your Intutic plan limits the number of active keys, leave room for one more during the swap.
+-->
 
 To rotate one key now, replace it explicitly:
 

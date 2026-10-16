@@ -3,12 +3,12 @@
 page_title: "intutic_member_budget Resource - intutic"
 subcategory: ""
 description: |-
-  A member's LLM spend budgets per UTC day and month, or the default member budget (member_id = "default"). A member's own budget for a period replaces the default's for that period. Needs a plan with member budgets (Biz Org and up) and the OWNER or ADMIN role. Destroying the resource removes the budgets.
+  A member's LLM spend budgets per UTC day and month, or the default member budget (member_id = "default"). A member's own budget for a period replaces the default's for that period. Needs the OWNER or ADMIN role. Destroying the resource removes the budgets.
 ---
 
 # intutic_member_budget (Resource)
 
-A member's LLM spend budgets per UTC day and month, or the default member budget (`member_id = "default"`). A member's own budget for a period replaces the default's for that period. Needs a plan with member budgets (Biz Org and up) and the OWNER or ADMIN role. Destroying the resource removes the budgets.
+A member's LLM spend budgets per UTC day and month, or the default member budget (`member_id = "default"`). A member's own budget for a period replaces the default's for that period. Needs the OWNER or ADMIN role. Destroying the resource removes the budgets.
 
 ## Example Usage
 

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { createServer, Server } from 'http'
 import { ClawdeClient } from '../src/client'
 import { ClawdeBlockedError, ClawdeConnectionError, ClawdeVerdictError } from '../src/errors'
+import { CLOUD_RELEASED, HOSTED_CONTROL_PLANE_URL } from '../src/release'
+import { CLOUD_RELEASED as CANONICAL_CLOUD_RELEASED } from '@intutic/shared-types'
 
 interface Reply {
   status: number
@@ -295,7 +297,46 @@ describe('ClawdeClient', () => {
 })
 
 describe('ClawdeClient control-plane default', () => {
-  it('checks the budget on the hosted API host when nothing names a control plane', async () => {
+  it('keeps its release flag in step with @intutic/shared-types', () => {
+    expect(CLOUD_RELEASED).toBe(CANONICAL_CLOUD_RELEASED)
+  })
+
+  it.runIf(!CLOUD_RELEASED)('has no control plane to check the budget on when nothing names one', async () => {
+    const original = process.env.INTUTIC_CONTROL_PLANE_URL
+    delete process.env.INTUTIC_CONTROL_PLANE_URL
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    try {
+      // Constructing still works: the proxy calls need no control plane.
+      const client = new ClawdeClient({ apiKey: 'vk_test', autoContext: false })
+      await expect(client.checkBudget('gpt-4o', 1)).rejects.toThrow(ClawdeConnectionError)
+      await expect(client.checkBudget('gpt-4o', 1)).rejects.toThrow(/INTUTIC_CONTROL_PLANE_URL/)
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      fetchSpy.mockRestore()
+      if (original !== undefined) process.env.INTUTIC_CONTROL_PLANE_URL = original
+    }
+  })
+
+  it('checks the budget on INTUTIC_CONTROL_PLANE_URL when it is set', async () => {
+    const original = process.env.INTUTIC_CONTROL_PLANE_URL
+    process.env.INTUTIC_CONTROL_PLANE_URL = 'https://cp.env.example'
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ budget_remaining_usd: 1, alert_triggered: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    try {
+      await new ClawdeClient({ apiKey: 'vk_test', autoContext: false }).checkBudget('gpt-4o', 1)
+      expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://cp.env.example/api/v1/budget')
+    } finally {
+      fetchSpy.mockRestore()
+      if (original === undefined) delete process.env.INTUTIC_CONTROL_PLANE_URL
+      else process.env.INTUTIC_CONTROL_PLANE_URL = original
+    }
+  })
+
+  it.runIf(CLOUD_RELEASED)('checks the budget on the hosted API host when nothing names a control plane', async () => {
     const original = process.env.INTUTIC_CONTROL_PLANE_URL
     delete process.env.INTUTIC_CONTROL_PLANE_URL
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -307,7 +348,7 @@ describe('ClawdeClient control-plane default', () => {
     try {
       await new ClawdeClient({ apiKey: 'vk_test', autoContext: false }).checkBudget('gpt-4o', 1)
       // The same host @intutic/gate and the CLI default to, not the dashboard's.
-      expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://api.intutic.ai/api/v1/budget')
+      expect(String(fetchSpy.mock.calls[0]![0])).toBe(`${HOSTED_CONTROL_PLANE_URL}/api/v1/budget`)
     } finally {
       fetchSpy.mockRestore()
       if (original !== undefined) process.env.INTUTIC_CONTROL_PLANE_URL = original

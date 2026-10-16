@@ -116,9 +116,10 @@ class GateClient(
 
 Control-plane client for the pre-execution gate.
 
-`base_url` is the control plane's address: `INTUTIC_CONTROL_PLANE_URL`,
-then Intutic's hosted control plane. Without an `api_key` the client is
-`local_only`. `harness` defaults to "langgraph" and is sent as
+`base_url` is the control plane's address, else `INTUTIC_CONTROL_PLANE_URL`
+(this release has no default control plane). Without an `api_key` the
+client is `local_only` and needs no address; with one and no address,
+`ValueError`. `harness` defaults to "langgraph" and is sent as
 `harnessType` on every gate call and event, so incidents attribute to the
 right adapter. Override it when wrapping a different framework.
 `fail_closed` blocks a call when the hook gate gives no verdict (the
@@ -191,8 +192,9 @@ def from_env(
 Build a client from the environment, falling back to CLI credentials.
 
 Reading ~/.intutic/credentials.json means the gate works with whatever
-workspace `intutic login` already bound, instead of duplicating the key.
-With no key in either place the client is `local_only`.
+workspace `intutic login` already bound, instead of duplicating the key:
+its key, workspace and the control plane it logged in to. With no key in
+either place the client is `local_only`.
 
 
 ##### GateClient.hook_gate()

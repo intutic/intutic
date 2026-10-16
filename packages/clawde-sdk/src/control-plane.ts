@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { ClawdeConnectionError } from './errors'
 import { unwrapToonEnvelope } from './toon'
+import { DEFAULT_CONTROL_PLANE_URL, NO_CONTROL_PLANE_URL } from './release'
 import type {
   ControlPlaneClientOptions,
   WhoamiResult,
@@ -139,12 +140,6 @@ import type {
   MirrorAdoptionReport,
 } from './types'
 
-/**
- * Intutic's hosted control plane: the API host, as `@intutic/gate` and the CLI
- * default to. The dashboard host serves the web app, not the API.
- */
-export const DEFAULT_CONTROL_PLANE_URL = 'https://api.intutic.ai'
-
 /** The connector providers `intutic guardrails sources` lists: the ones that are policy sources. */
 const POLICY_SOURCE_PROVIDERS = new Set(['notion', 'confluence', 'github', 'gdrive'])
 
@@ -157,8 +152,8 @@ const COVERAGE_FORMATS: Record<CoverageFormat, string> = { json: 'json', md: 'ma
  *
  * Deliberately a separate class, not new methods on `ClawdeClient`:
  * `ClawdeClient.baseUrl` targets the *proxy* (default `http://localhost:4000`);
- * the control plane is a different origin entirely (default Intutic's
- * hosted control plane, or a self-hosted `CONTROL_PLANE_URL`). Bolting
+ * the control plane is a different origin entirely (`baseUrl` or
+ * `INTUTIC_CONTROL_PLANE_URL`; see release.ts for the default). Bolting
  * management calls onto `ClawdeClient` would silently need a second base URL
  * on a class whose whole contract today is "one client, one proxy."
  *
@@ -182,13 +177,13 @@ const COVERAGE_FORMATS: Record<CoverageFormat, string> = { json: 'json', md: 'ma
  * here), `sops status`, `guardrails pull`, and `policy
  * compile|install|snapshot|list-local`.
  *
- * Works unmodified against a self-hosted control plane — there is no
- * SaaS-vs-self-hosted branch anywhere in this file. An open-core user who
- * runs the proxy standalone with no control plane configured simply never
- * constructs this class (or does, points it at nothing, and gets a
- * `ClawdeConnectionError` on the first call) — the same framing
- * `whoami.ts` already uses: "This command needs an Intutic control plane,
- * which open core does not include."
+ * Works unmodified against any control plane it is pointed at. An open-core
+ * user who runs the proxy standalone with no control plane configured simply
+ * never constructs this class: with no address (no `baseUrl`, no
+ * `INTUTIC_CONTROL_PLANE_URL`, and no default before the hosted control plane
+ * is released) the constructor throws — the same framing `whoami.ts` already
+ * uses: "This command needs an Intutic control plane, which open core does
+ * not include."
  *
  * Auth: the same `apiKey` type `ClawdeClient` accepts — a `vk_` token or a
  * JWT both satisfy `services/control-plane/src/middleware/auth.ts`, which
@@ -206,8 +201,9 @@ export class ControlPlaneClient {
       throw new Error('API key is required to initialize ControlPlaneClient.')
     }
     this.apiKey = options.apiKey
-    this.baseUrl =
-      options.baseUrl || process.env.INTUTIC_CONTROL_PLANE_URL || DEFAULT_CONTROL_PLANE_URL
+    const baseUrl = options.baseUrl || process.env.INTUTIC_CONTROL_PLANE_URL || DEFAULT_CONTROL_PLANE_URL
+    if (!baseUrl) throw new Error(NO_CONTROL_PLANE_URL)
+    this.baseUrl = baseUrl
   }
 
   private async send(

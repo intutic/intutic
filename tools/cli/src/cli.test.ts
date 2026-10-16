@@ -13,6 +13,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { CONTROL_PLANE_PRODUCT_RELEASED, SELF_HOST_RELEASED } from '@intutic/shared-types'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const CLI = resolve(here, 'cli.ts')
@@ -238,5 +239,53 @@ describe('intutic skill audit exit status', () => {
     await writeFile(join(dir, 'CLAUDE.md'), '# Rules\n\nPrefer small commits.\n')
     expect((await run(['init', '--no-git-hooks'], dir)).code).toBe(0)
     expect((await run(['skill', 'audit'], dir)).code).toBe(0)
+  }, 60_000)
+})
+
+// The release flags (packages/shared-types/src/release.ts): until a control
+// plane product ships, the commands that need one are left out of help, but
+// they are only hidden, so a script or a staging user can still run them.
+describe('commands of unreleased products', () => {
+  const noControlPlane = { INTUTIC_CONTROL_PLANE_URL: '' }
+
+  /** The command names a help screen lists, from its Commands: section. */
+  function listed(help: string): string[] {
+    const commands = help.split(/^Commands:$/m)[1] ?? ''
+    return [...commands.matchAll(/^ {2}([\w-]+)/gm)].map((m) => m[1]!)
+  }
+
+  it.runIf(!CONTROL_PLANE_PRODUCT_RELEASED)('leaves the control-plane commands out of --help', async () => {
+    const top = listed((await run(['--help'], here, noControlPlane)).stdout)
+    for (const cmd of ['login', 'logout', 'connect', 'whoami', 'org', 'team', 'keys', 'sops', 'guardrails', 'gateway', 'siem', 'compliance', 'usage', 'enterprise']) {
+      expect(top, cmd).not.toContain(cmd)
+    }
+    for (const cmd of ['init', 'start', 'status', 'doctor', 'disconnect', 'exec', 'policy', 'skill', 'budget']) {
+      expect(top, cmd).toContain(cmd)
+    }
+    expect(listed((await run(['budget', '--help'], here, noControlPlane)).stdout)).toEqual([])
+    const policy = listed((await run(['policy', '--help'], here, noControlPlane)).stdout)
+    expect(policy).toEqual(expect.arrayContaining(['test', 'compile', 'install', 'list-local']))
+    expect(policy).not.toContain('snapshot')
+    expect(optionFlags((await run(['policy', 'compile', '--help'], here, noControlPlane)).stdout)).not.toContain('--candidate')
+  }, 60_000)
+
+  it.runIf(!SELF_HOST_RELEASED)('leaves the self-hosted commands out of --help', async () => {
+    expect(listed((await run(['--help'], here, noControlPlane)).stdout)).not.toContain('judge')
+  }, 30_000)
+
+  it.runIf(!CONTROL_PLANE_PRODUCT_RELEASED)('still runs a hidden command', async () => {
+    const help = await run(['org', 'create', '--help'], here, noControlPlane)
+    expect(help.code).toBe(0)
+    expect(help.stdout).toContain('Usage: intutic org create')
+
+    // With no control plane named it says how to name one, without a stack trace.
+    const login = await run(['login', '--api-key', 'vk_' + 'x'], here, noControlPlane)
+    expect(login.code).toBe(1)
+    expect(login.stderr).toContain('No control plane configured')
+    expect(login.stderr).not.toContain('    at ')
+
+    // Named, it is used: the login reaches for that control plane.
+    const named = await run(['login', '--api-key', 'vk_' + 'x', '--control-plane-url', 'http://127.0.0.1:1'], here, noControlPlane)
+    expect(`${named.stdout}${named.stderr}`).toContain('Control plane: http://127.0.0.1:1')
   }, 60_000)
 })

@@ -34,14 +34,23 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 	computed := func(desc string) schema.StringAttribute {
 		return schema.StringAttribute{Computed: true, Description: desc}
 	}
+	description := "The workspace the provider's API key belongs to, its tier, and the member the key acts as " +
+		"(`GET /api/v1/auth/me`)."
+	tier := computed("The workspace's tier, as the control plane reports it.")
+	tierName := computed("The tier's display name.")
+	if cloudReleased || selfHostReleased {
+		description = "The workspace the provider's API key belongs to, its plan, and the member the key acts as " +
+			"(`GET /api/v1/auth/me` and `GET /api/v1/trial/status`)."
+		tier = computed("The plan tier, for example `biz_org` or `ent_lic`.")
+		tierName = computed("The plan's display name.")
+	}
 	resp.Schema = schema.Schema{
-		Description: "The workspace the provider's API key belongs to, its plan, and the member the key acts as " +
-			"(`GET /api/v1/auth/me` and `GET /api/v1/trial/status`).",
+		Description: description,
 		Attributes: map[string]schema.Attribute{
 			"id":        computed("The workspace id."),
 			"org_id":    computed("The workspace's organization id."),
-			"plan_tier": computed("The plan tier, for example `biz_org` or `ent_lic`."),
-			"plan_name": computed("The plan's display name."),
+			"plan_tier": tier,
+			"plan_name": tierName,
 			"member_id": computed("The member the API key acts as."),
 			"email":     computed("That member's email address."),
 			"role":      computed("That member's role: `OWNER`, `ADMIN`, `EM`, `DEVELOPER` or `VIEWER`."),

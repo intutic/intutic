@@ -132,11 +132,14 @@ RSYNC_EXCLUDES=(
 #                                  Excluded rather than deleted because rsync
 #                                  --delete would otherwise remove this copy the
 #                                  moment it is absent downstream.
-#   apps/docs/Dockerfile           Sets INTUTIC_ENTERPRISE_BUILD=true and
-#                                  INTUTIC_REQUIRE_FULL=true: docs.intutic.ai
-#                                  publishes every page, and the image build
-#                                  fails if a paid-tier page is missing.
-#                                  Identical downstream.
+#   apps/docs/Dockerfile           Builds the image for docs.intutic.ai and
+#                                  the Self-host bundle: DOCS_EDITION=oss by
+#                                  default (open-source pages only, as
+#                                  docs.intutic.ai ships until launch), full
+#                                  for the bundle, and the image build checks
+#                                  its output for the paid-tier pages either
+#                                  way. Not synced: copy it downstream by hand
+#                                  when it changes (identical until now).
 #
 # NOTE: rsync patterns are relative to the transfer root, which is the synced
 # directory itself — not the repo root. `--exclude=packages/proxy/Cargo.lock`

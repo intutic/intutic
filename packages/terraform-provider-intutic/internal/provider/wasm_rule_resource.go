@@ -71,7 +71,8 @@ func (r *wasmRuleResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 	resp.Schema = schema.Schema{
 		Description: "A custom filter (`/api/v1/wasm-rules`): a native WebAssembly rule built with the Rules SDK, or " +
 			"a Rego policy built with `intutic rules build --rego`, uploaded to the workspace and run by its proxies. " +
-			"Custom filters need the Biz Org, Enterprise or Self-host plan (or a trial). The plan reads `source` " +
+			planNote("Custom filters need the Biz Org, Enterprise or Self-host plan (or a trial). ") +
+			"The plan reads `source` " +
 			"and computes its SHA-256 as `bundle_sha256`; a different file, or a rule whose bytes on the server " +
 			"no longer match, replaces the rule, since the API cannot change an uploaded rule's bytes. After the " +
 			"upload the provider checks the API stored the same SHA-256 the proxies verify, and fails otherwise. " +

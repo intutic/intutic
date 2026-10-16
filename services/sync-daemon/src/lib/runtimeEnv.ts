@@ -11,7 +11,7 @@
  *
  * Format (POSIX sh source-compatible):
  *
- *   INTUTIC_HOST=https://api.intutic.ai
+ *   INTUTIC_HOST=https://control-plane.example.com
  *   INTUTIC_API_KEY=sk-live-...
  *   INTUTIC_WORKSPACE_ID=ws_...
  *   INTUTIC_VALKEY_URL=redis://127.0.0.1:6379   (only when a local Valkey is running)
@@ -31,7 +31,7 @@ const log = createLogger('sync-runtime-env')
 export const DEFAULT_RUNTIME_ENV_PATH = path.join(os.homedir(), '.intutic', 'env', 'runtime.env')
 
 export interface RuntimeEnvOptions {
-  /** Control plane base URL (e.g., `https://api.intutic.ai`). */
+  /** Control plane base URL (e.g., `https://control-plane.example.com`). */
   controlPlaneUrl: string
   /** Workspace API key. */
   apiKey: string

@@ -7,7 +7,7 @@ description: Zenity is a security platform for AI agents across the enterprise, 
 
 *Last reviewed: 2026-10-10*
 
-Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. It is open core, runs fully self-hosted including air-gapped, and publishes its prices. Zenity ([zenity.io](https://zenity.io)) secures AI agents across an organization: assistants such as Microsoft Copilot, ChatGPT Enterprise and Gemini, agents built on Foundry, Bedrock and Vertex, and, for coding and personal agents, native agent hooks and an MCP gateway that block or modify a tool call before it runs. Zenity covers the breadth of enterprise AI from one platform; Intutic goes deep on coding agents and agent frameworks, where they run.
+Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. It is open core<!-- ENTERPRISE_ONLY_START -->, runs fully self-hosted including air-gapped, and publishes its prices<!-- ENTERPRISE_ONLY_END -->. Zenity ([zenity.io](https://zenity.io)) secures AI agents across an organization: assistants such as Microsoft Copilot, ChatGPT Enterprise and Gemini, agents built on Foundry, Bedrock and Vertex, and, for coding and personal agents, native agent hooks and an MCP gateway that block or modify a tool call before it runs. Zenity covers the breadth of enterprise AI from one platform; Intutic goes deep on coding agents and agent frameworks, where they run.
 
 ## Comparison
 
@@ -21,9 +21,16 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 | **Red teaming** | — | No red-teaming product documented. Risky skills, files and code can be detonated in a sandbox |
 | **Discovery and inventory** | [AI inventory](/guide/ai-inventory) of developer machines that run `intutic connect`: the harnesses, MCP servers and skill bundles on each, and which run ungoverned | Assistants and agent platforms across the organization; inventory and monitoring through its GitHub Copilot and Codex hooks |
 | **Audit and SIEM** | Merkle tree with per-trace inclusion proofs and Ed25519-signed roots, verifiable in the browser or with `intutic integrity verify`; six SIEM destinations, including Splunk HEC, Syslog/CEF and Datadog | Immutable audit; streaming to Splunk and Microsoft Sentinel |
-| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | No self-hosted or air-gapped option is documented |
 | **Source** | Open core (MIT): the proxy, hook gates, MCP proxy, CLI and sync daemon | The platform's source is not published; Zenity released an [open-source security framework for OpenClaw](https://zenity.io/blog/open-source-security-openclaw) in March 2026, with no licence stated |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | Zenity |
+|---|---|---|
+| **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | No self-hosted or air-gapped option is documented |
 | **Pricing** | [Published](/guide/plans); the open core is free | Not published |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where Zenity is stronger
 
@@ -36,8 +43,8 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 ## When to choose Intutic
 
 - Your agents are coding agents and agent frameworks, such as Windsurf, Cline, Goose or LangGraph alongside Claude Code and Cursor, and you want each tool call decided before it runs.
-- You want risky calls held for approval rather than only allowed or blocked.
-- You need to run the whole product on your own infrastructure, including air-gapped.
+- You want risky calls held for approval rather than only allowed or blocked.<!-- ENTERPRISE_ONLY_START -->
+- You need to run the whole product on your own infrastructure, including air-gapped.<!-- ENTERPRISE_ONLY_END -->
 - You want to read the code that blocks a call, and to verify the audit trail yourself.
 - You want an egress firewall and a sandbox so an agent cannot route around governance.
 

@@ -41,7 +41,7 @@ beforeAll(() => {
   process.env.HOME = home
   delete process.env.INTUTIC_DEV
   mkdirSync(path.join(home, '.intutic'), { recursive: true })
-  writeFileSync(path.join(home, '.intutic', 'credentials.json'), JSON.stringify({ apiKey: 'vk_test_key', workspaceId: 'ws_test' }), { mode: 0o600 })
+  writeFileSync(path.join(home, '.intutic', 'credentials.json'), JSON.stringify({ apiKey: 'vk_test_key', workspaceId: 'ws_test', controlPlaneUrl: 'https://cp.test.invalid' }), { mode: 0o600 })
 })
 
 afterAll(() => {

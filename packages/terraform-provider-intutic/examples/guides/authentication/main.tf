@@ -14,14 +14,14 @@ terraform {
 # No api_key here: the provider reads INTUTIC_API_KEY from the environment, so
 # the key never appears in configuration, plan files or version control.
 provider "intutic" {
-  # Null falls back to INTUTIC_CONTROL_PLANE_URL, then to Intutic Cloud.
+  # Null falls back to INTUTIC_CONTROL_PLANE_URL.
   endpoint = var.intutic_endpoint
 }
 
 variable "intutic_endpoint" {
   type        = string
   default     = null
-  description = "Control-plane URL of a self-hosted deployment. Leave null for Intutic Cloud."
+  description = "The control plane's base URL. Leave null to use INTUTIC_CONTROL_PLANE_URL."
 }
 
 # A key belongs to one workspace. To manage a second workspace from the same

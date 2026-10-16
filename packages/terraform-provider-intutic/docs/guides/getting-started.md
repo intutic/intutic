@@ -32,11 +32,13 @@ Before 1.0, a minor release can change behaviour you rely on: 0.4.0 removed the 
 
 ## Authenticate
 
-The provider authenticates with a workspace API key (`vk_…`):
+The provider authenticates with a workspace API key (`vk_…`) created with **This key is for automation (CI, scripts, a service)** ticked. An automation key keeps working without anyone signing in through SSO; it still stops working when its member is deactivated. The key is shown once, when it is created.
 
+<!-- UNRELEASED:cloud
 1. In the dashboard, open **Settings › Security › Virtual API Keys** and create a key.
 2. Tick **This key is for automation (CI, scripts, a service)**. An automation key keeps working without anyone signing in through SSO; it still stops working when its member is deactivated.
 3. Copy the key; it is shown once.
+-->
 
 Give it to the provider through the environment, not the configuration:
 
@@ -47,17 +49,25 @@ export INTUTIC_API_KEY="vk_..."
 | Argument   | Environment variable        | Default                  |
 |------------|-----------------------------|--------------------------|
 | `api_key`  | `INTUTIC_API_KEY`           | none: the provider fails without a key |
-| `endpoint` | `INTUTIC_CONTROL_PLANE_URL` | `https://api.intutic.ai` |
+| `endpoint` | `INTUTIC_CONTROL_PLANE_URL` | none: the provider fails without the control plane's base URL |
 
-An argument in the `provider "intutic"` block wins over its environment variable. Set the endpoint only for a self-hosted control plane.
+<!-- UNRELEASED:cloud
+| `endpoint` | `INTUTIC_CONTROL_PLANE_URL` | `https://api.intutic.ai` |
+-->
+
+An argument in the `provider "intutic"` block wins over its environment variable.
+
+<!-- UNRELEASED:cloud
+Set the endpoint only for a self-hosted control plane.
+-->
 
 The provider acts as the member who owns the key, in that member's workspace: there is no workspace argument, because the key decides it. Creating and changing most resources needs the OWNER or ADMIN role. The [authentication guide](https://registry.terraform.io/providers/intutic/intutic/latest/docs/guides/authentication) covers roles, CI and key rotation.
 
 ## Write a first configuration
 
 ```terraform
-# The API key comes from INTUTIC_API_KEY. Intutic Cloud is the default
-# endpoint; a self-hosted control plane is set with INTUTIC_CONTROL_PLANE_URL.
+# The API key comes from INTUTIC_API_KEY, and the control plane's base URL
+# from INTUTIC_CONTROL_PLANE_URL.
 provider "intutic" {}
 
 # The workspace and member the key acts as. Reading it is a quick check that

@@ -26,9 +26,16 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Rate limits** | Requests and tokens per minute per virtual key, shared across proxy replicas, with `Retry-After` | Requests or tokens per minute, hour or day per API key, on the same plans |
 | **Audit trail** | Signed Merkle roots with inclusion proofs, verifiable in the browser or CLI | Request and response logs, kept 3 days on Developer and 30 days on Production; admin audit logs on Enterprise. No cryptographic sealing documented |
 | **Stored provider keys** | Envelope encryption (AES-256-GCM, a data key per value) under a key derived from your deployment's `ENCRYPTION_KEY`, rotatable; every change to a provider key or virtual key is recorded and streamed to SIEM. A cloud KMS key is not supported yet | Envelope encryption under your own AWS KMS key on Enterprise |
+| **Source** | Open core (MIT) | The open-source gateway is MIT, last released as v1.15.2 on 2026-01-12 with no merges since 2026-05-25; the Enterprise Gateway (v2.28.0 on 2026-10-08) is closed |
+
+<!-- ENTERPRISE_ONLY_START -->
+
+| | Intutic | Portkey |
+|---|---|---|
 | **Deployment** | Cloud, or fully self-hosted including air-gapped | Hosted, or hybrid with the data plane in your VPC and the control plane hosted by Portkey (or in Palo Alto Networks Strata Cloud Manager). Fully air-gapped deployment is no longer offered to new customers. The open-source gateway still self-hosts |
 | **Pricing** | [Published plans](/guide/plans); the open core is free | Developer free (10k logs a month); Production $49 a month plus $9 per extra 100k logs; Enterprise by quote through Palo Alto Networks |
-| **Source** | Open core (MIT) | The open-source gateway is MIT, last released as v1.15.2 on 2026-01-12 with no merges since 2026-05-25; the Enterprise Gateway (v2.28.0 on 2026-10-08) is closed |
+
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where Portkey is stronger
 
@@ -71,7 +78,7 @@ Portkey and Palo Alto Networks, as of 2026-10-10:
 - [Open-source gateway releases](https://github.com/Portkey-AI/gateway/releases)
 - Koi: [Help Net Security report on the acquisition](https://www.helpnetsecurity.com/2026/02/17/palo-alto-networks-koi-acquistion/) (third-party)
 
-Intutic: [Intelligent routing](/guide/intelligent-routing), [MCP governance](/guide/mcp-governance), [Budgets](/guide/budgets), [Trace integrity](/concepts/trace-integrity) and [Self-hosting](/guide/self-host).
+Intutic: <!-- ENTERPRISE_ONLY_START -->[Self-hosting](/guide/self-host), <!-- ENTERPRISE_ONLY_END -->[Intelligent routing](/guide/intelligent-routing), [MCP governance](/guide/mcp-governance), [Budgets](/guide/budgets) and [Trace integrity](/concepts/trace-integrity).
 
 ## Intutic's measured false-positive rate
 

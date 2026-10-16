@@ -14,7 +14,7 @@ const source = readFileSync(CLI, 'utf8')
 
 describe('gateway command registration', () => {
   it('registers the gateway command group', () => {
-    expect(source).toMatch(/\.command\(\s*['"]gateway['"]\s*\)/)
+    expect(source).toMatch(/\.command\(\s*['"]gateway['"]\s*(,\s*needsControlPlane\s*)?\)/)
   })
 
   it.each([
@@ -42,7 +42,7 @@ describe('gateway command registration', () => {
 
 describe('credentials command registration', () => {
   it('registers the credentials command group', () => {
-    expect(source).toMatch(/\.command\(\s*['"]credentials['"]\s*\)/)
+    expect(source).toMatch(/\.command\(\s*['"]credentials['"]\s*(,\s*needsControlPlane\s*)?\)/)
   })
 
   it.each([

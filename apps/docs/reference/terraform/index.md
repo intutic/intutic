@@ -20,8 +20,8 @@ terraform {
   }
 }
 
-# Reads INTUTIC_API_KEY (and INTUTIC_CONTROL_PLANE_URL for a self-hosted
-# control plane) from the environment when the arguments are omitted.
+# Reads INTUTIC_API_KEY and INTUTIC_CONTROL_PLANE_URL (the control plane's
+# base URL) from the environment when the arguments are omitted.
 provider "intutic" {
   # endpoint = "https://intutic.example.internal"
 }
@@ -33,7 +33,7 @@ provider "intutic" {
 ### Optional
 
 - `api_key` (String, Sensitive) A workspace API key (`vk_…`), created with **This key is for automation** ticked. Defaults to `INTUTIC_API_KEY`. The provider acts as the key's member, so the member's role must allow every change in the configuration (OWNER or ADMIN for most resources).
-- `endpoint` (String) Control-plane base URL. Defaults to `INTUTIC_CONTROL_PLANE_URL`, then https://api.intutic.ai. A self-hosted deployment uses its own control-plane address.
+- `endpoint` (String) Control-plane base URL. Defaults to `INTUTIC_CONTROL_PLANE_URL`; one of the two is required.
 
 ## Resources
 
