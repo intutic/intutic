@@ -10,9 +10,11 @@
 # person, in which case the pull request waits for one.
 #
 # A pull request opened with the workflow's GITHUB_TOKEN starts no workflows of
-# its own, so CI is started here with `gh workflow run ci.yml`, which that token
-# may do. Its merge, by the same token, starts none either: nothing deploys
-# from it; the next deploy picks the new prices up.
+# its own that run: GitHub records its pull_request runs as action_required and
+# holds them. So CI is started here with `gh workflow run ci.yml`, which that
+# token may do, and only that dispatched run is followed. Its merge, by the same
+# token, starts no workflows either: nothing deploys from it; the next deploy
+# picks the new prices up.
 #
 # Needs: gh with GH_TOKEN (contents, pull-requests and actions: write),
 # GITHUB_REPOSITORY, and `pnpm install` already run.
@@ -97,7 +99,7 @@ gh workflow run ci.yml --repo "$REPO" --ref "$branch"
 head="$(git rev-parse HEAD)"
 run=""
 for _ in $(seq 1 30); do
-  run="$(gh run list --repo "$REPO" --workflow ci.yml --branch "$branch" --json databaseId,headSha \
+  run="$(gh run list --repo "$REPO" --workflow ci.yml --branch "$branch" --event workflow_dispatch --json databaseId,headSha \
     --jq "map(select(.headSha == \"$head\"))[0].databaseId // empty")"
   [ -n "$run" ] && break
   sleep 20
