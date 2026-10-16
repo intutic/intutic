@@ -289,7 +289,38 @@ function serializeCatalogEntry(e: ModelCatalogEntryData): string {
   return `  { ${fields.join(', ')} },`
 }
 
-function writeModelCatalog(entries: ModelCatalogEntryData[], generatedAt: string) {
+// The catalog is carried forward the same way the bundle is (see "Carry forward
+// models upstream has delisted" in main): on 2026-10-16 LiteLLM's price list
+// dropped every openrouter/ entry at once, and regenerating from it alone would
+// have removed 185 models from the picker. A previous entry upstream no longer
+// lists is kept exactly as it was generated; it leaves only when a person
+// deletes it or an exclusion pattern now matches it.
+function carryForwardCatalog(entries: ModelCatalogEntryData[]): string[] {
+  let previous: string
+  try {
+    previous = readFileSync(CATALOG_OUTPUT_PATH, 'utf-8')
+  } catch {
+    return [] // First run: nothing to carry.
+  }
+  const listed = new Set(entries.map((e) => e.ref))
+  const carried: string[] = []
+  for (const line of previous.split('\n')) {
+    const m = line.match(/^ {2}\{ ref: ("[^"]*"), id: ("[^"]*")/)
+    if (!m) continue
+    const ref = JSON.parse(m[1]) as string
+    const id = JSON.parse(m[2]) as string
+    if (listed.has(ref)) continue
+    if (EXCLUDED_MODEL_PATTERNS.some((re) => re.test(id.toLowerCase()))) continue
+    carried.push(line)
+  }
+  if (carried.length > 0) console.log(`  Catalog carried forward: ${carried.length} model(s) upstream no longer lists`)
+  return carried
+}
+
+function writeModelCatalog(entries: ModelCatalogEntryData[], carried: string[], generatedAt: string) {
+  const refOf = (line: string) => JSON.parse(line.match(/^ {2}\{ ref: ("[^"]*")/)![1]) as string
+  const rows = [...entries.map((e) => ({ ref: e.ref, line: serializeCatalogEntry(e) })), ...carried.map((line) => ({ ref: refOf(line), line }))]
+    .sort((a, b) => a.ref.localeCompare(b.ref))
   const lines = [
     '// GENERATED — do not edit by hand.',
     '//',
@@ -303,13 +334,13 @@ function writeModelCatalog(entries: ModelCatalogEntryData[], generatedAt: string
     '// consume this data.',
     '',
     'export const MODEL_CATALOG_GENERATED = [',
-    ...entries.map(serializeCatalogEntry),
+    ...rows.map((r) => r.line),
     '] as const',
     '',
   ]
   writeFileSync(CATALOG_OUTPUT_PATH, lines.join('\n'), 'utf-8')
   console.log(`  Written to ${CATALOG_OUTPUT_PATH}`)
-  console.log(`  Catalog entries: ${entries.length}`)
+  console.log(`  Catalog entries: ${rows.length}`)
 }
 
 // ─── Fetch and transform ───────────────────────────────────────────────────────
@@ -469,7 +500,7 @@ async function main() {
 
   const generatedAt = bundle._meta.generated_at
   const catalog = buildModelCatalog(raw, generatedAt)
-  writeModelCatalog(catalog, generatedAt)
+  writeModelCatalog(catalog, carryForwardCatalog(catalog), generatedAt)
 
   console.log('Done! Commit packages/proxy/src/pricing/offline_bundle.json')
   console.log('  and packages/shared-types/src/modelCatalog.generated.ts.')
