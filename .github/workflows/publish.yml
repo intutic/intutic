@@ -159,7 +159,7 @@ jobs:
           [ "$fail" -eq 0 ] && echo "✅ No workspace: refs in any tarball"
           exit $fail
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-tarballs
           path: npm-tarballs/*.tgz
@@ -301,7 +301,7 @@ jobs:
           else
             cp target/${{ matrix.target }}/release/intutic-proxy dist-release/${{ matrix.artifact_name }}
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.artifact_name }}
           path: dist-release/${{ matrix.artifact_name }}
@@ -340,7 +340,7 @@ jobs:
           # engines range (>=20.19).
           pnpm --filter @intutic/cli exec pkg package.json --targets node22-macos-arm64,node22-macos-x64,node22-linux-x64,node22-win-x64 --out-path ../../dist-cli
           mv dist-cli/cli-macos-arm64 dist-cli/cli-macos-arm64 2>/dev/null || true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: cli-standalone-binaries
           path: dist-cli/*
