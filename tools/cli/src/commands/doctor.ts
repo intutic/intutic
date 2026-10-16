@@ -16,7 +16,7 @@
  * 7. CA cert trust (~/.intutic/ca.crt + OS trust store)
  * 8. Policy snapshot present, intact, and current
  *
- * Checks 2-5 need a control plane. While no control plane product has
+ * Checks 2-5 and 8 need a control plane. While no control plane product has
  * launched (CONTROL_PLANE_PRODUCT_RELEASED) and nobody has logged in, they are
  * skipped with one note instead of failing and pointing at hidden commands.
  *
@@ -480,14 +480,14 @@ export function linuxCaTrustInstalled(read: (path: string) => string = (p) => re
  * - macOS: Uses `security verify-cert` to check trust chain.
  * - Linux: Checks if the cert is installed in the system CA directory.
  */
-function checkCertTrust(): CheckResult {
+function checkCertTrust(startCommand = 'intutic connect'): CheckResult {
   // Step 1: Does the CA cert file exist?
   if (!existsSync(CA_CERT_PATH)) {
     return {
       name: 'Cert Trust',
       passed: false,
       detail: `CA certificate not found at ${CA_CERT_PATH}`,
-      remediation: 'Start the proxy with `intutic connect` — it auto-generates the CA cert on first run.',
+      remediation: `Start the proxy with \`${startCommand}\` — it auto-generates the CA cert on first run.`,
     }
   }
 
@@ -670,8 +670,8 @@ export async function runDoctor(): Promise<void> {
     results.push(checkDaemonLog())
   }
   results.push(await checkValkey())
-  results.push(checkCertTrust())
-  results.push(await checkPolicySnapshot())
+  results.push(checkCertTrust(connected ? 'intutic connect' : 'intutic start'))
+  if (connected) results.push(await checkPolicySnapshot())
   results.push(await checkCiscoScanner())
 
   // Print results
@@ -696,7 +696,7 @@ export async function runDoctor(): Promise<void> {
   }
 
   if (!connected) {
-    console.log(`  ${pc.dim('–')} ${pc.dim('Control plane, sync daemon, harness sync and daemon log checks skipped: open core, no control plane connected.')}`)
+    console.log(`  ${pc.dim('–')} ${pc.dim('Control plane, sync daemon, harness sync, daemon log and policy snapshot checks skipped: open core, no control plane connected.')}`)
   }
 
   // Summary

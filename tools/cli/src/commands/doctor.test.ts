@@ -216,7 +216,8 @@ describe('runDoctor on an open-core install', () => {
     expect(out).toContain('intutic start')
     expect(out).not.toMatch(/intutic (login|connect)/)
     expect(out).not.toContain('Control Plane Auth')
-  })
+    expect(out).not.toContain('Policy Snapshot')
+  }, 30_000) // runs every local probe (proxy, Valkey, CA trust, snapshot, scanner)
 })
 
 describe('linuxCaTrustInstalled', () => {

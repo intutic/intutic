@@ -45,7 +45,9 @@ const FLAG_FILES = [
 ]
 
 const OPENER = /^\s*<!-- UNRELEASED:(\S+)\s*$/
-const CLOSER = /^\s*-->\s*$/
+// Browsers end a comment at `--!>` as well as `-->`.
+const CLOSER = /^\s*--!?>\s*$/
+const COMMENT_END = /--!?>/
 
 function flagValue(text, lang, name) {
   const re = {
@@ -69,8 +71,8 @@ function parseBlocks(path, text) {
       if (CLOSER.test(line)) {
         blocks.push({ ...open, end: i })
         open = null
-      } else if (line.includes('-->')) {
-        errors.push(`${path}:${i + 1}: \`-->\` inside the UNRELEASED:${open.kind} block opened on line ${open.start + 1} ends it early`)
+      } else if (COMMENT_END.test(line)) {
+        errors.push(`${path}:${i + 1}: a comment end (\`-->\` or \`--!>\`) inside the UNRELEASED:${open.kind} block opened on line ${open.start + 1} ends it early`)
       } else if (line.includes('<!--')) {
         errors.push(`${path}:${i + 1}: a comment opened inside the UNRELEASED:${open.kind} block opened on line ${open.start + 1}`)
       }

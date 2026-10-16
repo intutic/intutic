@@ -70,7 +70,16 @@ describe('resolveSandboxRequirement', () => {
 const identity: GraphIdentity = { graphId: 'gr_test', nodeId: 'nd_test', parentId: '', depth: 0 }
 
 describe('openSandboxSession / closeSandboxSession — sandbox-usage telemetry', () => {
-  afterEach(() => vi.restoreAllMocks())
+  // There is no default control plane while none has launched; name one.
+  const savedUrl = process.env.INTUTIC_CONTROL_PLANE_URL
+  beforeEach(() => {
+    process.env.INTUTIC_CONTROL_PLANE_URL = 'https://cp.example'
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    if (savedUrl === undefined) delete process.env.INTUTIC_CONTROL_PLANE_URL
+    else process.env.INTUTIC_CONTROL_PLANE_URL = savedUrl
+  })
 
   it('opens a SANDBOX-mode session and returns its id', async () => {
     let sentBody: unknown

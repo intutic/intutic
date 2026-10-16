@@ -369,6 +369,9 @@ No options. Runs nine checks in order, each printing ✓ or ✗ plus a one-line 
 8. Policy snapshot present, valid, non-empty and fresh (`~/.intutic/hooks/policy-snapshot.rules`)
 9. Cisco skill scanner on `PATH` (optional; never fails)
 
+Checks 2–5 and 8 need a control plane. On a machine with no login they are skipped with one note,
+and the proxy and CA-trust remediations point at `intutic start`.
+
 See [`intutic doctor`](/reference/cli-doctor) for what each check verifies and how to fix it.
 
 ---
