@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `intutic disconnect` no longer says a setting "was removed rather than
+  restored: an earlier Intutic version set it" for a file Intutic itself
+  created, such as `~/.gemini/config/hooks.json` after `intutic gates
+  install` on a clean machine. The file is deleted when nothing else is in
+  it; the note is kept for files an older version wrote without a record.
+
 ## [2.9.0] - 2026-10-16
 
 ### Added

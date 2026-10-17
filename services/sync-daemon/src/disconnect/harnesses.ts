@@ -701,7 +701,7 @@ function rulesSection(plan: DisconnectPlan, file: string, workspaceRoot: string)
     const withoutRules = removeRulesSection(text) ?? text
     const next = removeRulesSection(withoutRules, DECISIONS_MARKERS) ?? withoutRules
     if (next === text) return null
-    if (c.originalText === null || c.originalText.endsWith('\n')) return next
+    if (c.originalText === null || c.originalText === '' || c.originalText.endsWith('\n')) return next
     const tail = text.trimEnd()
     return tail.endsWith(RULES_SECTION_END) || tail.endsWith(DECISIONS_MARKERS.end) ? next.replace(/\r?\n$/, '') : next
   })
