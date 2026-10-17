@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The SDK gates no longer let a shadow or warn match hide a later block.**
+  `@intutic/gate` and the `intutic-clawde` gate returned on the first
+  matching snapshot rule, so a `shadow` or `warn` rule earlier in the
+  snapshot stopped a later `block` or `hold` from ever being checked. The
+  harness gates already kept looking. Both SDKs, and the managed-agents
+  sandbox gate, now decide as the harness gates do: every shadow and warn
+  match is recorded, the first block or hold decides, and after an approved
+  hold the remaining rules still apply. `snapshot.evaluate()` returns the
+  recorded matches as `advisories`.
+
 ## [2.9.1] - 2026-10-17
 
 ### Fixed

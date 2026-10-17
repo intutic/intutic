@@ -881,24 +881,36 @@ function evaluate(toolName, target, command, rules) {
   const nCommand = normalise(command);
   const nTarget = normalise(target);
   let words = null;
+  // As snapshot.evaluate(): a shadow or warn match does not decide the call,
+  // so evaluation continues and a later hold or block wins; with none, the
+  // first advisory match is returned.
+  let advisory = null;
   for (const rule of rules) {
+    let matched = false;
     if (rule.subject === 'phrase') {
       if (words === null) words = phraseText(command);
       const w = words;
       if (!rule.pattern.source.split('|').some(function (p) { return hasPhrase(w, p, true); })) continue;
-      return { severity: rule.severity, reason: rule.reason + ' [' + rule.id + ']' };
+      matched = true;
+    } else {
+      const subjects =
+        rule.subject === 'tool' ? [nTool] :
+        rule.subject === 'command' ? [nCommand] :
+        rule.subject === 'target' ? [nTarget] :
+        [nCommand, nTarget];
+      matched = subjects.some(function (subject) {
+        return rule.steps ? sequenceMatch(rule.steps, subject) : rule.pattern.test(subject);
+      });
     }
-    const subjects =
-      rule.subject === 'tool' ? [nTool] :
-      rule.subject === 'command' ? [nCommand] :
-      rule.subject === 'target' ? [nTarget] :
-      [nCommand, nTarget];
-    for (const subject of subjects) {
-      if (!(rule.steps ? sequenceMatch(rule.steps, subject) : rule.pattern.test(subject))) continue;
-      return { severity: rule.severity, reason: rule.reason + ' [' + rule.id + ']' };
+    if (!matched) continue;
+    const decision = { severity: rule.severity, reason: rule.reason + ' [' + rule.id + ']' };
+    if (rule.severity === 'warn' || rule.severity === 'shadow') {
+      if (advisory === null) advisory = decision;
+      continue;
     }
+    return decision;
   }
-  return null;
+  return advisory;
 }
 
 /**

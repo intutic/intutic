@@ -168,6 +168,40 @@ describe('evaluation', () => {
     expect(evaluate('webfetch', '', '', snap()).severity).toBe(SEV_BLOCK)
   })
 
+  it('a shadow or warn match does not hide a later block, as in the rendered gates', () => {
+    const s = loadSnapshot(
+      WS,
+      rulesFile([
+        line('shadow.push', 'shadow', '-', 'command', 'Push observed', 'git push'),
+        line('advise.push', 'warn', '-', 'command', 'Push flagged', 'git push'),
+        line('sop.no_force', 'block', '-', 'command', 'No force push', 'push --force'),
+      ]),
+    )
+    const d = evaluate('shell', '', 'git push --force origin main', s)
+    expect(d.severity).toBe(SEV_BLOCK)
+    expect(d.ruleId).toBe('sop.no_force')
+    expect(d.advisories?.map((a) => a.ruleId)).toEqual(['shadow.push', 'advise.push'])
+    // With no block, the first advisory match is still the decision.
+    const plain = evaluate('shell', '', 'git push origin feature', s)
+    expect(plain.severity).toBe(SEV_SHADOW)
+    expect(plain.advisories?.map((a) => a.ruleId)).toEqual(['shadow.push', 'advise.push'])
+  })
+
+  it('resumes after the deciding rule, so a block behind an approved hold still decides', () => {
+    const s = loadSnapshot(
+      WS,
+      rulesFile([
+        line('sop.deploy_hold', 'hold', '-', 'command', 'Deploys are reviewed', 'deploy'),
+        line('sop.no_prod', 'block', '-', 'command', 'Not to prod', 'deploy prod'),
+      ]),
+    )
+    const held = evaluate('shell', '', 'make deploy prod', s)
+    expect(held.severity).toBe('hold')
+    const after = evaluate('shell', '', 'make deploy prod', s, false, held.next)
+    expect(after.severity).toBe(SEV_BLOCK)
+    expect(after.ruleId).toBe('sop.no_prod')
+  })
+
   it('warn allows but reports the verb', () => {
     const d = evaluate('shell', '', 'curl https://example.com', snap())
     expect(d.severity).toBe(SEV_WARN)

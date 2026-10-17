@@ -465,7 +465,7 @@ export class Gate {
     // Hold rules an approved bypass let through on this call, so the register's
     // copy of the same rule in Tier A3 does not hold it a second time.
     const approved = new Set<string>()
-    const d = snapshot.evaluate(toolName, target, command, this.getSnapshot(), disabled)
+    let d = snapshot.evaluate(toolName, target, command, this.getSnapshot(), disabled)
     if (note) {
       if (d.ruleId) note.ruleId = d.ruleId
       // Destructive whether or not a rule decided the call, the escape hatch
@@ -474,18 +474,21 @@ export class Gate {
       destructive.rules = this.getSnapshot().rules.filter((r) => r.id.startsWith('destructive.'))
       note.destructive = snapshot.evaluate(toolName, target, command, destructive, false).severity !== null
     }
-    if (d.severity === snapshot.SEV_HOLD) {
+    // As the rendered gates: every shadow or warn match is recorded, and an
+    // approved hold lets evaluation continue, so a later block still refuses.
+    for (;;) {
+      for (const a of d.advisories ?? []) {
+        await this.emit(a.severity === snapshot.SEV_WARN ? 'tool_flagged' : 'tool_would_block', toolName, a.reason, toolInput)
+      }
+      if (d.severity === snapshot.SEV_BLOCK) {
+        await this.emit('tool_blocked', toolName, d.reason, toolInput)
+        throw new IntuticGateRefusal(this.shown(d.reason), 'SNAPSHOT')
+      }
+      if (d.severity !== snapshot.SEV_HOLD) break
       await this.hold({ id: d.ruleId, reason: d.reason }, toolName, toolInput)
       approved.add(d.ruleId)
       if (note) note.policyHit = true
-    } else if (d.severity === snapshot.SEV_BLOCK) {
-      await this.emit('tool_blocked', toolName, d.reason, toolInput)
-      throw new IntuticGateRefusal(this.shown(d.reason), 'SNAPSHOT')
-    }
-    if (d.severity === snapshot.SEV_WARN) {
-      await this.emit('tool_flagged', toolName, d.reason, toolInput)
-    } else if (d.severity === snapshot.SEV_SHADOW) {
-      await this.emit('tool_would_block', toolName, d.reason, toolInput)
+      d = snapshot.evaluate(toolName, target, command, this.getSnapshot(), disabled, d.next)
     }
 
     // ---- Tier M: the MCP server registry and allowlist ----------------
