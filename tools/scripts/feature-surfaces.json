@@ -477,6 +477,27 @@
       }
     },
     {
+      "id": "local-gates",
+      "title": "intutic gates install (harness gates without a control plane)",
+      "surfaces": {
+        "api": { "none": "machine-local: writes harness files and calls no endpoint" },
+        "dashboard": { "none": "a machine with no control plane has no dashboard" },
+        "cli": ["gates install --harness --add --route --dry-run --workspace", "start --no-gates", "init --gates --no-gates"],
+        "gateSdk": { "none": "SDK gates are installed in the developer's own code" },
+        "clawdeSdk": { "none": "a local command" },
+        "mcpTools": { "none": "a local command" },
+        "kitkat": ["intutic gates install"],
+        "terraform": { "none": "a machine-local command" },
+        "docs": ["integrations/index.md#what-writes-harness-files", "reference/cli-doctor.md#checks"],
+        "website": { "none": "detail below the level the site describes" },
+        "events": { "none": "writes files; the gates it installs log the events they always do" },
+        "enforcement": [
+          { "file": "tools/cli/src/lib/localGates.ts", "contains": "writeLocalPolicySnapshot" },
+          { "file": "services/sync-daemon/src/lib/policySnapshot.ts", "contains": "offlineHoldReason" }
+        ]
+      }
+    },
+    {
       "id": "gateway-live-config",
       "title": "Live gateway config, bare metal, applied/desired version",
       "plan": "Enterprise",

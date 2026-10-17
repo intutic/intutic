@@ -43,14 +43,14 @@ human-in-the-loop validation or in-process local interception:
 | :--- | :--- | :--- |
 | **Execution Timing** | **Pre-flight (Before execution)** | **Post-flight / Async (During/After execution)** |
 | **Latency** | **No model call and no network hop**: checked on the machine before the action runs (WASM rules are stopped by an instruction budget) | **A model call**: seconds, while or after the response streams |
-| **Purpose** | **Hard Prevention**: Instantly blocks `rm -rf` and force pushes at the hook gate, blocks a `DROP TABLE` in an MCP tool call (at the hook gate it is flagged, not blocked; at the LLM proxy a SOP's [`sql_guard:`](/reference/sop-front-matter#destructive-sql) refuses one aimed at a database outside its allowlist), and redacts API keys before destruction occurs. | **Semantic Audit**: Evaluates whether the agent followed complex, subjective guidelines (e.g. *"Did the refactored code maintain proper architectural layering?"*). |
+| **Purpose** | **Hard Prevention**: The hook gate blocks writes to its own hook files and settings, governance-bypass commands and secrets; `rm -rf /`, `mkfs` and similar are flagged there, not blocked, and the LLM proxy refuses them in a model's code-execution tool call. Force pushes and other recursive deletes are refused once a rule you add names them (an SOP's `hook_rule:`, which the proxy enforces, or a WASM or Rego rule). The MCP governance proxy blocks a `DROP TABLE` in an MCP tool call (at the hook gate it is flagged, not blocked; at the LLM proxy a SOP's [`sql_guard:`](/reference/sop-front-matter#destructive-sql) refuses one aimed at a database outside its allowlist), and redacts API keys before destruction occurs. | **Semantic Audit**: Evaluates whether the agent followed complex, subjective guidelines (e.g. *"Did the refactored code maintain proper architectural layering?"*). |
 
 *Without local harness rules, an agent would execute destructive commands before an LLM judge even finishes thinking!*
 
 ### 1. Standard SOPs
 Standard SOPs are authored in natural language markdown. They represent corporate policies (e.g., "Do not use deprecated cryptographic functions") and are used by:
 - **The response judge:** the proxy sends each model response to the control plane, chunk by chunk as it streams and again when it ends, where a self-hosted judge model grades it against the workspace's SOPs and records an incident for a violation.
-- **The harnesses and the proxy:** `intutic connect` writes them into each harness's rules file, and the proxy enforces the keys in their [front matter](/reference/sop-front-matter).
+- **The harnesses and the proxy:** `intutic gates install` writes the rule sets in `.intutic/sops/` into each harness's rules file<!-- ENTERPRISE_ONLY_START --> (`intutic connect` also the workspace's)<!-- ENTERPRISE_ONLY_END -->, and the proxy enforces the keys in their [front matter](/reference/sop-front-matter).
 
 ### 2. WASM Rules
 For programmatic enforcement, rules compile to WebAssembly and run in the proxy with an
@@ -93,7 +93,7 @@ that are tested in both directions rather than examples that were never executab
 
 ### 1. Secret & Credential Redaction (Markdown SOP)
 
-Save under `.intutic/sops/` (for example `.intutic/sops/secrets-dlp/rules.md`, or `.intutic/sops/secrets-dlp.md` directly in it); the proxy reads it from there, and `intutic connect` writes it into each harness's rules file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)):
+Save under `.intutic/sops/` (for example `.intutic/sops/secrets-dlp/rules.md`, or `.intutic/sops/secrets-dlp.md` directly in it); the proxy reads it from there, and `intutic gates install` writes it into each harness's rules file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)):
 
 ```markdown
 # SOP: Secrets DLP & Credential Protection

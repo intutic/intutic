@@ -607,7 +607,11 @@ function sanitizeMcpServerNames(names: readonly string[]): string[] {
 
 /** Builds the rule set a snapshot would carry, without writing it. Exported so
  *  a test can assert the contents rather than re-deriving them. */
-export function buildSnapshotRules(policy: ResolvedPolicy, localHoldTokens: readonly string[] = []): GuardPattern[] {
+export function buildSnapshotRules(
+  policy: ResolvedPolicy,
+  localHoldTokens: readonly string[] = [],
+  localHoldMode: LocalHoldMode = 'hold',
+): GuardPattern[] {
   // `shadow` names the advisory GuardPattern severity these rules are demoted
   // to; the workspace-level trigger is intervention mode SILENT_LOG.
   const shadow = isSilentLogMode(policy)
@@ -617,7 +621,7 @@ export function buildSnapshotRules(policy: ResolvedPolicy, localHoldTokens: read
     .filter((r): r is GuardPattern => r !== null)
 
   const localHolds = [...new Set(localHoldTokens.map((t) => t.trim()).filter(Boolean))]
-    .map((t) => localHoldPattern(t, shadow))
+    .map((t) => localHoldPattern(t, shadow, localHoldMode))
     .filter((r): r is GuardPattern => r !== null)
 
   const destructive = DESTRUCTIVE_COMMAND_PATTERNS.map((p) => {
@@ -748,13 +752,30 @@ function ssoGroupPatterns(policy: ResolvedPolicy): GuardPattern[] {
 }
 
 /**
+ * What a local `review_before:` token compiles to. `hold`: refused, recorded
+ * for review, and let through once when approved — which needs a control
+ * plane to approve it. `block`: refused outright, for a snapshot written with
+ * no control plane (`writeLocalPolicySnapshot`), where a hold could never be
+ * approved and would only pile up requests nobody can see.
+ */
+export type LocalHoldMode = 'hold' | 'block'
+
+/** The reason a `block`-mode local hold gives the agent. */
+export function offlineHoldReason(token: string): string {
+  return (
+    `Refused: ${token} is declared in review_before:. Holding for approval needs a control plane, ` +
+    'and none is connected — run it yourself, or remove the token.'
+  )
+}
+
+/**
  * A local `review_before:` token as a hold rule. `action:*` tokens match the
  * gate's action subject (the tokens it classifies a shell command to);
  * anything else is a tool name. Case-insensitive, as the bespoke Claude Code
  * hold was. A token that is not a plain identifier is refused with a log line
  * rather than escaped into a regex nobody can read back.
  */
-function localHoldPattern(token: string, shadow: boolean): GuardPattern | null {
+function localHoldPattern(token: string, shadow: boolean, mode: LocalHoldMode): GuardPattern | null {
   if (!/^[A-Za-z0-9_:.-]+$/.test(token)) {
     log.warn({ action: 'local_hold_token_rejected', token }, 'review_before token is not a plain identifier — not shipped to the gate')
     return null
@@ -763,14 +784,17 @@ function localHoldPattern(token: string, shadow: boolean): GuardPattern | null {
   // full escape is still applied so the pattern is safe by construction and
   // not by the guard three lines up.
   const source = ` (${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}) `
+  const offline = mode === 'block'
   return {
     id: `sop.local.review_before.${token}`,
     source,
     subject: token.startsWith('action:') ? 'action' : 'tool',
     ignoreCase: true,
-    severity: shadow ? 'shadow' : 'hold',
-    reason: `Held for human review: ${token} — declared in review_before:`,
-    rationale: 'A local SOP or the workspace settings asked to see this action before it runs.',
+    severity: shadow ? 'shadow' : offline ? 'block' : 'hold',
+    reason: offline ? offlineHoldReason(token) : `Held for human review: ${token} — declared in review_before:`,
+    rationale: offline
+      ? 'A local SOP asked to see this action before it runs, and no control plane is connected to approve it.'
+      : 'A local SOP or the workspace settings asked to see this action before it runs.',
     matches: [],
     notMatches: [],
   }
@@ -788,16 +812,18 @@ export async function writePolicySnapshot(
   policy: ResolvedPolicy,
   snapshotDir: string = DEFAULT_SNAPSHOT_DIR,
   localHoldTokens: readonly string[] = [],
+  localHolds: LocalHoldMode = 'hold',
 ): Promise<{ digest: string; ruleCount: number }> {
-  return oneAtATime(() => writeSnapshotFiles(policy, snapshotDir, localHoldTokens))
+  return oneAtATime(() => writeSnapshotFiles(policy, snapshotDir, localHoldTokens, { localHolds }))
 }
 
 async function writeSnapshotFiles(
   policy: ResolvedPolicy,
   snapshotDir: string,
   localHoldTokens: readonly string[],
+  opts: { localHolds?: LocalHoldMode; source?: 'local' } = {},
 ): Promise<{ digest: string; ruleCount: number }> {
-  const rules = buildSnapshotRules(policy, localHoldTokens)
+  const rules = buildSnapshotRules(policy, localHoldTokens, opts.localHolds)
   // One timestamp shared by both artifacts. Two `new Date()` calls would put
   // different values in the JSON and the .rules, so a reader comparing them
   // would see drift that is not there.
@@ -858,6 +884,9 @@ async function writeSnapshotFiles(
        * constant nothing reads.
        */
       gateVersion: GATE_VERSION,
+      // `local`: written by `intutic gates install` (or `intutic start`) with
+      // no control plane. Absent on a snapshot connect wrote.
+      ...(opts.source ? { source: opts.source } : {}),
       workspaceId: policy.workspaceId,
       generatedAt,
       interventionMode: policy.interventionMode,
@@ -920,6 +949,9 @@ async function writeSnapshotFiles(
     `#digest ${digest}\n` +
     `#workspace ${policy.workspaceId}\n` +
     `#generated ${generatedAt}\n` +
+    // A comment line, so outside the digest, and every gate skips a `#` line
+    // it does not know.
+    (opts.source ? `#source ${opts.source}\n` : '') +
     lines.join('\n') +
     '\n'
 
@@ -958,6 +990,42 @@ function oneAtATime<T>(run: () => Promise<T>): Promise<T> {
   const next = snapshotQueue.then(run, run)
   snapshotQueue = next.catch(() => undefined)
   return next
+}
+
+/**
+ * The policy a machine with no control plane enforces: no workspace rules, no
+ * MCP allowlist or registry, TRANSPARENT. Its snapshot still carries the
+ * destructive-command tier, the skill tiers and the local `review_before:`
+ * tokens.
+ *
+ * `workspaceId` is empty on purpose. Every gate compares the snapshot's
+ * `#workspace` with its own only when both are set, and a gate generated
+ * while connected (or reading a stale `runtime.env`) carries a workspace id:
+ * a local snapshot naming any id would fail that comparison, and an invalid
+ * snapshot refuses every MCP call.
+ */
+export function localResolvedPolicy(): ResolvedPolicy {
+  return {
+    workspaceId: '',
+    sopRules: [],
+    interventionMode: 'TRANSPARENT',
+    mcpAllowedServers: [],
+    sqlDropStrictBlock: false,
+  }
+}
+
+/**
+ * Writes the snapshot of {@link localResolvedPolicy}, marked `source: local`.
+ * The local holds refuse (`block`) rather than hold: with no control plane
+ * nothing could approve them. Never fetches.
+ */
+export async function writeLocalPolicySnapshot(
+  opts: { localHoldTokens?: readonly string[]; snapshotDir?: string } = {},
+): Promise<{ digest: string; ruleCount: number }> {
+  const dir = opts.snapshotDir ?? DEFAULT_SNAPSHOT_DIR
+  return oneAtATime(() =>
+    writeSnapshotFiles(localResolvedPolicy(), dir, opts.localHoldTokens ?? [], { localHolds: 'block', source: 'local' }),
+  )
 }
 
 /**

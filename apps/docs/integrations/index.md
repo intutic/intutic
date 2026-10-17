@@ -5,7 +5,10 @@ description: Connect Intutic to 43 AI coding agents — IDE extensions, CLI tool
 
 # Integrations <Badge type="tip" text="Open-Core" />
 
-Intutic supports **43 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI detects which agents are present and records them; `intutic connect` then writes each one's governance config and keeps it in sync.
+Intutic supports **43 AI agent harnesses** out of the box. Run `intutic init` in your project and the CLI detects which agents are present and records them; `intutic gates install` then writes each one's gate and rules file from your local SOPs, and `intutic start` keeps them current as the SOPs change.
+<!-- ENTERPRISE_ONLY_START -->
+With a control plane, `intutic connect` writes them instead and keeps them in sync with the workspace's SOPs.
+<!-- ENTERPRISE_ONLY_END -->
 
 ```bash
 intutic init
@@ -151,24 +154,38 @@ All harnesses share the same integration flow:
                                                 │
 ┌──────────────┐     ┌─────────────┐     ┌──────▼───────┐
 │  Evaluate    │◀────│  Write      │◀────│  intutic     │
-│  + enforce   │     │  harness    │     │  connect     │
-│  each call   │     │  config     │     │              │
+│  + enforce   │     │  harness    │     │  gates       │
+│  each call   │     │  config     │     │  install     │
 └──────────────┘     └─────────────┘     └──────────────┘
 ```
 
-1. **`intutic init`** scans your workspace, detects the harnesses present and records them in `~/.intutic/config.json`. It writes no harness files.
-2. **`intutic connect`** starts the proxy and writes each recorded harness's governance config in its native format — rules, hooks and proxy routing — then keeps them in sync as SOPs change (see [What writes harness files](#what-writes-harness-files)).
-3. Every tool call flows through the proxy, and through the harness's own hook where it has one, for real-time policy evaluation.
+1. **`intutic init`** scans your workspace, detects the harnesses present and records them in `~/.intutic/config.json`. With no login it offers to run the next step for you.
+2. **`intutic gates install`** writes each recorded harness's gate and rules file in its native format, from this machine alone; on a machine with a login, **`intutic connect`** writes them instead and keeps them in sync with the control plane (see [What writes harness files](#what-writes-harness-files)).
+3. Every tool call goes through the harness's own gate where it has one, and its LLM traffic through the proxy when it is routed there, for real-time policy evaluation.
 
-`intutic connect` needs a control plane. Without one, `intutic start` runs the same proxy but writes no harness files: point each harness at the proxy as its page describes, or launch it with `intutic exec`.
+`intutic start` runs the proxy with no account or control plane. Point each harness at it as its page describes, run `intutic gates install --route`, or launch the harness with `intutic exec`.
 
 ## What writes harness files
 
-Only `intutic connect` writes harness files. On each config sync, for every harness recorded in `~/.intutic/config.json`, it installs the gate and the proxy routing that harness's page lists, whether or not any SOP targets it: the gate enforces the built-in protections, the destructive-command tier, group rules and holds, none of which needs an SOP. The harness's rules file ([Where rule sets go](/guide/how-it-works#where-rule-sets-go) lists each one) is written when **at least one SOP targets that harness**: a synced SOP whose targets include it, or any local SOP under `.intutic/sops/`, which targets every recorded harness.
+Two commands write harness files, and a machine uses one of them: [`intutic gates install`](/reference/cli#intutic-gates-install) with no login, [`intutic connect`](/reference/cli#intutic-connect) with one. Both run the same writers, for every harness recorded in `~/.intutic/config.json`, and install each harness's gate whether or not any SOP targets it: the gate enforces the built-in protections and the destructive-command tier, none of which needs an SOP. The harness's rules file ([Where rule sets go](/guide/how-it-works#where-rule-sets-go) lists each one) is written when **at least one SOP targets that harness**: any local SOP under `.intutic/sops/` targets every recorded harness, and with `connect`, so does a synced SOP whose targets include it.
 
-To govern a harness `intutic init` did not detect, add its id (the harness type, e.g. `"codex"`) to the `harnesses` list in `~/.intutic/config.json` and restart `intutic connect`.
+What each one compiles into the policy snapshot every gate reads:
 
-Files the user also edits — `settings.json`, `hooks.json`, `config.toml`, `config.yaml`, `.aider.conf.yml` — are merged: only the Intutic keys or entries are added or replaced, and a file that does not parse is left untouched and reported in the `intutic connect` log. In `AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md` and `.goosehints`, connect writes only the section between the `INTUTIC:RULES` markers.
+| | `intutic gates install` | `intutic connect` |
+|---|---|---|
+| Built-in protections, destructive-command and skill tiers | Yes | Yes |
+| `review_before:` tokens from `.intutic/sops/` | Refused outright: with no control plane, nothing could approve a hold | Held for approval |
+| Workspace policy (`BLOCK:` SOPs, guardrails, MCP allowlist and registry, group rules) | No | Yes |
+| Proxy routing for each harness (base URLs, proxy settings) | Only with `--route` | Yes |
+| Kept in sync | Re-run it after editing `.intutic/sops/`, or keep `intutic start` running, which refreshes the gates when they change | On every config sync |
+
+Routing is written only by `intutic connect` or `intutic gates install --route`, because a harness pointed at a proxy that is not running cannot reach its model.
+
+[`intutic disconnect`](/reference/cli#intutic-disconnect) undoes either one: every file goes back the way it was, and the gates, rules files and snapshot are removed.
+
+To govern a harness `intutic init` did not detect, run `intutic gates install --harness <id> --add` (the id is the harness type, e.g. `codex`); with a login, add the id to the `harnesses` list in `~/.intutic/config.json` and restart `intutic connect`.
+
+Files the user also edits — `settings.json`, `hooks.json`, `config.toml`, `config.yaml`, `.aider.conf.yml` — are merged: only the Intutic keys or entries are added or replaced, and a file that does not parse is left untouched and reported in the command's output (the `intutic connect` log, for connect). In `AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md` and `.goosehints`, only the section between the `INTUTIC:RULES` markers is written.
 
 Each adapter uses **atomic writes** (write to temp file, then rename) to prevent config corruption during sync.
 

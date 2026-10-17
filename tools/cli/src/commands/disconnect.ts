@@ -1,5 +1,7 @@
 /**
- * `intutic disconnect` — undo what `intutic connect` set up on this machine.
+ * `intutic disconnect` — undo what `intutic connect` (or `intutic gates
+ * install`, which writes the same gates without a control plane) set up on
+ * this machine.
  *
  * Every harness config connect wrote is put back (see
  * `@intutic/sync-daemon`'s `planDisconnect` for the files), and on a full
@@ -8,9 +10,10 @@
  * started, the gate caches and, unless `--keep-login`, the stored
  * credentials.
  *
- * A real run tells the control plane before it removes the credentials
- * (`reportDisconnect`), so the silent-gate check, the devices list and the AI
- * inventory treat the machine as disconnected rather than broken.
+ * A real run with a login tells the control plane before it removes the
+ * credentials (`reportDisconnect`), so the silent-gate check, the devices
+ * list and the AI inventory treat the machine as disconnected rather than
+ * broken. With no login there is no control plane to tell.
  *
  * Everything is planned before anything changes, so `--dry-run` prints
  * exactly what a real run does. Running connect would write it all straight
@@ -31,7 +34,7 @@ import type { IntuticConfig } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { reportDisconnect } from '../lib/deviceReport.js'
 import { linuxConnectCaRemoval, removeLinuxConnectCaTrust } from '../lib/caTrust.js'
-import { clearCredentials, loadConfig, saveConfig } from '../config/store.js'
+import { clearCredentials, loadConfig, loadCredentials, saveConfig } from '../config/store.js'
 import { getCredentialsPath, getIntuticDir } from '../config/paths.js'
 import { getServicePaths, uninstallDaemon, uninstallMcpDaemon, uninstallProxyService, type ServiceTarget } from './install-daemon.js'
 
@@ -223,6 +226,7 @@ export async function runDisconnect(opts: DisconnectOptions): Promise<void> {
   }
   const full = opts.harness === undefined
   const config = loadConfig()
+  const loggedIn = (await loadCredentials()) !== null
 
   // Services first: while one runs, connect would write the files straight back.
   const services = new DisconnectPlan()
@@ -266,17 +270,28 @@ export async function runDisconnect(opts: DisconnectOptions): Promise<void> {
   }
   await files.apply()
   // Before the credentials go: the control plane stops expecting this
-  // machine's gates, and does not alert on it going quiet.
-  const reported = await reportDisconnect({
-    scope: full ? 'machine' : 'harness',
-    harnesses: full ? (config?.harnesses ?? []) : [opts.harness!],
-  })
-  if (reported.reported) {
-    log.info('Told the control plane, so it no longer expects events from this machine.')
-  } else {
-    log.warn(`Could not tell the control plane (${reported.reason}). It may report this machine's gates as silent.`)
+  // machine's gates, and does not alert on it going quiet. With no login
+  // there is none to tell.
+  if (loggedIn) {
+    const reported = await reportDisconnect({
+      scope: full ? 'machine' : 'harness',
+      harnesses: full ? (config?.harnesses ?? []) : [opts.harness!],
+    })
+    if (reported.reported) {
+      log.info('Told the control plane, so it no longer expects events from this machine.')
+    } else {
+      log.warn(`Could not tell the control plane (${reported.reason}). It may report this machine's gates as silent.`)
+    }
   }
   await machine.apply()
+  if (!loggedIn) {
+    log.success(
+      full
+        ? 'Removed. Run `intutic gates install` to install the gates again.'
+        : `Removed ${opts.harness}. Run \`intutic init\`, then \`intutic gates install\`, to gate it again.`,
+    )
+    return
+  }
   log.success(
     full
       ? 'Disconnected. Run `intutic init` and `intutic connect` to connect again.'

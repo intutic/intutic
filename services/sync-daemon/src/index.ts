@@ -87,12 +87,21 @@ export { writeRuntimeEnv } from './lib/runtimeEnv.js'
 export {
   refreshPolicySnapshot,
   writePolicySnapshot,
+  writeLocalPolicySnapshot,
+  localResolvedPolicy,
+  offlineHoldReason,
+  snapshotRulesVerify,
   fetchResolvedPolicy,
   buildSnapshotRules,
   validateRule,
   DEFAULT_SNAPSHOT_DIR,
   DESTRUCTIVE_TIER_SEVERITY,
+  SNAPSHOT_JSON,
+  SNAPSHOT_RULES,
+  VERIFIED_SNAPSHOT_DIR,
 } from './lib/policySnapshot.js'
+export type { LocalHoldMode } from './lib/policySnapshot.js'
+export { findGateFile, GATE_ARTIFACTS } from './harness/gateArtifacts.js'
 export { runComplianceProbes } from './lib/complianceProbes.js'
 export { getActiveAgentProcesses } from './lib/processPoller.js'
 

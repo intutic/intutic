@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
-import type { IHarnessAdapter } from './types.js'
+import type { HarnessWriteOptions, IHarnessAdapter } from './types.js'
 import { writeGooseHooks } from '@intutic/sync-daemon/harness/gooseHooks'
 import { rulesSectionHash, writeRulesSectionFile } from './rulesFiles.js'
 
@@ -39,8 +39,8 @@ export const gooseAdapter: IHarnessAdapter = {
   },
 
   /** The governance plugin and the config proxy URL (gooseHooks handles both). */
-  async installGate(_workspaceRoot: string, proxyUrl: string): Promise<void> {
-    await writeGooseHooks(proxyUrl)
+  async installGate(_workspaceRoot: string, proxyUrl: string, opts?: HarnessWriteOptions): Promise<void> {
+    await writeGooseHooks(proxyUrl, undefined, undefined, opts?.routing !== false)
   },
 
   writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {

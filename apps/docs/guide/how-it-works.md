@@ -27,7 +27,7 @@ Intutic is a **transparent governance layer** that sits between your AI agents a
 
 ## The Proxy Gateway
 
-Every LLM request from your agents flows through the Intutic proxy. The proxy is transparent — agents don't need to change their code. `intutic connect` configures each harness to route through the proxy by setting the appropriate base URL or config variable.
+Every LLM request from your agents flows through the Intutic proxy. The proxy is transparent — agents don't need to change their code. `intutic gates install --route` configures each harness that has a setting for it to route through the proxy, by setting the appropriate base URL or config variable<!-- ENTERPRISE_ONLY_START --> (`intutic connect` does the same)<!-- ENTERPRISE_ONLY_END -->; `intutic exec -- <agent>` sets the base-URL variables for one process.
 
 **How routing works per harness:**
 
@@ -150,6 +150,7 @@ Every execution trace records:
 
 Spend is limited by the workspace's daily and monthly caps and by budgets on virtual keys and members, each one refusing requests or alerting only; the proxy checks the ones that refuse on every request. See [Budgets](/guide/budgets#setting-up-budget-limits).
 
+<!-- ENTERPRISE_ONLY_START -->
 ## Sync Daemon
 
 The `intutic connect` command starts a long-lived sync daemon that:
@@ -161,13 +162,14 @@ The `intutic connect` command starts a long-lived sync daemon that:
 5. Uses **atomic writes** (tmp file + rename) to prevent file corruption
 
 The daemon supports 42 of Intutic's 43 harness adapters and handles each one's config format natively. The 43rd, TrueForge run as its own standalone/hosted server, is not something `intutic init` can detect in a repo at all (it's an operator-configured deployment, not a repo dependency) — it is governed instead by a separate, out-of-process service, `services/trueforge-bridge`. See the [TrueForge integration guide](/integrations/trueforge#server-mode-standalone-hosted).
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Where rule sets go
 
-`intutic connect` writes the rule sets aimed at a harness, and the [Governed Decisions Log](/guide/decisions-log) when the workspace turned it on, into the file that product reads as standing instructions, and nowhere else. Three shapes:
+`intutic gates install` writes the rule sets aimed at a harness<!-- ENTERPRISE_ONLY_START -->, and `intutic connect` also the [Governed Decisions Log](/guide/decisions-log) when the workspace turned it on,<!-- ENTERPRISE_ONLY_END --> into the file that product reads as standing instructions, and nowhere else. Three shapes:
 
 - **A file of Intutic's own** in a directory whose every file the product reads, such as `.cursor/rules/`. The decisions log gets a second file there. You keep your own rules in other files there.
-- **A marked section** of a file you also write, such as `AGENTS.md`. The rule sets sit between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->`, and the decisions log in a section of its own between `<!-- INTUTIC:DECISIONS_LOG:START -->` and `<!-- INTUTIC:DECISIONS_LOG:END -->`; the rest of the file is yours, and connect never touches it. You can move the sections within the file.
+- **A marked section** of a file you also write, such as `AGENTS.md`. The rule sets sit between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->`, and the decisions log in a section of its own between `<!-- INTUTIC:DECISIONS_LOG:START -->` and `<!-- INTUTIC:DECISIONS_LOG:END -->`; the rest of the file is yours, and Intutic never touches it. You can move the sections within the file.
 - **No instructions file.** The product reads no file of standing instructions, so neither the rule-set text nor the decisions log can reach the model. A harness with a gate still enforces the rules compiled from your rule sets. The dashboard's Compliance Scope card for such a harness says so.
 
 Connect never creates or writes `CLAUDE.md`. Claude Code gets everything from `.claude/rules/`, which it loads at launch with or without a `CLAUDE.md`. When Claude Code also reads the workspace's `AGENTS.md` (by default, when no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` is in its working directory or above; always, if you chose `claude-md-and-agents-md` for **Project instructions** in your own `/config`), what `AGENTS.md` carries for the other harnesses is left out of `.claude/rules/`, so Claude Code reads each rule set and the decisions log once. See [Claude Code](/integrations/claude-code#rules-and-the-decisions-log).
@@ -270,6 +272,6 @@ To detect a machine whose containment has stopped working, where containment is
 expected: the workspace's egress mode is **Enforce**, or the machine applied
 `intutic enforce`. On any other machine a direct connection to a provider is
 the normal state, so no probe runs.
-1. On every sync, `intutic connect` sends an HTTPS `HEAD` request directly to `https://api.anthropic.com/` and `https://api2.cursor.sh/`, bypassing localhost routing.
+1. On every sync, the sync daemon, which runs with a control plane, sends an HTTPS `HEAD` request directly to `https://api.anthropic.com/` and `https://api2.cursor.sh/`, bypassing localhost routing.
 2. If this direct connection succeeds with a certificate the machine's Intutic CA (`~/.intutic/ca.crt`) did not issue, checked by the CA's fingerprint and signature rather than by name, the network is uncontained.
 3. The daemon records a `network_bypass` event, which the control plane files as a `CRITICAL` `DATA_EXFILTRATION` incident, shown to administrators under **Findings › Incidents**. One incident is filed per machine, host and UTC day; later detections that day add to its `occurrences` count.

@@ -358,11 +358,13 @@ async function mergeGrokConfigToml(configPath: string, proxyUrl: string, workspa
  * @param workspaceRoot - Absolute workspace root.
  * @param proxyUrl      - Intutic proxy URL (also merged into config.toml).
  * @param workspaceId   - Workspace ID embedded in hook event payloads.
+ * @param routing       - Also merge the proxy into config.toml. False writes the gate only.
  */
 export async function writeGrokHooks(
   workspaceRoot: string,
   proxyUrl: string,
   workspaceId = '',
+  routing = true,
 ): Promise<void> {
   const hookScriptDir = path.join(workspaceRoot, '.intutic', 'hooks')
   await fs.mkdir(hookScriptDir, { recursive: true })
@@ -382,6 +384,8 @@ export async function writeGrokHooks(
   const userHooksDir = path.join(GROK_USER_DIR, 'hooks')
   await writeOwnedFile(path.join(userHooksDir, HOOK_FILENAME), workspaceRoot, registration)
   log.info({ action: 'grok_hooks_written', level: 'user', path: userHooksDir }, 'Grok user-level hooks written')
+
+  if (!routing) return
 
   // 3. config.toml model base_url — project and user level.
   // Grok Build talks to xAI's OpenAI-compatible API (its own default base_url

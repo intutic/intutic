@@ -4,11 +4,13 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer, type AddressInfo } from 'node:net'
 import { describePolicySnapshot, checkCiscoScanner, checkControlPlane, checkValkey, linuxCaTrustInstalled, runDoctor } from './doctor.js'
-import { loadCredentials } from '../config/store.js'
+import { loadConfig, loadCredentials } from '../config/store.js'
+import { writeLocalPolicySnapshot } from '@intutic/sync-daemon'
 
 vi.mock('../config/store.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../config/store.js')>()),
   loadCredentials: vi.fn(),
+  loadConfig: vi.fn(),
 }))
 import type { PolicySnapshotHealth, SnapshotState } from '../lib/policySnapshot.js'
 import { CISCO_SCANNER_BINARY } from '../lib/ciscoScanner.js'
@@ -55,6 +57,14 @@ describe('describePolicySnapshot', () => {
     const result = describePolicySnapshot(health({ state: 'absent', ruleCount: 0 }))
     expect(result.detail).toContain('/home/dev/.intutic/hooks/policy-snapshot.rules')
     expect(result.remediation).toContain('intutic policy snapshot')
+  })
+
+  it('points an open-core machine at `intutic gates install` for every failing state', () => {
+    for (const state of failing) {
+      const result = describePolicySnapshot(health({ state, ruleCount: 0 }), { local: true })
+      expect(result.remediation, state).toContain('intutic gates install')
+      expect(result.remediation, state).not.toMatch(/intutic (policy snapshot|connect|daemon status)/)
+    }
   })
 
   it('says the dynamic rules were dropped when the snapshot is invalid', () => {
@@ -203,21 +213,59 @@ describe('checkControlPlane', () => {
 })
 
 describe('runDoctor on an open-core install', () => {
-  afterEach(() => vi.restoreAllMocks())
+  let dir: string
+  const savedRules = process.env.INTUTIC_SNAPSHOT_RULES
 
-  it('skips the control-plane checks instead of pointing at hidden commands', async () => {
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(join(tmpdir(), 'intutic-doctor-oc-'))
+    // The snapshot the gates would read; written by the tests that want one.
+    process.env.INTUTIC_SNAPSHOT_RULES = join(dir, 'hooks', 'policy-snapshot.rules')
     vi.mocked(loadCredentials).mockResolvedValue(null)
+    vi.mocked(loadConfig).mockReturnValue({ workspaceRoot: dir, harnesses: ['cursor', 'aider'], configVersion: 0, devMode: false } as never)
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'))
+  })
+
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    if (savedRules === undefined) delete process.env.INTUTIC_SNAPSHOT_RULES
+    else process.env.INTUTIC_SNAPSHOT_RULES = savedRules
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  async function doctorLines(): Promise<string[]> {
     const lines: string[] = []
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { lines.push(args.join(' ')) })
     await runDoctor()
-    const out = lines.join('\n')
+    return lines
+  }
+  const lineFor = (lines: string[], name: string) => lines.find((l) => l.includes(name)) ?? ''
+
+  it('skips the control-plane checks instead of pointing at hidden commands', async () => {
+    const out = (await doctorLines()).join('\n')
     expect(out).toContain('skipped: open core, no control plane connected')
     expect(out).toContain('intutic start')
-    expect(out).not.toMatch(/intutic (login|connect)/)
+    expect(out).not.toMatch(/intutic (login|connect|policy snapshot)/)
     expect(out).not.toContain('Control Plane Auth')
-    expect(out).not.toContain('Policy Snapshot')
   }, 30_000) // runs every local probe (proxy, Valkey, CA trust, snapshot, scanner)
+
+  it('says no gates are installed, and names `intutic gates install`, when there are none', async () => {
+    const lines = await doctorLines()
+    expect(lineFor(lines, 'Policy Snapshot')).toContain('✗')
+    expect(lineFor(lines, 'Local Gates')).toContain('None installed for cursor')
+    // aider has no tool-call gate to install, so it is not counted missing.
+    expect(lineFor(lines, 'Local Gates')).not.toContain('aider')
+    expect(lines.join('\n')).toContain('intutic gates install')
+  }, 30_000)
+
+  it('passes the snapshot and gate checks once local gates are installed', async () => {
+    await writeLocalPolicySnapshot({ snapshotDir: join(dir, 'hooks'), localHoldTokens: ['Write'] })
+    await fs.mkdir(join(dir, '.intutic', 'hooks'), { recursive: true })
+    await fs.writeFile(join(dir, '.intutic', 'hooks', 'cursor-check.js'), '// gate\n')
+    const lines = await doctorLines()
+    expect(lineFor(lines, 'Policy Snapshot')).toContain('✓')
+    expect(lineFor(lines, 'Local Gates')).toContain('✓')
+    expect(lineFor(lines, 'Local Gates')).toContain('1 gate(s) installed: cursor')
+  }, 30_000)
 })
 
 describe('linuxCaTrustInstalled', () => {

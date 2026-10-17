@@ -63,7 +63,7 @@ and then **three faulted repetitions**. Each repetition:
 The proxy injects the `llm.*` and `egress.*` faults, the MCP proxy injects the
 MCP side of `tool.error` and the `tool.*`, `mcp.*` and `inject.*` faults, and
 the gates inject `permission.deny_or_delay` and the built-in-tool side of
-`tool.error`: the hook gates `intutic connect` writes, and the in-process
+`tool.error`: the hook gates `intutic gates install` writes, and the in-process
 [gate SDKs](/reference/gate-sdk#chaos-runs) (`@intutic/gate` and
 `intutic_clawde.gate`) for an agent built on a framework with no hook file.
 Each appends what it saw to the events file; the probes read nothing else.
@@ -141,7 +141,7 @@ intutic chaos run registry-down.yaml --sandbox-image my-agent-sandbox
 ```
 
 Each repetition's workspace is a worktree of your repository's `HEAD`,
-mounted at `/work`. What `intutic connect` generated for the project is
+mounted at `/work`. What `intutic gates install` generated for the project is
 usually not committed, and what is names your machine's paths, so the runner
 carries the gates in. Into each repetition's worktree, never into your
 project, it:
@@ -162,9 +162,9 @@ project, it:
 A file the commit already has is never replaced by the project's copy; its
 paths are still rewritten. The run's output names every file it carried in
 and rewrote, and warns when the project has no generated gates (`intutic
-connect` never ran there, so a harness in the sandbox runs ungoverned) or the
+gates install` never ran there, so a harness in the sandbox runs ungoverned) or the
 gates have no snapshot (so the destructive-command tier and your rules are
-missing). Run `intutic chaos run` from the project root `intutic connect` was
+missing). Run `intutic chaos run` from the project root `intutic gates install` was
 run in: that is the path it rewrites.
 
 Anything else the agent needs from the project must be committed. The agent

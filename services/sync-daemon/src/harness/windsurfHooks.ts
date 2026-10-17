@@ -317,12 +317,15 @@ process.stdin.on('end', () => {
  *                        HTTP CONNECT (TLS MITM) on the same listener as its
  *                        API routes.
  * @param workspaceId   - Workspace ID embedded in hook event payloads.
+ * @param routing       - Also point Windsurf's HTTP proxy settings (Desktop and
+ *                        JetBrains) at the local proxy. False writes the gate only.
  */
 export async function writeWindsurfHooks(
   workspaceRoot: string,
   proxyUrl: string,
   proxyPort = 4000,
   workspaceId = '',
+  routing = true,
 ): Promise<void> {
   const hookScriptDir = path.join(workspaceRoot, '.intutic', 'hooks')
   await fs.mkdir(hookScriptDir, { recursive: true })
@@ -359,6 +362,8 @@ export async function writeWindsurfHooks(
   // by an agent does not disable the user-level registration above.
   await mergeCascadeHooksJson(path.join(workspaceRoot, '.windsurf', 'hooks.json'), hookScriptPath, workspaceRoot)
   log.info({ action: 'windsurf_hooks_written', level: 'workspace' }, 'Windsurf workspace-level hooks written')
+
+  if (!routing) return
 
   // 3. HTTP proxy settings — Desktop's own settings.json. Merged: the keys
   // below are the only ones Intutic owns, and a file that is not a plain JSON

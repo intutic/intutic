@@ -29,7 +29,11 @@ intutic init
   ✔ opencode → /path/to/project/AGENTS.md
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 ### 3. Start the proxy
 
@@ -37,7 +41,9 @@ intutic init
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 ### 4. LLM egress
 
@@ -51,16 +57,18 @@ OpenCode has no base-URL environment variable. To route model traffic through th
 }
 ```
 
-Intutic does not write your provider settings — `opencode.json` is your file, and a wholesale rewrite of it is exactly the kind of change the drift guard exists to catch. The one block it edits is `mcp` (see [MCP servers](#mcp-servers)). The plugin gate governs tool calls whether or not the egress is routed.
+Intutic does not write your provider settings — `opencode.json` is your file, and a wholesale rewrite of it is exactly the kind of change the drift guard exists to catch. <!-- ENTERPRISE_ONLY_START -->Under `intutic connect`, the one block it edits is `mcp` (see [MCP servers](#mcp-servers)).<!-- ENTERPRISE_ONLY_END --> The plugin gate governs tool calls whether or not the egress is routed.
 
 ## What gets written
 
-- **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, written when at least one SOP targets OpenCode or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Once connect creates `AGENTS.md` in a workspace that only had a `CLAUDE.md`, OpenCode reads `AGENTS.md` in its place.
-- **Plugin:** `.opencode/plugins/intutic-governance.js` and `.opencode/plugins/intutic-governance/index.js` — the gate, written twice with identical bytes because the two OpenCode lines discover local plugins differently: 1.x globs files in `.opencode/plugins/`, 2.x reads `<name>/index.js` sub-directories, and each ignores the other's layout. An ES module with the shared gate body embedded; a `tool.execute.before` hook for 1.x and a `tool` `execute.before` hook for 2.x in the same module. Written atomically; repeated syncs replace, never stack.
-- **MCP servers:** the `mcp` block of `opencode.json` (project) and `~/.config/opencode/opencode.json` (global) — each server is fronted by the MCP governance proxy. Every other key is left as it was. See [MCP servers](#mcp-servers).
+- **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, written when at least one SOP targets OpenCode or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). Once Intutic creates `AGENTS.md` in a workspace that only had a `CLAUDE.md`, OpenCode reads `AGENTS.md` in its place.
+- **Plugin:** `.opencode/plugins/intutic-governance.js` and `.opencode/plugins/intutic-governance/index.js` — the gate, written twice with identical bytes because the two OpenCode lines discover local plugins differently: 1.x globs files in `.opencode/plugins/`, 2.x reads `<name>/index.js` sub-directories, and each ignores the other's layout. An ES module with the shared gate body embedded; a `tool.execute.before` hook for 1.x and a `tool` `execute.before` hook for 2.x in the same module. Written atomically; repeated writes replace, never stack.
+<!-- ENTERPRISE_ONLY_START -->
+- **MCP servers** (under `intutic connect`)**:** the `mcp` block of `opencode.json` (project) and `~/.config/opencode/opencode.json` (global) — each server is fronted by the MCP governance proxy. Every other key is left as it was. See [MCP servers](#mcp-servers).
+<!-- ENTERPRISE_ONLY_END -->
 - **Not written:** the rest of `opencode.json` (egress and the optional static `permission` map are yours).
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness opencode`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness opencode`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Pre-tool hooks (blocking)
 
@@ -68,7 +76,7 @@ The hook receives the tool name and its argument object and refuses by throwing 
 
 Fail-closed is local to the hook rather than process-wide: a fault inside the gate (or an argument object the gate cannot read) is rethrown as a BLOCKED error, so a call the gate could not evaluate is refused, never allowed. The plugin installs no `uncaughtException` handler — it runs inside your OpenCode process and must not exit it, the same posture the n8n in-process gate takes.
 
-Every decision is appended to `.intutic/events/hook-events.jsonl` and drained to the control plane, same as every other harness. On load the plugin prints one line to OpenCode's stderr saying whether it found the policy snapshot, so a machine enforcing only the floor is visible.
+Every decision is appended to `.intutic/events/hook-events.jsonl`<!-- ENTERPRISE_ONLY_START --> and, under `intutic connect`, drained to the control plane<!-- ENTERPRISE_ONLY_END -->, same as every other harness. On load the plugin prints one line to OpenCode's stderr saying whether it found the policy snapshot, so a machine enforcing only the floor is visible.
 
 ::: tip Static fallback, if you want one
 OpenCode's own `permission` map in `opencode.json` (1.x; `permissions` array in 2.x) can deny tools or bash-command globs — `"bash": { "rm -rf *": "deny" }`. It is static: no argument-pattern rules, no policy snapshot, no audit line. It is belt-and-braces beside the plugin, not a substitute, and Intutic leaves it to you.
@@ -76,7 +84,7 @@ OpenCode's own `permission` map in `opencode.json` (1.x; `permissions` array in 
 
 ## MCP servers
 
-`intutic connect` rewrites each server in the `mcp` block of `opencode.json` so that the [MCP governance proxy](/guide/mcp-governance) fronts it, on every sync cycle — so a server added later is wrapped on the next cycle (30 seconds by default). Tool-description poisoning checks, DLP on results and TOFU pinning then apply to OpenCode's MCP traffic as they do for every other harness.
+With the [MCP governance proxy](/guide/mcp-governance) fronting each server in the `mcp` block of `opencode.json`, tool-description poisoning checks, DLP on results and TOFU pinning apply to OpenCode's MCP traffic as they do for every other harness.<!-- ENTERPRISE_ONLY_START --> `intutic connect` rewrites the block so, on every sync cycle — so a server added later is wrapped on the next cycle (30 seconds by default).<!-- ENTERPRISE_ONLY_END --> A wrapped entry looks like this:
 
 - A `local` server's `command` becomes `["node", <proxy>, "--workspace-id", <ws>, "--server-name", <name>, "--", ...original command]`. `environment`, `cwd`, `enabled` and `timeout` are kept.
 - A `remote` server becomes a `local` entry that runs the proxy in bridge mode (`--remote-url <url> --remote-transport http`). Its `headers` move to the `INTUTIC_REMOTE_HEADERS` environment variable, so they never appear in the process list.

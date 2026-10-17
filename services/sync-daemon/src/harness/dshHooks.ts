@@ -578,8 +578,9 @@ async function writeDshInstallMd(dshHome: string, profileNames: string[]): Promi
  *   `config.repoRoot`).
  * @param proxyUrl       - Intutic proxy URL, set as the `llm-deepseek` row's `baseURL`.
  * @param workspaceId    - Workspace ID, stored in the plugin row's config.
+ * @param routing        - Also set the `llm-deepseek` row's `baseURL`. False registers the gate only.
  */
-export async function writeDshHooks(workspaceRoot: string, proxyUrl: string, workspaceId = ''): Promise<void> {
+export async function writeDshHooks(workspaceRoot: string, proxyUrl: string, workspaceId = '', routing = true): Promise<void> {
   const dshHome = resolveDshHome()
   const profileDirs = await listDshProfileDirs(dshHome)
 
@@ -596,7 +597,7 @@ export async function writeDshHooks(workspaceRoot: string, proxyUrl: string, wor
     await mergeProfilePatch(profileDir, workspaceRoot, workspaceId)
     // dsh's llm-deepseek route speaks the Anthropic Messages wire and
     // appends /v1/messages to its baseURL, so it gets the bare proxy host.
-    await mergeProfileLlmRoute(profileDir, anthropicBaseUrl(proxyUrl))
+    if (routing) await mergeProfileLlmRoute(profileDir, anthropicBaseUrl(proxyUrl))
     await mergeProfileDependency(profileDir)
     log.info({ action: 'dsh_profile_written', profile: path.basename(profileDir) }, 'dsh profile governance plugin registered')
   }

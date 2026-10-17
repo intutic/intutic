@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType, rulesFrontMatterOf } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
-import type { IHarnessAdapter } from './types.js'
+import type { HarnessWriteOptions, IHarnessAdapter } from './types.js'
 import { loadCredentials } from '../config/store.js'
 import { localProxyPort } from '../lib/localProxy.js'
 import { writeWindsurfHooks } from '@intutic/sync-daemon/harness/windsurfHooks'
@@ -47,10 +47,10 @@ export const windsurfAdapter: IHarnessAdapter = {
    *  The proxy serves HTTP CONNECT on the same listener as its API, so the
    *  port is the one `intutic connect` and `start` run it on: the port of
    *  INTUTIC_PROXY_URL, 4000 by default. `PORT` is not read. */
-  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+  async installGate(workspaceRoot: string, proxyUrl: string, opts?: HarnessWriteOptions): Promise<void> {
     const proxyPort = localProxyPort()
     const creds = await loadCredentials()
-    await writeWindsurfHooks(workspaceRoot, proxyUrl, proxyPort, creds?.workspaceId || 'local')
+    await writeWindsurfHooks(workspaceRoot, proxyUrl, proxyPort, creds?.workspaceId || 'local', opts?.routing !== false)
   },
 
   async writeConfig(workspaceRoot: string, sops: SyncSopEntry[], proxyUrl: string): Promise<string | null> {

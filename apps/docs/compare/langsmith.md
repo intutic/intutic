@@ -16,7 +16,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Primary job** | Runtime enforcement and audit for AI agents | Tracing, evaluation and prompt engineering for LLM applications |
 | **Where it enforces** | Pre-execution gates inside the agent (native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), plus request and response proxy, MCP governance proxy, egress firewall and sandbox | LLM Gateway (public beta), inline on model traffic; Sandboxes, for code sent to them |
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Gemini CLI, Cursor, GitHub Copilot, Windsurf and Cline | Gateway guides for Claude Code, Codex and Gemini CLI |
-| **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Block on a spend cap (HTTP 402), a rate limit or a model-access policy; fall back to another model; redact PII and secrets |
+| **Decisions** | Allow, warn, require approval (the call is refused and held for review; with a control plane, once a reviewer approves it the identical retry passes if the workspace has opted in, and with none it stays refused), block, redact, re-ask, shadow | Block on a spend cap (HTTP 402), a rate limit or a model-access policy; fall back to another model; redact PII and secrets |
 | **Sensitive data** | Secrets and credentials matched by pattern and validated PII detectors for payment cards, IBANs and US Social Security numbers (email and phone opt-in), redacted or blocked in requests before they leave, in responses before the agent sees them, and in MCP tool calls; patterns you define (such as PHI) in the proxy's configuration apply to model traffic | Gateway redaction: a PII policy built on Presidio (names, places, nationality, religion, political affiliation, ages; a separate Enterprise entitlement) and a Secrets policy (US phone numbers, US Social Security numbers, API keys and tokens). System prompts, tool-call arguments and response content are not scanned. Masking of trace inputs and outputs |
 | **Cost control** | Daily spend caps enforced before a request leaves; a loop run that exceeds its budget is stopped | Hard spend caps and rate limits in the gateway |
 | **Containment** | Opt-in default-deny egress firewall on the machine the agent runs on; sandboxed runs in a container or Firecracker microVM | Sandboxes: microVMs with credentials injected by an auth proxy and domain allow and deny lists, for code an agent sends there. A local coding agent's own tool calls are not gated |
@@ -43,7 +43,9 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 - Your agents run commands, edit files and call MCP tools, and you need each call decided before it runs.
 - You want risky calls from the coding agents and frameworks you already run held for human approval.
 - You need egress control and sandboxing where the agent itself runs, including a developer's machine, so it cannot route around governance; LangSmith Sandboxes contain only the code sent to them.
+<!-- ENTERPRISE_ONLY_START -->
 - You want an audit trail you can verify independently, on infrastructure you control.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## When to choose LangSmith
 

@@ -32,15 +32,27 @@ The CLI detects `CLAUDE.md` and registers Claude Code as a harness:
   ✔ claude-code → /path/to/project/.claude/rules/intutic-governance.md
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files.
 
-### 3. Start the proxy
+### 3. Install the gate
+
+```bash
+intutic gates install
+```
+
+The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files).
+
+### 4. Start the proxy
 
 ```bash
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
+`intutic start` also refreshes the installed gates when a rule set under `.intutic/sops/` changes.
+
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## What gets written
 
@@ -65,7 +77,7 @@ Never commit secrets, API keys, or credentials to version control...
 
 ### Hooks and permissions
 
-`intutic connect` also writes the gate script `.intutic/hooks/claude-code-check.js` and merges two keys into `.claude/settings.json` (project) and `~/.claude/settings.json` (user):
+`intutic gates install` also writes the gate script `.intutic/hooks/claude-code-check.js` and merges two keys into `.claude/settings.json` (project) and `~/.claude/settings.json` (user):
 
 ```json
 {
@@ -83,11 +95,11 @@ Never commit secrets, API keys, or credentials to version control...
 }
 ```
 
-There is one PreToolUse entry each for `Bash`, `Edit`, `Write`, `MultiEdit` and `mcp__.*`. Your own PreToolUse hooks and every other setting are kept; only the Intutic entries are replaced on each sync. `permissions.deny` gets the entries derived from your SOPs' blocked tools and patterns, added to your own: in the project file the entries an earlier sync wrote give way to the current set, and in the user file they accumulate until `intutic disconnect` removes them. A settings file that is not plain JSON (for example one with comments) is left untouched and reported in the `intutic connect` log.
+There is one PreToolUse entry each for `Bash`, `Edit`, `Write`, `MultiEdit` and `mcp__.*`. Your own PreToolUse hooks and every other setting are kept; only the Intutic entries are replaced each time they are written. `permissions.deny` gets the entries derived from your SOPs' blocked tools and patterns, added to your own: in the project file the entries an earlier install wrote give way to the current set, and in the user file they accumulate until `intutic disconnect` removes them. A settings file that is not plain JSON (for example one with comments) is left untouched and reported.
 
-The gate fails closed: if it cannot read the tool call or crashes, the call is refused. Every decision is appended to `.intutic/events/hook-events.jsonl` and forwarded to the control plane.
+The gate fails closed: if it cannot read the tool call or crashes, the call is refused. Every decision is appended to `.intutic/events/hook-events.jsonl`<!-- ENTERPRISE_ONLY_START --> and, under `intutic connect`, forwarded to the control plane<!-- ENTERPRISE_ONLY_END -->.
 
-The rules file is Intutic's own and is replaced on each sync; keep your own instructions in `CLAUDE.md` or in other files in `.claude/rules/`. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
+The rules file is Intutic's own and is replaced each time it is written; keep your own instructions in `CLAUDE.md` or in other files in `.claude/rules/`. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).
 
 ### Rules and the decisions log
 
@@ -96,7 +108,7 @@ The rules file is Intutic's own and is replaced on each sync; keep your own inst
 - **Nothing is read twice.** Claude Code reads the workspace's `AGENTS.md` too when no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` is in its working directory or a directory above it (your own `~/.claude/CLAUDE.md` does not count). Then a rule set aimed at both Claude Code and another `AGENTS.md` reader, such as Codex, reaches Claude Code through `AGENTS.md` and is left out of `.claude/rules/intutic-governance.md`, and the decisions log, which `AGENTS.md` carries for those harnesses, is left out of `.claude/rules/intutic-decisions.md`. A rule set aimed at Claude Code alone always stays in its own file. When a `CLAUDE.md` appears or goes, the next sync moves the content to match.
 - **Your choice of instruction files is followed.** Claude Code's **Project instructions** setting decides when it reads `AGENTS.md`: the default `claude-md-or-agents-md`, `claude-md-and-agents-md` to read your `CLAUDE.md` and `AGENTS.md` together, `claude-md`, or `managed-only`. You can opt in to `claude-md-and-agents-md` from `/config` in Claude Code, or under `pluginConfigs` → `cc-plugin-agents-md@builtin` in `~/.claude/settings.json`; Intutic reads the value there and places the content to match. Claude Code ignores the setting in a project's settings files, so it is yours to choose, not the repository's. See [Claude Code's AGENTS.md documentation](https://code.claude.com/docs/en/memory#agentsmd).
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness claude-code`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness claude-code`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Config details
 
@@ -141,9 +153,11 @@ LLM judging runs only on a plan that includes it. On a plan without it (Free), t
 
 ## MCP Server Integration (`~/.claude.json`)
 
-`intutic connect` wraps the MCP servers Claude Code already has in `~/.claude.json` — the user-scope `mcpServers` and this project's local-scope servers — with the MCP governance proxy, and adds the `intutic` server below. It only edits `~/.claude.json` once Claude Code has created it, and keeps everything else in the file. A project's shared `.mcp.json` is never rewritten: each of its servers you have approved in Claude Code gets a wrapped copy of the same name at local scope instead, which Claude Code uses in its place (see [How a server gets here at all](/guide/mcp-governance#how-a-server-gets-here-at-all)). Every MCP tool call, wrapped or not, also passes through the `mcp__.*` PreToolUse gate.
+<!-- ENTERPRISE_ONLY_START -->
+`intutic connect` wraps the MCP servers Claude Code already has in `~/.claude.json` — the user-scope `mcpServers` and this project's local-scope servers — with the MCP governance proxy, and adds the `intutic` server below. It only edits `~/.claude.json` once Claude Code has created it, and keeps everything else in the file. A project's shared `.mcp.json` is never rewritten: each of its servers you have approved in Claude Code gets a wrapped copy of the same name at local scope instead, which Claude Code uses in its place (see [How a server gets here at all](/guide/mcp-governance#how-a-server-gets-here-at-all)).
+<!-- ENTERPRISE_ONLY_END -->
 
-To configure the same entries by hand, add them to `~/.claude.json`:
+Every MCP tool call, wrapped or not, passes through the `mcp__.*` PreToolUse gate. To also put MCP servers behind the MCP governance proxy yourself, add these entries to `~/.claude.json`:
 
 ### 1. Standalone Governance Server Mode
 Exposes Intutic governance tools (`intutic_governance_status`, `intutic_list_sops`, `intutic_list_incidents`, `intutic_hold_status`, `intutic_mcp_registry_status`, `intutic_mcp_budget_remaining`) to Claude Code CLI:

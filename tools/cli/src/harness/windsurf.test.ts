@@ -27,13 +27,19 @@ describe('windsurfAdapter.installGate', () => {
     process.env.INTUTIC_PROXY_URL = 'http://127.0.0.1:4123'
     process.env.PORT = '3000'
     await windsurfAdapter.installGate!('/tmp/ws', 'http://127.0.0.1:4123')
-    expect(writeWindsurfHooksMock).toHaveBeenCalledWith('/tmp/ws', 'http://127.0.0.1:4123', 4123, 'ws_test')
+    expect(writeWindsurfHooksMock).toHaveBeenCalledWith('/tmp/ws', 'http://127.0.0.1:4123', 4123, 'ws_test', true)
   })
 
   it('defaults to 4000 with INTUTIC_PROXY_URL unset, whatever PORT says', async () => {
     delete process.env.INTUTIC_PROXY_URL
     process.env.PORT = '3000'
     await windsurfAdapter.installGate!('/tmp/ws', 'http://localhost:4000')
-    expect(writeWindsurfHooksMock).toHaveBeenCalledWith('/tmp/ws', 'http://localhost:4000', 4000, 'ws_test')
+    expect(writeWindsurfHooksMock).toHaveBeenCalledWith('/tmp/ws', 'http://localhost:4000', 4000, 'ws_test', true)
+  })
+
+  it('writes the gate without the proxy settings when routing is off', async () => {
+    delete process.env.INTUTIC_PROXY_URL
+    await windsurfAdapter.installGate!('/tmp/ws', 'http://127.0.0.1:4000', { routing: false })
+    expect(writeWindsurfHooksMock).toHaveBeenCalledWith('/tmp/ws', 'http://127.0.0.1:4000', 4000, 'ws_test', false)
   })
 })

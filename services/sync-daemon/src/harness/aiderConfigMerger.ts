@@ -63,7 +63,7 @@ export const AIDER_SOPS_FILE = '.intutic/aider-sops.md'
  *  user's own content, and is replaced, not stacked, on every sync. */
 const HEADER = [
   '# Intutic: openai-api-base, the ANTHROPIC_BASE_URL set-env entry and the',
-  `# ${AIDER_SOPS_FILE} read entry are managed by intutic connect. test-cmd,`,
+  `# ${AIDER_SOPS_FILE} read entry are managed by Intutic. test-cmd,`,
   '# lint-cmd, auto-test and auto-lint are removed on every sync.',
 ]
 
@@ -119,8 +119,16 @@ function ensureSeq(doc: Document, key: string): YAMLSeq {
  * @param proxyUrl      - The proxy host (a trailing `/v1` is tolerated).
  * @param workspaceRoot - The directory holding the config.
  * @param hasSops       - Whether the SOP file is to be listed under `read`.
+ * @param routing       - Also set `openai-api-base` and the `ANTHROPIC_BASE_URL`
+ *                        set-env entry. False leaves both as they are.
  */
-export function mergeAiderYaml(raw: string, proxyUrl: string, workspaceRoot: string, hasSops: boolean): AiderMergeResult {
+export function mergeAiderYaml(
+  raw: string,
+  proxyUrl: string,
+  workspaceRoot: string,
+  hasSops: boolean,
+  routing = true,
+): AiderMergeResult {
   const doc: Document = parseDocument(stripOwnHeader(raw))
   if (doc.errors.length > 0) return { content: null, stripped: [] }
   // A missing, empty or comment-only file starts as an empty mapping (its
@@ -132,14 +140,16 @@ export function mergeAiderYaml(raw: string, proxyUrl: string, workspaceRoot: str
   const stripped = SUPPRESSED_KEYS.filter((key) => doc.has(key))
   for (const key of [...stripped, ...INVALID_LEGACY_KEYS]) doc.delete(key)
 
-  doc.set('openai-api-base', openaiBaseUrl(proxyUrl))
+  if (routing) {
+    doc.set('openai-api-base', openaiBaseUrl(proxyUrl))
 
-  const setEnv = ensureSeq(doc, 'set-env')
-  setEnv.items = setEnv.items.filter((item) => {
-    const value = isScalar(item) ? item.value : item
-    return !(typeof value === 'string' && value.startsWith('ANTHROPIC_BASE_URL='))
-  })
-  setEnv.add(`ANTHROPIC_BASE_URL=${anthropicBaseUrl(proxyUrl)}`)
+    const setEnv = ensureSeq(doc, 'set-env')
+    setEnv.items = setEnv.items.filter((item) => {
+      const value = isScalar(item) ? item.value : item
+      return !(typeof value === 'string' && value.startsWith('ANTHROPIC_BASE_URL='))
+    })
+    setEnv.add(`ANTHROPIC_BASE_URL=${anthropicBaseUrl(proxyUrl)}`)
+  }
 
   const read = ensureSeq(doc, 'read')
   read.items = read.items.filter((item) => !isAiderSopsEntry(isScalar(item) ? item.value : item, workspaceRoot))
@@ -157,6 +167,7 @@ export function mergeAiderYaml(raw: string, proxyUrl: string, workspaceRoot: str
  * @param configPath - Absolute path to .aider.conf.yml
  * @param proxyUrl   - Intutic proxy URL
  * @param sopsText   - Optional SOP instructions, written to the `read` file
+ * @param routing    - Also route Aider's models through the proxy (see {@link mergeAiderYaml})
  * @returns `true` when the config was written, `false` when it was left
  *          untouched because it is not a YAML mapping (a warning is logged).
  */
@@ -164,6 +175,7 @@ export async function mergeAiderConfig(
   configPath: string,
   proxyUrl: string,
   sopsText?: string,
+  routing = true,
 ): Promise<boolean> {
   let raw = ''
   try {
@@ -172,7 +184,7 @@ export async function mergeAiderConfig(
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
 
-  const { content, stripped } = mergeAiderYaml(raw, proxyUrl, path.dirname(configPath), Boolean(sopsText))
+  const { content, stripped } = mergeAiderYaml(raw, proxyUrl, path.dirname(configPath), Boolean(sopsText), routing)
   if (content === null) {
     log.warn(
       { action: 'aider_config_merge_skipped', path: configPath },

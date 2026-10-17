@@ -23,6 +23,10 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import {
   writePolicySnapshot,
+  writeLocalPolicySnapshot,
+  localResolvedPolicy,
+  offlineHoldReason,
+  snapshotRulesVerify,
   buildSnapshotRules,
   validateRule,
   fetchResolvedPolicy,
@@ -766,5 +770,60 @@ describe('sqlDropStrictBlock — Wave 7 (audit-remediation) per-rule override', 
   it('sql_drop is never part of the DESTRUCTIVE_TIER_SEVERITY ramp — its static definition is warn, not block', () => {
     const staticDef = DESTRUCTIVE_COMMAND_PATTERNS.find((p) => p.id === 'destructive.sql_drop')
     expect(staticDef?.severity).toBe('warn')
+  })
+})
+
+describe('writeLocalPolicySnapshot — no control plane', () => {
+  it('names no workspace, so no gate compares it with one', () => {
+    expect(localResolvedPolicy().workspaceId).toBe('')
+  })
+
+  it('writes a verifying snapshot marked local, with the destructive tier and refusing local holds, and never fetches', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const dir = mkdtempSync(join(tmpdir(), 'intutic-local-snap-'))
+    try {
+      const { digest, ruleCount } = await writeLocalPolicySnapshot({ snapshotDir: dir, localHoldTokens: ['Write', 'action:deploy'] })
+      expect(fetchSpy).not.toHaveBeenCalled()
+
+      const rulesText = readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')
+      expect(rulesText.split('\n')).toContain('#workspace ')
+      expect(rulesText).toContain('#source local\n')
+      expect(rulesText).toContain(`#digest ${digest}`)
+      // The comment line is outside the digest: every gate still verifies it.
+      expect(snapshotRulesVerify(rulesText)).toBe(true)
+      // And the verified copy the settings guard restores from is the same file.
+      expect(readFileSync(join(dir, 'verified', SNAPSHOT_RULES), 'utf8')).toBe(rulesText)
+
+      const doc = JSON.parse(readFileSync(join(dir, SNAPSHOT_JSON), 'utf8'))
+      expect(doc.source).toBe('local')
+      expect(doc.workspaceId).toBe('')
+      expect(doc.rules.length).toBe(ruleCount)
+
+      const byId = new Map<string, { severity: string; reason: string }>(doc.rules.map((r: { id: string }) => [r.id, r]))
+      for (const p of DESTRUCTIVE_COMMAND_PATTERNS) {
+        expect(byId.get(p.id)?.severity, p.id).toBe(p.severity === 'block' ? DESTRUCTIVE_TIER_SEVERITY : 'warn')
+      }
+      expect(byId.get('sop.local.review_before.Write')).toMatchObject({ severity: 'block', reason: offlineHoldReason('Write') })
+      expect(byId.get('sop.local.review_before.action:deploy')?.severity).toBe('block')
+      expect(offlineHoldReason('Write')).toMatch(/^Refused: Write is declared in review_before:\. Holding for approval needs a control plane/)
+      expect(doc.rules.some((r: { severity: string }) => r.severity === 'hold')).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('leaves the connected path as it was: local tokens hold, and no source is recorded', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'intutic-snap-'))
+    try {
+      await writePolicySnapshot(policy(), dir, ['Write'])
+      const doc = JSON.parse(readFileSync(join(dir, SNAPSHOT_JSON), 'utf8'))
+      expect(doc.source).toBeUndefined()
+      expect(readFileSync(join(dir, SNAPSHOT_RULES), 'utf8')).not.toContain('#source')
+      expect(doc.rules.find((r: { id: string }) => r.id === 'sop.local.review_before.Write')?.severity).toBe('hold')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

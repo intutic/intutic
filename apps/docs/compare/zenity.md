@@ -7,7 +7,7 @@ description: Zenity is a security platform for AI agents across the enterprise, 
 
 *Last reviewed: 2026-10-10*
 
-Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution and a signed audit trail behind it. It is open core<!-- ENTERPRISE_ONLY_START -->, runs fully self-hosted including air-gapped, and publishes its prices<!-- ENTERPRISE_ONLY_END -->. Zenity ([zenity.io](https://zenity.io)) secures AI agents across an organization: assistants such as Microsoft Copilot, ChatGPT Enterprise and Gemini, agents built on Foundry, Bedrock and Vertex, and, for coding and personal agents, native agent hooks and an MCP gateway that block or modify a tool call before it runs. Zenity covers the breadth of enterprise AI from one platform; Intutic goes deep on coding agents and agent frameworks, where they run.
+Intutic is the enforcement point inside the coding agent: a pre-execution gate decides each tool call in 36 of the 43 supported harnesses, with a policy proxy, an MCP governance proxy, a default-deny egress firewall, sandboxed execution<!-- ENTERPRISE_ONLY_START --> and a signed audit trail<!-- ENTERPRISE_ONLY_END --> behind it. It is open core<!-- ENTERPRISE_ONLY_START -->, runs fully self-hosted including air-gapped, and publishes its prices<!-- ENTERPRISE_ONLY_END -->. Zenity ([zenity.io](https://zenity.io)) secures AI agents across an organization: assistants such as Microsoft Copilot, ChatGPT Enterprise and Gemini, agents built on Foundry, Bedrock and Vertex, and, for coding and personal agents, native agent hooks and an MCP gateway that block or modify a tool call before it runs. Zenity covers the breadth of enterprise AI from one platform; Intutic goes deep on coding agents and agent frameworks, where they run.
 
 ## Comparison
 
@@ -15,18 +15,18 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 |---|---|---|
 | **Where enforcement happens** | At the tool call: native pre-execution hook gates in 18 of the 43 harnesses and in-process SDK gates in 17 agent frameworks; plus a request and response proxy, an MCP governance proxy, a host egress firewall (`intutic enforce`) and sandboxed execution (`intutic exec --sandbox`) | Native agent hooks (pre-tool blocking in Claude Code, Cursor and Codex) and its MCP gateway, which block or modify a tool call before it runs. Telemetry comes from OpenTelemetry and the hooks; Claude Enterprise connects through Anthropic's Compliance API. The vendor says no endpoint sensor is needed |
 | **Coding agents covered** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Cline, Roo Code, OpenCode and Goose, plus agent frameworks such as LangGraph, CrewAI and the OpenAI Agents SDK through an in-process gate | Claude Code, Claude Cowork, Codex, GitHub Copilot and Cursor are named on its [coding-agents page](https://zenity.io/use-cases/agent-type/coding-personal-agents); hooks for GitHub Copilot and Codex became generally available in August 2026 |
-| **Policy actions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, and shadow mode that measures how often a rule would act | Block a tool call, redact output, or show guidance in the agent's chat; MCP allowlists set at build time. Rules run in Detect or Prevent mode, and each taint is marked as blocking or flag-only |
-| **When the policy layer fails** | Hook gates fail closed on a crash or a malformed payload, and the proxy blocks by default when its policy service is unreachable. A built-in destructive-command tier blocks with no configuration | Not documented |
+| **Policy actions** | Allow, warn, require approval (the call is refused and held for review; with a control plane, once a reviewer approves it the identical retry passes if the workspace has opted in, and with none it stays refused), block, redact, re-ask, and shadow mode that measures how often a rule would act | Block a tool call, redact output, or show guidance in the agent's chat; MCP allowlists set at build time. Rules run in Detect or Prevent mode, and each taint is marked as blocking or flag-only |
+| **When the policy layer fails** | Hook gates fail closed on a crash or a malformed payload, and the proxy blocks by default when its policy service is unreachable. With no configuration, the gates block writes to their own hook files and settings, governance-bypass commands and secrets, and the proxy refuses `rm -rf /`, `mkfs` and similar operations in a model's code-execution tool call. The gates' destructive-command tier flags those commands rather than blocking them | Not documented |
 | **MCP governance** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | An [MCP gateway](https://zenity.io/platform/mcp-security) behind one URL that allows, modifies or blocks each tool, per agent, user or team |
 | **Red teaming** | — | No red-teaming product documented. Risky skills, files and code can be detonated in a sandbox |
-| **Discovery and inventory** | [AI inventory](/guide/ai-inventory) of developer machines that run `intutic connect`: the harnesses, MCP servers and skill bundles on each, and which run ungoverned | Assistants and agent platforms across the organization; inventory and monitoring through its GitHub Copilot and Codex hooks |
-| **Audit and SIEM** | Merkle tree with per-trace inclusion proofs and Ed25519-signed roots, verifiable in the browser or with `intutic integrity verify`; six SIEM destinations, including Splunk HEC, Syslog/CEF and Datadog | Immutable audit; streaming to Splunk and Microsoft Sentinel |
 | **Source** | Open core (MIT): the proxy, hook gates, MCP proxy, CLI and sync daemon | The platform's source is not published; Zenity released an [open-source security framework for OpenClaw](https://zenity.io/blog/open-source-security-openclaw) in March 2026, with no licence stated |
 
 <!-- ENTERPRISE_ONLY_START -->
 
 | | Intutic | Zenity |
 |---|---|---|
+| **Discovery and inventory** | [AI inventory](/guide/ai-inventory) of developer machines that run `intutic connect`: the harnesses, MCP servers and skill bundles on each, and which run ungoverned | Assistants and agent platforms across the organization; inventory and monitoring through its GitHub Copilot and Codex hooks |
+| **Audit and SIEM** | Merkle tree with per-trace inclusion proofs and Ed25519-signed roots, verifiable in the browser or with `intutic integrity verify`; six SIEM destinations, including Splunk HEC, Syslog/CEF and Datadog | Immutable audit; streaming to Splunk and Microsoft Sentinel |
 | **Deployment** | Cloud, or fully self-hosted: signed images and an air-gap bundle, Helm charts, an offline license | No self-hosted or air-gapped option is documented |
 | **Pricing** | [Published](/guide/plans); the open core is free | Not published |
 
@@ -45,7 +45,7 @@ Intutic is the enforcement point inside the coding agent: a pre-execution gate d
 - Your agents are coding agents and agent frameworks, such as Windsurf, Cline, Goose or LangGraph alongside Claude Code and Cursor, and you want each tool call decided before it runs.
 - You want risky calls held for approval rather than only allowed or blocked.<!-- ENTERPRISE_ONLY_START -->
 - You need to run the whole product on your own infrastructure, including air-gapped.<!-- ENTERPRISE_ONLY_END -->
-- You want to read the code that blocks a call, and to verify the audit trail yourself.
+- You want to read the code that blocks a call<!-- ENTERPRISE_ONLY_START -->, and to verify the audit trail yourself<!-- ENTERPRISE_ONLY_END -->.
 - You want an egress firewall and a sandbox so an agent cannot route around governance.
 
 ## When to choose Zenity

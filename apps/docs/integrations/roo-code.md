@@ -20,7 +20,11 @@ The CLI detects Roo Code and registers it as a harness:
   ✔ roo-code → /path/to/project/AGENTS.md
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 ### 2. Start the proxy
 
@@ -28,16 +32,18 @@ The CLI detects Roo Code and registers it as a harness:
 intutic start
 ```
 
-> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_START -->
+> Have an Intutic account or run your own control plane? Use `intutic connect` instead. It writes the same files, starts the same proxy and adds bidirectional config sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## What gets written
 
 Intutic generates:
 * **Rules:** the section between `<!-- INTUTIC:RULES:START -->` and `<!-- INTUTIC:RULES:END -->` in the workspace's `AGENTS.md`, written when at least one SOP targets Roo Code or another `AGENTS.md` reader in the workspace. Your own text in the file is kept, and the section is shared with every other harness that reads `AGENTS.md` (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)).
 
-Intutic does not write `.roorules` or `.roo/rules/`: a file in `.roo/rules/` would stop Roo Code reading your own `.roorules` and `.clinerules`. Earlier versions overwrote `.roorules` whole; the first sync with this version gives you your own copy of it back.
+Intutic does not write `.roorules` or `.roo/rules/`: a file in `.roo/rules/` would stop Roo Code reading your own `.roorules` and `.clinerules`. Earlier versions overwrote `.roorules` whole; the first write with this version gives you your own copy of it back.
 
-To undo what `intutic connect` writes here, run `intutic disconnect --harness roo-code`: each file goes back to what it held before connect first wrote it, or is deleted if connect created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
+To undo what `intutic gates install` writes here, run `intutic disconnect --harness roo-code`: each file goes back to what it held before Intutic first wrote it, or is deleted if Intutic created it, and edits you made since are kept. In `AGENTS.md` only the marked section is taken out, and it stays while another harness that writes it is still connected. See [`intutic disconnect`](/reference/cli#intutic-disconnect).
 
 ## Proxy routing
 

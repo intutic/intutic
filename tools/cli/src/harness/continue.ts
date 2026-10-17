@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType, rulesFrontMatterOf, openaiBaseUrl } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
-import type { IHarnessAdapter } from './types.js'
+import type { HarnessWriteOptions, IHarnessAdapter } from './types.js'
 import { mergeContinueConfig } from '@intutic/sync-daemon'
 import { ownRulesFileHash, writeOwnRulesFile } from './rulesFiles.js'
 
@@ -52,7 +52,9 @@ export const continueAdapter: IHarnessAdapter = {
     }
   },
 
-  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+  /** Continue has no tool-call hook: its "gate" is the routing, so without it there is nothing to write. */
+  async installGate(_workspaceRoot: string, proxyUrl: string, opts?: HarnessWriteOptions): Promise<void> {
+    if (opts?.routing === false) return
     await mergeContinueConfig(continuePath('config.yaml'), openaiBaseUrl(proxyUrl))
   },
 

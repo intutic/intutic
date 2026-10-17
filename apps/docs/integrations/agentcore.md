@@ -8,9 +8,9 @@ description: What Intutic can and cannot govern across AgentCore Runtime, Gatewa
 AWS Bedrock AgentCore (GA 2025-10) is a 13-module platform for hosting and running agents on AWS — Runtime, Gateway, Policy, Harness, Memory, Identity, Code Interpreter, Browser, Observability, Payments, Evaluations, Optimization, Registry. This page covers exactly the four modules that intersect with tool-call governance: **Runtime**, **Gateway**, **Policy**, and **Harness**. The other nine (Memory, Identity, Code Interpreter, Browser, Observability, Payments, Evaluations, Optimization, Registry) have no tool-call surface for Intutic to govern and are out of scope here.
 
 ::: warning This page covers two structurally different integrations
-**AgentCore Runtime** hosts your own agent code — it is governed via whichever already-supported framework SDK gate your code uses (Strands, LangGraph, CrewAI, ...), the same way that framework is governed anywhere else. There is a `HarnessType` entry (`agentcore-runtime`) and `intutic init`/`intutic connect` detect it, but it writes no config of its own.
+**AgentCore Runtime** hosts your own agent code — it is governed via whichever already-supported framework SDK gate your code uses (Strands, LangGraph, CrewAI, ...), the same way that framework is governed anywhere else. There is a `HarnessType` entry (`agentcore-runtime`) and `intutic init` detects it, but it writes no config of its own.
 
-**AgentCore Gateway** is a deployed AWS resource, not something on a developer's laptop — like [QM](/integrations/qm), it has **no `HarnessType` entry** and `intutic init`/`intutic connect` never detect or configure it. Its coverage is the `tools/agentcore-interceptor` Lambda, deployed once by an operator, calling a dedicated Intutic control-plane endpoint for a verdict.
+**AgentCore Gateway** is a deployed AWS resource, not something on a developer's laptop — like [QM](/integrations/qm), it has **no `HarnessType` entry** and `intutic init`/`intutic gates install` never detect or configure it. Its coverage is the `tools/agentcore-interceptor` Lambda, deployed once by an operator, calling a dedicated Intutic control-plane endpoint for a verdict.
 :::
 
 ## What IS governable

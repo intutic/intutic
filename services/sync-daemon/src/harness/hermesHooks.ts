@@ -181,7 +181,10 @@ async function mergeHermesConfig(hookScriptPath: string): Promise<void> {
 
 // ─── Governance skill template ────────────────────────────────────────────────
 
-function buildGovernanceSkill(proxyUrl: string): string {
+function buildGovernanceSkill(proxyUrl: string, routing: boolean): string {
+  const traffic = routing
+    ? `Policy is managed in Intutic; this agent's LLM traffic goes through the Intutic proxy at \`${proxyUrl}\`.`
+    : 'Policy is managed in Intutic, on this machine.'
   return `---
 name: intutic-governance
 description: Intutic governance awareness. Always check compliance before tool calls.
@@ -197,7 +200,7 @@ Before every tool call, you MUST verify compliance with workspace SOPs.
 A pre-tool-use hook (\`~/.intutic/hooks/hermes-check.sh\`) enforces these rules automatically.
 
 If a tool call is blocked, do NOT attempt to circumvent the governance gate.
-Policy is managed in Intutic; this agent's LLM traffic goes through the Intutic proxy at \`${proxyUrl}\`.
+${traffic}
 `
 }
 
@@ -213,11 +216,14 @@ Policy is managed in Intutic; this agent's LLM traffic goes through the Intutic 
  * @param workspaceRoot - Absolute workspace root path.
  * @param proxyUrl      - Intutic proxy URL written into hook headers / skill.
  * @param workspaceId   - Workspace ID embedded in every hook event payload.
+ * @param routing       - Whether the agent's LLM traffic goes through the proxy;
+ *                        only the skill's wording depends on it.
  */
 export async function writeHermesHooks(
   workspaceRoot: string,
   proxyUrl: string,
   workspaceId = '',
+  routing = true,
 ): Promise<void> {
   // ── 1. Ensure directories ──────────────────────────────────────────────────
 
@@ -256,7 +262,7 @@ export async function writeHermesHooks(
 
   // ── 4. Write governance skill ──────────────────────────────────────────────
 
-  const skill = buildGovernanceSkill(proxyUrl)
+  const skill = buildGovernanceSkill(proxyUrl, routing)
   await writeFileAtomic(skillPath, skill)
   await noteWritten(skillPath, workspaceRoot, skill)
 

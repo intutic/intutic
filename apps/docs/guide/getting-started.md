@@ -87,13 +87,13 @@ For environments without Node.js, download single-file precompiled binaries dire
 * 💻 macOS (Intel): `cli-macos-x64` / `intutic-proxy-darwin-x64`
 :::
 
-## Step 2 — Log in <Badge type="tip" text="Connected mode only" />
+<!-- ENTERPRISE_ONLY_START -->
+## Connected mode: log in first <Badge type="tip" text="Connected mode only" />
 
-::: tip Running open core standalone? Skip to [Step 4](#step-4-start-the-proxy).
+::: tip Running open core standalone? Skip this section.
 `login` authenticates you with a **control plane**, which open core does not
-include, and `init` records the workspace for `intutic connect` to sync.
-Standalone needs neither — `intutic start` runs the proxy with no account at
-all.
+include. Standalone needs none — `intutic start` runs the proxy with no account
+at all.
 :::
 
 ```bash
@@ -122,7 +122,6 @@ intutic login --api-key vk_your_key_here
 ```
 :::
 
-<!-- ENTERPRISE_ONLY_START -->
 ::: tip Self-hosted control plane
 Log in with its URL once; every later command, `intutic connect` included, uses it:
 ```bash
@@ -131,7 +130,6 @@ intutic login --control-plane-url https://intutic.internal.example
 `INTUTIC_CONTROL_PLANE_URL` does the same per shell. See
 [Choosing a control plane](/reference/cli#control-plane-url).
 :::
-<!-- ENTERPRISE_ONLY_END -->
 
 ::: details Local development
 If you are running a control plane on this machine, point at it with `--dev`:
@@ -142,8 +140,9 @@ This uses `http://localhost:3001` instead of the hosted API. Open core does not
 include a control plane, so this is only useful if you are supplying one — the
 proxy itself needs no login and runs standalone without either.
 :::
+<!-- ENTERPRISE_ONLY_END -->
 
-## Step 3 — Initialize your workspace
+## Step 2 — Initialize your workspace
 
 From your project root (must contain a `.git/` directory or `package.json`):
 
@@ -153,7 +152,8 @@ intutic init
 
 This auto-detects every AI harness in your project and records them in
 `~/.intutic/config.json`. It makes no network call and writes no harness
-files; `intutic connect` (Step 4) writes those.
+files; `intutic gates install` (Step 3) writes those. At a terminal, `init`
+offers to run it for you; `--gates` or `--no-gates` answers that in a script.
 
 ```
 Intutic — Workspace Initialization
@@ -167,7 +167,6 @@ Intutic — Workspace Initialization
   ...
 
 ✔ Detected 2 harnesses
-✔ Authenticated as you@company.com
 
 Install Intutic Git hooks (post-commit, post-checkout, pre-commit secret scan, post-merge)? [Y/n]:
 ✔ Workspace initialized.
@@ -183,6 +182,24 @@ Record dev mode, so later commands use a local control plane
 intutic init --dev
 ```
 :::
+
+## Step 3 — Install the gates
+
+```bash
+intutic gates install
+```
+
+For each harness `init` recorded, this writes its blocking gate and, when
+`.intutic/sops/` holds rule sets, its rules file. Everything comes from local
+files; no control plane or account is involved. `--dry-run` shows what it would
+write, and `--harness <id>` limits it to one harness. Each harness's page under
+[Integrations](/integrations/) lists the files, and `intutic disconnect` takes
+them out again.
+
+The gates enforce the built-in protections, your rule sets and their
+[front matter](/reference/sop-front-matter) on every tool call. A
+`review_before:` hold needs a reviewer, which only a control plane provides, so
+without one the gates refuse those calls.
 
 ## Step 4 — Start the proxy {#step-4-start-the-proxy}
 
@@ -250,6 +267,7 @@ INTUTIC_STANDALONE=1 intutic-proxy
 ```
 :::
 
+<!-- ENTERPRISE_ONLY_START -->
 ::: warning `intutic connect` is not this
 `intutic connect` starts the **sync daemon**, which mirrors governance config
 with a control plane. Open core does not include one, so that command will ask
@@ -257,7 +275,7 @@ you to authenticate against an account you have no way to create. Use it only if
 you are running a control plane yourself.
 :::
 
-### Connected<!-- ENTERPRISE_ONLY_START --> (Cloud / self-hosted control plane)<!-- ENTERPRISE_ONLY_END -->
+### Connected (Cloud / self-hosted control plane)
 
 With a control plane available, `intutic connect` additionally opens a WebSocket
 for live policy updates and watches your harness configs for drift:
@@ -308,6 +326,7 @@ both modes, and the two representations agree within `1e-12`. A workspace that
 learned standalone keeps that learning when a control plane takes over, and the
 control plane signals the handover by setting the workspace's reward mode to
 `cloud`, at which point the local loop stands down within 60 seconds.
+<!-- ENTERPRISE_ONLY_END -->
 
 ### Route your agent
 
@@ -319,10 +338,20 @@ Set your agent's base URL environment variable to point at the local Intutic pro
 export ANTHROPIC_BASE_URL="http://localhost:4000"
 ```
 
+For a harness with a config key for its base URL, such as Codex or Aider,
+`intutic gates install --route` writes it for you while the proxy runs; or start
+the agent with `intutic exec -- <agent>`, which sets these variables for that
+process.
+
+`intutic start` also keeps the installed gates current: when a rule set under
+`.intutic/sops/` changes, it rewrites them (`intutic start --no-gates` leaves
+them alone).
+
 Now, every LLM API call and tool execution is evaluated pre-flight.
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
 ## 🛠️ Under the Hood
 
 When you run `intutic connect`, Intutic:
@@ -341,6 +370,7 @@ intutic connect --dev              # Local control plane
 ```
 For a persistent system service that starts on login, see [`intutic daemon install`](/reference/cli).
 :::
+<!-- ENTERPRISE_ONLY_END -->
 
 ## Step 5 — Trigger your first block
 
@@ -361,7 +391,7 @@ inside a code blob; this one was read.
 The proxy alone reads a call's arguments once the call comes back in the
 conversation history, on the next request. To refuse a tool before the harness
 runs it, name it in an SOP's `deny_tools`, which the proxy applies to the
-model's response, or use the pre-tool-use gate `intutic connect` installs.
+model's response, or rely on the pre-tool-use gate `intutic gates install` installs.
 
 ## Step 6 — View your trace
 
@@ -424,7 +454,7 @@ Intutic — Workspace Status
 
 ## Disconnecting
 
-`intutic disconnect` undoes `intutic connect`: every harness config it changed goes back the way it was, the background services are removed, and you are logged out. Run it with `--dry-run` first to see each change, and `--harness <id>` to disconnect one harness. See [`intutic disconnect`](/reference/cli#intutic-disconnect) for what it restores and what it leaves.
+`intutic disconnect` undoes `intutic gates install`<!-- ENTERPRISE_ONLY_START --> and `intutic connect`<!-- ENTERPRISE_ONLY_END -->: every harness config it changed goes back the way it was<!-- ENTERPRISE_ONLY_START -->, the background services are removed, and you are logged out<!-- ENTERPRISE_ONLY_END -->. Run it with `--dry-run` first to see each change, and `--harness <id>` to disconnect one harness. See [`intutic disconnect`](/reference/cli#intutic-disconnect) for what it restores and what it leaves.
 
 ```bash
 intutic disconnect --dry-run

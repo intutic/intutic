@@ -19,7 +19,7 @@ Everything here runs in the proxy and the gates on your machine, with no
 account, except the three sections badged <Badge type="tip" text="Cloud" />: a
 run budget, a hold for human review, and sandbox attestation each need a
 connected workspace's control plane — as does anything that reads loop runs or
-stored findings (`LOOP_RUN_TERMINATED`, `intutic findings`, the Findings page).
+stored findings (`LOOP_RUN_TERMINATED`, the Findings page).
 
 ## The problem a graph creates
 
@@ -169,8 +169,8 @@ included) so an operator can see propagation a turn early — it never changes
 a verdict, because a model legitimately quotes these phrasings when asked
 about them. That stays true regardless of labelling: no amount of adjudication
 turns this into a blocking signal. Each firing is recorded per pattern as a
-`detector_findings` row, and `intutic findings adjudicate <id>
---true-positive|--false-positive` on the CLI or the dashboard's Findings page
+`detector_findings` row, and with a control plane, the dashboard's Findings page<!-- ENTERPRISE_ONLY_START --> or `intutic findings adjudicate <id>
+--true-positive|--false-positive` on the CLI<!-- ENTERPRISE_ONLY_END -->
 will accept a ruling on one — but the product keeps only a short DLP-scrubbed
 snippet of the response around each match (200 bytes by default, 14-day
 retention, owners and admins only), so a ruling rests on that window rather

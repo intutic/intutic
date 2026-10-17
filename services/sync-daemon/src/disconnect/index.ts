@@ -28,8 +28,19 @@ export interface DisconnectOptions {
   remaining?: readonly string[]
 }
 
-/** Gate caches connect refreshes for every harness's gate, in `~/.intutic/hooks/`. */
-const GATE_CACHES = ['policy-snapshot.json', 'policy-snapshot.rules', 'approved-bypasses.jsonl', 'egress-policy.json']
+/**
+ * Gate caches connect (or `intutic gates install`) writes for every harness's
+ * gate, in `~/.intutic/hooks/`: the policy snapshot, its last verified copy,
+ * the approved bypasses and the egress policy.
+ */
+const GATE_CACHES = [
+  'policy-snapshot.json',
+  'policy-snapshot.rules',
+  node_path.join('verified', 'policy-snapshot.json'),
+  node_path.join('verified', 'policy-snapshot.rules'),
+  'approved-bypasses.jsonl',
+  'egress-policy.json',
+]
 
 /**
  * Every change disconnect would make, in the order it makes them. Nothing is
@@ -80,6 +91,7 @@ export async function planDisconnect(options: DisconnectOptions): Promise<Discon
     }
     // Directories connect's writers create for themselves; any still holding
     // something (logs, config, credentials) stays.
+    plan.removeIfEmpty(node_path.join(hooks, 'verified'))
     for (const root of [...roots, home]) {
       for (const dir of ['events', 'env', 'hooks', 'n8n']) plan.removeIfEmpty(node_path.join(root, '.intutic', dir))
       plan.removeIfEmpty(node_path.join(root, '.intutic'))

@@ -41,12 +41,13 @@ Once a control plane manages a workspace, a daily job scores each arm (routed mo
 
 A request is routed only when the model it names is one of the **candidate models**, or a dated snapshot or `-latest` alias of one: with `claude-sonnet-4-5` as a candidate, `claude-sonnet-4-5-20250929` and `claude-sonnet-4-5-latest` are routed too, and `claude-sonnet-4-6` is not. Every other request is forwarded as written. When the router keeps a snapshot on its own candidate, the request goes out under the exact snapshot name it asked for.
 
-The candidates are the proxy's `routing.candidate_models` ([configuration](/reference/configuration#model-routing-intutic-settings-routing)), by default `claude-sonnet-5-5`, `gpt-4.1` and `gemini-3.8-flash`. A workspace can replace that list with its own `routingCandidates` setting: **Settings › AI Routing & Caching › Candidate Models** in the dashboard, or
+The candidates are the proxy's `routing.candidate_models` ([configuration](/reference/configuration#model-routing-intutic-settings-routing)), by default `claude-sonnet-5-5`, `gpt-4.1` and `gemini-3.8-flash`. With a control plane, a workspace can replace that list with its own `routingCandidates` setting.<!-- ENTERPRISE_ONLY_START --> Set it under **Settings › AI Routing & Caching › Candidate Models** in the dashboard, or with:
 
 ```bash
 intutic settings set routingCandidates '["claude-sonnet-5-5", "claude-haiku-4-5", "gemini-3.8-flash"]'
 intutic settings set routingCandidates '[]'   # back to the proxy's list
 ```
+<!-- ENTERPRISE_ONLY_END -->
 
 Each request then only sees the candidates it can actually reach. A candidate is left out of that request's choice when:
 
@@ -60,7 +61,7 @@ The model the request named is always kept: choosing it sends the request as wri
 
 ### Try it in shadow mode first
 
-Shadow mode runs the whole selection and records its pick on the trace (`routing_shadow_model`) and in the shadow savings report, while every request is served with the model it asked for. Turn on **Shadow Routing** in the dashboard, or set `ff_shadow_routing` (`intutic settings set featureFlags '{"ff_shadow_routing": true}'`); standalone, set `routing.mode: shadow` (with `routing.enabled` unset, shadow turns routing on by itself; an explicit `routing.enabled: false` keeps it off and logs a warning at startup). Shadow says how often the router would switch and what that would cost; it cannot say whether the other model's answers would have been as good, because it never ran. [Mirroring](/guide/mirror-adoption-report) measures that.
+Shadow mode runs the whole selection and records its pick on the trace (`routing_shadow_model`) and in the shadow savings report, while every request is served with the model it asked for. With a control plane, turn on **Shadow Routing** in the dashboard, or set `ff_shadow_routing`<!-- ENTERPRISE_ONLY_START --> (`intutic settings set featureFlags '{"ff_shadow_routing": true}'`)<!-- ENTERPRISE_ONLY_END -->; standalone, set `routing.mode: shadow` (with `routing.enabled` unset, shadow turns routing on by itself; an explicit `routing.enabled: false` keeps it off and logs a warning at startup). Shadow says how often the router would switch and what that would cost; it cannot say whether the other model's answers would have been as good, because it never ran. [Mirroring](/guide/mirror-adoption-report) measures that.
 
 ---
 
@@ -369,13 +370,15 @@ the fallback's response earns it nothing.
 
 ### Per-workspace settings
 
-The workspace setting `upstreamRetry` overrides any of the proxy's values, field by field, for requests made with a virtual key through a proxy that has a control plane URL:
+The workspace setting `upstreamRetry` overrides any of the proxy's values, field by field, for requests made with a virtual key through a proxy that has a control plane URL.
 
+<!-- ENTERPRISE_ONLY_START -->
 ```bash
 intutic settings set upstreamRetry '{"maxAttempts": 4, "budgetMs": 45000}'
 intutic settings set upstreamRetry --file retry.json   # with fallbacks
 intutic settings set upstreamRetry null                # back to each proxy's config
 ```
+<!-- ENTERPRISE_ONLY_END -->
 
 Its fallback targets take every provider `config.yaml` does, `bedrock`, `vertex` and `azure` included.
 The same setting is under **Settings › AI Routing & Caching › Retries & Fallbacks** in the dashboard and in
@@ -418,13 +421,16 @@ You can customize the words that trigger model redirection to fit your team's te
 To route agent traffic, you must ensure your AI agent harnesses are connected to the Intutic proxy gateway:
 
 #### Option A: Using the CLI (Recommended)
-`intutic connect` starts the sync daemon, which writes each detected harness's gate and, where the harness has a config key for it, its base URL, and prints setup steps for the rest:
+`intutic gates install --route` writes each detected harness's gate and, where the harness has a config key for it, its base URL; the proxy must be running. For the rest, start the agent with `intutic exec -- <agent>`:
 ```bash
 npm install -g @intutic/cli
-intutic login
 intutic init
-intutic connect
+intutic start
+intutic gates install --route
 ```
+<!-- ENTERPRISE_ONLY_START -->
+With a control plane, `intutic login` and `intutic connect` write the same files and keep them in sync.
+<!-- ENTERPRISE_ONLY_END -->
 
 #### Option B: Standalone Proxy Redirects
 For custom agent configurations, point your agent's API base URL environment variables directly to the proxy gateway:

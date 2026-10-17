@@ -23,6 +23,7 @@ model_list:
 
 ## Credentials
 
+<!-- ENTERPRISE_ONLY_START -->
 **A workspace's own credential.** Provision it under Settings › Security › Provider Keys, with `intutic credentials set`, the SDKs' `setProviderCredential`, or the Terraform `intutic_provider_credential` resource. It takes a region and either an access key pair or a Bedrock API key:
 
 ```bash
@@ -33,6 +34,7 @@ intutic credentials set bedrock --field awsRegion=us-east-1 \
 Requests made with an Intutic key (`vk_…`) use it. On a gateway that requires provisioned keys, a workspace without one is refused with `402 byok_required`.
 
 The credential is checked as soon as it is saved, and again from **Test** on the Provider Keys card: an access key pair with STS `GetCallerIdentity`, which proves the key but not its Bedrock permissions (the first model call checks those); a Bedrock API key with `ListFoundationModels`. A key AWS does not recognise is reported as rejected; a key that authenticates but may not list models is reported as not verified.
+<!-- ENTERPRISE_ONLY_END -->
 
 **A self-hosted proxy's own credentials.** Set the region with `AWS_REGION` (or `AWS_DEFAULT_REGION`) or `intutic_settings.providers.bedrock.region`. The proxy then authenticates with, in order:
 

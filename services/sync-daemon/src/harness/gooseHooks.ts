@@ -74,8 +74,15 @@ function shellQuote(s: string): string {
  * @param proxyUrl    - Intutic proxy URL written into the plugin script.
  * @param workspaceRoot - Absolute workspace root (for hook events log path).
  * @param workspaceId - Workspace ID embedded in hook event payloads.
+ * @param routing     - Also point goose's provider hosts at the proxy. False
+ *                      registers the gate in config.yaml and leaves the hosts.
  */
-export async function writeGooseHooks(proxyUrl: string, workspaceRoot = os.homedir(), workspaceId = ''): Promise<void> {
+export async function writeGooseHooks(
+  proxyUrl: string,
+  workspaceRoot = os.homedir(),
+  workspaceId = '',
+  routing = true,
+): Promise<void> {
   const hooksDir = path.join(PLUGIN_DIR, 'hooks')
   const scriptsDir = path.join(PLUGIN_DIR, 'scripts')
   await keepOriginal(path.join(PLUGIN_DIR, 'plugin.json'), workspaceRoot)
@@ -185,7 +192,8 @@ exit 0
   )
 
   // ── Merge proxy URL into goose config.yaml ───────────────────────────
-  await mergeGooseConfig(proxyUrl)
+  // An empty URL registers the gate and leaves the provider hosts alone.
+  await mergeGooseConfig(routing ? proxyUrl : '')
 }
 
 /**

@@ -6,7 +6,7 @@ routes as the standalone Provider Keys settings: an interactive CLI command, and
 modal.
 
 Neither is a separate code path from the settings you'd otherwise click through one at a time —
-`intutic setup` calls the exact route `intutic credentials set` already calls, and the
+`intutic setup` calls the exact route the workspace's Provider Keys setting already calls, and the
 dashboard's Guided Setup button drives the same mutations `ProviderKeyWizard` uses. This is a
 sequence over existing actions, not new behavior to trust separately.
 
@@ -23,7 +23,7 @@ Steps:
 
 1. **Codescan** — detects harnesses in the current workspace (the same detection `intutic init`
    uses).
-2. **Mode** — connected to Intutic (needs `intutic login` first) or local/offline, with no
+2. **Mode** — connected to a control plane (logged in to it first) or local/offline, with no
    control plane.
 3. **Provider** — pick one from the registry; each option shows whether the proxy currently
    routes to it (see [Provider Keys](/guide/settings#provider-keys)).
@@ -33,7 +33,7 @@ Steps:
    a confirmed-invalid key (401/403) stops you, and even then you can choose to save it anyway;
    a rate-limited or unreachable response is reported but never blocks.
 6. **Persist** — connected mode saves the credential to your workspace (the same
-   `PUT /api/v1/workspace/provider-credentials/:provider` route `intutic credentials set` uses);
+   `PUT /api/v1/workspace/provider-credentials/:provider` route the Provider Keys setting uses);
    local mode writes a `.intutic.env` file (mode `0600`) you source yourself<!-- ENTERPRISE_ONLY_START -->, and points you at
    [`intutic judge configure`](/reference/cli#intutic-judge-configure) to set up an on-prem
    judge on a self-hosted model<!-- ENTERPRISE_ONLY_END -->.

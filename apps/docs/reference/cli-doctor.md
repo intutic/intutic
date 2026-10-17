@@ -1,6 +1,6 @@
 ---
 title: intutic doctor
-description: Diagnose workspace health — verify proxy, auth, daemon, config integrity, logs, Valkey, cert trust, the policy snapshot and the optional Cisco skill scanner.
+description: Diagnose workspace health — verify proxy, auth, daemon, config integrity, logs, Valkey, cert trust, the policy snapshot, the local gates and the optional Cisco skill scanner.
 ---
 
 # `intutic doctor`
@@ -17,9 +17,10 @@ No flags. The command reads `~/.intutic/` and the workspace recorded by `intutic
 
 ## Checks
 
-The doctor runs these nine checks in order. Checks 2–5 and 8 need a control plane: on a machine with
-no login they are skipped with one note, and the proxy and CA-trust remediations point at
-`intutic start`.
+The doctor runs these checks in order. Checks 2–5 need a control plane: on a machine with no login
+they are skipped with one note, and the proxy and CA-trust remediations point at `intutic start`.
+On such a machine check 8 reads the snapshot [`intutic gates install`](/reference/cli#intutic-gates-install)
+wrote, and check 9 runs; both point at `intutic gates install` to fix what is missing.
 
 | # | Check | What it verifies | Pass condition |
 |---|---|---|---|
@@ -30,8 +31,9 @@ no login they are skipped with one note, and the proxy and CA-trust remediations
 | 5 | **Daemon Log** | The first readable of `~/.intutic/logs/sync-daemon.log`, the system-service log (`/Library/Logs/Intutic/sync-daemon.log` on macOS, `/var/log/intutic/sync-daemon.log` on Linux), then the legacy `~/.intutic/daemon.log` | Readable and not empty; the age of the newest entry is shown |
 | 6 | **Valkey** | TCP connection to `127.0.0.1:6379` | Connects within 2s |
 | 7 | **Cert Trust** | `~/.intutic/ca.crt` exists and is in the OS trust store | macOS: `security verify-cert`; Linux: system CA directory |
-| 8 | **Policy Snapshot** | `~/.intutic/hooks/policy-snapshot.rules`, the compiled workspace policy every harness gate reads | Present, digest valid, belongs to the logged-in workspace, at least one rule, refreshed within 7 days |
-| 9 | **Cisco Skill Scanner** | Whether the optional `skill-scanner` binary used by `intutic skill audit --engine cisco` is on `PATH` | Always passes; prints the install command when absent |
+| 8 | **Policy Snapshot** | `~/.intutic/hooks/policy-snapshot.rules`, the compiled workspace policy every harness gate reads | Present, digest valid, belongs to the logged-in workspace (a local snapshot names none), at least one rule, refreshed within 7 days |
+| 9 | **Local Gates** | With no login: a gate file for each harness recorded by `intutic init` that has a tool-call gate | Every such harness has one |
+| 10 | **Cisco Skill Scanner** | Whether the optional `skill-scanner` binary used by `intutic skill audit --engine cisco` is on `PATH` | Always passes; prints the install command when absent |
 
 Valkey is optional for a standalone proxy (`intutic start` runs without it), so a failed
 Valkey check on a machine that never set one up is expected. A stale policy snapshot is still
@@ -59,6 +61,22 @@ Intutic Doctor — Workspace Health Check
 ✔ All 9 checks passed — workspace is healthy.
 ```
 
+On a machine with no login, with the gates installed:
+
+```
+  ✗ Proxy — Not reachable — fetch failed
+    → Start the proxy: ensure `intutic start` is running or the proxy binary is started.
+  ✗ Valkey — Not reachable on port 6379
+    → Start Valkey: `docker compose up -d valkey` or install locally.
+  ✗ Cert Trust — CA certificate not found at /Users/dev/.intutic/ca.crt
+    → Start the proxy with `intutic start` — it auto-generates the CA cert on first run.
+  ✓ Policy Snapshot — 31 rule(s), digest 0f3c9a7e21d84b6a5c0e9f1d2b3a4c5d, 0d old
+  ✓ Local Gates — 2 gate(s) installed: claude-code, cursor
+  ✓ Cisco Skill Scanner — not installed (optional integration)
+    → pipx install cisco-ai-skill-scanner
+  – Control plane, sync daemon, harness sync and daemon log checks skipped: open core, no control plane connected. The gates are checked as `intutic gates install` writes them.
+```
+
 When a check fails:
 
 ```
@@ -83,7 +101,8 @@ When a check fails:
 | CA cert not found | `intutic connect` (auto-generates on first run) |
 | CA cert not trusted (macOS) | `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.intutic/ca.crt` |
 | CA cert not trusted (Linux) | `sudo cp ~/.intutic/ca.crt /usr/local/share/ca-certificates/intutic-ca.crt && sudo update-ca-certificates` |
-| Policy snapshot absent, invalid, empty or stale | `intutic policy snapshot` |
+| Policy snapshot absent, invalid, empty or stale | `intutic gates install` with no login; `intutic policy snapshot` with one |
+| Local gates missing | `intutic gates install` |
 | Cisco skill scanner not installed | `pipx install cisco-ai-skill-scanner` (only needed for `--engine cisco`) |
 
 ## Source

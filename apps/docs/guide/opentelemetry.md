@@ -45,7 +45,7 @@ No instrument carries a `workspace_id` or per-detector label — per-workspace a
 
 Every component that receives a `traceparent` header (W3C Trace Context) on an inbound request propagates it correctly to its own outbound calls and emitted spans — this is what lets a single trace span the harness, the proxy, and the control plane.
 
-The `intutic connect` CLI daemon is a special case: it's software every open-core user installs locally, so it does not pull in the full auto-instrumentation package (that would meaningfully bloat install size and startup time for the vast majority who never configure a collector). Instead it does propagation only — if the CLI process itself was launched with an active trace context (a `TRACEPARENT` environment variable set by an already-instrumented parent process), it carries that context onto every request it makes to the control plane. It does not create its own spans.
+The CLI's sync daemon, which talks to a control plane, is a special case: it's software every open-core user installs locally, so it does not pull in the full auto-instrumentation package (that would meaningfully bloat install size and startup time for the vast majority who never configure a collector). Instead it does propagation only — if the CLI process itself was launched with an active trace context (a `TRACEPARENT` environment variable set by an already-instrumented parent process), it carries that context onto every request it makes to the control plane. It does not create its own spans.
 
 ## Log correlation
 

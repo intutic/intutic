@@ -42,8 +42,9 @@ Developer's Machine                                  Cloud
 ::: tip Open core runs without the control plane
 The control plane is optional, and open core ships none. A standalone install
 (`intutic start`) runs the harness and the proxy on the developer's machine. The
-sync daemon is `intutic connect`, which needs a control plane, so it and steps
-4–6 below apply only once you connect one.
+sync daemon needs a control plane, so it and steps 4–6 below apply only once
+you connect one. Standalone, `intutic gates install` writes each harness's gate
+and rules file from `.intutic/sops/`.
 :::
 
 ### The flow
@@ -97,6 +98,7 @@ Every request passes through these stages before reaching the LLM:
 
 ---
 
+<!-- ENTERPRISE_ONLY_START -->
 ## Sync Daemon (TypeScript)
 
 The sync daemon keeps harness config files in sync with SOPs from the control plane. It runs on the developer's machine as a managed process started by `intutic connect`.
@@ -136,6 +138,11 @@ The daemon watches all harness config files using **chokidar**:
 - Reports the drift to the control plane either way
 
 All config writes are **atomic** — write to a temp file, then rename. With the **Write-protect** setting on macOS, the rules files also carry the `uchg` immutable flag between syncs, so a hand edit fails; the daemon clears the flag before it writes and sets it again afterwards.
+<!-- ENTERPRISE_ONLY_END -->
+
+## Harness files
+
+`intutic gates install` writes each recorded harness's gate and, when a rule set targets it, its rules file, from `.intutic/sops/`; `intutic start` rewrites them when a rule set changes. See [What writes harness files](/integrations/#what-writes-harness-files).
 
 ### Config file formats
 
@@ -174,7 +181,7 @@ interface IHarnessAdapter {
 | Method | Purpose |
 |---|---|
 | `detect()` | Check if the harness is present (usually `fs.access` on the config file) |
-| `installGate()` | Install the harness's tool-call gate and its proxy routing. `intutic connect` runs it for every configured harness, whether or not a rule set targets it |
+| `installGate()` | Install the harness's tool-call gate and, with `intutic gates install --route`, its proxy routing. `intutic gates install` runs it for every configured harness, whether or not a rule set targets it |
 | `writeConfig()` | Write the rule sets into the one file the harness reads as standing instructions, and no other; called only when a rule set targets the harness, or on a forced sync |
 | `readCurrentHash()` | SHA-256 of the rules file (for drift detection) |
 

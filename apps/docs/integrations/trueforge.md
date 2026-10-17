@@ -32,7 +32,11 @@ intutic init
   ✔ trueforge → /path/to/project/.env.intutic
 ```
 
-`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic connect` — see [What writes harness files](/integrations/#what-writes-harness-files).
+`intutic init` only detects the harness and records it in `~/.intutic/config.json`; it writes no harness files. The files described on this page are written by `intutic gates install` (open core, no control plane), from the rule sets in `.intutic/sops/` — see [What writes harness files](/integrations/#what-writes-harness-files):
+
+```bash
+intutic gates install
+```
 
 #### 2. Route LLM traffic through the proxy
 
@@ -61,8 +65,8 @@ npm install @intutic/gate
 import { Gate, GateClient, install } from '@intutic/gate'
 import { intuticApprovalResponder } from '@intutic/gate/trueforge'
 
-// The client reads INTUTIC_API_KEY / INTUTIC_WORKSPACE_ID, or the credentials
-// `intutic login` saved. Without it the gate still enforces the local policy
+// The client reads INTUTIC_API_KEY / INTUTIC_WORKSPACE_ID, or the credentials a
+// control-plane login saved. Without it the gate still enforces the local policy
 // snapshot, but skips your SOP rules, the control-plane check and audit events.
 const client = GateClient.fromEnv({ sessionId: runId, harness: 'trueforge' })
 install(new Gate({ workspaceId: client.workspaceId }, client))

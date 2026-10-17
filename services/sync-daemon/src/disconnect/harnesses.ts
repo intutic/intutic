@@ -215,13 +215,15 @@ function restoreDeny(doc: JsonObject, ctx: ReverseContext, replaced: boolean): b
   const originalDeny = Array.isArray(originalValue) ? originalValue : []
   const kept = replaced ? originalDeny : originalDeny.filter((r) => deny.includes(r))
   const next = [...kept, ...deny.filter((r) => !originalDeny.includes(r) && !added.has(r as string))]
-  if (isDeepStrictEqual(next, deny)) return false
+  // Before the equality check: a writer with no rules to add still wrote an
+  // empty list, which comes out when the original had none.
   if (next.length === 0 && originalValue === undefined) {
     deletePath(doc, ['permissions', 'deny'])
     pruneEmpty(doc, ['permissions'], ctx.original)
-  } else {
-    setPath(doc, ['permissions', 'deny'], next)
+    return true
   }
+  if (isDeepStrictEqual(next, deny)) return false
+  setPath(doc, ['permissions', 'deny'], next)
   return true
 }
 

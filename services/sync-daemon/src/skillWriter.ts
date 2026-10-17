@@ -133,19 +133,17 @@ Hello! I am **Kitkat**, your friendly agentic control plane assistant for the In
 Use the \`intutic\` CLI commands to manage the daemon, inspect execution traces, or manage governed task loops in your workspace:
 
 ### 1. Connection & Session Setup
-- **Authenticate:** \`intutic login [--control-plane-url <url>]\` (authenticates with your Intutic control plane).
-- **Initialize Workspace:** \`intutic init\` (detects the developer harnesses in the workspace, like Claude Code or Cursor, and records them for sync).
-- **Start Connection:** \`intutic connect\` (boots the local interceptor proxy, writes each recorded harness's rules and hooks, keeps them in sync with the control plane, and writes this skill and the rule-author skill into \`.agents/skills/\` when they are missing).
-- **Stop Governing:** \`intutic disconnect [--harness <id>] [--dry-run] [--keep-login]\` (undoes \`connect\` on this machine: restores every harness config it changed, removes its hooks, services and the skills it wrote, and logs out). Run it only when the user asks; \`--dry-run\` shows what would change.
-- **Offline Spend Sync:** The sync daemon automatically reconciles offline query consumption logs (\`traces-*.jsonl\`) and local budgets back to the control plane on reconnect.
+- **Initialize Workspace:** \`intutic init\` (detects the developer harnesses in the workspace, like Claude Code or Cursor, and records them in \`~/.intutic/config.json\`).
+- **Install Gates:** \`intutic gates install [--harness <id>] [--route] [--dry-run]\` (writes each recorded harness's blocking hooks, and its rules file from the local SOPs in \`.intutic/sops/\`, with no control plane; \`--route\` also points the harnesses at the local proxy, which must then be running).
+- **Start the Proxy:** \`intutic start\` (boots the local interceptor proxy, and refreshes installed gates at start and whenever \`.intutic/sops/\` changes).
+- **Stop Governing:** \`intutic disconnect [--harness <id>] [--dry-run] [--keep-login]\` (restores every harness config Intutic changed and removes its hooks). Run it only when the user asks; \`--dry-run\` shows what would change.
 
 ### 2. Traces & Auditing
-- **Check Budget:** \`intutic budget\` (displays overall monthly/daily spend limits, local spend caps, and active task loops).
+- **Check Budget:** \`intutic budget\` (displays the local daily spend cap and today's spend; with a control plane, the workspace limits too).
 - **List Sessions:** \`intutic traces list\`
 - **Inspect Session Trace:** \`intutic traces inspect <trace_id>\`
-- **Push SOP Rules:** \`intutic sops push <name>\` (promotes local SOP rules to central repository).
 
-### 3. Governed Task Loops
+### 3. Governed Task Loops (control plane only)
 - **Start Task Loop:** \`intutic loop start --name <name> [--budget <USD>] [--sops <indices_or_names>] [--auto-judge]\`
 - **Execute Wrapped Agent:** \`intutic loop exec --name <name> [--budget <USD>] [--sops <indices_or_names>] [--auto-judge] -- <command>\`
 - **Complete/Kill Loop:** \`intutic loop complete <loopRunId>\` / \`intutic loop kill <loopRunId>\`
@@ -199,7 +197,7 @@ Intutic names every refusal with a code: an SDK raises it (\`ClawdeBlockedError.
 ### Held: tell the user, then wait
 A hold rule wants a person to see this call before it runs. Codes: \`HELD\` (with a hold id, \`hold_…\`), a hook gate's \`[Intutic Governance] HELD:\` message, \`LOOP_RUN_PENDING_REVIEW\` (the loop run is paused for review), and the proxy's \`policy_held\` (a Rego or WASM rule held the request; the error names the hold id). \`SERVER_HELD\` is the MCP registry's version: the server changed its tools in a risky way and waits for an owner or admin on the MCP Servers page.
 - Tell the user what was held and quote the hold id.
-- Only an **Owner, Admin or Engineering Manager** can decide it: \`intutic decision approve <holdId>\` or \`intutic decision reject <holdId>\`, or the Slack card. A developer cannot approve their own hold.
+- Only an **Owner, Admin or Engineering Manager** can decide it, on a control plane: \`intutic decision approve <holdId>\` or \`intutic decision reject <holdId>\`, the review queue, or the Slack card. A developer cannot approve their own hold. With no control plane a hold cannot be approved: the call stays refused.
 - Do not retry while it is pending. After approval, the identical call (same tool, same arguments) passes only if the workspace's review-hold bypass (\`reviewHoldBypassEnabled\`) is on, and only for a short window (10 minutes by default); otherwise approval records the decision and a retry is held again. The \`intutic_hold_status\` MCP tool says which.
 - A hold with no hold id could not be recorded, so there is nothing to approve: tell the user.
 
@@ -233,11 +231,11 @@ Continue without it, or tell the user what would have to change and who can chan
 ## 🛡️ Policy & Hook Verification
 
 1. **Pre-Tool Interception Hooks:**
-   Harness configurations (e.g. \`.claude/settings.json\`, \`.cursor/hooks.json\`) are automatically updated by \`intutic connect\`. They register execution hooks that block unauthorized tools or unsafe commands before execution.
+   Harness configurations (e.g. \`.claude/settings.json\`, \`.cursor/hooks.json\`) are written by \`intutic gates install\`. They register execution hooks that block unauthorized tools or unsafe commands before execution.
 2. **Local Guidelines & Scoping:**
    Define local, developer-specific rules inside subdirectories of the \`.intutic/sops/\` directory (e.g. \`.intutic/sops/my-rules/rules.md\`). Initialize them using \`@intutic initialize\` and select active local SOPs using \`@intutic start <ticket> --sops=<indices_or_names>\`. These rules are enforced locally in the developer console to protect developer privacy, while global/corporate rules log incidents back to the control plane.
 3. **Offline Sync & Promotion:**
-   When offline, prompt telemetry is stored locally in sharded files \`~/.intutic/logs/traces-YYYY-MM-DD.jsonl\` and budgets are enforced against sharded daily files \`~/.intutic/logs/local-spend-YYYY-MM-DD.jsonl\`. The sync daemon uploads them automatically on connect via \`/api/v1/traces/sync-back\` and cleans up the local files. Rules can be promoted workspace-wide via \`intutic sops push <name>\`.
+   When offline, prompt telemetry is stored locally in sharded files \`~/.intutic/logs/traces-YYYY-MM-DD.jsonl\` and budgets are enforced against sharded daily files \`~/.intutic/logs/local-spend-YYYY-MM-DD.jsonl\`. With a control plane, the sync daemon uploads them via \`/api/v1/traces/sync-back\` and cleans up the local files, and rules can be promoted workspace-wide.
 `
 
 /** Every skill connect writes, by workspace-relative path. */

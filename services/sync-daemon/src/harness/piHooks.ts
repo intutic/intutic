@@ -248,17 +248,21 @@ export function mergePiModels(existing: PiModelsConfig, proxyUrl: string): PiMod
  * @param workspaceRoot - Absolute workspace root path.
  * @param proxyUrl      - Intutic proxy URL for LLM provider routing.
  * @param workspaceId   - Workspace ID embedded in every hook event payload.
+ * @param routing       - Also merge the proxy into models.json. False writes the extension only.
  */
 export async function writePiHooks(
   workspaceRoot: string,
   proxyUrl: string,
   workspaceId = '',
+  routing = true,
 ): Promise<void> {
   await fs.mkdir(path.join(workspaceRoot, '.intutic', 'events'), { recursive: true })
 
   const extensionPath = path.join(os.homedir(), PI_EXTENSION_FILE)
   await writeOwnedFile(extensionPath, workspaceRoot, buildPiExtension(proxyUrl, workspaceRoot, workspaceId))
   log.info({ action: 'pi_extension_written', path: extensionPath }, 'Pi governance extension written')
+
+  if (!routing) return
 
   // A file that is not a plain JSON object is left untouched (and reported)
   // rather than replaced with only the Intutic entries.

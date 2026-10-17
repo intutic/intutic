@@ -52,9 +52,9 @@ Intutic supports 43 AI agent harnesses out of the box. The CLI auto-detects whic
 ## How integration works
 
 1. **`intutic init`** scans your workspace for every supported harness and records the ones it finds in `~/.intutic/config.json`; it writes no harness files
-2. **`intutic connect`** installs each recorded harness's gate and writes governance rules (SOPs) into the harness-native config format
-3. It keeps these files in sync as SOPs change on the control plane
-   (`intutic connect` needs an account. Without one, `intutic start` runs the proxy, but no harness files are written.)
+2. **`intutic gates install`** installs each recorded harness's gate and writes the rule sets in `.intutic/sops/` into the harness-native config format; with `--route` it also points the harness at the proxy
+3. **`intutic start`** runs the proxy, and refreshes the installed gates when a rule set under `.intutic/sops/` changes<!-- ENTERPRISE_ONLY_START -->
+   (`intutic connect` does the same with a control plane, and keeps these files in sync as SOPs change there.)<!-- ENTERPRISE_ONLY_END -->
 4. Each harness adapter uses **atomic writes** (write to temp file, then rename) to prevent corruption
 
 ## Config format per harness

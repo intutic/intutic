@@ -39,7 +39,7 @@ It is a hybrid system divided between the **Local Rust Proxy** and the **Remote 
 
 **Yes, absolutely.** The open-core version is fully functional as a developer sandbox:
 *   Developers can define personal, local-only guidelines in `.intutic/sops/`, as files directly in it or in subdirectories.
-*   Once a control plane is connected, the sync daemon (`intutic connect`) also merges these local guidelines into each harness's rules file as they change, such as `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`.
+*   `intutic gates install` writes these local guidelines into each harness's rules file, such as `.cursor/rules/intutic-governance.mdc`, `.claude/rules/intutic-governance.md` or the rules section of `AGENTS.md`, and installs each harness's blocking gate; `intutic start` rewrites them as the guidelines change.<!-- ENTERPRISE_ONLY_START --> Once a control plane is connected, the sync daemon (`intutic connect`) merges them with the workspace's SOPs.<!-- ENTERPRISE_ONLY_END -->
 *   The local proxy reads the same files: it injects the SOPs that apply into each request and blocks tool calls they list under `deny_tools`, and custom WASM rules run in its sandbox.
 *   This setup protects developer privacy: local rule deviations are kept entirely offline in your workspace, while providing active stream-level interception and rule enforcement. Central database logging, trajectory analysis and config-drift reporting are only enabled when connected to the commercial control plane.
 
@@ -64,7 +64,7 @@ This allows you to enforce a wide variety of development standards, including:
 The token cost prediction works via a multi-tiered fallback architecture:
 
 #### Tier 1: Workspace Baseline (Connected)
-In a connected workspace, the control plane records each call's output and reasoning tokens in Valkey, per model and input-size bucket (`0-1k`, `1k-5k`, `5k-20k`, `20k-50k`, `50k+` tokens). With at least 3 samples for the model and bucket, `@intutic predict` (and `intutic predict-cost`) uses their average output and reasoning tokens, with `medium` confidence (`high` from 10 samples). The same tokens are also recorded in a baseline across every workspace on the control plane; until a workspace has 3 samples of its own, the estimate uses that shared baseline when it has more samples.
+In a connected workspace, the control plane records each call's output and reasoning tokens in Valkey, per model and input-size bucket (`0-1k`, `1k-5k`, `5k-20k`, `20k-50k`, `50k+` tokens). With at least 3 samples for the model and bucket, `@intutic predict`<!-- ENTERPRISE_ONLY_START --> (and `intutic predict-cost`)<!-- ENTERPRISE_ONLY_END --> uses their average output and reasoning tokens, with `medium` confidence (`high` from 10 samples). The same tokens are also recorded in a baseline across every workspace on the control plane; until a workspace has 3 samples of its own, the estimate uses that shared baseline when it has more samples.
 
 #### Tier 2: Static Token Multipliers (Zero-Data Fallback)
 With fewer than 3 samples in either baseline (a model or input size nobody has used yet, or a standalone proxy, which has no baseline), the engine falls back to static, model-specific token ratio multipliers:
@@ -112,9 +112,10 @@ If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with ze
 *   **Local Cost & Token Ledger:** Local JSON/JSONL logs store session traces and aggregate token metrics, query counts, and daily spend.
 *   **Local Cost Predictions:** `@intutic predict` estimates from the static per-model multipliers (see question 6); a standalone proxy keeps no token baseline.
 *   **Local Spending Caps (Rust Proxy):** Enforces global daily limits set in `~/.intutic/config.json` natively inside the proxy gateway.
+*   **Rules files and gates:** `intutic gates install` writes `.intutic/sops/` into each harness's rules file (such as `.cursor/rules/intutic-governance.mdc` or the rules section of `AGENTS.md`) and installs each harness's blocking gate.
 
 #### What is Gated (Requires control plane<!-- ENTERPRISE_ONLY_START --> / SaaS Tier<!-- ENTERPRISE_ONLY_END -->):
-*   **Writing SOPs into harness rules files:** the sync daemon (`intutic connect`) merges `.intutic/sops/` into each harness's rules file (such as `.cursor/rules/intutic-governance.mdc` or the rules section of `AGENTS.md`), and it needs a control plane. Standalone, the proxy injects the same SOPs into each request instead.
+*   **Approving held calls:** a `review_before:` hold needs a reviewer on a control plane; standalone, the gates refuse those calls.
 *   **Ticket Board Integrations (Jira / Linear):** `@intutic initialize` cannot log into enterprise APIs to pull issues. Scoping local rules via `--sops` still works, but cost attribution to a Jira key is unavailable.
 *   **Central Governance Dashboard:** The web UI for tracking team-wide spending, compute budgets, and developer audits is disabled.
 *   **Corporate Policy Distribution:** Centralized policy management and automated distribution of tamper-proof global SOPs to developers requires the control plane.
@@ -124,14 +125,16 @@ If you run Intutic in **pure, standalone Open-Core mode** (100% offline, with ze
 
 ### 10. How do users set and manage spending caps/budgets?
 
-Developers set and manage spending caps using three distinct interfaces:
+Developers set and manage spending caps using these interfaces:
 
+<!-- ENTERPRISE_ONLY_START -->
 #### Setting a Budget for a Specific Session/Task (CLI Wrapper)
 If you want to prevent an agent from running away in a recursive loop on a complex task, wrap the agent's start command using the `intutic loop` CLI helper:
 ```bash
 intutic loop exec --name "ISSUE-101" --budget 3.50 -- claude
 ```
 This registers a loop run with the control plane (it needs `intutic login`), and the proxy tracks the cost of that run's requests. Once the run's cost passes `$3.50`, the proxy refuses its next request with `403`, and the control plane marks the run `KILLED`, after which every request of the run is refused with `403 LOOP_RUN_TERMINATED`.
+<!-- ENTERPRISE_ONLY_END -->
 
 #### Setting a Daily/Global Spend Cap (Local Configuration)
 To set a blanket limit to protect your wallet across all sessions and agents running on your machine, configure the daily budget inside your global configuration file (located at `~/.intutic/config.json`):
@@ -162,7 +165,7 @@ While pair-programming inside the agent chat window (like Cursor or Claude Code)
 ```markdown
 @intutic budget
 ```
-This returns a markdown card with today's and this month's spend against the workspace's caps and, on plans with member budgets, your own member budgets: spent, limit, share used, and whether the budget refuses requests or only alerts. The spend is read from the same counters the proxy's budget gate reads. Per-key budgets are on **Settings › Billing** and `intutic budget keys`.
+This returns a markdown card with today's and this month's spend against the workspace's caps and, on plans with member budgets, your own member budgets: spent, limit, share used, and whether the budget refuses requests or only alerts. The spend is read from the same counters the proxy's budget gate reads.<!-- ENTERPRISE_ONLY_START --> Per-key budgets are on **Settings › Billing** and `intutic budget keys`.<!-- ENTERPRISE_ONLY_END -->
 
 ---
 
@@ -189,7 +192,7 @@ Intutic enforces financial controls differently based on connection state to ens
 When developers pair-program in Standalone / Offline mode, all LLM trajectories, token counts, and cost details are queued locally to prevent data loss. The sync-back pipeline reconciles these logs as follows:
 
 1.  **Local Append Logging:** The local proxy writes every successful LLM completion as a structured JSON line to sharded, daily offline trace files `~/.intutic/logs/traces-YYYY-MM-DD.jsonl`.
-2.  **Sync Daemon Reconnect:** When the developer logs in (`intutic login`) and starts the sync daemon (`intutic connect`), the daemon scans `~/.intutic/logs` for trace files on startup and on every subsequent polling iteration.
+2.  **Sync Daemon Reconnect:** When the developer connects to a control plane and the sync daemon starts, the daemon scans `~/.intutic/logs` for trace files on startup and on every subsequent polling iteration.
 3.  **Batch Reconstruction & Upload:** The daemon renames active trace files to `traces-YYYY-MM-DD.jsonl.syncing` to prevent concurrency conflicts, groups the offline traces into batches of 100 and uploads them securely via `POST /api/v1/traces/sync-back` to the control plane.
 4.  **Database Ingestion & Validation:** The control plane validates the API token, resolves trace parameters (e.g., mapping orphaned session IDs to synthetic sessions if context was missing), persists them in the control plane’s datastore using the `recordUsageEvent` service, and updates Valkey billing states.
 5.  **Log Cleanup:** Upon receiving a successful `200 OK` response from the control plane for all batches in a file, the sync daemon deletes the local `.syncing` file, preventing double-processing.
@@ -202,11 +205,7 @@ Intutic supports local-first development by letting developers test custom promp
 
 *   **Local SOP Discovery:** Developers define rule directories locally under `.intutic/sops/<rule-group-name>/` containing markdown rules.
 *   **State Mirroring & Metadata Sync:** When connected, the sync daemon reports the list of active local rule names in the WebSocket `context_report` message. The control plane caches these metadata entries in Valkey so they can be referenced/targeted by other developer clients in `@intutic start`.
-*   **Rule Promotion (Push to Central SOP Registry):** If a local rule proves effective and needs to be distributed to the entire workspace, the developer runs:
-    ```bash
-    intutic sops push <rule-group-name>
-    ```
-    This pushes each of the rule group's markdown files to the control plane's SOP registry: a new SOP for a file pushed the first time, an update to the same SOP afterwards (each file records the SOP it was pushed to).
+*   **Rule Promotion (Push to Central SOP Registry):** If a local rule proves effective and needs to be distributed to the entire workspace, the developer pushes it to the control plane<!-- ENTERPRISE_ONLY_START --> with `intutic sops push <rule-group-name>`<!-- ENTERPRISE_ONLY_END -->. This pushes each of the rule group's markdown files to the control plane's SOP registry: a new SOP for a file pushed the first time, an update to the same SOP afterwards (each file records the SOP it was pushed to).
 *   **Workspace-wide Distribution:** During subsequent sync cycles, the sync daemons of all other developers in the workspace automatically fetch the newly promoted rule with the workspace's sync config and write it into their respective adapter configs (like `.cursor/rules/intutic-governance.mdc` or `.claude/rules/intutic-governance.md`).
 
 ---
@@ -221,7 +220,7 @@ The self-correction mechanism works through two distinct loops at the proxy laye
 3.  **Context Retention:** Because the IDE or CLI client saves the complete response (including the warning block) in the conversation history, the agent sees the critique on its next turn.
 4.  **Auto-Refinement:** On the subsequent turn, the LLM reads the previous warning instruction and dynamically refines its output to fix the violation.
 
-#### Flow B: Scripted/CLI Loop Steering (`intutic loop exec` & Autonomous Agents)
+#### Flow B: Scripted/CLI Loop Steering (Autonomous Agents)
 1.  **Refusal & Block:** If the agent tries to perform a prohibited file write or command execution, the proxy blocks the action and returns a protocol error.
 2.  **Autonomic Retry:** The agent loop reads the refusal response, updates its loop state, and automatically issues a revised prompt/command to resolve the issue before finalizing the run.
 
@@ -269,7 +268,9 @@ this page claimed:
 To keep the global developer installation lightweight, the local Rust proxy binary is **not** bundled inside the `@intutic/cli` npm package. Instead:
 *   **Pipeline Compilation:** When a version tag (`v<version>`) is pushed, the Github Actions publish workflow (`.github/workflows/publish.yml`) compiles the Rust proxy code (`packages/proxy`) for five target combinations: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, and `x86_64-pc-windows-msvc` — that is, macOS arm64/x64, Linux x64/arm64, and Windows x64.
 *   **GitHub Release Hosting:** The `github-release` job collects every compiled artifact together with the `npm pack` tarballs and attaches them to a GitHub Release for the tag (`gh release create <tag> release-assets/*`); the standalone `pkg`-built CLI executables ride along in the same release. In parallel, `packages/proxy` is published to npm as `@intutic/proxy` — the npm package ships the `bin/proxy.js` launcher only, not a compiled binary, so the tarball stays small on every platform.
+<!-- ENTERPRISE_ONLY_START -->
 *   **Dynamic Download:** `intutic connect` only fetches a binary in non-dev mode, and only after it fails to find a workspace build at `target/release/intutic-proxy`, then `target/debug/intutic-proxy` (both at the repository root, where the Cargo workspace builds), then the global cache `~/.intutic/bin/`. It then detects the local OS/architecture and downloads the matching asset from the GitHub Release for the pinned CLI version — `https://github.com/intutic/intutic/releases/download/v<version>/<asset-name>` (e.g. `intutic-proxy-darwin-arm64`) — checks it against the release's `checksums.json` (refusing a binary that does not match), marks it executable, and saves it in `~/.intutic/bin/` as `intutic-proxy-<version>` to run as a local managed process. Because the URL is derived from the release tag, the download can never drift from the published assets. If the download fails, the CLI falls back to `cargo run`.
+<!-- ENTERPRISE_ONLY_END -->
 
 ---
 

@@ -16,7 +16,7 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 | **Primary job** | Runtime enforcement and audit for AI agents | Tracing and evaluation for LLM applications |
 | **Where it enforces** | Pre-execution gates inside the agent (native hook gates in 18 of the 43 harnesses, in-process SDK gates in 17 agent frameworks), plus request and response proxy, MCP governance proxy, egress firewall and sandbox | Scorers your application code applies as guardrails; built-in Signals flag live traces without blocking |
 | **Coding agents** | **43** supported harnesses, including Claude Code, Codex, Cursor, GitHub Copilot, Windsurf and Cline | A Claude Code session tracing plugin (public preview, no PII scrubbing); W&B Skills and an MCP server for Claude Code and Codex. Tracing and analysis only, no enforcement |
-| **Decisions** | Allow, warn, require approval (the call is refused and queued for review; once it is approved with `intutic decision approve`, the identical retry passes if the workspace has opted in), block, redact, re-ask, shadow | Whatever your code does with a scorer's result |
+| **Decisions** | Allow, warn, require approval (the call is refused and held for review; with a control plane, once a reviewer approves it the identical retry passes if the workspace has opted in, and with none it stays refused), block, redact, re-ask, shadow | Whatever your code does with a scorer's result |
 | **MCP** | MCP governance proxy with a server registry, approvals and optional default-deny, approval holds, per-call identity, DLP, policy rules, anomaly detectors, trust-on-first-use pinning and tool-description poisoning detection | Traces MCP clients and servers |
 | **Containment** | Default-deny egress firewall and sandboxed runs on Docker, Podman or Firecracker | Not part of the product |
 | **Source** | Open core (MIT) | SDK is Apache-2.0 |
@@ -40,7 +40,9 @@ Intutic decides agent tool calls before they run, across 43 supported harnesses:
 - Your agents run commands, edit files and call MCP tools, and you need each call decided before it runs.
 - You need egress control and sandboxing so an agent cannot reach the network except through governance.
 - You want risky calls held for human approval.
+<!-- ENTERPRISE_ONLY_START -->
 - You want an audit trail you can verify independently.
+<!-- ENTERPRISE_ONLY_END -->
 
 ## When to choose W&B Weave
 

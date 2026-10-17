@@ -358,8 +358,8 @@ was a deliberate, accepted gap: a rephrasing that avoids every
 pattern's literal wording passes clean, and closing that gap needs a
 semantic judgment call a regex table cannot make. Semantic analysis closes it — as an
 **opt-in**, workspace-level setting (`semanticSkillAnalysisEnabled`, default
-`false`, set with **Settings › Security › Semantic Skill Review**, `intutic
-settings set semanticSkillAnalysisEnabled true` or
+`false`, set on a control plane with **Settings › Security › Semantic Skill Review**<!-- ENTERPRISE_ONLY_START -->, `intutic
+settings set semanticSkillAnalysisEnabled true`<!-- ENTERPRISE_ONLY_END --> or
 `PUT /api/v1/workspace/settings`), never a hot/live path.
 It needs a control plane on a plan with the LLM judge, so not Free: on Free
 the content is still stripped and nothing is judged.

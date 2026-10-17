@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { HarnessType, anthropicBaseUrl, openaiBaseUrl, proxyHost } from '@intutic/shared-types'
 import type { SyncSopEntry } from '@intutic/shared-types'
-import type { IHarnessAdapter } from './types.js'
+import type { HarnessWriteOptions, IHarnessAdapter } from './types.js'
 import { loadCredentials } from '../config/store.js'
 import { newIso } from '@intutic/id'
 import { writeCodexHooks, mergeCodexConfig, writeOwnedFile } from '@intutic/sync-daemon'
@@ -54,10 +54,10 @@ export const codexAdapter: IHarnessAdapter = {
     return false
   },
 
-  async installGate(workspaceRoot: string, proxyUrl: string): Promise<void> {
+  async installGate(workspaceRoot: string, proxyUrl: string, opts?: HarnessWriteOptions): Promise<void> {
     // Codex user config — persists proxy routing across sessions without env
     // sourcing. Merged; a config.toml that does not parse is left alone.
-    await mergeCodexConfig(join(codexHome(), 'config.toml'), openaiBaseUrl(proxyUrl))
+    if (opts?.routing !== false) await mergeCodexConfig(join(codexHome(), 'config.toml'), openaiBaseUrl(proxyUrl))
 
     // The PreToolUse gate. The routing above governs LLM egress only; the
     // gate is what refuses tool calls.
