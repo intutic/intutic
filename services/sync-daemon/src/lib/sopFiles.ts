@@ -71,13 +71,13 @@ export async function listSopFiles(
  * null. Read line by line, no regex over the whole file: the content is
  * whatever an agent wrote.
  */
-function frontMatterValue(content: string, key: string): string | null {
+function frontMatterValue(content: string, key: string, topLevel = false): string | null {
   const lines = content.trimStart().split('\n')
   if (lines[0]?.trim() !== '---') return null
   for (const line of lines.slice(1)) {
     const t = line.trim()
     if (t === '---') return null
-    if (t.startsWith(key)) {
+    if ((topLevel ? line : t).startsWith(key)) {
       const v = t.slice(key.length).trim().replace(/^["']|["']$/g, '')
       return v || null
     }
@@ -101,7 +101,9 @@ export function recordedSopId(content: string): string | null {
  * proxy reads the same key (`pulled_but_not_enforced` in `sops.rs`).
  */
 export function markedNotEnforced(content: string): boolean {
-  return frontMatterValue(content, 'intutic_enforced:')?.toLowerCase() === 'false'
+  // Top level only, as `pulled_but_not_enforced` in sops.rs: a nested
+  // `intutic_enforced: false` must not switch a file off.
+  return frontMatterValue(content, 'intutic_enforced:', true)?.toLowerCase() === 'false'
 }
 
 /**

@@ -411,10 +411,24 @@ function keyValues(front: string, key: string): string[] {
   return out
 }
 
-/** The `list("key:", lower)` closure: split on commas, trim, strip quotes/brackets, drop empties. */
-function listKey(front: string, key: string, lower: boolean): string[] {
+/**
+ * `top_level_values` in sops.rs: the values of `key` on lines that start with
+ * it, with no indentation. Keys that can only weaken a SOP (`mode:`, `roles:`)
+ * are read this way, so a nested `mode: shadow` does not switch the whole SOP
+ * to shadow. Keys that add a rule are still read at any indentation.
+ */
+function topLevelValues(front: string, key: string): string[] {
   const out: string[] = []
-  for (const value of keyValues(front, key)) {
+  for (const line of front.split('\n')) {
+    if (line.startsWith(key)) out.push(line.slice(key.length))
+  }
+  return out
+}
+
+/** The `list("key:", lower)` closure: split on commas, trim, strip quotes/brackets, drop empties. `topLevel` is `top_level_list`. */
+function listKey(front: string, key: string, lower: boolean, topLevel = false): string[] {
+  const out: string[] = []
+  for (const value of topLevel ? topLevelValues(front, key) : keyValues(front, key)) {
     for (const raw of value.split(',')) {
       const t = trimQuotesAndBrackets(raw.trim())
       if (t) out.push(lower ? t.toLowerCase() : t)
@@ -516,15 +530,16 @@ function parseItems<T>(
 }
 
 function parseMode(front: string): 'shadow' | 'enforce' {
-  const first = keyValues(front, 'mode:')[0]
+  const first = topLevelValues(front, 'mode:')[0]
   if (first === undefined) return 'enforce'
   return trimChars(first.trim(), QUOTE_CHARS).toLowerCase() === 'shadow' ? 'shadow' : 'enforce'
 }
 
 /**
  * Parse the text between the fences exactly as `parse_front_matter` in
- * sops.rs does: a key is a line prefix, list keys split on commas and strip
- * quotes/brackets, `requires_before`/`forbid_after` parse `A -> B`,
+ * sops.rs does: a key is a line prefix (unindented only for `mode:` and
+ * `roles:`), list keys split on commas and strip quotes/brackets,
+ * `requires_before`/`forbid_after` parse `A -> B`,
  * `max_calls` parses `A <= N` (comma-split), `forbid_with` parses
  * `taint(), token` (never comma-split), unknown keys are ignored, and an
  * unparseable rule is reported rather than dropped.
@@ -535,7 +550,7 @@ export function parseFrontMatterEnforcing(front: string): ParsedFrontMatter {
   const counts = parseItems(front, 'max_calls:', true, parseCountBound)
   const cooccur = parseItems(front, 'forbid_with:', false, parseCooccurrence)
   return {
-    roles: listKey(front, 'roles:', true),
+    roles: listKey(front, 'roles:', true, true),
     allowHarnesses: listKey(front, 'allow_harnesses:', true),
     denyTools: listKey(front, 'deny_tools:', false),
     planSteps: listKey(front, 'plan_steps:', false),
