@@ -20,6 +20,8 @@
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
+| <a id="property-advisories"></a> `advisories?` | [`Decision`](#decision)[] | Every rule that matched without deciding the call (shadow, warn), in rule order, up to the deciding rule. The caller records each one, as the rendered gates do. When no rule decides, `severity` is the first of them. |
+| <a id="property-next"></a> `next?` | `number` | Index of the rule after the deciding one: where to resume after an approved hold. |
 | <a id="property-reason"></a> `reason` | `string` | The rule's reason and `[id]`; for a hold, the reason alone, which the gate words as a hold. |
 | <a id="property-ruleid"></a> `ruleId` | `string` | - |
 | <a id="property-severity"></a> `severity` | [`Severity`](#severity) \| `null` | `null` means allow. |
@@ -641,11 +643,15 @@ function evaluate(
    target, 
    command, 
    snap, 
-   guardDisabled?
+   guardDisabled?, 
+   from?
 ): Decision;
 ```
 
-Evaluate one tool call against the snapshot. First match wins.
+Evaluate one tool call against the snapshot, as the rendered gates do: a
+shadow or warn match is collected and evaluation continues, so a later block
+or hold still decides the call. The first block or hold wins. With none, the
+first advisory match is returned. `from` resumes after an approved hold.
 
 #### Parameters
 
@@ -656,6 +662,7 @@ Evaluate one tool call against the snapshot. First match wins.
 | `command` | `string` | `undefined` |
 | `snap` | [`Snapshot`](classes/Snapshot.md) | `undefined` |
 | `guardDisabled` | `boolean` | `false` |
+| `from` | `number` | `0` |
 
 #### Returns
 

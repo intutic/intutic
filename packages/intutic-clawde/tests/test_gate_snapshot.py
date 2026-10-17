@@ -150,6 +150,32 @@ class TestEvaluation:
     def test_shadow_is_counted_apart_from_warn(self, s):
         assert snap.evaluate("shell", "", "helm upgrade x", s).severity == snap.SEV_SHADOW
 
+    def test_shadow_or_warn_does_not_hide_a_later_block(self, tmp_path):
+        """As the rendered gates: an advisory match is recorded, a later block still decides."""
+        p = _rules_file(tmp_path, [
+            line("shadow.push", "shadow", "-", "command", "Push observed", "git push"),
+            line("advise.push", "warn", "-", "command", "Push flagged", "git push"),
+            line("sop.no_force", "block", "-", "command", "No force push", "push --force"),
+        ])
+        s = snap.load_snapshot(WS, p)
+        d = snap.evaluate("shell", "", "git push --force origin main", s)
+        assert d.severity == snap.SEV_BLOCK and d.rule_id == "sop.no_force"
+        assert [a.rule_id for a in d.advisories] == ["shadow.push", "advise.push"]
+        plain = snap.evaluate("shell", "", "git push origin feature", s)
+        assert plain.severity == snap.SEV_SHADOW
+        assert [a.rule_id for a in plain.advisories] == ["shadow.push", "advise.push"]
+
+    def test_resumes_after_an_approved_hold(self, tmp_path):
+        p = _rules_file(tmp_path, [
+            line("sop.deploy_hold", "hold", "-", "command", "Deploys are reviewed", "deploy"),
+            line("sop.no_prod", "block", "-", "command", "Not to prod", "deploy prod"),
+        ])
+        s = snap.load_snapshot(WS, p)
+        held = snap.evaluate("shell", "", "make deploy prod", s)
+        assert held.severity == snap.SEV_HOLD
+        after = snap.evaluate("shell", "", "make deploy prod", s, False, held.next)
+        assert after.severity == snap.SEV_BLOCK and after.rule_id == "sop.no_prod"
+
     def test_guard_disable_drops_only_destructive(self, s):
         """INTUTIC_GUARD_DISABLE=1 must not disable a workspace's own rules."""
         assert snap.evaluate("shell", "", "rm -rf /", s, guard_disabled=True).severity is None

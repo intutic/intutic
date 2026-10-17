@@ -138,6 +138,21 @@ def test_lets_the_identical_call_through_on_an_approved_bypass(monkeypatch):
     assert cp.events() == ["hold_approved_bypass_used", "tool_allowed"]
 
 
+def test_still_refuses_on_a_later_block_rule_after_an_approved_bypass(monkeypatch):
+    """As the rendered gates: an approved hold lets evaluation continue, so a later block still refuses."""
+    cp = FakeControlPlane(bypasses=[bypass_for(DEPLOY)])
+    g = holding_gate(monkeypatch, cp)
+    g.snapshot().rules.append(snapshot_mod.Rule(
+        id="sop.no_deploy_tool", severity="block", subject="tool", reason="deploy is not allowed here",
+        pattern=re.compile(r"(deploy)", re.IGNORECASE),
+    ))
+    with pytest.raises(IntuticGateRefusal) as err:
+        g.guard("deploy", DEPLOY)
+    assert not isinstance(err.value, IntuticGateHold)
+    assert "[sop.no_deploy_tool]" in str(err.value)
+    assert cp.events() == ["hold_approved_bypass_used", "tool_blocked"]
+
+
 @pytest.mark.parametrize("bypass", [
     bypass_for({"target": "staging", "image": "api@sha256:abc"}),
     bypass_for(DEPLOY, sopRuleId="sop.other"),

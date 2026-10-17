@@ -163,6 +163,20 @@ describe('Gate.guard: hold rules', () => {
     expect(events()).toEqual(['hold_approved_bypass_used', 'tool_allowed'])
   })
 
+  it('still refuses on a later block rule after an approved bypass, as the rendered gates do', async () => {
+    bypasses = [bypassFor(DEPLOY)]
+    const g = holdingGate(client())
+    const snap = (g as unknown as { _snapshot: snapshotMod.Snapshot })._snapshot
+    snap.rules.push({ id: 'sop.no_deploy_tool', severity: 'block', subject: 'tool', reason: 'deploy is not allowed here', pattern: / (deploy) /i })
+
+    const err = await g.guard('deploy', DEPLOY).catch((e) => e)
+
+    expect(err).toBeInstanceOf(IntuticGateRefusal)
+    expect(err).not.toBeInstanceOf(IntuticGateHold)
+    expect(err.message).toContain('[sop.no_deploy_tool]')
+    expect(events()).toEqual(['hold_approved_bypass_used', 'tool_blocked'])
+  })
+
   it.each([
     ['other arguments', bypassFor({ target: 'staging', image: 'api@sha256:abc' })],
     ['another rule', bypassFor(DEPLOY, { sopRuleId: 'sop.other' })],

@@ -422,18 +422,22 @@ class Gate:
             destructive = dataclasses.replace(
                 self.snapshot(), rules=[r for r in self.snapshot().rules if r.id.startswith("destructive.")])
             note["destructive"] = snapshot.evaluate(tool_name, target, command, destructive, False).severity is not None
-        if d.severity == snapshot.SEV_HOLD:
+        # As the rendered gates: every shadow or warn match is recorded, and an
+        # approved hold lets evaluation continue, so a later block still refuses.
+        while True:
+            for a in d.advisories:
+                self._emit("tool_flagged" if a.severity == snapshot.SEV_WARN else "tool_would_block",
+                           tool_name, a.reason, tool_input)
+            if d.severity == snapshot.SEV_BLOCK:
+                self._emit("tool_blocked", tool_name, d.reason, tool_input)
+                raise IntuticGateRefusal(self._shown(d.reason), "SNAPSHOT")
+            if d.severity != snapshot.SEV_HOLD:
+                break
             self._hold(d.rule_id, d.reason, tool_name, tool_input)
             approved.add(d.rule_id)
             if note is not None:
                 note["policyHit"] = True
-        elif d.severity == snapshot.SEV_BLOCK:
-            self._emit("tool_blocked", tool_name, d.reason, tool_input)
-            raise IntuticGateRefusal(self._shown(d.reason), "SNAPSHOT")
-        if d.severity == snapshot.SEV_WARN:
-            self._emit("tool_flagged", tool_name, d.reason, tool_input)
-        elif d.severity == snapshot.SEV_SHADOW:
-            self._emit("tool_would_block", tool_name, d.reason, tool_input)
+            d = snapshot.evaluate(tool_name, target, command, self.snapshot(), disabled, d.next)
 
         # ---- Tier M: the MCP server registry and allowlist ----------------
         self._guard_mcp(tool_name, tool_input, note)

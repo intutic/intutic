@@ -119,6 +119,13 @@ class Decision:
     # words as a hold.
     reason: str = ""
     rule_id: str = ""
+    # Every rule that matched without deciding the call (shadow, warn), in
+    # rule order, up to the deciding rule. The caller records each one, as the
+    # rendered gates do. When no rule decides, `severity` is the first of them.
+    advisories: tuple = ()
+    # Index of the rule after the deciding one: where to resume after an
+    # approved hold.
+    next: int = 0
 
 
 def snapshot_path() -> str:
@@ -239,8 +246,14 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
 
 
 def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
-             guard_disabled: bool = False) -> Decision:
-    """Evaluate one tool call against the snapshot. First match wins."""
+             guard_disabled: bool = False, start: int = 0) -> Decision:
+    """Evaluate one tool call against the snapshot, as the rendered gates do.
+
+    A shadow or warn match is collected and evaluation continues, so a later
+    block or hold still decides the call. The first block or hold wins; with
+    none, the first advisory match is returned. `start` resumes after an
+    approved hold.
+    """
     rules = list(snap.rules)
     if guard_disabled:
         # Only the destructive family is skippable. The alternative a blocked
@@ -254,8 +267,10 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
     # so a review_before hold on action:deploy matches whole tokens. Classified
     # with the same needles and phrase matcher as the hook gates and actions.rs.
     action_tokens = None
+    advisories: list[Decision] = []
 
-    for rule in rules:
+    for i in range(start, len(rules)):
+        rule = rules[i]
         if rule.subject == "phrase":
             # The source is `|`-separated phrases matched as words against the
             # raw command (phrases.py), not a regex: a backtracking regex for
@@ -284,17 +299,22 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
             ):
                 continue
             if rule.severity == SEV_SHADOW:
-                return Decision(SEV_SHADOW, f"{rule.reason} [{rule.id}]", rule.id)
+                advisories.append(Decision(SEV_SHADOW, f"{rule.reason} [{rule.id}]", rule.id))
+                break
             if rule.severity == SEV_WARN:
                 verb = n_command.strip().split(" ")[0] if n_command else ""
-                return Decision(SEV_WARN, f"{rule.reason} [{rule.id}] verb={verb}", rule.id)
+                advisories.append(Decision(SEV_WARN, f"{rule.reason} [{rule.id}] verb={verb}", rule.id))
+                break
             if rule.severity == SEV_HOLD:
-                return Decision(SEV_HOLD, rule.reason, rule.id)
+                return Decision(SEV_HOLD, rule.reason, rule.id, tuple(advisories), i + 1)
             # Any other severity blocks, as an unknown one does in the shipped
             # gates: a severity this reader does not know must not allow. The
             # rule's own reason, not a generic one — resolveSeverity reads it.
-            return Decision(SEV_BLOCK, f"{rule.reason} [{rule.id}]", rule.id)
+            return Decision(SEV_BLOCK, f"{rule.reason} [{rule.id}]", rule.id, tuple(advisories), i + 1)
 
+    if advisories:
+        first = advisories[0]
+        return Decision(first.severity, first.reason, first.rule_id, tuple(advisories))
     return Decision(None)
 
 

@@ -167,6 +167,14 @@ export interface Decision {
   /** The rule's reason and `[id]`; for a hold, the reason alone, which the gate words as a hold. */
   reason: string
   ruleId: string
+  /**
+   * Every rule that matched without deciding the call (shadow, warn), in
+   * rule order, up to the deciding rule. The caller records each one, as the
+   * rendered gates do. When no rule decides, `severity` is the first of them.
+   */
+  advisories?: Decision[]
+  /** Index of the rule after the deciding one: where to resume after an approved hold. */
+  next?: number
 }
 
 function allow(): Decision {
@@ -307,13 +315,19 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
   return snap
 }
 
-/** Evaluate one tool call against the snapshot. First match wins. */
+/**
+ * Evaluate one tool call against the snapshot, as the rendered gates do: a
+ * shadow or warn match is collected and evaluation continues, so a later block
+ * or hold still decides the call. The first block or hold wins. With none, the
+ * first advisory match is returned. `from` resumes after an approved hold.
+ */
 export function evaluate(
   toolName: string,
   target: string,
   command: string,
   snap: Snapshot,
   guardDisabled = false,
+  from = 0,
 ): Decision {
   let rules = snap.rules
   if (guardDisabled) {
@@ -331,8 +345,10 @@ export function evaluate(
   // a hold on `action:deploy` matches whole tokens. Classified with the same
   // needles and phrase matcher as the hook gates and the proxy's actions.rs.
   let actions: string | null = null
+  const advisories: Decision[] = []
 
-  for (const rule of rules) {
+  for (let i = from; i < rules.length; i++) {
+    const rule = rules[i]!
     if (rule.subject === 'phrase') {
       // The source is `|`-separated phrases matched as words against the raw
       // command (phrases.ts), not a regex: a backtracking regex for "whatever
@@ -358,27 +374,25 @@ export function evaluate(
     for (const subject of subjects) {
       if (rule.subject !== 'phrase' && !(rule.steps ? sequenceMatch(rule.steps, subject) : rule.pattern.test(subject))) continue
       if (rule.severity === SEV_SHADOW) {
-        return { severity: SEV_SHADOW, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id }
+        advisories.push({ severity: SEV_SHADOW, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id })
+        break
       }
       if (rule.severity === SEV_WARN) {
         const verb = nCommand.trim().split(' ')[0] ?? ''
-        return {
-          severity: SEV_WARN,
-          reason: `${rule.reason} [${rule.id}] verb=${verb}`,
-          ruleId: rule.id,
-        }
+        advisories.push({ severity: SEV_WARN, reason: `${rule.reason} [${rule.id}] verb=${verb}`, ruleId: rule.id })
+        break
       }
       if (rule.severity === SEV_HOLD) {
-        return { severity: SEV_HOLD, reason: rule.reason, ruleId: rule.id }
+        return { severity: SEV_HOLD, reason: rule.reason, ruleId: rule.id, advisories, next: i + 1 }
       }
       // Any other severity blocks, as an unknown one does in the shipped
       // gates: a severity this reader does not know must not allow. The
       // rule's own reason, not a generic one — resolveSeverity reads it.
-      return { severity: SEV_BLOCK, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id }
+      return { severity: SEV_BLOCK, reason: `${rule.reason} [${rule.id}]`, ruleId: rule.id, advisories, next: i + 1 }
     }
   }
 
-  return allow()
+  return advisories.length > 0 ? { ...advisories[0]!, advisories } : allow()
 }
 
 export function guardDisabledFromEnv(): boolean {
