@@ -90,6 +90,10 @@ describe('local SOP layout', () => {
     // Only `false` switches a file off; a typo leaves it enforced.
     await fs.writeFile(join(sops, 'draft.md'), '---\nintutic_id: sop_d\nintutic_enforced: flase\nreview_before: action:release\n---\n')
     expect(await localHoldTokensFor(root, [], undefined, HARNESSES)).toContain('action:release')
+    // Only at the top level: a nested `intutic_enforced: false` belongs to some
+    // other block and leaves the file enforced.
+    await fs.writeFile(join(sops, 'draft.md'), '---\nintutic_id: sop_d\nmeta:\n  intutic_enforced: false\nreview_before: action:release\n---\n')
+    expect(await localHoldTokensFor(root, [], undefined, HARNESSES)).toContain('action:release')
   })
 
   it('lists folders, then the developer\'s own flat files, as the selectable rule sets', async () => {

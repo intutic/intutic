@@ -312,9 +312,7 @@ impl FrontMatter {
 /// `risk_tier: HGIH` as `Low` is how a declared band becomes a control the
 /// operator believes is set and the code never sees.
 fn parse_risk_tier(front: &str) -> Option<RiskLevel> {
-    let raw = front
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("risk_tier:"))
+    let raw = top_level_values(front, "risk_tier:")
         .next()?
         .trim()
         .trim_matches(['"', '\''])
@@ -335,9 +333,7 @@ fn parse_risk_tier(front: &str) -> Option<RiskLevel> {
 /// here is a typo silently *disabling* enforcement, not merely being unread,
 /// so `mode: shaddow` enforces exactly as if the line were never written.
 fn parse_mode(front: &str) -> SopMode {
-    let raw = front
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("mode:"))
+    let raw = top_level_values(front, "mode:")
         .next()
         .map(|v| v.trim().trim_matches(['"', '\'']).to_ascii_lowercase());
     match raw.as_deref() {
@@ -353,9 +349,7 @@ fn parse_mode(front: &str) -> SopMode {
 /// off. An `sql_allow_dsns:` with no `sql_guard:` turns the rule on at
 /// `refuse`, because writing an allowlist is asking for it.
 fn parse_sql_guard(front: &str, any_allowlist: bool) -> (Option<SqlGuardSeverity>, Option<String>) {
-    let raw = front
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("sql_guard:"))
+    let raw = top_level_values(front, "sql_guard:")
         .next()
         .map(|v| v.trim().trim_matches(['"', '\'']).to_string());
     match raw {
@@ -369,6 +363,19 @@ fn parse_sql_guard(front: &str, any_allowlist: bool) -> (Option<SqlGuardSeverity
         None if any_allowlist => (Some(SqlGuardSeverity::Refuse), None),
         None => (None, None),
     }
+}
+
+/// The values of `key` written at the top level of the front matter: lines
+/// that start with the key, with no indentation before it.
+///
+/// Keys that can only weaken a SOP are read this way: `mode:` (shadow),
+/// `roles:` (narrows who the rules apply to), `risk_tier:`, `sql_guard:`
+/// (`warn`), `sql_allow_dsns:` and `intutic_enforced:`. An indented line
+/// belongs to some nested block, and a nested `mode: shadow` must not switch
+/// the whole SOP, `deny_tools` included, to shadow. Keys that add a rule are
+/// still read at any indentation, so a rule written indented keeps enforcing.
+fn top_level_values<'a>(front: &'a str, key: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+    front.lines().filter_map(move |l| l.strip_prefix(key))
 }
 
 /// Split optional front matter from the body.
@@ -388,10 +395,9 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
     };
     let (front, body) = rest.split_at(end);
 
-    let list = |key: &str, lower: bool| -> Vec<String> {
-        front
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix(key))
+    let split = |values: Vec<&str>, lower: bool| -> Vec<String> {
+        values
+            .into_iter()
             .flat_map(|v| v.split(','))
             .map(|r| {
                 let t = r.trim().trim_matches(['"', '\'', '[', ']']).to_string();
@@ -404,6 +410,18 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
             .filter(|r| !r.is_empty())
             .collect()
     };
+    let list = |key: &str, lower: bool| -> Vec<String> {
+        split(
+            front
+                .lines()
+                .filter_map(|l| l.trim().strip_prefix(key))
+                .collect(),
+            lower,
+        )
+    };
+    let top_level_list = |key: &str, lower: bool| -> Vec<String> {
+        split(top_level_values(front, key).collect(), lower)
+    };
 
     let requires = parse_rules(front, "requires_before:");
     let forbids = parse_rules(front, "forbid_after:");
@@ -412,11 +430,11 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
     let counts = parse_items(front, "max_calls:", true, parse_count_bound);
     let cooccur = parse_items(front, "forbid_with:", false, parse_cooccurrence);
     // Patterns keep their case as written; the matcher lowercases both sides.
-    let sql_allow_dsns = list("sql_allow_dsns:", false);
+    let sql_allow_dsns = top_level_list("sql_allow_dsns:", false);
     let (sql_guard, sql_guard_error) = parse_sql_guard(front, !sql_allow_dsns.is_empty());
 
     FrontMatter {
-        roles: list("roles:", true),
+        roles: top_level_list("roles:", true),
         // Harness names are lowercase by convention (`claude-code`, `cursor`).
         allow_harnesses: list("allow_harnesses:", true),
         // Tool names keep their case — harnesses ship tools called `Bash` and
@@ -784,14 +802,11 @@ fn pulled_but_not_enforced(raw: &str) -> bool {
     let Some(end) = rest.find("\n---") else {
         return false;
     };
-    rest[..end]
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("intutic_enforced:"))
-        .any(|v| {
-            v.trim()
-                .trim_matches(['"', '\''])
-                .eq_ignore_ascii_case("false")
-        })
+    top_level_values(&rest[..end], "intutic_enforced:").any(|v| {
+        v.trim()
+            .trim_matches(['"', '\''])
+            .eq_ignore_ascii_case("false")
+    })
 }
 
 fn read_dir_sops(dir: &Path) -> Vec<Sop> {
@@ -2306,6 +2321,49 @@ mod mode_tests {
         assert_eq!(parse("---\nroles: deployer\n---\nbody"), SopMode::Enforce);
         assert_eq!(parse("---\nmode: enforce\n---\nbody"), SopMode::Enforce);
         assert_eq!(parse("---\nmode: shaddow\n---\nbody"), SopMode::Enforce);
+    }
+
+    /// A `mode:` line inside a nested block is not the SOP's mode. Read at any
+    /// indentation, it switched the whole SOP, `deny_tools` included, to shadow.
+    #[test]
+    fn nested_mode_does_not_switch_the_sop_to_shadow() {
+        let fm = parse_front_matter("---\ndeny_tools: rm\nother:\n  mode: shadow\n---\nbody");
+        assert_eq!(fm.mode, SopMode::Enforce);
+        assert_eq!(fm.deny_tools, vec!["rm".to_string()]);
+        let tab = parse_front_matter("---\ndeny_tools: rm\n\tmode: shadow\n---\nbody");
+        assert_eq!(tab.mode, SopMode::Enforce);
+    }
+
+    /// The other keys that can only weaken a SOP are read at the top level
+    /// too; keys that add a rule still count at any indentation.
+    #[test]
+    fn weakening_keys_count_only_at_the_top_level() {
+        let fm = parse_front_matter(
+            "---\nnested:\n  roles: viewer\n  risk_tier: low\n  sql_guard: warn\n  sql_allow_dsns: prod\n  deny_tools: curl\n---\nbody",
+        );
+        assert!(fm.roles.is_empty());
+        assert_eq!(fm.risk_tier, None);
+        assert_eq!(fm.sql_guard, None);
+        assert!(fm.sql_allow_dsns.is_empty());
+        assert_eq!(fm.deny_tools, vec!["curl".to_string()]);
+
+        let top = parse_front_matter(
+            "---\nroles: viewer\nrisk_tier: low\nsql_guard: warn\nsql_allow_dsns: prod\n---\nbody",
+        );
+        assert_eq!(top.roles, vec!["viewer".to_string()]);
+        assert_eq!(top.risk_tier, Some(RiskLevel::Low));
+        assert_eq!(top.sql_guard, Some(SqlGuardSeverity::Warn));
+        assert_eq!(top.sql_allow_dsns, vec!["prod".to_string()]);
+    }
+
+    #[test]
+    fn nested_intutic_enforced_false_does_not_switch_a_file_off() {
+        assert!(pulled_but_not_enforced(
+            "---\nintutic_enforced: false\n---\nbody"
+        ));
+        assert!(!pulled_but_not_enforced(
+            "---\nmeta:\n  intutic_enforced: false\n---\nbody"
+        ));
     }
 
     #[test]

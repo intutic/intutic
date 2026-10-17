@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A nested `mode: shadow` no longer switches a whole SOP to shadow.** The
+  front-matter parsers read `mode:` on any line, at any indentation, so an
+  indented `mode: shadow` inside some other block put the entire SOP,
+  `deny_tools` included, in shadow: evaluated and logged, never enforced. Keys
+  that can only weaken a SOP (`mode:`, `roles:`, `risk_tier:`, `sql_guard:`,
+  `sql_allow_dsns:` and `intutic_enforced:`) now count only at the top level,
+  in the proxy, the sync daemon and the shared parser. Keys that add a rule
+  still count at any indentation.
 - `intutic disconnect` no longer says a setting "was removed rather than
   restored: an earlier Intutic version set it" for a file Intutic itself
   created, such as `~/.gemini/config/hooks.json` after `intutic gates

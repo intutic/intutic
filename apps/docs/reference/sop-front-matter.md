@@ -108,6 +108,13 @@ the failure direction that matters here is a typo silently *disabling*
 enforcement, not merely going unread, so an unrecognised value never falls
 back to shadow.
 
+`mode:` counts only at the top level of the front matter, with no
+indentation. An indented `mode: shadow` belongs to some nested block and
+leaves the SOP enforcing. The same holds for every key that can only weaken a
+SOP: `roles:`, `risk_tier:`, `sql_guard:`, `sql_allow_dsns:` and
+`intutic_enforced:`. Keys that add a rule, such as `deny_tools:`, count at any
+indentation.
+
 Scoping (`roles:`) still applies to a shadow SOP exactly as it does to an
 enforcing one — a shadow policy scoped to `deployer` is evaluated only against
 requests reporting that role, same as if it were enforcing.

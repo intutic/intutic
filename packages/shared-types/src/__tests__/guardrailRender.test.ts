@@ -231,6 +231,17 @@ describe('front matter parser: never throws, and refuses mutations in the Rust w
     expect(fm.allowHarnesses).toEqual(['claude-code'])
   })
 
+  it('reads `mode:` and `roles:` only at the top level, as sops.rs does; rule keys count at any indentation', () => {
+    const nested = parseFrontMatterEnforcing('deny_tools: rm\nother:\n  mode: shadow\n  roles: viewer\n  review_before: action:deploy\n\tmode: shadow')
+    expect(nested.mode).toBe('enforce')
+    expect(nested.roles).toEqual([])
+    expect(nested.denyTools).toEqual(['rm'])
+    expect(nested.reviewBefore).toEqual(['action:deploy'])
+    const top = parseFrontMatterEnforcing('mode: shadow\nroles: viewer')
+    expect(top.mode).toBe('shadow')
+    expect(top.roles).toEqual(['viewer'])
+  })
+
   it('mode: shadow is read; anything else, including a typo, is enforce', () => {
     expect(parseFrontMatterEnforcing('mode: shadow').mode).toBe('shadow')
     expect(parseFrontMatterEnforcing('mode: "Shadow"').mode).toBe('shadow')
