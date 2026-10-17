@@ -16,6 +16,7 @@ import { planDisconnect } from '../../src/disconnect/index.js'
 import { unwrapEntry, unwrapServerMap, unwrapOpenCodeEntry, unwrapUnmarkedEntry, geminiRemoteShape, antigravityRemoteShape, isIntuticServer } from '../../src/disconnect/mcp.js'
 import { injectMcpServer } from '../../src/harness/mcpAutoWrite.js'
 import { guardSettingsFile } from '../../src/watcher/settingsGuard.js'
+import { writeAntigravityCliHooks, antigravityHooksPath } from '../../src/harness/antigravityCliHooks.js'
 
 const BIN = '/opt/intutic/node_modules/@intutic/mcp-governance-proxy/dist/index.js'
 
@@ -361,5 +362,36 @@ describe('--harness', () => {
     await put(hooks, { hooks: {} })
     expect(await guardSettingsFile(hooks, ws, [], '', undefined, new Set(['cursor']))).toBe(false)
     expect(await readJson(hooks)).toEqual({ hooks: {} })
+  })
+})
+
+// ─── A file Intutic created ──────────────────────────────────────────────────
+
+describe('a file Intutic created', () => {
+  const earlier = (plan: { notes: { message: string }[] }) => plan.notes.filter((n) => n.message.includes('an earlier Intutic version'))
+
+  it('is deleted on a fresh install, with no "earlier version" note', async () => {
+    await writeAntigravityCliHooks(ws, 'http://localhost:4000')
+    expect(existsSync(antigravityHooksPath())).toBe(true)
+    const plan = await disconnect()
+    expect(existsSync(antigravityHooksPath())).toBe(false)
+    expect(earlier(plan)).toEqual([])
+  })
+
+  it('still says so when no record was kept (an earlier version wrote it)', async () => {
+    await writeAntigravityCliHooks(ws, 'http://localhost:4000')
+    await forgetOriginal(antigravityHooksPath(), home)
+    const plan = await disconnect()
+    expect(earlier(plan).length).toBe(1)
+  })
+
+  it('takes a key out of a text config Intutic created without the note', async () => {
+    await noteProxyUrl('http://localhost:4000')
+    const config = join(home, '.codex', 'config.toml')
+    await keepOriginal(config, home)
+    await put(config, 'model = "o4"\nopenai_base_url = "http://localhost:4000/v1"\n')
+    const plan = await disconnect()
+    expect(await read(config)).toBe('model = "o4"\n')
+    expect(earlier(plan)).toEqual([])
   })
 })

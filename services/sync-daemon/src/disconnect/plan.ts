@@ -355,7 +355,12 @@ export function isEmptyValue(js: unknown): boolean {
 }
 
 export interface ReverseContext {
-  /** The file as it was before Intutic first wrote it, when a record was kept. */
+  /**
+   * The file as it was before Intutic first wrote it, when a record was kept:
+   * `{}` when the record says the file did not exist (every key was absent),
+   * `null` only when there is no record, so an edit can tell "Intutic created
+   * this" from "an earlier version wrote it without keeping the original".
+   */
   original: JsonObject | null
   record: OriginalRecord | null
   /** The format's parsed form, for an edit that works on it directly (a YAML list). */
@@ -406,7 +411,8 @@ export async function reverseStructuredFile<H>(
       originalHandle = null
     }
   }
-  const original = originalHandle === null ? null : format.toJS(originalHandle)
+  // A file Intutic created had no keys at all; only a missing record is unknown.
+  const original = record && !record.existed ? {} : originalHandle === null ? null : format.toJS(originalHandle)
 
   const doc = format.toJS(handle)
   const changed = edit(doc, { original, record, handle, note: (message) => plan.note(file, message) })
@@ -460,7 +466,8 @@ export async function reverseTextFile(
     forgetMissing(plan, file, record, forget)
     return
   }
-  const originalText = record?.existed && record.content ? record.content.toString('utf-8') : null
+  // A file Intutic created was empty before; only a missing record is unknown.
+  const originalText = record && !record.existed ? '' : record?.existed && record.content ? record.content.toString('utf-8') : null
   const next = edit(raw, { originalText, note: (message) => plan.note(file, message) })
   if (next === null || next === raw) {
     if (record) plan.quiet(file, forget)
