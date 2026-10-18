@@ -171,18 +171,15 @@ export function engineHost(url: string): string {
  * What 3.0 does not do with a readable rule as written, one sentence each,
  * for `decide lint`, `gates install` and `doctor`:
  *
- * - `on: response`: read and validated everywhere, evaluated nowhere. No
- *   gate sees a response, and the gateway evaluates only the rule it
- *   synthesises for its local judge.
  * - `context: ["last_user_turn"]`: reserved. No gate supplies the user's last
  *   turn, so the rule is asked without one, and `decide test` and
  *   `decide eval` ask it the same way so the eval measures what a gate asks.
+ *
+ * An `on: response` rule is carried out: the gateway judges each complete
+ * response by it.
  */
 export function decideRuleNotes(rule: { id: string; on: string; context?: readonly string[] }): string[] {
   const out: string[] = []
-  if (rule.on === 'response') {
-    out.push(`decide rule ${rule.id} is on: response, which is not enforced in 3.0: it is read and validated, and no gate or gateway evaluates it`)
-  }
   if ((rule.context ?? []).includes('last_user_turn')) {
     out.push(
       `decide rule ${rule.id} declares context: ["last_user_turn"], which is reserved and not supplied in 3.0: ` +

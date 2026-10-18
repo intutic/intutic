@@ -44,8 +44,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     refuses.
   - **Older gates:** a gate older than this release refuses the tools a decide
     rule names, through a fallback line in the policy snapshot.
-  - **Read but not enforced yet:** `on: response` rules, and the
-    `last_user_turn` context.
+  - **Response rules at the gateway:** the proxy evaluates `on: response`
+    rules on model responses, and decide rules on the tool calls in a
+    response. A refused response gets a violation note, and an unreadable
+    `decide:` line refuses responses.
+    - `intutic decide test` and `intutic decide eval` build the same response
+      state the gateway sends, so a pin measures what the gateway asks.
+    - The gateway writes the decide log.
+    - On a shared gateway it uses the pins its policy serves, and uploads
+      decisions when the workspace turns that on.
+  - **`intutic decide eval --calibration <id>`** pre-registers a served
+    calibration's band. When logged in, `decide eval` registers and uploads
+    its runs.
+  - **Reserved:** the `last_user_turn` context is read but not supplied yet.
+  - **A `mode: shadow` SOP** now runs its decide rules in shadow on a local
+    machine too.
+- **Governance of calls to decision models.** The proxy recognises System One
+  (`POST /v1/systemone`) and OpenAI Decisions (`POST /v1/decisions`) traffic
+  and governs it like an LLM call.
+  - **Before the call:** DLP on the state or input, the egress allowlist, and
+    a refusal of moving aliases such as `jev-latest` in enforce mode.
+  - **After the call:** a confidence floor and a `consequential` header that
+    tell the app to abstain or ask a person.
+  - **Records:** each call is one Governed Request and gets a record in the
+    decision-traffic log.
 
 ### Deprecated
 

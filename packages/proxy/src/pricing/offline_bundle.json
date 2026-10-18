@@ -1,7 +1,7 @@
 {
   "_meta": {
     "source": "https://raw.githubusercontent.com/BerriAI/litellm/9d442b1300966d7c8873be87c50a4ab03ef91db0/model_prices_and_context_window.json",
-    "generated_at": "2026-10-16",
+    "generated_at": "2026-10-18",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
@@ -664,6 +664,13 @@
       "max_tokens": 16384,
       "cache_read_cost_per_1k": 0.00125
     },
+    "gpt-6-luna": {
+      "input_cost_per_1k": 0.0001,
+      "output_cost_per_1k": 0.0005,
+      "max_tokens": 128000,
+      "cache_read_cost_per_1k": 0.00001,
+      "cache_write_cost_per_1k": 0.000125
+    },
     "mistral.devstral-2-123b": {
       "input_cost_per_1k": 0.0004,
       "output_cost_per_1k": 0.002,
@@ -1185,6 +1192,22 @@
       "input_cost_per_1k": 0,
       "output_cost_per_1k": 0,
       "max_tokens": 131072
+    },
+    "typesafe/jev-1.13.0": {
+      "input_cost_per_1k": 0.000042,
+      "output_cost_per_1k": 0
+    },
+    "typesafe/jev-1.14.0": {
+      "input_cost_per_1k": 0.000042,
+      "output_cost_per_1k": 0
+    },
+    "typesafe/jev-latest": {
+      "input_cost_per_1k": 0.000042,
+      "output_cost_per_1k": 0
+    },
+    "typesafe/jev-preview": {
+      "input_cost_per_1k": 0.000042,
+      "output_cost_per_1k": 0
     },
     "deepseek.r1-v1:0": {
       "input_cost_per_1k": 0.00135,

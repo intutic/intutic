@@ -135,6 +135,10 @@ pub enum DenialReason {
     /// A call an enforcing hook-rule guardrail refuses (`plugins::hook_rules`)
     /// — or one it could not show is allowed, which it refuses the same way.
     HookRule(HookRuleHit),
+    /// A call a decide rule refuses (`decide::gateway`): its rule was true,
+    /// it could not decide (the gateway has no ask), or the engine could not
+    /// answer for an enforcing rule.
+    Decide(crate::decide::gateway::ToolCallRefusal),
     /// The body did not parse, so the gate could not show it carried no denied
     /// call. Only ever produced when `fail_closed` is set.
     Unparseable,
@@ -190,6 +194,7 @@ impl Denial {
             // The deny_tools code: to an SDK this is a tool the policy
             // forbids, and the rule id is the one every other layer names.
             DenialReason::HookRule(hit) => Refusal::new(Code::ToolDenied, hit.rule_id.clone()),
+            DenialReason::Decide(d) => Refusal::new(Code::ToolDenied, d.rule_id.clone()),
             DenialReason::Unparseable => {
                 Refusal::new(Code::ResponseUnparseable, "response_gate.fail_closed")
             }
@@ -252,6 +257,14 @@ impl Denial {
                 hit.rule_id,
                 hit.reason
             ),
+            DenialReason::Decide(d) => format!(
+                "Response blocked by anomaly policy [{}]: tool call {} refused by decide rule {} ({}): {}",
+                AnomalyKind::UnauthorizedTool.as_str(),
+                d.tool,
+                d.rule_id,
+                d.code,
+                d.reason
+            ),
             DenialReason::Unparseable => format!(
                 "Response blocked by anomaly policy [{}]: response body did not parse, and a tool deny list, SSO group policy or SQL guard is in force — cannot show it carries no forbidden call",
                 AnomalyKind::UnauthorizedTool.as_str()
@@ -284,6 +297,12 @@ impl Denial {
                  The call was withheld by the proxy and never reached the client, so it did not run. \
                  Do not retry it — continue without that call, or ask an operator to change the policy.",
                 hit.tool, hit.reason, hit.rule_id
+            ),
+            DenialReason::Decide(d) => format!(
+                "[Intutic] Blocked tool call: {}. {} [{}, {}] \
+                 The call was withheld by the proxy and never reached the client, so it did not run. \
+                 Do not retry it — continue without that call, or ask an operator to change the policy.",
+                d.tool, d.reason, d.code, d.rule_id
             ),
             DenialReason::Unparseable => {
                 "[Intutic] The model's response could not be parsed, and a tool deny list, SSO group policy or SQL guard is in force \
@@ -517,6 +536,39 @@ pub fn gate_response_hook_rules(
         block_index: 0,
     });
     (denial, decision, !calls.is_empty())
+}
+
+/// Evaluate a complete, parsed response body's tool calls against the decide
+/// rules in force (`decide::gateway`), each call in order, once every gate
+/// above allowed the body. Returns the first refusal.
+///
+/// Inert when the gate is off or no `on: tool_call` rule is in force. A body
+/// that will not parse is refused under `fail_closed` while a rule stamped
+/// `enforce` is in force, like the deny list.
+pub async fn gate_response_decide(
+    cfg: &ResponseGateConfig,
+    body: Option<&Value>,
+    rules: &crate::decide::gateway::GatewayRules,
+) -> Option<Denial> {
+    if !cfg.enabled || rules.tools().is_empty() {
+        return None;
+    }
+    let Some(body) = body else {
+        return (cfg.fail_closed && rules.has_enforcing_tool_rules()).then_some(Denial {
+            reason: DenialReason::Unparseable,
+            block_index: 0,
+        });
+    };
+    for (name, args, raw) in crate::routing::integrity::response_tool_calls(body) {
+        let args = args.unwrap_or_else(|| raw.map_or(Value::Null, Value::String));
+        if let Some(refusal) = rules.check_tool_call(&name, &args).await {
+            return Some(Denial {
+                reason: DenialReason::Decide(refusal),
+                block_index: 0,
+            });
+        }
+    }
+    None
 }
 
 /// The name half of the hook-rule check on one SSE line: a refusal for an

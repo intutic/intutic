@@ -34,7 +34,10 @@ pub fn path_for(protocol: &Protocol) -> Option<&'static str> {
     match protocol {
         Protocol::OpenAIChatCompletions | Protocol::Unknown => Some("/openai/v1/chat/completions"),
         Protocol::OpenAIResponses => Some("/openai/v1/responses"),
-        Protocol::Anthropic | Protocol::Gemini => None,
+        Protocol::Anthropic
+        | Protocol::Gemini
+        | Protocol::SystemOne
+        | Protocol::OpenAIDecisions => None,
     }
 }
 

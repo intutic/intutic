@@ -167,6 +167,11 @@ pub struct ExecutionTrace {
     /// cost a warm prompt cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_fallback: Option<crate::routing::retry::UpstreamFallback>,
+    /// Set on the trace of a customer call to a decision model (the
+    /// `decision_traffic` event): the record the decision-traffic log holds.
+    /// A decision call is one trace, so it meters as one Governed Request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_traffic: Option<crate::decision_traffic::DecisionTrafficRecord>,
     pub output_tokens: u32,
     pub raw_cost_usd: f64,
     pub actual_cost_usd: f64,
@@ -404,6 +409,17 @@ impl FindingWire {
             wire.tool_name = Some(hit.tool.clone());
             return Some(wire);
         }
+        if let crate::plugins::response_gate::DenialReason::Decide(d) = &denial.reason {
+            let mut finding = crate::plugins::anomaly::AnomalyFinding::kill(
+                crate::plugins::anomaly::AnomalyKind::UnauthorizedTool,
+                format!("{} [{}, {}]", d.reason, d.code, d.rule_id),
+            );
+            finding.detector_id = "decide";
+            let mut wire = Self::from_finding(&finding);
+            wire.rule_id = Some(d.rule_id.clone());
+            wire.tool_name = Some(d.tool.clone());
+            return Some(wire);
+        }
         let crate::plugins::response_gate::DenialReason::SsoGroup { tool, decision } =
             &denial.reason
         else {
@@ -544,6 +560,7 @@ mod tests {
     /// sites Phase 8a adds a trace to).
     fn base_trace() -> ExecutionTrace {
         ExecutionTrace {
+            decision_traffic: None,
             trace_id: String::new(),
             session_id: String::new(),
             proxy_instance_id: String::new(),

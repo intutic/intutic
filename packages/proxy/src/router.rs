@@ -5,6 +5,8 @@
 //! - POST /v1/chat/completions   (OpenAI Chat Completions — Cursor)
 //! - POST /v1/responses          (OpenAI Responses API — Codex CLI)
 //! - POST /v1beta/models/:model  (Gemini v1beta — refused, see `root`)
+//! - POST /v1/systemone          (System One decision API — decision traffic)
+//! - POST /v1/decisions          (OpenAI Decisions API — decision traffic)
 //! - GET  /health                (Health check)
 //! - GET  /intutic/instance      (This process's instance id — loopback only)
 
@@ -35,6 +37,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/responses", post(crate::proxy::handle_proxy))
         // Gemini v1beta (Antigravity)
         .route("/v1beta/models/:model_id", post(crate::proxy::handle_proxy))
+        // Customer calls to decision models (`crate::decision_traffic`)
+        .route("/v1/systemone", post(crate::proxy::handle_proxy))
+        .route("/v1/decisions", post(crate::proxy::handle_proxy))
         .layer(TraceLayer::new_for_http());
 
     Router::new()

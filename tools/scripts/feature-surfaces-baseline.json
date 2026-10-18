@@ -112,7 +112,6 @@
     "GET /api/v1/policy-guardrails/impact",
     "GET /api/v1/policy-guardrails/search",
     "GET /api/v1/policy-guardrails/thresholds",
-    "GET /api/v1/policy/resolve",
     "GET /api/v1/provider-incidents",
     "GET /api/v1/provider-incidents/sla-evidence/:runId",
     "GET /api/v1/routing/bandit/status",

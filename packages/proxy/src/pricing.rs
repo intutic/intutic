@@ -91,6 +91,12 @@ pub fn estimate_cost(model: &str, input_tokens: u32, output_tokens: u32) -> f64 
     input_cost + output_cost
 }
 
+/// The bundle's rate for exactly `model` (case-insensitive), with no family
+/// or conservative fallback: `None` when the bundle does not list it.
+pub fn exact_price(model: &str) -> Option<ModelPrice> {
+    REGISTRY.models.get(&model.to_lowercase()).cloned()
+}
+
 /// Returns input cost per 1K tokens for use in budget gate pre-checks.
 pub fn input_cost_per_1k(model: &str) -> f64 {
     lookup_price(model).input_cost_per_1k

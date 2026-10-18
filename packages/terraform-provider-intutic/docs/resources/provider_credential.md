@@ -57,8 +57,8 @@ variable "azure_openai_api_key" {
 
 ### Required
 
-- `fields` (Map of String, Sensitive) The credential's fields, which the API never returns. `anthropic`, `openai`, `gemini`, `mistral`, `openrouter`, `deepseek` and `cohere` take `apiKey`; `azure_openai` takes `endpoint` (`https://<resource>.openai.azure.com`, `.services.ai.azure.com` or `.cognitiveservices.azure.com`) and `apiKey`; `bedrock` takes `awsRegion` and either `awsAccessKeyId` with `awsSecretAccessKey`, or `apiKey`; `vertex_ai` takes `projectId`, optionally `location`, and `serviceAccountJson` (the key file's contents); `ollama` takes `apiBase`. Secret fields are 8 to 512 characters. An imported credential has no `fields` in state, so the first apply after an import sends them.
-- `provider_id` (String) The upstream provider: one of `anthropic`, `openai`, `gemini`, `azure_openai`, `bedrock`, `vertex_ai`, `cohere`, `mistral`, `openrouter`, `deepseek`, `ollama`. Changing it replaces the resource.
+- `fields` (Map of String, Sensitive) The credential's fields, which the API never returns. `anthropic`, `openai`, `gemini`, `mistral`, `openrouter`, `deepseek`, `cohere`, and the decision-model providers `typesafe` and `fastino`, take `apiKey`; `azure_openai` takes `endpoint` (`https://<resource>.openai.azure.com`, `.services.ai.azure.com` or `.cognitiveservices.azure.com`) and `apiKey`; `bedrock` takes `awsRegion` and either `awsAccessKeyId` with `awsSecretAccessKey`, or `apiKey`; `vertex_ai` takes `projectId`, optionally `location`, and `serviceAccountJson` (the key file's contents); `ollama` takes `apiBase`. Secret fields are 8 to 512 characters. An imported credential has no `fields` in state, so the first apply after an import sends them.
+- `provider_id` (String) The upstream provider: one of `anthropic`, `openai`, `gemini`, `azure_openai`, `bedrock`, `vertex_ai`, `cohere`, `mistral`, `openrouter`, `deepseek`, `typesafe`, `fastino`, `ollama`. Changing it replaces the resource.
 
 ### Read-Only
 

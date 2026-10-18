@@ -469,7 +469,7 @@ pub fn canonical_json(value: &Value) -> String {
 }
 
 /// The longest prefix of whole characters that fits in `max` UTF-8 bytes.
-fn utf8_prefix(s: &str, max: usize) -> &str {
+pub(crate) fn utf8_prefix(s: &str, max: usize) -> &str {
     if s.len() <= max {
         return s;
     }

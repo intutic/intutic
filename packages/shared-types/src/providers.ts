@@ -35,6 +35,12 @@
  * not a config change. The dashboard wizard must say so, not imply the key
  * is live the moment it's saved.
  *
+ * `kind: 'decision'` marks a provider of decision models (TypeSafe, Fastino):
+ * the proxy forwards a customer's own calls to them on `/v1/systemone`
+ * (`packages/proxy/src/decision_traffic.rs`), governed like LLM calls. Such a
+ * key is customer traffic only. No judge, decide engine or other governance
+ * call Intutic makes uses it: those are self-hosted.
+ *
  * @module
  */
 
@@ -69,6 +75,11 @@ export interface ProviderDefinition {
   usageHint?: string
   /** See module doc — whether packages/proxy currently routes to this provider. */
   routingLive: boolean
+  /**
+   * `decision`: a decision-model API (System One) the proxy forwards customer
+   * calls to. Absent: an LLM provider.
+   */
+  kind?: 'decision'
 }
 
 /**
@@ -195,6 +206,26 @@ export const PROVIDER_REGISTRY: ProviderDefinition[] = [
     routingLive: true,
   },
   {
+    // Customer decision traffic only (see `kind` in the module doc).
+    id: 'typesafe',
+    displayName: 'TypeSafe (decision models)',
+    docsUrl: 'https://typesafe.ai',
+    fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true }],
+    usageHint: 'Point a System One client at the proxy (/v1/systemone) and name a pinned model, e.g. jev-1.14.0.',
+    routingLive: true,
+    kind: 'decision',
+  },
+  {
+    // Customer decision traffic only (see `kind` in the module doc).
+    id: 'fastino',
+    displayName: 'Fastino (decision models)',
+    docsUrl: 'https://fastino.ai',
+    fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true }],
+    usageHint: 'Point a System One client at the proxy (/v1/systemone) with decision_traffic.systemone_upstream set to your Fastino endpoint.',
+    routingLive: true,
+    kind: 'decision',
+  },
+  {
     id: 'ollama',
     displayName: 'Ollama (self-hosted)',
     docsUrl: 'https://github.com/ollama/ollama/blob/main/docs/api.md',
@@ -209,6 +240,11 @@ export function getProviderDefinition(id: string): ProviderDefinition | undefine
 
 export function isKnownProviderId(id: string): boolean {
   return PROVIDER_REGISTRY.some((p) => p.id === id)
+}
+
+/** The ids of the decision-model providers: customer traffic, never a judge. */
+export function decisionProviderIds(): string[] {
+  return PROVIDER_REGISTRY.filter((p) => p.kind === 'decision').map((p) => p.id)
 }
 
 /**

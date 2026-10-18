@@ -3,7 +3,7 @@
   "info": {
     "title": "Intutic Control Plane API",
     "version": "v1",
-    "description": "Generated from the control plane's route source. 408 operations; 129 validate their JSON body and 70 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 169 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
+    "description": "Generated from the control plane's route source. 418 operations; 132 validate their JSON body and 74 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 179 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
   },
   "servers": [
     {
@@ -59,6 +59,10 @@
     {
       "name": "connectors.ts",
       "description": "Routes defined in `connectors.ts`."
+    },
+    {
+      "name": "decide.ts",
+      "description": "Routes defined in `decide.ts`."
     },
     {
       "name": "decisions.ts",
@@ -4525,6 +4529,605 @@
         "x-intutic-response-schema": "none"
       }
     },
+    "/api/v1/decide/calibrations": {
+      "get": {
+        "operationId": "getApiV1DecideCalibrations",
+        "tags": [
+          "decide.ts"
+        ],
+        "summary": "Calibrations of the workspace's decide rules, by ruleHash and status",
+        "description": "**Auth:** Authenticated\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ruleHash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "candidate",
+                "active",
+                "retired"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Clamped to 1–500.",
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideCalibrationListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "Authenticated",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "zod"
+      }
+    },
+    "/api/v1/decide/calibrations/{calibrationId}/promote": {
+      "post": {
+        "operationId": "postApiV1DecideCalibrationsCalibrationIdPromote",
+        "tags": [
+          "decide.ts"
+        ],
+        "summary": "Make a candidate calibration active, when it meets every mark of the exit rule",
+        "description": "**Auth:** OWNER/ADMIN/EM\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "calibrationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideCalibrationChangedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "OWNER/ADMIN/EM",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "none",
+        "x-intutic-response-schema": "zod"
+      }
+    },
+    "/api/v1/decide/calibrations/{calibrationId}/retire": {
+      "post": {
+        "operationId": "postApiV1DecideCalibrationsCalibrationIdRetire",
+        "tags": [
+          "decide.ts"
+        ],
+        "summary": "Retire an active calibration; its rule drops to shadow on the next snapshot poll",
+        "description": "**Auth:** OWNER/ADMIN/EM\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "calibrationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideCalibrationChangedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "OWNER/ADMIN/EM",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "none",
+        "x-intutic-response-schema": "zod"
+      }
+    },
+    "/api/v1/decide/eval-runs": {
+      "get": {
+        "operationId": "getApiV1DecideEvalRuns",
+        "tags": [
+          "decide.ts"
+        ],
+        "summary": "Eval runs, newest first, by ruleHash",
+        "description": "**Auth:** Authenticated\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ruleHash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Clamped to 1–500.",
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideEvalRunListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "Authenticated",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "zod"
+      },
+      "post": {
+        "operationId": "postApiV1DecideEvalRuns",
+        "tags": [
+          "decide.ts"
+        ],
+        "summary": "Pre-register an evaluation of a rule on a model digest, before any label is read",
+        "description": "**Auth:** OWNER/ADMIN/EM/DEVELOPER\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideEvalRunCreateSchema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideEvalRunChangedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "OWNER/ADMIN/EM/DEVELOPER",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "zod"
+      }
+    },
+    "/api/v1/decide/eval-runs/{evalRunId}/results": {
+      "post": {
+        "operationId": "postApiV1DecideEvalRunsEvalRunIdResults",
+        "tags": [
+          "decide.ts"
+        ],
+        "summary": "Write a pre-registered run's results, once",
+        "description": "**Auth:** OWNER/ADMIN/EM/DEVELOPER\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "evalRunId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideEvalResultsSchema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideEvalRunChangedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "OWNER/ADMIN/EM/DEVELOPER",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "zod"
+      }
+    },
+    "/api/v1/decide/events": {
+      "get": {
+        "operationId": "getApiV1DecideEvents",
+        "tags": [
+          "decide.ts"
+        ],
+        "summary": "Uploaded decisions, newest first, by ruleHash, outcome, from and to; paginated by cursor",
+        "description": "**Auth:** Authenticated\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ruleHash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "refuse",
+                "escalate",
+                "unavailable"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Default: 7 days ago.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Default: now.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Clamped to 1–500.",
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideEventListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "Authenticated",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "zod"
+      },
+      "post": {
+        "operationId": "postApiV1DecideEvents",
+        "tags": [
+          "decide.ts"
+        ],
+        "summary": "Upload decide-log lines (at most 500); stored only when the workspace setting decideLogUploadEnabled is on",
+        "description": "**Auth:** OWNER/ADMIN/EM/DEVELOPER\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideEventsIngestSchema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideEventsIngestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "OWNER/ADMIN/EM/DEVELOPER",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "zod"
+      }
+    },
+    "/api/v1/decide/rules": {
+      "get": {
+        "operationId": "getApiV1DecideRules",
+        "tags": [
+          "decide.ts"
+        ],
+        "summary": "The served decide rules with their uploaded decisions: outcomes, escalation rate, shadow against enforce, and each question's answers by probability",
+        "description": "**Auth:** Authenticated\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "How many days of uploaded decisions to read.",
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideRuleListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "Authenticated",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "zod",
+        "x-intutic-response-schema": "zod"
+      }
+    },
     "/api/v1/decisions": {
       "get": {
         "operationId": "getApiV1Decisions",
@@ -7271,7 +7874,7 @@
         "tags": [
           "judgeReviews.ts"
         ],
-        "summary": "Judge responses waiting for a person (`status=PENDING|VIOLATION|CLEAN`)",
+        "summary": "Judge responses and decide escalations waiting for a person (`status=PENDING|VIOLATION|CLEAN`, `source=judge|decide`)",
         "description": "**Auth:** OWNER/ADMIN/EM\n\n**Plan:** Cloud",
         "security": [
           {
@@ -7294,6 +7897,18 @@
                 "CLEAN"
               ],
               "default": "PENDING"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "judge",
+                "decide"
+              ]
             }
           },
           {
@@ -7336,7 +7951,7 @@
         "tags": [
           "judgeReviews.ts"
         ],
-        "summary": "`{ decision, note? }`: a VIOLATION opens an incident, a CLEAN resolves the interim one",
+        "summary": "`{ decision, note? }`: on a judge review a VIOLATION opens an incident (a CLEAN resolves one a pre-3.0 interim verdict opened); on a decide review the ruling is the rule's label",
         "description": "**Auth:** OWNER/ADMIN/EM\n\n**Plan:** Cloud",
         "security": [
           {
@@ -7401,7 +8016,7 @@
         "tags": [
           "judgeReviews.ts"
         ],
-        "summary": "Rulings per SOP and per stage-1 score bucket",
+        "summary": "Rulings per SOP and per stage-1 score bucket, and decide escalations per rule",
         "description": "**Auth:** OWNER/ADMIN/EM\n\n**Plan:** Cloud",
         "security": [
           {
@@ -11638,6 +12253,65 @@
         },
         "x-intutic-auth": "OWNER/ADMIN/EM",
         "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "none",
+        "x-intutic-response-schema": "zod"
+      }
+    },
+    "/api/v1/policy-guardrails/documents/{docId}/draft-decide": {
+      "post": {
+        "operationId": "postApiV1PolicyGuardrailsDocumentsDocIdDraftDecide",
+        "tags": [
+          "policyGuardrails.ts"
+        ],
+        "summary": "Draft decide rules from a document's prose; each draft the validator admits is a proposed guardrail, served to no gate until approved",
+        "description": "**Auth:** OWNER/ADMIN\n\n**Plan:** Self-serve+",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyExtractResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "429": {
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "OWNER/ADMIN",
+        "x-intutic-plan": "Self-serve+",
         "x-intutic-request-schema": "none",
         "x-intutic-response-schema": "zod"
       }
@@ -22889,6 +23563,9 @@
               "mcp.budget.threshold",
               "mcp.budget.exceeded",
               "judge.review.queued",
+              "decide.drift",
+              "decide.canary_failed",
+              "decide.promotion_ready",
               "finops.budget.exceeded",
               "finops.budget.threshold",
               "finops.tokens.classified",
@@ -23424,6 +24101,1143 @@
           "harnesses"
         ],
         "additionalProperties": false
+      },
+      "DecideCalibrationChangedResponse": {
+        "type": "object",
+        "properties": {
+          "calibration": {
+            "type": "object",
+            "properties": {
+              "calibrationId": {
+                "type": "string"
+              },
+              "ruleHash": {
+                "type": "string"
+              },
+              "modelDigest": {
+                "type": "string"
+              },
+              "modelId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "candidate",
+                  "active",
+                  "retired"
+                ]
+              },
+              "temperature": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "combiner": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "bias": {
+                        "type": "number"
+                      },
+                      "weights": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "required": [
+                      "bias",
+                      "weights"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "band": {
+                "type": "object",
+                "properties": {
+                  "yes_at": {
+                    "type": "number"
+                  },
+                  "no_below": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "yes_at",
+                  "no_below"
+                ]
+              },
+              "evalRunId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "labelsN": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fittedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "promotedBy": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "promotedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "retiredAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "calibrationId",
+              "ruleHash",
+              "modelDigest",
+              "modelId",
+              "status",
+              "temperature",
+              "combiner",
+              "band",
+              "evalRunId",
+              "labelsN",
+              "fittedAt",
+              "promotedBy",
+              "promotedAt",
+              "retiredAt"
+            ]
+          }
+        },
+        "required": [
+          "calibration"
+        ]
+      },
+      "DecideCalibrationListResponse": {
+        "type": "object",
+        "properties": {
+          "calibrations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "calibrationId": {
+                  "type": "string"
+                },
+                "ruleHash": {
+                  "type": "string"
+                },
+                "modelDigest": {
+                  "type": "string"
+                },
+                "modelId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "candidate",
+                    "active",
+                    "retired"
+                  ]
+                },
+                "temperature": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                },
+                "combiner": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "bias": {
+                          "type": "number"
+                        },
+                        "weights": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "bias",
+                        "weights"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "band": {
+                  "type": "object",
+                  "properties": {
+                    "yes_at": {
+                      "type": "number"
+                    },
+                    "no_below": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "yes_at",
+                    "no_below"
+                  ]
+                },
+                "evalRunId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "labelsN": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fittedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "promotedBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "promotedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "retiredAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "calibrationId",
+                "ruleHash",
+                "modelDigest",
+                "modelId",
+                "status",
+                "temperature",
+                "combiner",
+                "band",
+                "evalRunId",
+                "labelsN",
+                "fittedAt",
+                "promotedBy",
+                "promotedAt",
+                "retiredAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "calibrations"
+        ]
+      },
+      "DecideEvalResultsSchema": {
+        "type": "object",
+        "properties": {
+          "setHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "sha256 of the labelled set, hex."
+          },
+          "results": {
+            "type": "object",
+            "properties": {
+              "n": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "refuseLabels": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "recall": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "falseAlarms": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "escalation": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "n",
+              "refuseLabels",
+              "recall",
+              "falseAlarms",
+              "escalation"
+            ],
+            "additionalProperties": true
+          },
+          "adversarial": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "setHash",
+          "results"
+        ],
+        "additionalProperties": false
+      },
+      "DecideEvalRunChangedResponse": {
+        "type": "object",
+        "properties": {
+          "evalRun": {
+            "type": "object",
+            "properties": {
+              "evalRunId": {
+                "type": "string"
+              },
+              "ruleHash": {
+                "type": "string"
+              },
+              "modelDigest": {
+                "type": "string"
+              },
+              "preregHash": {
+                "type": "string"
+              },
+              "prereg": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "registeredAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "setHash": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "results": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "completedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "cli",
+                  "job"
+                ]
+              },
+              "reusedSet": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "evalRunId",
+              "ruleHash",
+              "modelDigest",
+              "preregHash",
+              "prereg",
+              "registeredAt",
+              "setHash",
+              "results",
+              "passed",
+              "completedAt",
+              "source",
+              "reusedSet"
+            ]
+          },
+          "marks": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "On results: each pass mark of the exit rule the run met (marks 1–3 and 5)."
+          }
+        },
+        "required": [
+          "evalRun"
+        ]
+      },
+      "DecideEvalRunCreateSchema": {
+        "type": "object",
+        "properties": {
+          "ruleHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "modelDigest": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "prereg": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "The band, the pass marks and a description of the set, as registered before any label is read."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "cli",
+              "job"
+            ]
+          }
+        },
+        "required": [
+          "ruleHash",
+          "modelDigest",
+          "prereg"
+        ],
+        "additionalProperties": false
+      },
+      "DecideEvalRunListResponse": {
+        "type": "object",
+        "properties": {
+          "evalRuns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evalRunId": {
+                  "type": "string"
+                },
+                "ruleHash": {
+                  "type": "string"
+                },
+                "modelDigest": {
+                  "type": "string"
+                },
+                "preregHash": {
+                  "type": "string"
+                },
+                "prereg": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "registeredAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "setHash": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "results": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "passed": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "completedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "cli",
+                    "job"
+                  ]
+                },
+                "reusedSet": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "evalRunId",
+                "ruleHash",
+                "modelDigest",
+                "preregHash",
+                "prereg",
+                "registeredAt",
+                "setHash",
+                "results",
+                "passed",
+                "completedAt",
+                "source",
+                "reusedSet"
+              ]
+            }
+          }
+        },
+        "required": [
+          "evalRuns"
+        ]
+      },
+      "DecideEventListResponse": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "eventId": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "receivedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "harness": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ruleRef": {
+                  "type": "string"
+                },
+                "ruleHash": {
+                  "type": "string"
+                },
+                "modelId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "modelDigest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "adapter": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "rollout": {
+                  "type": "string"
+                },
+                "effective": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string"
+                },
+                "answers": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "whenValue": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "stateHash": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "argsExcerpt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "latencyMs": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "errorCode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reviewId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "eventId",
+                "createdAt",
+                "receivedAt",
+                "source",
+                "harness",
+                "ruleRef",
+                "ruleHash",
+                "modelId",
+                "modelDigest",
+                "adapter",
+                "rollout",
+                "effective",
+                "outcome",
+                "answers",
+                "whenValue",
+                "stateHash",
+                "argsExcerpt",
+                "latencyMs",
+                "errorCode",
+                "reviewId"
+              ]
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last."
+          }
+        },
+        "required": [
+          "events",
+          "nextCursor"
+        ]
+      },
+      "DecideEventsIngestResponse": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "description": "Rule decisions stored."
+          },
+          "duplicates": {
+            "type": "integer",
+            "description": "Rule decisions already stored (a re-sent batch)."
+          },
+          "overBudget": {
+            "type": "integer",
+            "description": "Rule decisions refused by the per-workspace daily row budget."
+          },
+          "outOfWindow": {
+            "type": "integer",
+            "description": "Rule decisions older than 30 days or more than a day ahead."
+          },
+          "invalid": {
+            "type": "integer",
+            "description": "Rule decisions that did not read."
+          },
+          "ignored": {
+            "type": "integer",
+            "description": "Log lines that are not decisions (drift, canary, unavailable events)."
+          },
+          "argsDropped": {
+            "type": "boolean",
+            "description": "Arguments excerpts were dropped: `decideLogUploadArgs` is off."
+          }
+        },
+        "required": [
+          "accepted",
+          "duplicates",
+          "overBudget",
+          "outOfWindow",
+          "invalid",
+          "ignored",
+          "argsDropped"
+        ]
+      },
+      "DecideEventsIngestSchema": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {},
+            "maxItems": 500
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "gate",
+              "sdk",
+              "gateway"
+            ],
+            "description": "Who decided: a hook gate (the default), a gate SDK or the gateway."
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "additionalProperties": false
+      },
+      "DecideRuleListResponse": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "shadow",
+              "on"
+            ],
+            "description": "The server kill switch for this workspace (`INTUTIC_DECIDE`): off serves no rule."
+          },
+          "windowDays": {
+            "type": "integer"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sopId": {
+                  "type": "string",
+                  "description": "The SOP id, or `guardrail:<pgr>` for a decide guardrail."
+                },
+                "sopTitle": {
+                  "type": "string"
+                },
+                "guardrailId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ruleRef": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "`<sopId>#<id>`; null on a line that does not read."
+                },
+                "ruleHash": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "rule": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The rule as its line carries it (the IR without `kind`); null on a line that does not read."
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Why the line does not read; null when it does."
+                },
+                "stamp": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "shadow"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The server stamp: shadow under the kill switch, for a shadow guardrail or a `mode: shadow` SOP."
+                },
+                "pins": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "modelDigest": {
+                        "type": "string"
+                      },
+                      "temperature": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "number"
+                        }
+                      },
+                      "band": {
+                        "type": "object",
+                        "properties": {
+                          "yes_at": {
+                            "type": "number"
+                          },
+                          "no_below": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "yes_at",
+                          "no_below"
+                        ]
+                      },
+                      "combiner": {
+                        "type": "object",
+                        "properties": {
+                          "bias": {
+                            "type": "number"
+                          },
+                          "weights": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "number"
+                            }
+                          }
+                        },
+                        "required": [
+                          "bias",
+                          "weights"
+                        ]
+                      },
+                      "evalRunId": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "local",
+                          "server"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "modelDigest",
+                      "evalRunId",
+                      "source"
+                    ]
+                  }
+                },
+                "stats": {
+                  "type": "object",
+                  "properties": {
+                    "decisions": {
+                      "type": "integer"
+                    },
+                    "outcomes": {
+                      "type": "object",
+                      "properties": {
+                        "allow": {
+                          "type": "integer"
+                        },
+                        "refuse": {
+                          "type": "integer"
+                        },
+                        "escalate": {
+                          "type": "integer"
+                        },
+                        "unavailable": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "allow",
+                        "refuse",
+                        "escalate",
+                        "unavailable"
+                      ]
+                    },
+                    "shadow": {
+                      "type": "integer",
+                      "description": "Decisions the rule made in shadow."
+                    },
+                    "enforce": {
+                      "type": "integer",
+                      "description": "Decisions the rule made enforcing."
+                    },
+                    "shadowWouldAct": {
+                      "type": "integer",
+                      "description": "Shadow decisions that refused or escalated: the call went through, and an enforcing rule would have stopped it."
+                    },
+                    "enforceActed": {
+                      "type": "integer",
+                      "description": "Enforcing decisions that refused or escalated."
+                    },
+                    "escalationRate": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Escalations over decisions; null with none."
+                    },
+                    "shadowDisagreementRate": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "shadowWouldAct over shadow decisions: how often the shadow run and an enforcing rule would have disagreed; null with no shadow decisions."
+                    },
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "yes_no",
+                              "choice"
+                            ]
+                          },
+                          "ask": {
+                            "type": "string"
+                          },
+                          "n": {
+                            "type": "integer"
+                          },
+                          "unknownRate": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "description": "Share of answers inside the band; null with no answers."
+                          },
+                          "buckets": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "lo": {
+                                  "type": "number"
+                                },
+                                "hi": {
+                                  "type": "number"
+                                },
+                                "n": {
+                                  "type": "integer",
+                                  "description": "Answers whose probability fell in the bucket (a choice question: its top option)."
+                                },
+                                "unknown": {
+                                  "type": "integer",
+                                  "description": "Of those, answers inside the band: unknown."
+                                },
+                                "labelled": {
+                                  "type": "integer",
+                                  "description": "Of those, decisions a person ruled on in the review queue."
+                                },
+                                "refuseLabels": {
+                                  "type": "integer",
+                                  "description": "Of the ruled ones, those ruled a violation (refuse)."
+                                }
+                              },
+                              "required": [
+                                "lo",
+                                "hi",
+                                "n",
+                                "unknown",
+                                "labelled",
+                                "refuseLabels"
+                              ]
+                            },
+                            "description": "Ten buckets of width 0.1, from 0 to 1."
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type",
+                          "ask",
+                          "n",
+                          "unknownRate",
+                          "buckets"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "decisions",
+                    "outcomes",
+                    "shadow",
+                    "enforce",
+                    "shadowWouldAct",
+                    "enforceActed",
+                    "escalationRate",
+                    "shadowDisagreementRate",
+                    "questions"
+                  ]
+                }
+              },
+              "required": [
+                "sopId",
+                "sopTitle",
+                "guardrailId",
+                "ruleRef",
+                "ruleHash",
+                "rule",
+                "error",
+                "stamp",
+                "pins",
+                "stats"
+              ]
+            }
+          }
+        },
+        "required": [
+          "mode",
+          "windowDays",
+          "rules"
+        ]
       },
       "DecideSchema": {
         "type": "object",
@@ -32611,6 +34425,28 @@
               "decision",
               "score"
             ]
+          },
+          "deprecation": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "FREE_TEXT_VERDICT_DEPRECATED"
+              },
+              "removedIn": {
+                "type": "string",
+                "const": "4.0"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "removedIn",
+              "message"
+            ],
+            "description": "When `builtin:finalize` has no band for the workspace: the free-text verdict decided, as before 3.0. Deprecated; retired in 4.0."
           }
         },
         "required": [
@@ -32922,6 +34758,20 @@
             ],
             "description": "Only `true` keeps tool-call argument values in replay contexts."
           },
+          "decideLogUploadEnabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Only `true` sends the gateway's decide log lines to `POST /api/v1/decide/events`."
+          },
+          "decideLogUploadArgs": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Only `true` sends the arguments excerpt with them."
+          },
           "budget": {
             "anyOf": [
               {
@@ -32982,6 +34832,8 @@
           "piiDetectors",
           "upstreamRetry",
           "storeToolArguments",
+          "decideLogUploadEnabled",
+          "decideLogUploadArgs",
           "budget",
           "interventionMode",
           "llmJudgeEnabled"
@@ -34832,6 +36684,9 @@
                     "mcp.budget.threshold",
                     "mcp.budget.exceeded",
                     "judge.review.queued",
+                    "decide.drift",
+                    "decide.canary_failed",
+                    "decide.promotion_ready",
                     "finops.budget.exceeded",
                     "finops.budget.threshold",
                     "finops.tokens.classified",
@@ -35005,6 +36860,9 @@
               "mcp.budget.threshold",
               "mcp.budget.exceeded",
               "judge.review.queued",
+              "decide.drift",
+              "decide.canary_failed",
+              "decide.promotion_ready",
               "finops.budget.exceeded",
               "finops.budget.threshold",
               "finops.tokens.classified",
@@ -36752,6 +38610,112 @@
           "sqlDropStrictBlock": {
             "type": "boolean",
             "description": "`ff_sql_drop_strict_block`: the daemon's destructive-SQL hook rule blocks instead of warning."
+          },
+          "decideRules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sopId": {
+                  "type": "string",
+                  "description": "The SOP id, or `guardrail:<pgr>` for a decide guardrail."
+                },
+                "sopTitle": {
+                  "type": "string"
+                },
+                "ruleText": {
+                  "type": "string",
+                  "description": "The SOP body, or the guardrail description."
+                },
+                "ir": {
+                  "type": "string",
+                  "description": "The text after `decide:`."
+                },
+                "rollout": {
+                  "type": "string",
+                  "const": "shadow",
+                  "description": "The server stamp: present when the kill switch (`INTUTIC_DECIDE=shadow`), a shadow guardrail or a `mode: shadow` SOP holds the rule in shadow."
+                },
+                "ruleHash": {
+                  "type": "string",
+                  "description": "The rule hash the server computed; absent on a line that does not read."
+                },
+                "pins": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "modelDigest": {
+                        "type": "string"
+                      },
+                      "temperature": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "number"
+                        }
+                      },
+                      "band": {
+                        "type": "object",
+                        "properties": {
+                          "yes_at": {
+                            "type": "number"
+                          },
+                          "no_below": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "yes_at",
+                          "no_below"
+                        ]
+                      },
+                      "combiner": {
+                        "type": "object",
+                        "properties": {
+                          "bias": {
+                            "type": "number"
+                          },
+                          "weights": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "number"
+                            }
+                          }
+                        },
+                        "required": [
+                          "bias",
+                          "weights"
+                        ]
+                      },
+                      "evalRunId": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "local",
+                          "server"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "modelDigest",
+                      "evalRunId",
+                      "source"
+                    ]
+                  },
+                  "description": "The active calibrations of this rule hash."
+                }
+              },
+              "required": [
+                "sopId",
+                "sopTitle",
+                "ruleText",
+                "ir",
+                "pins"
+              ]
+            },
+            "description": "The `decide:` lines of the enforced SOPs and decide guardrails, with their active calibrations as pins. Empty under `INTUTIC_DECIDE=off`; absent from a control plane before 3.0."
           }
         },
         "required": [
@@ -42038,6 +44002,15 @@
               "governanceCardLabelingEnabled": {
                 "type": "boolean"
               },
+              "decideLogUploadEnabled": {
+                "type": "boolean"
+              },
+              "decideLogUploadArgs": {
+                "type": "boolean"
+              },
+              "decideAutoPromote": {
+                "type": "boolean"
+              },
               "appliedSecurityPosture": {
                 "type": "string",
                 "description": "The security posture preset last applied; removed by a manual edit to a knob it governs."
@@ -43667,6 +45640,9 @@
               "mcp.budget.threshold",
               "mcp.budget.exceeded",
               "judge.review.queued",
+              "decide.drift",
+              "decide.canary_failed",
+              "decide.promotion_ready",
               "finops.budget.exceeded",
               "finops.budget.threshold",
               "finops.tokens.classified",
@@ -44421,6 +46397,15 @@
             "type": "number",
             "minimum": 0,
             "maximum": 1
+          },
+          "decideLogUploadEnabled": {
+            "type": "boolean"
+          },
+          "decideLogUploadArgs": {
+            "type": "boolean"
+          },
+          "decideAutoPromote": {
+            "type": "boolean"
           },
           "sso_group_policy": {
             "anyOf": [
@@ -45459,6 +47444,15 @@
               "governanceCardLabelingEnabled": {
                 "type": "boolean"
               },
+              "decideLogUploadEnabled": {
+                "type": "boolean"
+              },
+              "decideLogUploadArgs": {
+                "type": "boolean"
+              },
+              "decideAutoPromote": {
+                "type": "boolean"
+              },
               "appliedSecurityPosture": {
                 "type": "string",
                 "description": "The security posture preset last applied; removed by a manual edit to a knob it governs."
@@ -46074,6 +48068,15 @@
                 "type": "number"
               },
               "governanceCardLabelingEnabled": {
+                "type": "boolean"
+              },
+              "decideLogUploadEnabled": {
+                "type": "boolean"
+              },
+              "decideLogUploadArgs": {
+                "type": "boolean"
+              },
+              "decideAutoPromote": {
                 "type": "boolean"
               },
               "appliedSecurityPosture": {

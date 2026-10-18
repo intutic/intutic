@@ -1293,10 +1293,19 @@ fn scan_sql(sql: &str) -> SqlScan {
 /// block whose tool a hook rule names *and* whose arguments that rule
 /// constrains is held the same way and decided whole. Blocks no argument rule
 /// names flow unheld.
+///
+/// And the decide rules (`decide::gateway`): a block whose tool an
+/// `on: tool_call` rule names is held, and once the SQL guard and the hook
+/// rules allow it, handed to the caller ([`HoldStep::decide`]) to ask the
+/// engine. The block waits in the hold until the caller releases it
+/// ([`StreamHold::release_decided`]) or refuses it.
 pub struct StreamHold {
     policies: Vec<SqlGuardPolicy>,
     hook_rules: crate::plugins::hook_rules::HookRuleSet,
+    decide_tools: std::collections::BTreeSet<String>,
     held: Option<Held>,
+    /// A block the decide rules are deciding, and the line that ended it.
+    decided: Option<(Vec<String>, Option<String>)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1331,6 +1340,33 @@ pub struct HoldStep {
     pub refuse_hook: Option<(crate::plugins::hook_rules::HookRuleHit, u64)>,
     /// Shadow hook rules that fired on a released block, for the trace.
     pub hook_shadow: Vec<crate::plugins::hook_rules::HookRuleHit>,
+    /// A complete block the deterministic rules allowed and a decide rule
+    /// names: ask the engine, then release it or refuse it. Nothing more may
+    /// be pushed until it is released.
+    pub decide: Option<DecideCall>,
+}
+
+/// A held tool call for the decide rules.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecideCall {
+    pub tool: String,
+    /// The arguments: parsed JSON, `null` when empty, or the raw text as a
+    /// string when they are not JSON.
+    pub args: Value,
+    /// Where a refusal is written.
+    pub block_index: u64,
+}
+
+impl HoldStep {
+    /// Adds what pushing the next line did, after this step's own lines.
+    pub fn absorb(&mut self, next: HoldStep) {
+        self.emit.extend(next.emit);
+        self.notes.extend(next.notes);
+        self.hook_shadow.extend(next.hook_shadow);
+        self.refuse = next.refuse;
+        self.refuse_hook = next.refuse_hook;
+        self.decide = next.decide;
+    }
 }
 
 fn data_json(line: &str) -> Option<Value> {
@@ -1346,8 +1382,34 @@ impl StreamHold {
         Self {
             policies,
             hook_rules: crate::plugins::hook_rules::HookRuleSet::default(),
+            decide_tools: std::collections::BTreeSet::new(),
             held: None,
+            decided: None,
         }
+    }
+
+    /// Also hold the blocks of `tools`, which decide rules name, for the
+    /// caller to decide once the rules above allow them.
+    pub fn with_decide_tools(mut self, tools: std::collections::BTreeSet<String>) -> Self {
+        self.decide_tools = tools;
+        self
+    }
+
+    /// Releases the block [`HoldStep::decide`] handed out, then handles the
+    /// line that ended it.
+    pub fn release_decided(&mut self) -> HoldStep {
+        let Some((lines, after)) = self.decided.take() else {
+            return HoldStep::default();
+        };
+        let mut step = HoldStep {
+            emit: lines,
+            ..HoldStep::default()
+        };
+        if let Some(line) = after {
+            let next = self.push(line);
+            step.absorb(next);
+        }
+        step
     }
 
     /// Also hold, and decide whole, the blocks the hook rules in `rules`
@@ -1476,6 +1538,7 @@ impl StreamHold {
         let start = crate::protocol::tool_use_parser::parse_sse_chunk(&line).filter(|ev| {
             (!self.policies.is_empty() && tool_is(&ev.tool_name, SHELL_TOOLS))
                 || self.hook_rules.holds(&ev.tool_name)
+                || self.decide_tools.contains(&ev.tool_name)
         });
         let (Some(ev), Some(v)) = (start, data_json(&line)) else {
             return HoldStep {
@@ -1575,14 +1638,19 @@ impl StreamHold {
                 return step;
             }
         }
+        if self.decide_tools.contains(&held.tool) {
+            step.decide = Some(DecideCall {
+                tool: held.tool,
+                args,
+                block_index: held.block_index,
+            });
+            self.decided = Some((held.lines, after));
+            return step;
+        }
         step.emit = held.lines;
         if let Some(line) = after {
             let next = self.push(line);
-            step.emit.extend(next.emit);
-            step.notes.extend(next.notes);
-            step.hook_shadow.extend(next.hook_shadow);
-            step.refuse = next.refuse;
-            step.refuse_hook = next.refuse_hook;
+            step.absorb(next);
         }
         step
     }
@@ -2021,6 +2089,61 @@ mod tests {
             vec![other[0].clone()],
             "an unnamed tool is not held"
         );
+    }
+
+    /// A block a decide rule names is held whole and handed out once
+    /// complete; nothing is released until the caller releases it, and then
+    /// the block goes out in order, followed by the line that ended it.
+    #[test]
+    fn the_hold_hands_decide_blocks_to_the_caller() {
+        let tools = std::collections::BTreeSet::from(["Bash".to_string()]);
+        let mut hold = StreamHold::new(Vec::new()).with_decide_tools(tools);
+        let block = anthropic_block("Bash", &["{\"command\": \"ls", " -la\"}"]);
+        let mut call = None;
+        for l in block.clone() {
+            let step = hold.push(l);
+            assert!(step.emit.is_empty(), "a held line was released early");
+            if let Some(c) = step.decide {
+                call = Some(c);
+            }
+        }
+        let call = call.expect("the complete block is handed out");
+        assert_eq!(call.tool, "Bash");
+        assert_eq!(call.args, json!({"command": "ls -la"}));
+        assert_eq!(call.block_index, 2);
+        let released = hold.release_decided();
+        assert_eq!(released.emit, block, "released whole and in order");
+        assert!(released.decide.is_none());
+        assert!(hold.release_decided().emit.is_empty(), "released once");
+
+        // OpenAI chat: the next call's first line ends the held one; it is
+        // handled after the release, and starts a hold of its own.
+        let tc = |idx: u64, name: Option<&str>, args: &str| {
+            let mut f = json!({ "arguments": args });
+            if let Some(n) = name {
+                f["name"] = json!(n);
+            }
+            format!(
+                "data: {}",
+                json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":idx,"function":f}]},"finish_reason":null}]})
+            )
+        };
+        let first = [tc(0, Some("Bash"), ""), tc(0, None, "{\"command\":\"ls\"}")];
+        for l in first.clone() {
+            assert!(hold.push(l).decide.is_none());
+        }
+        let step = hold.push(tc(1, Some("Bash"), ""));
+        assert_eq!(
+            step.decide.expect("handed out").args,
+            json!({"command": "ls"})
+        );
+        let released = hold.release_decided();
+        assert_eq!(
+            released.emit,
+            first.to_vec(),
+            "the next call's line is held"
+        );
+        assert!(released.decide.is_none());
     }
 
     /// Arguments that complete as something other than JSON cannot be shown

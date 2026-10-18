@@ -98,7 +98,7 @@ const decideCmd = program.command('decide').description('Decide rules: test and 
 decideCmd
   .command('test <rule>')
   .description('Ask a rule\'s questions about one call and show each answer, the when value and the outcome')
-  .requiredOption('--state <file>', 'A JSON file with the call: {"tool","toolInput","cwd"?}')
+  .requiredOption('--state <file>', 'A JSON file with the call, {"tool","toolInput","cwd"?}; for an on: response rule, the response, {"response"}')
   .option('--json', 'Print the result as JSON')
   .option('--log-state', 'Also write the exact state sent to ~/.intutic/logs/decide-state-<date>.jsonl')
   .option('--workspace <dir>', 'The workspace whose .intutic/sops to read (default: the recorded one, else the current directory)')
@@ -110,8 +110,9 @@ decideCmd
 decideCmd
   .command('eval <rule>')
   .description('Measure a rule on labelled calls; under a pre-registration, a pass pins the engine\'s model so the rule may enforce')
-  .option('--labels <file>', 'JSONL, one call per line: {"id","label":"refuse"|"allow","tool","toolInput","cwd"?}')
+  .option('--labels <file>', 'JSONL, one case per line: {"id","label":"refuse"|"allow","tool","toolInput","cwd"?}, or {"id","label","response"} for an on: response rule')
   .option('--preregister <file>', 'Write the pre-registration here when it is absent (reading no label); evaluate against it when present')
+  .option('--calibration <id>', 'Pre-register a control-plane candidate calibration\'s band and combiner, and upload the run as its companion (logged in only)')
   .option('--adversarial', 'Add the planted-approval, instruction-in-arguments and paraphrase families (always on under a pre-registration)')
   .option('--json', 'Print the run report as JSON')
   .option('--log-state', 'Also write each exact state sent to ~/.intutic/logs/decide-state-<date>.jsonl')

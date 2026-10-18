@@ -23,10 +23,15 @@
 pub mod engine;
 /// One call's rules through the engine, inside the engine protections.
 pub mod evaluate;
+/// The gateway's decide stage: the engine it reads at startup, and the SOPs'
+/// rules on tool calls and responses.
+pub mod gateway;
 /// The self-hosted guard on the engine's URL.
 pub mod guard;
 /// The self-hosted gateway's local judge, as the decide rule `local-judge`.
 pub mod local_judge;
+/// The decide log the gateway writes, its drift stats, and its upload.
+pub mod log;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
@@ -1238,6 +1243,20 @@ pub fn select_rules<'a>(candidates: &'a [Candidate], tool: &str) -> Selection<'a
         .iter()
         .filter(|c| c.on == On::ToolCall && c.tools.iter().any(|t| t == tool))
         .collect();
+    select_matched(matched, &format!("name {tool}"))
+}
+
+/// The rules a model response is judged by: every `on: response` rule, under
+/// the same limit and order as a tool call's.
+pub fn select_response_rules(candidates: &[Candidate]) -> Selection<'_> {
+    let matched: Vec<&Candidate> = candidates.iter().filter(|c| c.on == On::Response).collect();
+    select_matched(matched, "judge the response")
+}
+
+/// Enforce rules first, then snapshot order; the first
+/// [`DECIDE_MAX_RULES_PER_CALL`] are evaluated. `what` ends the reason an
+/// enforce rule past the limit gives: "more than 4 decide rules <what>".
+fn select_matched<'a>(matched: Vec<&'a Candidate>, what: &str) -> Selection<'a> {
     let (enforce, shadow): (Vec<&Candidate>, Vec<&Candidate>) = matched
         .into_iter()
         .partition(|c| c.effective == Rollout::Enforce);
@@ -1254,7 +1273,7 @@ pub fn select_rules<'a>(candidates: &'a [Candidate], tool: &str) -> Selection<'a
         unavailable: beyond
             .iter()
             .any(|c| c.effective == Rollout::Enforce)
-            .then(|| format!("more than {DECIDE_MAX_RULES_PER_CALL} decide rules name {tool}")),
+            .then(|| format!("more than {DECIDE_MAX_RULES_PER_CALL} decide rules {what}")),
     }
 }
 

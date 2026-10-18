@@ -81,3 +81,19 @@ misleading as a green test over a control that does nothing.
 
 So: after editing a fixture to prove a test catches a regression, `touch` a
 source file — or `cargo clean -p intutic-proxy` — before believing the result.
+
+## Decision traffic (`decision-traffic/`)
+
+`systemone.json` and `decisions.json` are the exception to the rule above:
+they are **written from the documented shapes, not captured**. No test may
+call a hosted decision API, and none was called to make them.
+
+| file | shape source |
+|---|---|
+| `systemone.json` | The System One request and answer shapes the decide engine's Kev replay vectors use (`packages/shared-types/fixtures/decide-engine-vectors.json`): `questions` keyed by name, `noul` / `choice` answers under `answers`, `model` and `version`. The `score` question is shaped like a choice, an assumption: no System One score answer was available to check |
+| `decisions.json` | OpenAI's Decisions guide and API reference: `input` as content parts, `questions[]` with `name`, `predicate` / `choice` / `score`, and `answers[]` in question order, a `refusal` included |
+
+Each file holds a `request`, the `response` the stub upstream returns, and
+the `normalised` shape both must parse to (`tests/decision_traffic_test.rs`).
+A capture from a real server should replace each when one can be made without
+a hosted call, for example from a self-hosted Kev or LiteLLM.

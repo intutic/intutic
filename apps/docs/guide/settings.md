@@ -451,6 +451,9 @@ The **Event Type** list offers only the events the control plane sends:
 |------------|------------------------|
 | `incident.created` | Incident Created: sent at the incident's own severity, so ticking HIGH and CRITICAL leaves out MEDIUM and LOW incidents. Before 2.4.0 every incident was sent at CRITICAL. See [incident types](/guide/concepts#incident-types) |
 | `judge.review.queued` | Judge Review Waiting |
+| `decide.drift` | Decide Rule Drifted: a decide rule's uploaded decisions moved from the evaluation its calibration was promoted on (the escalation rate by more than 0.15, or a question's median probability out of its p10–p90 range); at most once a day per rule and model; MEDIUM |
+| `decide.canary_failed` | Decide Engine Failed Its Canary: a gate, SDK or gateway's decide engine got the known-answer canary wrong, so its enforce rules refuse until it passes again; HIGH |
+| `decide.promotion_ready` | Decide Calibration Ready to Promote: a candidate calibration passed every exit-rule mark a machine checks and waits for an owner, admin or EM; MEDIUM |
 | `anomaly.detected` | Anomaly Detected |
 | `anomaly.finding` | Detector Finding (incl. advisory): every detector finding, allowed or blocked; pair it with a severity filter |
 | `trajectory.alert` | Trajectory Drift Alert |

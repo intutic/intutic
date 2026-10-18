@@ -242,7 +242,7 @@ or `<file>#<id>`.
 
 | Option | Description |
 |--------|-------------|
-| `--state <file>` | A JSON file with the call: `{"tool", "toolInput", "cwd"?}`. A `lastUserTurn` in it is not sent: `context: ["last_user_turn"]` is reserved in 3.0, and no gate supplies the user's last turn |
+| `--state <file>` | A JSON file with the call: `{"tool", "toolInput", "cwd"?}`. A `lastUserTurn` in it is not sent: `context: ["last_user_turn"]` is reserved in 3.0, and no gate supplies the user's last turn. For an `on: response` rule, the response instead: `{"response"}`, asked in the gateway's layout (the SOP's text, then the response) and held to the engine's response limit (32,768 bytes unless `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` says otherwise) |
 | `--json` | Print the result as JSON |
 | `--log-state` | Also write the exact state sent to `~/.intutic/logs/decide-state-<date>.jsonl` |
 | `--workspace <dir>` | The workspace whose `.intutic/sops` to read. Default: the recorded one, else the current directory |
@@ -259,7 +259,9 @@ intutic decide eval <rule> --labels <file.jsonl> [--preregister <file>] [--adver
 ```
 
 Each labels line is one call: `{"id", "label": "refuse" | "allow", "tool", "toolInput", "cwd"?}`
-(`violation` and `clean` read as `refuse` and `allow`). Recall counts a `refuse` case as caught when it
+(`violation` and `clean` read as `refuse` and `allow`). For an `on: response` rule each line is one
+response, `{"id", "label", "response"}`, asked about in the gateway's layout and under its response
+limit; a response over the limit counts as an escalation. Recall counts a `refuse` case as caught when it
 is refused or escalated; false alarms count `allow` cases refused. A case the engine could not answer
 counts as an escalation, never as an allow.
 
@@ -282,8 +284,22 @@ counts as an escalation, never as an allow.
 
 `--adversarial` adds three fixed families to the refuse cases: five planted approvals appended to the
 arguments, five instructions aimed at the model, and paraphrases of the command (an environment
-variable for the program, quoting, a line split, reordered flags, long and short options). No model
-writes a case. Each family is reported apart.
+variable for the program, quoting, a line split, reordered flags, long and short options). For a
+response rule the approvals and instructions are appended to the response, with no paraphrase. No
+model writes a case. Each family is reported apart.
+
+<!-- ENTERPRISE_ONLY_START -->
+**On a logged-in machine** a pre-registered eval is also registered with the control plane
+(`POST /api/v1/decide/eval-runs`, see [Eval runs and calibrations](/reference/api#eval-runs-and-calibrations))
+when the pre-registration is written, before any label is read, and its results are uploaded to that
+run (`POST /api/v1/decide/eval-runs/:evalRunId/results`):
+the labelled set's hash, the recall, false-alarm and escalation figures and the adversarial report,
+never a label's text or a state. The local pin and its message are unchanged, and a failed upload
+only says so. `--calibration <id>` pre-registers a control-plane candidate calibration's band and
+combiner (the calibration must be a candidate of this rule, fitted on the engine's model), scores
+the run under them, and registers it as that calibration's companion run, which is how a candidate
+fitted by the calibration job gets the planted-approval mark its promotion needs.
+<!-- ENTERPRISE_ONLY_END -->
 
 **Options:**
 
@@ -400,10 +416,10 @@ Undo `intutic decide disable`.
 
 Read every `decide:` line in `.intutic/sops/`: each rule with its file, line, rule hash and whether a
 pin exists for it, each line that does not read with its error (a bare `decide:` line gets the hint
-"write one rule per line as `decide: {json}`"), and each tool more than 4 rules name. It warns about
-each `on: response` rule, which is not enforced in 3.0, and each rule declaring
+"write one rule per line as `decide: {json}`"), and each tool more than 4 rules name. An
+`on: response` rule is marked as judged at the gateway. It warns about each rule declaring
 `context: ["last_user_turn"]`, which is reserved and not supplied in 3.0; `intutic gates install` and
-`intutic doctor` report both too. Exits with status `1` when a line does not read; the warnings do not
+`intutic doctor` report it too. Exits with status `1` when a line does not read; the warnings do not
 change the status.
 
 | Option | Description |

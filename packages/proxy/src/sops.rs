@@ -230,10 +230,10 @@ pub struct Sop {
     pub hook_rules: Vec<HookRuleDecl>,
     /// `decide: {json}` — one per line: a rule a self-hosted model answers
     /// (`crate::decide`). A line that does not parse is kept as
-    /// [`DecideDecl::Unreadable`]. In 3.0 the gateway evaluates none of
-    /// these (the gates evaluate `on: tool_call` rules, and refuse an
-    /// unreadable line's tools); it logs each SOP's `on: response` rules and
-    /// unreadable lines at load.
+    /// [`DecideDecl::Unreadable`], which refuses every response while it is
+    /// in force. The gateway asks `on: tool_call` rules about the tool calls
+    /// in a model's response and `on: response` rules about its text
+    /// (`crate::decide::gateway`).
     pub decide_rules: Vec<DecideDecl>,
 }
 
@@ -705,7 +705,12 @@ fn parse_rules(front: &str, key: &str) -> (Vec<(String, String, bool)>, Vec<Stri
 /// and no declarative field set. A declaration-only SOP (whole content is
 /// `scope_paths:`) is still real and must not be dropped — every declarative
 /// field is checked here for exactly that reason.
-fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) -> Option<Sop> {
+pub(crate) fn parse_sop_content(
+    title: String,
+    raw: &str,
+    source: &str,
+    scope: SopScope,
+) -> Option<Sop> {
     let fm = parse_front_matter(raw);
     if fm.body.is_empty()
         && fm.deny_tools.is_empty()
@@ -741,12 +746,9 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
             tracing::warn!(sop = %source, "Unreadable hook rule — every tool call is refused while it is in force: {error}");
         }
     }
-    // This gateway reads and validates decide rules and evaluates none of
-    // them in 3.0: the gates evaluate `on: tool_call` rules, nothing yet
-    // evaluates `on: response` rules, and the only decide rule the gateway
-    // runs is the one it synthesises for its local judge. Said once per SOP
-    // at load, so a response rule an operator believes is enforcing is not
-    // silent.
+    // The gateway judges each complete response by these
+    // (`crate::decide::gateway`); named once per SOP at load, so an operator
+    // can see which rules a response is held to.
     let response_rules: Vec<&str> = fm
         .decide_rules
         .iter()
@@ -758,15 +760,15 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
         })
         .collect();
     if !response_rules.is_empty() {
-        tracing::warn!(
+        tracing::info!(
             sop = %source,
             rules = %response_rules.join(", "),
-            "Decide rules with on: response are not enforced in 3.0: they are read and validated, and nothing evaluates them"
+            "Decide rules with on: response judge each complete response at the gateway"
         );
     }
     for decl in &fm.decide_rules {
         if let DecideDecl::Unreadable { error, .. } = decl {
-            tracing::warn!(sop = %source, "Unreadable decide rule — the gateway only logs it; the gates refuse the tools it names until it is fixed: {error}");
+            tracing::warn!(sop = %source, "Unreadable decide rule — every response is refused, and the gates refuse the tools it names, until it is fixed: {error}");
         }
     }
     Some(Sop {
@@ -2342,7 +2344,8 @@ pub fn inject_into_body(
         // An unrecognised shape gets nothing. Guessing where system text
         // belongs risks corrupting a body we do not understand, and a
         // malformed request is a worse outcome than an un-injected one.
-        Protocol::Unknown => return false,
+        // A decision call's state is the customer's data, not a prompt.
+        Protocol::Unknown | Protocol::SystemOne | Protocol::OpenAIDecisions => return false,
     }
     true
 }
@@ -3882,11 +3885,11 @@ mod discovery_tests {
         assert!(logged.contains("/etc/intutic/sops"), "{logged}");
     }
 
-    /// The gateway evaluates no `on: response` decide rule in 3.0, so loading
-    /// one says so, once per SOP, naming each such rule and not the
-    /// tool-call rules beside it.
+    /// Loading a SOP's `on: response` decide rules names them once, as rules
+    /// the gateway judges responses by, and not the tool-call rules beside
+    /// them. Nothing calls them unenforced.
     #[test]
-    fn a_response_decide_rule_is_reported_as_not_enforced_at_load() {
+    fn a_response_decide_rule_is_named_at_load() {
         let q = r#""questions":{"a":{"type":"yes_no","ask":"Does the response leak customer data?"}},"when":"a""#;
         let raw = format!(
             "---\ndecide: {{\"id\":\"leak\",\"on\":\"response\",{q}}}\ndecide: {{\"id\":\"tone\",\"on\":\"response\",{q}}}\n\
@@ -3897,13 +3900,14 @@ mod discovery_tests {
                 parse_sop_content("data".into(), &raw, "data.md", SopScope::Workspace).unwrap();
             assert_eq!(sop.decide_rules.len(), 3);
         });
+        assert!(!logged.contains("not enforced"), "{logged}");
         let lines: Vec<&str> = logged
             .lines()
-            .filter(|l| l.contains("not enforced in 3.0"))
+            .filter(|l| l.contains("judge each complete response at the gateway"))
             .collect();
         assert_eq!(lines.len(), 1, "one line per SOP: {logged}");
         assert!(
-            lines[0].contains("WARN") && lines[0].contains("data.md"),
+            lines[0].contains("INFO") && lines[0].contains("data.md"),
             "{logged}"
         );
         assert!(lines[0].contains("leak, tone"), "{logged}");
@@ -3918,7 +3922,7 @@ mod discovery_tests {
                 SopScope::Workspace,
             );
         });
-        assert!(!quiet.contains("not enforced in 3.0"), "{quiet}");
+        assert!(!quiet.contains("judge each complete response"), "{quiet}");
     }
 
     /// The whole point of the override: on a host whose cwd ancestry carries no

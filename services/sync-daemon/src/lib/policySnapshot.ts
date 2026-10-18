@@ -78,6 +78,7 @@ import {
   parseDecidePin,
   scrubReason,
   splitFrontMatter,
+  parseFrontMatterEnforcing,
   encodeInterventionModeRecord,
   encodeMcpAllowlistRecord,
   isOpaqueInterventionMode,
@@ -304,7 +305,11 @@ export interface ServedDecideRule {
   ruleText: string
   /** The line's JSON value, or a local line's text after `decide:`. */
   ir: unknown
-  /** The server's stamp: `shadow` under its kill switch. Absent on a local rule. */
+  /**
+   * The policy source's stamp: `shadow` under the server's kill switch, for a
+   * SHADOW guardrail, or for an SOP whose front matter says `mode: shadow`
+   * (the server's resolve and {@link localDecideRules} alike). Absent otherwise.
+   */
   rollout?: 'shadow' | 'enforce'
   /** The hash the server computed. When it is not this writer's, the pins were earned by another rule and are dropped. */
   ruleHash?: string
@@ -596,8 +601,9 @@ function decideFallbackPattern(id: string, tools: readonly string[], severity: '
 
 /**
  * Why a readable rule is stamped as it is: its own
- * rollout, then `intutic decide disable` on this machine, then the server's
- * kill switch, then SILENT_LOG, then pins. Only a
+ * rollout, then `intutic decide disable` on this machine, then the policy
+ * source's shadow stamp (the server's kill switch, a SHADOW guardrail, or an
+ * SOP in `mode: shadow`), then SILENT_LOG, then pins. Only a
  * rule that clears all of them is stamped `enforce`.
  */
 function stampDecideRule(
@@ -707,7 +713,10 @@ export const DEFAULT_DECIDE_DIR = path.join(os.homedir(), '.intutic', 'decide')
  * with no control plane. Each line's text is kept as written, so the writer
  * reads it exactly as the proxy does, unreadable lines included. A readable
  * rule's pins are the ones `decideDir/evals/<ruleHash>/` holds; a file that is
- * not a pin is ignored.
+ * not a pin is ignored. An SOP whose front matter says `mode: shadow` has its
+ * rules stamped shadow, as the control plane's resolve stamps them
+ * (`listServedDecideRules`): the record says `server-shadow`, and no fallback
+ * line is written.
  */
 export async function localDecideRules(
   entries: readonly SyncSopEntry[],
@@ -725,10 +734,11 @@ export async function localDecideRules(
     if (lines.length === 0) continue
     const heading = body.split('\n').find((l) => l.startsWith('# '))
     const sopTitle = heading ? heading.slice(2) : entry.title
+    const sopShadow = parseFrontMatterEnforcing(front).mode === 'shadow'
     for (const line of lines) {
       const decl = parseDecideLine(line)
       const pins = decl.kind === 'rule' ? await readLocalPins(path.join(dir, 'evals', decideRuleHash(decl.rule, sha256Hex))) : []
-      out.push({ sopId: entry.sopId, sopTitle, ruleText: body, ir: line, pins })
+      out.push({ sopId: entry.sopId, sopTitle, ruleText: body, ir: line, ...(sopShadow ? { rollout: 'shadow' as const } : {}), pins })
     }
   }
   return out

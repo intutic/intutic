@@ -82,6 +82,20 @@ export const NOTIFICATION_EVENT_TYPES = [
   // ── Governance judge ──
   /** A judged response is waiting for a person in the judge review queue: the typed judge was unsure, or it is a spot check of one it cleared. */
   'judge.review.queued',
+  // ── Decide rules ──
+  /**
+   * A decide rule's uploaded decisions drifted from the eval run of its active
+   * calibration: the escalation rate moved more than 0.15, or a question's
+   * median probability left the run's p10–p90 range. Computed by the control
+   * plane from `decide_events`, at most once a day per rule and model. Carries
+   * `ruleRef`, `ruleHash`, `modelDigest`, `measure`, `value`, `expected` and
+   * `threshold`. MEDIUM.
+   */
+  'decide.drift',
+  /** A gate, SDK or gateway reported that its decide engine failed the known-answer canary, so its enforce rules refuse. Carries `source`, `engineHost` and `modelDigest`. HIGH. */
+  'decide.canary_failed',
+  /** A candidate calibration passed every exit-rule mark a machine checks and waits for an OWNER, ADMIN or EM to promote it. Carries `ruleRef`, `calibrationId`, `evalRunId` and the results. MEDIUM. */
+  'decide.promotion_ready',
   // ── FinOps & budget ──
   'finops.budget.exceeded',
   'finops.budget.threshold',

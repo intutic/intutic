@@ -194,7 +194,7 @@ describe('intutic gates install', () => {
     ])
   })
 
-  it('warns that an on: response rule is not enforced in 3.0, and that last_user_turn is reserved', async () => {
+  it('warns that last_user_turn is reserved, and nothing against an on: response rule, which the gateway judges', async () => {
     await saveConfig(['claude-code'])
     const questions = { leaks: { type: 'yes_no', ask: 'Does the response include customer data?' } }
     const response = { id: 'no-leaks', on: 'response', questions, when: 'leaks' }
@@ -202,7 +202,8 @@ describe('intutic gates install', () => {
     await put(join(ws, '.intutic', 'sops', 'data.md'), `---\ndecide: ${JSON.stringify(response)}\ndecide: ${JSON.stringify(turn)}\n---\n# Data\n\nStay in production.\n`)
     const r = await gates()
     expect(r.code).toBe(0)
-    expect(r.out).toContain('.intutic/sops/data.md:2: decide rule no-leaks is on: response, which is not enforced in 3.0')
+    expect(r.out).not.toContain('not enforced')
+    expect(r.out).not.toContain('decide rule no-leaks')
     expect(r.out).toContain('.intutic/sops/data.md:3: decide rule with-turn declares context: ["last_user_turn"], which is reserved and not supplied in 3.0')
     // The response rule is in no record; the tool-call rule is compiled as before.
     const records = (await fs.readFile(snapshotRules, 'utf-8')).split('\n').filter((l) => l.startsWith('@decide\t'))

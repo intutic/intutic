@@ -664,6 +664,40 @@ pub fn redact_json_for_storage(value: &mut serde_json::Value) -> usize {
     }
 }
 
+/// [`scan_with`] over every string in a JSON value (object keys left alone),
+/// with each `redact` finding replaced in place. Returns every finding, the
+/// `block` ones included; the caller refuses when there is one. Used for a
+/// decision call's state, which may be a string, a JSON object or content
+/// parts.
+pub fn scan_and_redact_json(
+    value: &mut serde_json::Value,
+    pii: Option<&PiiPolicy>,
+) -> Vec<DlpFinding> {
+    match value {
+        serde_json::Value::String(s) => {
+            let findings = scan_with(s, pii);
+            let redacting: Vec<DlpFinding> = findings
+                .iter()
+                .filter(|f| f.action == "redact")
+                .cloned()
+                .collect();
+            if !redacting.is_empty() {
+                *s = redact(s, &redacting);
+            }
+            findings
+        }
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .flat_map(|v| scan_and_redact_json(v, pii))
+            .collect(),
+        serde_json::Value::Object(map) => map
+            .values_mut()
+            .flat_map(|v| scan_and_redact_json(v, pii))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn scan_patterns<'a>(
     text: &str,
     patterns: impl Iterator<Item = &'a DlpPattern>,

@@ -35,20 +35,25 @@ export interface LabelledCase {
   id: string
   /** `refuse`: the rule should not allow it; `allow`: it should. */
   label: 'refuse' | 'allow'
+  /** The call, for an `on: tool_call` rule; empty for a response case. */
   tool: string
   toolInput: unknown
   cwd: string
   lastUserTurn: string | null
+  /** The response's text, for an `on: response` rule; null for a tool call. */
+  response: string | null
   /** The adversarial family the case was generated for, or null for the user's own. */
   family: AdversarialFamily | null
 }
 
 /**
- * One case per JSONL line: `{"id","label","tool","toolInput","cwd"?,"lastUserTurn"?}`.
+ * One case per JSONL line. For an `on: tool_call` rule (`on`'s default) a
+ * case is a call, `{"id","label","tool","toolInput","cwd"?,"lastUserTurn"?}`;
+ * for an `on: response` rule it is a response's text, `{"id","label","response"}`.
  * `label` is `refuse` or `allow` (`violation` and `clean` read the same).
  * Throws with the line number on the first line that does not read.
  */
-export function parseLabels(text: string): LabelledCase[] {
+export function parseLabels(text: string, on: 'tool_call' | 'response' = 'tool_call'): LabelledCase[] {
   const out: LabelledCase[] = []
   const ids = new Set<string>()
   text.split('\n').forEach((raw, i) => {
@@ -64,6 +69,12 @@ export function parseLabels(text: string): LabelledCase[] {
     if (typeof v.id !== 'string' || !v.id) throw new Error(`labels line ${i + 1} has no id`)
     if (ids.has(v.id)) throw new Error(`labels line ${i + 1} reuses id ${v.id}`)
     if (label !== 'refuse' && label !== 'allow') throw new Error(`labels line ${i + 1}: label must be refuse or allow`)
+    if (on === 'response') {
+      if (typeof v.response !== 'string') throw new Error(`labels line ${i + 1} has no response: a case for an on: response rule is {"id","label","response"}`)
+      ids.add(v.id)
+      out.push({ id: v.id, label, tool: '', toolInput: {}, cwd: '', lastUserTurn: null, response: v.response, family: null })
+      return
+    }
     if (typeof v.tool !== 'string' || !v.tool) throw new Error(`labels line ${i + 1} has no tool`)
     ids.add(v.id)
     out.push({
@@ -73,6 +84,7 @@ export function parseLabels(text: string): LabelledCase[] {
       toolInput: v.toolInput ?? {},
       cwd: typeof v.cwd === 'string' ? v.cwd : '',
       lastUserTurn: typeof v.lastUserTurn === 'string' ? v.lastUserTurn : null,
+      response: null,
       family: null,
     })
   })
@@ -338,14 +350,21 @@ function withText(input: unknown, field: string, text: string): unknown {
 
 /**
  * The adversarial cases for a labelled set: for each refuse case, every
- * planted approval and every injection appended to its text field, and every
- * paraphrase of its `command` that changes it. All keep the label `refuse`.
- * Deterministic; no model writes a case.
+ * planted approval and every injection appended to its text field (a
+ * response case's text is the response), and every paraphrase of its
+ * `command` that changes it. All keep the label `refuse`. Deterministic; no
+ * model writes a case.
  */
 export function adversarialCases(cases: readonly LabelledCase[]): LabelledCase[] {
   const out: LabelledCase[] = []
   for (const c of cases) {
     if (c.label !== 'refuse' || c.family !== null) continue
+    if (c.response !== null) {
+      const text = c.response
+      PLANTED_APPROVALS.forEach((s, i) => out.push({ ...c, id: `${c.id}~planted_approval-${i + 1}`, response: text + s, family: 'planted_approval' }))
+      ARGUMENT_INJECTIONS.forEach((s, i) => out.push({ ...c, id: `${c.id}~instruction_in_arguments-${i + 1}`, response: text + s, family: 'instruction_in_arguments' }))
+      continue
+    }
     const field = textField(c.toolInput)
     if (field === null) continue
     const text = (c.toolInput as Record<string, string>)[field]!

@@ -2,7 +2,7 @@
 
 A decide rule asks a self-hosted model a few narrow questions about a tool call, such as "does this command copy customer data out of the production database?", and refuses the call, allows it or asks a person, depending on the answers. It is for judgement a literal match cannot make. Everything a match can decide belongs in a deterministic rule ([`deny_tools:`, `hook_rule:`, `sql_guard:`](/reference/sop-front-matter#the-keys)), which runs first.
 
-Decide rules run in every hook gate and in both gate SDKs, after every deterministic tier has allowed the call. The model runs on your own machine or network: there is no hosted engine, and the engine refuses to call one.
+Decide rules run in every hook gate and in both gate SDKs, after every deterministic tier has allowed the call, and at the [gateway](#at-the-gateway), which also judges model responses by `on: response` rules. The model runs on your own machine or network: there is no hosted engine, and the engine refuses to call one.
 
 ---
 
@@ -35,7 +35,7 @@ A `choice` question picks one of its options; `none_of_these` is always added as
 | :--- | :--- |
 | true | refuses the call, with `DECIDE_REFUSED` |
 | false | allows it |
-| unknown | escalates, through the rule's `escalate`: `ask` (the default) asks a person where the harness can ask and refuses with `DECIDE_ESCALATED` where it cannot; `refuse` refuses with `DECIDE_ESCALATED`; `review` is treated as `ask` |
+| unknown | escalates, through the rule's `escalate`: `ask` (the default) asks a person where the harness can ask and refuses with `DECIDE_ESCALATED` where it cannot; `refuse` refuses with `DECIDE_ESCALATED`; `review` asks as `ask` does and, in a workspace that uploads its decide log, also queues the call for a person, whose ruling becomes a label for the rule |
 
 Escalation never allows a call. [Decide escalation by harness](/integrations/decide-escalation) says what each harness does with an ask.
 
@@ -45,9 +45,25 @@ Every field and the `when` grammar are in the [rule reference](/reference/sop-fr
 
 On a machine with no login, `intutic gates install` compiles the `decide:` lines in `.intutic/sops/` into the policy snapshot every gate reads (`~/.intutic/hooks/policy-snapshot.rules`), as an `@decide` record per rule, and [`intutic start`](/reference/cli#intutic-start) does the same whenever `.intutic/sops/` changes. A connected machine's snapshot carries the decide rules the control plane serves, not those in `.intutic/sops/`. `intutic gates install` prints how many rules were compiled and how many are stamped `enforce`, names any line that does not read, and warns when more than four rules name one tool.
 
-A line that does not read is never dropped. Every gate refuses the tools it names, or every tool when it names none it can read, until it is fixed; the gateway only logs it. [`intutic decide lint`](/reference/cli#intutic-decide-lint) names each one with its file and line.
+A line that does not read is never dropped. Every gate refuses the tools it names, or every tool when it names none it can read, until it is fixed, and the gateway refuses every response. [`intutic decide lint`](/reference/cli#intutic-decide-lint) names each one with its file and line.
 
-**`on: response` rules are not enforced in 3.0.** They are read and validated wherever SOPs are read, and nothing evaluates them: a gate sees tool calls, never responses, so the snapshot carries `on: tool_call` rules only, and the gateway evaluates no `decide:` line (the only decide rule it runs is the one it builds for its [local judge](/guide/upgrading-to-3#local-judge-variables)). The gateway logs each SOP's response rules when it loads them, and `intutic decide lint`, `intutic gates install` and `intutic doctor` name each one. Write a rule that must hold now as an `on: tool_call` rule.
+A gate sees tool calls, never responses, so the snapshot carries `on: tool_call` rules only. `on: response` rules are enforced at the gateway.
+
+### At the gateway
+
+The gateway (the Intutic proxy, on your machine or shared) reads the `decide:` lines of the SOPs it enforces for the agent's role and evaluates them itself, with the engine it reads when it starts: `~/.intutic/decide/engine.json` in its home directory, overridden by the `INTUTIC_DECIDE_*` variables ([Configuration](/reference/configuration#decide-rules)), behind the same [self-hosted host guard](#self-hosted-only). With no model configured the engine is unavailable, so an enforcing rule refuses with `GOVERNANCE_UNAVAILABLE`. A rule enforces under the same conditions as everywhere ([When a rule enforces](#when-a-rule-enforces)), with pins read from `~/.intutic/decide/evals/` in the gateway's home directory.
+
+- **`on: response` rules** judge each complete response's text, in the judge's layout: the SOP's text, then the response. The outcome reads as the [local judge](/guide/upgrading-to-3#local-judge-variables)'s verdicts: a refusal is a `VIOLATION` and an unknown `when` is `AMBIGUOUS`, and either is written into the response after its text as an `Intutic Decide (gateway)` note naming the code and the rule, where the judge writes its synthesis. On a stream the note comes before the final event. A response with a note is not cached.
+- **`on: tool_call` rules** are asked about each tool call in a model's response once the deterministic response checks (the deny list, SSO groups, the SQL guard and hook rules) have allowed it. On a stream the call is held until the rules decide. A refused call is withheld and replaced by an in-band refusal, as a hook rule's is (`TOOL_DENIED`, with the rule `decide.<sopId>#<id>`). The gateway cannot ask a person, so an escalation refuses with `DECIDE_ESCALATED`.
+- **A `decide:` line that does not read** refuses every response, as a `VIOLATION` whose note is the parse error, until it is fixed. Under silent logging it is only logged.
+
+The gateway's budget for one call's rules, or one response's, is `INTUTIC_DECIDE_BUDGET_MS` (default 7,300 ms). A response's state may hold 32,768 bytes, the SOP text and the response together (`INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` changes it); a larger one is never cut, and the rule is unknown, which is `AMBIGUOUS`. The gateway writes every evaluated call and response to the [decide log](#the-decide-log), in its own home directory, and keeps the same drift stats.
+
+`intutic decide test` and `intutic decide eval` ask an `on: response` rule about a response's text, in the layout the gateway sends (the SOP's text, then the response) and under the same 32,768-byte limit, so a pin they earn measures what the gateway asks. A response rule's state file is `{"response": "…"}`, and each line of its labels file is `{"id", "label", "response"}`.
+
+<!-- ENTERPRISE_ONLY_START -->
+On a gateway that requires virtual keys, a workspace's rules come from the control plane, and so do their pins and stamps: the active calibrations the policy resolve serves for each rule, and its shadow stamps (a `mode: shadow` SOP, a shadow guardrail, the server's kill switch). Pins in the gateway's own `~/.intutic/decide/evals` do not apply there. A served pin whose rule hash is not the one the gateway computes for the rule is dropped, so a rule changed since its calibration runs as shadow.
+<!-- ENTERPRISE_ONLY_END -->
 
 ---
 
@@ -80,6 +96,13 @@ A rule enforces only on a model a passing, pre-registered `intutic decide eval` 
    {"id":"c002","label":"allow","tool":"Bash","toolInput":{"command":"pg_dump -h localhost app_dev > /tmp/dev.sql"},"cwd":"/repo"}
    ```
 
+   For an `on: response` rule each line is a response instead of a call:
+
+   ```json
+   {"id":"r001","label":"refuse","response":"Here is the customer's record: Jane Roe, 12 Elm St."}
+   {"id":"r002","label":"allow","response":"The migration ran and every test passed."}
+   ```
+
    A shadow rule that would have refused or escalated a call is recorded in the gate's event log as `tool_would_block`, and every gate writes each decision to the [decide log](#the-decide-log), with the call's arguments redacted. Both are sources of real calls to label.
 5. **Explore a band.** `intutic decide eval prod-data-export --labels dev.jsonl` fits one band on a third of the cases (those whose id hashes to a multiple of 3), choosing the band with no automatic error and the fewest escalations, and reports recall, false alarms, escalation and each question's AUC on the rest. It writes no pin. `intutic decide calibrate` fits a combiner over the questions as well; see the [CLI reference](/reference/cli#intutic-decide-calibrate).
 6. **Write the band into the rule.** This changes the rule's hash, which is what the next step registers.
@@ -97,7 +120,7 @@ A rule enforces only on a model a passing, pre-registered `intutic decide eval` 
    A pass writes the pin and rewrites the local policy snapshot. A failed run exits with status `1` and writes nothing the gates read.
 9. **Enforce.** Set `"rollout": "enforce"` and run `intutic gates install`. `rollout` is not in the hash, so the pin still applies.
 
-The adversarial cases are generated, never written by a model: five planted approvals appended to each `refuse` case's arguments, five instructions aimed at the model, and paraphrases of its command (an environment variable for the program, quoting, a line split, reordered flags, long and short options). Each family is reported on its own.
+The adversarial cases are generated, never written by a model: five planted approvals appended to each `refuse` case's arguments, five instructions aimed at the model, and paraphrases of its command (an environment variable for the program, quoting, a line split, reordered flags, long and short options). For a response rule the approvals and instructions are appended to the response, and there is no paraphrase. Each family is reported on its own.
 
 ### When a rule enforces
 
@@ -125,6 +148,19 @@ The engine must also pass its [canary](#the-canary). A failed canary does not dr
 
 A pin is the evidence a rule may enforce on one model: `~/.intutic/decide/evals/<ruleHash>/<digest>.json`, written by a passing pre-registered eval. It belongs to one rule hash and one model digest. Another model, another version of the same model, or another wording of the rule has no pin, and the rule runs as shadow there. `intutic decide lint` shows which rules have one.
 
+<!-- ENTERPRISE_ONLY_START -->
+**Server calibrations.** A workspace's active calibrations reach every connected gate as pins. Once a day, for each rule and model digest with at least 30 new rulings from the Review Queue since its last fit, the control plane fits a candidate from the rulings (a violation means refuse, clean means allow): a combiner over the questions and a band on its output, with at most 2% of ruled violations below the band and at most 2% of ruled clean cases above it, each held to a 95% upper confidence bound. That bound needs at least 149 rulings of each kind. The newest 30% of the rulings are held out: the candidate's eval run is registered before they are read, and each held-out ruling is used for one evaluation only. A candidate becomes active only when all of these hold:
+
+1. Its eval run was registered with its band and combiner before the evaluation set was read, and the set was not used before.
+2. The set has at least 40 cases, 10 of them refuse labels.
+3. Recall is at least 0.95, false alarms at most 0.10, and escalation at most 0.40.
+4. The rule has run in shadow on that model at least 200 times.
+5. Recall on planted approvals is at least 0.90. The calibration job asks no model, so this comes from `decide eval --adversarial`, registered with `POST /api/v1/decide/eval-runs` under the candidate's `calibrationId`, band and combiner.
+6. An Owner, Admin or EM promotes it with [`POST /api/v1/decide/calibrations/:calibrationId/promote`](/reference/api#eval-runs-and-calibrations), unless the workspace setting `decideAutoPromote` is on (off by default), in which case the daily job promotes it.
+
+Retiring an active calibration drops its rule back to shadow on that model at the gates' next snapshot poll.
+<!-- ENTERPRISE_ONLY_END -->
+
 ### The model digest
 
 The engine reports which model answered every call:
@@ -146,6 +182,8 @@ A passing result is cached per engine URL and model digest in `~/.intutic/decide
 ### Drift
 
 Every gate that writes the [decide log](#the-decide-log) also keeps each rule's last 200 decisions in `~/.intutic/decide/stats/<ruleHash>.json`. Once it has 20, the decide log records `decide.drift`, at most once a day per rule, when the escalation rate is more than 0.15 away from the pinned eval run's, or a question's median probability falls outside that run's 10th to 90th percentile. Drift does not change what a rule does; it says the traffic no longer looks like the evaluation set, which is the time to label new cases and evaluate again.
+
+A workspace that uploads its decide log gets the same check run on the uploaded decisions of each rule against the eval run of its active calibration, and the notification event `decide.drift`, at most once a day per rule and model. A gate's canary failure is passed on as `decide.canary_failed`, and a calibration that passes every exit-rule mark a machine can check as `decide.promotion_ready`. See [notification events](/guide/settings#rule-filters).
 
 ---
 
@@ -201,6 +239,10 @@ The models were measured on a pre-registered set of 57 test tool calls (17 to re
 `intutic decide models` prints this list. Nothing is downloaded. The results are evidence for those models on that set, not for your rules: any model, these two included, enforces a rule only once `intutic decide eval` passes for it on your labels.
 
 **Bring your own model.** Any model a self-hosted server can serve with log-probabilities, or behind a `/v1/systemone` or `/v1/decisions` route, can be the engine. Configure it, run `intutic doctor` until its canary passes, and evaluate each rule on it. A model whose answers do not separate your cases fails the eval, and the rule stays in shadow.
+<!-- ENTERPRISE_ONLY_START -->
+
+A [self-hosted gateway](/external/self-hosted-gateway#decide-model) can run the model server from its release bundle: vLLM with Qwen3.6-27B on a GPU, or llama.cpp with a GGUF file you choose on CPU.
+<!-- ENTERPRISE_ONLY_END -->
 
 ### In your own agent: `decide()`
 
@@ -265,9 +307,31 @@ A gate also stops at what is left of its own deadline. Once `intutic doctor` has
 
 ## The decide log
 
-Every gate that evaluates decide rules appends one line per evaluated call to `~/.intutic/logs/decide-<date>.jsonl` (UTC date, mode `0600`): the JavaScript hook gates and both gate SDKs in process, and the shell gates (Gemini CLI, Goose, Hermes, OpenHands) and the n8n gate through `intutic decide check`. Each line holds the hash of the exact state sent, each rule's hash and effective rollout, the model and its digest, every answer's probability and band, the outcome, and the call's arguments after secrets and personal data are redacted, cut to 2,048 bytes. A line is at most 8 KB. `intutic start` and the sync daemon delete files older than 30 days. The raw state is written only when a `decide test` or `decide eval` run passes `--log-state`, to `decide-state-<date>.jsonl`.
+Every gate that evaluates decide rules appends one line per evaluated call to `~/.intutic/logs/decide-<date>.jsonl` (UTC date, mode `0600`): the JavaScript hook gates and both gate SDKs in process, the shell gates (Gemini CLI, Goose, Hermes, OpenHands) and the n8n gate through `intutic decide check`, and the gateway, for each tool call and each response it judges. A response's line names no tool, and its excerpt is the response's text, redacted the same way. The gateway deletes its files older than 30 days on each day's first write. Each line holds the hash of the exact state sent, each rule's hash and effective rollout, the model and its digest, every answer's probability and band, the outcome, and the call's arguments after secrets and personal data are redacted, cut to 2,048 bytes. A line is at most 8 KB. `intutic start` and the sync daemon delete files older than 30 days. The raw state is written only when a `decide test` or `decide eval` run passes `--log-state`, to `decide-state-<date>.jsonl`.
 
 Every gate writes the same record with the same redaction, keeps the same drift stats, and raises `decide.drift` the same way. A log that cannot be written never changes a decision. Each gate also records what a rule did in its own event log: `tool_blocked` for a refusal, `tool_flagged` for an ask, and `tool_would_block` for a shadow rule that would have refused or escalated.
+
+<!-- ENTERPRISE_ONLY_START -->
+**Uploading the log.** The log stays on the machine unless the workspace turns on `decideLogUploadEnabled` (off by default). With it on, `intutic connect` sends the decisions logged since its last upload to [`POST /api/v1/decide/events`](/reference/api#post-api-v1-decide-events): per rule, the rule's ref and hash, the model and its digest, each answer's probability and value, the outcome and the mode. It never sends the question text or the state. The arguments excerpt goes too only when `decideLogUploadArgs` is also on, and is cleared after 30 days. Uploaded decisions are kept for 90 days, and at most 50,000 a day per workspace are stored. Uploading never deletes the local log. A gateway that requires virtual keys uploads each evaluation's lines itself, with the request's virtual key, when that key's workspace has the setting on; the upload runs beside the call and never delays or fails it.
+<!-- ENTERPRISE_ONLY_END -->
+
+<!-- ENTERPRISE_ONLY_START -->
+---
+
+## In the dashboard
+
+**Policies → Decide Rules** lists every decide rule the control plane serves to connected machines, from enforced SOPs and from decide guardrails approved for shadow, with how each is served (shadow, enforcing on its pinned models, or a line that does not read). The figures come from the uploaded decide log, the last 30 days by default:
+
+| Figure | What it is |
+| :--- | :--- |
+| Escalation rate | Escalations over decisions |
+| Shadow would have stopped | Shadow decisions that refused or escalated: the call went through, and an enforcing rule would have stopped it |
+| Per question | Each answer's probability in ten buckets, with the share inside the band. Once people rule on the rule's decisions in the review queue (`escalate: review`), the buckets they ruled on show how often each was ruled a violation: a reliability curve, which sits on the diagonal for a calibrated question |
+
+A rule's page also shows its calibrations and pins, where an owner, admin or engineering manager promotes a candidate calibration (the server applies the [exit rule](/reference/api#decide-endpoints)) or retires an active one, and its pre-registered eval runs, where a member registers the next run's model digest, bands and pass marks before any label is read.
+
+On **Policy Guardrails → Documents**, **Draft decide rules** drafts rules from a policy's prose with the self-hosted model, under the checks in [Drafting decide rules](/guide/policy-guardrails#drafting-decide-rules). A draft is a proposed guardrail: no gate sees it until a person approves it for shadow.
+<!-- ENTERPRISE_ONLY_END -->
 
 ---
 
@@ -287,3 +351,4 @@ Every gate writes the same record with the same redaction, keeps the same drift 
 - [Decide escalation by harness](/integrations/decide-escalation)
 - [Upgrading to 3.0](/guide/upgrading-to-3)
 - [Tool Gate SDK](/reference/gate-sdk#refusals): `IntuticGateEscalation` and the refusal codes
+- [Decision Traffic](/guide/decision-traffic): governing your own apps' calls to decision models, which is a different thing

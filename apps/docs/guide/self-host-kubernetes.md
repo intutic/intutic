@@ -166,7 +166,7 @@ set `global.imagePullSecrets`.
 | `valkey.image.repository`, `valkey.image.tag` | `valkey/valkey`, `7-alpine` | Your copy of Valkey |
 | `valkey.persistence.size`, `valkey.persistence.storageClass` | `5Gi`, the cluster default | Valkey's volume |
 | `proxy.env` | none | Where model requests go: `OPENAI_UPSTREAM_URL`, `ANTHROPIC_UPSTREAM_URL`, `GEMINI_UPSTREAM_URL`, `MISTRAL_UPSTREAM_URL`, `OPENROUTER_UPSTREAM_URL`, `DEEPSEEK_UPSTREAM_URL` |
-| `controlPlane.env` | LiteLLM model names, `LOG_LEVEL`, `FF_TRAJECTORY_MONITOR: "true"` | Extra settings, e.g. `INTUTIC_WEBHOOK_ALLOWED_HOSTS`; `LITELLM_ADMIN_BASE_URL`, your LiteLLM's address, which turns on the LLM-backed checks; `GITHUB_BASE_URL` (`https://HOST/api/v3`) and `CONFLUENCE_BASE_URL` for your GitHub Enterprise Server and Confluence Data Center; `FF_TRAJECTORY_MONITOR: "false"` to turn the trajectory monitor off |
+| `controlPlane.env` | LiteLLM model names, `LOG_LEVEL`, `FF_TRAJECTORY_MONITOR: "true"`, `INTUTIC_DECIDE: "shadow"`, `INTUTIC_DECIDE_WORKSPACES: "wk_demo-workspace-1"` | Extra settings, e.g. `INTUTIC_WEBHOOK_ALLOWED_HOSTS`; `LITELLM_ADMIN_BASE_URL`, your LiteLLM's address, which turns on the LLM-backed checks; `GITHUB_BASE_URL` (`https://HOST/api/v3`) and `CONFLUENCE_BASE_URL` for your GitHub Enterprise Server and Confluence Data Center; `FF_TRAJECTORY_MONITOR: "false"` to turn the trajectory monitor off; `INTUTIC_DECIDE_WORKSPACES`, your workspace ids or `""` for all, to serve decide rules beyond the demo workspace |
 | `controlPlane.podAnnotations` | none | Annotations on the control plane's pods |
 | `controlPlane.replicaCount`, `proxy.replicaCount`, `dashboard.replicaCount` | 2 | |
 | `docs.replicaCount` | 1 | |

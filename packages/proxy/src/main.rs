@@ -367,6 +367,9 @@ async fn main() -> anyhow::Result<()> {
     // can authenticate with.
     let gateway_cfg = gateway::GatewayConfig::from_config_and_env(&config.intutic_settings.gateway);
     let require_vk = gateway::init_gateway_config(gateway_cfg);
+    // The decide engine the SOPs' decide rules are asked on: engine.json and
+    // the INTUTIC_DECIDE_* variables, read once here.
+    intutic_proxy::decide::gateway::install_from_env();
     if require_vk {
         tracing::warn!(
             "Gateway front door: REQUIRE_VK — only vk_ virtual keys are accepted; every other \

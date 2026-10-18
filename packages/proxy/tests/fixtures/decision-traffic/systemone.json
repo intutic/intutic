@@ -1,0 +1,81 @@
+{
+  "request": {
+    "model": "jev-1.14.0",
+    "state": "REFUND REQUEST\norder: 88412\ncustomer tenure: 4 years\namount: 412.00 USD\nreason: item arrived damaged; photos attached\nprior refunds in 12 months: 1",
+    "questions": {
+      "approve": {
+        "type": "noul",
+        "instructions": "Should this refund be approved under the refund policy?"
+      },
+      "route": {
+        "type": "choice",
+        "instructions": "Which team should handle this request?",
+        "criteria": {
+          "billing": "Payment and refund questions",
+          "fraud_review": "Signs of abuse or a stolen account",
+          "support": "Everything else"
+        }
+      },
+      "urgency": {
+        "type": "score",
+        "instructions": "How urgent is this request?",
+        "criteria": {
+          "low": "Can wait a week",
+          "medium": "Within two days",
+          "high": "Today"
+        }
+      }
+    }
+  },
+  "response": {
+    "model": "jev-1.14.0",
+    "version": "1.14.0",
+    "answers": {
+      "approve": {
+        "type": "noul",
+        "noul": 0.62
+      },
+      "route": {
+        "type": "choice",
+        "choice": "billing",
+        "confidence": 0.41,
+        "probabilities": {
+          "billing": 0.71,
+          "fraud_review": 0.08,
+          "support": 0.21
+        }
+      },
+      "urgency": {
+        "type": "score",
+        "score": 0.93,
+        "confidence": 0.33,
+        "probabilities": {
+          "low": 0.31,
+          "medium": 0.45,
+          "high": 0.24
+        }
+      }
+    },
+    "usage": {
+      "input_tokens": 212,
+      "output_tokens": 0
+    },
+    "latency_ms": 143.2
+  },
+  "normalised": {
+    "model": "jev-1.14.0",
+    "questions": [
+      { "name": "approve", "type": "yes_no" },
+      { "name": "route", "type": "choice", "options": ["billing", "fraud_review", "support"] },
+      { "name": "urgency", "type": "score", "options": ["high", "low", "medium"] }
+    ],
+    "modelVersion": "1.14.0",
+    "answers": {
+      "approve": 0.62,
+      "route": { "billing": 0.71, "fraud_review": 0.08, "support": 0.21 },
+      "urgency": { "high": 0.24, "low": 0.31, "medium": 0.45 }
+    },
+    "inputTokens": 212,
+    "outputTokens": 0
+  }
+}

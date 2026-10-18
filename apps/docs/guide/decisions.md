@@ -63,10 +63,14 @@ See [Session Safety & Budgets](/guide/loops).
 
 ## Judge Reviews
 
-Agent responses the governance judge could not decide on its own. The judge's interim verdict has already answered the agent; your ruling decides whether an incident stands. Each card shows the SOP it is most likely about, the judge's score, the interim verdict (flagged or passed) and the response excerpt.
+Agent responses the governance judge could not decide on its own, and tool calls a [decide rule](/guide/decide) sent to a person.
 
-- **Violation** opens an incident, unless the interim verdict already opened one.
-- **Clean** closes the incident the interim verdict opened.
+**Judge responses.** The judge decides with typed yes/no questions and a band: below it a response is clean, above it a violation, and inside it the response is held here with the verdict `REVIEW`. Nothing else decides in its place, so your ruling is the verdict. A deployment with no band configured (a self-hosted control plane sets none by default) holds nothing here: the free-text judge decides every response, as before 3.0, with a deprecation until 4.0 ([Upgrading to 3.0](/guide/upgrading-to-3#control-plane-judge)). Each card shows the SOP it is most likely about, the judge's score and the response excerpt.
+
+- **Violation** opens an incident.
+- **Clean** opens none. On a review queued before 3.0, which carries the old interim verdict (flagged or passed), Clean also closes the incident that verdict opened.
+
+**Decide rules.** A rule with `escalate: review` whose answers were unknown is queued here once the workspace uploads its decide log (`decideLogUploadEnabled`). Each card names the rule and shows the tool and its arguments when `decideLogUploadArgs` is on. Your ruling is a label for that rule, **Violation** meaning it should have refused and **Clean** that it should have allowed; it opens no incident. Labelled cases are what the rule is evaluated and calibrated on.
 
 **How to rule** sets out the rule reviewers apply: rule on what the response itself did, not on what the agent might do next. Above the queue, **Reviews by SOP** counts the reviews waiting and ruled for each SOP, and marks an SOP whose reviews are mostly ruled clean as one to consider rewording.
 

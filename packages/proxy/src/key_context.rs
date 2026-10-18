@@ -184,6 +184,15 @@ pub fn store_tool_arguments(body: &Value) -> bool {
     body.get("storeToolArguments").and_then(Value::as_bool) == Some(true)
 }
 
+/// Whether the workspace uploads its decide log (`decideLogUploadEnabled`),
+/// and whether with the arguments excerpt (`decideLogUploadArgs`), from a
+/// key-context body. Only an explicit `true` turns either on: absent (a
+/// control plane older than the fields) or null (unreadable) sends nothing.
+pub fn decide_log_upload(body: &Value) -> (bool, bool) {
+    let on = |k: &str| body.get(k).and_then(Value::as_bool) == Some(true);
+    (on("decideLogUploadEnabled"), on("decideLogUploadArgs"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +235,8 @@ mod tests {
         );
         assert!(!llm_judge_enabled(&body));
         assert!(store_tool_arguments(&body));
+        assert_eq!(decide_log_upload(&body), (true, false));
+        assert_eq!(decide_log_upload(&serde_json::json!({})), (false, false));
 
         let gate = crate::sso_groups::parse_key_context(&body)
             .expect("ssoGroups reads")

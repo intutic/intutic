@@ -162,7 +162,9 @@ or σ rounds a bound to 0 or 1 (`HI` above about 36, `LO` below about -745). A r
 one error and leaves the rule off; the free-text judge decides, as it does without a band.
 
 **Without a band** there is no equivalent decide rule. The free-text verdict keeps deciding, with
-a deprecation warning, until 4.0.
+a deprecation warning, until 4.0. The control plane's own judge does the same when it has no
+`INTUTIC_JUDGE_CASCADE_LO`/`_HI` band, which a self-hosted control plane does not set by default
+([Upgrading to 3.0](/guide/upgrading-to-3#control-plane-judge)).
 
 **Measure your own band.** `-4` and `2.461` are the values validated for Qwen3.6-27B. They are
 the only measured example. Another model scores differently, so these numbers are a starting
