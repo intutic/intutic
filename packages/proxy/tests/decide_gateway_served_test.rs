@@ -415,13 +415,8 @@ async fn a_gateway_that_requires_keys_takes_pins_from_resolve_and_writes_and_upl
     assert_eq!(
         rules,
         [
-            ("Served rules#alpha-leak", "enforce", "refuse", ""),
-            (
-                "Served rules#delta-shadowed",
-                "shadow",
-                "allow",
-                "server-shadow"
-            ),
+            ("sop_1#alpha-leak", "enforce", "refuse", ""),
+            ("sop_1#delta-shadowed", "shadow", "allow", "server-shadow"),
             (
                 "Served rules#epsilon-unserved",
                 "shadow",
