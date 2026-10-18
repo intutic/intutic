@@ -111,9 +111,9 @@ The server checks the file against `INTUTIC_DECIDE_MODEL_DIGEST` before it start
 that does not match, so the digest decide pins are keyed by is the weights it serves. Its image,
 llama.cpp, is in the bundle. A CPU answers far more slowly than a GPU, hence the longer
 per-call timeout. The release's air-gap smoke test runs this profile with Qwen3.5-4B (Q4_K_M)
-to prove the wiring: that model reads the engine canary's yes/no questions the right way round,
-but its choice answer falls short of the canary's bar, so decide rules on it are unavailable,
-and an enforcing one refuses its calls.
+to prove the wiring: the model it serves is the configured one, its digest is pinned, and it
+answers with token log-probabilities. That model does not pass the engine canary, so decide
+rules on it are unavailable and an enforcing one refuses its calls.
 
 Whichever model you run, a rule enforces on it only once `intutic decide eval` passes for that
 rule on your labels. Neither profile can be reached from outside the gateway host's internal
